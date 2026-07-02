@@ -124,7 +124,7 @@ Konventionen:
 
 Hybrid-Modell: häufige Felder als typisierte Spalten, gerätespezifisches in `JSONB`.
 
-### 6.9 Management-Layer (Auszug)
+### 6.1 Management-Layer (Auszug)
 
 - `asset`, `assignment` (kaufmännische + Lifecycle-Sicht),
 - `app_user`, `team`, `role`, `permission`,
