@@ -1,5 +1,7 @@
 # Reticora-CMDB
 
+## 1. Produktüberblick
+
 Reticora ist eine **mandantenfähige SaaS-CMDB**, die Netzwerk-, Server-, Strom- und Storage-Infrastruktur **automatisch ausliest**, in ein konsistentes Datenmodell überführt und sowohl **menschenlesbar** (intuitive Web-UI) als auch **maschinenlesbar** (REST-API, Webhooks, Export) bereitstellt. Zielgruppe sind ISPs und auf Netzwerke spezialisierte MSPs.
 
 ## 2. Architekturüberblick
