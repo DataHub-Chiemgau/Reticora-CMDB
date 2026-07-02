@@ -18,12 +18,49 @@
     "edit": "Bearbeiten",
     "create": "Erstellen",
     "search": "Suchen…",
-    "noResults": "Keine Ergebnisse"
+    "noResults": "Keine Ergebnisse",
+    "back": "Zurück",
+    "next": "Weiter",
+    "entries": "Einträge",
+    "export": "Exportieren"
   },
   "tenant": {
     "organization": "Organisation",
     "client": "Kunde",
     "site": "Standort",
     "switchTenant": "Mandant wechseln"
+  },
+  "ci": {
+    "title": "Configuration Items",
+    "name": "Name",
+    "status": "Status",
+    "manufacturer": "Hersteller",
+    "model": "Modell",
+    "serialNumber": "Seriennummer",
+    "managementIp": "Management-IP",
+    "firmware": "Firmware",
+    "source": "Quelle",
+    "lastSeen": "Zuletzt gesehen",
+    "created": "Erstellt",
+    "updated": "Aktualisiert",
+    "attributes": "Attribute",
+    "relationships": "Beziehungen",
+    "statusActive": "Aktiv",
+    "statusInactive": "Inaktiv",
+    "statusMaintenance": "Wartung",
+    "statusDecommissioned": "Außer Betrieb",
+    "allStatus": "Alle Status"
+  },
+  "discovery": {
+    "collectors": "Collectors",
+    "jobs": "Discovery-Jobs",
+    "bulkIngest": "Bulk-Import"
+  },
+  "webhook": {
+    "title": "Webhooks",
+    "name": "Name",
+    "url": "URL",
+    "events": "Events",
+    "active": "Aktiv"
   }
 }

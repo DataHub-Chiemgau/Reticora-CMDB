@@ -1,0 +1,267 @@
+// Package webhook provides webhook subscription management for Reticora CMDB.
+package webhook
+
+import (
+	"fmt"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+)
+
+// Subscription represents a webhook subscription.
+type Subscription struct {
+	ID             string            `json:"id"`
+	OrganizationID string            `json:"organization_id"`
+	Name           string            `json:"name"`
+	URL            string            `json:"url"`
+	Secret         string            `json:"-"` // never expose in API responses
+	Events         []string          `json:"events"`
+	IsActive       bool              `json:"is_active"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	CreatedAt      string            `json:"created_at"`
+	UpdatedAt      string            `json:"updated_at"`
+}
+
+// CreateRequest is the payload for creating a webhook subscription.
+type CreateRequest struct {
+	Name    string            `json:"name"`
+	URL     string            `json:"url"`
+	Secret  string            `json:"secret"`
+	Events  []string          `json:"events"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// ValidEvents lists allowed webhook events.
+var ValidEvents = map[string]bool{
+	"ci.created":           true,
+	"ci.updated":           true,
+	"ci.deleted":           true,
+	"ci.status_changed":    true,
+	"relationship.created": true,
+	"relationship.deleted": true,
+	"discovery.completed":  true,
+}
+
+// Repository defines persistence operations for webhooks.
+type Repository interface {
+	List(orgID string, page api.PaginationParams) ([]Subscription, int, error)
+	GetByID(orgID, id string) (*Subscription, error)
+	Create(sub *Subscription) error
+	Delete(orgID, id string) error
+	ListByEvent(orgID, event string) ([]Subscription, error)
+}
+
+// MemoryRepository is an in-memory webhook store.
+type MemoryRepository struct {
+	mu    sync.RWMutex
+	items map[string]*Subscription
+	seq   int
+}
+
+// NewMemoryRepository creates a new in-memory webhook repository.
+func NewMemoryRepository() *MemoryRepository {
+	return &MemoryRepository{items: make(map[string]*Subscription)}
+}
+
+func (r *MemoryRepository) List(orgID string, page api.PaginationParams) ([]Subscription, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []Subscription
+	for _, sub := range r.items {
+		if sub.OrganizationID != orgID {
+			continue
+		}
+		result = append(result, *sub)
+	}
+
+	total := len(result)
+	start := page.Offset
+	if start > total {
+		start = total
+	}
+	end := start + page.Limit
+	if end > total {
+		end = total
+	}
+	return result[start:end], total, nil
+}
+
+func (r *MemoryRepository) GetByID(orgID, id string) (*Subscription, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	sub, ok := r.items[id]
+	if !ok || sub.OrganizationID != orgID {
+		return nil, fmt.Errorf("not found")
+	}
+	return sub, nil
+}
+
+func (r *MemoryRepository) Create(sub *Subscription) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.seq++
+	sub.ID = fmt.Sprintf("%08d-0000-0000-0000-%012d", r.seq, r.seq)
+	now := time.Now().UTC().Format(time.RFC3339)
+	sub.CreatedAt = now
+	sub.UpdatedAt = now
+	r.items[sub.ID] = sub
+	return nil
+}
+
+func (r *MemoryRepository) Delete(orgID, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	sub, ok := r.items[id]
+	if !ok || sub.OrganizationID != orgID {
+		return fmt.Errorf("not found")
+	}
+	delete(r.items, id)
+	return nil
+}
+
+func (r *MemoryRepository) ListByEvent(orgID, event string) ([]Subscription, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []Subscription
+	for _, sub := range r.items {
+		if sub.OrganizationID != orgID || !sub.IsActive {
+			continue
+		}
+		for _, e := range sub.Events {
+			if e == event {
+				result = append(result, *sub)
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
+// Handler provides HTTP handlers for webhook endpoints.
+type Handler struct {
+	repo Repository
+}
+
+// NewHandler creates a new webhook handler.
+func NewHandler(repo Repository) *Handler {
+	return &Handler{repo: repo}
+}
+
+// RegisterRoutes registers webhook routes.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/webhooks", h.List)
+	mux.HandleFunc("POST /api/v1/webhooks", h.Create)
+	mux.HandleFunc("GET /api/v1/webhooks/{id}", h.Get)
+	mux.HandleFunc("DELETE /api/v1/webhooks/{id}", h.Delete)
+}
+
+// List handles GET /api/v1/webhooks
+func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	page := api.ParsePagination(r)
+	subs, total, err := h.repo.List(t.OrganizationID, page)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[Subscription]{
+		Data:    subs,
+		Total:   total,
+		Limit:   page.Limit,
+		Offset:  page.Offset,
+		HasMore: page.Offset+page.Limit < total,
+	})
+}
+
+// Get handles GET /api/v1/webhooks/{id}
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	id := r.PathValue("id")
+	sub, err := h.repo.GetByID(t.OrganizationID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
+		return
+	}
+
+	api.WriteJSON(w, http.StatusOK, sub)
+}
+
+// Create handles POST /api/v1/webhooks
+func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	var req CreateRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+
+	if req.Name == "" || req.URL == "" || req.Secret == "" || len(req.Events) == 0 {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name, url, secret, and events are required")
+		return
+	}
+
+	for _, e := range req.Events {
+		if !ValidEvents[e] {
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", fmt.Sprintf("invalid event: %s", e))
+			return
+		}
+	}
+
+	sub := &Subscription{
+		OrganizationID: t.OrganizationID,
+		Name:           req.Name,
+		URL:            req.URL,
+		Secret:         req.Secret,
+		Events:         req.Events,
+		IsActive:       true,
+		Headers:        req.Headers,
+	}
+
+	if err := h.repo.Create(sub); err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
+	api.WriteJSON(w, http.StatusCreated, sub)
+}
+
+// Delete handles DELETE /api/v1/webhooks/{id}
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	id := r.PathValue("id")
+	if err := h.repo.Delete(t.OrganizationID, id); err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

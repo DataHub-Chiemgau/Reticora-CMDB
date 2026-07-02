@@ -11,8 +11,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
 
 func main() {
@@ -30,17 +35,41 @@ func main() {
 	}
 	defer shutdown(context.Background())
 
+	// Initialize repositories
+	ciRepo := ci.NewMemoryRepository()
+	relRepo := relationship.NewMemoryRepository()
+	webhookRepo := webhook.NewMemoryRepository()
+	discoveryRepo := discovery.NewMemoryRepository()
+
+	// Initialize handlers
+	ciHandler := ci.NewHandler(ciRepo)
+	relHandler := relationship.NewHandler(relRepo)
+	webhookHandler := webhook.NewHandler(webhookRepo)
+	discoveryHandler := discovery.NewHandler(discoveryRepo)
+	exportHandler := export.NewHandler(ciRepo)
+
 	mux := http.NewServeMux()
+
+	// Health check
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, `{"status":"ok"}`)
 	})
+
+	// Phase 0 endpoints
 	mux.HandleFunc("GET /api/v1/entitlements", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, `{"entitlements":[]}`)
 	})
+
+	// Phase 1 endpoints
+	ciHandler.RegisterRoutes(mux)
+	relHandler.RegisterRoutes(mux)
+	webhookHandler.RegisterRoutes(mux)
+	discoveryHandler.RegisterRoutes(mux)
+	exportHandler.RegisterRoutes(mux)
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
