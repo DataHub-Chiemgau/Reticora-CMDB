@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: 220 90% 56%;
+  --color-surface: 0 0% 100%;
+  --color-surface-dark: 220 13% 10%;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-surface: 220 13% 10%;
+  }
+}

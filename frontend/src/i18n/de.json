@@ -1,0 +1,29 @@
+{
+  "app": {
+    "title": "Reticora CMDB",
+    "loading": "Wird geladen…",
+    "error": "Ein Fehler ist aufgetreten"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "cmdb": "CMDB",
+    "discovery": "Discovery",
+    "topology": "Topologie",
+    "settings": "Einstellungen"
+  },
+  "common": {
+    "save": "Speichern",
+    "cancel": "Abbrechen",
+    "delete": "Löschen",
+    "edit": "Bearbeiten",
+    "create": "Erstellen",
+    "search": "Suchen…",
+    "noResults": "Keine Ergebnisse"
+  },
+  "tenant": {
+    "organization": "Organisation",
+    "client": "Kunde",
+    "site": "Standort",
+    "switchTenant": "Mandant wechseln"
+  }
+}
