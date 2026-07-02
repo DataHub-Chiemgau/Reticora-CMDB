@@ -63,11 +63,11 @@ export function CIListPage() {
           onChange={(e) => { setStatus(e.target.value); setOffset(0); }}
           className="rounded border px-3 py-1.5 dark:border-gray-600 dark:bg-gray-800"
         >
-          <option value="">Alle Status</option>
-          <option value="active">Aktiv</option>
-          <option value="inactive">Inaktiv</option>
-          <option value="maintenance">Wartung</option>
-          <option value="decommissioned">Außer Betrieb</option>
+          <option value="">{t('ci.allStatus')}</option>
+          <option value="active">{t('ci.statusActive')}</option>
+          <option value="inactive">{t('ci.statusInactive')}</option>
+          <option value="maintenance">{t('ci.statusMaintenance')}</option>
+          <option value="decommissioned">{t('ci.statusDecommissioned')}</option>
         </select>
       </div>
 
@@ -122,7 +122,7 @@ export function CIListPage() {
           {/* Pagination */}
           <div className="flex items-center justify-between text-sm">
             <span>
-              {data.total} Einträge
+              {data.total} {t('common.entries')}
             </span>
             <div className="flex gap-2">
               <button
@@ -130,14 +130,14 @@ export function CIListPage() {
                 onClick={() => setOffset(Math.max(0, offset - limit))}
                 className="rounded border px-3 py-1 disabled:opacity-50 dark:border-gray-600"
               >
-                ← Zurück
+                ← {t('common.back')}
               </button>
               <button
                 disabled={!data.has_more}
                 onClick={() => setOffset(offset + limit)}
                 className="rounded border px-3 py-1 disabled:opacity-50 dark:border-gray-600"
               >
-                Weiter →
+                {t('common.next')} →
               </button>
             </div>
           </div>
