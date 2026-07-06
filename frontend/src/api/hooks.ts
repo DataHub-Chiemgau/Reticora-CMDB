@@ -1,6 +1,17 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ciApi } from '../api/client';
-import type { CIListParams, CICreateRequest, CIUpdateRequest } from '../api/client';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  ciApi, collectorApi, assetApi, assignmentApi,
+  documentApi, stocktakeApi, ticketApi, userApi, teamApi, roleApi,
+} from '../api/client';
+import type {
+  CICreateRequest, CIListParams, CIUpdateRequest, ListParams,
+  AssetCreateRequest, AssetUpdateRequest, AssetListParams,
+  AssignmentCreateRequest, AssignmentListParams,
+  DocumentCreateRequest, DocumentListParams,
+  StocktakeCreateRequest, StocktakeListParams,
+  TicketCreateRequest, TicketUpdateRequest, TicketListParams,
+  UserListParams,
+} from '../api/client';
 
 export function useCIList(params: CIListParams) {
   return useQuery({
@@ -22,6 +33,13 @@ export function useCIRelationships(id: string) {
     queryKey: ['ci-relationships', id],
     queryFn: () => ciApi.relationships(id),
     enabled: !!id,
+  });
+}
+
+export function useCollectors(params: ListParams = {}) {
+  return useQuery({
+    queryKey: ['collectors', params],
+    queryFn: () => collectorApi.list(params),
   });
 }
 
@@ -54,5 +72,179 @@ export function useDeleteCI() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cis'] });
     },
+  });
+}
+
+// --- Assets ---
+
+export function useAssetList(params: AssetListParams) {
+  return useQuery({
+    queryKey: ['assets', params],
+    queryFn: () => assetApi.list(params),
+  });
+}
+
+export function useCreateAsset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: AssetCreateRequest) => assetApi.create(data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['assets'] }); },
+  });
+}
+
+export function useUpdateAsset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: AssetUpdateRequest }) => assetApi.update(id, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['assets'] }); },
+  });
+}
+
+export function useDeleteAsset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => assetApi.delete(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['assets'] }); },
+  });
+}
+
+// --- Assignments ---
+
+export function useAssignmentList(params: AssignmentListParams) {
+  return useQuery({
+    queryKey: ['assignments', params],
+    queryFn: () => assignmentApi.list(params),
+  });
+}
+
+export function useCreateAssignment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: AssignmentCreateRequest) => assignmentApi.create(data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['assignments'] }); },
+  });
+}
+
+export function useReturnAssignment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { return_condition?: string; notes?: string } }) =>
+      assignmentApi.returnAssignment(id, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['assignments'] }); },
+  });
+}
+
+export function useTransferAssignment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { new_assignee: string; notes?: string } }) =>
+      assignmentApi.transfer(id, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['assignments'] }); },
+  });
+}
+
+// --- Documents ---
+
+export function useDocumentList(params: DocumentListParams) {
+  return useQuery({
+    queryKey: ['documents', params],
+    queryFn: () => documentApi.list(params),
+  });
+}
+
+export function useCreateDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: DocumentCreateRequest) => documentApi.create(data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['documents'] }); },
+  });
+}
+
+export function useDeleteDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => documentApi.delete(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['documents'] }); },
+  });
+}
+
+// --- Stocktakes ---
+
+export function useStocktakeList(params: StocktakeListParams) {
+  return useQuery({
+    queryKey: ['stocktakes', params],
+    queryFn: () => stocktakeApi.list(params),
+  });
+}
+
+export function useCreateStocktake() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: StocktakeCreateRequest) => stocktakeApi.create(data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['stocktakes'] }); },
+  });
+}
+
+export function useDeleteStocktake() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => stocktakeApi.delete(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['stocktakes'] }); },
+  });
+}
+
+// --- Tickets ---
+
+export function useTicketList(params: TicketListParams) {
+  return useQuery({
+    queryKey: ['tickets', params],
+    queryFn: () => ticketApi.list(params),
+  });
+}
+
+export function useCreateTicket() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: TicketCreateRequest) => ticketApi.create(data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['tickets'] }); },
+  });
+}
+
+export function useUpdateTicket() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: TicketUpdateRequest }) => ticketApi.update(id, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['tickets'] }); },
+  });
+}
+
+export function useDeleteTicket() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => ticketApi.delete(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['tickets'] }); },
+  });
+}
+
+// --- Users / Teams / Roles ---
+
+export function useUserList(params: UserListParams) {
+  return useQuery({
+    queryKey: ['users', params],
+    queryFn: () => userApi.list(params),
+  });
+}
+
+export function useTeamList(params: UserListParams) {
+  return useQuery({
+    queryKey: ['teams', params],
+    queryFn: () => teamApi.list(params),
+  });
+}
+
+export function useRoleList(params: ListParams = {}) {
+  return useQuery({
+    queryKey: ['roles', params],
+    queryFn: () => roleApi.list(params),
   });
 }

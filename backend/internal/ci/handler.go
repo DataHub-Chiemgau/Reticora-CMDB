@@ -7,6 +7,11 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
+// EventDispatcher publishes CI lifecycle events.
+type EventDispatcher interface {
+	Dispatch(orgID, event string, payload any)
+}
+
 // Repository defines persistence operations for CIs.
 type Repository interface {
 	List(orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error)
@@ -18,12 +23,17 @@ type Repository interface {
 
 // Handler provides HTTP handlers for CI endpoints.
 type Handler struct {
-	repo Repository
+	repo       Repository
+	dispatcher EventDispatcher
 }
 
 // NewHandler creates a new CI handler.
-func NewHandler(repo Repository) *Handler {
-	return &Handler{repo: repo}
+func NewHandler(repo Repository, dispatcher ...EventDispatcher) *Handler {
+	h := &Handler{repo: repo}
+	if len(dispatcher) > 0 {
+		h.dispatcher = dispatcher[0]
+	}
+	return h
 }
 
 // RegisterRoutes registers CI routes on the given mux.
@@ -135,6 +145,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
+	if h.dispatcher != nil {
+		h.dispatcher.Dispatch(t.OrganizationID, "ci.created", item)
+	}
 
 	api.WriteJSON(w, http.StatusCreated, item)
 }
@@ -159,6 +172,9 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
 		return
 	}
+	if h.dispatcher != nil {
+		h.dispatcher.Dispatch(t.OrganizationID, "ci.updated", item)
+	}
 
 	api.WriteJSON(w, http.StatusOK, item)
 }
@@ -172,9 +188,17 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := r.PathValue("id")
+	item, err := h.repo.GetByID(t.OrganizationID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
+		return
+	}
 	if err := h.repo.Delete(t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
 		return
+	}
+	if h.dispatcher != nil {
+		h.dispatcher.Dispatch(t.OrganizationID, "ci.deleted", item)
 	}
 
 	w.WriteHeader(http.StatusNoContent)

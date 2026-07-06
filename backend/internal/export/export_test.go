@@ -85,3 +85,41 @@ func TestExportCSV(t *testing.T) {
 		t.Error("expected CSV to contain Dell")
 	}
 }
+
+func TestExportDATEV(t *testing.T) {
+	repo := ci.NewMemoryRepository()
+	repo.Create(&ci.Item{
+		OrganizationID: "org-1",
+		CITypeID:       "type-server",
+		Name:           "srv-01",
+		Status:         "active",
+		Manufacturer:   "Dell",
+		Model:          "R740",
+		SerialNumber:   "SN-1",
+		Attributes: map[string]any{
+			"purchase_date": "2024-01-15",
+			"location":      "HQ",
+			"cost_center":   "IT-100",
+		},
+	})
+
+	h := NewHandler(repo)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/api/v1/export/cis?format=datev", nil)
+	req = tenantCtx(req)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Inventarnummer;Bezeichnung;Hersteller") {
+		t.Fatalf("expected DATEV header, got %s", body)
+	}
+	if !strings.Contains(body, "HQ") || !strings.Contains(body, "IT-100") {
+		t.Fatalf("expected DATEV body to contain mapped fields, got %s", body)
+	}
+}

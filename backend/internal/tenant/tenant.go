@@ -9,6 +9,7 @@ import "context"
 type TenantInfo struct {
 	OrganizationID string
 	ClientID       string // optional, for client-scoped access
+	UserID         string // authenticated user ID
 }
 
 type contextKey struct{}

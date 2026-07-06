@@ -9,7 +9,13 @@
     "cmdb": "CMDB",
     "discovery": "Discovery",
     "topology": "Topologie",
-    "settings": "Einstellungen"
+    "settings": "Einstellungen",
+    "assets": "Inventar",
+    "assignments": "Zuweisungen",
+    "documents": "Dokumente",
+    "stocktake": "Inventur",
+    "tickets": "Tickets",
+    "users": "Benutzer"
   },
   "common": {
     "save": "Speichern",
@@ -19,10 +25,38 @@
     "create": "Erstellen",
     "search": "Suchen…",
     "noResults": "Keine Ergebnisse",
+    "noData": "Keine Daten vorhanden",
     "back": "Zurück",
     "next": "Weiter",
     "entries": "Einträge",
-    "export": "Exportieren"
+    "export": "Exportieren",
+    "actions": "Aktionen",
+    "description": "Beschreibung",
+    "notes": "Notizen"
+  },
+  "commandPalette": {
+    "title": "Befehlsmenü",
+    "searchPlaceholder": "Befehl oder Seite suchen…",
+    "commands": {
+      "dashboard": "Zu Dashboard wechseln",
+      "cmdb": "Zur CMDB wechseln",
+      "discovery": "Zu Discovery wechseln",
+      "createCI": "CI erstellen",
+      "toggleDarkMode": "Dunkelmodus umschalten",
+      "assets": "Inventar öffnen",
+      "assignments": "Zuweisungen öffnen",
+      "documents": "Dokumente öffnen",
+      "stocktake": "Inventur öffnen",
+      "tickets": "Tickets öffnen",
+      "users": "Benutzer & Teams öffnen"
+    }
+  },
+  "dashboard": {
+    "summary": "Schneller Überblick über Ihre Konfigurationsdaten.",
+    "totalCIs": "Gesamte CIs",
+    "activeCIs": "Aktive CIs",
+    "maintenanceCIs": "CIs in Wartung",
+    "collectorsOnline": "Collector online"
   },
   "tenant": {
     "organization": "Organisation",
@@ -49,12 +83,38 @@
     "statusInactive": "Inaktiv",
     "statusMaintenance": "Wartung",
     "statusDecommissioned": "Außer Betrieb",
-    "allStatus": "Alle Status"
+    "allStatus": "Alle Status",
+    "exportCsv": "CSV exportieren",
+    "exportJson": "JSON exportieren"
+  },
+  "form": {
+    "createCI": "CI erstellen",
+    "editCI": "CI bearbeiten",
+    "ciDescription": "Pflegen Sie Stammdaten und Status des Configuration Items.",
+    "selectPlaceholder": "Bitte auswählen",
+    "fields": {
+      "name": "Name",
+      "ciType": "CI-Typ",
+      "status": "Status",
+      "manufacturer": "Hersteller",
+      "model": "Modell",
+      "serialNumber": "Seriennummer",
+      "managementIp": "Management-IP",
+      "firmwareVersion": "Firmware-Version"
+    },
+    "validation": {
+      "nameRequired": "Name ist erforderlich.",
+      "ciTypeRequired": "CI-Typ ist erforderlich."
+    }
   },
   "discovery": {
     "collectors": "Collectors",
     "jobs": "Discovery-Jobs",
-    "bulkIngest": "Bulk-Import"
+    "bulkIngest": "Bulk-Import",
+    "summary": "Status und Heartbeats Ihrer Discovery-Collector.",
+    "version": "Version",
+    "lastHeartbeat": "Letzter Heartbeat",
+    "createdAt": "Erstellt"
   },
   "webhook": {
     "title": "Webhooks",
@@ -62,5 +122,72 @@
     "url": "URL",
     "events": "Events",
     "active": "Aktiv"
+  },
+  "accessibility": {
+    "closeModal": "Modal schließen",
+    "closePanel": "Detailansicht schließen",
+    "toggleDarkMode": "Dunkelmodus umschalten",
+    "commandPaletteSearch": "Befehle durchsuchen",
+    "searchCIs": "Configuration Items durchsuchen",
+    "filterCIStatus": "CI-Status filtern",
+    "primaryNavigation": "Hauptnavigation"
+  },
+  "asset": {
+    "title": "Inventar",
+    "assetTag": "Asset-Tag",
+    "category": "Kategorie",
+    "location": "Standort",
+    "supplier": "Lieferant",
+    "create": "Asset erstellen"
+  },
+  "assignment": {
+    "title": "Zuweisungen",
+    "assign": "Zuweisen",
+    "return": "Rückgabe",
+    "transfer": "Transfer",
+    "type": "Typ",
+    "assignedTo": "Zugewiesen an",
+    "assignedAt": "Zugewiesen am",
+    "assetId": "Asset-ID"
+  },
+  "document": {
+    "title": "Dokumente",
+    "docTitle": "Titel",
+    "fileName": "Dateiname",
+    "category": "Kategorie",
+    "size": "Größe",
+    "version": "Version",
+    "upload": "Dokument erstellen",
+    "storageKey": "Storage-Key"
+  },
+  "stocktake": {
+    "title": "Inventur",
+    "create": "Inventur starten",
+    "name": "Bezeichnung",
+    "scope": "Umfang",
+    "progress": "Fortschritt",
+    "missing": "Fehlend",
+    "dueDate": "Fällig am"
+  },
+  "ticket": {
+    "title": "Tickets",
+    "create": "Ticket erstellen",
+    "ticketTitle": "Titel",
+    "priority": "Priorität",
+    "category": "Kategorie",
+    "createdAt": "Erstellt",
+    "startWork": "Bearbeiten"
+  },
+  "userMgmt": {
+    "title": "Benutzer & Teams",
+    "users": "Benutzer",
+    "teams": "Teams",
+    "roles": "Rollen",
+    "displayName": "Anzeigename",
+    "email": "E-Mail",
+    "lastLogin": "Letzter Login",
+    "memberCount": "Mitglieder",
+    "permissions": "Berechtigungen",
+    "type": "Typ"
   }
 }

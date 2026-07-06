@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -27,20 +28,20 @@ type Collector struct {
 
 // BulkIngestRequest is the payload sent by a collector for bulk CI data.
 type BulkIngestRequest struct {
-	CollectorID string         `json:"collector_id"`
-	Items       []IngestItem   `json:"items"`
+	CollectorID string       `json:"collector_id"`
+	Items       []IngestItem `json:"items"`
 }
 
 // IngestItem is a single CI data point from discovery.
 type IngestItem struct {
-	Fingerprint    map[string]any `json:"fingerprint"` // identity keys for reconciliation
-	RawData        map[string]any `json:"raw_data"`
-	CITypeName     string         `json:"ci_type_name"`
-	Name           string         `json:"name,omitempty"`
-	Manufacturer   string         `json:"manufacturer,omitempty"`
-	Model          string         `json:"model,omitempty"`
-	SerialNumber   string         `json:"serial_number,omitempty"`
-	ManagementIP   string         `json:"management_ip,omitempty"`
+	Fingerprint  map[string]any `json:"fingerprint"`
+	RawData      map[string]any `json:"raw_data"`
+	CITypeName   string         `json:"ci_type_name"`
+	Name         string         `json:"name,omitempty"`
+	Manufacturer string         `json:"manufacturer,omitempty"`
+	Model        string         `json:"model,omitempty"`
+	SerialNumber string         `json:"serial_number,omitempty"`
+	ManagementIP string         `json:"management_ip,omitempty"`
 }
 
 // BulkIngestResponse is the response for bulk ingest.
@@ -124,12 +125,17 @@ func (r *MemoryRepository) Heartbeat(orgID, collectorID string) error {
 
 // Handler provides HTTP handlers for discovery endpoints.
 type Handler struct {
-	repo Repository
+	repo   Repository
+	ciRepo ci.Repository
 }
 
 // NewHandler creates a new discovery handler.
-func NewHandler(repo Repository) *Handler {
-	return &Handler{repo: repo}
+func NewHandler(repo Repository, ciRepo ...ci.Repository) *Handler {
+	h := &Handler{repo: repo}
+	if len(ciRepo) > 0 {
+		h.ciRepo = ciRepo[0]
+	}
+	return h
 }
 
 // RegisterRoutes registers discovery routes.
@@ -213,8 +219,7 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// BulkIngest handles POST /api/v1/ingest/bulk
-// This is the primary endpoint for collectors to push discovered CI data.
+// BulkIngest handles POST /api/v1/ingest/bulk.
 func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -227,23 +232,86 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-
 	if len(req.Items) == 0 {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "items cannot be empty")
 		return
 	}
 
-	// In a full implementation, this would:
-	// 1. Match fingerprints against existing CIs (reconciliation)
-	// 2. Create new CIs or update existing ones
-	// 3. Flag conflicts for review
-	// For now, acknowledge receipt.
-	resp := BulkIngestResponse{
-		Received:  len(req.Items),
-		Created:   0,
-		Updated:   0,
-		Conflicts: 0,
+	resp := BulkIngestResponse{Received: len(req.Items)}
+	if h.ciRepo == nil {
+		api.WriteJSON(w, http.StatusAccepted, resp)
+		return
+	}
+
+	existing, _, err := h.ciRepo.List(t.OrganizationID, ci.FilterParams{}, api.PaginationParams{Limit: 10000, Offset: 0})
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
+	for _, item := range req.Items {
+		result := Reconcile(existing, item)
+		now := time.Now().UTC().Format(time.RFC3339)
+		source := "discovery"
+		attributes := map[string]any{
+			"fingerprint": item.Fingerprint,
+			"raw_data":    item.RawData,
+		}
+
+		switch result.Action {
+		case ReconcileCreated:
+			newItem := ci.Item{
+				OrganizationID: t.OrganizationID,
+				CITypeID:       item.CITypeName,
+				Name:           item.Name,
+				Status:         "active",
+				Manufacturer:   item.Manufacturer,
+				Model:          item.Model,
+				SerialNumber:   item.SerialNumber,
+				ManagementIP:   item.ManagementIP,
+				Attributes:     attributes,
+				Source:         source,
+				LastSeen:       now,
+			}
+			if err := h.ciRepo.Create(&newItem); err != nil {
+				api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+				return
+			}
+			existing = append(existing, newItem)
+			resp.Created++
+		case ReconcileMatched:
+			updated, err := h.ciRepo.Update(t.OrganizationID, result.MatchedCIID, ci.UpdateRequest{
+				Name:         stringPtr(item.Name),
+				Manufacturer: stringPtr(item.Manufacturer),
+				Model:        stringPtr(item.Model),
+				SerialNumber: stringPtr(item.SerialNumber),
+				ManagementIP: stringPtr(item.ManagementIP),
+				Attributes:   attributes,
+				Source:       &source,
+				LastSeen:     &now,
+			})
+			if err != nil {
+				api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+				return
+			}
+			for i := range existing {
+				if existing[i].ID == updated.ID {
+					existing[i] = *updated
+					break
+				}
+			}
+			resp.Updated++
+		case ReconcileConflict:
+			resp.Conflicts++
+		}
 	}
 
 	api.WriteJSON(w, http.StatusAccepted, resp)
+}
+
+func stringPtr(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
