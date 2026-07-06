@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -60,6 +59,5 @@ func runDiscoveryLoop(ctx context.Context) {
 
 func runAgentRelay(ctx context.Context) {
 	slog.Info("agent relay started")
-	fmt.Sprintf("relay placeholder")
 	<-ctx.Done()
 }
