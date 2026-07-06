@@ -11,14 +11,20 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
 
@@ -40,6 +46,12 @@ func main() {
 	webhookRepo := webhook.NewMemoryRepository()
 	discoveryRepo := discovery.NewMemoryRepository()
 	entitlementSvc := entitlement.NewService()
+	assetRepo := asset.NewMemoryRepository()
+	assignmentRepo := assignment.NewMemoryRepository()
+	documentRepo := document.NewMemoryRepository()
+	stocktakeRepo := stocktake.NewMemoryRepository()
+	ticketRepo := ticket.NewMemoryRepository()
+	userRepo := user.NewMemoryRepository()
 	webhookDispatcher := webhook.NewDispatcher(webhookRepo, nil)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -55,6 +67,12 @@ func main() {
 	discoveryHandler := discovery.NewHandler(discoveryRepo, ciRepo)
 	exportHandler := export.NewHandler(ciRepo)
 	entitlementHandler := entitlement.NewHandler(entitlementSvc)
+	assetHandler := asset.NewHandler(assetRepo)
+	assignmentHandler := assignment.NewHandler(assignmentRepo)
+	documentHandler := document.NewHandler(documentRepo)
+	stocktakeHandler := stocktake.NewHandler(stocktakeRepo)
+	ticketHandler := ticket.NewHandler(ticketRepo)
+	userHandler := user.NewHandler(userRepo)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +87,12 @@ func main() {
 	webhookHandler.RegisterRoutes(mux)
 	discoveryHandler.RegisterRoutes(mux)
 	exportHandler.RegisterRoutes(mux)
+	assetHandler.RegisterRoutes(mux)
+	assignmentHandler.RegisterRoutes(mux)
+	documentHandler.RegisterRoutes(mux)
+	stocktakeHandler.RegisterRoutes(mux)
+	ticketHandler.RegisterRoutes(mux)
+	userHandler.RegisterRoutes(mux)
 
 	handler := middleware.Chain(
 		middleware.Recovery,

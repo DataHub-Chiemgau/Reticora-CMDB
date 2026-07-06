@@ -1,0 +1,413 @@
+package user
+
+import (
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+)
+
+// Repository defines persistence operations for users, teams, and roles.
+type Repository interface {
+	// Users
+	ListUsers(orgID, search string, page api.PaginationParams) ([]User, int, error)
+	GetUser(orgID, id string) (*User, error)
+	CreateUser(u *User) error
+	UpdateUser(orgID, id string, req UpdateUserRequest) (*User, error)
+	DeleteUser(orgID, id string) error
+
+	// Teams
+	ListTeams(orgID, search string, page api.PaginationParams) ([]Team, int, error)
+	GetTeam(orgID, id string) (*Team, error)
+	CreateTeam(t *Team) error
+	UpdateTeam(orgID, id string, req UpdateTeamRequest) (*Team, error)
+	DeleteTeam(orgID, id string) error
+	AddTeamMember(orgID string, m *TeamMember) error
+	RemoveTeamMember(orgID, teamID, userID string) error
+	ListTeamMembers(orgID, teamID string) ([]TeamMember, error)
+
+	// Custom Roles
+	ListRoles(orgID string, page api.PaginationParams) ([]CustomRole, int, error)
+	GetRole(orgID, id string) (*CustomRole, error)
+	CreateRole(r *CustomRole) error
+	UpdateRole(orgID, id string, req UpdateRoleRequest) (*CustomRole, error)
+	DeleteRole(orgID, id string) error
+	AssignRole(orgID string, a *UserRoleAssignment) error
+	ListUserRoles(orgID, userID string) ([]UserRoleAssignment, error)
+}
+
+// MemoryRepository is an in-memory implementation of Repository.
+type MemoryRepository struct {
+	mu          sync.RWMutex
+	users       map[string]*User
+	teams       map[string]*Team
+	members     map[string]*TeamMember
+	roles       map[string]*CustomRole
+	assignments map[string]*UserRoleAssignment
+	nextID      int
+}
+
+// NewMemoryRepository creates a new in-memory user/team/role repository.
+func NewMemoryRepository() *MemoryRepository {
+	return &MemoryRepository{
+		users:       make(map[string]*User),
+		teams:       make(map[string]*Team),
+		members:     make(map[string]*TeamMember),
+		roles:       make(map[string]*CustomRole),
+		assignments: make(map[string]*UserRoleAssignment),
+	}
+}
+
+func (r *MemoryRepository) nextIDStr(prefix string) string {
+	r.nextID++
+	return fmt.Sprintf("%s-%d", prefix, r.nextID)
+}
+
+// --- Users ---
+
+func (r *MemoryRepository) ListUsers(orgID, search string, page api.PaginationParams) ([]User, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []User
+	for _, u := range r.users {
+		if u.OrganizationID != orgID {
+			continue
+		}
+		if search != "" && !strings.Contains(strings.ToLower(u.DisplayName), strings.ToLower(search)) &&
+			!strings.Contains(strings.ToLower(u.Email), strings.ToLower(search)) {
+			continue
+		}
+		result = append(result, *u)
+	}
+
+	total := len(result)
+	start := page.Offset
+	if start > total {
+		start = total
+	}
+	end := start + page.Limit
+	if end > total {
+		end = total
+	}
+	return result[start:end], total, nil
+}
+
+func (r *MemoryRepository) GetUser(orgID, id string) (*User, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	u, ok := r.users[id]
+	if !ok || u.OrganizationID != orgID {
+		return nil, fmt.Errorf("user not found")
+	}
+	return u, nil
+}
+
+func (r *MemoryRepository) CreateUser(u *User) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	u.ID = r.nextIDStr("user")
+	now := time.Now().UTC()
+	u.CreatedAt = now
+	u.UpdatedAt = now
+	r.users[u.ID] = u
+	return nil
+}
+
+func (r *MemoryRepository) UpdateUser(orgID, id string, req UpdateUserRequest) (*User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	u, ok := r.users[id]
+	if !ok || u.OrganizationID != orgID {
+		return nil, fmt.Errorf("user not found")
+	}
+	if req.DisplayName != nil {
+		u.DisplayName = *req.DisplayName
+	}
+	if req.Status != nil {
+		u.Status = *req.Status
+	}
+	if req.AvatarURL != nil {
+		u.AvatarURL = *req.AvatarURL
+	}
+	u.UpdatedAt = time.Now().UTC()
+	return u, nil
+}
+
+func (r *MemoryRepository) DeleteUser(orgID, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	u, ok := r.users[id]
+	if !ok || u.OrganizationID != orgID {
+		return fmt.Errorf("user not found")
+	}
+	delete(r.users, id)
+	return nil
+}
+
+// --- Teams ---
+
+func (r *MemoryRepository) ListTeams(orgID, search string, page api.PaginationParams) ([]Team, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []Team
+	for _, t := range r.teams {
+		if t.OrganizationID != orgID {
+			continue
+		}
+		if search != "" && !strings.Contains(strings.ToLower(t.Name), strings.ToLower(search)) {
+			continue
+		}
+		result = append(result, *t)
+	}
+
+	total := len(result)
+	start := page.Offset
+	if start > total {
+		start = total
+	}
+	end := start + page.Limit
+	if end > total {
+		end = total
+	}
+	return result[start:end], total, nil
+}
+
+func (r *MemoryRepository) GetTeam(orgID, id string) (*Team, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	t, ok := r.teams[id]
+	if !ok || t.OrganizationID != orgID {
+		return nil, fmt.Errorf("team not found")
+	}
+	return t, nil
+}
+
+func (r *MemoryRepository) CreateTeam(t *Team) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	t.ID = r.nextIDStr("team")
+	now := time.Now().UTC()
+	t.CreatedAt = now
+	t.UpdatedAt = now
+	r.teams[t.ID] = t
+	return nil
+}
+
+func (r *MemoryRepository) UpdateTeam(orgID, id string, req UpdateTeamRequest) (*Team, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	t, ok := r.teams[id]
+	if !ok || t.OrganizationID != orgID {
+		return nil, fmt.Errorf("team not found")
+	}
+	if req.Name != nil {
+		t.Name = *req.Name
+	}
+	if req.Description != nil {
+		t.Description = *req.Description
+	}
+	if req.LeadID != nil {
+		t.LeadID = *req.LeadID
+	}
+	t.UpdatedAt = time.Now().UTC()
+	return t, nil
+}
+
+func (r *MemoryRepository) DeleteTeam(orgID, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	t, ok := r.teams[id]
+	if !ok || t.OrganizationID != orgID {
+		return fmt.Errorf("team not found")
+	}
+	delete(r.teams, id)
+	// Remove team members
+	for mid, m := range r.members {
+		if m.TeamID == id {
+			delete(r.members, mid)
+		}
+	}
+	return nil
+}
+
+func (r *MemoryRepository) AddTeamMember(orgID string, m *TeamMember) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	t, ok := r.teams[m.TeamID]
+	if !ok || t.OrganizationID != orgID {
+		return fmt.Errorf("team not found")
+	}
+
+	m.ID = r.nextIDStr("member")
+	m.JoinedAt = time.Now().UTC()
+	r.members[m.ID] = m
+	t.MemberCount++
+	return nil
+}
+
+func (r *MemoryRepository) RemoveTeamMember(orgID, teamID, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	t, ok := r.teams[teamID]
+	if !ok || t.OrganizationID != orgID {
+		return fmt.Errorf("team not found")
+	}
+
+	for mid, m := range r.members {
+		if m.TeamID == teamID && m.UserID == userID {
+			delete(r.members, mid)
+			t.MemberCount--
+			return nil
+		}
+	}
+	return fmt.Errorf("member not found")
+}
+
+func (r *MemoryRepository) ListTeamMembers(orgID, teamID string) ([]TeamMember, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	t, ok := r.teams[teamID]
+	if !ok || t.OrganizationID != orgID {
+		return nil, fmt.Errorf("team not found")
+	}
+
+	var result []TeamMember
+	for _, m := range r.members {
+		if m.TeamID == teamID {
+			result = append(result, *m)
+		}
+	}
+	return result, nil
+}
+
+// --- Custom Roles ---
+
+func (r *MemoryRepository) ListRoles(orgID string, page api.PaginationParams) ([]CustomRole, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []CustomRole
+	for _, role := range r.roles {
+		if role.OrganizationID != orgID {
+			continue
+		}
+		result = append(result, *role)
+	}
+
+	total := len(result)
+	start := page.Offset
+	if start > total {
+		start = total
+	}
+	end := start + page.Limit
+	if end > total {
+		end = total
+	}
+	return result[start:end], total, nil
+}
+
+func (r *MemoryRepository) GetRole(orgID, id string) (*CustomRole, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	role, ok := r.roles[id]
+	if !ok || role.OrganizationID != orgID {
+		return nil, fmt.Errorf("role not found")
+	}
+	return role, nil
+}
+
+func (r *MemoryRepository) CreateRole(role *CustomRole) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	role.ID = r.nextIDStr("role")
+	now := time.Now().UTC()
+	role.CreatedAt = now
+	role.UpdatedAt = now
+	r.roles[role.ID] = role
+	return nil
+}
+
+func (r *MemoryRepository) UpdateRole(orgID, id string, req UpdateRoleRequest) (*CustomRole, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	role, ok := r.roles[id]
+	if !ok || role.OrganizationID != orgID {
+		return nil, fmt.Errorf("role not found")
+	}
+	if role.IsSystem {
+		return nil, fmt.Errorf("cannot modify system role")
+	}
+	if req.Name != nil {
+		role.Name = *req.Name
+	}
+	if req.Description != nil {
+		role.Description = *req.Description
+	}
+	if req.Permissions != nil {
+		role.Permissions = req.Permissions
+	}
+	role.UpdatedAt = time.Now().UTC()
+	return role, nil
+}
+
+func (r *MemoryRepository) DeleteRole(orgID, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	role, ok := r.roles[id]
+	if !ok || role.OrganizationID != orgID {
+		return fmt.Errorf("role not found")
+	}
+	if role.IsSystem {
+		return fmt.Errorf("cannot delete system role")
+	}
+	delete(r.roles, id)
+	return nil
+}
+
+func (r *MemoryRepository) AssignRole(orgID string, a *UserRoleAssignment) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Verify role exists
+	role, ok := r.roles[a.CustomRoleID]
+	if !ok || role.OrganizationID != orgID {
+		return fmt.Errorf("role not found")
+	}
+
+	a.ID = r.nextIDStr("assign")
+	a.GrantedAt = time.Now().UTC()
+	r.assignments[a.ID] = a
+	return nil
+}
+
+func (r *MemoryRepository) ListUserRoles(orgID, userID string) ([]UserRoleAssignment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []UserRoleAssignment
+	for _, a := range r.assignments {
+		if a.UserID == userID {
+			result = append(result, *a)
+		}
+	}
+	return result, nil
+}

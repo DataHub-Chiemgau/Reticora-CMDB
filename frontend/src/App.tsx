@@ -3,10 +3,16 @@ import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
 import { Button } from './components/ui/Button';
+import { AssetListPage } from './pages/AssetListPage';
+import { AssignmentListPage } from './pages/AssignmentListPage';
 import { CIFormModal } from './pages/CIFormModal';
 import { CIListPage } from './pages/CIListPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DiscoveryPage } from './pages/DiscoveryPage';
+import { DocumentListPage } from './pages/DocumentListPage';
+import { StocktakeListPage } from './pages/StocktakeListPage';
+import { TicketListPage } from './pages/TicketListPage';
+import { UserManagementPage } from './pages/UserManagementPage';
 import { useThemeStore } from './stores/theme';
 
 function App() {
@@ -51,8 +57,26 @@ function App() {
               <NavButton active={page === 'cmdb'} onClick={() => setPage('cmdb')}>
                 {t('nav.cmdb')}
               </NavButton>
+              <NavButton active={page === 'assets'} onClick={() => setPage('assets')}>
+                {t('nav.assets', 'Inventar')}
+              </NavButton>
+              <NavButton active={page === 'tickets'} onClick={() => setPage('tickets')}>
+                {t('nav.tickets', 'Tickets')}
+              </NavButton>
+              <NavButton active={page === 'assignments'} onClick={() => setPage('assignments')}>
+                {t('nav.assignments', 'Zuweisungen')}
+              </NavButton>
+              <NavButton active={page === 'documents'} onClick={() => setPage('documents')}>
+                {t('nav.documents', 'Dokumente')}
+              </NavButton>
+              <NavButton active={page === 'stocktake'} onClick={() => setPage('stocktake')}>
+                {t('nav.stocktake', 'Inventur')}
+              </NavButton>
               <NavButton active={page === 'discovery'} onClick={() => setPage('discovery')}>
                 {t('nav.discovery')}
+              </NavButton>
+              <NavButton active={page === 'users'} onClick={() => setPage('users')}>
+                {t('nav.users', 'Benutzer')}
               </NavButton>
             </nav>
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -89,6 +113,12 @@ function App() {
         {page === 'dashboard' ? <DashboardPage /> : null}
         {page === 'cmdb' ? <CIListPage onCreateCI={openCreateCI} /> : null}
         {page === 'discovery' ? <DiscoveryPage /> : null}
+        {page === 'assets' ? <AssetListPage /> : null}
+        {page === 'assignments' ? <AssignmentListPage /> : null}
+        {page === 'documents' ? <DocumentListPage /> : null}
+        {page === 'stocktake' ? <StocktakeListPage /> : null}
+        {page === 'tickets' ? <TicketListPage /> : null}
+        {page === 'users' ? <UserManagementPage /> : null}
       </main>
 
       <CommandPalette onNavigate={setPage} onCreateCI={openCreateCI} onToggleDarkMode={toggleDarkMode} />

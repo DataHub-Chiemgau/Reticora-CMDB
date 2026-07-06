@@ -9,7 +9,13 @@
     "cmdb": "CMDB",
     "discovery": "Discovery",
     "topology": "Topologie",
-    "settings": "Einstellungen"
+    "settings": "Einstellungen",
+    "assets": "Inventar",
+    "assignments": "Zuweisungen",
+    "documents": "Dokumente",
+    "stocktake": "Inventur",
+    "tickets": "Tickets",
+    "users": "Benutzer"
   },
   "common": {
     "save": "Speichern",
@@ -19,10 +25,14 @@
     "create": "Erstellen",
     "search": "Suchen…",
     "noResults": "Keine Ergebnisse",
+    "noData": "Keine Daten vorhanden",
     "back": "Zurück",
     "next": "Weiter",
     "entries": "Einträge",
-    "export": "Exportieren"
+    "export": "Exportieren",
+    "actions": "Aktionen",
+    "description": "Beschreibung",
+    "notes": "Notizen"
   },
   "commandPalette": {
     "title": "Befehlsmenü",
@@ -32,7 +42,13 @@
       "cmdb": "Zur CMDB wechseln",
       "discovery": "Zu Discovery wechseln",
       "createCI": "CI erstellen",
-      "toggleDarkMode": "Dunkelmodus umschalten"
+      "toggleDarkMode": "Dunkelmodus umschalten",
+      "assets": "Inventar öffnen",
+      "assignments": "Zuweisungen öffnen",
+      "documents": "Dokumente öffnen",
+      "stocktake": "Inventur öffnen",
+      "tickets": "Tickets öffnen",
+      "users": "Benutzer & Teams öffnen"
     }
   },
   "dashboard": {
@@ -115,5 +131,63 @@
     "searchCIs": "Configuration Items durchsuchen",
     "filterCIStatus": "CI-Status filtern",
     "primaryNavigation": "Hauptnavigation"
+  },
+  "asset": {
+    "title": "Inventar",
+    "assetTag": "Asset-Tag",
+    "category": "Kategorie",
+    "location": "Standort",
+    "supplier": "Lieferant",
+    "create": "Asset erstellen"
+  },
+  "assignment": {
+    "title": "Zuweisungen",
+    "assign": "Zuweisen",
+    "return": "Rückgabe",
+    "transfer": "Transfer",
+    "type": "Typ",
+    "assignedTo": "Zugewiesen an",
+    "assignedAt": "Zugewiesen am",
+    "assetId": "Asset-ID"
+  },
+  "document": {
+    "title": "Dokumente",
+    "docTitle": "Titel",
+    "fileName": "Dateiname",
+    "category": "Kategorie",
+    "size": "Größe",
+    "version": "Version",
+    "upload": "Dokument erstellen",
+    "storageKey": "Storage-Key"
+  },
+  "stocktake": {
+    "title": "Inventur",
+    "create": "Inventur starten",
+    "name": "Bezeichnung",
+    "scope": "Umfang",
+    "progress": "Fortschritt",
+    "missing": "Fehlend",
+    "dueDate": "Fällig am"
+  },
+  "ticket": {
+    "title": "Tickets",
+    "create": "Ticket erstellen",
+    "ticketTitle": "Titel",
+    "priority": "Priorität",
+    "category": "Kategorie",
+    "createdAt": "Erstellt",
+    "startWork": "Bearbeiten"
+  },
+  "userMgmt": {
+    "title": "Benutzer & Teams",
+    "users": "Benutzer",
+    "teams": "Teams",
+    "roles": "Rollen",
+    "displayName": "Anzeigename",
+    "email": "E-Mail",
+    "lastLogin": "Letzter Login",
+    "memberCount": "Mitglieder",
+    "permissions": "Berechtigungen",
+    "type": "Typ"
   }
 }

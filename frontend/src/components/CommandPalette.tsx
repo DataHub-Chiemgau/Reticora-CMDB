@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Badge } from './ui/Badge';
 import { cn } from './ui/utils';
 
-export type AppPage = 'dashboard' | 'cmdb' | 'discovery';
+export type AppPage = 'dashboard' | 'cmdb' | 'discovery' | 'assets' | 'assignments' | 'documents' | 'stocktake' | 'tickets' | 'users';
 
 interface CommandPaletteProps {
   onNavigate: (page: AppPage) => void;
@@ -81,6 +81,42 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
       label: t('commandPalette.commands.toggleDarkMode'),
       keywords: ['theme dark light appearance'],
       action: onToggleDarkMode,
+    },
+    {
+      id: 'nav-assets',
+      label: t('commandPalette.commands.assets', 'Inventar öffnen'),
+      keywords: ['assets inventar hardware'],
+      action: () => onNavigate('assets'),
+    },
+    {
+      id: 'nav-assignments',
+      label: t('commandPalette.commands.assignments', 'Zuweisungen öffnen'),
+      keywords: ['assignments zuweisungen transfer'],
+      action: () => onNavigate('assignments'),
+    },
+    {
+      id: 'nav-documents',
+      label: t('commandPalette.commands.documents', 'Dokumente öffnen'),
+      keywords: ['documents dokumente files'],
+      action: () => onNavigate('documents'),
+    },
+    {
+      id: 'nav-stocktake',
+      label: t('commandPalette.commands.stocktake', 'Inventur öffnen'),
+      keywords: ['stocktake inventur scan'],
+      action: () => onNavigate('stocktake'),
+    },
+    {
+      id: 'nav-tickets',
+      label: t('commandPalette.commands.tickets', 'Tickets öffnen'),
+      keywords: ['tickets support helpdesk'],
+      action: () => onNavigate('tickets'),
+    },
+    {
+      id: 'nav-users',
+      label: t('commandPalette.commands.users', 'Benutzer & Teams öffnen'),
+      keywords: ['users teams roles benutzer rollen'],
+      action: () => onNavigate('users'),
     },
   ], [onCreateCI, onNavigate, onToggleDarkMode, t]);
 
