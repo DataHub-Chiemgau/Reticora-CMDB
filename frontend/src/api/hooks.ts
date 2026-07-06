@@ -1,6 +1,6 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ciApi } from '../api/client';
-import type { CIListParams, CICreateRequest, CIUpdateRequest } from '../api/client';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ciApi, collectorApi } from '../api/client';
+import type { CICreateRequest, CIListParams, CIUpdateRequest, ListParams } from '../api/client';
 
 export function useCIList(params: CIListParams) {
   return useQuery({
@@ -22,6 +22,13 @@ export function useCIRelationships(id: string) {
     queryKey: ['ci-relationships', id],
     queryFn: () => ciApi.relationships(id),
     enabled: !!id,
+  });
+}
+
+export function useCollectors(params: ListParams = {}) {
+  return useQuery({
+    queryKey: ['collectors', params],
+    queryFn: () => collectorApi.list(params),
   });
 }
 

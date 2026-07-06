@@ -116,9 +116,18 @@ func (r *MemoryRepository) Update(orgID, id string, req UpdateRequest) (*Item, e
 		item.FirmwareVersion = *req.FirmwareVersion
 	}
 	if req.Attributes != nil {
+		if item.Attributes == nil {
+			item.Attributes = make(map[string]any)
+		}
 		for k, v := range req.Attributes {
 			item.Attributes[k] = v
 		}
+	}
+	if req.Source != nil {
+		item.Source = *req.Source
+	}
+	if req.LastSeen != nil {
+		item.LastSeen = *req.LastSeen
 	}
 	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	return item, nil
@@ -140,7 +149,6 @@ func containsIgnoreCase(s, sub string) bool {
 	if s == "" || sub == "" {
 		return false
 	}
-	// Simple case-insensitive contains
 	ls := []rune(s)
 	lsub := []rune(sub)
 	if len(lsub) > len(ls) {

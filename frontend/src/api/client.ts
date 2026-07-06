@@ -1,5 +1,3 @@
-// API client for Reticora backend
-
 const API_BASE = '/api/v1';
 
 export interface PaginatedResponse<T> {
@@ -66,6 +64,19 @@ export interface Relationship {
   updated_at: string;
 }
 
+export interface Collector {
+  id: string;
+  organization_id: string;
+  client_id?: string;
+  name: string;
+  version?: string;
+  status: string;
+  last_heartbeat?: string;
+  config: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CIListParams {
   limit?: number;
   offset?: number;
@@ -77,6 +88,11 @@ export interface CIListParams {
   sort_dir?: string;
 }
 
+export interface ListParams {
+  limit?: number;
+  offset?: number;
+}
+
 async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -86,19 +102,26 @@ async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
     const error = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(error.detail || res.statusText);
   }
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204) {
+    return undefined as T;
+  }
   return res.json();
+}
+
+function buildQuery(params: object) {
+  const query = new URLSearchParams();
+  Object.entries(params as Record<string, string | number | undefined>).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') {
+      query.set(key, String(value));
+    }
+  });
+  const value = query.toString();
+  return value ? `?${value}` : '';
 }
 
 export const ciApi = {
   list(params: CIListParams = {}): Promise<PaginatedResponse<CI>> {
-    const query = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== '') {
-        query.set(key, String(value));
-      }
-    });
-    return fetchAPI(`/cis?${query.toString()}`);
+    return fetchAPI(`/cis${buildQuery(params)}`);
   },
 
   get(id: string): Promise<CI> {
@@ -129,5 +152,11 @@ export const ciApi = {
 
   exportCIs(format: 'json' | 'csv' = 'json'): string {
     return `${API_BASE}/export/cis?format=${format}`;
+  },
+};
+
+export const collectorApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<Collector>> {
+    return fetchAPI(`/collectors${buildQuery(params)}`);
   },
 };

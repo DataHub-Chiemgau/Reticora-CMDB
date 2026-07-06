@@ -24,6 +24,24 @@
     "entries": "Einträge",
     "export": "Exportieren"
   },
+  "commandPalette": {
+    "title": "Befehlsmenü",
+    "searchPlaceholder": "Befehl oder Seite suchen…",
+    "commands": {
+      "dashboard": "Zu Dashboard wechseln",
+      "cmdb": "Zur CMDB wechseln",
+      "discovery": "Zu Discovery wechseln",
+      "createCI": "CI erstellen",
+      "toggleDarkMode": "Dunkelmodus umschalten"
+    }
+  },
+  "dashboard": {
+    "summary": "Schneller Überblick über Ihre Konfigurationsdaten.",
+    "totalCIs": "Gesamte CIs",
+    "activeCIs": "Aktive CIs",
+    "maintenanceCIs": "CIs in Wartung",
+    "collectorsOnline": "Collector online"
+  },
   "tenant": {
     "organization": "Organisation",
     "client": "Kunde",
@@ -49,12 +67,38 @@
     "statusInactive": "Inaktiv",
     "statusMaintenance": "Wartung",
     "statusDecommissioned": "Außer Betrieb",
-    "allStatus": "Alle Status"
+    "allStatus": "Alle Status",
+    "exportCsv": "CSV exportieren",
+    "exportJson": "JSON exportieren"
+  },
+  "form": {
+    "createCI": "CI erstellen",
+    "editCI": "CI bearbeiten",
+    "ciDescription": "Pflegen Sie Stammdaten und Status des Configuration Items.",
+    "selectPlaceholder": "Bitte auswählen",
+    "fields": {
+      "name": "Name",
+      "ciType": "CI-Typ",
+      "status": "Status",
+      "manufacturer": "Hersteller",
+      "model": "Modell",
+      "serialNumber": "Seriennummer",
+      "managementIp": "Management-IP",
+      "firmwareVersion": "Firmware-Version"
+    },
+    "validation": {
+      "nameRequired": "Name ist erforderlich.",
+      "ciTypeRequired": "CI-Typ ist erforderlich."
+    }
   },
   "discovery": {
     "collectors": "Collectors",
     "jobs": "Discovery-Jobs",
-    "bulkIngest": "Bulk-Import"
+    "bulkIngest": "Bulk-Import",
+    "summary": "Status und Heartbeats Ihrer Discovery-Collector.",
+    "version": "Version",
+    "lastHeartbeat": "Letzter Heartbeat",
+    "createdAt": "Erstellt"
   },
   "webhook": {
     "title": "Webhooks",
@@ -62,5 +106,14 @@
     "url": "URL",
     "events": "Events",
     "active": "Aktiv"
+  },
+  "accessibility": {
+    "closeModal": "Modal schließen",
+    "closePanel": "Detailansicht schließen",
+    "toggleDarkMode": "Dunkelmodus umschalten",
+    "commandPaletteSearch": "Befehle durchsuchen",
+    "searchCIs": "Configuration Items durchsuchen",
+    "filterCIStatus": "CI-Status filtern",
+    "primaryNavigation": "Hauptnavigation"
   }
 }
