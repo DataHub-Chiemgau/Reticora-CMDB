@@ -1,0 +1,100 @@
+// Package main provides the entry point for the Reticora Cloud backend server.
+package main
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
+)
+
+func main() {
+	cfg := config.Load()
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: cfg.LogLevel,
+	}))
+	slog.SetDefault(logger)
+
+	shutdown, err := observability.Init(cfg.OTelEndpoint, "reticora-server", cfg.Environment)
+	if err != nil {
+		slog.Error("failed to init observability", "error", err)
+		os.Exit(1)
+	}
+	defer shutdown(context.Background())
+
+	// Initialize repositories
+	ciRepo := ci.NewMemoryRepository()
+	relRepo := relationship.NewMemoryRepository()
+	webhookRepo := webhook.NewMemoryRepository()
+	discoveryRepo := discovery.NewMemoryRepository()
+
+	// Initialize handlers
+	ciHandler := ci.NewHandler(ciRepo)
+	relHandler := relationship.NewHandler(relRepo)
+	webhookHandler := webhook.NewHandler(webhookRepo)
+	discoveryHandler := discovery.NewHandler(discoveryRepo)
+	exportHandler := export.NewHandler(ciRepo)
+
+	mux := http.NewServeMux()
+
+	// Health check
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"status":"ok"}`)
+	})
+
+	// Phase 0 endpoints
+	mux.HandleFunc("GET /api/v1/entitlements", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"entitlements":[]}`)
+	})
+
+	// Phase 1 endpoints
+	ciHandler.RegisterRoutes(mux)
+	relHandler.RegisterRoutes(mux)
+	webhookHandler.RegisterRoutes(mux)
+	discoveryHandler.RegisterRoutes(mux)
+	exportHandler.RegisterRoutes(mux)
+
+	server := &http.Server{
+		Addr:         ":" + cfg.Port,
+		Handler:      mux,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	go func() {
+		slog.Info("starting server", "port", cfg.Port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("server error", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	slog.Info("shutting down server")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		slog.Error("server shutdown error", "error", err)
+	}
+}
