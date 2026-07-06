@@ -26,7 +26,11 @@ type Claims struct {
 }
 
 // AuthMiddleware parses bearer tokens and stores claims in the request context.
-// It intentionally skips cryptographic verification for development mode.
+// SECURITY NOTE: This implementation skips JWT signature verification and is
+// intended for DEVELOPMENT ONLY. In production, tokens MUST be verified against
+// the OIDC provider's public keys (JWKS endpoint). A production-ready version
+// should accept an OIDC issuer URL configuration and validate signatures,
+// audience, and expiry cryptographically.
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !requiresTenant(r) {
