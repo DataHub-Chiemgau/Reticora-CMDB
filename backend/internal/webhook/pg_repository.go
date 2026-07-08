@@ -284,8 +284,10 @@ func scanWebhook(scanner webhookScanner) (*Subscription, error) {
 	sub.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 	sub.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
 
-	if len(headersJSON) > 0 {
-		_ = json.Unmarshal(headersJSON, &sub.Headers)
+	if len(headersJSON) > 0 && string(headersJSON) != "null" {
+		if err := json.Unmarshal(headersJSON, &sub.Headers); err != nil {
+			sub.Headers = make(map[string]string)
+		}
 	}
 
 	return sub, nil
