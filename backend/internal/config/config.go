@@ -56,7 +56,7 @@ func Load() *Config {
 		Port:        envOrDefault("RETICORA_PORT", "8080"),
 		Environment: envOrDefault("RETICORA_ENVIRONMENT", "development"),
 
-		DatabaseURL: envOrDefault("RETICORA_DATABASE_URL", "******localhost:5432/reticora?sslmode=disable"),
+		DatabaseURL: envOrDefault("RETICORA_DATABASE_URL", "postgres://localhost:5432/reticora?sslmode=disable"),
 		NATSUrl:     envOrDefault("RETICORA_NATS_URL", "nats://localhost:4222"),
 		RedisURL:    envOrDefault("RETICORA_REDIS_URL", "redis://localhost:6379"),
 

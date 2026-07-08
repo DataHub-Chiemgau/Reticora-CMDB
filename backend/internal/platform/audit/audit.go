@@ -124,7 +124,7 @@ func (w *MemoryWriter) Verify(_ context.Context, orgID string) (bool, error) {
 		}
 		if first {
 			prev = e.PreviousHash
-			first = true
+			first = false
 		}
 		expected := computeHash(prev, e.Sequence, e.Entry)
 		if e.Hash != expected {
