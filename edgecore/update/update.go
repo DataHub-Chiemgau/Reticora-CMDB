@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -120,7 +121,9 @@ func (c *Checker) Apply(ctx context.Context, release ReleaseInfo) error {
 
 	// Atomic swap: move current binary to .old, then staging to current
 	backupPath := execPath + ".old"
-	_ = os.Remove(backupPath) // Remove any previous backup
+	if err := os.Remove(backupPath); err != nil && !os.IsNotExist(err) {
+		slog.Warn("update: failed to remove previous backup", "path", backupPath, "error", err)
+	}
 
 	if err := os.Rename(execPath, backupPath); err != nil {
 		os.Remove(stagingPath)

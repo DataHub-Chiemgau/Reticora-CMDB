@@ -221,7 +221,7 @@ reposReady:
 
 // maskDSN hides password from database URL for logging.
 func maskDSN(dsn string) string {
-	// Mask the password portion of ******host/db
+	// Mask the password portion of user:password@host/db
 	atIdx := strings.Index(dsn, "@")
 	if atIdx < 0 {
 		return dsn

@@ -147,6 +147,8 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig) {
 }
 
 // expandSubnets converts CIDR notations to individual IP targets.
+const maxSubnetExpansionTargets = 4096
+
 func expandSubnets(subnets []string) []string {
 	var targets []string
 	for _, subnet := range subnets {
@@ -156,18 +158,25 @@ func expandSubnets(subnets []string) []string {
 			targets = append(targets, subnet)
 			continue
 		}
+
+		maskOnes, _ := ipNet.Mask.Size()
+		var subnetTargets []string
 		for ip := ipNet.IP.Mask(ipNet.Mask); ipNet.Contains(ip); incrementIP(ip) {
-			targets = append(targets, ip.String())
+			subnetTargets = append(subnetTargets, ip.String())
 			// Safety limit to avoid expanding huge ranges
-			if len(targets) > 4096 {
-				slog.Warn("subnet expansion limit reached", "subnet", subnet, "limit", 4096)
+			if len(subnetTargets) > maxSubnetExpansionTargets {
+				slog.Warn("subnet expansion limit reached", "subnet", subnet, "limit", maxSubnetExpansionTargets)
 				break
 			}
 		}
-	}
-	// Remove network and broadcast addresses for /24 and smaller
-	if len(targets) > 2 {
-		return targets[1 : len(targets)-1]
+
+		// Remove network and broadcast addresses for /30 and larger prefixes
+		// For /31 and /32 all addresses are usable (point-to-point or host routes)
+		if maskOnes <= 30 && len(subnetTargets) > 2 {
+			subnetTargets = subnetTargets[1 : len(subnetTargets)-1]
+		}
+
+		targets = append(targets, subnetTargets...)
 	}
 	return targets
 }
