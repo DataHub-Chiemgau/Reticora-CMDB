@@ -1,0 +1,112 @@
+# Reticora CMDB — Full Deployment Stack
+#
+# This compose file runs the complete Reticora stack for testing and staging.
+# For development, use the root docker-compose.yml instead.
+#
+# Usage:
+#   docker compose -f deploy/docker-compose/docker-compose.yml up -d
+
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB: reticora
+      POSTGRES_USER: reticora
+      POSTGRES_PASSWORD: ${RETICORA_DB_PASSWORD:-reticora_secret}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reticora"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  nats:
+    image: nats:2.10-alpine
+    command: ["--jetstream", "--store_dir=/data"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - natsdata:/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${RETICORA_S3_ACCESS_KEY:-reticora}
+      MINIO_ROOT_PASSWORD: ${RETICORA_S3_SECRET_KEY:-reticora_secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    command: start-dev --import-realm
+    environment:
+      KC_DB: dev-mem
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    ports:
+      - "8180:8080"
+    volumes:
+      - ../keycloak:/opt/keycloak/data/import
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  server:
+    image: reticora-server:latest
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    environment:
+      RETICORA_PORT: "8080"
+      RETICORA_DATABASE_URL: "postgres://reticora:${RETICORA_DB_PASSWORD:-reticora_secret}@postgres:5432/reticora?sslmode=disable"
+      RETICORA_NATS_URL: "nats://nats:4222"
+      RETICORA_REDIS_URL: "redis://redis:6379"
+      RETICORA_S3_ENDPOINT: "minio:9000"
+      RETICORA_S3_BUCKET: "reticora"
+      RETICORA_S3_ACCESS_KEY: "${RETICORA_S3_ACCESS_KEY:-reticora}"
+      RETICORA_S3_SECRET_KEY: "${RETICORA_S3_SECRET_KEY:-reticora_secret}"
+      RETICORA_OIDC_ISSUER_URL: "http://keycloak:8080/realms/reticora"
+      RETICORA_OIDC_CLIENT_ID: "reticora-app"
+      RETICORA_ENVIRONMENT: "production"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  frontend:
+    image: reticora-frontend:latest
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - server
+
+volumes:
+  pgdata:
+  natsdata:
+  miniodata:

@@ -261,18 +261,21 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 
 		switch result.Action {
 		case ReconcileCreated:
+			nowTime := time.Now().UTC()
 			newItem := ci.Item{
-				OrganizationID: t.OrganizationID,
-				CITypeID:       item.CITypeName,
-				Name:           item.Name,
-				Status:         "active",
-				Manufacturer:   item.Manufacturer,
-				Model:          item.Model,
-				SerialNumber:   item.SerialNumber,
-				ManagementIP:   item.ManagementIP,
-				Attributes:     attributes,
-				Source:         source,
-				LastSeen:       now,
+				OrganizationID:  t.OrganizationID,
+				CITypeID:        item.CITypeName,
+				Name:            item.Name,
+				Status:          "active",
+				Manufacturer:    item.Manufacturer,
+				Model:           item.Model,
+				SerialNumber:    item.SerialNumber,
+				ManagementIP:    item.ManagementIP,
+				Attributes:      attributes,
+				DiscoverySource: "sweep",
+				Source:          source,
+				FirstSeenAt:     &nowTime,
+				LastSeenAt:      &nowTime,
 			}
 			if err := h.ciRepo.Create(&newItem); err != nil {
 				api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())

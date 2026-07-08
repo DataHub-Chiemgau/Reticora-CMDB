@@ -19,6 +19,7 @@ type claimsContextKey struct{}
 type Claims struct {
 	Subject        string `json:"sub"`
 	OrganizationID string `json:"organization_id"`
+	OrgID          string `json:"org_id,omitempty"`
 	TenantID       string `json:"tenant_id,omitempty"`
 	ClientID       string `json:"client_id,omitempty"`
 	ExpiresAt      int64  `json:"exp,omitempty"`
@@ -92,7 +93,15 @@ func ClaimsFromContext(ctx context.Context) (Claims, bool) {
 }
 
 func requiresTenant(r *http.Request) bool {
-	return strings.HasPrefix(r.URL.Path, "/api/")
+	if !strings.HasPrefix(r.URL.Path, "/api/") {
+		return false
+	}
+	switch r.URL.Path {
+	case "/api/v1/auth/login", "/api/v1/auth/callback", "/api/v1/auth/refresh":
+		return false
+	default:
+		return true
+	}
 }
 
 func claimsFromRequestOrContext(r *http.Request) (Claims, error) {
@@ -125,12 +134,39 @@ func parseJWTClaims(token string) (Claims, error) {
 		return Claims{}, fmt.Errorf("decode JWT claims: %w", err)
 	}
 
-	var claims Claims
-	if err := json.Unmarshal(payload, &claims); err != nil {
+	var raw struct {
+		Subject        string          `json:"sub"`
+		OrganizationID string          `json:"organization_id"`
+		OrgID          string          `json:"org_id,omitempty"`
+		TenantID       string          `json:"tenant_id,omitempty"`
+		ClientID       string          `json:"client_id,omitempty"`
+		ExpiresAt      json.RawMessage `json:"exp,omitempty"`
+		IssuedAt       json.RawMessage `json:"iat,omitempty"`
+	}
+	if err := json.Unmarshal(payload, &raw); err != nil {
 		return Claims{}, fmt.Errorf("parse JWT claims: %w", err)
 	}
+
+	expiresAt, err := parseTimestampClaim(raw.ExpiresAt)
+	if err != nil {
+		return Claims{}, fmt.Errorf("parse exp claim: %w", err)
+	}
+	issuedAt, err := parseTimestampClaim(raw.IssuedAt)
+	if err != nil {
+		return Claims{}, fmt.Errorf("parse iat claim: %w", err)
+	}
+
+	claims := Claims{
+		Subject:        raw.Subject,
+		OrganizationID: raw.OrganizationID,
+		OrgID:          raw.OrgID,
+		TenantID:       raw.TenantID,
+		ClientID:       raw.ClientID,
+		ExpiresAt:      expiresAt,
+		IssuedAt:       issuedAt,
+	}
 	if claims.Organization() == "" {
-		return Claims{}, fmt.Errorf("organization_id claim is required")
+		return Claims{}, fmt.Errorf("organization claim is required")
 	}
 	if claims.ExpiresAt > 0 && time.Now().Unix() >= claims.ExpiresAt {
 		return Claims{}, fmt.Errorf("token is expired")
@@ -142,5 +178,30 @@ func (c Claims) Organization() string {
 	if c.OrganizationID != "" {
 		return c.OrganizationID
 	}
+	if c.OrgID != "" {
+		return c.OrgID
+	}
 	return c.TenantID
+}
+
+func parseTimestampClaim(raw json.RawMessage) (int64, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0, nil
+	}
+
+	var unix int64
+	if err := json.Unmarshal(raw, &unix); err == nil {
+		return unix, nil
+	}
+
+	var ts string
+	if err := json.Unmarshal(raw, &ts); err == nil {
+		parsed, err := time.Parse(time.RFC3339, ts)
+		if err != nil {
+			return 0, err
+		}
+		return parsed.Unix(), nil
+	}
+
+	return 0, fmt.Errorf("unsupported timestamp format")
 }
