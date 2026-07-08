@@ -127,8 +127,10 @@ func (r *MemoryRepository) Update(orgID, id string, req UpdateRequest) (*Item, e
 		item.Source = *req.Source
 	}
 	if req.LastSeen != nil {
-		t, _ := time.Parse(time.RFC3339, *req.LastSeen)
-		item.LastSeenAt = &t
+		t, err := time.Parse(time.RFC3339, *req.LastSeen)
+		if err == nil {
+			item.LastSeenAt = &t
+		}
 	}
 	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	return item, nil

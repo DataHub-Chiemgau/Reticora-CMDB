@@ -49,8 +49,8 @@ func Idempotency(next http.Handler) http.Handler {
 		orgID := r.Header.Get("X-Organization-ID")
 		storeKey := orgID + ":" + key
 
-		// Read and hash the body
-		body, err := io.ReadAll(r.Body)
+		// Read and hash the body (limit to 1MB for safety)
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		if err != nil {
 			httpx.Internal(w, r, "failed to read request body")
 			return

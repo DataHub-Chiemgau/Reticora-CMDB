@@ -11,7 +11,7 @@ LIMIT $1 OFFSET $2;
 SELECT * FROM ci
 WHERE ci_type_id = $1 AND deleted_at IS NULL
 ORDER BY name
-LIMIT $1 OFFSET $2;
+LIMIT $2 OFFSET $3;
 
 -- name: ListCIsByStatus :many
 SELECT * FROM ci

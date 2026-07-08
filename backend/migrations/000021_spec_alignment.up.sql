@@ -63,7 +63,7 @@ ALTER TABLE site ADD COLUMN IF NOT EXISTS notes TEXT;
 -- Add unique name per org constraint if not exists
 DO $$ BEGIN
     ALTER TABLE site ADD CONSTRAINT site_org_name_unique UNIQUE (organization_id, name);
-EXCEPTION WHEN duplicate_table THEN NULL;
+EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- ─── Building table additions ───────────────────────────────────────────────────

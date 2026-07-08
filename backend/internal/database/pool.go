@@ -37,8 +37,8 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 }
 
 // WithTenant executes fn within a database transaction that sets the RLS
-// session variables app.org_id and app.client_scope. This ensures Row-Level
-// Security policies are enforced for all queries within the transaction.
+// session variables app.org_id and app.client_scope. The callback receives
+// the transaction (pgx.Tx) for executing queries within the tenant scope.
 func WithTenant(ctx context.Context, pool *pgxpool.Pool, orgID string, clientScope string, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
