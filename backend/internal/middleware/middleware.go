@@ -44,15 +44,19 @@ func Logger(next http.Handler) http.Handler {
 		next.ServeHTTP(rw, r)
 
 		tenantInfo := tenantFromHeaderSafe(r)
+		requestID := w.Header().Get("X-Request-ID")
 		slog.Info("request completed",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rw.status,
 			"bytes", rw.bytes,
 			"duration_ms", time.Since(start).Milliseconds(),
-			"request_id", w.Header().Get("X-Request-ID"),
+			"trace_id", requestID,
+			"request_id", requestID,
 			"organization_id", tenantInfo.OrganizationID,
+			"org_id", tenantInfo.OrganizationID,
 			"client_id", tenantInfo.ClientID,
+			"user_id", tenantInfo.UserID,
 			"remote_addr", r.RemoteAddr,
 		)
 	})
@@ -113,13 +117,19 @@ func newRequestID() string {
 func tenantFromHeaderSafe(r *http.Request) struct {
 	OrganizationID string
 	ClientID       string
+	UserID         string
 } {
 	tenantInfo := tenant.TenantInfo{
 		OrganizationID: r.Header.Get("X-Organization-ID"),
 		ClientID:       r.Header.Get("X-Client-ID"),
 	}
+	userID := ""
+	if claims, ok := ClaimsFromContext(r.Context()); ok {
+		userID = claims.Subject
+	}
 	return struct {
 		OrganizationID string
 		ClientID       string
-	}{OrganizationID: tenantInfo.OrganizationID, ClientID: tenantInfo.ClientID}
+		UserID         string
+	}{OrganizationID: tenantInfo.OrganizationID, ClientID: tenantInfo.ClientID, UserID: userID}
 }

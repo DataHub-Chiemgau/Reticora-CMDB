@@ -61,6 +61,10 @@ CREATE INDEX idx_team_member_user ON team_member(user_id);
 CREATE INDEX idx_custom_role_org ON custom_role(organization_id);
 CREATE INDEX idx_user_custom_role_user ON user_custom_role(user_id);
 
+ALTER TABLE ticket
+    ADD CONSTRAINT ticket_team_id_fkey
+    FOREIGN KEY (team_id) REFERENCES team(id);
+
 ALTER TABLE team ENABLE ROW LEVEL SECURITY;
 CREATE POLICY team_tenant_isolation ON team
     USING (organization_id = current_setting('app.current_org')::UUID);

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 func tenantCtx(r *http.Request) *http.Request {
@@ -19,7 +20,7 @@ func tenantCtx(r *http.Request) *http.Request {
 func TestHandler_CreateAndGet(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	// Create a CI
@@ -63,7 +64,7 @@ func TestHandler_CreateAndGet(t *testing.T) {
 func TestHandler_List(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	// Create two CIs
@@ -100,7 +101,7 @@ func TestHandler_List(t *testing.T) {
 func TestHandler_Update(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	item := &Item{
@@ -135,7 +136,7 @@ func TestHandler_Update(t *testing.T) {
 func TestHandler_Delete(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	item := &Item{
@@ -170,7 +171,7 @@ func TestHandler_Delete(t *testing.T) {
 func TestHandler_Unauthorized(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	// Request without tenant context
@@ -187,7 +188,7 @@ func TestHandler_Unauthorized(t *testing.T) {
 func TestHandler_ListFilter(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	repo.Create(&Item{OrganizationID: "org-1", CITypeID: "type-server", Name: "srv-active", Status: "active", Attributes: map[string]any{}})

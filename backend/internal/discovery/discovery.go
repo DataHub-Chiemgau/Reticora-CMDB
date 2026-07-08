@@ -10,6 +10,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 // Collector represents a customer-deployed collector instance.
@@ -139,11 +140,11 @@ func NewHandler(repo Repository, ciRepo ...ci.Repository) *Handler {
 }
 
 // RegisterRoutes registers discovery routes.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/collectors", h.ListCollectors)
-	mux.HandleFunc("POST /api/v1/collectors", h.RegisterCollector)
-	mux.HandleFunc("POST /api/v1/collectors/{id}/heartbeat", h.Heartbeat)
-	mux.HandleFunc("POST /api/v1/ingest/bulk", h.BulkIngest)
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/api/v1/collectors", h.ListCollectors)
+	r.Post("/api/v1/collectors", h.RegisterCollector)
+	r.Post("/api/v1/collectors/{id}/heartbeat", h.Heartbeat)
+	r.Post("/api/v1/ingest/bulk", h.BulkIngest)
 }
 
 // ListCollectors handles GET /api/v1/collectors
@@ -210,7 +211,7 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := h.repo.Heartbeat(t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "collector not found")
 		return

@@ -5,6 +5,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 // Handler provides entitlement HTTP endpoints.
@@ -18,10 +19,10 @@ func NewHandler(service *Service) *Handler {
 }
 
 // RegisterRoutes registers entitlement routes.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/entitlements", h.List)
-	mux.HandleFunc("POST /api/v1/entitlements", h.Grant)
-	mux.HandleFunc("GET /api/v1/entitlements/check/{feature}", h.Check)
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/api/v1/entitlements", h.List)
+	r.Post("/api/v1/entitlements", h.Grant)
+	r.Get("/api/v1/entitlements/check/{feature}", h.Check)
 }
 
 // List handles GET /api/v1/entitlements.
@@ -89,7 +90,7 @@ func (h *Handler) Check(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	feature := r.PathValue("feature")
+	feature := chi.URLParam(r, "feature")
 	if feature == "" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "feature is required")
 		return

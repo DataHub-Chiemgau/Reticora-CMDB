@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 func tenantCtx(r *http.Request) *http.Request {
@@ -17,7 +18,7 @@ func tenantCtx(r *http.Request) *http.Request {
 
 func TestHandlerGrantListAndCheck(t *testing.T) {
 	h := NewHandler(NewService())
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/entitlements", bytes.NewBufferString(`{"feature_key":"ticketing","plan":"pro"}`))

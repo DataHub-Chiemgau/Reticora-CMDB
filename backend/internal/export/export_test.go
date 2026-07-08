@@ -9,6 +9,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 func tenantCtx(r *http.Request) *http.Request {
@@ -27,7 +28,7 @@ func TestExportJSON(t *testing.T) {
 	})
 
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest("GET", "/api/v1/export/cis?format=json", nil)
@@ -61,7 +62,7 @@ func TestExportCSV(t *testing.T) {
 	})
 
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest("GET", "/api/v1/export/cis?format=csv", nil)
@@ -104,7 +105,7 @@ func TestExportDATEV(t *testing.T) {
 	})
 
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest("GET", "/api/v1/export/cis?format=datev", nil)

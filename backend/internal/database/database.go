@@ -76,7 +76,7 @@ func driverNameFromURL(databaseURL string) (string, error) {
 
 	switch scheme {
 	case "postgres", "postgresql":
-		return "postgres", nil
+		return "pgx", nil
 	default:
 		return scheme, nil
 	}

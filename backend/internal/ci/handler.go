@@ -5,6 +5,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 // EventDispatcher publishes CI lifecycle events.
@@ -37,12 +38,12 @@ func NewHandler(repo Repository, dispatcher ...EventDispatcher) *Handler {
 }
 
 // RegisterRoutes registers CI routes on the given mux.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/cis", h.List)
-	mux.HandleFunc("POST /api/v1/cis", h.Create)
-	mux.HandleFunc("GET /api/v1/cis/{id}", h.Get)
-	mux.HandleFunc("PATCH /api/v1/cis/{id}", h.Update)
-	mux.HandleFunc("DELETE /api/v1/cis/{id}", h.Delete)
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/api/v1/cis", h.List)
+	r.Post("/api/v1/cis", h.Create)
+	r.Get("/api/v1/cis/{id}", h.Get)
+	r.Patch("/api/v1/cis/{id}", h.Update)
+	r.Delete("/api/v1/cis/{id}", h.Delete)
 }
 
 // List handles GET /api/v1/cis
@@ -86,7 +87,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	item, err := h.repo.GetByID(t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
@@ -160,7 +161,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	var req UpdateRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -187,7 +188,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	item, err := h.repo.GetByID(t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")

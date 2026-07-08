@@ -1,0 +1,18 @@
+ALTER TABLE IF EXISTS ci DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS ci_type DISABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS ci_isolation ON ci;
+DROP POLICY IF EXISTS ci_type_isolation ON ci_type;
+
+DROP INDEX IF EXISTS idx_ci_attributes;
+DROP INDEX IF EXISTS idx_ci_last_seen;
+DROP INDEX IF EXISTS idx_ci_mgmt_ip;
+DROP INDEX IF EXISTS idx_ci_serial;
+DROP INDEX IF EXISTS idx_ci_status;
+DROP INDEX IF EXISTS idx_ci_client;
+DROP INDEX IF EXISTS idx_ci_type;
+DROP INDEX IF EXISTS idx_ci_org;
+
+DROP TABLE IF EXISTS ci;
+DROP TABLE IF EXISTS ci_type_attribute;
+DROP TABLE IF EXISTS ci_type;

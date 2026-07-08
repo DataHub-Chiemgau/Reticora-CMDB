@@ -17,15 +17,16 @@ type Config struct {
 	LogLevel     slog.Level
 }
 
-// Load reads configuration from environment variables with sensible defaults.
+// Load reads configuration from environment variables with RETICORA_ prefix
+// and sensible defaults.
 func Load() *Config {
 	cfg := &Config{
-		Port:         envOrDefault("PORT", "8080"),
-		DatabaseURL:  envOrDefault("DATABASE_URL", "postgres://localhost:5432/reticora?sslmode=disable"),
-		NATSUrl:      envOrDefault("NATS_URL", "nats://localhost:4222"),
-		RedisURL:     envOrDefault("REDIS_URL", "redis://localhost:6379"),
-		OTelEndpoint: envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
-		Environment:  envOrDefault("ENVIRONMENT", "development"),
+		Port:         envOrDefault("RETICORA_PORT", "8080"),
+		DatabaseURL:  envOrDefault("RETICORA_DATABASE_URL", "postgres://localhost:5432/reticora?sslmode=disable"),
+		NATSUrl:      envOrDefault("RETICORA_NATS_URL", "nats://localhost:4222"),
+		RedisURL:     envOrDefault("RETICORA_REDIS_URL", "redis://localhost:6379"),
+		OTelEndpoint: envOrDefault("RETICORA_OTEL_ENDPOINT", ""),
+		Environment:  envOrDefault("RETICORA_ENVIRONMENT", "development"),
 		LogLevel:     slog.LevelInfo,
 	}
 

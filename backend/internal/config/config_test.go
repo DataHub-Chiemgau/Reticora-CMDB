@@ -16,10 +16,10 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadFromEnv(t *testing.T) {
-	os.Setenv("PORT", "9090")
-	os.Setenv("ENVIRONMENT", "production")
-	defer os.Unsetenv("PORT")
-	defer os.Unsetenv("ENVIRONMENT")
+	os.Setenv("RETICORA_PORT", "9090")
+	os.Setenv("RETICORA_ENVIRONMENT", "production")
+	defer os.Unsetenv("RETICORA_PORT")
+	defer os.Unsetenv("RETICORA_ENVIRONMENT")
 
 	cfg := Load()
 	if cfg.Port != "9090" {

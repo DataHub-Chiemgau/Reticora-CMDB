@@ -1,0 +1,193 @@
+{
+  "app": {
+    "title": "Reticora CMDB",
+    "loading": "Loading…",
+    "error": "An error occurred"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "cmdb": "CMDB",
+    "discovery": "Discovery",
+    "topology": "Topology",
+    "settings": "Settings",
+    "assets": "Assets",
+    "assignments": "Assignments",
+    "documents": "Documents",
+    "stocktake": "Stocktake",
+    "tickets": "Tickets",
+    "users": "Users"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "search": "Search…",
+    "noResults": "No results",
+    "noData": "No data available",
+    "back": "Back",
+    "next": "Next",
+    "entries": "Entries",
+    "export": "Export",
+    "actions": "Actions",
+    "description": "Description",
+    "notes": "Notes"
+  },
+  "commandPalette": {
+    "title": "Command Menu",
+    "searchPlaceholder": "Search command or page…",
+    "commands": {
+      "dashboard": "Go to Dashboard",
+      "cmdb": "Go to CMDB",
+      "discovery": "Go to Discovery",
+      "createCI": "Create CI",
+      "toggleDarkMode": "Toggle dark mode",
+      "assets": "Open Assets",
+      "assignments": "Open Assignments",
+      "documents": "Open Documents",
+      "stocktake": "Open Stocktake",
+      "tickets": "Open Tickets",
+      "users": "Open Users & Teams"
+    }
+  },
+  "dashboard": {
+    "summary": "Quick overview of your configuration data.",
+    "totalCIs": "Total CIs",
+    "activeCIs": "Active CIs",
+    "maintenanceCIs": "CIs in Maintenance",
+    "collectorsOnline": "Collectors Online"
+  },
+  "tenant": {
+    "organization": "Organization",
+    "client": "Client",
+    "site": "Site",
+    "switchTenant": "Switch Tenant"
+  },
+  "ci": {
+    "title": "Configuration Items",
+    "name": "Name",
+    "status": "Status",
+    "manufacturer": "Manufacturer",
+    "model": "Model",
+    "serialNumber": "Serial Number",
+    "managementIp": "Management IP",
+    "firmware": "Firmware",
+    "source": "Source",
+    "lastSeen": "Last Seen",
+    "created": "Created",
+    "updated": "Updated",
+    "attributes": "Attributes",
+    "relationships": "Relationships",
+    "statusActive": "Active",
+    "statusInactive": "Inactive",
+    "statusMaintenance": "Maintenance",
+    "statusDecommissioned": "Decommissioned",
+    "allStatus": "All Statuses",
+    "exportCsv": "Export CSV",
+    "exportJson": "Export JSON"
+  },
+  "form": {
+    "createCI": "Create CI",
+    "editCI": "Edit CI",
+    "ciDescription": "Manage master data and status of the Configuration Item.",
+    "selectPlaceholder": "Please select",
+    "fields": {
+      "name": "Name",
+      "ciType": "CI Type",
+      "status": "Status",
+      "manufacturer": "Manufacturer",
+      "model": "Model",
+      "serialNumber": "Serial Number",
+      "managementIp": "Management IP",
+      "firmwareVersion": "Firmware Version"
+    },
+    "validation": {
+      "nameRequired": "Name is required.",
+      "ciTypeRequired": "CI type is required."
+    }
+  },
+  "discovery": {
+    "collectors": "Collectors",
+    "jobs": "Discovery Jobs",
+    "bulkIngest": "Bulk Import",
+    "summary": "Status and heartbeats of your Discovery Collectors.",
+    "version": "Version",
+    "lastHeartbeat": "Last Heartbeat",
+    "createdAt": "Created"
+  },
+  "webhook": {
+    "title": "Webhooks",
+    "name": "Name",
+    "url": "URL",
+    "events": "Events",
+    "active": "Active"
+  },
+  "accessibility": {
+    "closeModal": "Close modal",
+    "closePanel": "Close detail view",
+    "toggleDarkMode": "Toggle dark mode",
+    "commandPaletteSearch": "Search commands",
+    "searchCIs": "Search Configuration Items",
+    "filterCIStatus": "Filter CI status",
+    "primaryNavigation": "Primary navigation"
+  },
+  "asset": {
+    "title": "Assets",
+    "assetTag": "Asset Tag",
+    "category": "Category",
+    "location": "Location",
+    "supplier": "Supplier",
+    "create": "Create Asset"
+  },
+  "assignment": {
+    "title": "Assignments",
+    "assign": "Assign",
+    "return": "Return",
+    "transfer": "Transfer",
+    "type": "Type",
+    "assignedTo": "Assigned to",
+    "assignedAt": "Assigned at",
+    "assetId": "Asset ID"
+  },
+  "document": {
+    "title": "Documents",
+    "docTitle": "Title",
+    "fileName": "Filename",
+    "category": "Category",
+    "size": "Size",
+    "version": "Version",
+    "upload": "Create Document",
+    "storageKey": "Storage Key"
+  },
+  "stocktake": {
+    "title": "Stocktake",
+    "create": "Start Stocktake",
+    "name": "Name",
+    "scope": "Scope",
+    "progress": "Progress",
+    "missing": "Missing",
+    "dueDate": "Due Date"
+  },
+  "ticket": {
+    "title": "Tickets",
+    "create": "Create Ticket",
+    "ticketTitle": "Title",
+    "priority": "Priority",
+    "category": "Category",
+    "createdAt": "Created",
+    "startWork": "Start Work"
+  },
+  "userMgmt": {
+    "title": "Users & Teams",
+    "users": "Users",
+    "teams": "Teams",
+    "roles": "Roles",
+    "displayName": "Display Name",
+    "email": "Email",
+    "lastLogin": "Last Login",
+    "memberCount": "Members",
+    "permissions": "Permissions",
+    "type": "Type"
+  }
+}

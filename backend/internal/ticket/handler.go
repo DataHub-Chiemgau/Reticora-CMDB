@@ -5,6 +5,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 // Handler provides HTTP handlers for ticket endpoints.
@@ -18,14 +19,14 @@ func NewHandler(repo Repository) *Handler {
 }
 
 // RegisterRoutes registers ticket routes on the given mux.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/tickets", h.List)
-	mux.HandleFunc("POST /api/v1/tickets", h.Create)
-	mux.HandleFunc("GET /api/v1/tickets/{id}", h.Get)
-	mux.HandleFunc("PATCH /api/v1/tickets/{id}", h.Update)
-	mux.HandleFunc("DELETE /api/v1/tickets/{id}", h.Delete)
-	mux.HandleFunc("POST /api/v1/tickets/{id}/comments", h.AddComment)
-	mux.HandleFunc("GET /api/v1/tickets/{id}/comments", h.ListComments)
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/api/v1/tickets", h.List)
+	r.Post("/api/v1/tickets", h.Create)
+	r.Get("/api/v1/tickets/{id}", h.Get)
+	r.Patch("/api/v1/tickets/{id}", h.Update)
+	r.Delete("/api/v1/tickets/{id}", h.Delete)
+	r.Post("/api/v1/tickets/{id}/comments", h.AddComment)
+	r.Get("/api/v1/tickets/{id}/comments", h.ListComments)
 }
 
 // List handles GET /api/v1/tickets
@@ -71,7 +72,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	item, err := h.repo.GetByID(t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ticket not found")
@@ -144,7 +145,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	var req UpdateRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -168,7 +169,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := h.repo.Delete(t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ticket not found")
 		return
@@ -185,7 +186,7 @@ func (h *Handler) AddComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ticketID := r.PathValue("id")
+	ticketID := chi.URLParam(r, "id")
 	var req CommentRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -221,7 +222,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ticketID := r.PathValue("id")
+	ticketID := chi.URLParam(r, "id")
 	page := api.ParsePagination(r)
 
 	comments, total, err := h.repo.ListComments(t.OrganizationID, ticketID, page)

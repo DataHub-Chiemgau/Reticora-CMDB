@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 func tenantCtx(r *http.Request) *http.Request {
@@ -18,7 +19,7 @@ func tenantCtx(r *http.Request) *http.Request {
 func TestHandler_RegisterAndListCollectors(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	body := `{"name":"collector-site-a","version":"1.0.0"}`
@@ -63,7 +64,7 @@ func TestHandler_RegisterAndListCollectors(t *testing.T) {
 func TestHandler_Heartbeat(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	c := &Collector{OrganizationID: "org-1", Name: "test-collector", Config: map[string]any{}}
@@ -82,7 +83,7 @@ func TestHandler_Heartbeat(t *testing.T) {
 func TestHandler_BulkIngest(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	body := `{"collector_id":"col-1","items":[{"fingerprint":{"serial":"ABC123"},"raw_data":{"hostname":"srv1"},"ci_type_name":"server","name":"srv1"}]}`
@@ -105,7 +106,7 @@ func TestHandler_BulkIngest(t *testing.T) {
 func TestHandler_BulkIngestEmpty(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	body := `{"collector_id":"col-1","items":[]}`

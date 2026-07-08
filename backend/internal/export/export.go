@@ -11,6 +11,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 // Handler provides HTTP handlers for export endpoints.
@@ -24,8 +25,8 @@ func NewHandler(ciRepo ci.Repository) *Handler {
 }
 
 // RegisterRoutes registers export routes.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/export/cis", h.ExportCIs)
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/api/v1/export/cis", h.ExportCIs)
 }
 
 // ExportCIs handles GET /api/v1/export/cis?format=csv|json|datev

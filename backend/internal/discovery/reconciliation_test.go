@@ -10,6 +10,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 func TestReconcilePriorityOrder(t *testing.T) {
@@ -36,7 +37,7 @@ func TestBulkIngestUsesReconciliation(t *testing.T) {
 	}
 
 	h := NewHandler(discoveryRepo, ciRepo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	payload := `{"collector_id":"col-1","items":[{"fingerprint":{"hardware_uuid":"uuid-1"},"raw_data":{"hostname":"srv-01"},"ci_type_name":"server","name":"srv-01","serial_number":"SN-1"},{"fingerprint":{"hardware_uuid":"uuid-2"},"raw_data":{"hostname":"srv-02"},"ci_type_name":"server","name":"srv-02","serial_number":"SN-2"}]}`
