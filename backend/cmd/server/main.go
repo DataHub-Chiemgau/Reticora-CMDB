@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
@@ -67,18 +69,58 @@ func main() {
 		}
 	}
 
-	// Repositories (memory for dev, replace with PG in production)
-	ciRepo := ci.NewMemoryRepository()
-	relRepo := relationship.NewMemoryRepository()
-	webhookRepo := webhook.NewMemoryRepository()
-	discoveryRepo := discovery.NewMemoryRepository()
+	// Repositories: use PostgreSQL when DATABASE_URL is available, otherwise memory for dev
+	var (
+		ciRepo        ci.Repository
+		relRepo       relationship.Repository
+		webhookRepo   webhook.Repository
+		discoveryRepo discovery.Repository
+		assetRepo     asset.Repository
+		assignmentRepo assignment.Repository
+		documentRepo  document.Repository
+		stocktakeRepo stocktake.Repository
+		ticketRepo    ticket.Repository
+		userRepo      user.Repository
+	)
+
+	if cfg.DatabaseURL != "" && cfg.Environment != "development" {
+		pool, err := database.NewPool(context.Background(), cfg.DatabaseURL)
+		if err != nil {
+			slog.Error("failed to connect to database, falling back to memory repositories", "error", err)
+			goto memoryRepos
+		}
+		defer pool.Close()
+
+		slog.Info("connected to PostgreSQL", "url", maskDSN(cfg.DatabaseURL))
+		ciRepo = ci.NewPGRepository(pool)
+		webhookRepo = webhook.NewPGRepository(pool)
+		// Modules without PG implementations use memory repos until migration
+		relRepo = relationship.NewMemoryRepository()
+		discoveryRepo = discovery.NewMemoryRepository()
+		assetRepo = asset.NewMemoryRepository()
+		assignmentRepo = assignment.NewMemoryRepository()
+		documentRepo = document.NewMemoryRepository()
+		stocktakeRepo = stocktake.NewMemoryRepository()
+		ticketRepo = ticket.NewMemoryRepository()
+		userRepo = user.NewMemoryRepository()
+		goto reposReady
+	}
+
+memoryRepos:
+	slog.Info("using in-memory repositories (development mode)")
+	ciRepo = ci.NewMemoryRepository()
+	relRepo = relationship.NewMemoryRepository()
+	webhookRepo = webhook.NewMemoryRepository()
+	discoveryRepo = discovery.NewMemoryRepository()
+	assetRepo = asset.NewMemoryRepository()
+	assignmentRepo = assignment.NewMemoryRepository()
+	documentRepo = document.NewMemoryRepository()
+	stocktakeRepo = stocktake.NewMemoryRepository()
+	ticketRepo = ticket.NewMemoryRepository()
+	userRepo = user.NewMemoryRepository()
+
+reposReady:
 	entitlementSvc := entitlement.NewService()
-	assetRepo := asset.NewMemoryRepository()
-	assignmentRepo := assignment.NewMemoryRepository()
-	documentRepo := document.NewMemoryRepository()
-	stocktakeRepo := stocktake.NewMemoryRepository()
-	ticketRepo := ticket.NewMemoryRepository()
-	userRepo := user.NewMemoryRepository()
 	webhookDispatcher := webhook.NewDispatcher(webhookRepo, nil)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -175,4 +217,25 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("server shutdown error", "error", err)
 	}
+}
+
+// maskDSN hides password from database URL for logging.
+func maskDSN(dsn string) string {
+	// Mask the password portion of ******host/db
+	atIdx := strings.Index(dsn, "@")
+	if atIdx < 0 {
+		return dsn
+	}
+	colonIdx := strings.Index(dsn, "://")
+	if colonIdx < 0 {
+		return "***"
+	}
+	prefix := dsn[:colonIdx+3]
+	rest := dsn[colonIdx+3:]
+	passStart := strings.Index(rest, ":")
+	passEnd := strings.Index(rest, "@")
+	if passStart < 0 || passEnd < 0 || passStart >= passEnd {
+		return dsn
+	}
+	return prefix + rest[:passStart+1] + "***" + rest[passEnd:]
 }
