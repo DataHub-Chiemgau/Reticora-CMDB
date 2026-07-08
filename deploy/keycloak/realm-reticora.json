@@ -1,0 +1,120 @@
+{
+  "realm": "reticora",
+  "enabled": true,
+  "displayName": "Reticora",
+  "defaultRoles": [
+    "default-roles-reticora",
+    "offline_access",
+    "uma_authorization"
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "default-roles-reticora",
+        "description": "Default roles for the reticora realm",
+        "composite": true,
+        "composites": {
+          "realm": [
+            "offline_access",
+            "uma_authorization"
+          ]
+        },
+        "clientRole": false,
+        "containerId": "reticora"
+      },
+      {
+        "name": "org_admin",
+        "description": "Organization administrator",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "reticora"
+      },
+      {
+        "name": "engineer",
+        "description": "Engineering user",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "reticora"
+      },
+      {
+        "name": "viewer",
+        "description": "Read-only user",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "reticora"
+      },
+      {
+        "name": "client_technician",
+        "description": "Client-scoped technician",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "reticora"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "reticora-app",
+      "name": "Reticora App",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:5173/*",
+        "http://localhost:8080/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5173"
+      ],
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email"
+      ],
+      "protocolMappers": [
+        {
+          "name": "organization_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "organization_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "organization_id",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin@reticora.local",
+      "enabled": true,
+      "email": "admin@reticora.local",
+      "emailVerified": true,
+      "firstName": "Reticora",
+      "lastName": "Admin",
+      "attributes": {
+        "organization_id": [
+          "reticora-demo"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "org_admin"
+      ]
+    }
+  ]
+}

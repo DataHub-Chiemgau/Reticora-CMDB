@@ -1,4 +1,4 @@
-.PHONY: generate build test lint migrate-up migrate-down up down seed e2e fmt vet
+.PHONY: generate build test lint migrate-up migrate-down up down seed e2e fmt vet sqlc
 
 # ─── Variables ──────────────────────────────────────────────────────────────────
 BACKEND_DIR := backend
@@ -7,9 +7,13 @@ MIGRATIONS_DIR := $(BACKEND_DIR)/migrations
 DATABASE_URL ?= ******localhost:5432/reticora?sslmode=disable
 
 # ─── Generate ───────────────────────────────────────────────────────────────────
-generate:
+generate: sqlc
 	@echo "==> Generating code..."
 	cd $(BACKEND_DIR) && go generate ./...
+
+sqlc:
+	@echo "==> Generating sqlc..."
+	cd sqlc && sqlc generate 2>/dev/null || echo "sqlc not installed, skipping (install: go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest)"
 
 # ─── Build ──────────────────────────────────────────────────────────────────────
 build: build-backend build-frontend
@@ -17,6 +21,10 @@ build: build-backend build-frontend
 build-backend:
 	@echo "==> Building backend..."
 	cd $(BACKEND_DIR) && go build ./...
+
+build-collector:
+	@echo "==> Building collector..."
+	cd collector && go build ./...
 
 build-frontend:
 	@echo "==> Building frontend..."
@@ -28,6 +36,10 @@ test: test-backend test-frontend
 test-backend:
 	@echo "==> Testing backend..."
 	cd $(BACKEND_DIR) && go test -race -coverprofile=coverage.out ./...
+
+test-collector:
+	@echo "==> Testing collector..."
+	cd collector && go test -race ./...
 
 test-frontend:
 	@echo "==> Testing frontend..."

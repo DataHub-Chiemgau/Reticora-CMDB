@@ -19,6 +19,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
@@ -42,6 +43,28 @@ func main() {
 	}
 	defer shutdown(context.Background())
 
+	// Initialize OIDC provider
+	oidcProvider := identity.NewOIDCProvider(identity.OIDCConfig{
+		IssuerURL:    cfg.OIDCIssuerURL,
+		ClientID:     cfg.OIDCClientID,
+		ClientSecret: cfg.OIDCClientSecret,
+	})
+
+	// Initialize session issuer (optional in dev mode)
+	var sessionIssuer *identity.SessionIssuer
+	if cfg.SessionKeyPath != "" {
+		keyData, err := os.ReadFile(cfg.SessionKeyPath)
+		if err != nil {
+			slog.Warn("failed to read session key, using dev mode", "error", err)
+		} else {
+			sessionIssuer, err = identity.NewSessionIssuer(keyData)
+			if err != nil {
+				slog.Warn("failed to init session issuer, using dev mode", "error", err)
+			}
+		}
+	}
+
+	// Repositories (memory for dev, replace with PG in production)
 	ciRepo := ci.NewMemoryRepository()
 	relRepo := relationship.NewMemoryRepository()
 	webhookRepo := webhook.NewMemoryRepository()
@@ -62,6 +85,8 @@ func main() {
 		}
 	}()
 
+	// Handlers
+	identityHandler := identity.NewHandler(oidcProvider, sessionIssuer)
 	ciHandler := ci.NewHandler(ciRepo, webhookDispatcher)
 	relHandler := relationship.NewHandler(relRepo)
 	webhookHandler := webhook.NewHandler(webhookRepo)
@@ -76,12 +101,21 @@ func main() {
 	userHandler := user.NewHandler(userRepo)
 
 	mux := chi.NewRouter()
+
+	// Health and metrics endpoints (no auth)
 	mux.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
+	mux.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "# Reticora metrics endpoint\n")
+	})
 
+	// Register routes
+	identityHandler.RegisterRoutes(mux)
 	entitlementHandler.RegisterRoutes(mux)
 	ciHandler.RegisterRoutes(mux)
 	relHandler.RegisterRoutes(mux)
@@ -95,11 +129,17 @@ func main() {
 	ticketHandler.RegisterRoutes(mux)
 	userHandler.RegisterRoutes(mux)
 
+	// Middleware chain per spec:
+	// RequestID/Tracing -> Panic-Recovery -> Auth -> Tenant -> Entitlement ->
+	// Rate-Limit -> POST-Idempotency -> Handler
 	handler := middleware.Chain(
+		middleware.RequestID,
 		middleware.Recovery,
 		middleware.Logger,
-		middleware.RequestID,
+		middleware.AuthMiddleware,
 		middleware.TenantMiddleware,
+		middleware.RateLimiter(cfg.RateLimitRPM),
+		middleware.Idempotency,
 	)(mux)
 
 	server := &http.Server{
@@ -111,7 +151,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("starting server", "port", cfg.Port)
+		slog.Info("starting server", "port", cfg.Port, "environment", cfg.Environment)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)
 			os.Exit(1)
