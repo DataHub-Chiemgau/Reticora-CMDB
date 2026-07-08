@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 )
 
 // SessionIssuer issues and validates internal RS256 session JWTs.
@@ -90,6 +89,7 @@ func (s *SessionIssuer) Issue(claims SessionClaims) (string, error) {
 }
 
 // Validate verifies a session JWT signature and parses its claims.
+// Callers are responsible for enforcing expiry semantics.
 func (s *SessionIssuer) Validate(token string) (*SessionClaims, error) {
 	if s == nil || s.publicKey == nil {
 		return nil, errors.New("identity: session issuer is not configured")
@@ -118,9 +118,6 @@ func (s *SessionIssuer) Validate(token string) (*SessionClaims, error) {
 	var claims SessionClaims
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return nil, fmt.Errorf("identity: parse JWT claims: %w", err)
-	}
-	if !claims.ExpiresAt.IsZero() && time.Now().After(claims.ExpiresAt) {
-		return nil, errors.New("identity: session token is expired")
 	}
 
 	return &claims, nil

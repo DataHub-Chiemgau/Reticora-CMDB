@@ -19,8 +19,10 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
@@ -48,6 +50,7 @@ func main() {
 		IssuerURL:    cfg.OIDCIssuerURL,
 		ClientID:     cfg.OIDCClientID,
 		ClientSecret: cfg.OIDCClientSecret,
+		RedirectURL:  cfg.OIDCRedirectURL,
 	})
 
 	// Initialize session issuer (optional in dev mode)
@@ -99,6 +102,8 @@ func main() {
 	stocktakeHandler := stocktake.NewHandler(stocktakeRepo)
 	ticketHandler := ticket.NewHandler(ticketRepo)
 	userHandler := user.NewHandler(userRepo)
+	monitoringHandler := monitoring.NewHandler(monitoring.NewMemoryMetricStore())
+	graphqlHandler := graphqlbff.NewHandler(ciRepo, relRepo)
 
 	mux := chi.NewRouter()
 
@@ -128,6 +133,8 @@ func main() {
 	stocktakeHandler.RegisterRoutes(mux)
 	ticketHandler.RegisterRoutes(mux)
 	userHandler.RegisterRoutes(mux)
+	monitoringHandler.RegisterRoutes(mux)
+	graphqlHandler.RegisterRoutes(mux)
 
 	// Middleware chain per spec:
 	// RequestID/Tracing -> Panic-Recovery -> Auth -> Tenant -> Entitlement ->

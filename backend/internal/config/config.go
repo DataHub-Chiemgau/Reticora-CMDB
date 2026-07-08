@@ -33,10 +33,11 @@ type Config struct {
 	S3UseSSL    bool
 
 	// Auth / OIDC
-	OIDCIssuerURL   string
-	OIDCClientID    string
+	OIDCIssuerURL    string
+	OIDCClientID     string
 	OIDCClientSecret string
-	SessionKeyPath  string // path to RS256 private key PEM for session JWTs
+	OIDCRedirectURL  string
+	SessionKeyPath   string // path to RS256 private key PEM for session JWTs
 
 	// Encryption
 	MasterKey string // 32-byte base64-encoded master key for envelope encryption
@@ -68,6 +69,7 @@ func Load() *Config {
 		OIDCIssuerURL:    envOrDefault("RETICORA_OIDC_ISSUER_URL", "http://localhost:8180/realms/reticora"),
 		OIDCClientID:     envOrDefault("RETICORA_OIDC_CLIENT_ID", "reticora-app"),
 		OIDCClientSecret: envOrDefault("RETICORA_OIDC_CLIENT_SECRET", ""),
+		OIDCRedirectURL:  envOrDefault("RETICORA_OIDC_REDIRECT_URL", ""),
 		SessionKeyPath:   envOrDefault("RETICORA_SESSION_KEY_PATH", ""),
 
 		MasterKey: envOrDefault("RETICORA_MASTER_KEY", ""),

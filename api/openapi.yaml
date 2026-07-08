@@ -1,10 +1,10 @@
-openapi: "3.1.0"
+openapi: 3.1.0
 info:
   title: Reticora CMDB API
-  version: "1.0.0"
+  version: 1.0.0
   description: |
-    Multi-tenant Configuration Management Database API for MSPs/ISPs.
-    All endpoints require authentication and tenant context.
+    Multi-tenant Configuration Management Database API for MSPs and ISPs.
+    Endpoints require tenant-scoped authentication unless explicitly marked otherwise.
   contact:
     name: DataHub Chiemgau
   license:
@@ -16,30 +16,41 @@ servers:
 
 security:
   - BearerAuth: []
+  - ApiKeyAuth: []
 
 tags:
   - name: Health
     description: Health and readiness endpoints
+  - name: Auth
+    description: Authentication and session endpoints
   - name: CIs
-    description: Configuration Items management
+    description: Configuration item management
   - name: Relationships
     description: CI relationship management
-  - name: Discovery
-    description: Network discovery operations
   - name: Webhooks
     description: Webhook subscription management
-  - name: Entitlements
-    description: Plan and feature entitlements
-  - name: Users
-    description: User and role management
-  - name: Assets
-    description: Asset inventory management
-  - name: Tickets
-    description: Ticket/change management
-  - name: Documents
-    description: Document management
+  - name: Discovery
+    description: Discovery ingest and job tracking
   - name: Export
     description: Data export operations
+  - name: Entitlements
+    description: Subscription features and usage
+  - name: Assets
+    description: Asset inventory management
+  - name: Assignments
+    description: Asset and CI assignment workflows
+  - name: Documents
+    description: Document metadata management
+  - name: Stocktake
+    description: Inventory stocktake operations
+  - name: Tickets
+    description: Ticket and comment management
+  - name: Users
+    description: User management
+  - name: Monitoring
+    description: Metrics and alert rules
+  - name: GraphQL
+    description: GraphQL backend-for-frontend endpoint
 
 paths:
   /healthz:
@@ -49,120 +60,1453 @@ paths:
       security: []
       summary: Health check
       responses:
-        "200":
+        '200':
           description: Service is healthy
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: ok
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      tags: [Auth]
+      security: []
+      summary: Exchange an authorization code for a session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Session token issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/auth/callback:
+    post:
+      operationId: authCallback
+      tags: [Auth]
+      security: []
+      summary: Complete the OIDC callback flow and issue a session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallbackRequest'
+      responses:
+        '200':
+          description: Session token and resolved user info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthCallbackResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/auth/refresh:
+    post:
+      operationId: refreshSession
+      tags: [Auth]
+      security: []
+      summary: Refresh an existing session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Refreshed session token issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/auth/me:
+    get:
+      operationId: getCurrentSession
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+      summary: Get the currently authenticated session claims
+      responses:
+        '200':
+          description: Current session claims
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionClaims'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /api/v1/cis:
     get:
       operationId: listCIs
       tags: [CIs]
-      summary: List Configuration Items
+      summary: List configuration items
       parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/SortBy'
+        - $ref: '#/components/parameters/SortDir'
+        - $ref: '#/components/parameters/CIStatus'
+        - $ref: '#/components/parameters/CITypeID'
+        - $ref: '#/components/parameters/ClientID'
+      responses:
+        '200':
+          description: Paginated list of configuration items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createCI
+      tags: [CIs]
+      summary: Create a configuration item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCIRequest'
+      responses:
+        '201':
+          description: Configuration item created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CI'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/cis/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCI
+      tags: [CIs]
+      summary: Get a configuration item
+      responses:
+        '200':
+          description: Configuration item details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CI'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateCI
+      tags: [CIs]
+      summary: Update a configuration item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCIRequest'
+      responses:
+        '200':
+          description: Configuration item updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CI'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteCI
+      tags: [CIs]
+      summary: Delete a configuration item
+      responses:
+        '204':
+          description: Configuration item deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/relationships:
+    get:
+      operationId: listRelationships
+      tags: [Relationships]
+      summary: List relationships
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: ci_id
+          in: query
+          schema:
+            type: string
+          description: Return relationships where the CI is either the source or target.
+        - name: source_ci_id
+          in: query
+          schema:
+            type: string
+        - name: target_ci_id
+          in: query
+          schema:
+            type: string
+        - name: rel_type
+          in: query
+          schema:
+            $ref: '#/components/schemas/RelationshipType'
+      responses:
+        '200':
+          description: Paginated list of relationships
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelationshipListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createRelationship
+      tags: [Relationships]
+      summary: Create a relationship
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRelationshipRequest'
+      responses:
+        '201':
+          description: Relationship created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Relationship'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/relationships/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    delete:
+      operationId: deleteRelationship
+      tags: [Relationships]
+      summary: Delete a relationship
+      responses:
+        '204':
+          description: Relationship deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/webhooks:
+    get:
+      operationId: listWebhooks
+      tags: [Webhooks]
+      summary: List webhook subscriptions
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: event
+          in: query
+          schema:
+            $ref: '#/components/schemas/WebhookEvent'
+      responses:
+        '200':
+          description: Paginated list of webhook subscriptions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createWebhook
+      tags: [Webhooks]
+      summary: Create a webhook subscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWebhookRequest'
+      responses:
+        '201':
+          description: Webhook subscription created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSubscription'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/webhooks/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getWebhook
+      tags: [Webhooks]
+      summary: Get a webhook subscription
+      responses:
+        '200':
+          description: Webhook subscription details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSubscription'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateWebhook
+      tags: [Webhooks]
+      summary: Update a webhook subscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWebhookRequest'
+      responses:
+        '200':
+          description: Webhook subscription updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSubscription'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteWebhook
+      tags: [Webhooks]
+      summary: Delete a webhook subscription
+      responses:
+        '204':
+          description: Webhook subscription deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/webhooks/{id}/test:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: testWebhook
+      tags: [Webhooks]
+      summary: Send a test delivery to a webhook subscription
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookTestRequest'
+      responses:
+        '200':
+          description: Test delivery completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookTestResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+
+  /api/v1/discovery/ingest:
+    post:
+      operationId: ingestDiscoveryData
+      tags: [Discovery]
+      summary: Ingest discovery results in bulk
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoveryIngestRequest'
+      responses:
+        '202':
+          description: Discovery payload accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryIngestResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/discovery/jobs:
+    get:
+      operationId: listDiscoveryJobs
+      tags: [Discovery]
+      summary: List discovery ingest jobs
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/DiscoveryJobStatus'
+        - name: collector_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of discovery jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryJobListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/discovery/jobs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getDiscoveryJob
+      tags: [Discovery]
+      summary: Get a discovery ingest job
+      responses:
+        '200':
+          description: Discovery job details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryJob'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/export/cis:
+    get:
+      operationId: exportCIs
+      tags: [Export]
+      summary: Export configuration items
+      parameters:
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [csv, json, datev]
+            default: json
+        - $ref: '#/components/parameters/CIStatus'
+        - $ref: '#/components/parameters/CITypeID'
+        - $ref: '#/components/parameters/ClientID'
+      responses:
+        '200':
+          description: Export payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIExportJSONResponse'
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/entitlements:
+    get:
+      operationId: listEntitlements
+      tags: [Entitlements]
+      summary: List tenant entitlements
+      responses:
+        '200':
+          description: Entitlements for the current tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntitlementListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: grantEntitlement
+      tags: [Entitlements]
+      summary: Grant or update an entitlement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantEntitlementRequest'
+      responses:
+        '201':
+          description: Entitlement granted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entitlement'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/entitlements/usage:
+    get:
+      operationId: getEntitlementUsage
+      tags: [Entitlements]
+      summary: Get current entitlement usage metrics
+      responses:
+        '200':
+          description: Usage metrics grouped by feature
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntitlementUsageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/assets:
+    get:
+      operationId: listAssets
+      tags: [Assets]
+      summary: List assets
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/SortBy'
+        - $ref: '#/components/parameters/SortDir'
         - name: status
           in: query
           schema:
             type: string
-            enum: [active, inactive, maintenance, decommissioned, unknown]
-        - name: ci_type_id
+        - name: category
           in: query
           schema:
             type: string
-            format: uuid
-        - name: search
-          in: query
-          schema:
-            type: string
+        - $ref: '#/components/parameters/ClientID'
       responses:
-        "200":
-          description: Paginated list of CIs
+        '200':
+          description: Paginated list of assets
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CIListResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-
+                $ref: '#/components/schemas/AssetListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     post:
-      operationId: createCI
-      tags: [CIs]
-      summary: Create a Configuration Item
+      operationId: createAsset
+      tags: [Assets]
+      summary: Create an asset
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateCIRequest"
+              $ref: '#/components/schemas/CreateAssetRequest'
       responses:
-        "201":
-          description: CI created
+        '201':
+          description: Asset created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CI"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+                $ref: '#/components/schemas/Asset'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /api/v1/cis/{id}:
+  /api/v1/assets/{id}:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
+      - $ref: '#/components/parameters/ResourceID'
     get:
-      operationId: getCI
-      tags: [CIs]
-      summary: Get a Configuration Item
+      operationId: getAsset
+      tags: [Assets]
+      summary: Get an asset
       responses:
-        "200":
-          description: CI details
+        '200':
+          description: Asset details
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CI"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/Asset'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     patch:
-      operationId: updateCI
-      tags: [CIs]
-      summary: Update a Configuration Item
+      operationId: updateAsset
+      tags: [Assets]
+      summary: Update an asset
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateCIRequest"
+              $ref: '#/components/schemas/UpdateAssetRequest'
       responses:
-        "200":
-          description: CI updated
+        '200':
+          description: Asset updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CI"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/Asset'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
-      operationId: deleteCI
-      tags: [CIs]
-      summary: Delete a Configuration Item
+      operationId: deleteAsset
+      tags: [Assets]
+      summary: Delete an asset
       responses:
-        "204":
-          description: CI deleted
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '204':
+          description: Asset deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/assignments:
+    get:
+      operationId: listAssignments
+      tags: [Assignments]
+      summary: List assignments
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/SortBy'
+        - $ref: '#/components/parameters/SortDir'
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: assigned_to
+          in: query
+          schema:
+            type: string
+        - name: asset_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of assignments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssignmentListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createAssignment
+      tags: [Assignments]
+      summary: Create an assignment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAssignmentRequest'
+      responses:
+        '201':
+          description: Assignment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assignment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/assignments/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getAssignment
+      tags: [Assignments]
+      summary: Get an assignment
+      responses:
+        '200':
+          description: Assignment details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assignment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateAssignment
+      tags: [Assignments]
+      summary: Update an assignment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAssignmentRequest'
+      responses:
+        '200':
+          description: Assignment updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assignment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteAssignment
+      tags: [Assignments]
+      summary: Delete an assignment
+      responses:
+        '204':
+          description: Assignment deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/documents:
+    get:
+      operationId: listDocuments
+      tags: [Documents]
+      summary: List documents
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/SortBy'
+        - $ref: '#/components/parameters/SortDir'
+        - name: category
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of documents
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createDocument
+      tags: [Documents]
+      summary: Create a document metadata record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDocumentRequest'
+      responses:
+        '201':
+          description: Document created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/documents/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getDocument
+      tags: [Documents]
+      summary: Get a document
+      responses:
+        '200':
+          description: Document details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateDocument
+      tags: [Documents]
+      summary: Update a document
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDocumentRequest'
+      responses:
+        '200':
+          description: Document updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteDocument
+      tags: [Documents]
+      summary: Delete a document
+      responses:
+        '204':
+          description: Document deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/stocktakes:
+    get:
+      operationId: listStocktakes
+      tags: [Stocktake]
+      summary: List stocktakes
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/SortBy'
+        - $ref: '#/components/parameters/SortDir'
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: scope
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of stocktakes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StocktakeListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createStocktake
+      tags: [Stocktake]
+      summary: Create a stocktake
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStocktakeRequest'
+      responses:
+        '201':
+          description: Stocktake created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stocktake'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/stocktakes/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getStocktake
+      tags: [Stocktake]
+      summary: Get a stocktake
+      responses:
+        '200':
+          description: Stocktake details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stocktake'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateStocktake
+      tags: [Stocktake]
+      summary: Update a stocktake
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStocktakeRequest'
+      responses:
+        '200':
+          description: Stocktake updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stocktake'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteStocktake
+      tags: [Stocktake]
+      summary: Delete a stocktake
+      responses:
+        '204':
+          description: Stocktake deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/stocktakes/{id}/scans:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listStocktakeScans
+      tags: [Stocktake]
+      summary: List recorded scans for a stocktake
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of stocktake scans
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockScanListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createStocktakeScan
+      tags: [Stocktake]
+      summary: Record a stocktake scan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStockScanRequest'
+      responses:
+        '201':
+          description: Stocktake scan recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockScan'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/tickets:
+    get:
+      operationId: listTickets
+      tags: [Tickets]
+      summary: List tickets
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/SortBy'
+        - $ref: '#/components/parameters/SortDir'
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: priority
+          in: query
+          schema:
+            type: string
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: assignee_id
+          in: query
+          schema:
+            type: string
+        - name: team_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of tickets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createTicket
+      tags: [Tickets]
+      summary: Create a ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTicketRequest'
+      responses:
+        '201':
+          description: Ticket created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/tickets/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getTicket
+      tags: [Tickets]
+      summary: Get a ticket
+      responses:
+        '200':
+          description: Ticket details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateTicket
+      tags: [Tickets]
+      summary: Update a ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTicketRequest'
+      responses:
+        '200':
+          description: Ticket updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteTicket
+      tags: [Tickets]
+      summary: Delete a ticket
+      responses:
+        '204':
+          description: Ticket deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/tickets/{id}/comments:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listTicketComments
+      tags: [Tickets]
+      summary: List comments for a ticket
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of comments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketCommentListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createTicketComment
+      tags: [Tickets]
+      summary: Add a comment to a ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTicketCommentRequest'
+      responses:
+        '201':
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketComment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      tags: [Users]
+      summary: List users
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: Paginated list of users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createUser
+      tags: [Users]
+      summary: Create a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/users/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getUser
+      tags: [Users]
+      summary: Get a user
+      responses:
+        '200':
+          description: User details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateUser
+      tags: [Users]
+      summary: Update a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteUser
+      tags: [Users]
+      summary: Delete a user
+      responses:
+        '204':
+          description: User deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/monitoring/metrics:
+    get:
+      operationId: queryMetrics
+      tags: [Monitoring]
+      summary: Query metric points
+      parameters:
+        - name: ci_id
+          in: query
+          schema:
+            type: string
+        - name: name
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: step
+          in: query
+          schema:
+            type: string
+          description: Go duration string used for aggregation, for example 5m or 1h.
+      responses:
+        '200':
+          description: Metric point series
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MetricPoint'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: ingestMetrics
+      tags: [Monitoring]
+      summary: Ingest one or more metrics
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/Metric'
+                - type: array
+                  items:
+                    $ref: '#/components/schemas/Metric'
+                - $ref: '#/components/schemas/MetricsIngestRequest'
+      responses:
+        '202':
+          description: Metrics accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsIngestResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/alerts:
+    get:
+      operationId: listAlerts
+      tags: [Monitoring]
+      summary: List alert rules
+      responses:
+        '200':
+          description: Alert rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AlertRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createAlert
+      tags: [Monitoring]
+      summary: Create an alert rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAlertRuleRequest'
+      responses:
+        '201':
+          description: Alert rule created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/monitoring/alerts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    delete:
+      operationId: deleteAlert
+      tags: [Monitoring]
+      summary: Delete an alert rule
+      responses:
+        '204':
+          description: Alert rule deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/graphql:
+    post:
+      operationId: executeGraphQL
+      tags: [GraphQL]
+      summary: Execute a GraphQL query
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GraphQLRequest'
+      responses:
+        '200':
+          description: GraphQL response envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphQLResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
 components:
   securitySchemes:
@@ -176,6 +1520,13 @@ components:
       name: X-API-Key
 
   parameters:
+    ResourceID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Resource identifier.
     Limit:
       name: limit
       in: query
@@ -184,6 +1535,7 @@ components:
         minimum: 1
         maximum: 100
         default: 50
+      description: Maximum number of items to return.
     Offset:
       name: offset
       in: query
@@ -191,6 +1543,41 @@ components:
         type: integer
         minimum: 0
         default: 0
+      description: Number of items to skip before returning data.
+    Search:
+      name: search
+      in: query
+      schema:
+        type: string
+      description: Free-text search term.
+    SortBy:
+      name: sort_by
+      in: query
+      schema:
+        type: string
+      description: Sort field name.
+    SortDir:
+      name: sort_dir
+      in: query
+      schema:
+        type: string
+        enum: [asc, desc]
+      description: Sort direction.
+    CIStatus:
+      name: status
+      in: query
+      schema:
+        $ref: '#/components/schemas/CIStatus'
+    CITypeID:
+      name: ci_type_id
+      in: query
+      schema:
+        type: string
+    ClientID:
+      name: client_id
+      in: query
+      schema:
+        type: string
 
   responses:
     BadRequest:
@@ -198,30 +1585,53 @@ components:
       content:
         application/problem+json:
           schema:
-            $ref: "#/components/schemas/ProblemDetail"
+            $ref: '#/components/schemas/ProblemDetail'
     Unauthorized:
       description: Unauthorized
       content:
         application/problem+json:
           schema:
-            $ref: "#/components/schemas/ProblemDetail"
+            $ref: '#/components/schemas/ProblemDetail'
+    Forbidden:
+      description: Forbidden
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
     NotFound:
       description: Resource not found
       content:
         application/problem+json:
           schema:
-            $ref: "#/components/schemas/ProblemDetail"
+            $ref: '#/components/schemas/ProblemDetail'
+    Conflict:
+      description: Conflict
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    BadGateway:
+      description: Upstream delivery failed
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
 
   schemas:
     ProblemDetail:
       type: object
-      description: RFC 7807 Problem Detail
+      description: RFC 7807 Problem Details object.
       required: [type, title, status]
       properties:
         type:
           type: string
           format: uri
-          example: "urn:reticora:error:not-found"
         title:
           type: string
         status:
@@ -234,75 +1644,183 @@ components:
         trace_id:
           type: string
 
+    PaginationEnvelope:
+      type: object
+      required: [total, limit, offset, has_more]
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+
+    LoginRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+
+    CallbackRequest:
+      type: object
+      required: [code, state]
+      properties:
+        code:
+          type: string
+        state:
+          type: string
+
+    RefreshRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+
+    AuthTokenResponse:
+      type: object
+      required: [token, expires_at]
+      properties:
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    AuthCallbackUser:
+      type: object
+      required: [sub, org_id, permissions]
+      properties:
+        sub:
+          type: string
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        groups:
+          type: array
+          items:
+            type: string
+        org_id:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+
+    AuthCallbackResponse:
+      allOf:
+        - $ref: '#/components/schemas/AuthTokenResponse'
+        - type: object
+          required: [user]
+          properties:
+            user:
+              $ref: '#/components/schemas/AuthCallbackUser'
+
+    SessionClaims:
+      type: object
+      required: [sub, org_id, permissions, iat, exp]
+      properties:
+        sub:
+          type: string
+        org_id:
+          type: string
+        client_scope:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        iat:
+          type: string
+          format: date-time
+        exp:
+          type: string
+          format: date-time
+
+    CIStatus:
+      type: string
+      enum: [active, inactive, maintenance, decommissioned, unknown]
+
+    CIDiscoverySource:
+      type: string
+      enum: [manual, sweep, snmp, ssh, redfish, ipmi, wmi, api, agent, discovery]
+
     CI:
       type: object
-      required: [id, organization_id, ci_type_id, name, status, created_at, updated_at]
+      required: [id, organization_id, ci_type_id, name, status, attributes, is_manual, created_at, updated_at]
       properties:
         id:
           type: string
-          format: uuid
         organization_id:
           type: string
-          format: uuid
         client_id:
           type: string
-          format: uuid
-          nullable: true
         site_id:
           type: string
-          format: uuid
-          nullable: true
         room_id:
           type: string
-          format: uuid
-          nullable: true
         ci_type_id:
           type: string
-          format: uuid
         name:
           type: string
         status:
-          type: string
-          enum: [active, inactive, maintenance, decommissioned, unknown]
-        hostname:
-          type: string
-          nullable: true
-        fqdn:
-          type: string
-          nullable: true
+          $ref: '#/components/schemas/CIStatus'
         manufacturer:
           type: string
-          nullable: true
         model:
           type: string
-          nullable: true
         serial_number:
           type: string
-          nullable: true
+        hardware_uuid:
+          type: string
         management_ip:
           type: string
-          nullable: true
-        firmware_version:
+        primary_mac:
           type: string
-          nullable: true
+        hostname:
+          type: string
+        fqdn:
+          type: string
         os_name:
           type: string
-          nullable: true
         os_version:
           type: string
-          nullable: true
-        discovery_source:
+        firmware_version:
           type: string
-          enum: [manual, sweep, snmp, ssh, redfish, ipmi, wmi, nas, power, agent]
-        is_manual:
-          type: boolean
+        sys_object_id:
+          type: string
         attributes:
           type: object
           additionalProperties: true
+        discovery_source:
+          $ref: '#/components/schemas/CIDiscoverySource'
+        source:
+          type: string
+          description: Deprecated alias for discovery source.
         first_seen_at:
           type: string
           format: date-time
-          nullable: true
+        last_seen_at:
+          type: string
+          format: date-time
+        is_manual:
+          type: boolean
+        deleted_at:
+          type: string
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -316,29 +1834,47 @@ components:
       properties:
         ci_type_id:
           type: string
-          format: uuid
         client_id:
           type: string
-          format: uuid
+        site_id:
+          type: string
+        room_id:
+          type: string
         name:
           type: string
         status:
-          type: string
-          enum: [active, inactive, maintenance, decommissioned, unknown]
-          default: active
+          $ref: '#/components/schemas/CIStatus'
         manufacturer:
           type: string
         model:
           type: string
         serial_number:
           type: string
+        hardware_uuid:
+          type: string
         management_ip:
           type: string
+        primary_mac:
+          type: string
+        hostname:
+          type: string
+        fqdn:
+          type: string
+        os_name:
+          type: string
+        os_version:
+          type: string
         firmware_version:
+          type: string
+        sys_object_id:
           type: string
         attributes:
           type: object
           additionalProperties: true
+        discovery_source:
+          $ref: '#/components/schemas/CIDiscoverySource'
+        source:
+          type: string
 
     UpdateCIRequest:
       type: object
@@ -346,8 +1882,234 @@ components:
         name:
           type: string
         status:
+          $ref: '#/components/schemas/CIStatus'
+        manufacturer:
           type: string
-          enum: [active, inactive, maintenance, decommissioned, unknown]
+        model:
+          type: string
+        serial_number:
+          type: string
+        hardware_uuid:
+          type: string
+        management_ip:
+          type: string
+        primary_mac:
+          type: string
+        hostname:
+          type: string
+        fqdn:
+          type: string
+        os_name:
+          type: string
+        os_version:
+          type: string
+        firmware_version:
+          type: string
+        sys_object_id:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
+        discovery_source:
+          $ref: '#/components/schemas/CIDiscoverySource'
+        source:
+          type: string
+        last_seen:
+          type: string
+          format: date-time
+
+    CIListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/CI'
+
+    RelationshipType:
+      type: string
+      enum: [connected_to, hosted_on, depends_on, member_of, powers, stores, monitors, backs_up]
+
+    Relationship:
+      type: object
+      required: [id, organization_id, source_ci_id, target_ci_id, rel_type, attributes, source, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        source_ci_id:
+          type: string
+        target_ci_id:
+          type: string
+        rel_type:
+          $ref: '#/components/schemas/RelationshipType'
+        attributes:
+          type: object
+          additionalProperties: true
+        source:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateRelationshipRequest:
+      type: object
+      required: [source_ci_id, target_ci_id, rel_type]
+      properties:
+        source_ci_id:
+          type: string
+        target_ci_id:
+          type: string
+        rel_type:
+          $ref: '#/components/schemas/RelationshipType'
+        attributes:
+          type: object
+          additionalProperties: true
+        source:
+          type: string
+          default: manual
+
+    RelationshipListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Relationship'
+
+    WebhookEvent:
+      type: string
+      enum: [ci.created, ci.updated, ci.deleted, ci.status_changed, relationship.created, relationship.deleted, discovery.completed]
+
+    WebhookSubscription:
+      type: object
+      required: [id, organization_id, name, url, events, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookEvent'
+        is_active:
+          type: boolean
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateWebhookRequest:
+      type: object
+      required: [name, url, secret, events]
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        secret:
+          type: string
+          writeOnly: true
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookEvent'
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+
+    UpdateWebhookRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookEvent'
+        is_active:
+          type: boolean
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+
+    WebhookTestRequest:
+      type: object
+      properties:
+        event:
+          $ref: '#/components/schemas/WebhookEvent'
+        payload:
+          type: object
+          additionalProperties: true
+
+    WebhookTestResponse:
+      type: object
+      required: [webhook_id, delivered]
+      properties:
+        webhook_id:
+          type: string
+        delivered:
+          type: boolean
+        status_code:
+          type: integer
+        event:
+          $ref: '#/components/schemas/WebhookEvent'
+        response_body:
+          type: string
+
+    WebhookListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/WebhookSubscription'
+
+    DiscoveryIngestItem:
+      type: object
+      required: [fingerprint, raw_data, ci_type_name]
+      properties:
+        fingerprint:
+          type: object
+          additionalProperties: true
+        raw_data:
+          type: object
+          additionalProperties: true
+        ci_type_name:
+          type: string
+        name:
+          type: string
         manufacturer:
           type: string
         model:
@@ -356,25 +2118,956 @@ components:
           type: string
         management_ip:
           type: string
-        firmware_version:
-          type: string
-        attributes:
-          type: object
-          additionalProperties: true
 
-    CIListResponse:
+    DiscoveryIngestRequest:
       type: object
-      required: [data, total, limit, offset, has_more]
+      required: [collector_id, items]
+      properties:
+        collector_id:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryIngestItem'
+
+    DiscoveryIngestResponse:
+      type: object
+      required: [received, created, updated, conflicts]
+      properties:
+        received:
+          type: integer
+        created:
+          type: integer
+        updated:
+          type: integer
+        conflicts:
+          type: integer
+        job_id:
+          type: string
+
+    DiscoveryJobStatus:
+      type: string
+      enum: [queued, running, completed, failed]
+
+    DiscoveryJob:
+      type: object
+      required: [id, organization_id, status, received, created, updated, conflicts, submitted_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        collector_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/DiscoveryJobStatus'
+        submitted_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        received:
+          type: integer
+        created:
+          type: integer
+        updated:
+          type: integer
+        conflicts:
+          type: integer
+        error:
+          type: string
+
+    DiscoveryJobListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/DiscoveryJob'
+
+    CIExportJSONResponse:
+      type: object
+      required: [data, total]
       properties:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/CI"
+            $ref: '#/components/schemas/CI'
         total:
+          type: integer
+
+    EntitlementPlan:
+      type: string
+      enum: [essential, standard, pro, enterprise]
+
+    Entitlement:
+      type: object
+      required: [organization_id, feature_key, plan, enabled]
+      properties:
+        organization_id:
+          type: string
+        feature_key:
+          type: string
+        plan:
+          $ref: '#/components/schemas/EntitlementPlan'
+        limit:
+          type: integer
+        enabled:
+          type: boolean
+
+    GrantEntitlementRequest:
+      type: object
+      required: [feature_key]
+      properties:
+        feature_key:
+          type: string
+        plan:
+          $ref: '#/components/schemas/EntitlementPlan'
+
+    EntitlementListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Entitlement'
+
+    EntitlementUsage:
+      type: object
+      required: [feature_key, used, enabled]
+      properties:
+        feature_key:
+          type: string
+        used:
           type: integer
         limit:
           type: integer
-        offset:
+        remaining:
           type: integer
-        has_more:
+        unit:
+          type: string
+        enabled:
           type: boolean
+
+    EntitlementUsageResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/EntitlementUsage'
+
+    Asset:
+      type: object
+      required: [id, organization_id, asset_tag, name, category, status, custom_fields, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        client_id:
+          type: string
+        ci_id:
+          type: string
+        asset_tag:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+        purchase_date:
+          type: string
+          format: date
+        purchase_cost:
+          type: number
+        currency:
+          type: string
+        warranty_end:
+          type: string
+          format: date
+        supplier:
+          type: string
+        invoice_number:
+          type: string
+        serial_number:
+          type: string
+        location:
+          type: string
+        notes:
+          type: string
+        custom_fields:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateAssetRequest:
+      type: object
+      required: [asset_tag, name]
+      properties:
+        client_id:
+          type: string
+        ci_id:
+          type: string
+        asset_tag:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+        purchase_date:
+          type: string
+          format: date
+        purchase_cost:
+          type: number
+        currency:
+          type: string
+        warranty_end:
+          type: string
+          format: date
+        supplier:
+          type: string
+        invoice_number:
+          type: string
+        serial_number:
+          type: string
+        location:
+          type: string
+        notes:
+          type: string
+        custom_fields:
+          type: object
+          additionalProperties: true
+
+    UpdateAssetRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+        purchase_date:
+          type: string
+          format: date
+        purchase_cost:
+          type: number
+        currency:
+          type: string
+        warranty_end:
+          type: string
+          format: date
+        supplier:
+          type: string
+        invoice_number:
+          type: string
+        serial_number:
+          type: string
+        location:
+          type: string
+        notes:
+          type: string
+        ci_id:
+          type: string
+        custom_fields:
+          type: object
+          additionalProperties: true
+
+    AssetListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Asset'
+
+    Assignment:
+      type: object
+      required: [id, organization_id, assigned_to, assigned_by, assignment_type, status, assigned_at, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        asset_id:
+          type: string
+        ci_id:
+          type: string
+        assigned_to:
+          type: string
+        assigned_by:
+          type: string
+        assignment_type:
+          type: string
+        status:
+          type: string
+        assigned_at:
+          type: string
+          format: date-time
+        due_date:
+          type: string
+          format: date-time
+        returned_at:
+          type: string
+          format: date-time
+        return_condition:
+          type: string
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateAssignmentRequest:
+      type: object
+      required: [assigned_to]
+      properties:
+        asset_id:
+          type: string
+        ci_id:
+          type: string
+        assigned_to:
+          type: string
+        assignment_type:
+          type: string
+        due_date:
+          type: string
+          format: date-time
+        notes:
+          type: string
+
+    UpdateAssignmentRequest:
+      type: object
+      properties:
+        assigned_to:
+          type: string
+        assignment_type:
+          type: string
+        status:
+          type: string
+        due_date:
+          type: string
+          format: date-time
+        returned_at:
+          type: string
+          format: date-time
+        return_condition:
+          type: string
+        notes:
+          type: string
+
+    AssignmentListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Assignment'
+
+    Document:
+      type: object
+      required: [id, organization_id, title, file_name, file_size, mime_type, storage_key, version, category, tags, uploaded_by, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        file_name:
+          type: string
+        file_size:
+          type: integer
+        mime_type:
+          type: string
+        storage_key:
+          type: string
+        version:
+          type: integer
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        uploaded_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateDocumentRequest:
+      type: object
+      required: [title, file_name, storage_key]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        file_name:
+          type: string
+        file_size:
+          type: integer
+        mime_type:
+          type: string
+        storage_key:
+          type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    UpdateDocumentRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    DocumentListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Document'
+
+    Stocktake:
+      type: object
+      required: [id, organization_id, title, status, scope, total_expected, total_scanned, total_missing, total_surplus, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        scope:
+          type: string
+        started_by:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        due_date:
+          type: string
+          format: date-time
+        total_expected:
+          type: integer
+        total_scanned:
+          type: integer
+        total_missing:
+          type: integer
+        total_surplus:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateStocktakeRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        scope:
+          type: string
+        due_date:
+          type: string
+          format: date-time
+        total_expected:
+          type: integer
+
+    UpdateStocktakeRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        due_date:
+          type: string
+          format: date-time
+        total_expected:
+          type: integer
+
+    StocktakeListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Stocktake'
+
+    StockScan:
+      type: object
+      required: [id, organization_id, stocktake_id, scanned_by, scan_method, scan_result, scanned_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        stocktake_id:
+          type: string
+        asset_id:
+          type: string
+        ci_id:
+          type: string
+        scanned_by:
+          type: string
+        scan_method:
+          type: string
+        scan_result:
+          type: string
+        location_found:
+          type: string
+        notes:
+          type: string
+        scanned_at:
+          type: string
+          format: date-time
+
+    CreateStockScanRequest:
+      type: object
+      required: [scan_result]
+      properties:
+        asset_id:
+          type: string
+        ci_id:
+          type: string
+        scan_method:
+          type: string
+        scan_result:
+          type: string
+        location_found:
+          type: string
+        notes:
+          type: string
+
+    StockScanListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/StockScan'
+
+    Ticket:
+      type: object
+      required: [id, organization_id, ticket_number, title, status, priority, category, reporter_id, tags, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        ticket_number:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        priority:
+          type: string
+        category:
+          type: string
+        reporter_id:
+          type: string
+        assignee_id:
+          type: string
+        team_id:
+          type: string
+        related_ci_id:
+          type: string
+        related_asset_id:
+          type: string
+        due_date:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+        closed_at:
+          type: string
+          format: date-time
+        tags:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateTicketRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+        category:
+          type: string
+        assignee_id:
+          type: string
+        team_id:
+          type: string
+        related_ci_id:
+          type: string
+        related_asset_id:
+          type: string
+        due_date:
+          type: string
+          format: date-time
+        tags:
+          type: array
+          items:
+            type: string
+
+    UpdateTicketRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        priority:
+          type: string
+        category:
+          type: string
+        assignee_id:
+          type: string
+        team_id:
+          type: string
+        related_ci_id:
+          type: string
+        related_asset_id:
+          type: string
+        due_date:
+          type: string
+          format: date-time
+        tags:
+          type: array
+          items:
+            type: string
+
+    TicketListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Ticket'
+
+    TicketComment:
+      type: object
+      required: [id, organization_id, ticket_id, author_id, content, is_internal, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        ticket_id:
+          type: string
+        author_id:
+          type: string
+        content:
+          type: string
+        is_internal:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateTicketCommentRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        is_internal:
+          type: boolean
+
+    TicketCommentListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/TicketComment'
+
+    User:
+      type: object
+      required: [id, organization_id, email, display_name, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+          format: uri
+        status:
+          type: string
+        external_id:
+          type: string
+        last_login_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateUserRequest:
+      type: object
+      required: [email, display_name]
+      properties:
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        status:
+          type: string
+        external_id:
+          type: string
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+        status:
+          type: string
+        avatar_url:
+          type: string
+          format: uri
+
+    UserListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/User'
+
+    Metric:
+      type: object
+      required: [name, value]
+      properties:
+        org_id:
+          type: string
+        ci_id:
+          type: string
+        name:
+          type: string
+        value:
+          type: number
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    MetricsIngestRequest:
+      type: object
+      required: [metrics]
+      properties:
+        metrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/Metric'
+
+    MetricsIngestResponse:
+      type: object
+      required: [ingested]
+      properties:
+        ingested:
+          type: integer
+
+    MetricPoint:
+      type: object
+      required: [timestamp, value]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        value:
+          type: number
+
+    AlertRule:
+      type: object
+      required: [id, org_id, name, metric_name, condition, threshold, duration, severity, enabled]
+      properties:
+        id:
+          type: string
+        org_id:
+          type: string
+        name:
+          type: string
+        metric_name:
+          type: string
+        condition:
+          type: string
+          enum: [gt, lt, eq]
+        threshold:
+          type: number
+        duration:
+          type: string
+          description: Go duration string.
+        severity:
+          type: string
+          enum: [critical, warning, info]
+        enabled:
+          type: boolean
+
+    CreateAlertRuleRequest:
+      type: object
+      required: [name, metric_name, condition, threshold]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        metric_name:
+          type: string
+        condition:
+          type: string
+          enum: [gt, lt, eq]
+        threshold:
+          type: number
+        duration:
+          type: string
+          description: Go duration string.
+        severity:
+          type: string
+          enum: [critical, warning, info]
+        enabled:
+          type: boolean
+          default: true
+
+    GraphQLRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        variables:
+          type: object
+          additionalProperties: true
+        operationName:
+          type: string
+
+    GraphQLError:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
+    GraphQLResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          additionalProperties: true
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphQLError'
