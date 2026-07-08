@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -38,7 +39,7 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 // WithTenant executes fn within a database transaction that sets the RLS
 // session variables app.org_id and app.client_scope. This ensures Row-Level
 // Security policies are enforced for all queries within the transaction.
-func WithTenant(ctx context.Context, pool *pgxpool.Pool, orgID string, clientScope string, fn func(ctx context.Context, tx pgxpool.Pool) error) error {
+func WithTenant(ctx context.Context, pool *pgxpool.Pool, orgID string, clientScope string, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire connection: %w", err)
@@ -61,9 +62,7 @@ func WithTenant(ctx context.Context, pool *pgxpool.Pool, orgID string, clientSco
 		}
 	}
 
-	// We pass the pool for compatibility; the actual tenant-scoped work
-	// should use the tx directly. This interface will be refined with sqlc.
-	if err := fn(ctx, *pool); err != nil {
+	if err := fn(ctx, tx); err != nil {
 		return err
 	}
 

@@ -272,7 +272,6 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 				ManagementIP:   item.ManagementIP,
 				Attributes:     attributes,
 				Source:         source,
-				LastSeen:       now,
 			}
 			if err := h.ciRepo.Create(&newItem); err != nil {
 				api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
