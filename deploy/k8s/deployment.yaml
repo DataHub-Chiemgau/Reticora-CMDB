@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reticora-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: server
+    spec:
+      containers:
+        - name: server
+          image: reticora-cmdb/server:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: RETICORA_PORT
+              value: "8080"
+            - name: RETICORA_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-secrets
+                  key: database-url
+            - name: RETICORA_NATS_URL
+              value: "nats://nats:4222"
+            - name: RETICORA_REDIS_URL
+              value: "redis://redis:6379"
+            - name: RETICORA_ENVIRONMENT
+              value: "production"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

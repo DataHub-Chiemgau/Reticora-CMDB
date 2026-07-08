@@ -5,6 +5,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 // Handler provides HTTP handlers for document endpoints.
@@ -18,14 +19,14 @@ func NewHandler(repo Repository) *Handler {
 }
 
 // RegisterRoutes registers document routes on the given mux.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/documents", h.List)
-	mux.HandleFunc("POST /api/v1/documents", h.Create)
-	mux.HandleFunc("GET /api/v1/documents/{id}", h.Get)
-	mux.HandleFunc("PATCH /api/v1/documents/{id}", h.Update)
-	mux.HandleFunc("DELETE /api/v1/documents/{id}", h.Delete)
-	mux.HandleFunc("POST /api/v1/documents/{id}/links", h.Link)
-	mux.HandleFunc("GET /api/v1/documents/{id}/links", h.GetLinks)
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/api/v1/documents", h.List)
+	r.Post("/api/v1/documents", h.Create)
+	r.Get("/api/v1/documents/{id}", h.Get)
+	r.Patch("/api/v1/documents/{id}", h.Update)
+	r.Delete("/api/v1/documents/{id}", h.Delete)
+	r.Post("/api/v1/documents/{id}/links", h.Link)
+	r.Get("/api/v1/documents/{id}/links", h.GetLinks)
 }
 
 // List handles GET /api/v1/documents
@@ -67,7 +68,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	item, err := h.repo.GetByID(t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
@@ -137,7 +138,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	var req UpdateRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -161,7 +162,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := h.repo.Delete(t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
 		return
@@ -178,7 +179,7 @@ func (h *Handler) Link(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	docID := r.PathValue("id")
+	docID := chi.URLParam(r, "id")
 	// Verify document exists
 	if _, err := h.repo.GetByID(t.OrganizationID, docID); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
@@ -219,7 +220,7 @@ func (h *Handler) GetLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	docID := r.PathValue("id")
+	docID := chi.URLParam(r, "id")
 	links, err := h.repo.GetLinks(t.OrganizationID, docID)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())

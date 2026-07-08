@@ -1,0 +1,16 @@
+ALTER TABLE IF EXISTS role_assignment DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS role DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS app_user DISABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS role_assignment_isolation ON role_assignment;
+DROP POLICY IF EXISTS role_isolation ON role;
+DROP POLICY IF EXISTS user_isolation ON app_user;
+
+DROP INDEX IF EXISTS idx_role_assignment_user;
+DROP INDEX IF EXISTS idx_role_org;
+DROP INDEX IF EXISTS idx_user_email;
+DROP INDEX IF EXISTS idx_user_org;
+
+DROP TABLE IF EXISTS role_assignment;
+DROP TABLE IF EXISTS role;
+DROP TABLE IF EXISTS app_user;

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 func tenantCtx(r *http.Request) *http.Request {
@@ -18,7 +19,7 @@ func tenantCtx(r *http.Request) *http.Request {
 func TestHandler_CreateAndList(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	body := `{"name":"My Hook","url":"https://example.com/hook","secret":"s3cr3t","events":["ci.created","ci.updated"]}`
@@ -63,7 +64,7 @@ func TestHandler_CreateAndList(t *testing.T) {
 func TestHandler_InvalidEvent(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	body := `{"name":"Bad","url":"https://example.com","secret":"x","events":["bad.event"]}`
@@ -80,7 +81,7 @@ func TestHandler_InvalidEvent(t *testing.T) {
 func TestHandler_Delete(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	sub := &Subscription{

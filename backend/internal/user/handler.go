@@ -5,6 +5,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 // Handler provides HTTP handlers for user, team, and role endpoints.
@@ -18,32 +19,32 @@ func NewHandler(repo Repository) *Handler {
 }
 
 // RegisterRoutes registers user/team/role routes on the given mux.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+func (h *Handler) RegisterRoutes(r chi.Router) {
 	// Users
-	mux.HandleFunc("GET /api/v1/users", h.ListUsers)
-	mux.HandleFunc("POST /api/v1/users", h.CreateUser)
-	mux.HandleFunc("GET /api/v1/users/{id}", h.GetUser)
-	mux.HandleFunc("PATCH /api/v1/users/{id}", h.UpdateUser)
-	mux.HandleFunc("DELETE /api/v1/users/{id}", h.DeleteUser)
-	mux.HandleFunc("GET /api/v1/users/{id}/roles", h.ListUserRoles)
+	r.Get("/api/v1/users", h.ListUsers)
+	r.Post("/api/v1/users", h.CreateUser)
+	r.Get("/api/v1/users/{id}", h.GetUser)
+	r.Patch("/api/v1/users/{id}", h.UpdateUser)
+	r.Delete("/api/v1/users/{id}", h.DeleteUser)
+	r.Get("/api/v1/users/{id}/roles", h.ListUserRoles)
 
 	// Teams
-	mux.HandleFunc("GET /api/v1/teams", h.ListTeams)
-	mux.HandleFunc("POST /api/v1/teams", h.CreateTeam)
-	mux.HandleFunc("GET /api/v1/teams/{id}", h.GetTeam)
-	mux.HandleFunc("PATCH /api/v1/teams/{id}", h.UpdateTeam)
-	mux.HandleFunc("DELETE /api/v1/teams/{id}", h.DeleteTeam)
-	mux.HandleFunc("GET /api/v1/teams/{id}/members", h.ListTeamMembers)
-	mux.HandleFunc("POST /api/v1/teams/{id}/members", h.AddTeamMember)
-	mux.HandleFunc("DELETE /api/v1/teams/{teamId}/members/{userId}", h.RemoveTeamMember)
+	r.Get("/api/v1/teams", h.ListTeams)
+	r.Post("/api/v1/teams", h.CreateTeam)
+	r.Get("/api/v1/teams/{id}", h.GetTeam)
+	r.Patch("/api/v1/teams/{id}", h.UpdateTeam)
+	r.Delete("/api/v1/teams/{id}", h.DeleteTeam)
+	r.Get("/api/v1/teams/{id}/members", h.ListTeamMembers)
+	r.Post("/api/v1/teams/{id}/members", h.AddTeamMember)
+	r.Delete("/api/v1/teams/{teamId}/members/{userId}", h.RemoveTeamMember)
 
 	// Custom Roles
-	mux.HandleFunc("GET /api/v1/roles", h.ListRoles)
-	mux.HandleFunc("POST /api/v1/roles", h.CreateRole)
-	mux.HandleFunc("GET /api/v1/roles/{id}", h.GetRole)
-	mux.HandleFunc("PATCH /api/v1/roles/{id}", h.UpdateRole)
-	mux.HandleFunc("DELETE /api/v1/roles/{id}", h.DeleteRole)
-	mux.HandleFunc("POST /api/v1/roles/assign", h.AssignRole)
+	r.Get("/api/v1/roles", h.ListRoles)
+	r.Post("/api/v1/roles", h.CreateRole)
+	r.Get("/api/v1/roles/{id}", h.GetRole)
+	r.Patch("/api/v1/roles/{id}", h.UpdateRole)
+	r.Delete("/api/v1/roles/{id}", h.DeleteRole)
+	r.Post("/api/v1/roles/assign", h.AssignRole)
 }
 
 // --- User handlers ---
@@ -80,7 +81,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	item, err := h.repo.GetUser(t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
@@ -136,7 +137,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	var req UpdateUserRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -159,7 +160,7 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := h.repo.DeleteUser(t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
 		return
@@ -175,7 +176,7 @@ func (h *Handler) ListUserRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.PathValue("id")
+	userID := chi.URLParam(r, "id")
 	roles, err := h.repo.ListUserRoles(t.OrganizationID, userID)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
@@ -219,7 +220,7 @@ func (h *Handler) GetTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	item, err := h.repo.GetTeam(t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "team not found")
@@ -269,7 +270,7 @@ func (h *Handler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	var req UpdateTeamRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -292,7 +293,7 @@ func (h *Handler) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := h.repo.DeleteTeam(t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "team not found")
 		return
@@ -308,7 +309,7 @@ func (h *Handler) ListTeamMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	teamID := r.PathValue("id")
+	teamID := chi.URLParam(r, "id")
 	members, err := h.repo.ListTeamMembers(t.OrganizationID, teamID)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
@@ -325,7 +326,7 @@ func (h *Handler) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	teamID := r.PathValue("id")
+	teamID := chi.URLParam(r, "id")
 	var req AddMemberRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -363,8 +364,8 @@ func (h *Handler) RemoveTeamMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	teamID := r.PathValue("teamId")
-	userID := r.PathValue("userId")
+	teamID := chi.URLParam(r, "teamId")
+	userID := chi.URLParam(r, "userId")
 
 	if err := h.repo.RemoveTeamMember(t.OrganizationID, teamID, userID); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
@@ -406,7 +407,7 @@ func (h *Handler) GetRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	item, err := h.repo.GetRole(t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "role not found")
@@ -459,7 +460,7 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	var req UpdateRoleRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -482,7 +483,7 @@ func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := h.repo.DeleteRole(t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 		return

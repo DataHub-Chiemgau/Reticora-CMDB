@@ -9,6 +9,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 // Relationship represents a directed edge between two CIs.
@@ -127,10 +128,10 @@ func NewHandler(repo Repository) *Handler {
 }
 
 // RegisterRoutes registers relationship routes.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/cis/{id}/relationships", h.List)
-	mux.HandleFunc("POST /api/v1/relationships", h.Create)
-	mux.HandleFunc("DELETE /api/v1/relationships/{id}", h.Delete)
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/api/v1/cis/{id}/relationships", h.List)
+	r.Post("/api/v1/relationships", h.Create)
+	r.Delete("/api/v1/relationships/{id}", h.Delete)
 }
 
 // List handles GET /api/v1/cis/{id}/relationships
@@ -141,7 +142,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ciID := r.PathValue("id")
+	ciID := chi.URLParam(r, "id")
 	page := api.ParsePagination(r)
 
 	rels, total, err := h.repo.List(t.OrganizationID, ciID, page)
@@ -213,7 +214,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := h.repo.Delete(t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "relationship not found")
 		return

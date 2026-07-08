@@ -9,6 +9,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 // Subscription represents a webhook subscription.
@@ -156,11 +157,11 @@ func NewHandler(repo Repository) *Handler {
 }
 
 // RegisterRoutes registers webhook routes.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/webhooks", h.List)
-	mux.HandleFunc("POST /api/v1/webhooks", h.Create)
-	mux.HandleFunc("GET /api/v1/webhooks/{id}", h.Get)
-	mux.HandleFunc("DELETE /api/v1/webhooks/{id}", h.Delete)
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/api/v1/webhooks", h.List)
+	r.Post("/api/v1/webhooks", h.Create)
+	r.Get("/api/v1/webhooks/{id}", h.Get)
+	r.Delete("/api/v1/webhooks/{id}", h.Delete)
 }
 
 // List handles GET /api/v1/webhooks
@@ -195,7 +196,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	sub, err := h.repo.GetByID(t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
@@ -257,7 +258,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := h.repo.Delete(t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
 		return

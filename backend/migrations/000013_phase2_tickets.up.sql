@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS ticket (
     category        TEXT NOT NULL DEFAULT 'incident',
     reporter_id     UUID NOT NULL REFERENCES app_user(id),
     assignee_id     UUID REFERENCES app_user(id),
-    team_id         UUID REFERENCES team(id),
+    team_id         UUID,
     related_ci_id   UUID REFERENCES ci(id),
     related_asset_id UUID REFERENCES asset(id),
     due_date        TIMESTAMPTZ,

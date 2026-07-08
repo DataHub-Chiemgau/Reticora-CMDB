@@ -6,6 +6,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 // Handler provides HTTP handlers for assignment endpoints.
@@ -19,13 +20,13 @@ func NewHandler(repo Repository) *Handler {
 }
 
 // RegisterRoutes registers assignment routes on the given mux.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/assignments", h.List)
-	mux.HandleFunc("POST /api/v1/assignments", h.Create)
-	mux.HandleFunc("GET /api/v1/assignments/{id}", h.Get)
-	mux.HandleFunc("POST /api/v1/assignments/{id}/return", h.Return)
-	mux.HandleFunc("POST /api/v1/assignments/{id}/transfer", h.Transfer)
-	mux.HandleFunc("DELETE /api/v1/assignments/{id}", h.Delete)
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/api/v1/assignments", h.List)
+	r.Post("/api/v1/assignments", h.Create)
+	r.Get("/api/v1/assignments/{id}", h.Get)
+	r.Post("/api/v1/assignments/{id}/return", h.Return)
+	r.Post("/api/v1/assignments/{id}/transfer", h.Transfer)
+	r.Delete("/api/v1/assignments/{id}", h.Delete)
 }
 
 // List handles GET /api/v1/assignments
@@ -69,7 +70,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	item, err := h.repo.GetByID(t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "assignment not found")
@@ -135,7 +136,7 @@ func (h *Handler) Return(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	existing, err := h.repo.GetByID(t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "assignment not found")
@@ -172,7 +173,7 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	existing, err := h.repo.GetByID(t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "assignment not found")
@@ -226,7 +227,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := h.repo.Delete(t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "assignment not found")
 		return

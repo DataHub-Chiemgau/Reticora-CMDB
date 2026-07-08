@@ -1,0 +1,9 @@
+ALTER TABLE IF EXISTS asset DISABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS asset_tenant_isolation ON asset;
+
+DROP INDEX IF EXISTS idx_asset_tag_org;
+DROP INDEX IF EXISTS idx_asset_status;
+DROP INDEX IF EXISTS idx_asset_org;
+
+DROP TABLE IF EXISTS asset;

@@ -26,6 +26,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
+	"github.com/go-chi/chi/v5"
 )
 
 func main() {
@@ -74,8 +75,8 @@ func main() {
 	ticketHandler := ticket.NewHandler(ticketRepo)
 	userHandler := user.NewHandler(userRepo)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+	mux := chi.NewRouter()
+	mux.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"status":"ok"}`)

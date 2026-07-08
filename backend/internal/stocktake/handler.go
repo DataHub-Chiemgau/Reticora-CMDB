@@ -6,6 +6,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 // Handler provides HTTP handlers for stocktake endpoints.
@@ -19,14 +20,14 @@ func NewHandler(repo Repository) *Handler {
 }
 
 // RegisterRoutes registers stocktake routes on the given mux.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/stocktakes", h.List)
-	mux.HandleFunc("POST /api/v1/stocktakes", h.Create)
-	mux.HandleFunc("GET /api/v1/stocktakes/{id}", h.Get)
-	mux.HandleFunc("PATCH /api/v1/stocktakes/{id}", h.Update)
-	mux.HandleFunc("DELETE /api/v1/stocktakes/{id}", h.Delete)
-	mux.HandleFunc("POST /api/v1/stocktakes/{id}/scans", h.AddScan)
-	mux.HandleFunc("GET /api/v1/stocktakes/{id}/scans", h.ListScans)
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/api/v1/stocktakes", h.List)
+	r.Post("/api/v1/stocktakes", h.Create)
+	r.Get("/api/v1/stocktakes/{id}", h.Get)
+	r.Patch("/api/v1/stocktakes/{id}", h.Update)
+	r.Delete("/api/v1/stocktakes/{id}", h.Delete)
+	r.Post("/api/v1/stocktakes/{id}/scans", h.AddScan)
+	r.Get("/api/v1/stocktakes/{id}/scans", h.ListScans)
 }
 
 // List handles GET /api/v1/stocktakes
@@ -69,7 +70,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	item, err := h.repo.GetByID(t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
@@ -130,7 +131,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	var req UpdateRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -154,7 +155,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := h.repo.Delete(t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
 		return
@@ -171,7 +172,7 @@ func (h *Handler) AddScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stocktakeID := r.PathValue("id")
+	stocktakeID := chi.URLParam(r, "id")
 	var req ScanRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -217,7 +218,7 @@ func (h *Handler) ListScans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stocktakeID := r.PathValue("id")
+	stocktakeID := chi.URLParam(r, "id")
 	page := api.ParsePagination(r)
 
 	scans, total, err := h.repo.ListScans(t.OrganizationID, stocktakeID, page)

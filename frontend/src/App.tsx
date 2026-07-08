@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
@@ -15,12 +16,31 @@ import { TicketListPage } from './pages/TicketListPage';
 import { UserManagementPage } from './pages/UserManagementPage';
 import { useThemeStore } from './stores/theme';
 
+const pageToPath: Record<AppPage, string> = {
+  dashboard: '/dashboard',
+  cmdb: '/cmdb',
+  discovery: '/discovery',
+  assets: '/assets',
+  assignments: '/assignments',
+  documents: '/documents',
+  stocktake: '/stocktake',
+  tickets: '/tickets',
+  users: '/users',
+};
+
+const pathToPage: Record<string, AppPage> = Object.fromEntries(
+  Object.entries(pageToPath).map(([k, v]) => [v, k as AppPage])
+);
+
 function App() {
   const { t } = useTranslation();
-  const [page, setPage] = useState<AppPage>('cmdb');
+  const navigate = useNavigate();
+  const location = useLocation();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const mode = useThemeStore((state) => state.mode);
   const setMode = useThemeStore((state) => state.setMode);
+
+  const currentPage: AppPage = pathToPage[location.pathname] || 'cmdb';
 
   const shortcutHint = useMemo(() => {
     if (typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)) {
@@ -37,8 +57,12 @@ function App() {
     setMode(isDark ? 'light' : 'dark');
   }
 
+  function handleNavigate(page: AppPage) {
+    navigate(pageToPath[page] || '/cmdb');
+  }
+
   function openCreateCI() {
-    setPage('cmdb');
+    navigate('/cmdb');
     setIsCreateOpen(true);
   }
 
@@ -51,31 +75,31 @@ function App() {
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <nav className="flex flex-wrap gap-2" aria-label={t('accessibility.primaryNavigation')}>
-              <NavButton active={page === 'dashboard'} onClick={() => setPage('dashboard')}>
+              <NavButton active={currentPage === 'dashboard'} onClick={() => handleNavigate('dashboard')}>
                 {t('nav.dashboard')}
               </NavButton>
-              <NavButton active={page === 'cmdb'} onClick={() => setPage('cmdb')}>
+              <NavButton active={currentPage === 'cmdb'} onClick={() => handleNavigate('cmdb')}>
                 {t('nav.cmdb')}
               </NavButton>
-              <NavButton active={page === 'assets'} onClick={() => setPage('assets')}>
+              <NavButton active={currentPage === 'assets'} onClick={() => handleNavigate('assets')}>
                 {t('nav.assets', 'Inventar')}
               </NavButton>
-              <NavButton active={page === 'tickets'} onClick={() => setPage('tickets')}>
+              <NavButton active={currentPage === 'tickets'} onClick={() => handleNavigate('tickets')}>
                 {t('nav.tickets', 'Tickets')}
               </NavButton>
-              <NavButton active={page === 'assignments'} onClick={() => setPage('assignments')}>
+              <NavButton active={currentPage === 'assignments'} onClick={() => handleNavigate('assignments')}>
                 {t('nav.assignments', 'Zuweisungen')}
               </NavButton>
-              <NavButton active={page === 'documents'} onClick={() => setPage('documents')}>
+              <NavButton active={currentPage === 'documents'} onClick={() => handleNavigate('documents')}>
                 {t('nav.documents', 'Dokumente')}
               </NavButton>
-              <NavButton active={page === 'stocktake'} onClick={() => setPage('stocktake')}>
+              <NavButton active={currentPage === 'stocktake'} onClick={() => handleNavigate('stocktake')}>
                 {t('nav.stocktake', 'Inventur')}
               </NavButton>
-              <NavButton active={page === 'discovery'} onClick={() => setPage('discovery')}>
+              <NavButton active={currentPage === 'discovery'} onClick={() => handleNavigate('discovery')}>
                 {t('nav.discovery')}
               </NavButton>
-              <NavButton active={page === 'users'} onClick={() => setPage('users')}>
+              <NavButton active={currentPage === 'users'} onClick={() => handleNavigate('users')}>
                 {t('nav.users', 'Benutzer')}
               </NavButton>
             </nav>
@@ -110,18 +134,21 @@ function App() {
         </div>
       </header>
       <main className="p-6">
-        {page === 'dashboard' ? <DashboardPage /> : null}
-        {page === 'cmdb' ? <CIListPage onCreateCI={openCreateCI} /> : null}
-        {page === 'discovery' ? <DiscoveryPage /> : null}
-        {page === 'assets' ? <AssetListPage /> : null}
-        {page === 'assignments' ? <AssignmentListPage /> : null}
-        {page === 'documents' ? <DocumentListPage /> : null}
-        {page === 'stocktake' ? <StocktakeListPage /> : null}
-        {page === 'tickets' ? <TicketListPage /> : null}
-        {page === 'users' ? <UserManagementPage /> : null}
+        <Routes>
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/cmdb" element={<CIListPage onCreateCI={openCreateCI} />} />
+          <Route path="/discovery" element={<DiscoveryPage />} />
+          <Route path="/assets" element={<AssetListPage />} />
+          <Route path="/assignments" element={<AssignmentListPage />} />
+          <Route path="/documents" element={<DocumentListPage />} />
+          <Route path="/stocktake" element={<StocktakeListPage />} />
+          <Route path="/tickets" element={<TicketListPage />} />
+          <Route path="/users" element={<UserManagementPage />} />
+          <Route path="*" element={<CIListPage onCreateCI={openCreateCI} />} />
+        </Routes>
       </main>
 
-      <CommandPalette onNavigate={setPage} onCreateCI={openCreateCI} onToggleDarkMode={toggleDarkMode} />
+      <CommandPalette onNavigate={handleNavigate} onCreateCI={openCreateCI} onToggleDarkMode={toggleDarkMode} />
       <CIFormModal open={isCreateOpen} onOpenChange={setIsCreateOpen} />
     </div>
   );

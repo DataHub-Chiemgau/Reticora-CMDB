@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 func tenantCtx(r *http.Request) *http.Request {
@@ -18,7 +19,7 @@ func tenantCtx(r *http.Request) *http.Request {
 func TestHandler_CreateAndList(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	body := `{"source_ci_id":"ci-1","target_ci_id":"ci-2","rel_type":"connected_to"}`
@@ -60,7 +61,7 @@ func TestHandler_CreateAndList(t *testing.T) {
 func TestHandler_InvalidRelType(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	body := `{"source_ci_id":"ci-1","target_ci_id":"ci-2","rel_type":"invalid_type"}`
@@ -77,7 +78,7 @@ func TestHandler_InvalidRelType(t *testing.T) {
 func TestHandler_Delete(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	rel := &Relationship{

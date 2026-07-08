@@ -1,0 +1,380 @@
+openapi: "3.1.0"
+info:
+  title: Reticora CMDB API
+  version: "1.0.0"
+  description: |
+    Multi-tenant Configuration Management Database API for MSPs/ISPs.
+    All endpoints require authentication and tenant context.
+  contact:
+    name: DataHub Chiemgau
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Health
+    description: Health and readiness endpoints
+  - name: CIs
+    description: Configuration Items management
+  - name: Relationships
+    description: CI relationship management
+  - name: Discovery
+    description: Network discovery operations
+  - name: Webhooks
+    description: Webhook subscription management
+  - name: Entitlements
+    description: Plan and feature entitlements
+  - name: Users
+    description: User and role management
+  - name: Assets
+    description: Asset inventory management
+  - name: Tickets
+    description: Ticket/change management
+  - name: Documents
+    description: Document management
+  - name: Export
+    description: Data export operations
+
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      tags: [Health]
+      security: []
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /api/v1/cis:
+    get:
+      operationId: listCIs
+      tags: [CIs]
+      summary: List Configuration Items
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, maintenance, decommissioned, unknown]
+        - name: ci_type_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list of CIs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CIListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      operationId: createCI
+      tags: [CIs]
+      summary: Create a Configuration Item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCIRequest"
+      responses:
+        "201":
+          description: CI created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CI"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/cis/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getCI
+      tags: [CIs]
+      summary: Get a Configuration Item
+      responses:
+        "200":
+          description: CI details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CI"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateCI
+      tags: [CIs]
+      summary: Update a Configuration Item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCIRequest"
+      responses:
+        "200":
+          description: CI updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CI"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteCI
+      tags: [CIs]
+      summary: Delete a Configuration Item
+      responses:
+        "204":
+          description: CI deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+
+  schemas:
+    ProblemDetail:
+      type: object
+      description: RFC 7807 Problem Detail
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "urn:reticora:error:not-found"
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri
+        trace_id:
+          type: string
+
+    CI:
+      type: object
+      required: [id, organization_id, ci_type_id, name, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        client_id:
+          type: string
+          format: uuid
+          nullable: true
+        site_id:
+          type: string
+          format: uuid
+          nullable: true
+        room_id:
+          type: string
+          format: uuid
+          nullable: true
+        ci_type_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive, maintenance, decommissioned, unknown]
+        hostname:
+          type: string
+          nullable: true
+        fqdn:
+          type: string
+          nullable: true
+        manufacturer:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        serial_number:
+          type: string
+          nullable: true
+        management_ip:
+          type: string
+          nullable: true
+        firmware_version:
+          type: string
+          nullable: true
+        os_name:
+          type: string
+          nullable: true
+        os_version:
+          type: string
+          nullable: true
+        discovery_source:
+          type: string
+          enum: [manual, sweep, snmp, ssh, redfish, ipmi, wmi, nas, power, agent]
+        is_manual:
+          type: boolean
+        attributes:
+          type: object
+          additionalProperties: true
+        first_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateCIRequest:
+      type: object
+      required: [ci_type_id, name]
+      properties:
+        ci_type_id:
+          type: string
+          format: uuid
+        client_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive, maintenance, decommissioned, unknown]
+          default: active
+        manufacturer:
+          type: string
+        model:
+          type: string
+        serial_number:
+          type: string
+        management_ip:
+          type: string
+        firmware_version:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
+
+    UpdateCIRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive, maintenance, decommissioned, unknown]
+        manufacturer:
+          type: string
+        model:
+          type: string
+        serial_number:
+          type: string
+        management_ip:
+          type: string
+        firmware_version:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
+
+    CIListResponse:
+      type: object
+      required: [data, total, limit, offset, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/CI"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
