@@ -1,10 +1,13 @@
 package middleware
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 )
 
@@ -16,9 +19,8 @@ type tokenBucket struct {
 	lastRefill time.Time
 }
 
-// rateLimiterStore is a simple in-memory rate limiter.
-// In production, this should be backed by Redis Token-Bucket.
-type rateLimiterStore struct {
+// memoryRateLimiterStore is a simple in-memory rate limiter fallback.
+type memoryRateLimiterStore struct {
 	mu      sync.Mutex
 	buckets map[string]*tokenBucket
 	rpm     int
@@ -27,12 +29,14 @@ type rateLimiterStore struct {
 // RateLimiter returns middleware that enforces a token-bucket rate limit.
 // Default: 600 requests/minute per key (user ID or API key).
 // The key is extracted from X-Organization-ID + authenticated user/API key.
+// When a cache.Store is provided (Redis), it uses a sliding-window counter.
+// Otherwise falls back to an in-memory token bucket.
 func RateLimiter(requestsPerMinute int) func(http.Handler) http.Handler {
 	if requestsPerMinute <= 0 {
 		requestsPerMinute = 600
 	}
 
-	store := &rateLimiterStore{
+	store := &memoryRateLimiterStore{
 		buckets: make(map[string]*tokenBucket),
 		rpm:     requestsPerMinute,
 	}
@@ -55,7 +59,52 @@ func RateLimiter(requestsPerMinute int) func(http.Handler) http.Handler {
 	}
 }
 
-func (s *rateLimiterStore) allow(key string) bool {
+// RateLimiterWithStore returns middleware using the provided cache store for
+// distributed rate limiting via a sliding-window counter.
+func RateLimiterWithStore(requestsPerMinute int, store cache.Store) func(http.Handler) http.Handler {
+	if requestsPerMinute <= 0 {
+		requestsPerMinute = 600
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := rateLimitKey(r)
+			if key == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			allowed, err := allowWithStore(r.Context(), store, key, requestsPerMinute)
+			if err != nil {
+				// On Redis errors, allow the request (fail-open)
+				next.ServeHTTP(w, r)
+				return
+			}
+			if !allowed {
+				httpx.RateLimited(w, r, "rate limit exceeded, try again later")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// allowWithStore implements a fixed-window rate limit using the cache store.
+// Key format: ratelimit:{key}:{minute_timestamp}
+func allowWithStore(ctx context.Context, store cache.Store, key string, rpm int) (bool, error) {
+	now := time.Now().UTC()
+	windowKey := fmt.Sprintf("ratelimit:%s:%d", key, now.Unix()/60)
+
+	count, err := store.Increment(ctx, windowKey, 2*time.Minute)
+	if err != nil {
+		return false, err
+	}
+
+	return count <= int64(rpm), nil
+}
+
+func (s *memoryRateLimiterStore) allow(key string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

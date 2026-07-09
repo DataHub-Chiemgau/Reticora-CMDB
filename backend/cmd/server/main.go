@@ -14,6 +14,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
@@ -28,6 +29,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
@@ -83,6 +85,23 @@ func main() {
 				slog.Warn("failed to init session issuer, using dev mode", "error", err)
 			}
 		}
+	}
+
+	// Initialize Redis-backed cache store
+	var cacheStore cache.Store
+	if cfg.RedisURL != "" {
+		redisClient, err := redisx.Connect(context.Background(), cfg.RedisURL)
+		if err != nil {
+			slog.Warn("failed to connect to Redis, falling back to in-memory cache", "error", err)
+			cacheStore = cache.NewMemoryStore()
+		} else {
+			defer redisClient.Close()
+			cacheStore = cache.NewRedisStore(redisClient.Unwrap())
+			slog.Info("Redis cache store initialized")
+		}
+	} else {
+		slog.Info("RETICORA_REDIS_URL not set, using in-memory cache")
+		cacheStore = cache.NewMemoryStore()
 	}
 
 	// Repositories: use PostgreSQL when DATABASE_URL is available, otherwise memory for dev
@@ -214,8 +233,8 @@ reposReady:
 		middleware.Logger,
 		middleware.AuthMiddleware,
 		middleware.TenantMiddleware,
-		middleware.RateLimiter(cfg.RateLimitRPM),
-		middleware.Idempotency,
+		middleware.RateLimiterWithStore(cfg.RateLimitRPM, cacheStore),
+		middleware.IdempotencyWithStore(cacheStore),
 	)(mux)
 
 	server := &http.Server{
