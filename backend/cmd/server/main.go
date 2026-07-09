@@ -16,6 +16,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
@@ -26,6 +27,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
@@ -46,6 +48,20 @@ func main() {
 		os.Exit(1)
 	}
 	defer shutdown(context.Background())
+
+	// Initialize envelope encryptor
+	var encryptor *crypto.EnvelopeEncryptor
+	if cfg.MasterKey != "" {
+		var err error
+		encryptor, err = crypto.NewEnvelopeEncryptor(cfg.MasterKey)
+		if err != nil {
+			slog.Error("failed to init envelope encryptor", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("envelope encryption initialized")
+	} else {
+		slog.Warn("RETICORA_MASTER_KEY not set, credential encryption unavailable")
+	}
 
 	// Initialize OIDC provider
 	oidcProvider := identity.NewOIDCProvider(identity.OIDCConfig{
@@ -147,6 +163,14 @@ reposReady:
 	monitoringHandler := monitoring.NewHandler(monitoring.NewMemoryMetricStore())
 	graphqlHandler := graphqlbff.NewHandler(ciRepo, relRepo)
 
+	// Credential handler (requires encryption)
+	var credentialHandler *credential.Handler
+	if encryptor != nil {
+		credRepo := credential.NewMemoryRepository()
+		credSvc := credential.NewService(credRepo, encryptor)
+		credentialHandler = credential.NewHandler(credSvc)
+	}
+
 	mux := chi.NewRouter()
 
 	// Health and metrics endpoints (no auth)
@@ -177,6 +201,9 @@ reposReady:
 	userHandler.RegisterRoutes(mux)
 	monitoringHandler.RegisterRoutes(mux)
 	graphqlHandler.RegisterRoutes(mux)
+	if credentialHandler != nil {
+		credentialHandler.RegisterRoutes(mux)
+	}
 
 	// Middleware chain per spec:
 	// RequestID/Tracing -> Panic-Recovery -> Auth -> Tenant -> Entitlement ->
