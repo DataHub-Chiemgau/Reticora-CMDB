@@ -34,8 +34,8 @@ ALTER TABLE metric_sample SET (
 );
 SELECT add_compression_policy('metric_sample', INTERVAL '7 days');
 
--- Retention policy (drop data older than 90 days)
-SELECT add_retention_policy('metric_sample', INTERVAL '90 days');
+-- Retention policy (drop data older than 400 days)
+SELECT add_retention_policy('metric_sample', INTERVAL '400 days');
 
 -- Continuous aggregate for hourly rollup
 CREATE MATERIALIZED VIEW metric_sample_hourly
