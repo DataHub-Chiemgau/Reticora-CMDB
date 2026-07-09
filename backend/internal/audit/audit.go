@@ -2,11 +2,18 @@
 package audit
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
+
+// AdvisoryLockID is the lock namespace for audit log serialisation.
+const AdvisoryLockID int32 = 0x52657469 // "Reti" in hex
 
 // Entry represents a single audit log entry.
 type Entry struct {
@@ -45,6 +52,20 @@ func ComputeHash(entry *Entry) string {
 	b, _ := json.Marshal(data)
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
+}
+
+// AcquireAdvisoryLock acquires a transaction-scoped advisory lock for audit log serialisation.
+// The lock is automatically released when the transaction commits or rolls back.
+func AcquireAdvisoryLock(ctx context.Context, tx pgx.Tx, orgID string) error {
+	// Use a hash of the org ID as the second lock key for per-tenant serialisation.
+	orgHash := sha256.Sum256([]byte(orgID))
+	orgKey := int32(orgHash[0])<<24 | int32(orgHash[1])<<16 | int32(orgHash[2])<<8 | int32(orgHash[3])
+
+	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1, $2)", int32(AdvisoryLockID), orgKey)
+	if err != nil {
+		return fmt.Errorf("audit: acquire advisory lock: %w", err)
+	}
+	return nil
 }
 
 // Log is an in-memory audit log (will be backed by PostgreSQL in production).
