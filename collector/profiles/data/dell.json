@@ -1,0 +1,41 @@
+[
+  {
+    "name": "dell-idrac-redfish",
+    "vendor": "Dell",
+    "model": "iDRAC",
+    "protocol": "redfish",
+    "endpoints": {
+      "system": "/redfish/v1/Systems/System.Embedded.1",
+      "chassis": "/redfish/v1/Chassis/System.Embedded.1",
+      "managers": "/redfish/v1/Managers/iDRAC.Embedded.1",
+      "thermals": "/redfish/v1/Chassis/System.Embedded.1/Thermal",
+      "power": "/redfish/v1/Chassis/System.Embedded.1/Power",
+      "storage": "/redfish/v1/Systems/System.Embedded.1/Storage",
+      "network_adapters": "/redfish/v1/Chassis/System.Embedded.1/NetworkAdapters"
+    },
+    "attributes": {
+      "category": "server",
+      "management_type": "out-of-band"
+    }
+  },
+  {
+    "name": "dell-switch-snmp",
+    "vendor": "Dell",
+    "model": "OS10",
+    "protocol": "snmp",
+    "snmpOids": {
+      "sysDescr": "1.3.6.1.2.1.1.1.0",
+      "sysName": "1.3.6.1.2.1.1.5.0",
+      "sysUpTime": "1.3.6.1.2.1.1.3.0",
+      "entPhysicalSerialNum": "1.3.6.1.2.1.47.1.1.1.1.11.1",
+      "entPhysicalModelName": "1.3.6.1.2.1.47.1.1.1.1.13.1",
+      "ifDescr": "1.3.6.1.2.1.2.2.1.2",
+      "ifOperStatus": "1.3.6.1.2.1.2.2.1.8",
+      "ifHighSpeed": "1.3.6.1.2.1.31.1.1.1.15"
+    },
+    "attributes": {
+      "category": "network_device",
+      "device_type": "switch"
+    }
+  }
+]
