@@ -2,10 +2,11 @@ package credential
 
 import (
 	"context"
+	"crypto/rand"
+	"fmt"
+	"io"
 	"sync"
 	"time"
-
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 )
 
 // MemoryRepository is an in-memory implementation of Repository for development/testing.
@@ -104,13 +105,11 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 
 // generateID creates a simple random hex ID for in-memory use.
 func generateID() string {
-	dek, _ := crypto.GenerateDEK()
-	// Use first 16 bytes as hex UUID-like identifier
-	const hexChars = "0123456789abcdef"
-	id := make([]byte, 36)
-	copy(id, "00000000-0000-0000-0000-")
-	for i := 24; i < 36; i++ {
-		id[i] = hexChars[dek[i-24]%16]
+	b := make([]byte, 16)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		panic("credential: failed to generate random ID: " + err.Error())
 	}
-	return string(id)
+	// Format as UUID-like string
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
