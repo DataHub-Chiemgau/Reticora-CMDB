@@ -5,7 +5,7 @@ CREATE TABLE ci_change (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
     ci_id UUID NOT NULL REFERENCES ci(id) ON DELETE CASCADE,
-    actor_id UUID,
+    actor_id UUID, -- references app_user(id) or service account; no FK to allow external identities
     change_type TEXT NOT NULL,
     field_name TEXT,
     old_value JSONB,
