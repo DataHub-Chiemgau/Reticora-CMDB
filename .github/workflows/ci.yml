@@ -106,7 +106,10 @@ jobs:
         run: npm run build
 
       - name: Run E2E tests
-        run: npx playwright test --project=chromium
+        run: |
+          npx serve -s dist -l 4173 &
+          npx wait-on http://localhost:4173 --timeout 10000
+          npx playwright test --project=chromium
         env:
           BASE_URL: http://localhost:4173
 
