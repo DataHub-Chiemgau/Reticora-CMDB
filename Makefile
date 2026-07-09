@@ -1,19 +1,24 @@
-.PHONY: generate build test lint migrate-up migrate-down up down seed e2e fmt vet sqlc
+.PHONY: generate build test lint migrate-up migrate-down up down seed e2e fmt vet sqlc oapi-codegen
 
 # ─── Variables ──────────────────────────────────────────────────────────────────
 BACKEND_DIR := backend
 FRONTEND_DIR := frontend
+COLLECTOR_DIR := collector
 MIGRATIONS_DIR := $(BACKEND_DIR)/migrations
 DATABASE_URL ?= ******localhost:5432/reticora?sslmode=disable
 
 # ─── Generate ───────────────────────────────────────────────────────────────────
-generate: sqlc
+generate: sqlc oapi-codegen
 	@echo "==> Generating code..."
 	cd $(BACKEND_DIR) && go generate ./...
 
 sqlc:
 	@echo "==> Generating sqlc..."
 	cd sqlc && sqlc generate 2>/dev/null || echo "sqlc not installed, skipping (install: go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest)"
+
+oapi-codegen:
+	@echo "==> Generating OpenAPI server..."
+	oapi-codegen --config oapi-codegen.yaml api/openapi.yaml 2>/dev/null || echo "oapi-codegen not installed, skipping (install: go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest)"
 
 # ─── Build ──────────────────────────────────────────────────────────────────────
 build: build-backend build-frontend
@@ -24,7 +29,7 @@ build-backend:
 
 build-collector:
 	@echo "==> Building collector..."
-	cd collector && go build ./...
+	cd $(COLLECTOR_DIR) && go build ./...
 
 build-frontend:
 	@echo "==> Building frontend..."
@@ -39,14 +44,14 @@ test-backend:
 
 test-collector:
 	@echo "==> Testing collector..."
-	cd collector && go test -race ./...
+	cd $(COLLECTOR_DIR) && go test -race ./...
 
 test-frontend:
 	@echo "==> Testing frontend..."
-	cd $(FRONTEND_DIR) && npm test -- --run 2>/dev/null || echo "No frontend tests configured yet"
+	cd $(FRONTEND_DIR) && npx vitest run
 
 # ─── Lint ───────────────────────────────────────────────────────────────────────
-lint: lint-backend lint-frontend
+lint: lint-backend lint-frontend lint-collector
 
 lint-backend:
 	@echo "==> Linting backend..."
@@ -55,11 +60,18 @@ lint-backend:
 lint-frontend:
 	@echo "==> Linting frontend..."
 	cd $(FRONTEND_DIR) && npm run lint
+	cd $(FRONTEND_DIR) && npx prettier --check .
+
+lint-collector:
+	@echo "==> Linting collector..."
+	cd $(COLLECTOR_DIR) && golangci-lint run ./... 2>/dev/null || echo "No linter config for collector yet"
 
 # ─── Format ─────────────────────────────────────────────────────────────────────
 fmt:
 	@echo "==> Formatting backend..."
 	cd $(BACKEND_DIR) && gofmt -w .
+	@echo "==> Formatting frontend..."
+	cd $(FRONTEND_DIR) && npx prettier --write .
 
 # ─── Vet ────────────────────────────────────────────────────────────────────────
 vet:
@@ -94,4 +106,4 @@ seed:
 # ─── E2E ────────────────────────────────────────────────────────────────────────
 e2e:
 	@echo "==> Running E2E tests..."
-	cd $(FRONTEND_DIR) && npx playwright test 2>/dev/null || echo "No E2E tests configured yet"
+	cd $(FRONTEND_DIR) && npx playwright test

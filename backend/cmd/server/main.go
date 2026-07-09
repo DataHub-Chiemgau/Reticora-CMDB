@@ -38,6 +38,9 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// version is set at build-time via -ldflags.
+var version = "dev"
+
 func main() {
 	cfg := config.Load()
 
@@ -199,9 +202,17 @@ reposReady:
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
 	mux.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "# Reticora metrics endpoint\n")
+		// Expose application metrics in Prometheus exposition format.
+		// When the OpenTelemetry SDK is fully initialized with a Prometheus exporter,
+		// replace this with promhttp.Handler() from the OTel prometheus bridge.
+		fmt.Fprintf(w, "# HELP reticora_up Whether the Reticora server is up.\n")
+		fmt.Fprintf(w, "# TYPE reticora_up gauge\n")
+		fmt.Fprintf(w, "reticora_up 1\n")
+		fmt.Fprintf(w, "# HELP reticora_info Build and version information.\n")
+		fmt.Fprintf(w, "# TYPE reticora_info gauge\n")
+		fmt.Fprintf(w, "reticora_info{version=\"%s\"} 1\n", version)
 	})
 
 	// Register routes
