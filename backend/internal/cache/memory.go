@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -67,15 +68,11 @@ func (m *MemoryStore) Increment(_ context.Context, key string, ttl time.Duration
 		return 1, nil
 	}
 
-	// Parse and increment
-	var count int64
-	for _, c := range entry.value {
-		count = count*10 + int64(c-'0')
-	}
+	count, _ := strconv.ParseInt(entry.value, 10, 64)
 	count++
 
 	m.entries[key] = memEntry{
-		value:     intToString(count),
+		value:     strconv.FormatInt(count, 10),
 		expiresAt: entry.expiresAt,
 	}
 	return count, nil
@@ -83,20 +80,4 @@ func (m *MemoryStore) Increment(_ context.Context, key string, ttl time.Duration
 
 func (m *MemoryStore) Close() error {
 	return nil
-}
-
-func intToString(n int64) string {
-	if n == 0 {
-		return "0"
-	}
-	buf := make([]byte, 0, 20)
-	for n > 0 {
-		buf = append(buf, byte('0'+n%10))
-		n /= 10
-	}
-	// Reverse
-	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
-		buf[i], buf[j] = buf[j], buf[i]
-	}
-	return string(buf)
 }

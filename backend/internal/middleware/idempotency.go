@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -128,7 +129,9 @@ func IdempotencyWithStore(store cache.Store) func(http.Handler) http.Handler {
 
 			if found {
 				var entry idempotencyEntry
-				if jsonErr := json.Unmarshal([]byte(existing), &entry); jsonErr == nil {
+				if jsonErr := json.Unmarshal([]byte(existing), &entry); jsonErr != nil {
+					slog.Warn("idempotency: failed to unmarshal cached entry, re-executing", "key", storeKey, "error", jsonErr)
+				} else {
 					if entry.BodyHash != bodyHash {
 						httpx.IdempotencyMismatch(w, r, "request body differs from original request with same Idempotency-Key")
 						return
