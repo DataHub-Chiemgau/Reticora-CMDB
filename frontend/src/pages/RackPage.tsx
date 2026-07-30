@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { CI, RackMount } from '../api/client';
-import { useCIList, useRackList, useRackMounts } from '../api/hooks';
+import { useMountedCIs, useRackList, useRackMounts } from '../api/hooks';
 import { RackSVG } from '../components/rack/RackSVG';
 import type { RackUnit } from '../components/rack/RackSVG';
 import { Card } from '../components/ui/Card';
@@ -32,7 +32,6 @@ export function RackPage() {
 
   const racksQuery = useRackList({ limit: 100 });
   const mountsQuery = useRackMounts(selectedRackId);
-  const cisQuery = useCIList({ limit: 200, offset: 0 });
 
   const racks = useMemo(() => racksQuery.data?.data ?? [], [racksQuery.data]);
 
@@ -45,12 +44,8 @@ export function RackPage() {
 
   const selectedRack = racks.find((rack) => rack.id === selectedRackId);
 
-  const cisById = useMemo(
-    () => new Map((cisQuery.data?.data ?? []).map((ci) => [ci.id, ci])),
-    [cisQuery.data],
-  );
-
   const mounts = useMemo(() => mountsQuery.data?.data ?? [], [mountsQuery.data]);
+  const cisById = useMountedCIs(mounts.map((mount) => mount.ci_id));
   const units = useMemo(() => buildRackUnits(mounts, cisById), [mounts, cisById]);
 
   return (

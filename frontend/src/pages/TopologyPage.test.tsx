@@ -37,6 +37,26 @@ describe('buildGraphModel', () => {
     expect(model.edges).toEqual([{ source: 'ci-1', target: 'ci-2', label: 'connected_to' }]);
   });
 
+  it('collapses parallel edges between the same pair into one labelled edge', () => {
+    const model = buildGraphModel({
+      nodes: [
+        { id: 'ci-1', name: 'core-sw-01', ci_type: 'switch', status: 'active' },
+        { id: 'ci-2', name: 'srv-01', ci_type: 'server', status: 'active' },
+      ],
+      edges: [
+        { id: 'e-1', source_ci_id: 'ci-1', target_ci_id: 'ci-2', rel_type: 'connected_to' },
+        { id: 'e-2', source_ci_id: 'ci-1', target_ci_id: 'ci-2', rel_type: 'powers' },
+        { id: 'e-3', source_ci_id: 'ci-1', target_ci_id: 'ci-2', rel_type: 'powers' },
+        { id: 'e-4', source_ci_id: 'ci-2', target_ci_id: 'ci-1', rel_type: 'depends_on' },
+      ],
+    });
+
+    expect(model.edges).toEqual([
+      { source: 'ci-1', target: 'ci-2', label: 'connected_to, powers' },
+      { source: 'ci-2', target: 'ci-1', label: 'depends_on' },
+    ]);
+  });
+
   it('falls back to the default color for unknown status values', () => {
     const model = buildGraphModel({
       nodes: [{ id: 'ci-3', name: 'unknown', ci_type: 'other', status: 'planned' }],

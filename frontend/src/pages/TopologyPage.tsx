@@ -29,10 +29,35 @@ export interface GraphModel {
 /**
  * Maps the API topology graph onto the renderer model. Edges whose endpoints
  * are not part of the returned node set are dropped, because the renderer
- * cannot place an edge without both of its nodes.
+ * cannot place an edge without both of its nodes. Two CIs may be related in
+ * several ways at once (for example `connected_to` and `powered_by`); the
+ * renderer graph is not a multigraph, so parallel edges are collapsed into one
+ * edge whose label lists every relationship type.
  */
 export function buildGraphModel(graph: TopologyGraphData): GraphModel {
   const nodeIds = new Set(graph.nodes.map((node) => node.id));
+  const edgesByPair = new Map<string, GraphEdge>();
+
+  graph.edges
+    .filter((edge) => nodeIds.has(edge.source_ci_id) && nodeIds.has(edge.target_ci_id))
+    .forEach((edge) => {
+      const key = `${edge.source_ci_id}\u0000${edge.target_ci_id}`;
+      const existing = edgesByPair.get(key);
+
+      if (!existing) {
+        edgesByPair.set(key, {
+          source: edge.source_ci_id,
+          target: edge.target_ci_id,
+          label: edge.rel_type,
+        });
+        return;
+      }
+
+      const labels = (existing.label ?? '').split(', ');
+      if (!labels.includes(edge.rel_type)) {
+        existing.label = [...labels, edge.rel_type].join(', ');
+      }
+    });
 
   return {
     nodes: graph.nodes.map((node) => ({
@@ -40,13 +65,7 @@ export function buildGraphModel(graph: TopologyGraphData): GraphModel {
       label: node.name,
       color: statusColors[node.status] ?? '#4f46e5',
     })),
-    edges: graph.edges
-      .filter((edge) => nodeIds.has(edge.source_ci_id) && nodeIds.has(edge.target_ci_id))
-      .map((edge) => ({
-        source: edge.source_ci_id,
-        target: edge.target_ci_id,
-        label: edge.rel_type,
-      })),
+    edges: [...edgesByPair.values()],
   };
 }
 

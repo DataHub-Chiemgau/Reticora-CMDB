@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ciApi,
   collectorApi,
@@ -90,8 +90,28 @@ export function useRackList(params: RackListParams = {}) {
 export function useRackMounts(rackId: string) {
   return useQuery({
     queryKey: ['rack-mounts', rackId],
-    queryFn: () => rackApi.listMounts(rackId, { limit: 200 }),
+    queryFn: () => rackApi.listMounts(rackId, { limit: 100 }),
     enabled: !!rackId,
+  });
+}
+
+/**
+ * Resolves the CIs referenced by rack mounts by id. A rack holds at most a few
+ * dozen mounts, so the CIs are fetched individually instead of relying on a
+ * single CI page, which would leave every CI beyond the page limit unnamed.
+ */
+export function useMountedCIs(ciIds: string[]) {
+  const uniqueIds = Array.from(new Set(ciIds));
+
+  return useQueries({
+    queries: uniqueIds.map((id) => ({
+      queryKey: ['ci', id],
+      queryFn: () => ciApi.get(id),
+    })),
+    combine: (results) =>
+      new Map(
+        results.flatMap((result) => (result.data ? [[result.data.id, result.data] as const] : [])),
+      ),
   });
 }
 

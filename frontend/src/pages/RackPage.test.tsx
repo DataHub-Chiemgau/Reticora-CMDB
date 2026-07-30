@@ -77,7 +77,7 @@ describe('RackPage', () => {
     stubFetchRoutes({
       '/racks/rack-1/mounts': paginated(mounts),
       '/racks': paginated([rack]),
-      '/cis': paginated([ci]),
+      '/cis/ci-1': ci,
     });
 
     renderWithProviders(<RackPage />, { route: '/racks' });
@@ -88,7 +88,7 @@ describe('RackPage', () => {
   });
 
   it('shows an empty state when no racks exist', async () => {
-    stubFetchRoutes({ '/racks': paginated([]), '/cis': paginated([]) });
+    stubFetchRoutes({ '/racks': paginated([]) });
 
     renderWithProviders(<RackPage />, { route: '/racks' });
 
