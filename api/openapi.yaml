@@ -59,6 +59,12 @@ tags:
     description: Permission catalogue and effective access
   - name: SLA
     description: Service-level policies and ticket clocks
+  - name: Forms
+    description: JSON-Schema based form definitions and submissions
+  - name: Workflows
+    description: Workflow definitions, runs and approvals
+  - name: Compliance
+    description: Compliance rules, evaluations and scores
   - name: Audit
     description: Hash-chained audit trail
   - name: Monitoring
@@ -3837,6 +3843,333 @@ paths:
           $ref: '#/components/responses/NotFound'
 
 
+
+  /api/v1/forms:
+    get:
+      operationId: listFormDefinitions
+      tags: [Forms]
+      summary: List form definitions
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: client_id
+          in: query
+          schema: { type: string }
+        - name: active
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200': { description: Paginated form definitions, content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinitionListResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    post:
+      operationId: createFormDefinition
+      tags: [Forms]
+      summary: Create a form definition
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateFormDefinitionRequest' } } }
+      responses:
+        '201': { description: Form definition created, content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /api/v1/forms/{id}:
+    parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+    get:
+      operationId: getFormDefinition
+      tags: [Forms]
+      summary: Get a form definition
+      responses:
+        '200': { description: Form definition, content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateFormDefinition
+      tags: [Forms]
+      summary: Update a form definition
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateFormDefinitionRequest' } } }
+      responses:
+        '200': { description: Form definition updated, content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteFormDefinition
+      tags: [Forms]
+      summary: Delete a form definition
+      responses:
+        '204': { description: Form definition deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/forms/{id}/submissions:
+    parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+    get:
+      operationId: listFormSubmissions
+      tags: [Forms]
+      summary: List submissions for a form
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: Paginated form submissions, content: { application/json: { schema: { $ref: '#/components/schemas/FormSubmissionListResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    post:
+      operationId: createFormSubmission
+      tags: [Forms]
+      summary: Submit values for a form
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateFormSubmissionRequest' } } }
+      responses:
+        '201': { description: Form submission created, content: { application/json: { schema: { $ref: '#/components/schemas/FormSubmission' } } } }
+        '400': { description: Bad request or validation problem, content: { application/json: { schema: { $ref: '#/components/schemas/ValidationProblem' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/form-submissions:
+    get:
+      operationId: listAllFormSubmissions
+      tags: [Forms]
+      summary: List form submissions
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: form_id
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: ticket_id
+          in: query
+          schema: { type: string }
+        - name: ci_id
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: Paginated form submissions, content: { application/json: { schema: { $ref: '#/components/schemas/FormSubmissionListResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /api/v1/form-submissions/{id}:
+    parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+    get:
+      operationId: getFormSubmission
+      tags: [Forms]
+      summary: Get a form submission
+      responses:
+        '200': { description: Form submission, content: { application/json: { schema: { $ref: '#/components/schemas/FormSubmission' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/workflows:
+    get:
+      operationId: listWorkflows
+      tags: [Workflows]
+      summary: List workflow definitions
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: active
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200': { description: Paginated workflows, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowDefinitionListResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    post:
+      operationId: createWorkflow
+      tags: [Workflows]
+      summary: Create a workflow definition
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateWorkflowDefinitionRequest' } } } }
+      responses:
+        '201': { description: Workflow created, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /api/v1/workflows/{id}:
+    parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+    get:
+      operationId: getWorkflow
+      tags: [Workflows]
+      summary: Get a workflow definition
+      responses:
+        '200': { description: Workflow, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateWorkflow
+      tags: [Workflows]
+      summary: Update a workflow definition
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateWorkflowDefinitionRequest' } } } }
+      responses:
+        '200': { description: Workflow updated, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteWorkflow
+      tags: [Workflows]
+      summary: Delete a workflow definition
+      responses:
+        '204': { description: Workflow deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/workflows/{id}/runs:
+    parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+    post:
+      operationId: triggerWorkflowRun
+      tags: [Workflows]
+      summary: Trigger a workflow run
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/TriggerWorkflowRequest' } } } }
+      responses:
+        '201': { description: Workflow run, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowRun' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/workflow-runs:
+    get:
+      operationId: listWorkflowRuns
+      tags: [Workflows]
+      summary: List workflow runs
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: workflow_id
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: Paginated workflow runs, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowRunListResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /api/v1/workflow-runs/{id}:
+    parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+    get:
+      operationId: getWorkflowRun
+      tags: [Workflows]
+      summary: Get workflow run details
+      responses:
+        '200': { description: Workflow run, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowRun' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/workflow-runs/{id}/approval:
+    parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+    post:
+      operationId: approveWorkflowRun
+      tags: [Workflows]
+      summary: Approve or reject a waiting workflow run
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowApprovalRequest' } } } }
+      responses:
+        '200': { description: Updated workflow run, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowRun' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/compliance/rules:
+    get:
+      operationId: listComplianceRules
+      tags: [Compliance]
+      summary: List compliance rules
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: ci_type_id
+          in: query
+          schema: { type: string }
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: active
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200': { description: Paginated compliance rules, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceRuleListResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    post:
+      operationId: createComplianceRule
+      tags: [Compliance]
+      summary: Create a compliance rule
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateComplianceRuleRequest' } } } }
+      responses:
+        '201': { description: Compliance rule created, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceRule' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /api/v1/compliance/rules/{id}:
+    parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+    get:
+      operationId: getComplianceRule
+      tags: [Compliance]
+      summary: Get a compliance rule
+      responses:
+        '200': { description: Compliance rule, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceRule' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateComplianceRule
+      tags: [Compliance]
+      summary: Update a compliance rule
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateComplianceRuleRequest' } } } }
+      responses:
+        '200': { description: Compliance rule updated, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceRule' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteComplianceRule
+      tags: [Compliance]
+      summary: Delete a compliance rule
+      responses:
+        '204': { description: Compliance rule deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/compliance/evaluations:
+    post:
+      operationId: evaluateCompliance
+      tags: [Compliance]
+      summary: Evaluate active compliance rules against tenant CIs
+      responses:
+        '200': { description: Evaluation results and score, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceEvaluationResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /api/v1/compliance/results:
+    get:
+      operationId: listComplianceResults
+      tags: [Compliance]
+      summary: List stored compliance results
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: ci_type_id
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [pass, fail, not_applicable] }
+      responses:
+        '200': { description: Paginated compliance results, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceResultListResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /api/v1/compliance/score:
+    get:
+      operationId: getComplianceScore
+      tags: [Compliance]
+      summary: Get compliance score from stored results
+      parameters:
+        - name: ci_type_id
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: Compliance score, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceEvaluationResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
 components:
   securitySchemes:
     BearerAuth:
@@ -5496,6 +5829,258 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/TicketSLA'
+
+
+    JSONValue:
+      description: Arbitrary JSON value.
+    FormDefinition:
+      type: object
+      required: [id, organization_id, name, schema, ui_hints, active, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        client_id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        schema: { $ref: '#/components/schemas/JSONValue' }
+        ui_hints: { $ref: '#/components/schemas/JSONValue' }
+        active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateFormDefinitionRequest:
+      type: object
+      required: [name, schema]
+      properties:
+        client_id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        schema: { $ref: '#/components/schemas/JSONValue' }
+        ui_hints: { $ref: '#/components/schemas/JSONValue' }
+        active: { type: boolean }
+    UpdateFormDefinitionRequest:
+      type: object
+      properties:
+        client_id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        schema: { $ref: '#/components/schemas/JSONValue' }
+        ui_hints: { $ref: '#/components/schemas/JSONValue' }
+        active: { type: boolean }
+    FormSubmission:
+      type: object
+      required: [id, organization_id, form_id, values, status, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        form_id: { type: string }
+        values: { $ref: '#/components/schemas/JSONValue' }
+        submitted_by: { type: string }
+        ci_id: { type: string }
+        ticket_id: { type: string }
+        status: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateFormSubmissionRequest:
+      type: object
+      required: [values]
+      properties:
+        values: { $ref: '#/components/schemas/JSONValue' }
+        ci_id: { type: string }
+        ticket_id: { type: string }
+        status: { type: string }
+    ValidationProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - type: object
+          properties:
+            fields:
+              type: array
+              items:
+                type: object
+                required: [field, message]
+                properties:
+                  field: { type: string }
+                  message: { type: string }
+    FormDefinitionListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties: { data: { type: array, items: { $ref: '#/components/schemas/FormDefinition' } } }
+    FormSubmissionListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties: { data: { type: array, items: { $ref: '#/components/schemas/FormSubmission' } } }
+    WorkflowDefinition:
+      type: object
+      required: [id, organization_id, name, trigger, conditions, actions, active, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        trigger: { $ref: '#/components/schemas/JSONValue' }
+        conditions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
+        actions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
+        active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateWorkflowDefinitionRequest:
+      type: object
+      required: [name, trigger, actions]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        trigger: { $ref: '#/components/schemas/JSONValue' }
+        conditions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
+        actions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
+        active: { type: boolean }
+    UpdateWorkflowDefinitionRequest:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        trigger: { $ref: '#/components/schemas/JSONValue' }
+        conditions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
+        actions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
+        active: { type: boolean }
+    WorkflowStep:
+      type: object
+      required: [id, organization_id, run_id, step_index, action_type, status, input, output, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        run_id: { type: string }
+        step_index: { type: integer }
+        action_type: { type: string }
+        status: { type: string }
+        input: { $ref: '#/components/schemas/JSONValue' }
+        output: { $ref: '#/components/schemas/JSONValue' }
+        error: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    WorkflowRun:
+      type: object
+      required: [id, organization_id, workflow_id, status, trigger, context, started_at, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        workflow_id: { type: string }
+        status: { type: string, enum: [pending, running, waiting_approval, succeeded, failed, cancelled] }
+        trigger: { type: string }
+        context: { $ref: '#/components/schemas/JSONValue' }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        steps: { type: array, items: { $ref: '#/components/schemas/WorkflowStep' } }
+    TriggerWorkflowRequest:
+      type: object
+      required: [trigger, context]
+      properties:
+        trigger: { type: string }
+        context: { $ref: '#/components/schemas/JSONValue' }
+    WorkflowApprovalRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [approved, rejected] }
+        comment: { type: string }
+    WorkflowDefinitionListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties: { data: { type: array, items: { $ref: '#/components/schemas/WorkflowDefinition' } } }
+    WorkflowRunListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties: { data: { type: array, items: { $ref: '#/components/schemas/WorkflowRun' } } }
+    ComplianceRule:
+      type: object
+      required: [id, organization_id, name, severity, category, expression, active, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        ci_type_id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        severity: { type: string, enum: [low, medium, high, critical] }
+        category: { type: string }
+        expression: { $ref: '#/components/schemas/JSONValue' }
+        remediation_hint: { type: string }
+        active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateComplianceRuleRequest:
+      type: object
+      required: [name, severity, category, expression]
+      properties:
+        ci_type_id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        severity: { type: string, enum: [low, medium, high, critical] }
+        category: { type: string }
+        expression: { $ref: '#/components/schemas/JSONValue' }
+        remediation_hint: { type: string }
+        active: { type: boolean }
+    UpdateComplianceRuleRequest:
+      type: object
+      properties:
+        ci_type_id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        severity: { type: string, enum: [low, medium, high, critical] }
+        category: { type: string }
+        expression: { $ref: '#/components/schemas/JSONValue' }
+        remediation_hint: { type: string }
+        active: { type: boolean }
+    ComplianceResult:
+      type: object
+      required: [id, organization_id, rule_id, ci_id, ci_type_id, status, evaluated_at, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        rule_id: { type: string }
+        ci_id: { type: string }
+        ci_type_id: { type: string }
+        status: { type: string, enum: [pass, fail, not_applicable] }
+        details: { type: string }
+        evaluated_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ComplianceScore:
+      type: object
+      required: [passed, failed, not_applicable, score]
+      properties:
+        ci_type_id: { type: string }
+        passed: { type: integer }
+        failed: { type: integer }
+        not_applicable: { type: integer }
+        score: { type: number }
+    ComplianceEvaluationResponse:
+      type: object
+      required: [overall, by_ci_type, results]
+      properties:
+        overall: { $ref: '#/components/schemas/ComplianceScore' }
+        by_ci_type: { type: array, items: { $ref: '#/components/schemas/ComplianceScore' } }
+        results: { type: array, items: { $ref: '#/components/schemas/ComplianceResult' } }
+    ComplianceRuleListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties: { data: { type: array, items: { $ref: '#/components/schemas/ComplianceRule' } } }
+    ComplianceResultListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties: { data: { type: array, items: { $ref: '#/components/schemas/ComplianceResult' } } }
 
     User:
       type: object

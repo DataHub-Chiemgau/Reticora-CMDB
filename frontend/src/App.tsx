@@ -20,6 +20,9 @@ import { PermissionsPage } from './pages/PermissionsPage';
 import { RackPage } from './pages/RackPage';
 import { TopologyPage } from './pages/TopologyPage';
 import { SLAPage } from './pages/SLAPage';
+import { FormsPage } from './pages/FormsPage';
+import { WorkflowPage } from './pages/WorkflowPage';
+import { CompliancePage } from './pages/CompliancePage';
 import { StocktakeListPage } from './pages/StocktakeListPage';
 import { TicketListPage } from './pages/TicketListPage';
 import { UserManagementPage } from './pages/UserManagementPage';
@@ -39,6 +42,9 @@ const pageToPath: Record<AppPage, string> = {
   users: '/users',
   permissions: '/permissions',
   slas: '/slas',
+  forms: '/forms',
+  workflows: '/workflows',
+  compliance: '/compliance',
 };
 
 const pathToPage: Record<string, AppPage> = Object.fromEntries(
@@ -190,6 +196,21 @@ function App() {
                 <NavButton active={currentPage === 'slas'} onClick={() => handleNavigate('slas')}>
                   {t('nav.slas')}
                 </NavButton>
+                <NavButton active={currentPage === 'forms'} onClick={() => handleNavigate('forms')}>
+                  {t('nav.forms')}
+                </NavButton>
+                <NavButton
+                  active={currentPage === 'workflows'}
+                  onClick={() => handleNavigate('workflows')}
+                >
+                  {t('nav.workflows')}
+                </NavButton>
+                <NavButton
+                  active={currentPage === 'compliance'}
+                  onClick={() => handleNavigate('compliance')}
+                >
+                  {t('nav.compliance')}
+                </NavButton>
               </nav>
             ) : null}
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -262,6 +283,9 @@ function App() {
             <Route path="/users" element={<UserManagementPage />} />
             <Route path="/permissions" element={<PermissionsPage />} />
             <Route path="/slas" element={<SLAPage />} />
+            <Route path="/forms" element={<FormsPage />} />
+            <Route path="/workflows" element={<WorkflowPage />} />
+            <Route path="/compliance" element={<CompliancePage />} />
             <Route path="*" element={<CIListPage onCreateCI={openCreateCI} />} />
           </Route>
         </Routes>

@@ -18,7 +18,10 @@ export type AppPage =
   | 'tickets'
   | 'users'
   | 'permissions'
-  | 'slas';
+  | 'slas'
+  | 'forms'
+  | 'workflows'
+  | 'compliance';
 
 interface CommandPaletteProps {
   onNavigate: (page: AppPage) => void;
@@ -155,6 +158,24 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
         label: t('commandPalette.commands.slas'),
         keywords: ['sla service levels breach policies'],
         action: () => onNavigate('slas'),
+      },
+      {
+        id: 'nav-forms',
+        label: t('commandPalette.commands.forms'),
+        keywords: ['forms formulare submissions'],
+        action: () => onNavigate('forms'),
+      },
+      {
+        id: 'nav-workflows',
+        label: t('commandPalette.commands.workflows'),
+        keywords: ['workflow automation approvals'],
+        action: () => onNavigate('workflows'),
+      },
+      {
+        id: 'nav-compliance',
+        label: t('commandPalette.commands.compliance'),
+        keywords: ['compliance iso nis2 score'],
+        action: () => onNavigate('compliance'),
       },
     ],
     [onCreateCI, onNavigate, onToggleDarkMode, t],

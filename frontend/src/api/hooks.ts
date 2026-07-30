@@ -14,6 +14,9 @@ import {
   roleApi,
   permissionApi,
   slaApi,
+  formApi,
+  workflowApi,
+  complianceApi,
 } from '../api/client';
 import type {
   CICreateRequest,
@@ -394,6 +397,76 @@ export function useCreateSLA() {
     mutationFn: (data: SLAPolicyRequest) => slaApi.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['slas'] });
+    },
+  });
+}
+
+// --- Forms / Workflows / Compliance ---
+
+export function useFormDefinitions() {
+  return useQuery({ queryKey: ['forms'], queryFn: () => formApi.list({ active: true }) });
+}
+
+export function useFormSubmissions(formId?: string) {
+  return useQuery({
+    queryKey: ['form-submissions', formId],
+    queryFn: () => formApi.submissions({ form_id: formId }),
+  });
+}
+
+export function useSubmitForm() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, values }: { id: string; values: Record<string, unknown> }) =>
+      formApi.submit(id, { values }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['form-submissions'] }),
+  });
+}
+
+export function useWorkflowDefinitions() {
+  return useQuery({ queryKey: ['workflows'], queryFn: () => workflowApi.list({ active: true }) });
+}
+
+export function useWorkflowRuns() {
+  return useQuery({ queryKey: ['workflow-runs'], queryFn: () => workflowApi.runs() });
+}
+
+export function useTriggerWorkflow() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => workflowApi.trigger(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workflow-runs'] }),
+  });
+}
+
+export function useApproveWorkflowRun() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, decision }: { id: string; decision: 'approved' | 'rejected' }) =>
+      workflowApi.approve(id, decision),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workflow-runs'] }),
+  });
+}
+
+export function useComplianceRules() {
+  return useQuery({ queryKey: ['compliance-rules'], queryFn: () => complianceApi.rules() });
+}
+
+export function useComplianceResults() {
+  return useQuery({ queryKey: ['compliance-results'], queryFn: () => complianceApi.results() });
+}
+
+export function useComplianceScore() {
+  return useQuery({ queryKey: ['compliance-score'], queryFn: () => complianceApi.score() });
+}
+
+export function useEvaluateCompliance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => complianceApi.evaluate(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['compliance-results'] });
+      queryClient.invalidateQueries({ queryKey: ['compliance-score'] });
     },
   });
 }

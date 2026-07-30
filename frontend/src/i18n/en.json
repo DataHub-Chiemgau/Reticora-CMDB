@@ -18,7 +18,10 @@
     "users": "Users",
     "racks": "Racks",
     "permissions": "Permissions",
-    "slas": "SLAs"
+    "slas": "SLAs",
+    "forms": "Forms",
+    "workflows": "Workflows",
+    "compliance": "Compliance"
   },
   "common": {
     "save": "Save",
@@ -56,7 +59,10 @@
       "topology": "Open topology",
       "racks": "Open racks",
       "permissions": "Open permissions",
-      "slas": "Open SLAs"
+      "slas": "Open SLAs",
+      "forms": "Open Forms",
+      "workflows": "Open Workflows",
+      "compliance": "Open Compliance"
     }
   },
   "dashboard": {
@@ -281,5 +287,47 @@
     "breached": "Breached",
     "noBreaches": "No breaches",
     "noBreachesHint": "No tickets are currently outside their SLA targets."
+  },
+  "forms": {
+    "title": "Forms",
+    "subtitle": "Fill and submit JSON-Schema forms.",
+    "loading": "Loading forms…",
+    "errorTitle": "Forms could not be loaded",
+    "definitions": "Form definitions",
+    "emptyTitle": "No forms",
+    "emptyHint": "Active forms appear here.",
+    "noDescription": "No description",
+    "render": "Form",
+    "submit": "Submit"
+  },
+  "workflows": {
+    "title": "Workflows",
+    "subtitle": "Start definitions, inspect runs and decide approvals.",
+    "loading": "Loading workflows…",
+    "errorTitle": "Workflows could not be loaded",
+    "definitions": "Definitions",
+    "emptyTitle": "No workflows",
+    "emptyHint": "Active workflow definitions appear here.",
+    "run": "Run",
+    "runs": "Runs",
+    "noRuns": "No runs",
+    "noRunsHint": "Started workflows appear here.",
+    "approve": "Approve",
+    "reject": "Reject"
+  },
+  "compliance": {
+    "title": "Compliance",
+    "subtitle": "Rules evaluate CIs and calculate compliance score.",
+    "loading": "Loading compliance…",
+    "errorTitle": "Compliance could not be loaded",
+    "evaluate": "Evaluate",
+    "score": "Score",
+    "scoreHint": "{{passed}} passed, {{failed}} failed",
+    "rules": "Rules",
+    "emptyRules": "No rules",
+    "emptyRulesHint": "Compliance rules appear here.",
+    "failures": "Failing results",
+    "noFailures": "No deviations",
+    "noFailuresHint": "No failing results are currently stored."
   }
 }

@@ -14,12 +14,14 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
@@ -34,6 +36,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -59,6 +62,9 @@ type Repositories struct {
 	Metrics           monitoring.MetricStore
 	Permission        permission.Repository
 	SLA               sla.Repository
+	Form              form.Repository
+	Workflow          workflow.Repository
+	Compliance        compliance.Repository
 }
 
 // Options carries everything the router needs beyond the repositories.
@@ -111,6 +117,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 		user.NewHandler(repos.User),
 		permission.NewHandler(repos.Permission),
 		sla.NewHandler(repos.SLA, repos.Ticket),
+		form.NewHandler(repos.Form),
+		workflow.NewHandler(repos.Workflow, workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher)),
+		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)),
 		tenantapi.NewHandler(repos.TenantHierarchy),
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
@@ -138,6 +147,12 @@ func validate(repos Repositories, opts Options) error {
 		return fmt.Errorf("server: permission repository is required")
 	case repos.SLA == nil:
 		return fmt.Errorf("server: SLA repository is required")
+	case repos.Form == nil:
+		return fmt.Errorf("server: form repository is required")
+	case repos.Workflow == nil:
+		return fmt.Errorf("server: workflow repository is required")
+	case repos.Compliance == nil:
+		return fmt.Errorf("server: compliance repository is required")
 	case repos.CI == nil:
 		return fmt.Errorf("server: CI repository is required")
 	case repos.Relationship == nil:

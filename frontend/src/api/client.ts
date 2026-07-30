@@ -155,11 +155,13 @@ export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<
 
 function buildQuery(params: object) {
   const query = new URLSearchParams();
-  Object.entries(params as Record<string, string | number | undefined>).forEach(([key, value]) => {
-    if (value !== undefined && value !== '') {
-      query.set(key, String(value));
-    }
-  });
+  Object.entries(params as Record<string, string | number | boolean | undefined>).forEach(
+    ([key, value]) => {
+      if (value !== undefined && value !== '') {
+        query.set(key, String(value));
+      }
+    },
+  );
   const value = query.toString();
   return value ? `?${value}` : '';
 }
@@ -960,5 +962,173 @@ export const slaApi = {
       method: 'POST',
       body: JSON.stringify({ sla_id }),
     });
+  },
+};
+
+// --- Stage 5: Forms / Workflows / Compliance ---
+
+export type JsonRecord = Record<string, unknown>;
+
+export interface FormDefinition {
+  id: string;
+  organization_id: string;
+  client_id?: string;
+  name: string;
+  description?: string;
+  schema: JsonRecord;
+  ui_hints: JsonRecord;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FormSubmission {
+  id: string;
+  organization_id: string;
+  form_id: string;
+  values: JsonRecord;
+  submitted_by?: string;
+  ci_id?: string;
+  ticket_id?: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowDefinition {
+  id: string;
+  organization_id: string;
+  name: string;
+  description?: string;
+  trigger: JsonRecord;
+  conditions: JsonRecord[];
+  actions: JsonRecord[];
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowStep {
+  id: string;
+  run_id: string;
+  step_index: number;
+  action_type: string;
+  status: string;
+  input: JsonRecord;
+  output: JsonRecord;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowRun {
+  id: string;
+  organization_id: string;
+  workflow_id: string;
+  status: string;
+  trigger: string;
+  context: JsonRecord;
+  started_at: string;
+  finished_at?: string;
+  created_at: string;
+  updated_at: string;
+  steps?: WorkflowStep[];
+}
+
+export interface ComplianceRule {
+  id: string;
+  organization_id: string;
+  ci_type_id?: string;
+  name: string;
+  description?: string;
+  severity: string;
+  category: string;
+  expression: JsonRecord;
+  remediation_hint?: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ComplianceResult {
+  id: string;
+  organization_id: string;
+  rule_id: string;
+  ci_id: string;
+  ci_type_id: string;
+  status: 'pass' | 'fail' | 'not_applicable';
+  details?: string;
+  evaluated_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ComplianceScore {
+  ci_type_id?: string;
+  passed: number;
+  failed: number;
+  not_applicable: number;
+  score: number;
+}
+
+export interface ComplianceEvaluationResponse {
+  overall: ComplianceScore;
+  by_ci_type: ComplianceScore[];
+  results: ComplianceResult[];
+}
+
+export const formApi = {
+  list(params: ListParams & { active?: boolean } = {}): Promise<PaginatedResponse<FormDefinition>> {
+    return fetchAPI(`/forms${buildQuery(params)}`);
+  },
+  create(data: Partial<FormDefinition>): Promise<FormDefinition> {
+    return fetchAPI('/forms', { method: 'POST', body: JSON.stringify(data) });
+  },
+  submit(id: string, data: { values: JsonRecord; ci_id?: string; ticket_id?: string }) {
+    return fetchAPI<FormSubmission>(`/forms/${id}/submissions`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  submissions(params: ListParams & { form_id?: string } = {}) {
+    return fetchAPI<PaginatedResponse<FormSubmission>>(`/form-submissions${buildQuery(params)}`);
+  },
+};
+
+export const workflowApi = {
+  list(params: ListParams & { active?: boolean } = {}) {
+    return fetchAPI<PaginatedResponse<WorkflowDefinition>>(`/workflows${buildQuery(params)}`);
+  },
+  runs(params: ListParams & { workflow_id?: string; status?: string } = {}) {
+    return fetchAPI<PaginatedResponse<WorkflowRun>>(`/workflow-runs${buildQuery(params)}`);
+  },
+  trigger(id: string, context: JsonRecord = {}) {
+    return fetchAPI<WorkflowRun>(`/workflows/${id}/runs`, {
+      method: 'POST',
+      body: JSON.stringify({ trigger: 'manual', context }),
+    });
+  },
+  approve(id: string, decision: 'approved' | 'rejected') {
+    return fetchAPI<WorkflowRun>(`/workflow-runs/${id}/approval`, {
+      method: 'POST',
+      body: JSON.stringify({ decision }),
+    });
+  },
+};
+
+export const complianceApi = {
+  rules(params: ListParams = {}) {
+    return fetchAPI<PaginatedResponse<ComplianceRule>>(`/compliance/rules${buildQuery(params)}`);
+  },
+  results(params: ListParams & { status?: string } = {}) {
+    return fetchAPI<PaginatedResponse<ComplianceResult>>(
+      `/compliance/results${buildQuery(params)}`,
+    );
+  },
+  score() {
+    return fetchAPI<ComplianceEvaluationResponse>('/compliance/score');
+  },
+  evaluate() {
+    return fetchAPI<ComplianceEvaluationResponse>('/compliance/evaluations', { method: 'POST' });
   },
 };

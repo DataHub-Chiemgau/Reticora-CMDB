@@ -1913,6 +1913,312 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/forms': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List form definitions */
+    get: operations['listFormDefinitions'];
+    put?: never;
+    /** Create a form definition */
+    post: operations['createFormDefinition'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/forms/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a form definition */
+    get: operations['getFormDefinition'];
+    put?: never;
+    post?: never;
+    /** Delete a form definition */
+    delete: operations['deleteFormDefinition'];
+    options?: never;
+    head?: never;
+    /** Update a form definition */
+    patch: operations['updateFormDefinition'];
+    trace?: never;
+  };
+  '/api/v1/forms/{id}/submissions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List submissions for a form */
+    get: operations['listFormSubmissions'];
+    put?: never;
+    /** Submit values for a form */
+    post: operations['createFormSubmission'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/form-submissions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List form submissions */
+    get: operations['listAllFormSubmissions'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/form-submissions/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a form submission */
+    get: operations['getFormSubmission'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/workflows': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List workflow definitions */
+    get: operations['listWorkflows'];
+    put?: never;
+    /** Create a workflow definition */
+    post: operations['createWorkflow'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/workflows/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a workflow definition */
+    get: operations['getWorkflow'];
+    put?: never;
+    post?: never;
+    /** Delete a workflow definition */
+    delete: operations['deleteWorkflow'];
+    options?: never;
+    head?: never;
+    /** Update a workflow definition */
+    patch: operations['updateWorkflow'];
+    trace?: never;
+  };
+  '/api/v1/workflows/{id}/runs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Trigger a workflow run */
+    post: operations['triggerWorkflowRun'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/workflow-runs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List workflow runs */
+    get: operations['listWorkflowRuns'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/workflow-runs/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get workflow run details */
+    get: operations['getWorkflowRun'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/workflow-runs/{id}/approval': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Approve or reject a waiting workflow run */
+    post: operations['approveWorkflowRun'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/compliance/rules': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List compliance rules */
+    get: operations['listComplianceRules'];
+    put?: never;
+    /** Create a compliance rule */
+    post: operations['createComplianceRule'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/compliance/rules/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a compliance rule */
+    get: operations['getComplianceRule'];
+    put?: never;
+    post?: never;
+    /** Delete a compliance rule */
+    delete: operations['deleteComplianceRule'];
+    options?: never;
+    head?: never;
+    /** Update a compliance rule */
+    patch: operations['updateComplianceRule'];
+    trace?: never;
+  };
+  '/api/v1/compliance/evaluations': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Evaluate active compliance rules against tenant CIs */
+    post: operations['evaluateCompliance'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/compliance/results': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List stored compliance results */
+    get: operations['listComplianceResults'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/compliance/score': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get compliance score from stored results */
+    get: operations['getComplianceScore'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2684,6 +2990,221 @@ export interface components {
     };
     TicketSLAListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['TicketSLA'][];
+    };
+    /** @description Arbitrary JSON value. */
+    JSONValue: unknown;
+    FormDefinition: {
+      id: string;
+      organization_id: string;
+      client_id?: string;
+      name: string;
+      description?: string;
+      schema: components['schemas']['JSONValue'];
+      ui_hints: components['schemas']['JSONValue'];
+      active: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateFormDefinitionRequest: {
+      client_id?: string;
+      name: string;
+      description?: string;
+      schema: components['schemas']['JSONValue'];
+      ui_hints?: components['schemas']['JSONValue'];
+      active?: boolean;
+    };
+    UpdateFormDefinitionRequest: {
+      client_id?: string;
+      name?: string;
+      description?: string;
+      schema?: components['schemas']['JSONValue'];
+      ui_hints?: components['schemas']['JSONValue'];
+      active?: boolean;
+    };
+    FormSubmission: {
+      id: string;
+      organization_id: string;
+      form_id: string;
+      values: components['schemas']['JSONValue'];
+      submitted_by?: string;
+      ci_id?: string;
+      ticket_id?: string;
+      status: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateFormSubmissionRequest: {
+      values: components['schemas']['JSONValue'];
+      ci_id?: string;
+      ticket_id?: string;
+      status?: string;
+    };
+    ValidationProblem: components['schemas']['ProblemDetail'] & {
+      fields?: {
+        field: string;
+        message: string;
+      }[];
+    };
+    FormDefinitionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['FormDefinition'][];
+    };
+    FormSubmissionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['FormSubmission'][];
+    };
+    WorkflowDefinition: {
+      id: string;
+      organization_id: string;
+      name: string;
+      description?: string;
+      trigger: components['schemas']['JSONValue'];
+      conditions: components['schemas']['JSONValue'][];
+      actions: components['schemas']['JSONValue'][];
+      active: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateWorkflowDefinitionRequest: {
+      name: string;
+      description?: string;
+      trigger: components['schemas']['JSONValue'];
+      conditions?: components['schemas']['JSONValue'][];
+      actions: components['schemas']['JSONValue'][];
+      active?: boolean;
+    };
+    UpdateWorkflowDefinitionRequest: {
+      name?: string;
+      description?: string;
+      trigger?: components['schemas']['JSONValue'];
+      conditions?: components['schemas']['JSONValue'][];
+      actions?: components['schemas']['JSONValue'][];
+      active?: boolean;
+    };
+    WorkflowStep: {
+      id: string;
+      organization_id: string;
+      run_id: string;
+      step_index: number;
+      action_type: string;
+      status: string;
+      input: components['schemas']['JSONValue'];
+      output: components['schemas']['JSONValue'];
+      error?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    WorkflowRun: {
+      id: string;
+      organization_id: string;
+      workflow_id: string;
+      /** @enum {string} */
+      status: 'pending' | 'running' | 'waiting_approval' | 'succeeded' | 'failed' | 'cancelled';
+      trigger: string;
+      context: components['schemas']['JSONValue'];
+      /** Format: date-time */
+      started_at: string;
+      /** Format: date-time */
+      finished_at?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+      steps?: components['schemas']['WorkflowStep'][];
+    };
+    TriggerWorkflowRequest: {
+      trigger: string;
+      context: components['schemas']['JSONValue'];
+    };
+    WorkflowApprovalRequest: {
+      /** @enum {string} */
+      decision: 'approved' | 'rejected';
+      comment?: string;
+    };
+    WorkflowDefinitionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['WorkflowDefinition'][];
+    };
+    WorkflowRunListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['WorkflowRun'][];
+    };
+    ComplianceRule: {
+      id: string;
+      organization_id: string;
+      ci_type_id?: string;
+      name: string;
+      description?: string;
+      /** @enum {string} */
+      severity: 'low' | 'medium' | 'high' | 'critical';
+      category: string;
+      expression: components['schemas']['JSONValue'];
+      remediation_hint?: string;
+      active: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateComplianceRuleRequest: {
+      ci_type_id?: string;
+      name: string;
+      description?: string;
+      /** @enum {string} */
+      severity: 'low' | 'medium' | 'high' | 'critical';
+      category: string;
+      expression: components['schemas']['JSONValue'];
+      remediation_hint?: string;
+      active?: boolean;
+    };
+    UpdateComplianceRuleRequest: {
+      ci_type_id?: string;
+      name?: string;
+      description?: string;
+      /** @enum {string} */
+      severity?: 'low' | 'medium' | 'high' | 'critical';
+      category?: string;
+      expression?: components['schemas']['JSONValue'];
+      remediation_hint?: string;
+      active?: boolean;
+    };
+    ComplianceResult: {
+      id: string;
+      organization_id: string;
+      rule_id: string;
+      ci_id: string;
+      ci_type_id: string;
+      /** @enum {string} */
+      status: 'pass' | 'fail' | 'not_applicable';
+      details?: string;
+      /** Format: date-time */
+      evaluated_at: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    ComplianceScore: {
+      ci_type_id?: string;
+      passed: number;
+      failed: number;
+      not_applicable: number;
+      score: number;
+    };
+    ComplianceEvaluationResponse: {
+      overall: components['schemas']['ComplianceScore'];
+      by_ci_type: components['schemas']['ComplianceScore'][];
+      results: components['schemas']['ComplianceResult'][];
+    };
+    ComplianceRuleListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ComplianceRule'][];
+    };
+    ComplianceResultListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ComplianceResult'][];
     };
     User: {
       id: string;
@@ -8411,6 +8932,742 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+    };
+  };
+  listFormDefinitions: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        client_id?: string;
+        active?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated form definitions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormDefinitionListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createFormDefinition: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateFormDefinitionRequest'];
+      };
+    };
+    responses: {
+      /** @description Form definition created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormDefinition'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getFormDefinition: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Form definition */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormDefinition'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteFormDefinition: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Form definition deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateFormDefinition: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateFormDefinitionRequest'];
+      };
+    };
+    responses: {
+      /** @description Form definition updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormDefinition'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listFormSubmissions: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        status?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated form submissions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormSubmissionListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createFormSubmission: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateFormSubmissionRequest'];
+      };
+    };
+    responses: {
+      /** @description Form submission created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormSubmission'];
+        };
+      };
+      /** @description Bad request or validation problem */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ValidationProblem'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listAllFormSubmissions: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        form_id?: string;
+        status?: string;
+        ticket_id?: string;
+        ci_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated form submissions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormSubmissionListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getFormSubmission: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Form submission */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormSubmission'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listWorkflows: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        active?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated workflows */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkflowDefinitionListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createWorkflow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateWorkflowDefinitionRequest'];
+      };
+    };
+    responses: {
+      /** @description Workflow created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkflowDefinition'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getWorkflow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Workflow */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkflowDefinition'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteWorkflow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Workflow deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateWorkflow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateWorkflowDefinitionRequest'];
+      };
+    };
+    responses: {
+      /** @description Workflow updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkflowDefinition'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  triggerWorkflowRun: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TriggerWorkflowRequest'];
+      };
+    };
+    responses: {
+      /** @description Workflow run */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkflowRun'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listWorkflowRuns: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        workflow_id?: string;
+        status?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated workflow runs */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkflowRunListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getWorkflowRun: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Workflow run */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkflowRun'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  approveWorkflowRun: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowApprovalRequest'];
+      };
+    };
+    responses: {
+      /** @description Updated workflow run */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkflowRun'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  listComplianceRules: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        ci_type_id?: string;
+        category?: string;
+        active?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated compliance rules */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceRuleListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createComplianceRule: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateComplianceRuleRequest'];
+      };
+    };
+    responses: {
+      /** @description Compliance rule created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceRule'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getComplianceRule: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Compliance rule */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceRule'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteComplianceRule: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Compliance rule deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateComplianceRule: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateComplianceRuleRequest'];
+      };
+    };
+    responses: {
+      /** @description Compliance rule updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceRule'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  evaluateCompliance: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Evaluation results and score */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceEvaluationResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listComplianceResults: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        ci_type_id?: string;
+        status?: 'pass' | 'fail' | 'not_applicable';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated compliance results */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceResultListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getComplianceScore: {
+    parameters: {
+      query?: {
+        ci_type_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Compliance score */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceEvaluationResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
     };
   };
 }

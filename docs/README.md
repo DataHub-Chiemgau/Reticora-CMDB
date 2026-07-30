@@ -89,6 +89,8 @@ Database schema is managed with [golang-migrate](https://github.com/golang-migra
 | 0024 | durable_webhook_delivery | Retry state (`status`, `max_attempts`, `next_retry_at`, `error`) and due-delivery index on `webhook_delivery` |
 | 0025 | reconciliation_topology | Discovery job runs, the reconciliation `review_item` queue, relationship suppressions and the `powered_by` relationship type |
 | 0026 | permissions_sla | First-class permission catalogue/role grants and SLA policy plus per-ticket clock state |
+| 0027 | workflows_forms | JSON-Schema form definitions/submissions and workflow definitions, runs and step history |
+| 0028 | compliance | Compliance rules and per-CI evaluation results |
 
 **Running migrations:**
 
@@ -164,6 +166,9 @@ internal/
 ├── ticket/         # Ticket/issue tracking
 ├── permission/     # RBAC/ABAC permission catalogue and effective grants
 ├── sla/            # SLA policies and ticket clock state
+├── form/           # JSON-Schema form definitions and submissions
+├── workflow/       # Workflow definitions, deterministic executor and approvals
+├── compliance/     # Compliance rules, evaluator and results
 ├── entitlement/    # License/feature-flag enforcement
 ├── export/         # Async export jobs (CSV, DATEV)
 ├── monitoring/     # Metric ingestion and queries
@@ -217,8 +222,8 @@ Repository errors deny access (fail-closed). Plan matrix:
 |------|----------|
 | essential | cmdb, discovery, inventory |
 | standard | + documents, stocktake, ticketing, export, webhooks |
-| pro | + monitoring |
-| enterprise | + iga, endpoint_agent |
+| pro | + monitoring, workflow_forms |
+| enterprise | + iga, endpoint_agent, workflow_forms, compliance |
 
 
 **Permissions and SLA:** migration 0026 turns permissions into data instead of
@@ -233,6 +238,27 @@ computed from persisted timestamps, not from UI-only heuristics. The first
 implementation treats `business_calendar` as a policy flag and still calculates
 due times in elapsed minutes; that preserves the contract while leaving calendar
 working-hours expansion for a dedicated scheduler.
+
+
+**Workflow builder and forms:** migration 0027 adds `form_def`,
+`form_submission`, `workflow_def`, `workflow_run` and `workflow_step`. Form
+submissions are validated server-side against the stored JSON Schema before they
+are persisted; the focused validator supports the subset used by Reticora forms
+(type, required, enum, numeric/string bounds, pattern, nested objects and arrays)
+and returns an RFC 7807 validation problem with field-level errors. Workflow
+definitions carry a trigger, conditions and ordered actions. The executor creates
+a run, evaluates conditions deterministically, records every step, and pauses on
+`require_approval` until `/api/v1/workflow-runs/{id}/approval` approves or
+rejects it. Side effects are routed through repositories or the webhook
+dispatcher rather than ad-hoc HTTP calls.
+
+**Compliance evaluation:** migration 0028 adds `compliance_rule` and
+`compliance_result`. Rules target a CI type and contain a small expression over
+CI columns or `attributes.*`. `POST /api/v1/compliance/evaluations` evaluates
+active rules against tenant CIs, replaces stored results for the tenant and
+returns scores by CI type plus the overall pass percentage. The score excludes
+`not_applicable` checks from the denominator and stored failures are exposed to
+the frontend compliance page.
 
 **Durable webhook delivery:** every dispatch is persisted to `webhook_delivery`
 before the first HTTP attempt and updated after each attempt. Failed attempts
@@ -343,7 +369,7 @@ npm run e2e                 # Playwright end-to-end tests
 **Routes:** `/dashboard`, `/cmdb` (CI list), `/cmdb/:id` (CI detail with
 overview, attributes, relationships and topology neighbours), `/topology`,
 `/racks`, `/discovery`, `/assets`, `/assignments`, `/documents`, `/stocktake`,
-`/tickets`, `/users`, `/permissions` and `/slas`. Every CI is deep-linkable: list rows, topology nodes,
+`/tickets`, `/users`, `/permissions`, `/slas`, `/forms`, `/workflows` and `/compliance`. Every CI is deep-linkable: list rows, topology nodes,
 rack mounts and relationship entries all link to `/cmdb/:id`, so a CI can be
 shared as a URL.
 

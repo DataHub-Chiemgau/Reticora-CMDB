@@ -28,6 +28,11 @@ var gatedRoutes = []struct {
 	{"/api/v1/exports", FeatureExport},
 	{"/api/v1/monitoring", FeatureMonitoring},
 	{"/api/v1/metrics", FeatureMonitoring},
+	{"/api/v1/forms", FeatureWorkflowForms},
+	{"/api/v1/form-submissions", FeatureWorkflowForms},
+	{"/api/v1/workflows", FeatureWorkflowForms},
+	{"/api/v1/workflow-runs", FeatureWorkflowForms},
+	{"/api/v1/compliance", FeatureCompliance},
 }
 
 // RequiredFeature returns the feature key gating the given request path.

@@ -5,11 +5,13 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
@@ -21,6 +23,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -49,6 +52,9 @@ func MemoryRepositories() Repositories {
 		Metrics:           monitoring.NewMemoryMetricStore(),
 		Permission:        permission.NewMemoryRepository(),
 		SLA:               sla.NewMemoryRepository(),
+		Form:              form.NewMemoryRepository(),
+		Workflow:          workflow.NewMemoryRepository(),
+		Compliance:        compliance.NewMemoryRepository(),
 	}
 }
 
@@ -77,5 +83,8 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Metrics:           monitoring.NewMemoryMetricStore(),
 		Permission:        permission.NewPGRepository(pool),
 		SLA:               sla.NewPGRepository(pool),
+		Form:              form.NewPGRepository(pool),
+		Workflow:          workflow.NewPGRepository(pool),
+		Compliance:        compliance.NewPGRepository(pool),
 	}
 }
