@@ -1,6 +1,7 @@
 package export
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +20,7 @@ func tenantCtx(r *http.Request) *http.Request {
 
 func TestExportJSON(t *testing.T) {
 	repo := ci.NewMemoryRepository()
-	repo.Create(&ci.Item{
+	repo.Create(context.Background(), &ci.Item{
 		OrganizationID: "org-1",
 		CITypeID:       "type-server",
 		Name:           "srv-01",
@@ -52,7 +53,7 @@ func TestExportJSON(t *testing.T) {
 
 func TestExportCSV(t *testing.T) {
 	repo := ci.NewMemoryRepository()
-	repo.Create(&ci.Item{
+	repo.Create(context.Background(), &ci.Item{
 		OrganizationID: "org-1",
 		CITypeID:       "type-server",
 		Name:           "srv-01",
@@ -89,7 +90,7 @@ func TestExportCSV(t *testing.T) {
 
 func TestExportDATEV(t *testing.T) {
 	repo := ci.NewMemoryRepository()
-	repo.Create(&ci.Item{
+	repo.Create(context.Background(), &ci.Item{
 		OrganizationID: "org-1",
 		CITypeID:       "type-server",
 		Name:           "srv-01",

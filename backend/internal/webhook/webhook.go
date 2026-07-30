@@ -35,6 +35,10 @@ type CreateRequest struct {
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
+// TestEvent is the event name used by the webhook test endpoint. It is
+// deliberately not part of ValidEvents so it cannot be subscribed to.
+const TestEvent = "webhook.test"
+
 // ValidEvents lists allowed webhook events.
 var ValidEvents = map[string]bool{
 	"ci.created":           true,
@@ -146,14 +150,25 @@ func (r *MemoryRepository) ListByEvent(orgID, event string) ([]Subscription, err
 	return result, nil
 }
 
-// Handler provides HTTP handlers for webhook endpoints.
-type Handler struct {
-	repo Repository
+// TestDeliverer performs a single synchronous delivery for the test endpoint.
+type TestDeliverer interface {
+	DeliverOnce(sub Subscription, event string, payload any) (Delivery, error)
 }
 
-// NewHandler creates a new webhook handler.
-func NewHandler(repo Repository) *Handler {
-	return &Handler{repo: repo}
+// Handler provides HTTP handlers for webhook endpoints.
+type Handler struct {
+	repo      Repository
+	deliverer TestDeliverer
+}
+
+// NewHandler creates a new webhook handler. An optional TestDeliverer enables
+// POST /api/v1/webhooks/{id}/test.
+func NewHandler(repo Repository, deliverer ...TestDeliverer) *Handler {
+	h := &Handler{repo: repo}
+	if len(deliverer) > 0 {
+		h.deliverer = deliverer[0]
+	}
+	return h
 }
 
 // RegisterRoutes registers webhook routes.
@@ -162,6 +177,41 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/webhooks", h.Create)
 	r.Get("/api/v1/webhooks/{id}", h.Get)
 	r.Delete("/api/v1/webhooks/{id}", h.Delete)
+	r.Post("/api/v1/webhooks/{id}/test", h.Test)
+}
+
+// Test handles POST /api/v1/webhooks/{id}/test by sending a single signed
+// `webhook.test` payload to the subscription URL and returning the attempt.
+func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	if h.deliverer == nil {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "webhook dispatcher is not configured")
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+	sub, err := h.repo.GetByID(t.OrganizationID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
+		return
+	}
+
+	delivery, err := h.deliverer.DeliverOnce(*sub, TestEvent, map[string]any{
+		"event":           TestEvent,
+		"subscription_id": sub.ID,
+		"organization_id": sub.OrganizationID,
+		"sent_at":         time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
+	api.WriteJSON(w, http.StatusOK, delivery)
 }
 
 // List handles GET /api/v1/webhooks

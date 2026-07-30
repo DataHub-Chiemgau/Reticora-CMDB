@@ -244,7 +244,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, _, err := h.ciRepo.List(t.OrganizationID, ci.FilterParams{}, api.PaginationParams{Limit: 10000, Offset: 0})
+	existing, _, err := h.ciRepo.List(r.Context(), t.OrganizationID, ci.FilterParams{}, api.PaginationParams{Limit: 10000, Offset: 0})
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -276,14 +276,14 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 				FirstSeenAt:     &nowTime,
 				LastSeenAt:      &nowTime,
 			}
-			if err := h.ciRepo.Create(&newItem); err != nil {
+			if err := h.ciRepo.Create(r.Context(), &newItem); err != nil {
 				api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 				return
 			}
 			existing = append(existing, newItem)
 			resp.Created++
 		case ReconcileMatched:
-			updated, err := h.ciRepo.Update(t.OrganizationID, result.MatchedCIID, ci.UpdateRequest{
+			updated, err := h.ciRepo.Update(r.Context(), t.OrganizationID, result.MatchedCIID, ci.UpdateRequest{
 				Name:            stringPtr(item.Name),
 				Manufacturer:    stringPtr(item.Manufacturer),
 				Model:           stringPtr(item.Model),

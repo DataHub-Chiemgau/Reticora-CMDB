@@ -74,7 +74,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
 		return fmt.Errorf("set tenant context: %w", err)
 	}
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_org', $1, true)", orgID); err != nil {
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
 		return fmt.Errorf("set legacy tenant context: %w", err)
 	}
 

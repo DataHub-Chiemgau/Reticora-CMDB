@@ -34,6 +34,60 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: reticora
+          POSTGRES_PASSWORD: reticora
+          POSTGRES_DB: reticora_migrations
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U reticora"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: reticora
+      DATABASE_URL: postgres://reticora:reticora@localhost:5432/reticora_migrations?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install golang-migrate
+        run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
+
+      - name: Apply all migrations
+        run: migrate -path backend/migrations -database "$DATABASE_URL" up
+
+      - name: Revert all migrations
+        run: migrate -path backend/migrations -database "$DATABASE_URL" down -all
+
+      - name: Re-apply all migrations
+        run: migrate -path backend/migrations -database "$DATABASE_URL" up
+
+      - name: Assert every tenant policy uses app.org_id
+        run: |
+          drifted=$(psql "$DATABASE_URL" -tAc "SELECT string_agg(tablename || '.' || policyname, ', ') FROM pg_policies WHERE schemaname = 'public' AND (qual LIKE '%app.organization_id%' OR qual LIKE '%app.current_org%')")
+          if [ -n "$drifted" ]; then
+            echo "RLS policies still reference a legacy session variable: $drifted"
+            exit 1
+          fi
+
+      - name: Assert RLS is forced on every tenant table
+        run: |
+          unforced=$(psql "$DATABASE_URL" -tAc "SELECT string_agg(c.relname, ', ') FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity AND NOT c.relforcerowsecurity")
+          if [ -n "$unforced" ]; then
+            echo "Tables with RLS enabled but not forced: $unforced"
+            exit 1
+          fi
+
   lint-backend:
     runs-on: ubuntu-latest
     defaults:

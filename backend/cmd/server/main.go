@@ -15,6 +15,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
@@ -138,6 +139,7 @@ func main() {
 		ticketRepo     ticket.Repository
 		userRepo       user.Repository
 		credentialRepo credential.Repository
+		auditHandler   *audit.Handler
 	)
 
 	if *noDB {
@@ -166,7 +168,9 @@ func main() {
 		defer pool.Close()
 
 		slog.Info("connected to PostgreSQL", "url", maskDSN(cfg.DatabaseURL))
-		ciRepo = ci.NewPGRepository(pool)
+		auditRecorder := audit.NewPGRecorder()
+		auditHandler = audit.NewHandler(pool)
+		ciRepo = ci.NewPGRepositoryWithAudit(pool, auditRecorder)
 		relRepo = relationship.NewPGRepository(pool)
 		webhookRepo = webhook.NewPGRepository(pool)
 		discoveryRepo = discovery.NewPGRepository(pool)
@@ -190,10 +194,11 @@ func main() {
 	}()
 
 	// Handlers
+	ciSvc := ci.NewService(ciRepo)
 	identityHandler := identity.NewHandler(oidcProvider, sessionIssuer)
-	ciHandler := ci.NewHandler(ciRepo, webhookDispatcher)
+	ciHandler := ci.NewHandler(ciSvc, webhookDispatcher)
 	relHandler := relationship.NewHandler(relRepo)
-	webhookHandler := webhook.NewHandler(webhookRepo)
+	webhookHandler := webhook.NewHandler(webhookRepo, webhookDispatcher)
 	discoveryHandler := discovery.NewHandler(discoveryRepo, ciRepo)
 	exportHandler := export.NewHandler(ciRepo)
 	entitlementHandler := entitlement.NewHandler(entitlementSvc)
@@ -248,6 +253,9 @@ func main() {
 	monitoringHandler.RegisterRoutes(mux)
 	graphqlHandler.RegisterRoutes(mux)
 	credentialHandler.RegisterRoutes(mux)
+	if auditHandler != nil {
+		auditHandler.RegisterRoutes(mux)
+	}
 
 	// Middleware chain per spec:
 	// RequestID/Tracing -> Panic-Recovery -> Auth -> Tenant -> Entitlement ->

@@ -1,6 +1,7 @@
 package ci
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -22,7 +23,7 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func (r *MemoryRepository) List(orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
+func (r *MemoryRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -61,7 +62,7 @@ func (r *MemoryRepository) List(orgID string, filter FilterParams, page api.Pagi
 	return result[start:end], total, nil
 }
 
-func (r *MemoryRepository) GetByID(orgID, id string) (*Item, error) {
+func (r *MemoryRepository) GetByID(ctx context.Context, orgID, id string) (*Item, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -72,7 +73,7 @@ func (r *MemoryRepository) GetByID(orgID, id string) (*Item, error) {
 	return item, nil
 }
 
-func (r *MemoryRepository) Create(item *Item) error {
+func (r *MemoryRepository) Create(ctx context.Context, item *Item) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -85,7 +86,7 @@ func (r *MemoryRepository) Create(item *Item) error {
 	return nil
 }
 
-func (r *MemoryRepository) Update(orgID, id string, req UpdateRequest) (*Item, error) {
+func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -136,7 +137,7 @@ func (r *MemoryRepository) Update(orgID, id string, req UpdateRequest) (*Item, e
 	return item, nil
 }
 
-func (r *MemoryRepository) Delete(orgID, id string) error {
+func (r *MemoryRepository) Delete(ctx context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -146,6 +147,11 @@ func (r *MemoryRepository) Delete(orgID, id string) error {
 	}
 	delete(r.items, id)
 	return nil
+}
+
+// ListChanges returns no persisted history for the in-memory repository.
+func (r *MemoryRepository) ListChanges(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Change, int, error) {
+	return []Change{}, 0, nil
 }
 
 func containsIgnoreCase(s, sub string) bool {

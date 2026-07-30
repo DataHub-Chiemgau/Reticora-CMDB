@@ -202,7 +202,7 @@ func (h *Handler) resolveCIs(ctx context.Context, args map[string]any) (any, err
 		offset = decodeCursor(asString(v))
 	}
 
-	items, total, err := h.ciRepo.List(t.OrganizationID, filter, api.PaginationParams{Limit: first, Offset: offset})
+	items, total, err := h.ciRepo.List(ctx, t.OrganizationID, filter, api.PaginationParams{Limit: first, Offset: offset})
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +242,7 @@ func (h *Handler) resolveCI(ctx context.Context, args map[string]any) (any, erro
 		return nil, fmt.Errorf("id is required")
 	}
 
-	return h.ciRepo.GetByID(t.OrganizationID, id)
+	return h.ciRepo.GetByID(ctx, t.OrganizationID, id)
 }
 
 func (h *Handler) resolveRelationships(ctx context.Context, args map[string]any) (any, error) {

@@ -105,6 +105,31 @@ func (d *Dispatcher) Dispatch(orgID, event string, payload any) {
 	}
 }
 
+// DeliverOnce performs a single synchronous delivery attempt against the given
+// subscription and returns the recorded attempt. It is used by the webhook test
+// endpoint, where the caller wants immediate feedback instead of a queued retry
+// sequence.
+func (d *Dispatcher) DeliverOnce(sub Subscription, event string, payload any) (Delivery, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return Delivery{}, fmt.Errorf("marshal webhook payload: %w", err)
+	}
+
+	job := deliveryJob{
+		deliveryID: d.nextID(),
+		orgID:      sub.OrganizationID,
+		event:      event,
+		payload:    body,
+		sub:        sub,
+	}
+
+	statusCode, sendErr := d.send(job)
+	d.recordAttempt(job, 1, statusCode, sendErr)
+
+	deliveries := d.Deliveries()
+	return deliveries[len(deliveries)-1], nil
+}
+
 // Deliveries returns a snapshot of recorded delivery attempts.
 func (d *Dispatcher) Deliveries() []Delivery {
 	d.mu.RLock()

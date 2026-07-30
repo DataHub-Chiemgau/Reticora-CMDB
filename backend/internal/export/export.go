@@ -48,7 +48,7 @@ func (h *Handler) ExportCIs(w http.ResponseWriter, r *http.Request) {
 		ClientID: r.URL.Query().Get("client_id"),
 	}
 
-	items, _, err := h.ciRepo.List(t.OrganizationID, filter, api.PaginationParams{Limit: 10000, Offset: 0})
+	items, _, err := h.ciRepo.List(r.Context(), t.OrganizationID, filter, api.PaginationParams{Limit: 10000, Offset: 0})
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return

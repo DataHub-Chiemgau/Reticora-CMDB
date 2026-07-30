@@ -47,6 +47,8 @@ tags:
     description: Ticket and comment management
   - name: Users
     description: User management
+  - name: Audit
+    description: Hash-chained audit trail
   - name: Monitoring
     description: Metrics and alert rules
   - name: GraphQL
@@ -266,6 +268,67 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/cis/{id}/changes:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Offset'
+    get:
+      operationId: listCIChanges
+      tags: [CIs]
+      summary: List the change history of a CI
+      description: >-
+        Returns the `ci_change` rows recorded for the CI. Entries are written in
+        the same transaction as the mutation itself, so the history can never
+        diverge from the current state.
+      responses:
+        '200':
+          description: Paginated change history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIChangeListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/audit:
+    parameters:
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Offset'
+    get:
+      operationId: listAuditEntries
+      tags: [Audit]
+      summary: List audit log entries
+      responses:
+        '200':
+          description: Paginated audit log
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEntryListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/audit/verify:
+    post:
+      operationId: verifyAuditChain
+      tags: [Audit]
+      summary: Verify the audit hash chain
+      description: >-
+        Walks the organization's audit log in chain order and reports whether the
+        `previous_hash`/`hash` linkage is intact.
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditVerifyResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /api/v1/relationships:
     get:
       operationId: listRelationships
@@ -448,25 +511,23 @@ paths:
       operationId: testWebhook
       tags: [Webhooks]
       summary: Send a test delivery to a webhook subscription
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/WebhookTestRequest'
+      description: >-
+        Sends a single signed `webhook.test` payload to the subscription URL and
+        returns the delivery attempt. The endpoint responds with 200 even when the
+        receiver rejected the request; inspect `success` and `status_code`.
       responses:
         '200':
-          description: Test delivery completed
+          description: Test delivery attempted
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WebhookTestResponse'
+                $ref: '#/components/schemas/WebhookDelivery'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-        '502':
-          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/discovery/ingest:
     post:
@@ -1616,6 +1677,12 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/ProblemDetail'
+    ServiceUnavailable:
+      description: A required subsystem is not configured or temporarily unavailable
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
     InternalServerError:
       description: Internal server error
       content:
@@ -1922,6 +1989,99 @@ components:
               items:
                 $ref: '#/components/schemas/CI'
 
+    CIChange:
+      type: object
+      required: [id, organization_id, ci_id, change_type, created_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        ci_id:
+          type: string
+        actor_id:
+          type: string
+        change_type:
+          type: string
+          enum: [create, update, delete, status_change, relationship_change, attribute_change]
+        field_name:
+          type: string
+        old_value: {}
+        new_value: {}
+        comment:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CIChangeListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/CIChange'
+
+    AuditEntry:
+      type: object
+      required: [id, organization_id, timestamp, action, resource_type, hash]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        actor_id:
+          type: string
+        actor_type:
+          type: string
+          enum: [user, system, collector, api_key]
+        action:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+        changes:
+          type: object
+          additionalProperties: true
+        previous_hash:
+          type: string
+        hash:
+          type: string
+
+    AuditEntryListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/AuditEntry'
+
+    AuditVerifyResult:
+      type: object
+      required: [intact, checked]
+      properties:
+        intact:
+          type: boolean
+        checked:
+          type: integer
+          description: Number of entries verified before the chain broke, or the total when intact.
+        broken_id:
+          type: string
+        broken_at:
+          type: integer
+        broken_reason:
+          type: string
+
     RelationshipType:
       type: string
       enum: [connected_to, hosted_on, depends_on, member_of, powers, stores, monitors, backs_up]
@@ -2054,29 +2214,32 @@ components:
           additionalProperties:
             type: string
 
-    WebhookTestRequest:
+    WebhookDelivery:
       type: object
+      required: [id, organization_id, subscription_id, event, url, attempt, success, created_at]
       properties:
-        event:
-          $ref: '#/components/schemas/WebhookEvent'
-        payload:
-          type: object
-          additionalProperties: true
-
-    WebhookTestResponse:
-      type: object
-      required: [webhook_id, delivered]
-      properties:
-        webhook_id:
+        id:
           type: string
-        delivered:
-          type: boolean
+        organization_id:
+          type: string
+        subscription_id:
+          type: string
+        event:
+          type: string
+        url:
+          type: string
+          format: uri
+        attempt:
+          type: integer
         status_code:
           type: integer
-        event:
-          $ref: '#/components/schemas/WebhookEvent'
-        response_body:
+        success:
+          type: boolean
+        error:
           type: string
+        created_at:
+          type: string
+          format: date-time
 
     WebhookListResponse:
       allOf:

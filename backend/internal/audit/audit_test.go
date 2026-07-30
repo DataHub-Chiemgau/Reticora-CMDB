@@ -79,3 +79,21 @@ func TestAuditTamperDetection(t *testing.T) {
 		t.Error("expected tampered chain to be invalid")
 	}
 }
+
+func TestVerifyEntriesReportsBrokenLink(t *testing.T) {
+	log := NewLog()
+	now := time.Now()
+	log.Append(&Entry{ID: "1", OrganizationID: "org-1", Timestamp: now, ActorID: "user-1", Action: "create", ResourceType: "ci", ResourceID: "ci-100"})
+	log.Append(&Entry{ID: "2", OrganizationID: "org-1", Timestamp: now.Add(time.Second), ActorID: "user-1", Action: "update", ResourceType: "ci", ResourceID: "ci-100"})
+
+	entries := log.Entries()
+	entries[1].PreviousHash = "broken"
+
+	result := VerifyEntries(entries)
+	if result.Intact {
+		t.Fatal("expected chain to be invalid")
+	}
+	if result.BrokenID != "2" || result.BrokenAt != 2 {
+		t.Fatalf("expected second entry to be reported broken, got id=%q at=%d", result.BrokenID, result.BrokenAt)
+	}
+}

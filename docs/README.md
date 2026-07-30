@@ -6,7 +6,7 @@ Reticora CMDB is a multi-tenant Configuration Management Database designed for M
 
 ### Technology Stack
 
-- **Backend**: Go 1.25+, chi v5 router, pgx v5, sqlc
+- **Backend**: Go 1.25+, chi v5 router, pgx v5 (hand-written SQL)
 - **Frontend**: React 18, TypeScript, Vite, TanStack Query v5, Zustand, React Router v6
 - **Database**: PostgreSQL 16 with Row-Level Security
 - **Messaging**: NATS JetStream
@@ -84,6 +84,8 @@ Database schema is managed with [golang-migrate](https://github.com/golang-migra
 | 0019 | api_keys_invitations | API key management and user invitations |
 | 0020 | metrics | TimescaleDB metric_sample hypertable (retention: 400 days) |
 | 0021 | spec_alignment | Schema alignment with latest spec |
+| 0022 | ci_change | CI change history feeding the audit trail |
+| 0023 | rls_variable_unification | One RLS session variable (`app.org_id`), legacy `ci.last_seen`/`ci.source` removed, identity-resolution indexes |
 
 **Running migrations:**
 
@@ -93,7 +95,19 @@ migrate -path backend/migrations -database "$DATABASE_URL" up
 
 # Rollback last migration
 migrate -path backend/migrations -database "$DATABASE_URL" down 1
+
+# Verify the full up/down/up round-trip (also enforced by the `migrations` CI job)
+make migrate-roundtrip
 ```
+
+**Tenant isolation:** every RLS policy reads the transaction-local session
+variable `app.org_id`, which repositories set with
+`SELECT set_config('app.org_id', $1, true)` before any tenant-scoped statement.
+Migration 0023 unified the three variable names that had accumulated
+(`app.organization_id`, `app.current_org`, `app.org_id`) onto `app.org_id`, added
+the missing `WITH CHECK` clauses and `FORCE ROW LEVEL SECURITY`. The
+`migrations` CI job fails if a policy reintroduces one of the legacy names or if
+a table has RLS enabled but not forced.
 
 ### Backend Architektur
 
@@ -105,9 +119,16 @@ The backend is a **modularer Go-Monolith** built with strict Bounded-Context sep
 |---------|---------|
 | chi/v5 | HTTP router with middleware chain |
 | pgx/v5 | PostgreSQL driver (connection pooling via puddle) |
-| sqlc | Type-safe SQL code generation |
 | OpenTelemetry | Distributed tracing and metrics |
 | NATS JetStream | Asynchronous event bus |
+
+**Persistence:** every domain owns a hand-written `pg_repository.go` built on
+pgx v5. Code generation with sqlc was removed because the generated package was
+never populated and the two approaches drifted permanently; hand-written pgx is
+now the single documented standard. The in-memory repositories exist only for
+tests and the explicit `--no-db` development mode — the server refuses to start
+when a database is expected but unreachable, and never silently degrades to
+memory.
 
 **Package layout (`backend/internal/`):**
 
@@ -135,7 +156,6 @@ internal/
 ├── middleware/     # Auth, RLS context, rate-limit, request-ID
 ├── config/         # Environment-based configuration
 ├── database/       # Connection pool, migration runner
-├── sqlcgen/        # Generated query code (sqlc)
 ├── graphqlbff/     # GraphQL BFF layer for frontend
 └── wire/           # Dependency injection wiring
 ```
@@ -144,7 +164,7 @@ internal/
 
 1. HTTP request → chi router → middleware chain (auth, org context, tracing).
 2. Middleware sets `app.org_id` on the database session for RLS enforcement.
-3. Handler calls domain service → repository (sqlc-generated queries).
+3. Handler calls domain service → repository (hand-written pgx queries in each domain's `pg_repository.go`).
 4. Domain events published to NATS JetStream for async side-effects (webhooks, audit, cache invalidation).
 5. Response serialized as JSON with RFC 7807 error format on failure.
 
