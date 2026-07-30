@@ -196,6 +196,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Search'
         - $ref: '#/components/parameters/SortBy'
         - $ref: '#/components/parameters/SortDir'
@@ -209,6 +210,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CIListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -768,6 +771,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Search'
         - $ref: '#/components/parameters/SortBy'
         - $ref: '#/components/parameters/SortDir'
@@ -787,6 +791,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AssetListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -876,6 +882,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Search'
         - $ref: '#/components/parameters/SortBy'
         - $ref: '#/components/parameters/SortDir'
@@ -898,6 +905,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AssignmentListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -987,6 +996,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Search'
         - $ref: '#/components/parameters/SortBy'
         - $ref: '#/components/parameters/SortDir'
@@ -1001,6 +1011,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DocumentListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -1090,6 +1102,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Search'
         - $ref: '#/components/parameters/SortBy'
         - $ref: '#/components/parameters/SortDir'
@@ -1108,6 +1121,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StocktakeListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -1242,6 +1257,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Search'
         - $ref: '#/components/parameters/SortBy'
         - $ref: '#/components/parameters/SortDir'
@@ -1272,6 +1288,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TicketListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -1679,7 +1697,18 @@ components:
         type: integer
         minimum: 0
         default: 0
-      description: Number of items to skip before returning data.
+      description: |
+        Number of items to skip before returning data. Ignored when `cursor` is
+        supplied.
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+      description: |
+        Opaque keyset cursor taken from `next_cursor` of the previous page.
+        Cursors are bound to the sort order they were issued for; sending one
+        with a different `sort_by`/`sort_dir` combination yields 400.
     Search:
       name: search
       in: query
@@ -1798,6 +1827,10 @@ components:
           type: integer
         has_more:
           type: boolean
+        next_cursor:
+          type: string
+          description: |
+            Opaque cursor for the next page. Absent when no further rows follow.
 
     HealthResponse:
       type: object

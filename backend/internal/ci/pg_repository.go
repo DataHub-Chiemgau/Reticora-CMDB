@@ -124,26 +124,37 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			return fmt.Errorf("count cis: %w", err)
 		}
 
-		sortColumn := "created_at"
-		switch filter.SortBy {
-		case "name", "status", "created_at", "updated_at":
-			sortColumn = filter.SortBy
-		}
-		sortDirection := "DESC"
-		if strings.EqualFold(filter.SortDir, "asc") {
-			sortDirection = "ASC"
+		sortColumn, sortDirection := NormalizeSort(filter)
+
+		// Keyset pagination: when a cursor is supplied it replaces the OFFSET
+		// so page boundaries stay stable while rows are inserted or removed.
+		listWhere := whereClause
+		listArgs := append([]any{}, args...)
+		if page.Cursor != nil {
+			if !page.Cursor.Matches(sortColumn, sortDirection) {
+				return fmt.Errorf("%w: sort order changed", api.ErrInvalidCursor)
+			}
+			listWhere += " AND " + api.KeysetClause(sortColumn, sortColumnCasts[sortColumn], sortDirection, argPos)
+			listArgs = append(listArgs, page.Cursor.Value, page.Cursor.ID)
+			argPos += 2
 		}
 
-		listArgs := append(append([]any{}, args...), page.Limit, page.Offset)
-		listQuery := fmt.Sprintf(
-			"SELECT %s FROM ci WHERE %s ORDER BY %s %s LIMIT $%d OFFSET $%d",
-			ciSelectColumns,
-			whereClause,
-			sortColumn,
-			sortDirection,
-			argPos,
-			argPos+1,
-		)
+		var listQuery string
+		if page.Cursor != nil {
+			listArgs = append(listArgs, page.Limit)
+			listQuery = fmt.Sprintf(
+				"SELECT %s FROM ci WHERE %s ORDER BY %s %s, id %s LIMIT $%d",
+				ciSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
+				strings.ToUpper(sortDirection), argPos,
+			)
+		} else {
+			listArgs = append(listArgs, page.Limit, page.Offset)
+			listQuery = fmt.Sprintf(
+				"SELECT %s FROM ci WHERE %s ORDER BY %s %s, id %s LIMIT $%d OFFSET $%d",
+				ciSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
+				strings.ToUpper(sortDirection), argPos, argPos+1,
+			)
+		}
 
 		rows, err := tx.Query(ctx, listQuery, listArgs...)
 		if err != nil {
