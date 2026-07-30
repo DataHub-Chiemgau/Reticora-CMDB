@@ -31,6 +31,10 @@ tags:
     description: Webhook subscription management
   - name: Discovery
     description: Discovery ingest and job tracking
+  - name: Collectors
+    description: Customer-deployed discovery collector management
+  - name: Credentials
+    description: Envelope-encrypted credential management
   - name: Export
     description: Data export operations
   - name: Entitlements
@@ -47,6 +51,10 @@ tags:
     description: Ticket and comment management
   - name: Users
     description: User management
+  - name: Teams
+    description: Team and membership management
+  - name: Roles
+    description: Custom role and role assignment management
   - name: Audit
     description: Hash-chained audit trail
   - name: Monitoring
@@ -494,29 +502,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-    patch:
-      operationId: updateWebhook
-      tags: [Webhooks]
-      summary: Update a webhook subscription
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateWebhookRequest'
-      responses:
-        '200':
-          description: Webhook subscription updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WebhookSubscription'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
     delete:
       operationId: deleteWebhook
       tags: [Webhooks]
@@ -776,21 +761,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /api/v1/entitlements/usage:
-    get:
-      operationId: getEntitlementUsage
-      tags: [Entitlements]
-      summary: Get current entitlement usage metrics
-      responses:
-        '200':
-          description: Usage metrics grouped by feature
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EntitlementUsageResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-
   /api/v1/assets:
     get:
       operationId: listAssets
@@ -977,29 +947,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Assignment'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    patch:
-      operationId: updateAssignment
-      tags: [Assignments]
-      summary: Update an assignment
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateAssignmentRequest'
-      responses:
-        '200':
-          description: Assignment updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Assignment'
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -2979,6 +2926,655 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/assignments/{id}/return:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: returnAssignment
+      tags: [Assignments]
+      summary: Return an assigned asset or CI
+      description: >-
+        Marks the assignment as returned, recording the return condition and
+        timestamp. The optional `notes` field overwrites the assignment notes
+        when non-empty.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReturnAssignmentRequest'
+      responses:
+        '200':
+          description: Assignment returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assignment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/assignments/{id}/transfer:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: transferAssignment
+      tags: [Assignments]
+      summary: Transfer an assignment to a new assignee
+      description: >-
+        Marks the existing assignment as transferred and creates a new active
+        assignment of the same asset/CI for the new assignee.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferAssignmentRequest'
+      responses:
+        '201':
+          description: New assignment created for the new assignee
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assignment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/cis/{id}/relationships:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listCIRelationships
+      tags: [Relationships]
+      summary: List relationships for a configuration item
+      description: >-
+        Returns relationships where the given CI is either the source or the
+        target.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of relationships
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelationshipListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/collectors:
+    get:
+      operationId: listCollectors
+      tags: [Collectors]
+      summary: List discovery collectors
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of collectors
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectorListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: registerCollector
+      tags: [Collectors]
+      summary: Register a discovery collector
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterCollectorRequest'
+      responses:
+        '201':
+          description: Collector registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collector'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/collectors/{id}/heartbeat:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: collectorHeartbeat
+      tags: [Collectors]
+      summary: Record a collector heartbeat
+      description: >-
+        Updates the collector's last-heartbeat timestamp so the platform can
+        track liveness. No request body is required.
+      responses:
+        '204':
+          description: Heartbeat recorded
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/ingest/bulk:
+    post:
+      operationId: bulkIngest
+      tags: [Discovery]
+      summary: Ingest discovery results in bulk
+      description: >-
+        Reconciles a batch of discovered items against existing CIs, creating,
+        updating or queueing them for manual review. This is the canonical
+        endpoint that `/api/v1/discovery/ingest` aliases.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoveryIngestRequest'
+      responses:
+        '202':
+          description: Discovery payload accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryIngestResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/credentials:
+    get:
+      operationId: listCredentials
+      tags: [Credentials]
+      summary: List credential metadata
+      description: >-
+        Returns credential metadata (never the secret material) for the
+        authenticated tenant. The organization is derived from the session and
+        cannot be supplied by the client.
+      responses:
+        '200':
+          description: Credential metadata list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Credential'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createCredential
+      tags: [Credentials]
+      summary: Create an encrypted credential
+      description: >-
+        Stores a credential whose secret is envelope-encrypted at rest. The
+        owning organization is derived from the authenticated tenant; any
+        `organization_id` in the request body is ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCredentialRequest'
+      responses:
+        '201':
+          description: Credential created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Credential'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/credentials/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCredential
+      tags: [Credentials]
+      summary: Get credential metadata
+      description: >-
+        Returns credential metadata (never the secret material) for the
+        authenticated tenant.
+      responses:
+        '200':
+          description: Credential metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Credential'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteCredential
+      tags: [Credentials]
+      summary: Delete a credential
+      responses:
+        '204':
+          description: Credential deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/credentials/{id}/decrypt:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: decryptCredential
+      tags: [Credentials]
+      summary: Decrypt and return a credential secret
+      description: >-
+        Decrypts the stored credential and returns the plaintext secret as a
+        JSON object. **This is the only endpoint that exposes secret material;**
+        callers must be strongly authorized. The organization is derived from
+        the authenticated tenant, so a caller can only decrypt secrets belonging
+        to their own organization.
+      responses:
+        '200':
+          description: Decrypted credential secret
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialSecret'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/documents/{id}/links:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getDocumentLinks
+      tags: [Documents]
+      summary: List entities linked to a document
+      responses:
+        '200':
+          description: Document links
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DocumentLink'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: linkDocument
+      tags: [Documents]
+      summary: Link a document to another entity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDocumentLinkRequest'
+      responses:
+        '201':
+          description: Document linked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentLink'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/teams:
+    get:
+      operationId: listTeams
+      tags: [Teams]
+      summary: List teams
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: Paginated list of teams
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createTeam
+      tags: [Teams]
+      summary: Create a team
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTeamRequest'
+      responses:
+        '201':
+          description: Team created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/teams/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getTeam
+      tags: [Teams]
+      summary: Get a team
+      responses:
+        '200':
+          description: Team details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateTeam
+      tags: [Teams]
+      summary: Update a team
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTeamRequest'
+      responses:
+        '200':
+          description: Team updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteTeam
+      tags: [Teams]
+      summary: Delete a team
+      responses:
+        '204':
+          description: Team deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/teams/{id}/members:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listTeamMembers
+      tags: [Teams]
+      summary: List members of a team
+      responses:
+        '200':
+          description: Team members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TeamMember'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: addTeamMember
+      tags: [Teams]
+      summary: Add a member to a team
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddTeamMemberRequest'
+      responses:
+        '201':
+          description: Member added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamMember'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/teams/{teamId}/members/{userId}:
+    parameters:
+      - name: teamId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Team identifier.
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: User identifier.
+    delete:
+      operationId: removeTeamMember
+      tags: [Teams]
+      summary: Remove a member from a team
+      responses:
+        '204':
+          description: Member removed
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/roles:
+    get:
+      operationId: listRoles
+      tags: [Roles]
+      summary: List custom roles
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of custom roles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createRole
+      tags: [Roles]
+      summary: Create a custom role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoleRequest'
+      responses:
+        '201':
+          description: Role created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/roles/assign:
+    post:
+      operationId: assignRole
+      tags: [Roles]
+      summary: Assign a custom role to a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignRoleRequest'
+      responses:
+        '201':
+          description: Role assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleAssignment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/roles/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getRole
+      tags: [Roles]
+      summary: Get a custom role
+      responses:
+        '200':
+          description: Role details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateRole
+      tags: [Roles]
+      summary: Update a custom role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRoleRequest'
+      responses:
+        '200':
+          description: Role updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteRole
+      tags: [Roles]
+      summary: Delete a custom role
+      responses:
+        '204':
+          description: Role deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/users/{id}/roles:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listUserRoles
+      tags: [Users]
+      summary: List custom role assignments for a user
+      responses:
+        '200':
+          description: Role assignments for the user
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RoleAssignment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
 
 
 components:
@@ -3648,25 +4244,6 @@ components:
           additionalProperties:
             type: string
 
-    UpdateWebhookRequest:
-      type: object
-      properties:
-        name:
-          type: string
-        url:
-          type: string
-          format: uri
-        events:
-          type: array
-          items:
-            $ref: '#/components/schemas/WebhookEvent'
-        is_active:
-          type: boolean
-        headers:
-          type: object
-          additionalProperties:
-            type: string
-
     WebhookDelivery:
       type: object
       required: [id, organization_id, subscription_id, event, url, attempt, success, created_at]
@@ -3889,32 +4466,6 @@ components:
               items:
                 $ref: '#/components/schemas/Entitlement'
 
-    EntitlementUsage:
-      type: object
-      required: [feature_key, used, enabled]
-      properties:
-        feature_key:
-          type: string
-        used:
-          type: integer
-        limit:
-          type: integer
-        remaining:
-          type: integer
-        unit:
-          type: string
-        enabled:
-          type: boolean
-
-    EntitlementUsageResponse:
-      type: object
-      required: [data]
-      properties:
-        data:
-          type: array
-          items:
-            $ref: '#/components/schemas/EntitlementUsage'
-
     Asset:
       type: object
       required: [id, organization_id, asset_tag, name, category, status, custom_fields, created_at, updated_at]
@@ -4106,26 +4657,6 @@ components:
         due_date:
           type: string
           format: date-time
-        notes:
-          type: string
-
-    UpdateAssignmentRequest:
-      type: object
-      properties:
-        assigned_to:
-          type: string
-        assignment_type:
-          type: string
-        status:
-          type: string
-        due_date:
-          type: string
-          format: date-time
-        returned_at:
-          type: string
-          format: date-time
-        return_condition:
-          type: string
         notes:
           type: string
 
@@ -5731,3 +6262,333 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/NetworkInterface'
+
+    ReturnAssignmentRequest:
+      type: object
+      description: Payload for returning an assigned asset or CI.
+      properties:
+        return_condition:
+          type: string
+        notes:
+          type: string
+
+    TransferAssignmentRequest:
+      type: object
+      required: [new_assignee]
+      properties:
+        new_assignee:
+          type: string
+        notes:
+          type: string
+
+    Collector:
+      type: object
+      required: [id, organization_id, name, status, config, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        client_id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+        last_heartbeat:
+          type: string
+          format: date-time
+        config:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    RegisterCollectorRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        client_id:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+        config:
+          type: object
+          additionalProperties: true
+
+    CollectorListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Collector'
+
+    Credential:
+      type: object
+      description: Credential metadata. The secret material is never included.
+      required: [id, organization_id, name, kind, key_version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        client_id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut]
+        scope:
+          type: string
+        key_version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateCredentialRequest:
+      type: object
+      required: [name, secret]
+      properties:
+        client_id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut]
+        scope:
+          type: string
+        secret:
+          type: object
+          description: Plaintext secret data, encrypted at rest before storage.
+          additionalProperties: true
+
+    CredentialSecret:
+      type: object
+      description: >-
+        Decrypted plaintext secret material returned only by the credential
+        decrypt endpoint. Field names depend on the credential kind.
+      additionalProperties: true
+
+    DocumentLink:
+      type: object
+      required: [id, organization_id, document_id, entity_type, entity_id, created_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        document_id:
+          type: string
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CreateDocumentLinkRequest:
+      type: object
+      required: [entity_type, entity_id]
+      properties:
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+
+    Team:
+      type: object
+      required: [id, organization_id, name, member_count, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        lead_id:
+          type: string
+        member_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateTeamRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        lead_id:
+          type: string
+
+    UpdateTeamRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        lead_id:
+          type: string
+
+    TeamListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Team'
+
+    TeamMember:
+      type: object
+      required: [id, team_id, user_id, role_in_team, joined_at]
+      properties:
+        id:
+          type: string
+        team_id:
+          type: string
+        user_id:
+          type: string
+        role_in_team:
+          type: string
+        joined_at:
+          type: string
+          format: date-time
+
+    AddTeamMemberRequest:
+      type: object
+      required: [user_id]
+      properties:
+        user_id:
+          type: string
+        role_in_team:
+          type: string
+          description: Defaults to "member" when omitted.
+
+    Role:
+      type: object
+      description: A custom permission role.
+      required: [id, organization_id, name, is_system, permissions, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        is_system:
+          type: boolean
+        permissions:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateRoleRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+
+    UpdateRoleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+
+    RoleListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Role'
+
+    RoleAssignment:
+      type: object
+      required: [id, user_id, custom_role_id, scope_type, granted_at]
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        custom_role_id:
+          type: string
+        scope_type:
+          type: string
+        scope_id:
+          type: string
+        granted_at:
+          type: string
+          format: date-time
+        granted_by:
+          type: string
+
+    AssignRoleRequest:
+      type: object
+      required: [user_id, custom_role_id]
+      properties:
+        user_id:
+          type: string
+        custom_role_id:
+          type: string
+        scope_type:
+          type: string
+          description: Defaults to "organization" when omitted.
+        scope_id:
+          type: string

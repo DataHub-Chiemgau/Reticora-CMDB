@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -28,22 +29,33 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	})
 }
 
+// organizationID resolves the tenant from the authenticated request context.
+// Credentials hold decryptable secret material, so the organization must never
+// be taken from client-supplied input such as a header or the request body —
+// that would let any authenticated caller read another tenant's secrets.
+func organizationID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	orgID := tenant.FromContext(r.Context()).OrganizationID
+	if orgID == "" {
+		writeError(w, http.StatusUnauthorized, "missing tenant context")
+		return "", false
+	}
+	return orgID, true
+}
+
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := organizationID(w, r)
+	if !ok {
+		return
+	}
+
 	var req CreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	// In production, orgID comes from middleware context; fallback to request body
-	orgID := r.Header.Get("X-Organization-ID")
-	if orgID != "" {
-		req.OrganizationID = orgID
-	}
-	if req.OrganizationID == "" {
-		writeError(w, http.StatusBadRequest, "organization_id is required")
-		return
-	}
+	req.OrganizationID = orgID
+
 	if req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
@@ -69,9 +81,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	orgID := r.Header.Get("X-Organization-ID")
-	if orgID == "" {
-		writeError(w, http.StatusBadRequest, "organization_id is required")
+	orgID, ok := organizationID(w, r)
+	if !ok {
 		return
 	}
 
@@ -90,13 +101,11 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
-	orgID := r.Header.Get("X-Organization-ID")
-	id := chi.URLParam(r, "id")
-
-	if orgID == "" {
-		writeError(w, http.StatusBadRequest, "organization_id is required")
+	orgID, ok := organizationID(w, r)
+	if !ok {
 		return
 	}
+	id := chi.URLParam(r, "id")
 
 	cred, err := h.svc.Get(r.Context(), orgID, id)
 	if err == ErrNotFound {
@@ -113,13 +122,11 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) decrypt(w http.ResponseWriter, r *http.Request) {
-	orgID := r.Header.Get("X-Organization-ID")
-	id := chi.URLParam(r, "id")
-
-	if orgID == "" {
-		writeError(w, http.StatusBadRequest, "organization_id is required")
+	orgID, ok := organizationID(w, r)
+	if !ok {
 		return
 	}
+	id := chi.URLParam(r, "id")
 
 	secret, err := h.svc.Decrypt(r.Context(), orgID, id)
 	if err == ErrNotFound {
@@ -136,13 +143,11 @@ func (h *Handler) decrypt(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
-	orgID := r.Header.Get("X-Organization-ID")
-	id := chi.URLParam(r, "id")
-
-	if orgID == "" {
-		writeError(w, http.StatusBadRequest, "organization_id is required")
+	orgID, ok := organizationID(w, r)
+	if !ok {
 		return
 	}
+	id := chi.URLParam(r, "id")
 
 	err := h.svc.Delete(r.Context(), orgID, id)
 	if err == ErrNotFound {

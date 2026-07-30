@@ -129,6 +129,12 @@ jobs:
       - name: Format check
         run: npx prettier --check .
 
+      # The typed client is generated from api/openapi.yaml, so a specification
+      # change that was not regenerated must fail the build rather than silently
+      # leave the frontend types behind.
+      - name: Generated API client is up to date
+        run: npm run generate:api:check
+
       - name: Type check
         run: npm run typecheck
 

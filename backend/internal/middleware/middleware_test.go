@@ -125,3 +125,27 @@ func testRawToken(t *testing.T, claims map[string]any) string {
 	}
 	return base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
 }
+
+// TestTenantMiddlewareIgnoresHeaderWhenTokenCarriesOrganization pins the tenant
+// isolation rule: a caller holding a valid token for one organization must not
+// be able to act on another organization by sending an X-Organization-ID
+// header. The token claim always wins.
+func TestTenantMiddlewareIgnoresHeaderWhenTokenCarriesOrganization(t *testing.T) {
+	handler := TenantMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tenantInfo := tenant.FromContext(r.Context())
+		if tenantInfo.OrganizationID != "org-jwt" {
+			t.Fatalf("expected the token organization org-jwt, got %s", tenantInfo.OrganizationID)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/cis", nil)
+	req.Header.Set("Authorization", "Bearer "+testToken(t, Claims{OrganizationID: "org-jwt"}))
+	req.Header.Set("X-Organization-ID", "org-victim")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+}

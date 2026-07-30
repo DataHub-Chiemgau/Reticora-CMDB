@@ -87,6 +87,7 @@ Database schema is managed with [golang-migrate](https://github.com/golang-migra
 | 0022 | ci_change | CI change history feeding the audit trail |
 | 0023 | rls_variable_unification | One RLS session variable (`app.org_id`), legacy `ci.last_seen`/`ci.source` removed, identity-resolution indexes |
 | 0024 | durable_webhook_delivery | Retry state (`status`, `max_attempts`, `next_retry_at`, `error`) and due-delivery index on `webhook_delivery` |
+| 0025 | reconciliation_topology | Discovery job runs, the reconciliation `review_item` queue, relationship suppressions and the `powered_by` relationship type |
 
 **Running migrations:**
 
@@ -140,11 +141,17 @@ memory.
 
 ```
 internal/
-├── api/            # HTTP handler registration, OpenAPI route wiring
+├── api/            # Shared HTTP contract: pagination, cursors, envelopes
+├── server/         # Single route-registration site (chi router assembly)
 ├── ci/             # Configuration Items domain (CRUD, search, bulk)
 ├── relationship/   # CI-to-CI relationships
-├── discovery/      # Network discovery orchestration
+├── topology/       # Derived network topology and neighbor queries
+├── discovery/      # Network discovery, jobs and the reconciliation queue
 ├── tenant/         # Organization/client/site management
+├── tenantapi/      # Clients, sites, buildings and rooms
+├── rack/           # Racks, rack mounts and cabling
+├── contact/        # Contacts and CI contact roles
+├── ipam/           # Subnets, IP addresses and network interfaces
 ├── user/           # User accounts, authentication context
 ├── identity/       # OIDC/SCIM integration
 ├── webhook/        # Webhook subscription & dispatch
@@ -185,6 +192,16 @@ a bearer token in the `Authorization` header; the client refreshes it via
 the token signature is verified by `middleware.AuthMiddlewareWithVerifier`;
 only `/api/v1/auth/{config,login,callback,refresh}` are unauthenticated.
 
+**Tenant resolution:** `TenantMiddleware` derives the organization from the
+verified session token. The `X-Organization-ID` header is only consulted for
+requests that carry no claims at all (the unverified `--no-db` development mode
+and the header-authenticated collector), and it can never override a token
+claim — otherwise any authenticated caller could read and write another
+tenant's data by changing a header. Handlers therefore read the tenant from the
+request context only. Credentials, which store decryptable secret material,
+additionally ignore `organization_id` in the request body and answer 401 when
+the context is missing.
+
 **Entitlement enforcement:** `entitlement.Service` resolves the effective plan
 per tenant (falling back to `RETICORA_DEFAULT_PLAN`) and caches it for 30
 seconds. Its middleware maps add-on route prefixes to features and answers with
@@ -208,6 +225,48 @@ default); a background worker claims due deliveries with
 queue and deliveries survive a restart. `GET /api/v1/webhooks/{id}/deliveries`
 exposes the history. Without a delivery store (`--no-db`) the dispatcher falls
 back to in-process retries.
+
+**API contract parity:** `api/openapi.yaml` is the single source of truth for
+the public HTTP API. Every route is registered in exactly one place —
+`server.NewRouter` in `backend/internal/server` — and
+`TestRoutesAndSpecificationAreInParity` walks the assembled chi router with
+`chi.Walk`, loads the specification and fails if a route is undocumented **or**
+if the specification documents an operation that is not registered. The check
+runs in the normal `go test ./...` job, so the specification cannot drift away
+from the implementation in either direction. `/metrics` is the only deliberate
+exception: it is the Prometheus scrape endpoint, not part of the tenant API.
+
+**Pagination:** list endpoints accept `limit` (default 50, maximum 200) plus
+either `offset` for random access or `cursor` for stable forward iteration.
+The cursor is an opaque base64url token that encodes the sort field, direction
+and the `(sort value, id)` position of the last returned row. Repositories turn
+it into a keyset predicate — `(sort_column, id) < ($1, $2)` — instead of an
+`OFFSET`, so a page never skips or repeats rows when data is inserted between
+requests, and the query cost stays constant on deep pages. A response that has
+more data returns `next_cursor`; passing it back with a different `sort_by` or
+`sort_dir` is rejected with HTTP 400, because the token is only meaningful for
+the ordering it was issued for. `total` is always the absolute match count and
+therefore ignores the cursor predicate. Cursors are supported by CIs, assets,
+assignments, documents, stocktakes and tickets.
+
+**Streaming export:** `GET /api/v1/cis/export` fetches rows in batches of 500
+and writes them to the response as they arrive, so memory use is bounded by the
+batch rather than by the result size. The first batch is fetched *before* the
+status line is written, which keeps a failing query a clean HTTP 500 with an
+RFC 7807 body. Once bytes are on the wire a later failure can no longer change
+the status code, so the writer aborts without emitting the JSON terminator —
+truncated output is detectable by the client instead of silently looking
+complete.
+
+**Reconciliation and topology:** discovery runs are recorded as jobs
+(`/api/v1/discovery/jobs`). Findings that cannot be matched to an existing CI
+with sufficient confidence are not applied directly; they land in the review
+queue (`/api/v1/discovery/review`) where they are accepted or rejected by an
+operator. Relationships derived from discovery evidence (LLDP/CDP neighbours,
+hypervisor placement, power feeds) are written as regular
+`ci_relationship` rows, and a suppression list keeps operator-rejected pairs
+from being re-derived on the next run. `/api/v1/topology` and
+`/api/v1/topology/cis/{id}/neighbors` serve the resulting graph.
 
 **Binaries (`backend/cmd/`):**
 
@@ -239,7 +298,9 @@ The frontend is a **React 19 SPA** built with TypeScript and Vite.
 
 ```
 src/
-├── api/          # API client (typed fetch wrappers, generated from OpenAPI)
+├── api/
+│   ├── client.ts       # Hand-written fetch wrappers (auth, refresh, errors)
+│   └── generated/      # Generated from api/openapi.yaml — do not edit by hand
 ├── components/   # Reusable UI components (design system)
 ├── pages/        # Route-level page components
 ├── stores/       # Zustand stores (auth, UI state, preferences)
@@ -256,7 +317,21 @@ npm run dev         # Start Vite dev server (HMR)
 npm run build       # Production build (tsc + vite build)
 npm run lint        # ESLint
 npm run typecheck   # TypeScript type checking
+npm run generate:api        # Regenerate the typed client from api/openapi.yaml
+npm run generate:api:check  # Fail if the checked-in client is out of date
 ```
+
+**Generated API client:** `src/api/generated/schema.d.ts` is produced from
+`api/openapi.yaml` by `openapi-typescript`; `src/api/generated/client.ts` wraps
+it in a small `createApiClient` helper that derives the path, method, path
+parameters, query parameters, request body and response type of every call from
+the specification. Calling an undocumented path, using the wrong method for a
+path or sending a body of the wrong shape is therefore a compile-time error, and
+a specification change surfaces in the frontend as a type error instead of a
+runtime 404. The generated files are committed so that the build does not depend
+on generation order; CI runs `npm run generate:api:check`, which regenerates
+them and fails on any diff. Regenerate with `make generate-api-client` (or
+`npm run generate:api`) after every specification change.
 
 **Production serving:** The built SPA is served via Nginx (`nginx.conf`) in a Docker container with proper SPA fallback routing.
 

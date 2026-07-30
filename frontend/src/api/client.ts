@@ -8,6 +8,13 @@ export interface PaginatedResponse<T> {
   limit: number;
   offset: number;
   has_more: boolean;
+  /**
+   * Opaque keyset cursor pointing at the row after the last one returned.
+   * Present only while `has_more` is true and only on endpoints that support
+   * cursor pagination. Pass it back as `cursor` with the identical `sort_by`
+   * and `sort_dir` to fetch the next page without skipped or repeated rows.
+   */
+  next_cursor?: string;
 }
 
 export interface CI {
@@ -85,6 +92,7 @@ export interface Collector {
 export interface CIListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
   status?: string;
   ci_type_id?: string;
   client_id?: string;
@@ -96,6 +104,7 @@ export interface CIListParams {
 export interface ListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
 }
 
 function mergeHeaders(options?: RequestInit) {
@@ -261,6 +270,7 @@ export interface AssetUpdateRequest {
 export interface AssetListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
   status?: string;
   category?: string;
   client_id?: string;
@@ -319,6 +329,7 @@ export interface AssignmentCreateRequest {
 export interface AssignmentListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
   status?: string;
   assigned_to?: string;
   asset_id?: string;
@@ -382,6 +393,7 @@ export interface DocumentCreateRequest {
 export interface DocumentListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
   category?: string;
   search?: string;
 }
@@ -466,6 +478,7 @@ export interface StocktakeCreateRequest {
 export interface StocktakeListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
   status?: string;
   scope?: string;
   search?: string;
@@ -579,6 +592,7 @@ export interface TicketUpdateRequest {
 export interface TicketListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
   status?: string;
   priority?: string;
   category?: string;
@@ -668,6 +682,7 @@ export interface CustomRole {
 export interface UserListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
   search?: string;
 }
 

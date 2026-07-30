@@ -4,3777 +4,7874 @@
  */
 
 export interface paths {
-    "/healthz": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Health check */
-        get: operations["getHealth"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Public OIDC parameters for browser clients
-         * @description Returns the issuer, client ID, redirect URI and endpoints a single-page application needs to start an authorization code flow with PKCE. The client secret is never returned.
-         */
-        get: operations["getAuthConfig"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/login": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Exchange an authorization code for a session token */
-        post: operations["login"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/callback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Complete the OIDC callback flow and issue a session token */
-        post: operations["authCallback"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Refresh an existing session token */
-        post: operations["refreshSession"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/me": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get the currently authenticated session claims */
-        get: operations["getCurrentSession"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/cis": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List configuration items */
-        get: operations["listCIs"];
-        put?: never;
-        /** Create a configuration item */
-        post: operations["createCI"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/cis/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        /** Get a configuration item */
-        get: operations["getCI"];
-        put?: never;
-        post?: never;
-        /** Delete a configuration item */
-        delete: operations["deleteCI"];
-        options?: never;
-        head?: never;
-        /** Update a configuration item */
-        patch: operations["updateCI"];
-        trace?: never;
-    };
-    "/api/v1/cis/{id}/changes": {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-            };
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        /**
-         * List the change history of a CI
-         * @description Returns the `ci_change` rows recorded for the CI. Entries are written in the same transaction as the mutation itself, so the history can never diverge from the current state.
-         */
-        get: operations["listCIChanges"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/audit": {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List audit log entries */
-        get: operations["listAuditEntries"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/audit/verify": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Verify the audit hash chain
-         * @description Walks the organization's audit log in chain order and reports whether the `previous_hash`/`hash` linkage is intact.
-         */
-        post: operations["verifyAuditChain"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/relationships": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List relationships */
-        get: operations["listRelationships"];
-        put?: never;
-        /** Create a relationship */
-        post: operations["createRelationship"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/relationships/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Delete a relationship */
-        delete: operations["deleteRelationship"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/webhooks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List webhook subscriptions */
-        get: operations["listWebhooks"];
-        put?: never;
-        /** Create a webhook subscription */
-        post: operations["createWebhook"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/webhooks/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        /** Get a webhook subscription */
-        get: operations["getWebhook"];
-        put?: never;
-        post?: never;
-        /** Delete a webhook subscription */
-        delete: operations["deleteWebhook"];
-        options?: never;
-        head?: never;
-        /** Update a webhook subscription */
-        patch: operations["updateWebhook"];
-        trace?: never;
-    };
-    "/api/v1/webhooks/{id}/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Send a test delivery to a webhook subscription
-         * @description Sends a single signed `webhook.test` payload to the subscription URL and returns the delivery attempt. The endpoint responds with 200 even when the receiver rejected the request; inspect `success` and `status_code`.
-         */
-        post: operations["testWebhook"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/webhooks/{id}/deliveries": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        /**
-         * List the durable delivery history of a webhook subscription
-         * @description Returns the persisted deliveries including their retry state. Failed deliveries are retried with exponential backoff until `max_attempts` is reached.
-         */
-        get: operations["listWebhookDeliveries"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/discovery/ingest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Ingest discovery results in bulk */
-        post: operations["ingestDiscoveryData"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/discovery/jobs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List discovery ingest jobs */
-        get: operations["listDiscoveryJobs"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/discovery/jobs/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        /** Get a discovery ingest job */
-        get: operations["getDiscoveryJob"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/export/cis": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Export configuration items */
-        get: operations["exportCIs"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/entitlements": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List tenant entitlements */
-        get: operations["listEntitlements"];
-        put?: never;
-        /** Grant or update an entitlement */
-        post: operations["grantEntitlement"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/entitlements/check/{feature}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                feature: string;
-            };
-            cookie?: never;
-        };
-        /** Check whether a feature is entitled for the current tenant */
-        get: operations["checkEntitlement"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/entitlements/usage": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get current entitlement usage metrics */
-        get: operations["getEntitlementUsage"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/assets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List assets */
-        get: operations["listAssets"];
-        put?: never;
-        /** Create an asset */
-        post: operations["createAsset"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/assets/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        /** Get an asset */
-        get: operations["getAsset"];
-        put?: never;
-        post?: never;
-        /** Delete an asset */
-        delete: operations["deleteAsset"];
-        options?: never;
-        head?: never;
-        /** Update an asset */
-        patch: operations["updateAsset"];
-        trace?: never;
-    };
-    "/api/v1/assignments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List assignments */
-        get: operations["listAssignments"];
-        put?: never;
-        /** Create an assignment */
-        post: operations["createAssignment"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/assignments/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        /** Get an assignment */
-        get: operations["getAssignment"];
-        put?: never;
-        post?: never;
-        /** Delete an assignment */
-        delete: operations["deleteAssignment"];
-        options?: never;
-        head?: never;
-        /** Update an assignment */
-        patch: operations["updateAssignment"];
-        trace?: never;
-    };
-    "/api/v1/documents": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List documents */
-        get: operations["listDocuments"];
-        put?: never;
-        /** Create a document metadata record */
-        post: operations["createDocument"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/documents/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        /** Get a document */
-        get: operations["getDocument"];
-        put?: never;
-        post?: never;
-        /** Delete a document */
-        delete: operations["deleteDocument"];
-        options?: never;
-        head?: never;
-        /** Update a document */
-        patch: operations["updateDocument"];
-        trace?: never;
-    };
-    "/api/v1/stocktakes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List stocktakes */
-        get: operations["listStocktakes"];
-        put?: never;
-        /** Create a stocktake */
-        post: operations["createStocktake"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/stocktakes/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        /** Get a stocktake */
-        get: operations["getStocktake"];
-        put?: never;
-        post?: never;
-        /** Delete a stocktake */
-        delete: operations["deleteStocktake"];
-        options?: never;
-        head?: never;
-        /** Update a stocktake */
-        patch: operations["updateStocktake"];
-        trace?: never;
-    };
-    "/api/v1/stocktakes/{id}/scans": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        /** List recorded scans for a stocktake */
-        get: operations["listStocktakeScans"];
-        put?: never;
-        /** Record a stocktake scan */
-        post: operations["createStocktakeScan"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tickets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List tickets */
-        get: operations["listTickets"];
-        put?: never;
-        /** Create a ticket */
-        post: operations["createTicket"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tickets/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        /** Get a ticket */
-        get: operations["getTicket"];
-        put?: never;
-        post?: never;
-        /** Delete a ticket */
-        delete: operations["deleteTicket"];
-        options?: never;
-        head?: never;
-        /** Update a ticket */
-        patch: operations["updateTicket"];
-        trace?: never;
-    };
-    "/api/v1/tickets/{id}/comments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        /** List comments for a ticket */
-        get: operations["listTicketComments"];
-        put?: never;
-        /** Add a comment to a ticket */
-        post: operations["createTicketComment"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/users": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List users */
-        get: operations["listUsers"];
-        put?: never;
-        /** Create a user */
-        post: operations["createUser"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/users/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        /** Get a user */
-        get: operations["getUser"];
-        put?: never;
-        post?: never;
-        /** Delete a user */
-        delete: operations["deleteUser"];
-        options?: never;
-        head?: never;
-        /** Update a user */
-        patch: operations["updateUser"];
-        trace?: never;
-    };
-    "/api/v1/monitoring/metrics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Query metric points */
-        get: operations["queryMetrics"];
-        put?: never;
-        /** Ingest one or more metrics */
-        post: operations["ingestMetrics"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/monitoring/alerts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List alert rules */
-        get: operations["listAlerts"];
-        put?: never;
-        /** Create an alert rule */
-        post: operations["createAlert"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/monitoring/alerts/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Delete an alert rule */
-        delete: operations["deleteAlert"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/graphql": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Execute a GraphQL query */
-        post: operations["executeGraphQL"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-}
-export type webhooks = Record<string, never>;
-export interface components {
-    schemas: {
-        /** @description RFC 7807 Problem Details object. */
-        ProblemDetail: {
-            /** Format: uri */
-            type: string;
-            title: string;
-            status: number;
-            detail?: string;
-            /** Format: uri */
-            instance?: string;
-            trace_id?: string;
-        };
-        PaginationEnvelope: {
-            total: number;
-            limit: number;
-            offset: number;
-            has_more: boolean;
-            /** @description Opaque cursor for the next page. Absent when no further rows follow. */
-            next_cursor?: string;
-        };
-        HealthResponse: {
-            /** @example ok */
-            status: string;
-        };
-        LoginRequest: {
-            code: string;
-        };
-        CallbackRequest: {
-            code: string;
-            state: string;
-            /** @description PKCE code verifier generated by the browser client. */
-            code_verifier?: string;
-        };
-        AuthConfigResponse: {
-            issuer: string;
-            client_id: string;
-            redirect_uri?: string;
-            scopes: string[];
-            authorization_endpoint: string;
-            token_endpoint: string;
-            end_session_endpoint?: string;
-            pkce_required: boolean;
-        };
-        RefreshRequest: {
-            token: string;
-        };
-        AuthTokenResponse: {
-            token: string;
-            /** Format: date-time */
-            expires_at: string;
-        };
-        AuthCallbackUser: {
-            sub: string;
-            /** Format: email */
-            email?: string;
-            name?: string;
-            groups?: string[];
-            org_id: string;
-            permissions: string[];
-        };
-        AuthCallbackResponse: components["schemas"]["AuthTokenResponse"] & {
-            user: components["schemas"]["AuthCallbackUser"];
-        };
-        SessionClaims: {
-            sub: string;
-            org_id: string;
-            client_scope?: string;
-            permissions: string[];
-            /** Format: date-time */
-            iat: string;
-            /** Format: date-time */
-            exp: string;
-        };
-        /** @enum {string} */
-        CIStatus: "active" | "inactive" | "maintenance" | "decommissioned" | "unknown";
-        /** @enum {string} */
-        CIDiscoverySource: "manual" | "sweep" | "snmp" | "ssh" | "redfish" | "ipmi" | "wmi" | "api" | "agent" | "discovery";
-        CI: {
-            id: string;
-            organization_id: string;
-            client_id?: string;
-            site_id?: string;
-            room_id?: string;
-            ci_type_id: string;
-            name: string;
-            status: components["schemas"]["CIStatus"];
-            manufacturer?: string;
-            model?: string;
-            serial_number?: string;
-            hardware_uuid?: string;
-            management_ip?: string;
-            primary_mac?: string;
-            hostname?: string;
-            fqdn?: string;
-            os_name?: string;
-            os_version?: string;
-            firmware_version?: string;
-            sys_object_id?: string;
-            attributes: {
-                [key: string]: unknown;
-            };
-            discovery_source?: components["schemas"]["CIDiscoverySource"];
-            /** Format: date-time */
-            first_seen_at?: string;
-            /** Format: date-time */
-            last_seen_at?: string;
-            is_manual: boolean;
-            /** Format: date-time */
-            deleted_at?: string;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        CreateCIRequest: {
-            ci_type_id: string;
-            client_id?: string;
-            site_id?: string;
-            room_id?: string;
-            name: string;
-            status?: components["schemas"]["CIStatus"];
-            manufacturer?: string;
-            model?: string;
-            serial_number?: string;
-            hardware_uuid?: string;
-            management_ip?: string;
-            primary_mac?: string;
-            hostname?: string;
-            fqdn?: string;
-            os_name?: string;
-            os_version?: string;
-            firmware_version?: string;
-            sys_object_id?: string;
-            attributes?: {
-                [key: string]: unknown;
-            };
-            discovery_source?: components["schemas"]["CIDiscoverySource"];
-        };
-        UpdateCIRequest: {
-            name?: string;
-            status?: components["schemas"]["CIStatus"];
-            manufacturer?: string;
-            model?: string;
-            serial_number?: string;
-            hardware_uuid?: string;
-            management_ip?: string;
-            primary_mac?: string;
-            hostname?: string;
-            fqdn?: string;
-            os_name?: string;
-            os_version?: string;
-            firmware_version?: string;
-            sys_object_id?: string;
-            attributes?: {
-                [key: string]: unknown;
-            };
-            discovery_source?: components["schemas"]["CIDiscoverySource"];
-            /** Format: date-time */
-            last_seen_at?: string;
-        };
-        CIListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["CI"][];
-        };
-        CIChange: {
-            id: string;
-            organization_id: string;
-            ci_id: string;
-            actor_id?: string;
-            /** @enum {string} */
-            change_type: "create" | "update" | "delete" | "status_change" | "relationship_change" | "attribute_change";
-            field_name?: string;
-            old_value?: unknown;
-            new_value?: unknown;
-            comment?: string;
-            /** Format: date-time */
-            created_at: string;
-        };
-        CIChangeListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["CIChange"][];
-        };
-        AuditEntry: {
-            id: string;
-            organization_id: string;
-            /** Format: date-time */
-            timestamp: string;
-            actor_id?: string;
-            /** @enum {string} */
-            actor_type?: "user" | "system" | "collector" | "api_key";
-            action: string;
-            resource_type: string;
-            resource_id?: string;
-            changes?: {
-                [key: string]: unknown;
-            };
-            previous_hash?: string;
-            hash: string;
-        };
-        AuditEntryListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["AuditEntry"][];
-        };
-        AuditVerifyResult: {
-            intact: boolean;
-            /** @description Number of entries verified before the chain broke, or the total when intact. */
-            checked: number;
-            broken_id?: string;
-            broken_at?: number;
-            broken_reason?: string;
-        };
-        /** @enum {string} */
-        RelationshipType: "connected_to" | "hosted_on" | "depends_on" | "member_of" | "powers" | "stores" | "monitors" | "backs_up";
-        Relationship: {
-            id: string;
-            organization_id: string;
-            source_ci_id: string;
-            target_ci_id: string;
-            rel_type: components["schemas"]["RelationshipType"];
-            attributes: {
-                [key: string]: unknown;
-            };
-            source: string;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        CreateRelationshipRequest: {
-            source_ci_id: string;
-            target_ci_id: string;
-            rel_type: components["schemas"]["RelationshipType"];
-            attributes?: {
-                [key: string]: unknown;
-            };
-            /** @default manual */
-            source: string;
-        };
-        RelationshipListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["Relationship"][];
-        };
-        /** @enum {string} */
-        WebhookEvent: "ci.created" | "ci.updated" | "ci.deleted" | "ci.status_changed" | "relationship.created" | "relationship.deleted" | "discovery.completed";
-        WebhookSubscription: {
-            id: string;
-            organization_id: string;
-            name: string;
-            /** Format: uri */
-            url: string;
-            events: components["schemas"]["WebhookEvent"][];
-            is_active: boolean;
-            headers?: {
-                [key: string]: string;
-            };
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        CreateWebhookRequest: {
-            name: string;
-            /** Format: uri */
-            url: string;
-            secret: string;
-            events: components["schemas"]["WebhookEvent"][];
-            headers?: {
-                [key: string]: string;
-            };
-        };
-        UpdateWebhookRequest: {
-            name?: string;
-            /** Format: uri */
-            url?: string;
-            events?: components["schemas"]["WebhookEvent"][];
-            is_active?: boolean;
-            headers?: {
-                [key: string]: string;
-            };
-        };
-        WebhookDelivery: {
-            id: string;
-            organization_id: string;
-            subscription_id: string;
-            event: string;
-            /** Format: uri */
-            url: string;
-            attempt: number;
-            status_code?: number;
-            success: boolean;
-            error?: string;
-            /** Format: date-time */
-            created_at: string;
-        };
-        WebhookDeliveryRecord: {
-            id: string;
-            organization_id: string;
-            subscription_id: string;
-            event: string;
-            /** @enum {string} */
-            status: "pending" | "retrying" | "success" | "failed";
-            attempt: number;
-            max_attempts: number;
-            response_status?: number;
-            duration_ms?: number;
-            error?: string;
-            /** Format: date-time */
-            next_retry_at?: string;
-            /** Format: date-time */
-            delivered_at?: string;
-            /** Format: date-time */
-            created_at: string;
-        };
-        WebhookDeliveryListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["WebhookDeliveryRecord"][];
-        };
-        WebhookListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["WebhookSubscription"][];
-        };
-        DiscoveryIngestItem: {
-            fingerprint: {
-                [key: string]: unknown;
-            };
-            raw_data: {
-                [key: string]: unknown;
-            };
-            ci_type_name: string;
-            name?: string;
-            manufacturer?: string;
-            model?: string;
-            serial_number?: string;
-            management_ip?: string;
-        };
-        DiscoveryIngestRequest: {
-            collector_id: string;
-            items: components["schemas"]["DiscoveryIngestItem"][];
-        };
-        DiscoveryIngestResponse: {
-            received: number;
-            created: number;
-            updated: number;
-            conflicts: number;
-            job_id?: string;
-        };
-        /** @enum {string} */
-        DiscoveryJobStatus: "queued" | "running" | "completed" | "failed";
-        DiscoveryJob: {
-            id: string;
-            organization_id: string;
-            collector_id?: string;
-            status: components["schemas"]["DiscoveryJobStatus"];
-            /** Format: date-time */
-            submitted_at: string;
-            /** Format: date-time */
-            started_at?: string;
-            /** Format: date-time */
-            completed_at?: string;
-            received: number;
-            created: number;
-            updated: number;
-            conflicts: number;
-            error?: string;
-        };
-        DiscoveryJobListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["DiscoveryJob"][];
-        };
-        CIExportJSONResponse: {
-            data: components["schemas"]["CI"][];
-            total: number;
-        };
-        /** @enum {string} */
-        EntitlementPlan: "essential" | "standard" | "pro" | "enterprise";
-        Entitlement: {
-            organization_id: string;
-            feature_key: string;
-            plan: components["schemas"]["EntitlementPlan"];
-            /** @description Maximum number of records for the feature. 0 means unlimited. */
-            limit?: number;
-            enabled: boolean;
-            /** Format: date-time */
-            expires_at?: string;
-        };
-        EntitlementCheckResponse: {
-            feature: string;
-            plan: components["schemas"]["EntitlementPlan"];
-            enabled: boolean;
-            limit?: number;
-        };
-        GrantEntitlementRequest: {
-            feature_key: string;
-            plan?: components["schemas"]["EntitlementPlan"];
-            enabled?: boolean;
-            limit?: number;
-            /** Format: date-time */
-            expires_at?: string;
-        };
-        EntitlementListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["Entitlement"][];
-        };
-        EntitlementUsage: {
-            feature_key: string;
-            used: number;
-            limit?: number;
-            remaining?: number;
-            unit?: string;
-            enabled: boolean;
-        };
-        EntitlementUsageResponse: {
-            data: components["schemas"]["EntitlementUsage"][];
-        };
-        Asset: {
-            id: string;
-            organization_id: string;
-            client_id?: string;
-            ci_id?: string;
-            asset_tag: string;
-            name: string;
-            category: string;
-            status: string;
-            /** Format: date */
-            purchase_date?: string;
-            purchase_cost?: number;
-            currency?: string;
-            /** Format: date */
-            warranty_end?: string;
-            supplier?: string;
-            invoice_number?: string;
-            serial_number?: string;
-            location?: string;
-            notes?: string;
-            custom_fields: {
-                [key: string]: unknown;
-            };
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        CreateAssetRequest: {
-            client_id?: string;
-            ci_id?: string;
-            asset_tag: string;
-            name: string;
-            category?: string;
-            status?: string;
-            /** Format: date */
-            purchase_date?: string;
-            purchase_cost?: number;
-            currency?: string;
-            /** Format: date */
-            warranty_end?: string;
-            supplier?: string;
-            invoice_number?: string;
-            serial_number?: string;
-            location?: string;
-            notes?: string;
-            custom_fields?: {
-                [key: string]: unknown;
-            };
-        };
-        UpdateAssetRequest: {
-            name?: string;
-            category?: string;
-            status?: string;
-            /** Format: date */
-            purchase_date?: string;
-            purchase_cost?: number;
-            currency?: string;
-            /** Format: date */
-            warranty_end?: string;
-            supplier?: string;
-            invoice_number?: string;
-            serial_number?: string;
-            location?: string;
-            notes?: string;
-            ci_id?: string;
-            custom_fields?: {
-                [key: string]: unknown;
-            };
-        };
-        AssetListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["Asset"][];
-        };
-        Assignment: {
-            id: string;
-            organization_id: string;
-            asset_id?: string;
-            ci_id?: string;
-            assigned_to: string;
-            assigned_by: string;
-            assignment_type: string;
-            status: string;
-            /** Format: date-time */
-            assigned_at: string;
-            /** Format: date-time */
-            due_date?: string;
-            /** Format: date-time */
-            returned_at?: string;
-            return_condition?: string;
-            notes?: string;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        CreateAssignmentRequest: {
-            asset_id?: string;
-            ci_id?: string;
-            assigned_to: string;
-            assignment_type?: string;
-            /** Format: date-time */
-            due_date?: string;
-            notes?: string;
-        };
-        UpdateAssignmentRequest: {
-            assigned_to?: string;
-            assignment_type?: string;
-            status?: string;
-            /** Format: date-time */
-            due_date?: string;
-            /** Format: date-time */
-            returned_at?: string;
-            return_condition?: string;
-            notes?: string;
-        };
-        AssignmentListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["Assignment"][];
-        };
-        Document: {
-            id: string;
-            organization_id: string;
-            title: string;
-            description?: string;
-            file_name: string;
-            file_size: number;
-            mime_type: string;
-            storage_key: string;
-            version: number;
-            category: string;
-            tags: string[];
-            uploaded_by: string;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        CreateDocumentRequest: {
-            title: string;
-            description?: string;
-            file_name: string;
-            file_size?: number;
-            mime_type?: string;
-            storage_key: string;
-            category?: string;
-            tags?: string[];
-        };
-        UpdateDocumentRequest: {
-            title?: string;
-            description?: string;
-            category?: string;
-            tags?: string[];
-        };
-        DocumentListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["Document"][];
-        };
-        Stocktake: {
-            id: string;
-            organization_id: string;
-            title: string;
-            description?: string;
-            status: string;
-            scope: string;
-            started_by?: string;
-            /** Format: date-time */
-            started_at?: string;
-            /** Format: date-time */
-            completed_at?: string;
-            /** Format: date-time */
-            due_date?: string;
-            total_expected: number;
-            total_scanned: number;
-            total_missing: number;
-            total_surplus: number;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        CreateStocktakeRequest: {
-            title: string;
-            description?: string;
-            scope?: string;
-            /** Format: date-time */
-            due_date?: string;
-            total_expected?: number;
-        };
-        UpdateStocktakeRequest: {
-            title?: string;
-            description?: string;
-            status?: string;
-            /** Format: date-time */
-            due_date?: string;
-            total_expected?: number;
-        };
-        StocktakeListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["Stocktake"][];
-        };
-        StockScan: {
-            id: string;
-            organization_id: string;
-            stocktake_id: string;
-            asset_id?: string;
-            ci_id?: string;
-            scanned_by: string;
-            scan_method: string;
-            scan_result: string;
-            location_found?: string;
-            notes?: string;
-            /** Format: date-time */
-            scanned_at: string;
-        };
-        CreateStockScanRequest: {
-            asset_id?: string;
-            ci_id?: string;
-            scan_method?: string;
-            scan_result: string;
-            location_found?: string;
-            notes?: string;
-        };
-        StockScanListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["StockScan"][];
-        };
-        Ticket: {
-            id: string;
-            organization_id: string;
-            ticket_number: number;
-            title: string;
-            description?: string;
-            status: string;
-            priority: string;
-            category: string;
-            reporter_id: string;
-            assignee_id?: string;
-            team_id?: string;
-            related_ci_id?: string;
-            related_asset_id?: string;
-            /** Format: date-time */
-            due_date?: string;
-            /** Format: date-time */
-            resolved_at?: string;
-            /** Format: date-time */
-            closed_at?: string;
-            tags: string[];
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        CreateTicketRequest: {
-            title: string;
-            description?: string;
-            priority?: string;
-            category?: string;
-            assignee_id?: string;
-            team_id?: string;
-            related_ci_id?: string;
-            related_asset_id?: string;
-            /** Format: date-time */
-            due_date?: string;
-            tags?: string[];
-        };
-        UpdateTicketRequest: {
-            title?: string;
-            description?: string;
-            status?: string;
-            priority?: string;
-            category?: string;
-            assignee_id?: string;
-            team_id?: string;
-            related_ci_id?: string;
-            related_asset_id?: string;
-            /** Format: date-time */
-            due_date?: string;
-            tags?: string[];
-        };
-        TicketListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["Ticket"][];
-        };
-        TicketComment: {
-            id: string;
-            organization_id: string;
-            ticket_id: string;
-            author_id: string;
-            content: string;
-            is_internal: boolean;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        CreateTicketCommentRequest: {
-            content: string;
-            is_internal?: boolean;
-        };
-        TicketCommentListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["TicketComment"][];
-        };
-        User: {
-            id: string;
-            organization_id: string;
-            /** Format: email */
-            email: string;
-            display_name: string;
-            /** Format: uri */
-            avatar_url?: string;
-            status: string;
-            external_id?: string;
-            /** Format: date-time */
-            last_login_at?: string;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        CreateUserRequest: {
-            /** Format: email */
-            email: string;
-            display_name: string;
-            status?: string;
-            external_id?: string;
-        };
-        UpdateUserRequest: {
-            display_name?: string;
-            status?: string;
-            /** Format: uri */
-            avatar_url?: string;
-        };
-        UserListResponse: components["schemas"]["PaginationEnvelope"] & {
-            data: components["schemas"]["User"][];
-        };
-        Metric: {
-            org_id?: string;
-            ci_id?: string;
-            name: string;
-            value: number;
-            labels?: {
-                [key: string]: string;
-            };
-            /** Format: date-time */
-            timestamp?: string;
-        };
-        MetricsIngestRequest: {
-            metrics: components["schemas"]["Metric"][];
-        };
-        MetricsIngestResponse: {
-            ingested: number;
-        };
-        MetricPoint: {
-            /** Format: date-time */
-            timestamp: string;
-            value: number;
-        };
-        AlertRule: {
-            id: string;
-            org_id: string;
-            name: string;
-            metric_name: string;
-            /** @enum {string} */
-            condition: "gt" | "lt" | "eq";
-            threshold: number;
-            /** @description Go duration string. */
-            duration: string;
-            /** @enum {string} */
-            severity: "critical" | "warning" | "info";
-            enabled: boolean;
-        };
-        CreateAlertRuleRequest: {
-            id?: string;
-            name: string;
-            metric_name: string;
-            /** @enum {string} */
-            condition: "gt" | "lt" | "eq";
-            threshold: number;
-            /** @description Go duration string. */
-            duration?: string;
-            /** @enum {string} */
-            severity?: "critical" | "warning" | "info";
-            /** @default true */
-            enabled: boolean;
-        };
-        GraphQLRequest: {
-            query: string;
-            variables?: {
-                [key: string]: unknown;
-            };
-            operationName?: string;
-        };
-        GraphQLError: {
-            message: string;
-        };
-        GraphQLResponse: {
-            data?: {
-                [key: string]: unknown;
-            };
-            errors?: components["schemas"]["GraphQLError"][];
-        };
-    };
-    responses: {
-        /** @description Bad request */
-        BadRequest: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/problem+json": components["schemas"]["ProblemDetail"];
-            };
-        };
-        /** @description Unauthorized */
-        Unauthorized: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/problem+json": components["schemas"]["ProblemDetail"];
-            };
-        };
-        /** @description Forbidden */
-        Forbidden: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/problem+json": components["schemas"]["ProblemDetail"];
-            };
-        };
-        /** @description Resource not found */
-        NotFound: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/problem+json": components["schemas"]["ProblemDetail"];
-            };
-        };
-        /** @description Conflict */
-        Conflict: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/problem+json": components["schemas"]["ProblemDetail"];
-            };
-        };
-        /** @description Upstream delivery failed */
-        BadGateway: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/problem+json": components["schemas"]["ProblemDetail"];
-            };
-        };
-        /** @description A required subsystem is not configured or temporarily unavailable */
-        ServiceUnavailable: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/problem+json": components["schemas"]["ProblemDetail"];
-            };
-        };
-        /** @description Internal server error */
-        InternalServerError: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/problem+json": components["schemas"]["ProblemDetail"];
-            };
-        };
-    };
+  '/healthz': {
     parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Health check */
+    get: operations['getHealth'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/auth/config': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Public OIDC parameters for browser clients
+     * @description Returns the issuer, client ID, redirect URI and endpoints a single-page application needs to start an authorization code flow with PKCE. The client secret is never returned.
+     */
+    get: operations['getAuthConfig'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/auth/login': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Exchange an authorization code for a session token */
+    post: operations['login'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/auth/callback': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Complete the OIDC callback flow and issue a session token */
+    post: operations['authCallback'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/auth/refresh': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Refresh an existing session token */
+    post: operations['refreshSession'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/auth/me': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get the currently authenticated session claims */
+    get: operations['getCurrentSession'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/cis': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List configuration items */
+    get: operations['listCIs'];
+    put?: never;
+    /** Create a configuration item */
+    post: operations['createCI'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/cis/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
         /** @description Resource identifier. */
-        ResourceID: string;
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a configuration item */
+    get: operations['getCI'];
+    put?: never;
+    post?: never;
+    /** Delete a configuration item */
+    delete: operations['deleteCI'];
+    options?: never;
+    head?: never;
+    /** Update a configuration item */
+    patch: operations['updateCI'];
+    trace?: never;
+  };
+  '/api/v1/cis/{id}/changes': {
+    parameters: {
+      query?: {
         /** @description Maximum number of items to return. */
-        Limit: number;
+        limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
          */
-        Offset: number;
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the change history of a CI
+     * @description Returns the `ci_change` rows recorded for the CI. Entries are written in the same transaction as the mutation itself, so the history can never diverge from the current state.
+     */
+    get: operations['listCIChanges'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/audit': {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List audit log entries */
+    get: operations['listAuditEntries'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/audit/verify': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Verify the audit hash chain
+     * @description Walks the organization's audit log in chain order and reports whether the `previous_hash`/`hash` linkage is intact.
+     */
+    post: operations['verifyAuditChain'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/relationships': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List relationships */
+    get: operations['listRelationships'];
+    put?: never;
+    /** Create a relationship */
+    post: operations['createRelationship'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/relationships/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Delete a relationship */
+    delete: operations['deleteRelationship'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/webhooks': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List webhook subscriptions */
+    get: operations['listWebhooks'];
+    put?: never;
+    /** Create a webhook subscription */
+    post: operations['createWebhook'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/webhooks/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a webhook subscription */
+    get: operations['getWebhook'];
+    put?: never;
+    post?: never;
+    /** Delete a webhook subscription */
+    delete: operations['deleteWebhook'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/webhooks/{id}/test': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Send a test delivery to a webhook subscription
+     * @description Sends a single signed `webhook.test` payload to the subscription URL and returns the delivery attempt. The endpoint responds with 200 even when the receiver rejected the request; inspect `success` and `status_code`.
+     */
+    post: operations['testWebhook'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/webhooks/{id}/deliveries': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the durable delivery history of a webhook subscription
+     * @description Returns the persisted deliveries including their retry state. Failed deliveries are retried with exponential backoff until `max_attempts` is reached.
+     */
+    get: operations['listWebhookDeliveries'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/discovery/ingest': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Ingest discovery results in bulk */
+    post: operations['ingestDiscoveryData'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/discovery/jobs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List discovery ingest jobs */
+    get: operations['listDiscoveryJobs'];
+    put?: never;
+    /** Create a discovery job */
+    post: operations['createDiscoveryJob'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/discovery/jobs/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a discovery ingest job */
+    get: operations['getDiscoveryJob'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/export/cis': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Export configuration items
+     * @description Streams the tenant's configuration items. Rows are fetched in
+     *     keyset-paginated batches and flushed as they are produced, so the
+     *     response is chunked and neither the server nor the client has to hold
+     *     the full result set in memory. There is no row limit.
+     */
+    get: operations['exportCIs'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/entitlements': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List tenant entitlements */
+    get: operations['listEntitlements'];
+    put?: never;
+    /** Grant or update an entitlement */
+    post: operations['grantEntitlement'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/entitlements/check/{feature}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        feature: string;
+      };
+      cookie?: never;
+    };
+    /** Check whether a feature is entitled for the current tenant */
+    get: operations['checkEntitlement'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assets': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List assets */
+    get: operations['listAssets'];
+    put?: never;
+    /** Create an asset */
+    post: operations['createAsset'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assets/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get an asset */
+    get: operations['getAsset'];
+    put?: never;
+    post?: never;
+    /** Delete an asset */
+    delete: operations['deleteAsset'];
+    options?: never;
+    head?: never;
+    /** Update an asset */
+    patch: operations['updateAsset'];
+    trace?: never;
+  };
+  '/api/v1/assignments': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List assignments */
+    get: operations['listAssignments'];
+    put?: never;
+    /** Create an assignment */
+    post: operations['createAssignment'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assignments/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get an assignment */
+    get: operations['getAssignment'];
+    put?: never;
+    post?: never;
+    /** Delete an assignment */
+    delete: operations['deleteAssignment'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/documents': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List documents */
+    get: operations['listDocuments'];
+    put?: never;
+    /** Create a document metadata record */
+    post: operations['createDocument'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/documents/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a document */
+    get: operations['getDocument'];
+    put?: never;
+    post?: never;
+    /** Delete a document */
+    delete: operations['deleteDocument'];
+    options?: never;
+    head?: never;
+    /** Update a document */
+    patch: operations['updateDocument'];
+    trace?: never;
+  };
+  '/api/v1/stocktakes': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List stocktakes */
+    get: operations['listStocktakes'];
+    put?: never;
+    /** Create a stocktake */
+    post: operations['createStocktake'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/stocktakes/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a stocktake */
+    get: operations['getStocktake'];
+    put?: never;
+    post?: never;
+    /** Delete a stocktake */
+    delete: operations['deleteStocktake'];
+    options?: never;
+    head?: never;
+    /** Update a stocktake */
+    patch: operations['updateStocktake'];
+    trace?: never;
+  };
+  '/api/v1/stocktakes/{id}/scans': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List recorded scans for a stocktake */
+    get: operations['listStocktakeScans'];
+    put?: never;
+    /** Record a stocktake scan */
+    post: operations['createStocktakeScan'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/tickets': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List tickets */
+    get: operations['listTickets'];
+    put?: never;
+    /** Create a ticket */
+    post: operations['createTicket'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/tickets/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a ticket */
+    get: operations['getTicket'];
+    put?: never;
+    post?: never;
+    /** Delete a ticket */
+    delete: operations['deleteTicket'];
+    options?: never;
+    head?: never;
+    /** Update a ticket */
+    patch: operations['updateTicket'];
+    trace?: never;
+  };
+  '/api/v1/tickets/{id}/comments': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List comments for a ticket */
+    get: operations['listTicketComments'];
+    put?: never;
+    /** Add a comment to a ticket */
+    post: operations['createTicketComment'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/users': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List users */
+    get: operations['listUsers'];
+    put?: never;
+    /** Create a user */
+    post: operations['createUser'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/users/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a user */
+    get: operations['getUser'];
+    put?: never;
+    post?: never;
+    /** Delete a user */
+    delete: operations['deleteUser'];
+    options?: never;
+    head?: never;
+    /** Update a user */
+    patch: operations['updateUser'];
+    trace?: never;
+  };
+  '/api/v1/monitoring/metrics': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Query metric points */
+    get: operations['queryMetrics'];
+    put?: never;
+    /** Ingest one or more metrics */
+    post: operations['ingestMetrics'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/monitoring/alerts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List alert rules */
+    get: operations['listAlerts'];
+    put?: never;
+    /** Create an alert rule */
+    post: operations['createAlert'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/monitoring/alerts/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Delete an alert rule */
+    delete: operations['deleteAlert'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/graphql': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Execute a GraphQL query */
+    post: operations['executeGraphQL'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/discovery/review-items': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List reconciliation review items */
+    get: operations['listReviewItems'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/discovery/review-items/{id}/resolve': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Resolve a reconciliation review item */
+    post: operations['resolveReviewItem'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/topology': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get the CI topology graph for the tenant */
+    get: operations['getTopology'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/topology/cis/{id}/neighbors': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get the immediate topology neighbors of a CI */
+    get: operations['getCINeighbors'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/clients': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List clients */
+    get: operations['listClients'];
+    put?: never;
+    /** Create a client */
+    post: operations['createClient'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/clients/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a client */
+    get: operations['getClient'];
+    put?: never;
+    post?: never;
+    /** Delete a client */
+    delete: operations['deleteClient'];
+    options?: never;
+    head?: never;
+    /** Update a client */
+    patch: operations['updateClient'];
+    trace?: never;
+  };
+  '/api/v1/sites': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List sites */
+    get: operations['listSites'];
+    put?: never;
+    /** Create a site */
+    post: operations['createSite'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/sites/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a site */
+    get: operations['getSite'];
+    put?: never;
+    post?: never;
+    /** Delete a site */
+    delete: operations['deleteSite'];
+    options?: never;
+    head?: never;
+    /** Update a site */
+    patch: operations['updateSite'];
+    trace?: never;
+  };
+  '/api/v1/buildings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List buildings */
+    get: operations['listBuildings'];
+    put?: never;
+    /** Create a building */
+    post: operations['createBuilding'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/buildings/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a building */
+    get: operations['getBuilding'];
+    put?: never;
+    post?: never;
+    /** Delete a building */
+    delete: operations['deleteBuilding'];
+    options?: never;
+    head?: never;
+    /** Update a building */
+    patch: operations['updateBuilding'];
+    trace?: never;
+  };
+  '/api/v1/rooms': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List rooms */
+    get: operations['listRooms'];
+    put?: never;
+    /** Create a room */
+    post: operations['createRoom'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/rooms/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a room */
+    get: operations['getRoom'];
+    put?: never;
+    post?: never;
+    /** Delete a room */
+    delete: operations['deleteRoom'];
+    options?: never;
+    head?: never;
+    /** Update a room */
+    patch: operations['updateRoom'];
+    trace?: never;
+  };
+  '/api/v1/racks': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List racks */
+    get: operations['listRacks'];
+    put?: never;
+    /** Create a rack */
+    post: operations['createRack'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/racks/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a rack */
+    get: operations['getRack'];
+    put?: never;
+    post?: never;
+    /** Delete a rack */
+    delete: operations['deleteRack'];
+    options?: never;
+    head?: never;
+    /** Update a rack */
+    patch: operations['updateRack'];
+    trace?: never;
+  };
+  '/api/v1/racks/{id}/mounts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List mounts in a rack */
+    get: operations['listRackMounts'];
+    put?: never;
+    /** Mount a CI into a rack */
+    post: operations['createRackMount'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/rack-mounts/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a rack mount */
+    get: operations['getRackMount'];
+    put?: never;
+    post?: never;
+    /** Delete a rack mount */
+    delete: operations['deleteRackMount'];
+    options?: never;
+    head?: never;
+    /** Update a rack mount */
+    patch: operations['updateRackMount'];
+    trace?: never;
+  };
+  '/api/v1/cables': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List cables */
+    get: operations['listCables'];
+    put?: never;
+    /** Create a cable */
+    post: operations['createCable'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/cables/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a cable */
+    get: operations['getCable'];
+    put?: never;
+    post?: never;
+    /** Delete a cable */
+    delete: operations['deleteCable'];
+    options?: never;
+    head?: never;
+    /** Update a cable */
+    patch: operations['updateCable'];
+    trace?: never;
+  };
+  '/api/v1/contacts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List contacts */
+    get: operations['listContacts'];
+    put?: never;
+    /** Create a contact */
+    post: operations['createContact'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/contacts/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a contact */
+    get: operations['getContact'];
+    put?: never;
+    post?: never;
+    /** Delete a contact */
+    delete: operations['deleteContact'];
+    options?: never;
+    head?: never;
+    /** Update a contact */
+    patch: operations['updateContact'];
+    trace?: never;
+  };
+  '/api/v1/cis/{id}/contacts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List contacts linked to a CI */
+    get: operations['listCIContacts'];
+    put?: never;
+    /** Link a contact to a CI */
+    post: operations['linkCIContact'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ci-contacts/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Unlink a contact from a CI */
+    delete: operations['unlinkCIContact'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/subnets': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List subnets */
+    get: operations['listSubnets'];
+    put?: never;
+    /** Create a subnet */
+    post: operations['createSubnet'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/subnets/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a subnet */
+    get: operations['getSubnet'];
+    put?: never;
+    post?: never;
+    /** Delete a subnet */
+    delete: operations['deleteSubnet'];
+    options?: never;
+    head?: never;
+    /** Update a subnet */
+    patch: operations['updateSubnet'];
+    trace?: never;
+  };
+  '/api/v1/subnets/{id}/addresses': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List IP addresses in a subnet */
+    get: operations['listSubnetAddresses'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ip-addresses': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List IP addresses */
+    get: operations['listIPAddresses'];
+    put?: never;
+    /** Create an IP address */
+    post: operations['createIPAddress'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ip-addresses/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get an IP address */
+    get: operations['getIPAddress'];
+    put?: never;
+    post?: never;
+    /** Delete an IP address */
+    delete: operations['deleteIPAddress'];
+    options?: never;
+    head?: never;
+    /** Update an IP address */
+    patch: operations['updateIPAddress'];
+    trace?: never;
+  };
+  '/api/v1/cis/{id}/interfaces': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List network interfaces of a CI */
+    get: operations['listCIInterfaces'];
+    put?: never;
+    /** Create a network interface on a CI */
+    post: operations['createCIInterface'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/network-interfaces/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a network interface */
+    get: operations['getNetworkInterface'];
+    put?: never;
+    post?: never;
+    /** Delete a network interface */
+    delete: operations['deleteNetworkInterface'];
+    options?: never;
+    head?: never;
+    /** Update a network interface */
+    patch: operations['updateNetworkInterface'];
+    trace?: never;
+  };
+  '/api/v1/assignments/{id}/return': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Return an assigned asset or CI
+     * @description Marks the assignment as returned, recording the return condition and timestamp. The optional `notes` field overwrites the assignment notes when non-empty.
+     */
+    post: operations['returnAssignment'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assignments/{id}/transfer': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Transfer an assignment to a new assignee
+     * @description Marks the existing assignment as transferred and creates a new active assignment of the same asset/CI for the new assignee.
+     */
+    post: operations['transferAssignment'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/cis/{id}/relationships': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List relationships for a configuration item
+     * @description Returns relationships where the given CI is either the source or the target.
+     */
+    get: operations['listCIRelationships'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/collectors': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List discovery collectors */
+    get: operations['listCollectors'];
+    put?: never;
+    /** Register a discovery collector */
+    post: operations['registerCollector'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/collectors/{id}/heartbeat': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Record a collector heartbeat
+     * @description Updates the collector's last-heartbeat timestamp so the platform can track liveness. No request body is required.
+     */
+    post: operations['collectorHeartbeat'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ingest/bulk': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Ingest discovery results in bulk
+     * @description Reconciles a batch of discovered items against existing CIs, creating, updating or queueing them for manual review. This is the canonical endpoint that `/api/v1/discovery/ingest` aliases.
+     */
+    post: operations['bulkIngest'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/credentials': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List credential metadata
+     * @description Returns credential metadata (never the secret material) for the authenticated tenant. The organization is derived from the session and cannot be supplied by the client.
+     */
+    get: operations['listCredentials'];
+    put?: never;
+    /**
+     * Create an encrypted credential
+     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored.
+     */
+    post: operations['createCredential'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/credentials/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get credential metadata
+     * @description Returns credential metadata (never the secret material) for the authenticated tenant.
+     */
+    get: operations['getCredential'];
+    put?: never;
+    post?: never;
+    /** Delete a credential */
+    delete: operations['deleteCredential'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/credentials/{id}/decrypt': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Decrypt and return a credential secret
+     * @description Decrypts the stored credential and returns the plaintext secret as a JSON object. **This is the only endpoint that exposes secret material;** callers must be strongly authorized. The organization is derived from the authenticated tenant, so a caller can only decrypt secrets belonging to their own organization.
+     */
+    get: operations['decryptCredential'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/documents/{id}/links': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List entities linked to a document */
+    get: operations['getDocumentLinks'];
+    put?: never;
+    /** Link a document to another entity */
+    post: operations['linkDocument'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/teams': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List teams */
+    get: operations['listTeams'];
+    put?: never;
+    /** Create a team */
+    post: operations['createTeam'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/teams/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a team */
+    get: operations['getTeam'];
+    put?: never;
+    post?: never;
+    /** Delete a team */
+    delete: operations['deleteTeam'];
+    options?: never;
+    head?: never;
+    /** Update a team */
+    patch: operations['updateTeam'];
+    trace?: never;
+  };
+  '/api/v1/teams/{id}/members': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List members of a team */
+    get: operations['listTeamMembers'];
+    put?: never;
+    /** Add a member to a team */
+    post: operations['addTeamMember'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/teams/{teamId}/members/{userId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Team identifier. */
+        teamId: string;
+        /** @description User identifier. */
+        userId: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Remove a member from a team */
+    delete: operations['removeTeamMember'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/roles': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List custom roles */
+    get: operations['listRoles'];
+    put?: never;
+    /** Create a custom role */
+    post: operations['createRole'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/roles/assign': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Assign a custom role to a user */
+    post: operations['assignRole'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/roles/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a custom role */
+    get: operations['getRole'];
+    put?: never;
+    post?: never;
+    /** Delete a custom role */
+    delete: operations['deleteRole'];
+    options?: never;
+    head?: never;
+    /** Update a custom role */
+    patch: operations['updateRole'];
+    trace?: never;
+  };
+  '/api/v1/users/{id}/roles': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List custom role assignments for a user */
+    get: operations['listUserRoles'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+}
+export type webhooks = Record<string, never>;
+export interface components {
+  schemas: {
+    /** @description RFC 7807 Problem Details object. */
+    ProblemDetail: {
+      /** Format: uri */
+      type: string;
+      title: string;
+      status: number;
+      detail?: string;
+      /** Format: uri */
+      instance?: string;
+      trace_id?: string;
+    };
+    PaginationEnvelope: {
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+      /** @description Opaque cursor for the next page. Absent when no further rows follow. */
+      next_cursor?: string;
+    };
+    HealthResponse: {
+      /** @example ok */
+      status: string;
+    };
+    LoginRequest: {
+      code: string;
+    };
+    CallbackRequest: {
+      code: string;
+      state: string;
+      /** @description PKCE code verifier generated by the browser client. */
+      code_verifier?: string;
+    };
+    AuthConfigResponse: {
+      issuer: string;
+      client_id: string;
+      redirect_uri?: string;
+      scopes: string[];
+      authorization_endpoint: string;
+      token_endpoint: string;
+      end_session_endpoint?: string;
+      pkce_required: boolean;
+    };
+    RefreshRequest: {
+      token: string;
+    };
+    AuthTokenResponse: {
+      token: string;
+      /** Format: date-time */
+      expires_at: string;
+    };
+    AuthCallbackUser: {
+      sub: string;
+      /** Format: email */
+      email?: string;
+      name?: string;
+      groups?: string[];
+      org_id: string;
+      permissions: string[];
+    };
+    AuthCallbackResponse: components['schemas']['AuthTokenResponse'] & {
+      user: components['schemas']['AuthCallbackUser'];
+    };
+    SessionClaims: {
+      sub: string;
+      org_id: string;
+      client_scope?: string;
+      permissions: string[];
+      /** Format: date-time */
+      iat: string;
+      /** Format: date-time */
+      exp: string;
+    };
+    /** @enum {string} */
+    CIStatus: 'active' | 'inactive' | 'maintenance' | 'decommissioned' | 'unknown';
+    /** @enum {string} */
+    CIDiscoverySource:
+      | 'manual'
+      | 'sweep'
+      | 'snmp'
+      | 'ssh'
+      | 'redfish'
+      | 'ipmi'
+      | 'wmi'
+      | 'api'
+      | 'agent'
+      | 'discovery';
+    CI: {
+      id: string;
+      organization_id: string;
+      client_id?: string;
+      site_id?: string;
+      room_id?: string;
+      ci_type_id: string;
+      name: string;
+      status: components['schemas']['CIStatus'];
+      manufacturer?: string;
+      model?: string;
+      serial_number?: string;
+      hardware_uuid?: string;
+      management_ip?: string;
+      primary_mac?: string;
+      hostname?: string;
+      fqdn?: string;
+      os_name?: string;
+      os_version?: string;
+      firmware_version?: string;
+      sys_object_id?: string;
+      attributes: {
+        [key: string]: unknown;
+      };
+      discovery_source?: components['schemas']['CIDiscoverySource'];
+      /** Format: date-time */
+      first_seen_at?: string;
+      /** Format: date-time */
+      last_seen_at?: string;
+      is_manual: boolean;
+      /** Format: date-time */
+      deleted_at?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateCIRequest: {
+      ci_type_id: string;
+      client_id?: string;
+      site_id?: string;
+      room_id?: string;
+      name: string;
+      status?: components['schemas']['CIStatus'];
+      manufacturer?: string;
+      model?: string;
+      serial_number?: string;
+      hardware_uuid?: string;
+      management_ip?: string;
+      primary_mac?: string;
+      hostname?: string;
+      fqdn?: string;
+      os_name?: string;
+      os_version?: string;
+      firmware_version?: string;
+      sys_object_id?: string;
+      attributes?: {
+        [key: string]: unknown;
+      };
+      discovery_source?: components['schemas']['CIDiscoverySource'];
+    };
+    UpdateCIRequest: {
+      name?: string;
+      status?: components['schemas']['CIStatus'];
+      manufacturer?: string;
+      model?: string;
+      serial_number?: string;
+      hardware_uuid?: string;
+      management_ip?: string;
+      primary_mac?: string;
+      hostname?: string;
+      fqdn?: string;
+      os_name?: string;
+      os_version?: string;
+      firmware_version?: string;
+      sys_object_id?: string;
+      attributes?: {
+        [key: string]: unknown;
+      };
+      discovery_source?: components['schemas']['CIDiscoverySource'];
+      /** Format: date-time */
+      last_seen_at?: string;
+    };
+    CIListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['CI'][];
+    };
+    CIChange: {
+      id: string;
+      organization_id: string;
+      ci_id: string;
+      actor_id?: string;
+      /** @enum {string} */
+      change_type:
+        | 'create'
+        | 'update'
+        | 'delete'
+        | 'status_change'
+        | 'relationship_change'
+        | 'attribute_change';
+      field_name?: string;
+      old_value?: unknown;
+      new_value?: unknown;
+      comment?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    CIChangeListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['CIChange'][];
+    };
+    AuditEntry: {
+      id: string;
+      organization_id: string;
+      /** Format: date-time */
+      timestamp: string;
+      actor_id?: string;
+      /** @enum {string} */
+      actor_type?: 'user' | 'system' | 'collector' | 'api_key';
+      action: string;
+      resource_type: string;
+      resource_id?: string;
+      changes?: {
+        [key: string]: unknown;
+      };
+      previous_hash?: string;
+      hash: string;
+    };
+    AuditEntryListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['AuditEntry'][];
+    };
+    AuditVerifyResult: {
+      intact: boolean;
+      /** @description Number of entries verified before the chain broke, or the total when intact. */
+      checked: number;
+      broken_id?: string;
+      broken_at?: number;
+      broken_reason?: string;
+    };
+    /** @enum {string} */
+    RelationshipType:
+      | 'connected_to'
+      | 'hosted_on'
+      | 'depends_on'
+      | 'member_of'
+      | 'powers'
+      | 'powered_by'
+      | 'stores'
+      | 'monitors'
+      | 'backs_up';
+    Relationship: {
+      id: string;
+      organization_id: string;
+      source_ci_id: string;
+      target_ci_id: string;
+      rel_type: components['schemas']['RelationshipType'];
+      attributes: {
+        [key: string]: unknown;
+      };
+      source: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateRelationshipRequest: {
+      source_ci_id: string;
+      target_ci_id: string;
+      rel_type: components['schemas']['RelationshipType'];
+      attributes?: {
+        [key: string]: unknown;
+      };
+      /** @default manual */
+      source: string;
+    };
+    RelationshipListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Relationship'][];
+    };
+    /** @enum {string} */
+    WebhookEvent:
+      | 'ci.created'
+      | 'ci.updated'
+      | 'ci.deleted'
+      | 'ci.status_changed'
+      | 'relationship.created'
+      | 'relationship.deleted'
+      | 'discovery.completed';
+    WebhookSubscription: {
+      id: string;
+      organization_id: string;
+      name: string;
+      /** Format: uri */
+      url: string;
+      events: components['schemas']['WebhookEvent'][];
+      is_active: boolean;
+      headers?: {
+        [key: string]: string;
+      };
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateWebhookRequest: {
+      name: string;
+      /** Format: uri */
+      url: string;
+      secret: string;
+      events: components['schemas']['WebhookEvent'][];
+      headers?: {
+        [key: string]: string;
+      };
+    };
+    WebhookDelivery: {
+      id: string;
+      organization_id: string;
+      subscription_id: string;
+      event: string;
+      /** Format: uri */
+      url: string;
+      attempt: number;
+      status_code?: number;
+      success: boolean;
+      error?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    WebhookDeliveryRecord: {
+      id: string;
+      organization_id: string;
+      subscription_id: string;
+      event: string;
+      /** @enum {string} */
+      status: 'pending' | 'retrying' | 'success' | 'failed';
+      attempt: number;
+      max_attempts: number;
+      response_status?: number;
+      duration_ms?: number;
+      error?: string;
+      /** Format: date-time */
+      next_retry_at?: string;
+      /** Format: date-time */
+      delivered_at?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    WebhookDeliveryListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['WebhookDeliveryRecord'][];
+    };
+    WebhookListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['WebhookSubscription'][];
+    };
+    DiscoveryIngestItem: {
+      fingerprint: {
+        [key: string]: unknown;
+      };
+      raw_data: {
+        [key: string]: unknown;
+      };
+      ci_type_name: string;
+      name?: string;
+      manufacturer?: string;
+      model?: string;
+      serial_number?: string;
+      management_ip?: string;
+    };
+    DiscoveryIngestRequest: {
+      collector_id: string;
+      items: components['schemas']['DiscoveryIngestItem'][];
+    };
+    DiscoveryIngestResponse: {
+      received: number;
+      created: number;
+      updated: number;
+      conflicts: number;
+      job_id?: string;
+    };
+    /** @enum {string} */
+    DiscoveryJobStatus: 'queued' | 'running' | 'completed' | 'failed';
+    DiscoveryJobListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['DiscoveryJobRecord'][];
+    };
+    CIExportJSONResponse: {
+      data: components['schemas']['CI'][];
+      total: number;
+    };
+    /** @enum {string} */
+    EntitlementPlan: 'essential' | 'standard' | 'pro' | 'enterprise';
+    Entitlement: {
+      organization_id: string;
+      feature_key: string;
+      plan: components['schemas']['EntitlementPlan'];
+      /** @description Maximum number of records for the feature. 0 means unlimited. */
+      limit?: number;
+      enabled: boolean;
+      /** Format: date-time */
+      expires_at?: string;
+    };
+    EntitlementCheckResponse: {
+      feature: string;
+      plan: components['schemas']['EntitlementPlan'];
+      enabled: boolean;
+      limit?: number;
+    };
+    GrantEntitlementRequest: {
+      feature_key: string;
+      plan?: components['schemas']['EntitlementPlan'];
+      enabled?: boolean;
+      limit?: number;
+      /** Format: date-time */
+      expires_at?: string;
+    };
+    EntitlementListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Entitlement'][];
+    };
+    Asset: {
+      id: string;
+      organization_id: string;
+      client_id?: string;
+      ci_id?: string;
+      asset_tag: string;
+      name: string;
+      category: string;
+      status: string;
+      /** Format: date */
+      purchase_date?: string;
+      purchase_cost?: number;
+      currency?: string;
+      /** Format: date */
+      warranty_end?: string;
+      supplier?: string;
+      invoice_number?: string;
+      serial_number?: string;
+      location?: string;
+      notes?: string;
+      custom_fields: {
+        [key: string]: unknown;
+      };
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateAssetRequest: {
+      client_id?: string;
+      ci_id?: string;
+      asset_tag: string;
+      name: string;
+      category?: string;
+      status?: string;
+      /** Format: date */
+      purchase_date?: string;
+      purchase_cost?: number;
+      currency?: string;
+      /** Format: date */
+      warranty_end?: string;
+      supplier?: string;
+      invoice_number?: string;
+      serial_number?: string;
+      location?: string;
+      notes?: string;
+      custom_fields?: {
+        [key: string]: unknown;
+      };
+    };
+    UpdateAssetRequest: {
+      name?: string;
+      category?: string;
+      status?: string;
+      /** Format: date */
+      purchase_date?: string;
+      purchase_cost?: number;
+      currency?: string;
+      /** Format: date */
+      warranty_end?: string;
+      supplier?: string;
+      invoice_number?: string;
+      serial_number?: string;
+      location?: string;
+      notes?: string;
+      ci_id?: string;
+      custom_fields?: {
+        [key: string]: unknown;
+      };
+    };
+    AssetListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Asset'][];
+    };
+    Assignment: {
+      id: string;
+      organization_id: string;
+      asset_id?: string;
+      ci_id?: string;
+      assigned_to: string;
+      assigned_by: string;
+      assignment_type: string;
+      status: string;
+      /** Format: date-time */
+      assigned_at: string;
+      /** Format: date-time */
+      due_date?: string;
+      /** Format: date-time */
+      returned_at?: string;
+      return_condition?: string;
+      notes?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateAssignmentRequest: {
+      asset_id?: string;
+      ci_id?: string;
+      assigned_to: string;
+      assignment_type?: string;
+      /** Format: date-time */
+      due_date?: string;
+      notes?: string;
+    };
+    AssignmentListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Assignment'][];
+    };
+    Document: {
+      id: string;
+      organization_id: string;
+      title: string;
+      description?: string;
+      file_name: string;
+      file_size: number;
+      mime_type: string;
+      storage_key: string;
+      version: number;
+      category: string;
+      tags: string[];
+      uploaded_by: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateDocumentRequest: {
+      title: string;
+      description?: string;
+      file_name: string;
+      file_size?: number;
+      mime_type?: string;
+      storage_key: string;
+      category?: string;
+      tags?: string[];
+    };
+    UpdateDocumentRequest: {
+      title?: string;
+      description?: string;
+      category?: string;
+      tags?: string[];
+    };
+    DocumentListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Document'][];
+    };
+    Stocktake: {
+      id: string;
+      organization_id: string;
+      title: string;
+      description?: string;
+      status: string;
+      scope: string;
+      started_by?: string;
+      /** Format: date-time */
+      started_at?: string;
+      /** Format: date-time */
+      completed_at?: string;
+      /** Format: date-time */
+      due_date?: string;
+      total_expected: number;
+      total_scanned: number;
+      total_missing: number;
+      total_surplus: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateStocktakeRequest: {
+      title: string;
+      description?: string;
+      scope?: string;
+      /** Format: date-time */
+      due_date?: string;
+      total_expected?: number;
+    };
+    UpdateStocktakeRequest: {
+      title?: string;
+      description?: string;
+      status?: string;
+      /** Format: date-time */
+      due_date?: string;
+      total_expected?: number;
+    };
+    StocktakeListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Stocktake'][];
+    };
+    StockScan: {
+      id: string;
+      organization_id: string;
+      stocktake_id: string;
+      asset_id?: string;
+      ci_id?: string;
+      scanned_by: string;
+      scan_method: string;
+      scan_result: string;
+      location_found?: string;
+      notes?: string;
+      /** Format: date-time */
+      scanned_at: string;
+    };
+    CreateStockScanRequest: {
+      asset_id?: string;
+      ci_id?: string;
+      scan_method?: string;
+      scan_result: string;
+      location_found?: string;
+      notes?: string;
+    };
+    StockScanListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['StockScan'][];
+    };
+    Ticket: {
+      id: string;
+      organization_id: string;
+      ticket_number: number;
+      title: string;
+      description?: string;
+      status: string;
+      priority: string;
+      category: string;
+      reporter_id: string;
+      assignee_id?: string;
+      team_id?: string;
+      related_ci_id?: string;
+      related_asset_id?: string;
+      /** Format: date-time */
+      due_date?: string;
+      /** Format: date-time */
+      resolved_at?: string;
+      /** Format: date-time */
+      closed_at?: string;
+      tags: string[];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateTicketRequest: {
+      title: string;
+      description?: string;
+      priority?: string;
+      category?: string;
+      assignee_id?: string;
+      team_id?: string;
+      related_ci_id?: string;
+      related_asset_id?: string;
+      /** Format: date-time */
+      due_date?: string;
+      tags?: string[];
+    };
+    UpdateTicketRequest: {
+      title?: string;
+      description?: string;
+      status?: string;
+      priority?: string;
+      category?: string;
+      assignee_id?: string;
+      team_id?: string;
+      related_ci_id?: string;
+      related_asset_id?: string;
+      /** Format: date-time */
+      due_date?: string;
+      tags?: string[];
+    };
+    TicketListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Ticket'][];
+    };
+    TicketComment: {
+      id: string;
+      organization_id: string;
+      ticket_id: string;
+      author_id: string;
+      content: string;
+      is_internal: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateTicketCommentRequest: {
+      content: string;
+      is_internal?: boolean;
+    };
+    TicketCommentListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['TicketComment'][];
+    };
+    User: {
+      id: string;
+      organization_id: string;
+      /** Format: email */
+      email: string;
+      display_name: string;
+      /** Format: uri */
+      avatar_url?: string;
+      status: string;
+      external_id?: string;
+      /** Format: date-time */
+      last_login_at?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateUserRequest: {
+      /** Format: email */
+      email: string;
+      display_name: string;
+      status?: string;
+      external_id?: string;
+    };
+    UpdateUserRequest: {
+      display_name?: string;
+      status?: string;
+      /** Format: uri */
+      avatar_url?: string;
+    };
+    UserListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['User'][];
+    };
+    Metric: {
+      org_id?: string;
+      ci_id?: string;
+      name: string;
+      value: number;
+      labels?: {
+        [key: string]: string;
+      };
+      /** Format: date-time */
+      timestamp?: string;
+    };
+    MetricsIngestRequest: {
+      metrics: components['schemas']['Metric'][];
+    };
+    MetricsIngestResponse: {
+      ingested: number;
+    };
+    MetricPoint: {
+      /** Format: date-time */
+      timestamp: string;
+      value: number;
+    };
+    AlertRule: {
+      id: string;
+      org_id: string;
+      name: string;
+      metric_name: string;
+      /** @enum {string} */
+      condition: 'gt' | 'lt' | 'eq';
+      threshold: number;
+      /** @description Go duration string. */
+      duration: string;
+      /** @enum {string} */
+      severity: 'critical' | 'warning' | 'info';
+      enabled: boolean;
+    };
+    CreateAlertRuleRequest: {
+      id?: string;
+      name: string;
+      metric_name: string;
+      /** @enum {string} */
+      condition: 'gt' | 'lt' | 'eq';
+      threshold: number;
+      /** @description Go duration string. */
+      duration?: string;
+      /** @enum {string} */
+      severity?: 'critical' | 'warning' | 'info';
+      /** @default true */
+      enabled: boolean;
+    };
+    GraphQLRequest: {
+      query: string;
+      variables?: {
+        [key: string]: unknown;
+      };
+      operationName?: string;
+    };
+    GraphQLError: {
+      message: string;
+    };
+    GraphQLResponse: {
+      data?: {
+        [key: string]: unknown;
+      };
+      errors?: components['schemas']['GraphQLError'][];
+    };
+    DiscoveryJobCreateRequest: {
+      collector_id: string;
+      /**
+       * @default sweep
+       * @enum {string}
+       */
+      job_type: 'sweep' | 'poll' | 'full';
+      config?: {
+        [key: string]: unknown;
+      };
+    };
+    DiscoveryJobRecord: {
+      id: string;
+      organization_id: string;
+      collector_id?: string;
+      /** @enum {string} */
+      job_type: 'sweep' | 'poll' | 'full';
+      /** @enum {string} */
+      status: 'pending' | 'running' | 'completed' | 'failed';
+      config: {
+        [key: string]: unknown;
+      };
+      result_summary?: {
+        [key: string]: unknown;
+      };
+      /** Format: date-time */
+      started_at?: string;
+      /** Format: date-time */
+      completed_at?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    ReviewItem: {
+      id: string;
+      organization_id: string;
+      /** @enum {string} */
+      kind: 'ambiguous_identity' | 'conflicting_values' | 'unclassified_device';
+      /** @enum {string} */
+      status: 'open' | 'resolved' | 'dismissed';
+      payload: {
+        [key: string]: unknown;
+      };
+      candidate_ci_ids?: string[];
+      resolved_by?: string;
+      /** Format: date-time */
+      resolved_at?: string;
+      resolution?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    ReviewItemListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ReviewItem'][];
+    };
+    ReviewItemResolveRequest: {
+      /**
+       * @description merge folds discovery data into an existing candidate CI (requires ci_id); create spawns a new CI from the payload; dismiss closes the item with no CI change.
+       * @enum {string}
+       */
+      action: 'merge' | 'create' | 'dismiss';
+      /** @description Target candidate CI id, required when action is merge. */
+      ci_id?: string;
+      resolved_by?: string;
+      /** @description Optional human-readable resolution note. */
+      resolution?: string;
+    };
+    TopologyNode: {
+      id: string;
+      name: string;
+      ci_type: string;
+      status: string;
+      client_id?: string;
+      site_id?: string;
+      management_ip?: string;
+    };
+    TopologyEdge: {
+      id: string;
+      source_ci_id: string;
+      target_ci_id: string;
+      /** @enum {string} */
+      rel_type:
+        | 'connected_to'
+        | 'hosted_on'
+        | 'depends_on'
+        | 'member_of'
+        | 'powers'
+        | 'powered_by'
+        | 'stores'
+        | 'monitors'
+        | 'backs_up';
+      /** @description Provenance of the edge (e.g. manual, discovery). */
+      source?: string;
+    };
+    TopologyGraph: {
+      nodes: components['schemas']['TopologyNode'][];
+      edges: components['schemas']['TopologyEdge'][];
+    };
+    Client: {
+      id: string;
+      organization_id: string;
+      name: string;
+      slug: string;
+      settings: {
+        [key: string]: unknown;
+      };
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateClientRequest: {
+      name: string;
+      slug: string;
+      settings?: {
+        [key: string]: unknown;
+      };
+    };
+    UpdateClientRequest: {
+      name?: string;
+      slug?: string;
+      settings?: {
+        [key: string]: unknown;
+      };
+    };
+    ClientListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Client'][];
+    };
+    Site: {
+      id: string;
+      organization_id: string;
+      client_id: string;
+      name: string;
+      address?: string;
+      geo_lat?: number;
+      geo_lon?: number;
+      notes?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateSiteRequest: {
+      client_id: string;
+      name: string;
+      address?: string;
+      geo_lat?: number;
+      geo_lon?: number;
+      notes?: string;
+    };
+    UpdateSiteRequest: {
+      name?: string;
+      address?: string;
+      geo_lat?: number;
+      geo_lon?: number;
+      notes?: string;
+    };
+    SiteListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Site'][];
+    };
+    Building: {
+      id: string;
+      organization_id: string;
+      site_id: string;
+      name: string;
+      floors?: number;
+      floorplan_object_key?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateBuildingRequest: {
+      site_id: string;
+      name: string;
+      floors?: number;
+      floorplan_object_key?: string;
+    };
+    UpdateBuildingRequest: {
+      name?: string;
+      floors?: number;
+      floorplan_object_key?: string;
+    };
+    BuildingListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Building'][];
+    };
+    Room: {
+      id: string;
+      organization_id: string;
+      building_id: string;
+      name: string;
+      floor?: number;
+      room_type?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateRoomRequest: {
+      building_id: string;
+      name: string;
+      floor?: number;
+      room_type?: string;
+    };
+    UpdateRoomRequest: {
+      name?: string;
+      floor?: number;
+      room_type?: string;
+    };
+    RoomListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Room'][];
+    };
+    Rack: {
+      id: string;
+      organization_id: string;
+      room_id: string;
+      name: string;
+      height_u: number;
+      width_mm: number;
+      depth_mm: number;
+      notes?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateRackRequest: {
+      room_id: string;
+      name: string;
+      height_u?: number;
+      width_mm?: number;
+      depth_mm?: number;
+      notes?: string;
+    };
+    UpdateRackRequest: {
+      name?: string;
+      height_u?: number;
+      width_mm?: number;
+      depth_mm?: number;
+      notes?: string;
+    };
+    RackListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Rack'][];
+    };
+    RackMount: {
+      id: string;
+      organization_id: string;
+      rack_id: string;
+      ci_id: string;
+      position_u: number;
+      height_u: number;
+      /** @enum {string} */
+      face: 'front' | 'rear' | 'both';
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateRackMountRequest: {
+      ci_id: string;
+      position_u: number;
+      height_u?: number;
+      /** @enum {string} */
+      face?: 'front' | 'rear' | 'both';
+    };
+    UpdateRackMountRequest: {
+      position_u?: number;
+      height_u?: number;
+      /** @enum {string} */
+      face?: 'front' | 'rear' | 'both';
+    };
+    RackMountListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['RackMount'][];
+    };
+    Cable: {
+      id: string;
+      organization_id: string;
+      label?: string;
+      /** @enum {string} */
+      cable_type: 'copper' | 'fiber_sm' | 'fiber_mm' | 'coaxial' | 'power' | 'other';
+      length_m?: number;
+      color?: string;
+      source_interface_id?: string;
+      target_interface_id?: string;
+      /** @enum {string} */
+      status: 'connected' | 'planned' | 'decommissioned';
+      /** Format: date-time */
+      installed_at?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateCableRequest: {
+      label?: string;
+      /** @enum {string} */
+      cable_type?: 'copper' | 'fiber_sm' | 'fiber_mm' | 'coaxial' | 'power' | 'other';
+      length_m?: number;
+      color?: string;
+      source_interface_id?: string;
+      target_interface_id?: string;
+      /** @enum {string} */
+      status?: 'connected' | 'planned' | 'decommissioned';
+      /** Format: date-time */
+      installed_at?: string;
+    };
+    UpdateCableRequest: {
+      label?: string;
+      /** @enum {string} */
+      cable_type?: 'copper' | 'fiber_sm' | 'fiber_mm' | 'coaxial' | 'power' | 'other';
+      length_m?: number;
+      color?: string;
+      source_interface_id?: string;
+      target_interface_id?: string;
+      /** @enum {string} */
+      status?: 'connected' | 'planned' | 'decommissioned';
+      /** Format: date-time */
+      installed_at?: string;
+    };
+    CableListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Cable'][];
+    };
+    Contact: {
+      id: string;
+      organization_id: string;
+      client_id?: string;
+      display_name: string;
+      email?: string;
+      phone?: string;
+      role?: string;
+      department?: string;
+      notes?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateContactRequest: {
+      client_id?: string;
+      display_name: string;
+      email?: string;
+      phone?: string;
+      role?: string;
+      department?: string;
+      notes?: string;
+    };
+    UpdateContactRequest: {
+      client_id?: string;
+      display_name?: string;
+      email?: string;
+      phone?: string;
+      role?: string;
+      department?: string;
+      notes?: string;
+    };
+    ContactListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Contact'][];
+    };
+    CIContact: {
+      id: string;
+      organization_id: string;
+      ci_id: string;
+      contact_id: string;
+      /** @enum {string} */
+      relationship_type: 'responsible' | 'owner' | 'operator' | 'vendor' | 'escalation';
+      /** Format: date-time */
+      created_at: string;
+    };
+    LinkContactRequest: {
+      contact_id: string;
+      /** @enum {string} */
+      relationship_type?: 'responsible' | 'owner' | 'operator' | 'vendor' | 'escalation';
+    };
+    CIContactListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['CIContact'][];
+    };
+    Subnet: {
+      id: string;
+      organization_id: string;
+      client_id?: string;
+      site_id?: string;
+      cidr: string;
+      name?: string;
+      vlan_id?: number;
+      gateway?: string;
+      dns_servers?: string[];
+      description?: string;
+      is_management: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateSubnetRequest: {
+      client_id?: string;
+      site_id?: string;
+      cidr: string;
+      name?: string;
+      vlan_id?: number;
+      gateway?: string;
+      dns_servers?: string[];
+      description?: string;
+      is_management?: boolean;
+    };
+    UpdateSubnetRequest: {
+      client_id?: string;
+      site_id?: string;
+      name?: string;
+      vlan_id?: number;
+      gateway?: string;
+      dns_servers?: string[];
+      description?: string;
+      is_management?: boolean;
+    };
+    SubnetListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Subnet'][];
+    };
+    IPAddress: {
+      id: string;
+      organization_id: string;
+      subnet_id?: string;
+      interface_id?: string;
+      address: string;
+      /** @enum {string} */
+      status: 'active' | 'reserved' | 'deprecated' | 'dhcp' | 'available';
+      dns_name?: string;
+      description?: string;
+      /** Format: date-time */
+      last_seen_at?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateIPAddressRequest: {
+      subnet_id?: string;
+      interface_id?: string;
+      address: string;
+      /** @enum {string} */
+      status?: 'active' | 'reserved' | 'deprecated' | 'dhcp' | 'available';
+      dns_name?: string;
+      description?: string;
+    };
+    UpdateIPAddressRequest: {
+      subnet_id?: string;
+      interface_id?: string;
+      /** @enum {string} */
+      status?: 'active' | 'reserved' | 'deprecated' | 'dhcp' | 'available';
+      dns_name?: string;
+      description?: string;
+    };
+    IPAddressListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['IPAddress'][];
+    };
+    NetworkInterface: {
+      id: string;
+      organization_id: string;
+      ci_id: string;
+      name: string;
+      mac_address?: string;
+      /** @enum {string} */
+      interface_type:
+        'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
+      speed_mbps?: number;
+      is_management: boolean;
+      is_uplink: boolean;
+      admin_status: string;
+      oper_status: string;
+      description?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateInterfaceRequest: {
+      name: string;
+      mac_address?: string;
+      /** @enum {string} */
+      interface_type?:
+        'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
+      speed_mbps?: number;
+      is_management?: boolean;
+      is_uplink?: boolean;
+      admin_status?: string;
+      oper_status?: string;
+      description?: string;
+    };
+    UpdateInterfaceRequest: {
+      name?: string;
+      mac_address?: string;
+      /** @enum {string} */
+      interface_type?:
+        'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
+      speed_mbps?: number;
+      is_management?: boolean;
+      is_uplink?: boolean;
+      admin_status?: string;
+      oper_status?: string;
+      description?: string;
+    };
+    NetworkInterfaceListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['NetworkInterface'][];
+    };
+    /** @description Payload for returning an assigned asset or CI. */
+    ReturnAssignmentRequest: {
+      return_condition?: string;
+      notes?: string;
+    };
+    TransferAssignmentRequest: {
+      new_assignee: string;
+      notes?: string;
+    };
+    Collector: {
+      id: string;
+      organization_id: string;
+      client_id?: string;
+      name: string;
+      version?: string;
+      status: string;
+      /** Format: date-time */
+      last_heartbeat?: string;
+      config: {
+        [key: string]: unknown;
+      };
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    RegisterCollectorRequest: {
+      name: string;
+      client_id?: string;
+      version?: string;
+      status?: string;
+      config?: {
+        [key: string]: unknown;
+      };
+    };
+    CollectorListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Collector'][];
+    };
+    /** @description Credential metadata. The secret material is never included. */
+    Credential: {
+      id: string;
+      organization_id: string;
+      client_id?: string;
+      name: string;
+      /** @enum {string} */
+      kind:
+        | 'snmp_v2c'
+        | 'snmp_v3'
+        | 'ssh_password'
+        | 'ssh_key'
+        | 'redfish'
+        | 'ipmi'
+        | 'wmi'
+        | 'api_token'
+        | 'nut';
+      scope?: string;
+      key_version: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateCredentialRequest: {
+      client_id?: string;
+      name: string;
+      /** @enum {string} */
+      kind?:
+        | 'snmp_v2c'
+        | 'snmp_v3'
+        | 'ssh_password'
+        | 'ssh_key'
+        | 'redfish'
+        | 'ipmi'
+        | 'wmi'
+        | 'api_token'
+        | 'nut';
+      scope?: string;
+      /** @description Plaintext secret data, encrypted at rest before storage. */
+      secret: {
+        [key: string]: unknown;
+      };
+    };
+    /** @description Decrypted plaintext secret material returned only by the credential decrypt endpoint. Field names depend on the credential kind. */
+    CredentialSecret: {
+      [key: string]: unknown;
+    };
+    DocumentLink: {
+      id: string;
+      organization_id: string;
+      document_id: string;
+      entity_type: string;
+      entity_id: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    CreateDocumentLinkRequest: {
+      entity_type: string;
+      entity_id: string;
+    };
+    Team: {
+      id: string;
+      organization_id: string;
+      name: string;
+      description?: string;
+      lead_id?: string;
+      member_count: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateTeamRequest: {
+      name: string;
+      description?: string;
+      lead_id?: string;
+    };
+    UpdateTeamRequest: {
+      name?: string;
+      description?: string;
+      lead_id?: string;
+    };
+    TeamListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Team'][];
+    };
+    TeamMember: {
+      id: string;
+      team_id: string;
+      user_id: string;
+      role_in_team: string;
+      /** Format: date-time */
+      joined_at: string;
+    };
+    AddTeamMemberRequest: {
+      user_id: string;
+      /** @description Defaults to "member" when omitted. */
+      role_in_team?: string;
+    };
+    /** @description A custom permission role. */
+    Role: {
+      id: string;
+      organization_id: string;
+      name: string;
+      description?: string;
+      is_system: boolean;
+      permissions: string[];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateRoleRequest: {
+      name: string;
+      description?: string;
+      permissions?: string[];
+    };
+    UpdateRoleRequest: {
+      name?: string;
+      description?: string;
+      permissions?: string[];
+    };
+    RoleListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Role'][];
+    };
+    RoleAssignment: {
+      id: string;
+      user_id: string;
+      custom_role_id: string;
+      scope_type: string;
+      scope_id?: string;
+      /** Format: date-time */
+      granted_at: string;
+      granted_by?: string;
+    };
+    AssignRoleRequest: {
+      user_id: string;
+      custom_role_id: string;
+      /** @description Defaults to "organization" when omitted. */
+      scope_type?: string;
+      scope_id?: string;
+    };
+  };
+  responses: {
+    /** @description Bad request */
+    BadRequest: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description Unauthorized */
+    Unauthorized: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description Forbidden */
+    Forbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description Resource not found */
+    NotFound: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description Conflict */
+    Conflict: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description Upstream delivery failed */
+    BadGateway: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description A required subsystem is not configured or temporarily unavailable */
+    ServiceUnavailable: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description Internal server error */
+    InternalServerError: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+  };
+  parameters: {
+    /** @description Resource identifier. */
+    ResourceID: string;
+    /** @description Maximum number of items to return. */
+    Limit: number;
+    /**
+     * @description Number of items to skip before returning data. Ignored when `cursor` is
+     *     supplied.
+     */
+    Offset: number;
+    /**
+     * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
+     *     Cursors are bound to the sort order they were issued for; sending one
+     *     with a different `sort_by`/`sort_dir` combination yields 400.
+     */
+    Cursor: string;
+    /** @description Free-text search term. */
+    Search: string;
+    /** @description Sort field name. */
+    SortBy: string;
+    /** @description Sort direction. */
+    SortDir: 'asc' | 'desc';
+    CIStatus: components['schemas']['CIStatus'];
+    CITypeID: string;
+    ClientID: string;
+  };
+  requestBodies: never;
+  headers: never;
+  pathItems: never;
+}
+export type $defs = Record<string, never>;
+export interface operations {
+  getHealth: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Service is healthy */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HealthResponse'];
+        };
+      };
+    };
+  };
+  getAuthConfig: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Public OIDC configuration */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AuthConfigResponse'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  login: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LoginRequest'];
+      };
+    };
+    responses: {
+      /** @description Session token issued */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AuthTokenResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  authCallback: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CallbackRequest'];
+      };
+    };
+    responses: {
+      /** @description Session token and resolved user info */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AuthCallbackResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  refreshSession: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RefreshRequest'];
+      };
+    };
+    responses: {
+      /** @description Refreshed session token issued */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AuthTokenResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getCurrentSession: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current session claims */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SessionClaims'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listCIs: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
         /**
          * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
          *     Cursors are bound to the sort order they were issued for; sending one
          *     with a different `sort_by`/`sort_dir` combination yields 400.
          */
-        Cursor: string;
+        cursor?: components['parameters']['Cursor'];
         /** @description Free-text search term. */
-        Search: string;
+        search?: components['parameters']['Search'];
         /** @description Sort field name. */
-        SortBy: string;
+        sort_by?: components['parameters']['SortBy'];
         /** @description Sort direction. */
-        SortDir: "asc" | "desc";
-        CIStatus: components["schemas"]["CIStatus"];
-        CITypeID: string;
-        ClientID: string;
-    };
-    requestBodies: never;
-    headers: never;
-    pathItems: never;
-}
-export type $defs = Record<string, never>;
-export interface operations {
-    getHealth: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Service is healthy */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthResponse"];
-                };
-            };
-        };
-    };
-    getAuthConfig: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Public OIDC configuration */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AuthConfigResponse"];
-                };
-            };
-            500: components["responses"]["InternalServerError"];
-            503: components["responses"]["ServiceUnavailable"];
-        };
-    };
-    login: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LoginRequest"];
-            };
-        };
-        responses: {
-            /** @description Session token issued */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AuthTokenResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    authCallback: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CallbackRequest"];
-            };
-        };
-        responses: {
-            /** @description Session token and resolved user info */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AuthCallbackResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    refreshSession: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RefreshRequest"];
-            };
-        };
-        responses: {
-            /** @description Refreshed session token issued */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AuthTokenResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    getCurrentSession: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Current session claims */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SessionClaims"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    listCIs: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-                /**
-                 * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-                 *     Cursors are bound to the sort order they were issued for; sending one
-                 *     with a different `sort_by`/`sort_dir` combination yields 400.
-                 */
-                cursor?: components["parameters"]["Cursor"];
-                /** @description Free-text search term. */
-                search?: components["parameters"]["Search"];
-                /** @description Sort field name. */
-                sort_by?: components["parameters"]["SortBy"];
-                /** @description Sort direction. */
-                sort_dir?: components["parameters"]["SortDir"];
-                status?: components["parameters"]["CIStatus"];
-                ci_type_id?: components["parameters"]["CITypeID"];
-                client_id?: components["parameters"]["ClientID"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of configuration items */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CIListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    createCI: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateCIRequest"];
-            };
-        };
-        responses: {
-            /** @description Configuration item created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CI"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    getCI: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Configuration item details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CI"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteCI: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Configuration item deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateCI: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateCIRequest"];
-            };
-        };
-        responses: {
-            /** @description Configuration item updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CI"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    listCIChanges: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-            };
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated change history */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CIChangeListResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    listAuditEntries: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated audit log */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AuditEntryListResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-        };
-    };
-    verifyAuditChain: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Verification result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AuditVerifyResult"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-        };
-    };
-    listRelationships: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-                /** @description Return relationships where the CI is either the source or target. */
-                ci_id?: string;
-                source_ci_id?: string;
-                target_ci_id?: string;
-                rel_type?: components["schemas"]["RelationshipType"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of relationships */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RelationshipListResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    createRelationship: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateRelationshipRequest"];
-            };
-        };
-        responses: {
-            /** @description Relationship created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Relationship"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    deleteRelationship: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Relationship deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    listWebhooks: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-                event?: components["schemas"]["WebhookEvent"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of webhook subscriptions */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebhookListResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    createWebhook: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateWebhookRequest"];
-            };
-        };
-        responses: {
-            /** @description Webhook subscription created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebhookSubscription"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    getWebhook: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Webhook subscription details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebhookSubscription"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteWebhook: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Webhook subscription deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateWebhook: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateWebhookRequest"];
-            };
-        };
-        responses: {
-            /** @description Webhook subscription updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebhookSubscription"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    testWebhook: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Test delivery attempted */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebhookDelivery"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            503: components["responses"]["ServiceUnavailable"];
-        };
-    };
-    listWebhookDeliveries: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-            };
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Delivery history */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebhookDeliveryListResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            503: components["responses"]["ServiceUnavailable"];
-        };
-    };
-    ingestDiscoveryData: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DiscoveryIngestRequest"];
-            };
-        };
-        responses: {
-            /** @description Discovery payload accepted */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DiscoveryIngestResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    listDiscoveryJobs: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-                status?: components["schemas"]["DiscoveryJobStatus"];
-                collector_id?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of discovery jobs */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DiscoveryJobListResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    getDiscoveryJob: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Discovery job details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DiscoveryJob"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    exportCIs: {
-        parameters: {
-            query?: {
-                format?: "csv" | "json" | "datev";
-                status?: components["parameters"]["CIStatus"];
-                ci_type_id?: components["parameters"]["CITypeID"];
-                client_id?: components["parameters"]["ClientID"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Export payload */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CIExportJSONResponse"];
-                    "text/csv": string;
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    listEntitlements: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Entitlements for the current tenant */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EntitlementListResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-        };
-    };
-    grantEntitlement: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GrantEntitlementRequest"];
-            };
-        };
-        responses: {
-            /** @description Entitlement granted */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Entitlement"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-        };
-    };
-    checkEntitlement: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                feature: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Entitlement decision for the feature */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EntitlementCheckResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    getEntitlementUsage: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Usage metrics grouped by feature */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EntitlementUsageResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-        };
-    };
-    listAssets: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-                /**
-                 * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-                 *     Cursors are bound to the sort order they were issued for; sending one
-                 *     with a different `sort_by`/`sort_dir` combination yields 400.
-                 */
-                cursor?: components["parameters"]["Cursor"];
-                /** @description Free-text search term. */
-                search?: components["parameters"]["Search"];
-                /** @description Sort field name. */
-                sort_by?: components["parameters"]["SortBy"];
-                /** @description Sort direction. */
-                sort_dir?: components["parameters"]["SortDir"];
-                status?: string;
-                category?: string;
-                client_id?: components["parameters"]["ClientID"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of assets */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AssetListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    createAsset: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateAssetRequest"];
-            };
-        };
-        responses: {
-            /** @description Asset created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Asset"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    getAsset: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Asset details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Asset"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteAsset: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Asset deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateAsset: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateAssetRequest"];
-            };
-        };
-        responses: {
-            /** @description Asset updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Asset"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    listAssignments: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-                /**
-                 * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-                 *     Cursors are bound to the sort order they were issued for; sending one
-                 *     with a different `sort_by`/`sort_dir` combination yields 400.
-                 */
-                cursor?: components["parameters"]["Cursor"];
-                /** @description Free-text search term. */
-                search?: components["parameters"]["Search"];
-                /** @description Sort field name. */
-                sort_by?: components["parameters"]["SortBy"];
-                /** @description Sort direction. */
-                sort_dir?: components["parameters"]["SortDir"];
-                status?: string;
-                assigned_to?: string;
-                asset_id?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of assignments */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AssignmentListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    createAssignment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateAssignmentRequest"];
-            };
-        };
-        responses: {
-            /** @description Assignment created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Assignment"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    getAssignment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Assignment details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Assignment"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteAssignment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Assignment deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateAssignment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateAssignmentRequest"];
-            };
-        };
-        responses: {
-            /** @description Assignment updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Assignment"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    listDocuments: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-                /**
-                 * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-                 *     Cursors are bound to the sort order they were issued for; sending one
-                 *     with a different `sort_by`/`sort_dir` combination yields 400.
-                 */
-                cursor?: components["parameters"]["Cursor"];
-                /** @description Free-text search term. */
-                search?: components["parameters"]["Search"];
-                /** @description Sort field name. */
-                sort_by?: components["parameters"]["SortBy"];
-                /** @description Sort direction. */
-                sort_dir?: components["parameters"]["SortDir"];
-                category?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of documents */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DocumentListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    createDocument: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateDocumentRequest"];
-            };
-        };
-        responses: {
-            /** @description Document created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Document"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    getDocument: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Document details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Document"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteDocument: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Document deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateDocument: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateDocumentRequest"];
-            };
-        };
-        responses: {
-            /** @description Document updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Document"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    listStocktakes: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-                /**
-                 * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-                 *     Cursors are bound to the sort order they were issued for; sending one
-                 *     with a different `sort_by`/`sort_dir` combination yields 400.
-                 */
-                cursor?: components["parameters"]["Cursor"];
-                /** @description Free-text search term. */
-                search?: components["parameters"]["Search"];
-                /** @description Sort field name. */
-                sort_by?: components["parameters"]["SortBy"];
-                /** @description Sort direction. */
-                sort_dir?: components["parameters"]["SortDir"];
-                status?: string;
-                scope?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of stocktakes */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StocktakeListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    createStocktake: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateStocktakeRequest"];
-            };
-        };
-        responses: {
-            /** @description Stocktake created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Stocktake"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    getStocktake: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Stocktake details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Stocktake"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteStocktake: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Stocktake deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateStocktake: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateStocktakeRequest"];
-            };
-        };
-        responses: {
-            /** @description Stocktake updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Stocktake"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    listStocktakeScans: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-            };
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of stocktake scans */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StockScanListResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    createStocktakeScan: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateStockScanRequest"];
-            };
-        };
-        responses: {
-            /** @description Stocktake scan recorded */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StockScan"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    listTickets: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-                /**
-                 * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-                 *     Cursors are bound to the sort order they were issued for; sending one
-                 *     with a different `sort_by`/`sort_dir` combination yields 400.
-                 */
-                cursor?: components["parameters"]["Cursor"];
-                /** @description Free-text search term. */
-                search?: components["parameters"]["Search"];
-                /** @description Sort field name. */
-                sort_by?: components["parameters"]["SortBy"];
-                /** @description Sort direction. */
-                sort_dir?: components["parameters"]["SortDir"];
-                status?: string;
-                priority?: string;
-                category?: string;
-                assignee_id?: string;
-                team_id?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of tickets */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TicketListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    createTicket: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateTicketRequest"];
-            };
-        };
-        responses: {
-            /** @description Ticket created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Ticket"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    getTicket: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Ticket details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Ticket"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteTicket: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Ticket deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateTicket: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateTicketRequest"];
-            };
-        };
-        responses: {
-            /** @description Ticket updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Ticket"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    listTicketComments: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-            };
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of comments */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TicketCommentListResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    createTicketComment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateTicketCommentRequest"];
-            };
-        };
-        responses: {
-            /** @description Comment created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TicketComment"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    listUsers: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of items to return. */
-                limit?: components["parameters"]["Limit"];
-                /**
-                 * @description Number of items to skip before returning data. Ignored when `cursor` is
-                 *     supplied.
-                 */
-                offset?: components["parameters"]["Offset"];
-                /** @description Free-text search term. */
-                search?: components["parameters"]["Search"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated list of users */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserListResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    createUser: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateUserRequest"];
-            };
-        };
-        responses: {
-            /** @description User created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["User"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    getUser: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description User details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["User"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteUser: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description User deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateUser: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateUserRequest"];
-            };
-        };
-        responses: {
-            /** @description User updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["User"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    queryMetrics: {
-        parameters: {
-            query?: {
-                ci_id?: string;
-                name?: string;
-                from?: string;
-                to?: string;
-                /** @description Go duration string used for aggregation, for example 5m or 1h. */
-                step?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Metric point series */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MetricPoint"][];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-        };
-    };
-    ingestMetrics: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Metric"] | components["schemas"]["Metric"][] | components["schemas"]["MetricsIngestRequest"];
-            };
-        };
-        responses: {
-            /** @description Metrics accepted */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MetricsIngestResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    listAlerts: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Alert rules */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AlertRule"][];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-        };
-    };
-    createAlert: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateAlertRuleRequest"];
-            };
-        };
-        responses: {
-            /** @description Alert rule created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AlertRule"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            409: components["responses"]["Conflict"];
-        };
-    };
-    deleteAlert: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Resource identifier. */
-                id: components["parameters"]["ResourceID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Alert rule deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    executeGraphQL: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GraphQLRequest"];
-            };
-        };
-        responses: {
-            /** @description GraphQL response envelope */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GraphQLResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-        };
-    };
+        sort_dir?: components['parameters']['SortDir'];
+        status?: components['parameters']['CIStatus'];
+        ci_type_id?: components['parameters']['CITypeID'];
+        client_id?: components['parameters']['ClientID'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of configuration items */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CIListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createCI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateCIRequest'];
+      };
+    };
+    responses: {
+      /** @description Configuration item created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CI'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getCI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Configuration item details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CI'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteCI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Configuration item deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateCI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateCIRequest'];
+      };
+    };
+    responses: {
+      /** @description Configuration item updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CI'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listCIChanges: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated change history */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CIChangeListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listAuditEntries: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated audit log */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AuditEntryListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  verifyAuditChain: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Verification result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AuditVerifyResult'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  listRelationships: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Return relationships where the CI is either the source or target. */
+        ci_id?: string;
+        source_ci_id?: string;
+        target_ci_id?: string;
+        rel_type?: components['schemas']['RelationshipType'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of relationships */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelationshipListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createRelationship: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateRelationshipRequest'];
+      };
+    };
+    responses: {
+      /** @description Relationship created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Relationship'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  deleteRelationship: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Relationship deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listWebhooks: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        event?: components['schemas']['WebhookEvent'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of webhook subscriptions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebhookListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createWebhook: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateWebhookRequest'];
+      };
+    };
+    responses: {
+      /** @description Webhook subscription created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebhookSubscription'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getWebhook: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Webhook subscription details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebhookSubscription'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteWebhook: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Webhook subscription deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  testWebhook: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Test delivery attempted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebhookDelivery'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listWebhookDeliveries: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Delivery history */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebhookDeliveryListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  ingestDiscoveryData: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DiscoveryIngestRequest'];
+      };
+    };
+    responses: {
+      /** @description Discovery payload accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DiscoveryIngestResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listDiscoveryJobs: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        status?: components['schemas']['DiscoveryJobStatus'];
+        collector_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of discovery jobs */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DiscoveryJobListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createDiscoveryJob: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DiscoveryJobCreateRequest'];
+      };
+    };
+    responses: {
+      /** @description Discovery job created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DiscoveryJobRecord'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getDiscoveryJob: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Discovery job details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DiscoveryJobRecord'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  exportCIs: {
+    parameters: {
+      query?: {
+        format?: 'csv' | 'json' | 'datev';
+        status?: components['parameters']['CIStatus'];
+        ci_type_id?: components['parameters']['CITypeID'];
+        client_id?: components['parameters']['ClientID'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Export payload */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CIExportJSONResponse'];
+          'text/csv': string;
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listEntitlements: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Entitlements for the current tenant */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['EntitlementListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  grantEntitlement: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['GrantEntitlementRequest'];
+      };
+    };
+    responses: {
+      /** @description Entitlement granted */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Entitlement'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  checkEntitlement: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        feature: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Entitlement decision for the feature */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['EntitlementCheckResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listAssets: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
+         *     Cursors are bound to the sort order they were issued for; sending one
+         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /** @description Free-text search term. */
+        search?: components['parameters']['Search'];
+        /** @description Sort field name. */
+        sort_by?: components['parameters']['SortBy'];
+        /** @description Sort direction. */
+        sort_dir?: components['parameters']['SortDir'];
+        status?: string;
+        category?: string;
+        client_id?: components['parameters']['ClientID'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of assets */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AssetListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createAsset: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateAssetRequest'];
+      };
+    };
+    responses: {
+      /** @description Asset created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Asset'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getAsset: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Asset details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Asset'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteAsset: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Asset deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateAsset: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateAssetRequest'];
+      };
+    };
+    responses: {
+      /** @description Asset updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Asset'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listAssignments: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
+         *     Cursors are bound to the sort order they were issued for; sending one
+         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /** @description Free-text search term. */
+        search?: components['parameters']['Search'];
+        /** @description Sort field name. */
+        sort_by?: components['parameters']['SortBy'];
+        /** @description Sort direction. */
+        sort_dir?: components['parameters']['SortDir'];
+        status?: string;
+        assigned_to?: string;
+        asset_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of assignments */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AssignmentListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createAssignment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateAssignmentRequest'];
+      };
+    };
+    responses: {
+      /** @description Assignment created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Assignment'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getAssignment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Assignment details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Assignment'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteAssignment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Assignment deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listDocuments: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
+         *     Cursors are bound to the sort order they were issued for; sending one
+         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /** @description Free-text search term. */
+        search?: components['parameters']['Search'];
+        /** @description Sort field name. */
+        sort_by?: components['parameters']['SortBy'];
+        /** @description Sort direction. */
+        sort_dir?: components['parameters']['SortDir'];
+        category?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of documents */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DocumentListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createDocument: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateDocumentRequest'];
+      };
+    };
+    responses: {
+      /** @description Document created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Document'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getDocument: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Document details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Document'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteDocument: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Document deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateDocument: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateDocumentRequest'];
+      };
+    };
+    responses: {
+      /** @description Document updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Document'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listStocktakes: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
+         *     Cursors are bound to the sort order they were issued for; sending one
+         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /** @description Free-text search term. */
+        search?: components['parameters']['Search'];
+        /** @description Sort field name. */
+        sort_by?: components['parameters']['SortBy'];
+        /** @description Sort direction. */
+        sort_dir?: components['parameters']['SortDir'];
+        status?: string;
+        scope?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of stocktakes */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StocktakeListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createStocktake: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateStocktakeRequest'];
+      };
+    };
+    responses: {
+      /** @description Stocktake created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Stocktake'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getStocktake: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stocktake details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Stocktake'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteStocktake: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stocktake deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateStocktake: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateStocktakeRequest'];
+      };
+    };
+    responses: {
+      /** @description Stocktake updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Stocktake'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listStocktakeScans: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of stocktake scans */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StockScanListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  createStocktakeScan: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateStockScanRequest'];
+      };
+    };
+    responses: {
+      /** @description Stocktake scan recorded */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StockScan'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listTickets: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
+         *     Cursors are bound to the sort order they were issued for; sending one
+         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /** @description Free-text search term. */
+        search?: components['parameters']['Search'];
+        /** @description Sort field name. */
+        sort_by?: components['parameters']['SortBy'];
+        /** @description Sort direction. */
+        sort_dir?: components['parameters']['SortDir'];
+        status?: string;
+        priority?: string;
+        category?: string;
+        assignee_id?: string;
+        team_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of tickets */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TicketListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createTicket: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateTicketRequest'];
+      };
+    };
+    responses: {
+      /** @description Ticket created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Ticket'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getTicket: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Ticket details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Ticket'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteTicket: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Ticket deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateTicket: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateTicketRequest'];
+      };
+    };
+    responses: {
+      /** @description Ticket updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Ticket'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listTicketComments: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of comments */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TicketCommentListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  createTicketComment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateTicketCommentRequest'];
+      };
+    };
+    responses: {
+      /** @description Comment created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TicketComment'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listUsers: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Free-text search term. */
+        search?: components['parameters']['Search'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of users */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UserListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createUser: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateUserRequest'];
+      };
+    };
+    responses: {
+      /** @description User created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['User'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getUser: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description User details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['User'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteUser: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description User deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateUser: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateUserRequest'];
+      };
+    };
+    responses: {
+      /** @description User updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['User'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  queryMetrics: {
+    parameters: {
+      query?: {
+        ci_id?: string;
+        name?: string;
+        from?: string;
+        to?: string;
+        /** @description Go duration string used for aggregation, for example 5m or 1h. */
+        step?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Metric point series */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetricPoint'][];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  ingestMetrics: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json':
+          | components['schemas']['Metric']
+          | components['schemas']['Metric'][]
+          | components['schemas']['MetricsIngestRequest'];
+      };
+    };
+    responses: {
+      /** @description Metrics accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetricsIngestResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listAlerts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Alert rules */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AlertRule'][];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createAlert: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateAlertRuleRequest'];
+      };
+    };
+    responses: {
+      /** @description Alert rule created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AlertRule'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  deleteAlert: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Alert rule deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  executeGraphQL: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['GraphQLRequest'];
+      };
+    };
+    responses: {
+      /** @description GraphQL response envelope */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['GraphQLResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  listReviewItems: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        status?: 'open' | 'resolved' | 'dismissed';
+        kind?: 'ambiguous_identity' | 'conflicting_values' | 'unclassified_device';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of review items */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReviewItemListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  resolveReviewItem: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReviewItemResolveRequest'];
+      };
+    };
+    responses: {
+      /** @description The resolved review item */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReviewItem'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getTopology: {
+    parameters: {
+      query?: {
+        client_id?: string;
+        site_id?: string;
+        ci_type?: string;
+        /** @description When set, returns a subgraph reachable from this CI. */
+        root_ci_id?: string;
+        /** @description Traversal depth from root_ci_id (default 2, max 10). */
+        depth?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Topology graph */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TopologyGraph'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getCINeighbors: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Neighbor subgraph (depth 1) centered on the CI */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TopologyGraph'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listClients: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of clients */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ClientListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createClient: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateClientRequest'];
+      };
+    };
+    responses: {
+      /** @description Client created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Client'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getClient: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Client'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteClient: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Client deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateClient: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateClientRequest'];
+      };
+    };
+    responses: {
+      /** @description Client updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Client'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listSites: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        client_id?: components['parameters']['ClientID'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of sites */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SiteListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createSite: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateSiteRequest'];
+      };
+    };
+    responses: {
+      /** @description Site created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Site'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getSite: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Site details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Site'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteSite: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Site deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateSite: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateSiteRequest'];
+      };
+    };
+    responses: {
+      /** @description Site updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Site'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listBuildings: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        site_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of buildings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BuildingListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createBuilding: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateBuildingRequest'];
+      };
+    };
+    responses: {
+      /** @description Building created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Building'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getBuilding: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Building details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Building'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteBuilding: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Building deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateBuilding: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateBuildingRequest'];
+      };
+    };
+    responses: {
+      /** @description Building updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Building'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listRooms: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        building_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of rooms */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RoomListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createRoom: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateRoomRequest'];
+      };
+    };
+    responses: {
+      /** @description Room created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Room'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getRoom: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Room details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Room'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteRoom: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Room deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateRoom: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateRoomRequest'];
+      };
+    };
+    responses: {
+      /** @description Room updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Room'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listRacks: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        room_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of racks */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createRack: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateRackRequest'];
+      };
+    };
+    responses: {
+      /** @description Rack created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Rack'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getRack: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rack details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Rack'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteRack: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rack deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateRack: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateRackRequest'];
+      };
+    };
+    responses: {
+      /** @description Rack updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Rack'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listRackMounts: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of rack mounts */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMountListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  createRackMount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateRackMountRequest'];
+      };
+    };
+    responses: {
+      /** @description Rack mount created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMount'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  getRackMount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rack mount details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMount'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteRackMount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rack mount deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateRackMount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateRackMountRequest'];
+      };
+    };
+    responses: {
+      /** @description Rack mount updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMount'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listCables: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of cables */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CableListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createCable: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateCableRequest'];
+      };
+    };
+    responses: {
+      /** @description Cable created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Cable'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getCable: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Cable details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Cable'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteCable: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Cable deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateCable: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateCableRequest'];
+      };
+    };
+    responses: {
+      /** @description Cable updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Cable'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listContacts: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        client_id?: components['parameters']['ClientID'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of contacts */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ContactListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createContact: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateContactRequest'];
+      };
+    };
+    responses: {
+      /** @description Contact created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Contact'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getContact: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Contact details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Contact'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteContact: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Contact deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateContact: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateContactRequest'];
+      };
+    };
+    responses: {
+      /** @description Contact updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Contact'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listCIContacts: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of CI-contact links */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CIContactListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  linkCIContact: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LinkContactRequest'];
+      };
+    };
+    responses: {
+      /** @description Contact linked to CI */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CIContact'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  unlinkCIContact: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description CI-contact link removed */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listSubnets: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        client_id?: components['parameters']['ClientID'];
+        site_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of subnets */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SubnetListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createSubnet: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateSubnetRequest'];
+      };
+    };
+    responses: {
+      /** @description Subnet created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Subnet'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getSubnet: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Subnet details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Subnet'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteSubnet: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Subnet deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateSubnet: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateSubnetRequest'];
+      };
+    };
+    responses: {
+      /** @description Subnet updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Subnet'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listSubnetAddresses: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of IP addresses */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAddressListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listIPAddresses: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        subnet_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of IP addresses */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAddressListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createIPAddress: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateIPAddressRequest'];
+      };
+    };
+    responses: {
+      /** @description IP address created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAddress'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getIPAddress: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description IP address details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAddress'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteIPAddress: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description IP address deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateIPAddress: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateIPAddressRequest'];
+      };
+    };
+    responses: {
+      /** @description IP address updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAddress'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listCIInterfaces: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of network interfaces */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NetworkInterfaceListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createCIInterface: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateInterfaceRequest'];
+      };
+    };
+    responses: {
+      /** @description Network interface created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NetworkInterface'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getNetworkInterface: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Network interface details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NetworkInterface'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteNetworkInterface: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Network interface deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateNetworkInterface: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateInterfaceRequest'];
+      };
+    };
+    responses: {
+      /** @description Network interface updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NetworkInterface'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  returnAssignment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['ReturnAssignmentRequest'];
+      };
+    };
+    responses: {
+      /** @description Assignment returned */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Assignment'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  transferAssignment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TransferAssignmentRequest'];
+      };
+    };
+    responses: {
+      /** @description New assignment created for the new assignee */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Assignment'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listCIRelationships: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of relationships */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelationshipListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listCollectors: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of collectors */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CollectorListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  registerCollector: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RegisterCollectorRequest'];
+      };
+    };
+    responses: {
+      /** @description Collector registered */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Collector'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  collectorHeartbeat: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Heartbeat recorded */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  bulkIngest: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DiscoveryIngestRequest'];
+      };
+    };
+    responses: {
+      /** @description Discovery payload accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DiscoveryIngestResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listCredentials: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Credential metadata list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Credential'][];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createCredential: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateCredentialRequest'];
+      };
+    };
+    responses: {
+      /** @description Credential created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Credential'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getCredential: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Credential metadata */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Credential'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  deleteCredential: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Credential deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  decryptCredential: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Decrypted credential secret */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CredentialSecret'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getDocumentLinks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Document links */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DocumentLink'][];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  linkDocument: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateDocumentLinkRequest'];
+      };
+    };
+    responses: {
+      /** @description Document linked */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DocumentLink'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listTeams: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Free-text search term. */
+        search?: components['parameters']['Search'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of teams */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TeamListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createTeam: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateTeamRequest'];
+      };
+    };
+    responses: {
+      /** @description Team created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Team'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getTeam: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Team details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Team'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteTeam: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Team deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateTeam: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateTeamRequest'];
+      };
+    };
+    responses: {
+      /** @description Team updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Team'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listTeamMembers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Team members */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TeamMember'][];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  addTeamMember: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AddTeamMemberRequest'];
+      };
+    };
+    responses: {
+      /** @description Member added */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TeamMember'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  removeTeamMember: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Team identifier. */
+        teamId: string;
+        /** @description User identifier. */
+        userId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Member removed */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listRoles: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of custom roles */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RoleListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createRole: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateRoleRequest'];
+      };
+    };
+    responses: {
+      /** @description Role created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Role'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  assignRole: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AssignRoleRequest'];
+      };
+    };
+    responses: {
+      /** @description Role assigned */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RoleAssignment'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  getRole: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Role details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Role'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteRole: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Role deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateRole: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateRoleRequest'];
+      };
+    };
+    responses: {
+      /** @description Role updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Role'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listUserRoles: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Role assignments for the user */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RoleAssignment'][];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
 }

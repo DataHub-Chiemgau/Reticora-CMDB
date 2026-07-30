@@ -23,7 +23,9 @@ describe('generated client helpers', () => {
 
 describe('createApiClient', () => {
   it('issues typed requests through the transport', async () => {
-    const transport = vi.fn().mockResolvedValue({ data: [], total: 0, limit: 50, offset: 0, has_more: false });
+    const transport = vi
+      .fn()
+      .mockResolvedValue({ data: [], total: 0, limit: 50, offset: 0, has_more: false });
     const client = createApiClient(transport);
 
     await client.get('/api/v1/cis', { query: { limit: 25, cursor: 'abc' } });

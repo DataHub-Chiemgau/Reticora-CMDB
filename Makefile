@@ -1,4 +1,4 @@
-.PHONY: generate build test lint migrate-up migrate-down migrate-roundtrip up down seed e2e fmt vet oapi-codegen
+.PHONY: generate build test lint migrate-up migrate-down migrate-roundtrip up down seed e2e fmt vet oapi-codegen generate-api-client check-api-client
 
 # ─── Variables ──────────────────────────────────────────────────────────────────
 BACKEND_DIR := backend
@@ -8,9 +8,17 @@ MIGRATIONS_DIR := $(BACKEND_DIR)/migrations
 DATABASE_URL ?= ******localhost:5432/reticora?sslmode=disable
 
 # ─── Generate ───────────────────────────────────────────────────────────────────
-generate: oapi-codegen
+generate: oapi-codegen generate-api-client
 	@echo "==> Generating code..."
 	cd $(BACKEND_DIR) && go generate ./...
+
+generate-api-client:
+	@echo "==> Generating TypeScript API client from api/openapi.yaml..."
+	cd $(FRONTEND_DIR) && npm run generate:api
+
+check-api-client:
+	@echo "==> Checking the generated TypeScript client is up to date..."
+	cd $(FRONTEND_DIR) && npm run generate:api:check
 
 oapi-codegen:
 	@echo "==> Generating OpenAPI server..."

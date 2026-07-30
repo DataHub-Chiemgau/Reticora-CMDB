@@ -110,19 +110,25 @@ func TenantMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		orgID := strings.TrimSpace(r.Header.Get("X-Organization-ID"))
-		clientID := strings.TrimSpace(r.Header.Get("X-Client-ID"))
+		// The token is authoritative: a verified organization claim must never
+		// be overridable by a request header, otherwise any authenticated
+		// caller could read and write another tenant's data. The headers are
+		// only honoured for requests that carry no claims at all, which is the
+		// unverified development mode and the header-authenticated collector.
+		orgID := ""
+		clientID := ""
+
+		claims, err := claimsFromRequestOrContext(r)
+		if err == nil {
+			orgID = claims.Organization()
+			clientID = claims.ClientID
+		}
 
 		if orgID == "" {
-			claims, err := claimsFromRequestOrContext(r)
-			if err != nil {
-				api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
-				return
-			}
-			orgID = claims.Organization()
-			if clientID == "" {
-				clientID = claims.ClientID
-			}
+			orgID = strings.TrimSpace(r.Header.Get("X-Organization-ID"))
+			clientID = strings.TrimSpace(r.Header.Get("X-Client-ID"))
+		} else if clientID == "" {
+			clientID = strings.TrimSpace(r.Header.Get("X-Client-ID"))
 		}
 
 		if orgID == "" {
