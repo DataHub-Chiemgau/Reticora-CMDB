@@ -11,7 +11,9 @@ import { Select } from '../components/ui/Select';
 import { CIFormModal } from './CIFormModal';
 import { useCIFilterStore } from '../stores/ciFilter';
 
-function getStatusBadgeVariant(status: string): 'success' | 'warning' | 'danger' | 'neutral' | 'info' {
+function getStatusBadgeVariant(
+  status: string,
+): 'success' | 'warning' | 'danger' | 'neutral' | 'info' {
   switch (status) {
     case 'active':
       return 'success';
@@ -111,7 +113,9 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
         </div>
       </Card>
 
-      {isLoading ? <p className="text-sm text-gray-600 dark:text-gray-300">{t('app.loading')}</p> : null}
+      {isLoading ? (
+        <p className="text-sm text-gray-600 dark:text-gray-300">{t('app.loading')}</p>
+      ) : null}
       {error ? <p className="text-sm text-red-600 dark:text-red-400">{t('app.error')}</p> : null}
 
       {data ? (
@@ -131,7 +135,10 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
               <tbody>
                 {data.data.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+                    <td
+                      colSpan={6}
+                      className="px-4 py-8 text-center text-gray-500 dark:text-gray-400"
+                    >
                       {t('common.noResults')}
                     </td>
                   </tr>
@@ -142,9 +149,13 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
                       onClick={() => setSelectedCI(ci)}
                       className="cursor-pointer border-b border-gray-100 transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
                     >
-                      <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">{ci.name}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">
+                        {ci.name}
+                      </td>
                       <td className="px-4 py-3">
-                        <Badge variant={getStatusBadgeVariant(ci.status)}>{t(getStatusTranslationKey(ci.status))}</Badge>
+                        <Badge variant={getStatusBadgeVariant(ci.status)}>
+                          {t(getStatusTranslationKey(ci.status))}
+                        </Badge>
                       </td>
                       <td className="px-4 py-3">{ci.manufacturer || '—'}</td>
                       <td className="px-4 py-3">{ci.model || '—'}</td>
@@ -201,7 +212,15 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
   );
 }
 
-function CIDetailPanel({ ci, onClose, onEdit }: { ci: CI; onClose: () => void; onEdit: () => void }) {
+function CIDetailPanel({
+  ci,
+  onClose,
+  onEdit,
+}: {
+  ci: CI;
+  onClose: () => void;
+  onEdit: () => void;
+}) {
   const { t } = useTranslation();
 
   return (
@@ -210,14 +229,21 @@ function CIDetailPanel({ ci, onClose, onEdit }: { ci: CI; onClose: () => void; o
         <div>
           <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">{ci.name}</h3>
           <div className="mt-2">
-            <Badge variant={getStatusBadgeVariant(ci.status)}>{t(getStatusTranslationKey(ci.status))}</Badge>
+            <Badge variant={getStatusBadgeVariant(ci.status)}>
+              {t(getStatusTranslationKey(ci.status))}
+            </Badge>
           </div>
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" onClick={onEdit}>
             {t('common.edit')}
           </Button>
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label={t('accessibility.closePanel')}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            aria-label={t('accessibility.closePanel')}
+          >
             ✕
           </Button>
         </div>

@@ -1,3 +1,5 @@
+import { clearSession, getSessionToken, refreshSession } from '../auth/session';
+
 const API_BASE = '/api/v1';
 
 export interface PaginatedResponse<T> {
@@ -96,12 +98,43 @@ export interface ListParams {
   offset?: number;
 }
 
-async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+function mergeHeaders(options?: RequestInit) {
+  const headers = new Headers(options?.headers);
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const token = getSessionToken();
+  if (token) {
+    headers.set('Authorization', ['Bearer', token].join(' '));
+  }
+
+  return headers;
+}
+
+export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
+  const request = () =>
+    fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: mergeHeaders(options),
+    });
+
+  let res = await request();
+
+  if (res.status === 401) {
+    const refreshed = await refreshSession();
+    if (refreshed) {
+      res = await request();
+    } else {
+      clearSession();
+    }
+  }
+
   if (!res.ok) {
+    if (res.status === 401) {
+      clearSession();
+    }
+
     const error = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(error.detail || res.statusText);
   }
@@ -302,7 +335,10 @@ export const assignmentApi = {
   create(data: AssignmentCreateRequest): Promise<Assignment> {
     return fetchAPI('/assignments', { method: 'POST', body: JSON.stringify(data) });
   },
-  returnAssignment(id: string, data: { return_condition?: string; notes?: string }): Promise<Assignment> {
+  returnAssignment(
+    id: string,
+    data: { return_condition?: string; notes?: string },
+  ): Promise<Assignment> {
     return fetchAPI(`/assignments/${id}/return`, { method: 'POST', body: JSON.stringify(data) });
   },
   transfer(id: string, data: { new_assignee: string; notes?: string }): Promise<Assignment> {
@@ -368,7 +404,10 @@ export const documentApi = {
   create(data: DocumentCreateRequest): Promise<Document> {
     return fetchAPI('/documents', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: { title?: string; description?: string; category?: string; tags?: string[] }): Promise<Document> {
+  update(
+    id: string,
+    data: { title?: string; description?: string; category?: string; tags?: string[] },
+  ): Promise<Document> {
     return fetchAPI(`/documents/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
@@ -442,14 +481,36 @@ export const stocktakeApi = {
   create(data: StocktakeCreateRequest): Promise<Stocktake> {
     return fetchAPI('/stocktakes', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: { title?: string; description?: string; status?: string; due_date?: string; total_expected?: number }): Promise<Stocktake> {
+  update(
+    id: string,
+    data: {
+      title?: string;
+      description?: string;
+      status?: string;
+      due_date?: string;
+      total_expected?: number;
+    },
+  ): Promise<Stocktake> {
     return fetchAPI(`/stocktakes/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/stocktakes/${id}`, { method: 'DELETE' });
   },
-  addScan(stocktakeId: string, data: { asset_id?: string; ci_id?: string; scan_method?: string; scan_result: string; location_found?: string; notes?: string }): Promise<StockScan> {
-    return fetchAPI(`/stocktakes/${stocktakeId}/scans`, { method: 'POST', body: JSON.stringify(data) });
+  addScan(
+    stocktakeId: string,
+    data: {
+      asset_id?: string;
+      ci_id?: string;
+      scan_method?: string;
+      scan_result: string;
+      location_found?: string;
+      notes?: string;
+    },
+  ): Promise<StockScan> {
+    return fetchAPI(`/stocktakes/${stocktakeId}/scans`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
   listScans(stocktakeId: string, params: ListParams = {}): Promise<PaginatedResponse<StockScan>> {
     return fetchAPI(`/stocktakes/${stocktakeId}/scans${buildQuery(params)}`);
@@ -542,10 +603,19 @@ export const ticketApi = {
   delete(id: string): Promise<void> {
     return fetchAPI(`/tickets/${id}`, { method: 'DELETE' });
   },
-  addComment(ticketId: string, data: { content: string; is_internal?: boolean }): Promise<TicketComment> {
-    return fetchAPI(`/tickets/${ticketId}/comments`, { method: 'POST', body: JSON.stringify(data) });
+  addComment(
+    ticketId: string,
+    data: { content: string; is_internal?: boolean },
+  ): Promise<TicketComment> {
+    return fetchAPI(`/tickets/${ticketId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
-  listComments(ticketId: string, params: ListParams = {}): Promise<PaginatedResponse<TicketComment>> {
+  listComments(
+    ticketId: string,
+    params: ListParams = {},
+  ): Promise<PaginatedResponse<TicketComment>> {
     return fetchAPI(`/tickets/${ticketId}/comments${buildQuery(params)}`);
   },
 };
@@ -611,7 +681,10 @@ export const userApi = {
   create(data: { email: string; display_name: string; status?: string }): Promise<AppUser> {
     return fetchAPI('/users', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: { display_name?: string; status?: string; avatar_url?: string }): Promise<AppUser> {
+  update(
+    id: string,
+    data: { display_name?: string; status?: string; avatar_url?: string },
+  ): Promise<AppUser> {
     return fetchAPI(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
@@ -629,7 +702,10 @@ export const teamApi = {
   create(data: { name: string; description?: string; lead_id?: string }): Promise<Team> {
     return fetchAPI('/teams', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: { name?: string; description?: string; lead_id?: string }): Promise<Team> {
+  update(
+    id: string,
+    data: { name?: string; description?: string; lead_id?: string },
+  ): Promise<Team> {
     return fetchAPI(`/teams/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
@@ -653,13 +729,21 @@ export const roleApi = {
   create(data: { name: string; description?: string; permissions: string[] }): Promise<CustomRole> {
     return fetchAPI('/roles', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: { name?: string; description?: string; permissions?: string[] }): Promise<CustomRole> {
+  update(
+    id: string,
+    data: { name?: string; description?: string; permissions?: string[] },
+  ): Promise<CustomRole> {
     return fetchAPI(`/roles/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/roles/${id}`, { method: 'DELETE' });
   },
-  assign(data: { user_id: string; custom_role_id: string; scope_type?: string; scope_id?: string }): Promise<unknown> {
+  assign(data: {
+    user_id: string;
+    custom_role_id: string;
+    scope_type?: string;
+    scope_id?: string;
+  }): Promise<unknown> {
     return fetchAPI('/roles/assign', { method: 'POST', body: JSON.stringify(data) });
   },
 };

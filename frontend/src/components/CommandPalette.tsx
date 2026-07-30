@@ -5,7 +5,16 @@ import { useTranslation } from 'react-i18next';
 import { Badge } from './ui/Badge';
 import { cn } from './ui/utils';
 
-export type AppPage = 'dashboard' | 'cmdb' | 'discovery' | 'assets' | 'assignments' | 'documents' | 'stocktake' | 'tickets' | 'users';
+export type AppPage =
+  | 'dashboard'
+  | 'cmdb'
+  | 'discovery'
+  | 'assets'
+  | 'assignments'
+  | 'documents'
+  | 'stocktake'
+  | 'tickets'
+  | 'users';
 
 interface CommandPaletteProps {
   onNavigate: (page: AppPage) => void;
@@ -51,77 +60,83 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  const commands = useMemo<CommandItem[]>(() => [
-    {
-      id: 'nav-dashboard',
-      label: t('commandPalette.commands.dashboard'),
-      keywords: ['dashboard overview'],
-      action: () => onNavigate('dashboard'),
-    },
-    {
-      id: 'nav-cmdb',
-      label: t('commandPalette.commands.cmdb'),
-      keywords: ['cmdb cis configuration items'],
-      action: () => onNavigate('cmdb'),
-    },
-    {
-      id: 'nav-discovery',
-      label: t('commandPalette.commands.discovery'),
-      keywords: ['discovery collectors'],
-      action: () => onNavigate('discovery'),
-    },
-    {
-      id: 'create-ci',
-      label: t('commandPalette.commands.createCI'),
-      keywords: ['create ci new asset item'],
-      action: onCreateCI,
-    },
-    {
-      id: 'toggle-theme',
-      label: t('commandPalette.commands.toggleDarkMode'),
-      keywords: ['theme dark light appearance'],
-      action: onToggleDarkMode,
-    },
-    {
-      id: 'nav-assets',
-      label: t('commandPalette.commands.assets', 'Inventar öffnen'),
-      keywords: ['assets inventar hardware'],
-      action: () => onNavigate('assets'),
-    },
-    {
-      id: 'nav-assignments',
-      label: t('commandPalette.commands.assignments', 'Zuweisungen öffnen'),
-      keywords: ['assignments zuweisungen transfer'],
-      action: () => onNavigate('assignments'),
-    },
-    {
-      id: 'nav-documents',
-      label: t('commandPalette.commands.documents', 'Dokumente öffnen'),
-      keywords: ['documents dokumente files'],
-      action: () => onNavigate('documents'),
-    },
-    {
-      id: 'nav-stocktake',
-      label: t('commandPalette.commands.stocktake', 'Inventur öffnen'),
-      keywords: ['stocktake inventur scan'],
-      action: () => onNavigate('stocktake'),
-    },
-    {
-      id: 'nav-tickets',
-      label: t('commandPalette.commands.tickets', 'Tickets öffnen'),
-      keywords: ['tickets support helpdesk'],
-      action: () => onNavigate('tickets'),
-    },
-    {
-      id: 'nav-users',
-      label: t('commandPalette.commands.users', 'Benutzer & Teams öffnen'),
-      keywords: ['users teams roles benutzer rollen'],
-      action: () => onNavigate('users'),
-    },
-  ], [onCreateCI, onNavigate, onToggleDarkMode, t]);
+  const commands = useMemo<CommandItem[]>(
+    () => [
+      {
+        id: 'nav-dashboard',
+        label: t('commandPalette.commands.dashboard'),
+        keywords: ['dashboard overview'],
+        action: () => onNavigate('dashboard'),
+      },
+      {
+        id: 'nav-cmdb',
+        label: t('commandPalette.commands.cmdb'),
+        keywords: ['cmdb cis configuration items'],
+        action: () => onNavigate('cmdb'),
+      },
+      {
+        id: 'nav-discovery',
+        label: t('commandPalette.commands.discovery'),
+        keywords: ['discovery collectors'],
+        action: () => onNavigate('discovery'),
+      },
+      {
+        id: 'create-ci',
+        label: t('commandPalette.commands.createCI'),
+        keywords: ['create ci new asset item'],
+        action: onCreateCI,
+      },
+      {
+        id: 'toggle-theme',
+        label: t('commandPalette.commands.toggleDarkMode'),
+        keywords: ['theme dark light appearance'],
+        action: onToggleDarkMode,
+      },
+      {
+        id: 'nav-assets',
+        label: t('commandPalette.commands.assets', 'Inventar öffnen'),
+        keywords: ['assets inventar hardware'],
+        action: () => onNavigate('assets'),
+      },
+      {
+        id: 'nav-assignments',
+        label: t('commandPalette.commands.assignments', 'Zuweisungen öffnen'),
+        keywords: ['assignments zuweisungen transfer'],
+        action: () => onNavigate('assignments'),
+      },
+      {
+        id: 'nav-documents',
+        label: t('commandPalette.commands.documents', 'Dokumente öffnen'),
+        keywords: ['documents dokumente files'],
+        action: () => onNavigate('documents'),
+      },
+      {
+        id: 'nav-stocktake',
+        label: t('commandPalette.commands.stocktake', 'Inventur öffnen'),
+        keywords: ['stocktake inventur scan'],
+        action: () => onNavigate('stocktake'),
+      },
+      {
+        id: 'nav-tickets',
+        label: t('commandPalette.commands.tickets', 'Tickets öffnen'),
+        keywords: ['tickets support helpdesk'],
+        action: () => onNavigate('tickets'),
+      },
+      {
+        id: 'nav-users',
+        label: t('commandPalette.commands.users', 'Benutzer & Teams öffnen'),
+        keywords: ['users teams roles benutzer rollen'],
+        action: () => onNavigate('users'),
+      },
+    ],
+    [onCreateCI, onNavigate, onToggleDarkMode, t],
+  );
 
   const filteredCommands = useMemo(
-    () => commands.filter((command) => fuzzyMatch(`${command.label} ${command.keywords.join(' ')}`, query)),
+    () =>
+      commands.filter((command) =>
+        fuzzyMatch(`${command.label} ${command.keywords.join(' ')}`, query),
+      ),
     [commands, query],
   );
 
@@ -162,7 +177,9 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
   function handleListNavigation(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setSelectedIndex((current) => (filteredCommands.length === 0 ? 0 : (current + 1) % filteredCommands.length));
+      setSelectedIndex((current) =>
+        filteredCommands.length === 0 ? 0 : (current + 1) % filteredCommands.length,
+      );
       return;
     }
 
@@ -207,7 +224,9 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
           </div>
           <div className="max-h-80 overflow-y-auto p-2">
             {filteredCommands.length === 0 ? (
-              <p className="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">{t('common.noResults')}</p>
+              <p className="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">
+                {t('common.noResults')}
+              </p>
             ) : (
               filteredCommands.map((command, index) => (
                 <button

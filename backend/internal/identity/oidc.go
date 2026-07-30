@@ -47,8 +47,45 @@ func NewOIDCProvider(cfg OIDCConfig) *OIDCProvider {
 	return &OIDCProvider{config: cfg}
 }
 
+// PublicConfig describes the OIDC parameters a browser client needs to start
+// an authorization code flow. It never contains the client secret.
+type PublicConfig struct {
+	Issuer                string   `json:"issuer"`
+	ClientID              string   `json:"client_id"`
+	RedirectURI           string   `json:"redirect_uri,omitempty"`
+	Scopes                []string `json:"scopes"`
+	AuthorizationEndpoint string   `json:"authorization_endpoint"`
+	TokenEndpoint         string   `json:"token_endpoint"`
+	EndSessionEndpoint    string   `json:"end_session_endpoint"`
+	PKCERequired          bool     `json:"pkce_required"`
+}
+
+// PublicConfig returns the browser-facing OIDC configuration.
+func (p *OIDCProvider) PublicConfig() PublicConfig {
+	if p == nil {
+		return PublicConfig{}
+	}
+	issuer := strings.TrimRight(strings.TrimSpace(p.config.IssuerURL), "/")
+	return PublicConfig{
+		Issuer:                issuer,
+		ClientID:              strings.TrimSpace(p.config.ClientID),
+		RedirectURI:           strings.TrimSpace(p.config.RedirectURL),
+		Scopes:                []string{"openid", "profile", "email", "groups"},
+		AuthorizationEndpoint: issuer + "/protocol/openid-connect/auth",
+		TokenEndpoint:         issuer + "/protocol/openid-connect/token",
+		EndSessionEndpoint:    issuer + "/protocol/openid-connect/logout",
+		PKCERequired:          true,
+	}
+}
+
 // ExchangeCode exchanges an authorization code for tokens.
 func (p *OIDCProvider) ExchangeCode(ctx context.Context, code string) (*TokenSet, error) {
+	return p.ExchangeCodeWithVerifier(ctx, code, "")
+}
+
+// ExchangeCodeWithVerifier exchanges an authorization code for tokens, sending
+// the PKCE code verifier when the client performed a PKCE flow.
+func (p *OIDCProvider) ExchangeCodeWithVerifier(ctx context.Context, code, codeVerifier string) (*TokenSet, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -73,6 +110,9 @@ func (p *OIDCProvider) ExchangeCode(ctx context.Context, code string) (*TokenSet
 	}
 	if redirectURL := strings.TrimSpace(p.config.RedirectURL); redirectURL != "" {
 		form.Set("redirect_uri", redirectURL)
+	}
+	if verifier := strings.TrimSpace(codeVerifier); verifier != "" {
+		form.Set("code_verifier", verifier)
 	}
 
 	req, err := http.NewRequestWithContext(

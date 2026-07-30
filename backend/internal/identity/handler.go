@@ -29,10 +29,33 @@ func NewHandler(oidc *OIDCProvider, sessions *SessionIssuer) *Handler {
 
 // RegisterRoutes registers authentication routes on the provided router.
 func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/api/v1/auth/config", h.Config)
 	r.Post("/api/v1/auth/login", h.Login)
 	r.Post("/api/v1/auth/callback", h.Callback)
 	r.Post("/api/v1/auth/refresh", h.Refresh)
 	r.Get("/api/v1/auth/me", h.Me)
+}
+
+// Config exposes the browser-facing OIDC parameters so that the single-page
+// application can start an authorization code flow with PKCE. The endpoint is
+// unauthenticated by design and never returns the client secret.
+func (h *Handler) Config(w http.ResponseWriter, r *http.Request) {
+	if err := r.Context().Err(); err != nil {
+		writeContextError(w, err)
+		return
+	}
+	if h == nil || h.oidc == nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "identity: OIDC provider is not configured")
+		return
+	}
+
+	cfg := h.oidc.PublicConfig()
+	if cfg.Issuer == "" || cfg.ClientID == "" {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "identity: OIDC provider is not configured")
+		return
+	}
+
+	api.WriteJSON(w, http.StatusOK, cfg)
 }
 
 // Login initiates the OIDC authentication flow.
@@ -50,7 +73,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionToken, expiresAt, _, err := h.exchangeAndIssue(r.Context(), req.Code)
+	sessionToken, expiresAt, _, err := h.exchangeAndIssue(r.Context(), req.Code, "")
 	if err != nil {
 		writeIdentityError(w, err)
 		return
@@ -70,8 +93,9 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Code  string `json:"code"`
-		State string `json:"state"`
+		Code         string `json:"code"`
+		State        string `json:"state"`
+		CodeVerifier string `json:"code_verifier"`
 	}
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -82,7 +106,7 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionToken, expiresAt, result, err := h.exchangeAndIssue(r.Context(), req.Code)
+	sessionToken, expiresAt, result, err := h.exchangeAndIssue(r.Context(), req.Code, req.CodeVerifier)
 	if err != nil {
 		writeIdentityError(w, err)
 		return
@@ -192,7 +216,7 @@ type authResult struct {
 	claims  SessionClaims
 }
 
-func (h *Handler) exchangeAndIssue(ctx context.Context, code string) (string, time.Time, authResult, error) {
+func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier string) (string, time.Time, authResult, error) {
 	if err := ctx.Err(); err != nil {
 		return "", time.Time{}, authResult{}, err
 	}
@@ -206,7 +230,7 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code string) (string, ti
 		return "", time.Time{}, authResult{}, errors.New("identity: authorization code is required")
 	}
 
-	tokenSet, err := h.oidc.ExchangeCode(ctx, code)
+	tokenSet, err := h.oidc.ExchangeCodeWithVerifier(ctx, code, codeVerifier)
 	if err != nil {
 		return "", time.Time{}, authResult{}, err
 	}

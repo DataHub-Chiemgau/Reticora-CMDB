@@ -15,7 +15,9 @@ export function UserManagementPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('userMgmt.title', 'Benutzer & Teams')}</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+          {t('userMgmt.title', 'Benutzer & Teams')}
+        </h1>
       </div>
 
       <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700">
@@ -39,7 +41,11 @@ export function UserManagementPage() {
         </button>
       </div>
 
-      <Input label={t('common.search', 'Suche')} value={search} onChange={(e) => setSearch(e.target.value)} />
+      <Input
+        label={t('common.search', 'Suche')}
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
 
       {tab === 'users' && <UsersTab search={search} />}
       {tab === 'teams' && <TeamsTab search={search} />}
@@ -52,7 +58,8 @@ function UsersTab({ search }: { search: string }) {
   const { t } = useTranslation();
   const { data, isLoading } = useUserList({ search });
 
-  if (isLoading) return <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>;
+  if (isLoading)
+    return <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>;
 
   return (
     <Card title={`${t('userMgmt.users', 'Benutzer')} (${data?.total ?? 0})`}>
@@ -72,13 +79,23 @@ function UsersTab({ search }: { search: string }) {
                 <td className="py-2 font-medium">{user.display_name}</td>
                 <td className="py-2">{user.email}</td>
                 <td className="py-2">
-                  <Badge variant={user.status === 'active' ? 'success' : 'danger'}>{user.status}</Badge>
+                  <Badge variant={user.status === 'active' ? 'success' : 'danger'}>
+                    {user.status}
+                  </Badge>
                 </td>
-                <td className="py-2">{user.last_login_at ? new Date(user.last_login_at).toLocaleDateString('de-DE') : '—'}</td>
+                <td className="py-2">
+                  {user.last_login_at
+                    ? new Date(user.last_login_at).toLocaleDateString('de-DE')
+                    : '—'}
+                </td>
               </tr>
             ))}
             {(!data?.data || data.data.length === 0) && (
-              <tr><td colSpan={4} className="py-4 text-center text-gray-400">{t('common.noData', 'Keine Daten')}</td></tr>
+              <tr>
+                <td colSpan={4} className="py-4 text-center text-gray-400">
+                  {t('common.noData', 'Keine Daten')}
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
@@ -91,7 +108,8 @@ function TeamsTab({ search }: { search: string }) {
   const { t } = useTranslation();
   const { data, isLoading } = useTeamList({ search });
 
-  if (isLoading) return <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>;
+  if (isLoading)
+    return <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>;
 
   return (
     <Card title={`${t('userMgmt.teams', 'Teams')} (${data?.total ?? 0})`}>
@@ -109,11 +127,17 @@ function TeamsTab({ search }: { search: string }) {
               <tr key={team.id} className="text-sm text-gray-700 dark:text-gray-300">
                 <td className="py-2 font-medium">{team.name}</td>
                 <td className="py-2">{team.description || '—'}</td>
-                <td className="py-2"><Badge variant="info">{team.member_count}</Badge></td>
+                <td className="py-2">
+                  <Badge variant="info">{team.member_count}</Badge>
+                </td>
               </tr>
             ))}
             {(!data?.data || data.data.length === 0) && (
-              <tr><td colSpan={3} className="py-4 text-center text-gray-400">{t('common.noData', 'Keine Daten')}</td></tr>
+              <tr>
+                <td colSpan={3} className="py-4 text-center text-gray-400">
+                  {t('common.noData', 'Keine Daten')}
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
@@ -126,7 +150,8 @@ function RolesTab() {
   const { t } = useTranslation();
   const { data, isLoading } = useRoleList();
 
-  if (isLoading) return <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>;
+  if (isLoading)
+    return <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>;
 
   return (
     <Card title={`${t('userMgmt.roles', 'Rollen')} (${data?.total ?? 0})`}>
@@ -147,12 +172,18 @@ function RolesTab() {
                 <td className="py-2">{role.description || '—'}</td>
                 <td className="py-2">{role.permissions.length}</td>
                 <td className="py-2">
-                  <Badge variant={role.is_system ? 'neutral' : 'info'}>{role.is_system ? 'System' : 'Custom'}</Badge>
+                  <Badge variant={role.is_system ? 'neutral' : 'info'}>
+                    {role.is_system ? 'System' : 'Custom'}
+                  </Badge>
                 </td>
               </tr>
             ))}
             {(!data?.data || data.data.length === 0) && (
-              <tr><td colSpan={4} className="py-4 text-center text-gray-400">{t('common.noData', 'Keine Daten')}</td></tr>
+              <tr>
+                <td colSpan={4} className="py-4 text-center text-gray-400">
+                  {t('common.noData', 'Keine Daten')}
+                </td>
+              </tr>
             )}
           </tbody>
         </table>

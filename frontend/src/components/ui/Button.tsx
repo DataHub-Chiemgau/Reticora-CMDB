@@ -14,14 +14,12 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClasses: Record<ButtonVariant, string> = {
-  primary:
-    'bg-primary text-white hover:bg-primary/90 focus-visible:ring-primary/40',
+  primary: 'bg-primary text-white hover:bg-primary/90 focus-visible:ring-primary/40',
   secondary:
     'border border-gray-200 bg-white text-gray-900 hover:bg-gray-50 focus-visible:ring-primary/30 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700',
   ghost:
     'text-gray-700 hover:bg-gray-100 focus-visible:ring-primary/30 dark:text-gray-200 dark:hover:bg-gray-800',
-  danger:
-    'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-400/50',
+  danger: 'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-400/50',
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
@@ -52,7 +50,9 @@ export function Button({
         sizeClasses[size],
         className,
       )}
-      {...(!asChild ? { disabled: isDisabled, type } : { 'aria-disabled': isDisabled || undefined })}
+      {...(!asChild
+        ? { disabled: isDisabled, type }
+        : { 'aria-disabled': isDisabled || undefined })}
       {...props}
     >
       {loading ? (

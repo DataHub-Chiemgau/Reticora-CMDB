@@ -26,11 +26,17 @@ export function Modal({ open, onOpenChange, title, description, children }: Moda
         >
           <div className="mb-5 flex items-start justify-between gap-4">
             <div>
-              <Dialog.Title id={titleId} className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              <Dialog.Title
+                id={titleId}
+                className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+              >
                 {title}
               </Dialog.Title>
               {description ? (
-                <Dialog.Description id={descriptionId} className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                <Dialog.Description
+                  id={descriptionId}
+                  className="mt-1 text-sm text-gray-600 dark:text-gray-300"
+                >
                   {description}
                 </Dialog.Description>
               ) : null}

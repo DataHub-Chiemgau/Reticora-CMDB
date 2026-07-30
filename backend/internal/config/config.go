@@ -39,6 +39,10 @@ type Config struct {
 	OIDCRedirectURL  string
 	SessionKeyPath   string // path to RS256 private key PEM for session JWTs
 
+	// Entitlements
+	DefaultPlan            string // plan applied to tenants without entitlement rows
+	EntitlementEnforcement bool   // when false, feature gating is reported but not enforced
+
 	// Encryption
 	MasterKey string // 32-byte base64-encoded master key for envelope encryption
 
@@ -71,6 +75,9 @@ func Load() *Config {
 		OIDCClientSecret: envOrDefault("RETICORA_OIDC_CLIENT_SECRET", ""),
 		OIDCRedirectURL:  envOrDefault("RETICORA_OIDC_REDIRECT_URL", ""),
 		SessionKeyPath:   envOrDefault("RETICORA_SESSION_KEY_PATH", ""),
+
+		DefaultPlan:            envOrDefault("RETICORA_DEFAULT_PLAN", "essential"),
+		EntitlementEnforcement: envOrDefault("RETICORA_ENTITLEMENT_ENFORCEMENT", "true") != "false",
 
 		MasterKey: envOrDefault("RETICORA_MASTER_KEY", ""),
 

@@ -189,5 +189,16 @@
     "memberCount": "Members",
     "permissions": "Permissions",
     "type": "Type"
+  },
+  "auth": {
+    "loginTitle": "Sign in",
+    "loginDescription": "Use your organization account to access Reticora CMDB.",
+    "loginButton": "Sign in",
+    "loginError": "Sign-in could not be started. Please try again later.",
+    "logout": "Log out",
+    "callbackTitle": "Completing sign-in",
+    "callbackProgress": "Please wait while we verify your session.",
+    "callbackError": "Sign-in could not be completed.",
+    "sessionExpired": "Your session has expired. Please sign in again."
   }
 }

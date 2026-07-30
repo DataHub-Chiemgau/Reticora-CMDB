@@ -15,21 +15,38 @@ type Repository interface {
 	Delete(ctx context.Context, orgID, id string) error
 }
 
+// LimitFeatureKey is the entitlement feature whose limit caps the number of CIs
+// an organization may store.
+const LimitFeatureKey = "cmdb"
+
 // ChangeReader defines persistence operations for CI change history.
 type ChangeReader interface {
 	ListChanges(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Change, int, error)
+}
+
+// LimitGuard enforces licensed resource limits before a new CI is created.
+// It is implemented by the entitlement service.
+type LimitGuard interface {
+	AllowCreate(ctx context.Context, orgID, featureKey string, current int64) error
 }
 
 // Service coordinates CI persistence with mutation semantics. Audit-log and
 // ci_change rows are written by the repository inside the same transaction as
 // the mutation, so history can never diverge from the stored data.
 type Service struct {
-	repo Repository
+	repo  Repository
+	limit LimitGuard
 }
 
 // NewService creates a CI service.
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
+}
+
+// NewServiceWithLimits creates a CI service that enforces the tenant's licensed
+// CI limit on every create.
+func NewServiceWithLimits(repo Repository, limit LimitGuard) *Service {
+	return &Service{repo: repo, limit: limit}
 }
 
 // List returns paginated CIs filtered by the given parameters.
@@ -42,8 +59,17 @@ func (s *Service) GetByID(ctx context.Context, orgID, id string) (*Item, error) 
 	return s.repo.GetByID(ctx, orgID, id)
 }
 
-// Create inserts a new CI.
+// Create inserts a new CI after verifying the tenant's licensed CI limit.
 func (s *Service) Create(ctx context.Context, item *Item) error {
+	if s.limit != nil {
+		_, total, err := s.repo.List(ctx, item.OrganizationID, FilterParams{}, api.PaginationParams{Limit: 1})
+		if err != nil {
+			return err
+		}
+		if err := s.limit.AllowCreate(ctx, item.OrganizationID, LimitFeatureKey, int64(total)); err != nil {
+			return err
+		}
+	}
 	return s.repo.Create(ctx, item)
 }
 

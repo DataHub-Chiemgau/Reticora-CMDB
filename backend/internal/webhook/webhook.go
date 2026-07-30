@@ -2,6 +2,8 @@
 package webhook
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -155,10 +157,16 @@ type TestDeliverer interface {
 	DeliverOnce(sub Subscription, event string, payload any) (Delivery, error)
 }
 
+// DeliveryLister exposes the durable delivery history of a subscription.
+type DeliveryLister interface {
+	ListDeliveries(ctx context.Context, orgID, subscriptionID string, page api.PaginationParams) ([]DeliveryRecord, int, error)
+}
+
 // Handler provides HTTP handlers for webhook endpoints.
 type Handler struct {
-	repo      Repository
-	deliverer TestDeliverer
+	repo       Repository
+	deliverer  TestDeliverer
+	deliveries DeliveryLister
 }
 
 // NewHandler creates a new webhook handler. An optional TestDeliverer enables
@@ -167,6 +175,9 @@ func NewHandler(repo Repository, deliverer ...TestDeliverer) *Handler {
 	h := &Handler{repo: repo}
 	if len(deliverer) > 0 {
 		h.deliverer = deliverer[0]
+		if lister, ok := deliverer[0].(DeliveryLister); ok {
+			h.deliveries = lister
+		}
 	}
 	return h
 }
@@ -178,6 +189,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/webhooks/{id}", h.Get)
 	r.Delete("/api/v1/webhooks/{id}", h.Delete)
 	r.Post("/api/v1/webhooks/{id}/test", h.Test)
+	r.Get("/api/v1/webhooks/{id}/deliveries", h.ListDeliveries)
 }
 
 // Test handles POST /api/v1/webhooks/{id}/test by sending a single signed
@@ -212,6 +224,45 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 	}
 
 	api.WriteJSON(w, http.StatusOK, delivery)
+}
+
+// ListDeliveries handles GET /api/v1/webhooks/{id}/deliveries and returns the
+// durable delivery history including retry state.
+func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	if h.deliveries == nil {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "webhook delivery store is not configured")
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+	if _, err := h.repo.GetByID(t.OrganizationID, id); err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
+		return
+	}
+
+	page := api.ParsePagination(r)
+	records, total, err := h.deliveries.ListDeliveries(r.Context(), t.OrganizationID, id, page)
+	if err != nil {
+		if errors.Is(err, ErrNoDeliveryStore) {
+			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", err.Error())
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[DeliveryRecord]{
+		Data:    records,
+		Total:   total,
+		Limit:   page.Limit,
+		Offset:  page.Offset,
+		HasMore: page.Offset+page.Limit < total,
+	})
 }
 
 // List handles GET /api/v1/webhooks

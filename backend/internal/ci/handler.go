@@ -1,12 +1,20 @@
 package ci
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
+
+// isEntitlementError reports whether the error was raised by the entitlement
+// service because a licensed limit or feature restriction was violated.
+func isEntitlementError(err error) bool {
+	var entitlementErr interface{ LimitExceeded() bool }
+	return errors.As(err, &entitlementErr) && entitlementErr.LimitExceeded()
+}
 
 // EventDispatcher publishes CI lifecycle events.
 type EventDispatcher interface {
@@ -135,6 +143,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.Create(r.Context(), item); err != nil {
+		if isEntitlementError(err) {
+			api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
+			return
+		}
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}

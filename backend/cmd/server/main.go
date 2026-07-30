@@ -128,18 +128,20 @@ func main() {
 	// development mode. A configured database that cannot be reached is a fatal
 	// startup error rather than a silent downgrade to per-replica memory state.
 	var (
-		ciRepo         ci.Repository
-		relRepo        relationship.Repository
-		webhookRepo    webhook.Repository
-		discoveryRepo  discovery.Repository
-		assetRepo      asset.Repository
-		assignmentRepo assignment.Repository
-		documentRepo   document.Repository
-		stocktakeRepo  stocktake.Repository
-		ticketRepo     ticket.Repository
-		userRepo       user.Repository
-		credentialRepo credential.Repository
-		auditHandler   *audit.Handler
+		ciRepo            ci.Repository
+		relRepo           relationship.Repository
+		webhookRepo       webhook.Repository
+		discoveryRepo     discovery.Repository
+		assetRepo         asset.Repository
+		assignmentRepo    assignment.Repository
+		documentRepo      document.Repository
+		stocktakeRepo     stocktake.Repository
+		ticketRepo        ticket.Repository
+		userRepo          user.Repository
+		credentialRepo    credential.Repository
+		entitlementRepo   entitlement.Repository
+		webhookDeliveries webhook.DeliveryStore
+		auditHandler      *audit.Handler
 	)
 
 	if *noDB {
@@ -155,6 +157,8 @@ func main() {
 		ticketRepo = ticket.NewMemoryRepository()
 		userRepo = user.NewMemoryRepository()
 		credentialRepo = credential.NewMemoryRepository()
+		entitlementRepo = entitlement.NewMemoryRepository()
+		webhookDeliveries = webhook.NewMemoryDeliveryStore()
 	} else {
 		if cfg.DatabaseURL == "" {
 			slog.Error("RETICORA_DATABASE_URL is required; start with --no-db for an ephemeral development server")
@@ -181,10 +185,20 @@ func main() {
 		ticketRepo = ticket.NewPGRepository(pool)
 		userRepo = user.NewPGRepository(pool)
 		credentialRepo = credential.NewPGRepository(pool)
+		entitlementRepo = entitlement.NewPGRepository(pool)
+		webhookDeliveries = webhook.NewPGDeliveryStore(pool)
 	}
 
-	entitlementSvc := entitlement.NewService()
-	webhookDispatcher := webhook.NewDispatcher(webhookRepo, nil)
+	entitlementSvc := entitlement.NewService(entitlementRepo, entitlement.Options{
+		DefaultPlan: entitlement.Plan(cfg.DefaultPlan),
+		Enforce:     cfg.EntitlementEnforcement,
+	})
+	slog.Info("entitlement enforcement configured",
+		"default_plan", cfg.DefaultPlan, "enforced", cfg.EntitlementEnforcement)
+
+	webhookDispatcher := webhook.NewDispatcher(webhookRepo, nil, webhook.DispatcherOptions{
+		Deliveries: webhookDeliveries,
+	})
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -194,7 +208,7 @@ func main() {
 	}()
 
 	// Handlers
-	ciSvc := ci.NewService(ciRepo)
+	ciSvc := ci.NewServiceWithLimits(ciRepo, entitlementSvc)
 	identityHandler := identity.NewHandler(oidcProvider, sessionIssuer)
 	ciHandler := ci.NewHandler(ciSvc, webhookDispatcher)
 	relHandler := relationship.NewHandler(relRepo)
@@ -257,6 +271,16 @@ func main() {
 		auditHandler.RegisterRoutes(mux)
 	}
 
+	// Session tokens are verified cryptographically whenever a session key is
+	// configured. Without a key the server falls back to unverified claim
+	// parsing, which is only acceptable for local development.
+	authMiddleware := middleware.AuthMiddleware
+	if sessionIssuer != nil {
+		authMiddleware = middleware.AuthMiddlewareWithVerifier(sessionIssuer)
+	} else {
+		slog.Warn("RETICORA_SESSION_KEY_PATH not set; bearer tokens are accepted without signature verification")
+	}
+
 	// Middleware chain per spec:
 	// RequestID/Tracing -> Panic-Recovery -> Auth -> Tenant -> Entitlement ->
 	// Rate-Limit -> POST-Idempotency -> Handler
@@ -264,8 +288,9 @@ func main() {
 		middleware.RequestID,
 		middleware.Recovery,
 		middleware.Logger,
-		middleware.AuthMiddleware,
+		authMiddleware,
 		middleware.TenantMiddleware,
+		entitlementSvc.Middleware,
 		middleware.RateLimiterWithStore(cfg.RateLimitRPM, cacheStore),
 		middleware.IdempotencyWithStore(cacheStore),
 	)(mux)

@@ -1,15 +1,33 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ciApi, collectorApi, assetApi, assignmentApi,
-  documentApi, stocktakeApi, ticketApi, userApi, teamApi, roleApi,
+  ciApi,
+  collectorApi,
+  assetApi,
+  assignmentApi,
+  documentApi,
+  stocktakeApi,
+  ticketApi,
+  userApi,
+  teamApi,
+  roleApi,
 } from '../api/client';
 import type {
-  CICreateRequest, CIListParams, CIUpdateRequest, ListParams,
-  AssetCreateRequest, AssetUpdateRequest, AssetListParams,
-  AssignmentCreateRequest, AssignmentListParams,
-  DocumentCreateRequest, DocumentListParams,
-  StocktakeCreateRequest, StocktakeListParams,
-  TicketCreateRequest, TicketUpdateRequest, TicketListParams,
+  CICreateRequest,
+  CIListParams,
+  CIUpdateRequest,
+  ListParams,
+  AssetCreateRequest,
+  AssetUpdateRequest,
+  AssetListParams,
+  AssignmentCreateRequest,
+  AssignmentListParams,
+  DocumentCreateRequest,
+  DocumentListParams,
+  StocktakeCreateRequest,
+  StocktakeListParams,
+  TicketCreateRequest,
+  TicketUpdateRequest,
+  TicketListParams,
   UserListParams,
 } from '../api/client';
 
@@ -56,8 +74,7 @@ export function useCreateCI() {
 export function useUpdateCI() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: CIUpdateRequest }) =>
-      ciApi.update(id, data),
+    mutationFn: ({ id, data }: { id: string; data: CIUpdateRequest }) => ciApi.update(id, data),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['cis'] });
       queryClient.invalidateQueries({ queryKey: ['ci', variables.id] });
@@ -88,15 +105,20 @@ export function useCreateAsset() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: AssetCreateRequest) => assetApi.create(data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['assets'] }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+    },
   });
 }
 
 export function useUpdateAsset() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: AssetUpdateRequest }) => assetApi.update(id, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['assets'] }); },
+    mutationFn: ({ id, data }: { id: string; data: AssetUpdateRequest }) =>
+      assetApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+    },
   });
 }
 
@@ -104,7 +126,9 @@ export function useDeleteAsset() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => assetApi.delete(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['assets'] }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+    },
   });
 }
 
@@ -121,16 +145,25 @@ export function useCreateAssignment() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: AssignmentCreateRequest) => assignmentApi.create(data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['assignments'] }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assignments'] });
+    },
   });
 }
 
 export function useReturnAssignment() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { return_condition?: string; notes?: string } }) =>
-      assignmentApi.returnAssignment(id, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['assignments'] }); },
+    mutationFn: ({
+      id,
+      data,
+    }: {
+      id: string;
+      data: { return_condition?: string; notes?: string };
+    }) => assignmentApi.returnAssignment(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assignments'] });
+    },
   });
 }
 
@@ -139,7 +172,9 @@ export function useTransferAssignment() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: { new_assignee: string; notes?: string } }) =>
       assignmentApi.transfer(id, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['assignments'] }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assignments'] });
+    },
   });
 }
 
@@ -156,7 +191,9 @@ export function useCreateDocument() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: DocumentCreateRequest) => documentApi.create(data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['documents'] }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+    },
   });
 }
 
@@ -164,7 +201,9 @@ export function useDeleteDocument() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => documentApi.delete(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['documents'] }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+    },
   });
 }
 
@@ -181,7 +220,9 @@ export function useCreateStocktake() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: StocktakeCreateRequest) => stocktakeApi.create(data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['stocktakes'] }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
+    },
   });
 }
 
@@ -189,7 +230,9 @@ export function useDeleteStocktake() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => stocktakeApi.delete(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['stocktakes'] }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
+    },
   });
 }
 
@@ -206,15 +249,20 @@ export function useCreateTicket() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: TicketCreateRequest) => ticketApi.create(data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['tickets'] }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    },
   });
 }
 
 export function useUpdateTicket() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: TicketUpdateRequest }) => ticketApi.update(id, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['tickets'] }); },
+    mutationFn: ({ id, data }: { id: string; data: TicketUpdateRequest }) =>
+      ticketApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    },
   });
 }
 
@@ -222,7 +270,9 @@ export function useDeleteTicket() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => ticketApi.delete(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['tickets'] }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    },
   });
 }
 

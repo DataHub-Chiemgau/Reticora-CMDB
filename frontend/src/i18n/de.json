@@ -189,5 +189,16 @@
     "memberCount": "Mitglieder",
     "permissions": "Berechtigungen",
     "type": "Typ"
+  },
+  "auth": {
+    "loginTitle": "Anmelden",
+    "loginDescription": "Melden Sie sich mit Ihrem Organisationskonto bei Reticora CMDB an.",
+    "loginButton": "Anmelden",
+    "loginError": "Die Anmeldung konnte nicht gestartet werden. Bitte versuchen Sie es später erneut.",
+    "logout": "Abmelden",
+    "callbackTitle": "Anmeldung wird abgeschlossen",
+    "callbackProgress": "Bitte warten Sie, während Ihre Sitzung geprüft wird.",
+    "callbackError": "Die Anmeldung konnte nicht abgeschlossen werden.",
+    "sessionExpired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an."
   }
 }
