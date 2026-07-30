@@ -319,7 +319,27 @@ npm run lint        # ESLint
 npm run typecheck   # TypeScript type checking
 npm run generate:api        # Regenerate the typed client from api/openapi.yaml
 npm run generate:api:check  # Fail if the checked-in client is out of date
+npm test                    # Vitest unit and component tests (also run in CI)
+npm run e2e                 # Playwright end-to-end tests
 ```
+
+**Routes:** `/dashboard`, `/cmdb` (CI list), `/cmdb/:id` (CI detail with
+overview, attributes, relationships and topology neighbours), `/topology`,
+`/racks`, `/discovery`, `/assets`, `/assignments`, `/documents`, `/stocktake`,
+`/tickets` and `/users`. Every CI is deep-linkable: list rows, topology nodes,
+rack mounts and relationship entries all link to `/cmdb/:id`, so a CI can be
+shared as a URL.
+
+**UX conventions:** every data view distinguishes four states — loading
+(`SkeletonList`, which reserves the layout and is announced via `role="status"`),
+empty (`EmptyState`, which explains the situation and offers the next step),
+error (`ErrorState`, announced via `role="alert"` and offering a retry) and
+content. Canvas-based visualisations (topology graph, rack diagram) are always
+accompanied by an equivalent list of focusable controls so the same information
+is reachable by keyboard and screen reader. A skip link jumps to the main
+content, and the command palette (`Ctrl`/`⌘`+`K`) reaches every page. All
+strings live in `src/i18n/de.json` and `src/i18n/en.json`; both files carry the
+identical key set.
 
 **Generated API client:** `src/api/generated/schema.d.ts` is produced from
 `api/openapi.yaml` by `openapi-typescript`; `src/api/generated/client.ts` wraps
@@ -401,7 +421,8 @@ Continuous Integration runs on **GitHub Actions** (`.github/workflows/ci.yml`), 
 3. `npm ci` — Install dependencies.
 4. `npm run lint` — ESLint checks.
 5. `npm run typecheck` — TypeScript type verification.
-6. `npm run build` — Production build.
+6. `npm test` — Vitest unit and component tests.
+7. `npm run build` — Production build.
 
 **Planned additions:**
 

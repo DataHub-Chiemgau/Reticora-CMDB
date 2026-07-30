@@ -143,7 +143,8 @@
     "searchCIs": "Search Configuration Items",
     "filterCIStatus": "Filter CI status",
     "primaryNavigation": "Primary navigation",
-    "breadcrumb": "Breadcrumb navigation"
+    "breadcrumb": "Breadcrumb navigation",
+    "skipToContent": "Skip to content"
   },
   "asset": {
     "title": "Assets",

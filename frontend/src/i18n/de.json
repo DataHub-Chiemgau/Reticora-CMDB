@@ -143,7 +143,8 @@
     "searchCIs": "Configuration Items durchsuchen",
     "filterCIStatus": "CI-Status filtern",
     "primaryNavigation": "Hauptnavigation",
-    "breadcrumb": "Brotkrumen-Navigation"
+    "breadcrumb": "Brotkrumen-Navigation",
+    "skipToContent": "Zum Inhalt springen"
   },
   "asset": {
     "title": "Inventar",

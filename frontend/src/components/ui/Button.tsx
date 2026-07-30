@@ -55,13 +55,19 @@ export function Button({
         : { 'aria-disabled': isDisabled || undefined })}
       {...props}
     >
-      {loading ? (
-        <span
-          aria-hidden="true"
-          className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
-        />
-      ) : null}
-      <span>{children}</span>
+      {asChild ? (
+        children
+      ) : (
+        <>
+          {loading ? (
+            <span
+              aria-hidden="true"
+              className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+            />
+          ) : null}
+          <span>{children}</span>
+        </>
+      )}
     </Comp>
   );
 }

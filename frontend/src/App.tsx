@@ -103,6 +103,12 @@ function App() {
 
   return (
     <div className="min-h-screen bg-surface text-gray-900 transition-colors dark:text-gray-100">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-white"
+      >
+        {t('accessibility.skipToContent')}
+      </a>
       <header className="border-b border-gray-200 bg-white/90 px-6 py-4 backdrop-blur dark:border-gray-800 dark:bg-gray-950/90">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -223,7 +229,7 @@ function App() {
           </div>
         </div>
       </header>
-      <main className="p-6">
+      <main id="main-content" className="p-6">
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/auth/callback" element={<CallbackPage />} />
