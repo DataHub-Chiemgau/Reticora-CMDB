@@ -18,7 +18,7 @@ func tenantCtx(r *http.Request) *http.Request {
 
 func TestHandler_RegisterAndListCollectors(t *testing.T) {
 	repo := NewMemoryRepository()
-	h := NewHandler(repo)
+	h := NewHandler(repo, nil)
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
@@ -63,7 +63,7 @@ func TestHandler_RegisterAndListCollectors(t *testing.T) {
 
 func TestHandler_Heartbeat(t *testing.T) {
 	repo := NewMemoryRepository()
-	h := NewHandler(repo)
+	h := NewHandler(repo, nil)
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
@@ -82,7 +82,7 @@ func TestHandler_Heartbeat(t *testing.T) {
 
 func TestHandler_BulkIngest(t *testing.T) {
 	repo := NewMemoryRepository()
-	h := NewHandler(repo)
+	h := NewHandler(repo, nil)
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
@@ -105,7 +105,7 @@ func TestHandler_BulkIngest(t *testing.T) {
 
 func TestHandler_BulkIngestEmpty(t *testing.T) {
 	repo := NewMemoryRepository()
-	h := NewHandler(repo)
+	h := NewHandler(repo, nil)
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 

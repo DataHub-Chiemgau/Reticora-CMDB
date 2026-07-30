@@ -41,6 +41,7 @@ var ValidRelTypes = map[string]bool{
 	"depends_on":   true,
 	"member_of":    true,
 	"powers":       true,
+	"powered_by":   true,
 	"stores":       true,
 	"monitors":     true,
 	"backs_up":     true,
@@ -129,6 +130,7 @@ func NewHandler(repo Repository) *Handler {
 
 // RegisterRoutes registers relationship routes.
 func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/api/v1/relationships", h.List)
 	r.Get("/api/v1/cis/{id}/relationships", h.List)
 	r.Post("/api/v1/relationships", h.Create)
 	r.Delete("/api/v1/relationships/{id}", h.Delete)

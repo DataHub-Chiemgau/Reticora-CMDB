@@ -169,11 +169,15 @@ type Handler struct {
 }
 
 // NewHandler creates a new discovery handler. ciRepo enables reconciliation and
-// review-item resolution; relRepo enables topology relationship derivation. Both
-// may be nil (e.g. for --no-db smoke tests), in which case those features are
-// skipped gracefully.
-func NewHandler(repo Repository, ciRepo ci.Repository, relRepo relationship.Repository) *Handler {
-	return &Handler{repo: repo, ciRepo: ciRepo, relRepo: relRepo}
+// review-item resolution; the optional relRepo enables topology relationship
+// derivation. Both may be nil (e.g. for --no-db smoke tests), in which case
+// those features are skipped gracefully.
+func NewHandler(repo Repository, ciRepo ci.Repository, relRepo ...relationship.Repository) *Handler {
+	h := &Handler{repo: repo, ciRepo: ciRepo}
+	if len(relRepo) > 0 {
+		h.relRepo = relRepo[0]
+	}
+	return h
 }
 
 // RegisterRoutes registers discovery routes.
@@ -364,8 +368,8 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			resp.Updated++
 		case ReconcileConflict:
 			resp.Conflicts++
-			if item := reviewItemFromConflict(t.OrganizationID, item, result); item != nil {
-				if err := h.repo.CreateReviewItem(item); err != nil {
+			if reviewItem := reviewItemFromConflict(t.OrganizationID, item, result); reviewItem != nil {
+				if err := h.repo.CreateReviewItem(reviewItem); err != nil {
 					api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 					return
 				}

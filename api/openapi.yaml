@@ -636,6 +636,29 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createDiscoveryJob
+      tags: [Discovery]
+      summary: Create a discovery job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoveryJobCreateRequest'
+      responses:
+        '201':
+          description: Discovery job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryJobRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /api/v1/discovery/jobs/{id}:
     parameters:
@@ -650,7 +673,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DiscoveryJob'
+                $ref: '#/components/schemas/DiscoveryJobRecord'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -661,6 +684,11 @@ paths:
       operationId: exportCIs
       tags: [Export]
       summary: Export configuration items
+      description: |
+        Streams the tenant's configuration items. Rows are fetched in
+        keyset-paginated batches and flushed as they are produced, so the
+        response is chunked and neither the server nor the client has to hold
+        the full result set in memory. There is no row limit.
       parameters:
         - name: format
           in: query
@@ -1662,6 +1690,1297 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /api/v1/discovery/review-items:
+    get:
+      operationId: listReviewItems
+      tags: [Discovery]
+      summary: List reconciliation review items
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, resolved, dismissed]
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [ambiguous_identity, conflicting_values, unclassified_device]
+      responses:
+        '200':
+          description: Paginated list of review items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewItemListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/discovery/review-items/{id}/resolve:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: resolveReviewItem
+      tags: [Discovery]
+      summary: Resolve a reconciliation review item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewItemResolveRequest'
+      responses:
+        '200':
+          description: The resolved review item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/topology:
+    get:
+      operationId: getTopology
+      tags: [Topology]
+      summary: Get the CI topology graph for the tenant
+      parameters:
+        - name: client_id
+          in: query
+          schema:
+            type: string
+        - name: site_id
+          in: query
+          schema:
+            type: string
+        - name: ci_type
+          in: query
+          schema:
+            type: string
+        - name: root_ci_id
+          in: query
+          description: When set, returns a subgraph reachable from this CI.
+          schema:
+            type: string
+        - name: depth
+          in: query
+          description: Traversal depth from root_ci_id (default 2, max 10).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10
+      responses:
+        '200':
+          description: Topology graph
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopologyGraph'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/topology/cis/{id}/neighbors:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCINeighbors
+      tags: [Topology]
+      summary: Get the immediate topology neighbors of a CI
+      responses:
+        '200':
+          description: Neighbor subgraph (depth 1) centered on the CI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopologyGraph'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/clients:
+    get:
+      operationId: listClients
+      tags: [Clients]
+      summary: List clients
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of clients
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createClient
+      tags: [Clients]
+      summary: Create a client
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateClientRequest'
+      responses:
+        '201':
+          description: Client created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/clients/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getClient
+      tags: [Clients]
+      summary: Get a client
+      responses:
+        '200':
+          description: Client details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateClient
+      tags: [Clients]
+      summary: Update a client
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateClientRequest'
+      responses:
+        '200':
+          description: Client updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteClient
+      tags: [Clients]
+      summary: Delete a client
+      responses:
+        '204':
+          description: Client deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/sites:
+    get:
+      operationId: listSites
+      tags: [Sites]
+      summary: List sites
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/ClientID'
+      responses:
+        '200':
+          description: Paginated list of sites
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createSite
+      tags: [Sites]
+      summary: Create a site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSiteRequest'
+      responses:
+        '201':
+          description: Site created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/sites/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getSite
+      tags: [Sites]
+      summary: Get a site
+      responses:
+        '200':
+          description: Site details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateSite
+      tags: [Sites]
+      summary: Update a site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSiteRequest'
+      responses:
+        '200':
+          description: Site updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteSite
+      tags: [Sites]
+      summary: Delete a site
+      responses:
+        '204':
+          description: Site deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/buildings:
+    get:
+      operationId: listBuildings
+      tags: [Buildings]
+      summary: List buildings
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: site_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of buildings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildingListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createBuilding
+      tags: [Buildings]
+      summary: Create a building
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBuildingRequest'
+      responses:
+        '201':
+          description: Building created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Building'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/buildings/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getBuilding
+      tags: [Buildings]
+      summary: Get a building
+      responses:
+        '200':
+          description: Building details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Building'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateBuilding
+      tags: [Buildings]
+      summary: Update a building
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBuildingRequest'
+      responses:
+        '200':
+          description: Building updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Building'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteBuilding
+      tags: [Buildings]
+      summary: Delete a building
+      responses:
+        '204':
+          description: Building deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/rooms:
+    get:
+      operationId: listRooms
+      tags: [Rooms]
+      summary: List rooms
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: building_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of rooms
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createRoom
+      tags: [Rooms]
+      summary: Create a room
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoomRequest'
+      responses:
+        '201':
+          description: Room created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Room'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/rooms/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getRoom
+      tags: [Rooms]
+      summary: Get a room
+      responses:
+        '200':
+          description: Room details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Room'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateRoom
+      tags: [Rooms]
+      summary: Update a room
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRoomRequest'
+      responses:
+        '200':
+          description: Room updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Room'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteRoom
+      tags: [Rooms]
+      summary: Delete a room
+      responses:
+        '204':
+          description: Room deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/racks:
+    get:
+      operationId: listRacks
+      tags: [Racks]
+      summary: List racks
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: room_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of racks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RackListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createRack
+      tags: [Racks]
+      summary: Create a rack
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRackRequest'
+      responses:
+        '201':
+          description: Rack created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rack'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/racks/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getRack
+      tags: [Racks]
+      summary: Get a rack
+      responses:
+        '200':
+          description: Rack details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rack'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateRack
+      tags: [Racks]
+      summary: Update a rack
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRackRequest'
+      responses:
+        '200':
+          description: Rack updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rack'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteRack
+      tags: [Racks]
+      summary: Delete a rack
+      responses:
+        '204':
+          description: Rack deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/racks/{id}/mounts:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listRackMounts
+      tags: [Racks]
+      summary: List mounts in a rack
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of rack mounts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RackMountListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createRackMount
+      tags: [Racks]
+      summary: Mount a CI into a rack
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRackMountRequest'
+      responses:
+        '201':
+          description: Rack mount created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RackMount'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/rack-mounts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getRackMount
+      tags: [Racks]
+      summary: Get a rack mount
+      responses:
+        '200':
+          description: Rack mount details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RackMount'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateRackMount
+      tags: [Racks]
+      summary: Update a rack mount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRackMountRequest'
+      responses:
+        '200':
+          description: Rack mount updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RackMount'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteRackMount
+      tags: [Racks]
+      summary: Delete a rack mount
+      responses:
+        '204':
+          description: Rack mount deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/cables:
+    get:
+      operationId: listCables
+      tags: [Cables]
+      summary: List cables
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of cables
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CableListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createCable
+      tags: [Cables]
+      summary: Create a cable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCableRequest'
+      responses:
+        '201':
+          description: Cable created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cable'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/cables/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCable
+      tags: [Cables]
+      summary: Get a cable
+      responses:
+        '200':
+          description: Cable details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cable'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateCable
+      tags: [Cables]
+      summary: Update a cable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCableRequest'
+      responses:
+        '200':
+          description: Cable updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cable'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteCable
+      tags: [Cables]
+      summary: Delete a cable
+      responses:
+        '204':
+          description: Cable deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/contacts:
+    get:
+      operationId: listContacts
+      tags: [Contacts]
+      summary: List contacts
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/ClientID'
+      responses:
+        '200':
+          description: Paginated list of contacts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createContact
+      tags: [Contacts]
+      summary: Create a contact
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateContactRequest'
+      responses:
+        '201':
+          description: Contact created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/contacts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getContact
+      tags: [Contacts]
+      summary: Get a contact
+      responses:
+        '200':
+          description: Contact details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateContact
+      tags: [Contacts]
+      summary: Update a contact
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateContactRequest'
+      responses:
+        '200':
+          description: Contact updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteContact
+      tags: [Contacts]
+      summary: Delete a contact
+      responses:
+        '204':
+          description: Contact deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/cis/{id}/contacts:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listCIContacts
+      tags: [Contacts]
+      summary: List contacts linked to a CI
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of CI-contact links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIContactListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: linkCIContact
+      tags: [Contacts]
+      summary: Link a contact to a CI
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkContactRequest'
+      responses:
+        '201':
+          description: Contact linked to CI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIContact'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/ci-contacts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    delete:
+      operationId: unlinkCIContact
+      tags: [Contacts]
+      summary: Unlink a contact from a CI
+      responses:
+        '204':
+          description: CI-contact link removed
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/subnets:
+    get:
+      operationId: listSubnets
+      tags: [IPAM]
+      summary: List subnets
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/ClientID'
+        - name: site_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of subnets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubnetListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createSubnet
+      tags: [IPAM]
+      summary: Create a subnet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSubnetRequest'
+      responses:
+        '201':
+          description: Subnet created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subnet'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/subnets/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getSubnet
+      tags: [IPAM]
+      summary: Get a subnet
+      responses:
+        '200':
+          description: Subnet details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subnet'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateSubnet
+      tags: [IPAM]
+      summary: Update a subnet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSubnetRequest'
+      responses:
+        '200':
+          description: Subnet updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subnet'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteSubnet
+      tags: [IPAM]
+      summary: Delete a subnet
+      responses:
+        '204':
+          description: Subnet deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/subnets/{id}/addresses:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listSubnetAddresses
+      tags: [IPAM]
+      summary: List IP addresses in a subnet
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of IP addresses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAddressListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/ip-addresses:
+    get:
+      operationId: listIPAddresses
+      tags: [IPAM]
+      summary: List IP addresses
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: subnet_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of IP addresses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAddressListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createIPAddress
+      tags: [IPAM]
+      summary: Create an IP address
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIPAddressRequest'
+      responses:
+        '201':
+          description: IP address created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAddress'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/ip-addresses/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getIPAddress
+      tags: [IPAM]
+      summary: Get an IP address
+      responses:
+        '200':
+          description: IP address details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAddress'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateIPAddress
+      tags: [IPAM]
+      summary: Update an IP address
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateIPAddressRequest'
+      responses:
+        '200':
+          description: IP address updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAddress'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteIPAddress
+      tags: [IPAM]
+      summary: Delete an IP address
+      responses:
+        '204':
+          description: IP address deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/cis/{id}/interfaces:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listCIInterfaces
+      tags: [IPAM]
+      summary: List network interfaces of a CI
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of network interfaces
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetworkInterfaceListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createCIInterface
+      tags: [IPAM]
+      summary: Create a network interface on a CI
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInterfaceRequest'
+      responses:
+        '201':
+          description: Network interface created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetworkInterface'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/network-interfaces/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getNetworkInterface
+      tags: [IPAM]
+      summary: Get a network interface
+      responses:
+        '200':
+          description: Network interface details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetworkInterface'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateNetworkInterface
+      tags: [IPAM]
+      summary: Update a network interface
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateInterfaceRequest'
+      responses:
+        '200':
+          description: Network interface updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetworkInterface'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteNetworkInterface
+      tags: [IPAM]
+      summary: Delete a network interface
+      responses:
+        '204':
+          description: Network interface deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+
+
 components:
   securitySchemes:
     BearerAuth:
@@ -2218,7 +3537,7 @@ components:
 
     RelationshipType:
       type: string
-      enum: [connected_to, hosted_on, depends_on, member_of, powers, stores, monitors, backs_up]
+      enum: [connected_to, hosted_on, depends_on, member_of, powers, powered_by, stores, monitors, backs_up]
 
     Relationship:
       type: object
@@ -2485,38 +3804,6 @@ components:
       type: string
       enum: [queued, running, completed, failed]
 
-    DiscoveryJob:
-      type: object
-      required: [id, organization_id, status, received, created, updated, conflicts, submitted_at]
-      properties:
-        id:
-          type: string
-        organization_id:
-          type: string
-        collector_id:
-          type: string
-        status:
-          $ref: '#/components/schemas/DiscoveryJobStatus'
-        submitted_at:
-          type: string
-          format: date-time
-        started_at:
-          type: string
-          format: date-time
-        completed_at:
-          type: string
-          format: date-time
-        received:
-          type: integer
-        created:
-          type: integer
-        updated:
-          type: integer
-        conflicts:
-          type: integer
-        error:
-          type: string
-
     DiscoveryJobListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'
@@ -2526,7 +3813,7 @@ components:
             data:
               type: array
               items:
-                $ref: '#/components/schemas/DiscoveryJob'
+                $ref: '#/components/schemas/DiscoveryJobRecord'
 
     CIExportJSONResponse:
       type: object
@@ -3431,3 +4718,1016 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/GraphQLError'
+
+    DiscoveryJobCreateRequest:
+      type: object
+      required: [collector_id]
+      properties:
+        collector_id:
+          type: string
+        job_type:
+          type: string
+          enum: [sweep, poll, full]
+          default: sweep
+        config:
+          type: object
+          additionalProperties: true
+
+    DiscoveryJobRecord:
+      type: object
+      required: [id, organization_id, job_type, status, config, created_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        collector_id:
+          type: string
+        job_type:
+          type: string
+          enum: [sweep, poll, full]
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        config:
+          type: object
+          additionalProperties: true
+        result_summary:
+          type: object
+          additionalProperties: true
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    ReviewItem:
+      type: object
+      required: [id, organization_id, kind, status, payload, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        kind:
+          type: string
+          enum: [ambiguous_identity, conflicting_values, unclassified_device]
+        status:
+          type: string
+          enum: [open, resolved, dismissed]
+        payload:
+          type: object
+          additionalProperties: true
+        candidate_ci_ids:
+          type: array
+          items:
+            type: string
+        resolved_by:
+          type: string
+        resolved_at:
+          type: string
+          format: date-time
+        resolution:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ReviewItemListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/ReviewItem'
+
+    ReviewItemResolveRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [merge, create, dismiss]
+          description: >-
+            merge folds discovery data into an existing candidate CI (requires
+            ci_id); create spawns a new CI from the payload; dismiss closes the
+            item with no CI change.
+        ci_id:
+          type: string
+          description: Target candidate CI id, required when action is merge.
+        resolved_by:
+          type: string
+        resolution:
+          type: string
+          description: Optional human-readable resolution note.
+
+    TopologyNode:
+      type: object
+      required: [id, name, ci_type, status]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        ci_type:
+          type: string
+        status:
+          type: string
+        client_id:
+          type: string
+        site_id:
+          type: string
+        management_ip:
+          type: string
+
+    TopologyEdge:
+      type: object
+      required: [id, source_ci_id, target_ci_id, rel_type]
+      properties:
+        id:
+          type: string
+        source_ci_id:
+          type: string
+        target_ci_id:
+          type: string
+        rel_type:
+          type: string
+          enum: [connected_to, hosted_on, depends_on, member_of, powers, powered_by, stores, monitors, backs_up]
+        source:
+          type: string
+          description: Provenance of the edge (e.g. manual, discovery).
+
+    TopologyGraph:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopologyNode'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopologyEdge'
+
+    Client:
+      type: object
+      required: [id, organization_id, name, slug, settings, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        settings:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateClientRequest:
+      type: object
+      required: [name, slug]
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        settings:
+          type: object
+          additionalProperties: true
+
+    UpdateClientRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        settings:
+          type: object
+          additionalProperties: true
+
+    ClientListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Client'
+
+    Site:
+      type: object
+      required: [id, organization_id, client_id, name, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        client_id:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        geo_lat:
+          type: number
+        geo_lon:
+          type: number
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateSiteRequest:
+      type: object
+      required: [client_id, name]
+      properties:
+        client_id:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        geo_lat:
+          type: number
+        geo_lon:
+          type: number
+        notes:
+          type: string
+
+    UpdateSiteRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        address:
+          type: string
+        geo_lat:
+          type: number
+        geo_lon:
+          type: number
+        notes:
+          type: string
+
+    SiteListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Site'
+
+    Building:
+      type: object
+      required: [id, organization_id, site_id, name, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        site_id:
+          type: string
+        name:
+          type: string
+        floors:
+          type: integer
+        floorplan_object_key:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateBuildingRequest:
+      type: object
+      required: [site_id, name]
+      properties:
+        site_id:
+          type: string
+        name:
+          type: string
+        floors:
+          type: integer
+        floorplan_object_key:
+          type: string
+
+    UpdateBuildingRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        floors:
+          type: integer
+        floorplan_object_key:
+          type: string
+
+    BuildingListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Building'
+
+    Room:
+      type: object
+      required: [id, organization_id, building_id, name, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        building_id:
+          type: string
+        name:
+          type: string
+        floor:
+          type: integer
+        room_type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateRoomRequest:
+      type: object
+      required: [building_id, name]
+      properties:
+        building_id:
+          type: string
+        name:
+          type: string
+        floor:
+          type: integer
+        room_type:
+          type: string
+
+    UpdateRoomRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        floor:
+          type: integer
+        room_type:
+          type: string
+
+    RoomListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Room'
+
+    Rack:
+      type: object
+      required: [id, organization_id, room_id, name, height_u, width_mm, depth_mm, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        room_id:
+          type: string
+        name:
+          type: string
+        height_u:
+          type: integer
+          minimum: 1
+          maximum: 60
+        width_mm:
+          type: integer
+        depth_mm:
+          type: integer
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateRackRequest:
+      type: object
+      required: [room_id, name]
+      properties:
+        room_id:
+          type: string
+        name:
+          type: string
+        height_u:
+          type: integer
+          minimum: 1
+          maximum: 60
+        width_mm:
+          type: integer
+        depth_mm:
+          type: integer
+        notes:
+          type: string
+
+    UpdateRackRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        height_u:
+          type: integer
+          minimum: 1
+          maximum: 60
+        width_mm:
+          type: integer
+        depth_mm:
+          type: integer
+        notes:
+          type: string
+
+    RackListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Rack'
+
+    RackMount:
+      type: object
+      required: [id, organization_id, rack_id, ci_id, position_u, height_u, face, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        rack_id:
+          type: string
+        ci_id:
+          type: string
+        position_u:
+          type: integer
+          minimum: 1
+        height_u:
+          type: integer
+          minimum: 1
+        face:
+          type: string
+          enum: [front, rear, both]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateRackMountRequest:
+      type: object
+      required: [ci_id, position_u]
+      properties:
+        ci_id:
+          type: string
+        position_u:
+          type: integer
+          minimum: 1
+        height_u:
+          type: integer
+          minimum: 1
+        face:
+          type: string
+          enum: [front, rear, both]
+
+    UpdateRackMountRequest:
+      type: object
+      properties:
+        position_u:
+          type: integer
+          minimum: 1
+        height_u:
+          type: integer
+          minimum: 1
+        face:
+          type: string
+          enum: [front, rear, both]
+
+    RackMountListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/RackMount'
+
+    Cable:
+      type: object
+      required: [id, organization_id, cable_type, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        label:
+          type: string
+        cable_type:
+          type: string
+          enum: [copper, fiber_sm, fiber_mm, coaxial, power, other]
+        length_m:
+          type: number
+        color:
+          type: string
+        source_interface_id:
+          type: string
+        target_interface_id:
+          type: string
+        status:
+          type: string
+          enum: [connected, planned, decommissioned]
+        installed_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateCableRequest:
+      type: object
+      properties:
+        label:
+          type: string
+        cable_type:
+          type: string
+          enum: [copper, fiber_sm, fiber_mm, coaxial, power, other]
+        length_m:
+          type: number
+        color:
+          type: string
+        source_interface_id:
+          type: string
+        target_interface_id:
+          type: string
+        status:
+          type: string
+          enum: [connected, planned, decommissioned]
+        installed_at:
+          type: string
+          format: date-time
+
+    UpdateCableRequest:
+      type: object
+      properties:
+        label:
+          type: string
+        cable_type:
+          type: string
+          enum: [copper, fiber_sm, fiber_mm, coaxial, power, other]
+        length_m:
+          type: number
+        color:
+          type: string
+        source_interface_id:
+          type: string
+        target_interface_id:
+          type: string
+        status:
+          type: string
+          enum: [connected, planned, decommissioned]
+        installed_at:
+          type: string
+          format: date-time
+
+    CableListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Cable'
+
+    Contact:
+      type: object
+      required: [id, organization_id, display_name, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        client_id:
+          type: string
+        display_name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+        department:
+          type: string
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateContactRequest:
+      type: object
+      required: [display_name]
+      properties:
+        client_id:
+          type: string
+        display_name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+        department:
+          type: string
+        notes:
+          type: string
+
+    UpdateContactRequest:
+      type: object
+      properties:
+        client_id:
+          type: string
+        display_name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+        department:
+          type: string
+        notes:
+          type: string
+
+    ContactListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Contact'
+
+    CIContact:
+      type: object
+      required: [id, organization_id, ci_id, contact_id, relationship_type, created_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        ci_id:
+          type: string
+        contact_id:
+          type: string
+        relationship_type:
+          type: string
+          enum: [responsible, owner, operator, vendor, escalation]
+        created_at:
+          type: string
+          format: date-time
+
+    LinkContactRequest:
+      type: object
+      required: [contact_id]
+      properties:
+        contact_id:
+          type: string
+        relationship_type:
+          type: string
+          enum: [responsible, owner, operator, vendor, escalation]
+
+    CIContactListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/CIContact'
+
+    Subnet:
+      type: object
+      required: [id, organization_id, cidr, is_management, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        client_id:
+          type: string
+        site_id:
+          type: string
+        cidr:
+          type: string
+        name:
+          type: string
+        vlan_id:
+          type: integer
+        gateway:
+          type: string
+        dns_servers:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+        is_management:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateSubnetRequest:
+      type: object
+      required: [cidr]
+      properties:
+        client_id:
+          type: string
+        site_id:
+          type: string
+        cidr:
+          type: string
+        name:
+          type: string
+        vlan_id:
+          type: integer
+        gateway:
+          type: string
+        dns_servers:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+        is_management:
+          type: boolean
+
+    UpdateSubnetRequest:
+      type: object
+      properties:
+        client_id:
+          type: string
+        site_id:
+          type: string
+        name:
+          type: string
+        vlan_id:
+          type: integer
+        gateway:
+          type: string
+        dns_servers:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+        is_management:
+          type: boolean
+
+    SubnetListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Subnet'
+
+    IPAddress:
+      type: object
+      required: [id, organization_id, address, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        subnet_id:
+          type: string
+        interface_id:
+          type: string
+        address:
+          type: string
+        status:
+          type: string
+          enum: [active, reserved, deprecated, dhcp, available]
+        dns_name:
+          type: string
+        description:
+          type: string
+        last_seen_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateIPAddressRequest:
+      type: object
+      required: [address]
+      properties:
+        subnet_id:
+          type: string
+        interface_id:
+          type: string
+        address:
+          type: string
+        status:
+          type: string
+          enum: [active, reserved, deprecated, dhcp, available]
+        dns_name:
+          type: string
+        description:
+          type: string
+
+    UpdateIPAddressRequest:
+      type: object
+      properties:
+        subnet_id:
+          type: string
+        interface_id:
+          type: string
+        status:
+          type: string
+          enum: [active, reserved, deprecated, dhcp, available]
+        dns_name:
+          type: string
+        description:
+          type: string
+
+    IPAddressListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/IPAddress'
+
+    NetworkInterface:
+      type: object
+      required: [id, organization_id, ci_id, name, interface_type, is_management, is_uplink, admin_status, oper_status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        ci_id:
+          type: string
+        name:
+          type: string
+        mac_address:
+          type: string
+        interface_type:
+          type: string
+          enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
+        speed_mbps:
+          type: integer
+        is_management:
+          type: boolean
+        is_uplink:
+          type: boolean
+        admin_status:
+          type: string
+        oper_status:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateInterfaceRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        mac_address:
+          type: string
+        interface_type:
+          type: string
+          enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
+        speed_mbps:
+          type: integer
+        is_management:
+          type: boolean
+        is_uplink:
+          type: boolean
+        admin_status:
+          type: string
+        oper_status:
+          type: string
+        description:
+          type: string
+
+    UpdateInterfaceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        mac_address:
+          type: string
+        interface_type:
+          type: string
+          enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
+        speed_mbps:
+          type: integer
+        is_management:
+          type: boolean
+        is_uplink:
+          type: boolean
+        admin_status:
+          type: string
+        oper_status:
+          type: string
+        description:
+          type: string
+
+    NetworkInterfaceListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/NetworkInterface'

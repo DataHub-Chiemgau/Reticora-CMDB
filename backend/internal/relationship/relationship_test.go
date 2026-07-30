@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -97,5 +98,39 @@ func TestHandler_Delete(t *testing.T) {
 
 	if w.Code != http.StatusNoContent {
 		t.Errorf("expected 204, got %d", w.Code)
+	}
+}
+
+// TestListAllRelationships covers GET /api/v1/relationships, which lists every
+// relationship in the organization rather than those of a single CI.
+func TestListAllRelationships(t *testing.T) {
+	repo := NewMemoryRepository()
+	for _, rel := range []*Relationship{
+		{OrganizationID: "org-1", SourceCIID: "ci-1", TargetCIID: "ci-2", RelType: "depends_on"},
+		{OrganizationID: "org-1", SourceCIID: "ci-3", TargetCIID: "ci-4", RelType: "hosts"},
+		{OrganizationID: "org-2", SourceCIID: "ci-5", TargetCIID: "ci-6", RelType: "hosts"},
+	} {
+		if err := repo.Create(rel); err != nil {
+			t.Fatalf("create relationship: %v", err)
+		}
+	}
+
+	router := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(router)
+
+	req := tenantCtx(httptest.NewRequest(http.MethodGet, "/api/v1/relationships", nil))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp api.ListResponse[Relationship]
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Total != 2 {
+		t.Errorf("expected the 2 relationships of org-1, got %d", resp.Total)
 	}
 }
