@@ -1132,3 +1132,120 @@ export const complianceApi = {
     return fetchAPI<ComplianceEvaluationResponse>('/compliance/evaluations', { method: 'POST' });
   },
 };
+
+// --- IGA ---
+export interface IGAConnector {
+  id: string;
+  organization_id: string;
+  name: string;
+  type: 'scim' | 'relay' | string;
+  base_url?: string;
+  credential_id?: string;
+  collector_id?: string;
+  capabilities: Record<string, boolean>;
+  config?: Record<string, unknown>;
+  status: string;
+  last_sync_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IGATask {
+  id: string;
+  connector_id: string;
+  user_id?: string;
+  external_id?: string;
+  action: string;
+  status: string;
+  attempts: number;
+  max_attempts: number;
+  next_run_at: string;
+  error?: string;
+  created_at: string;
+}
+
+export interface IGAAccessRequest {
+  id: string;
+  requester_id: string;
+  subject_user_id: string;
+  connector_id?: string;
+  entitlement: string;
+  reason?: string;
+  status: string;
+  created_at: string;
+}
+
+export interface IGAAccessReview {
+  id: string;
+  name: string;
+  description?: string;
+  status: string;
+  due_at?: string;
+  created_at: string;
+}
+
+export interface IGADriftFinding {
+  id: string;
+  connector_id: string;
+  external_id: string;
+  user_id?: string;
+  drift_type: string;
+  severity: string;
+  status: string;
+  created_at: string;
+}
+
+export interface IGACreateConnectorRequest {
+  name: string;
+  type: string;
+  base_url?: string;
+  collector_id?: string;
+  credential_id?: string;
+  secret?: Record<string, unknown>;
+  config?: Record<string, unknown>;
+}
+
+export const igaApi = {
+  connectors(params: ListParams = {}): Promise<PaginatedResponse<IGAConnector>> {
+    return fetchAPI(`/iga/connectors${buildQuery(params)}`);
+  },
+  createConnector(data: IGACreateConnectorRequest): Promise<IGAConnector> {
+    return fetchAPI('/iga/connectors', { method: 'POST', body: JSON.stringify(data) });
+  },
+  testConnector(id: string): Promise<Record<string, unknown>> {
+    return fetchAPI(`/iga/connectors/${id}/test`, { method: 'POST' });
+  },
+  syncConnector(id: string): Promise<Record<string, unknown>> {
+    return fetchAPI(`/iga/connectors/${id}/sync`, { method: 'POST' });
+  },
+  tasks(params: ListParams & { status?: string } = {}): Promise<PaginatedResponse<IGATask>> {
+    return fetchAPI(`/iga/tasks${buildQuery(params)}`);
+  },
+  retryTask(id: string): Promise<IGATask> {
+    return fetchAPI(`/iga/tasks/${id}/retry`, { method: 'POST' });
+  },
+  accessRequests(params: ListParams = {}): Promise<PaginatedResponse<IGAAccessRequest>> {
+    return fetchAPI(`/iga/access-requests${buildQuery(params)}`);
+  },
+  approveAccessRequest(id: string, comment = ''): Promise<IGAAccessRequest> {
+    return fetchAPI(`/iga/access-requests/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ comment }),
+    });
+  },
+  rejectAccessRequest(id: string, comment = ''): Promise<IGAAccessRequest> {
+    return fetchAPI(`/iga/access-requests/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ comment }),
+    });
+  },
+  reviews(params: ListParams = {}): Promise<PaginatedResponse<IGAAccessReview>> {
+    return fetchAPI(`/iga/access-reviews${buildQuery(params)}`);
+  },
+  drift(params: ListParams = {}): Promise<PaginatedResponse<IGADriftFinding>> {
+    return fetchAPI(`/iga/drift${buildQuery(params)}`);
+  },
+  remediateDrift(id: string): Promise<IGATask> {
+    return fetchAPI(`/iga/drift/${id}/remediate`, { method: 'POST' });
+  },
+};

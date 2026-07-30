@@ -33,6 +33,8 @@ var gatedRoutes = []struct {
 	{"/api/v1/workflows", FeatureWorkflowForms},
 	{"/api/v1/workflow-runs", FeatureWorkflowForms},
 	{"/api/v1/compliance", FeatureCompliance},
+	{"/api/v1/iga", FeatureIGA},
+	{"/scim/v2", FeatureIGA},
 }
 
 // RequiredFeature returns the feature key gating the given request path.

@@ -21,7 +21,8 @@
     "slas": "SLAs",
     "forms": "Forms",
     "workflows": "Workflows",
-    "compliance": "Compliance"
+    "compliance": "Compliance",
+    "iga": "IGA"
   },
   "common": {
     "save": "Save",
@@ -62,7 +63,8 @@
       "slas": "Open SLAs",
       "forms": "Open Forms",
       "workflows": "Open Workflows",
-      "compliance": "Open Compliance"
+      "compliance": "Open Compliance",
+      "iga": "Open IGA"
     }
   },
   "dashboard": {
@@ -329,5 +331,37 @@
     "failures": "Failing results",
     "noFailures": "No deviations",
     "noFailuresHint": "No failing results are currently stored."
+  },
+  "iga": {
+    "loading": "Loading identity governance",
+    "errorTitle": "IGA could not be loaded",
+    "title": "Identity Governance",
+    "subtitle": "Connectors, provisioning tasks, access reviews and drift remediation.",
+    "createConnector": "Create connector",
+    "name": "Name",
+    "type": "Type",
+    "baseUrl": "Base URL",
+    "collectorId": "Collector ID",
+    "connectors": "Connectors",
+    "test": "Test",
+    "sync": "Sync",
+    "emptyConnectors": "No connectors yet",
+    "emptyConnectorsHint": "Add SCIM or relay connectors to start provisioning.",
+    "tasks": "Provisioning tasks",
+    "retry": "Retry",
+    "emptyTasks": "No provisioning tasks",
+    "emptyTasksHint": "JML policies and reviews create asynchronous tasks.",
+    "accessRequests": "Access requests",
+    "approve": "Approve",
+    "reject": "Reject",
+    "emptyRequests": "No access requests",
+    "emptyRequestsHint": "Requests for roles and entitlements appear here.",
+    "reviews": "Review campaigns",
+    "emptyReviews": "No review campaigns",
+    "emptyReviewsHint": "Start a campaign to recertify access.",
+    "drift": "Drift findings",
+    "remediate": "Remediate",
+    "emptyDrift": "No drift detected",
+    "emptyDriftHint": "Connector reconciliation records orphan and missing accounts here."
   }
 }

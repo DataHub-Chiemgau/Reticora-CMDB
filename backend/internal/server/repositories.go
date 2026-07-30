@@ -12,6 +12,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
@@ -55,6 +56,7 @@ func MemoryRepositories() Repositories {
 		Form:              form.NewMemoryRepository(),
 		Workflow:          workflow.NewMemoryRepository(),
 		Compliance:        compliance.NewMemoryRepository(),
+		IGA:               iga.NewMemoryRepository(),
 	}
 }
 
@@ -86,5 +88,6 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Form:              form.NewPGRepository(pool),
 		Workflow:          workflow.NewPGRepository(pool),
 		Compliance:        compliance.NewPGRepository(pool),
+		IGA:               iga.NewPGRepository(pool),
 	}
 }

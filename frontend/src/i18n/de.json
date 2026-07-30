@@ -21,7 +21,8 @@
     "slas": "SLAs",
     "forms": "Formulare",
     "workflows": "Workflows",
-    "compliance": "Compliance"
+    "compliance": "Compliance",
+    "iga": "IGA"
   },
   "common": {
     "save": "Speichern",
@@ -62,7 +63,8 @@
       "slas": "SLAs öffnen",
       "forms": "Formulare öffnen",
       "workflows": "Workflows öffnen",
-      "compliance": "Compliance öffnen"
+      "compliance": "Compliance öffnen",
+      "iga": "IGA öffnen"
     }
   },
   "dashboard": {
@@ -329,5 +331,37 @@
     "failures": "Fehlgeschlagene Ergebnisse",
     "noFailures": "Keine Abweichungen",
     "noFailuresHint": "Aktuell sind keine Fehlschläge gespeichert."
+  },
+  "iga": {
+    "loading": "Identity Governance wird geladen",
+    "errorTitle": "IGA konnte nicht geladen werden",
+    "title": "Identity Governance",
+    "subtitle": "Konnektoren, Provisionierungsaufgaben, Access Reviews und Drift-Behebung.",
+    "createConnector": "Konnektor anlegen",
+    "name": "Name",
+    "type": "Typ",
+    "baseUrl": "Basis-URL",
+    "collectorId": "Collector-ID",
+    "connectors": "Konnektoren",
+    "test": "Testen",
+    "sync": "Synchronisieren",
+    "emptyConnectors": "Noch keine Konnektoren",
+    "emptyConnectorsHint": "SCIM- oder Relay-Konnektoren hinzufügen, um Provisionierung zu starten.",
+    "tasks": "Provisionierungsaufgaben",
+    "retry": "Erneut versuchen",
+    "emptyTasks": "Keine Provisionierungsaufgaben",
+    "emptyTasksHint": "JML-Policies und Reviews erzeugen asynchrone Aufgaben.",
+    "accessRequests": "Zugriffsanträge",
+    "approve": "Genehmigen",
+    "reject": "Ablehnen",
+    "emptyRequests": "Keine Zugriffsanträge",
+    "emptyRequestsHint": "Anträge für Rollen und Berechtigungen erscheinen hier.",
+    "reviews": "Review-Kampagnen",
+    "emptyReviews": "Keine Review-Kampagnen",
+    "emptyReviewsHint": "Starte eine Kampagne zur Rezertifizierung von Zugriffen.",
+    "drift": "Drift-Funde",
+    "remediate": "Beheben",
+    "emptyDrift": "Kein Drift erkannt",
+    "emptyDriftHint": "Konnektor-Abgleiche erfassen verwaiste und fehlende Konten hier."
   }
 }

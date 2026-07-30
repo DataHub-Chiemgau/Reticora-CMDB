@@ -23,6 +23,7 @@ import { SLAPage } from './pages/SLAPage';
 import { FormsPage } from './pages/FormsPage';
 import { WorkflowPage } from './pages/WorkflowPage';
 import { CompliancePage } from './pages/CompliancePage';
+import { IGAPage } from './pages/IGAPage';
 import { StocktakeListPage } from './pages/StocktakeListPage';
 import { TicketListPage } from './pages/TicketListPage';
 import { UserManagementPage } from './pages/UserManagementPage';
@@ -45,6 +46,7 @@ const pageToPath: Record<AppPage, string> = {
   forms: '/forms',
   workflows: '/workflows',
   compliance: '/compliance',
+  iga: '/iga',
 };
 
 const pathToPage: Record<string, AppPage> = Object.fromEntries(
@@ -211,6 +213,9 @@ function App() {
                 >
                   {t('nav.compliance')}
                 </NavButton>
+                <NavButton active={currentPage === 'iga'} onClick={() => handleNavigate('iga')}>
+                  {t('nav.iga')}
+                </NavButton>
               </nav>
             ) : null}
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -286,6 +291,7 @@ function App() {
             <Route path="/forms" element={<FormsPage />} />
             <Route path="/workflows" element={<WorkflowPage />} />
             <Route path="/compliance" element={<CompliancePage />} />
+            <Route path="/iga" element={<IGAPage />} />
             <Route path="*" element={<CIListPage onCreateCI={openCreateCI} />} />
           </Route>
         </Routes>

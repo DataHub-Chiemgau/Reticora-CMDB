@@ -17,6 +17,7 @@ import {
   formApi,
   workflowApi,
   complianceApi,
+  igaApi,
 } from '../api/client';
 import type {
   CICreateRequest,
@@ -41,6 +42,7 @@ import type {
   SLAListParams,
   SLABreachParams,
   SLAPolicyRequest,
+  IGACreateConnectorRequest,
 } from '../api/client';
 
 export function useCIList(params: CIListParams) {
@@ -468,5 +470,74 @@ export function useEvaluateCompliance() {
       queryClient.invalidateQueries({ queryKey: ['compliance-results'] });
       queryClient.invalidateQueries({ queryKey: ['compliance-score'] });
     },
+  });
+}
+
+// --- IGA ---
+
+export function useIGAConnectors(params: ListParams = {}) {
+  return useQuery({
+    queryKey: ['iga-connectors', params],
+    queryFn: () => igaApi.connectors(params),
+  });
+}
+export function useCreateIGAConnector() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: IGACreateConnectorRequest) => igaApi.createConnector(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['iga-connectors'] }),
+  });
+}
+export function useTestIGAConnector() {
+  return useMutation({ mutationFn: (id: string) => igaApi.testConnector(id) });
+}
+export function useSyncIGAConnector() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => igaApi.syncConnector(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['iga-drift'] }),
+  });
+}
+export function useIGATasks(params: ListParams & { status?: string } = {}) {
+  return useQuery({ queryKey: ['iga-tasks', params], queryFn: () => igaApi.tasks(params) });
+}
+export function useRetryIGATask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => igaApi.retryTask(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['iga-tasks'] }),
+  });
+}
+export function useIGAAccessRequests(params: ListParams = {}) {
+  return useQuery({
+    queryKey: ['iga-access-requests', params],
+    queryFn: () => igaApi.accessRequests(params),
+  });
+}
+export function useApproveIGAAccessRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => igaApi.approveAccessRequest(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['iga-access-requests'] }),
+  });
+}
+export function useRejectIGAAccessRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => igaApi.rejectAccessRequest(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['iga-access-requests'] }),
+  });
+}
+export function useIGAReviews(params: ListParams = {}) {
+  return useQuery({ queryKey: ['iga-reviews', params], queryFn: () => igaApi.reviews(params) });
+}
+export function useIGADrift(params: ListParams = {}) {
+  return useQuery({ queryKey: ['iga-drift', params], queryFn: () => igaApi.drift(params) });
+}
+export function useRemediateIGADrift() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => igaApi.remediateDrift(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['iga-drift'] }),
   });
 }

@@ -71,6 +71,10 @@ tags:
     description: Metrics and alert rules
   - name: GraphQL
     description: GraphQL backend-for-frontend endpoint
+  - name: IGA
+    description: Identity governance, active provisioning and access reviews
+  - name: SCIM
+    description: SCIM 2.0 service provider endpoints
 
 paths:
   /healthz:
@@ -4170,6 +4174,653 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+  /api/v1/iga/connectors:
+    get:
+      operationId: listIGAConnectors
+      tags: [IGA]
+      summary: List IGA connectors
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    post:
+      operationId: createIGAConnector
+      tags: [IGA]
+      summary: Create an IGA connector
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IGAObject' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/connectors/{id}:
+    parameters:
+        - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getIGAConnector
+      tags: [IGA]
+      summary: Get an IGA connector
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    patch:
+      operationId: updateIGAConnector
+      tags: [IGA]
+      summary: Update an IGA connector
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IGAObject' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    delete:
+      operationId: deleteIGAConnector
+      tags: [IGA]
+      summary: Delete an IGA connector
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/connectors/{id}/test:
+    parameters:
+        - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: testIGAConnector
+      tags: [IGA]
+      summary: Test an IGA connector
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/connectors/{id}/sync:
+    parameters:
+        - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: syncIGAConnector
+      tags: [IGA]
+      summary: Start connector reconciliation
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/tasks:
+    get:
+      operationId: listIGAProvisioningTasks
+      tags: [IGA]
+      summary: List IGA provisioning tasks
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/tasks/{id}:
+    parameters:
+        - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getIGAProvisioningTask
+      tags: [IGA]
+      summary: Get an IGA provisioning task
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/tasks/{id}/retry:
+    parameters:
+        - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: retryIGAProvisioningTask
+      tags: [IGA]
+      summary: Retry an IGA provisioning task
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/jml-policies:
+    get:
+      operationId: listIGAJMLPolicies
+      tags: [IGA]
+      summary: List joiner/mover/leaver policies
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    post:
+      operationId: createIGAJMLPolicy
+      tags: [IGA]
+      summary: Create a joiner/mover/leaver policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IGAObject' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/jml/resolve:
+    post:
+      operationId: resolveIGALifecycle
+      tags: [IGA]
+      summary: Resolve an identity lifecycle change
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IGAObject' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAArray' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAArray' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAArray' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/access-requests:
+    get:
+      operationId: listIGAAccessRequests
+      tags: [IGA]
+      summary: List IGA access requests
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    post:
+      operationId: createIGAAccessRequest
+      tags: [IGA]
+      summary: Create an IGA access request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IGAObject' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/access-requests/{id}/approve:
+    parameters:
+        - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: approveIGAAccessRequest
+      tags: [IGA]
+      summary: Approve an IGA access request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IGAObject' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/access-requests/{id}/reject:
+    parameters:
+        - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: rejectIGAAccessRequest
+      tags: [IGA]
+      summary: Reject an IGA access request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IGAObject' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/access-reviews:
+    get:
+      operationId: listIGAAccessReviews
+      tags: [IGA]
+      summary: List access review campaigns
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    post:
+      operationId: createIGAAccessReview
+      tags: [IGA]
+      summary: Create an access review campaign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IGAObject' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/access-reviews/{id}/items:
+    parameters:
+        - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listIGAAccessReviewItems
+      tags: [IGA]
+      summary: List access review items
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/access-reviews/{id}/items/{itemId}/decision:
+    parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string }
+    post:
+      operationId: decideIGAAccessReviewItem
+      tags: [IGA]
+      summary: Record an access review decision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IGAObject' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/drift:
+    get:
+      operationId: listIGADriftFindings
+      tags: [IGA]
+      summary: List IGA drift findings
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAListResponse' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/drift/reconcile:
+    post:
+      operationId: reconcileIGADrift
+      tags: [IGA]
+      summary: Run reconciliation for an IGA connector
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IGAObject' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAArray' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAArray' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAArray' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /api/v1/iga/drift/{id}/remediate:
+    parameters:
+        - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: remediateIGADrift
+      tags: [IGA]
+      summary: Create a remediation task for a drift finding
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /scim/v2/ServiceProviderConfig:
+    get:
+      operationId: getSCIMServiceProviderConfig
+      tags: [SCIM]
+      summary: Get SCIM ServiceProviderConfig
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /scim/v2/Users:
+    get:
+        operationId: listSCIMUsers
+        tags: [SCIM]
+        summary: List SCIM users
+        parameters:
+          - name: filter
+            in: query
+            schema: { type: string }
+          - name: startIndex
+            in: query
+            schema: { type: integer, default: 1 }
+          - name: count
+            in: query
+            schema: { type: integer, default: 100 }
+        responses:
+          '200': { description: SCIM list response, content: { application/scim+json: { schema: { $ref: '#/components/schemas/SCIMListResponse' } }, application/json: { schema: { $ref: '#/components/schemas/SCIMListResponse' } } } }
+    post:
+        operationId: createSCIMUser
+        tags: [SCIM]
+        summary: Create a SCIM user
+        requestBody: { required: true, content: { application/scim+json: { schema: { $ref: '#/components/schemas/SCIMResource' } }, application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        responses:
+          '201': { description: SCIM user, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+  /scim/v2/Users/{id}:
+    parameters:
+        - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getSCIMUser
+      tags: [SCIM]
+      summary: Get a SCIM user
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    put:
+      operationId: replaceSCIMUser
+      tags: [SCIM]
+      summary: Replace a SCIM user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IGAObject' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    patch:
+      operationId: patchSCIMUser
+      tags: [SCIM]
+      summary: Patch a SCIM user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IGAObject' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    delete:
+      operationId: deleteSCIMUser
+      tags: [SCIM]
+      summary: Delete a SCIM user
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /scim/v2/Groups:
+    get:
+        operationId: listSCIMGroups
+        tags: [SCIM]
+        summary: List SCIM groups
+        parameters:
+          - name: startIndex
+            in: query
+            schema: { type: integer, default: 1 }
+          - name: count
+            in: query
+            schema: { type: integer, default: 100 }
+        responses:
+          '200': { description: SCIM list response, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMListResponse' } } } }
+    post:
+        operationId: createSCIMGroup
+        tags: [SCIM]
+        summary: Create a SCIM group
+        requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        responses:
+          '201': { description: SCIM group, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+  /scim/v2/Groups/{id}:
+    parameters:
+        - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getSCIMGroup
+      tags: [SCIM]
+      summary: Get a SCIM group
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    put:
+      operationId: replaceSCIMGroup
+      tags: [SCIM]
+      summary: Replace a SCIM group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IGAObject' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    patch:
+      operationId: patchSCIMGroup
+      tags: [SCIM]
+      summary: Patch a SCIM group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IGAObject' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    delete:
+      operationId: deleteSCIMGroup
+      tags: [SCIM]
+      summary: Delete a SCIM group
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IGAObject' } } } }
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
 components:
   securitySchemes:
     BearerAuth:
@@ -4303,6 +4954,39 @@ components:
             $ref: '#/components/schemas/ProblemDetail'
 
   schemas:
+    IGAObject:
+      type: object
+      additionalProperties: true
+    IGAArray:
+      type: array
+      items:
+        $ref: '#/components/schemas/IGAObject'
+    IGAListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/IGAObject' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    SCIMResource:
+      type: object
+      additionalProperties: true
+    SCIMListResponse:
+      type: object
+      required: [schemas, totalResults, startIndex, itemsPerPage, Resources]
+      properties:
+        schemas:
+          type: array
+          items: { type: string }
+        totalResults: { type: integer }
+        startIndex: { type: integer }
+        itemsPerPage: { type: integer }
+        Resources:
+          type: array
+          items: { $ref: '#/components/schemas/SCIMResource' }
     ProblemDetail:
       type: object
       description: RFC 7807 Problem Details object.

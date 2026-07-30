@@ -24,6 +24,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
@@ -65,6 +66,7 @@ type Repositories struct {
 	Form              form.Repository
 	Workflow          workflow.Repository
 	Compliance        compliance.Repository
+	IGA               iga.Repository
 }
 
 // Options carries everything the router needs beyond the repositories.
@@ -120,6 +122,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 		form.NewHandler(repos.Form),
 		workflow.NewHandler(repos.Workflow, workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher)),
 		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)),
+		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow),
 		tenantapi.NewHandler(repos.TenantHierarchy),
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
@@ -153,6 +156,8 @@ func validate(repos Repositories, opts Options) error {
 		return fmt.Errorf("server: workflow repository is required")
 	case repos.Compliance == nil:
 		return fmt.Errorf("server: compliance repository is required")
+	case repos.IGA == nil:
+		return fmt.Errorf("server: IGA repository is required")
 	case repos.CI == nil:
 		return fmt.Errorf("server: CI repository is required")
 	case repos.Relationship == nil:

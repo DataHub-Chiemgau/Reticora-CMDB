@@ -91,6 +91,7 @@ Database schema is managed with [golang-migrate](https://github.com/golang-migra
 | 0026 | permissions_sla | First-class permission catalogue/role grants and SLA policy plus per-ticket clock state |
 | 0027 | workflows_forms | JSON-Schema form definitions/submissions and workflow definitions, runs and step history |
 | 0028 | compliance | Compliance rules and per-CI evaluation results |
+| 0029 | iga | IGA connectors, provisioning tasks, access requests/reviews and drift findings |
 
 **Running migrations:**
 
@@ -169,6 +170,7 @@ internal/
 ├── form/           # JSON-Schema form definitions and submissions
 ├── workflow/       # Workflow definitions, deterministic executor and approvals
 ├── compliance/     # Compliance rules, evaluator and results
+├── iga/            # IGA connectors, SCIM, JML, access reviews and drift
 ├── entitlement/    # License/feature-flag enforcement
 ├── export/         # Async export jobs (CSV, DATEV)
 ├── monitoring/     # Metric ingestion and queries
@@ -259,6 +261,25 @@ active rules against tenant CIs, replaces stored results for the tenant and
 returns scores by CI type plus the overall pass percentage. The score excludes
 `not_applicable` checks from the denominator and stored failures are exposed to
 the frontend compliance page.
+
+
+**Identity Governance (IGA):** migration 0029 adds the enterprise-only IGA
+module. Connector definitions live in `iga_connector`; outbound secrets are
+referenced by `credential_id` and are decrypted only through the existing
+envelope-encryption credential service. The connector framework supports direct
+SCIM 2.0 outbound calls (`/Users`, `/Groups`, paging and PATCH) and a relay mode
+that queues collector-facing discovery jobs for systems reachable only from a
+customer network. The inbound SCIM service provider is exposed under
+`/scim/v2/Users`, `/scim/v2/Groups` and `/scim/v2/ServiceProviderConfig`, mapped
+to `app_user` and `team` while preserving RFC 7643/7644 envelopes and errors.
+Joiner/mover/leaver policies resolve identity changes into asynchronous
+`iga_provisioning_task` rows with retry/backoff history. Access requests can be
+approved or rejected and record the workflow definition selected for approval;
+recertification campaigns store `iga_access_review` and `iga_access_review_item`
+decisions, with revoke decisions feeding provisioning tasks. Reconciliation reads
+connector accounts, compares them with expected state, stores
+`iga_drift_finding` rows and offers remediation tasks for orphan or missing
+accounts.
 
 **Durable webhook delivery:** every dispatch is persisted to `webhook_delivery`
 before the first HTTP attempt and updated after each attempt. Failed attempts
@@ -369,7 +390,7 @@ npm run e2e                 # Playwright end-to-end tests
 **Routes:** `/dashboard`, `/cmdb` (CI list), `/cmdb/:id` (CI detail with
 overview, attributes, relationships and topology neighbours), `/topology`,
 `/racks`, `/discovery`, `/assets`, `/assignments`, `/documents`, `/stocktake`,
-`/tickets`, `/users`, `/permissions`, `/slas`, `/forms`, `/workflows` and `/compliance`. Every CI is deep-linkable: list rows, topology nodes,
+`/tickets`, `/users`, `/permissions`, `/slas`, `/forms`, `/workflows`, `/compliance` and `/iga`. Every CI is deep-linkable: list rows, topology nodes,
 rack mounts and relationship entries all link to `/cmdb/:id`, so a CI can be
 shared as a URL.
 

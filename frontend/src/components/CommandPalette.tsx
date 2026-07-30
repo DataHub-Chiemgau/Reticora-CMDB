@@ -21,7 +21,8 @@ export type AppPage =
   | 'slas'
   | 'forms'
   | 'workflows'
-  | 'compliance';
+  | 'compliance'
+  | 'iga';
 
 interface CommandPaletteProps {
   onNavigate: (page: AppPage) => void;
@@ -176,6 +177,12 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
         label: t('commandPalette.commands.compliance'),
         keywords: ['compliance iso nis2 score'],
         action: () => onNavigate('compliance'),
+      },
+      {
+        id: 'nav-iga',
+        label: t('commandPalette.commands.iga'),
+        keywords: ['iga provisioning scim access reviews'],
+        action: () => onNavigate('iga'),
       },
     ],
     [onCreateCI, onNavigate, onToggleDarkMode, t],
