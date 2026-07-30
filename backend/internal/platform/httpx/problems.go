@@ -4,15 +4,15 @@ import "net/http"
 
 // Problem type URIs as defined in the spec.
 const (
-	TypeValidationError   = "urn:reticora:problem:validation-error"
-	TypeUnauthorized      = "urn:reticora:problem:unauthorized"
-	TypeForbidden         = "urn:reticora:problem:forbidden"
-	TypeEntitlementLimit  = "urn:reticora:problem:entitlement-limit"
-	TypeNotFound          = "urn:reticora:problem:not-found"
-	TypeConflict          = "urn:reticora:problem:conflict"
+	TypeValidationError     = "urn:reticora:problem:validation-error"
+	TypeUnauthorized        = "urn:reticora:problem:unauthorized"
+	TypeForbidden           = "urn:reticora:problem:forbidden"
+	TypeEntitlementLimit    = "urn:reticora:problem:entitlement-limit"
+	TypeNotFound            = "urn:reticora:problem:not-found"
+	TypeConflict            = "urn:reticora:problem:conflict"
 	TypeIdempotencyMismatch = "urn:reticora:problem:idempotency-mismatch"
-	TypeRateLimited       = "urn:reticora:problem:rate-limited"
-	TypeInternal          = "urn:reticora:problem:internal"
+	TypeRateLimited         = "urn:reticora:problem:rate-limited"
+	TypeInternal            = "urn:reticora:problem:internal"
 )
 
 // ValidationError returns a 400 validation problem.

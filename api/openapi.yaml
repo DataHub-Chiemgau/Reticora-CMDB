@@ -55,6 +55,10 @@ tags:
     description: Team and membership management
   - name: Roles
     description: Custom role and role assignment management
+  - name: Permissions
+    description: Permission catalogue and effective access
+  - name: SLA
+    description: Service-level policies and ticket clocks
   - name: Audit
     description: Hash-chained audit trail
   - name: Monitoring
@@ -3576,6 +3580,262 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
 
+  /api/v1/permissions:
+    get:
+      operationId: listPermissions
+      tags: [Permissions]
+      summary: List permission catalogue
+      responses:
+        '200':
+          description: Permission catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Permission'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/roles/{id}/permissions:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listRolePermissions
+      tags: [Permissions]
+      summary: List permissions granted to a role
+      responses:
+        '200':
+          description: Role permission grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RolePermissionGrant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      operationId: replaceRolePermissions
+      tags: [Permissions]
+      summary: Replace permissions granted to a role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceRolePermissionsRequest'
+      responses:
+        '200':
+          description: Replaced role permission grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RolePermissionGrant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/me/permissions:
+    get:
+      operationId: getMyPermissions
+      tags: [Permissions]
+      summary: Get effective permissions for the authenticated caller
+      responses:
+        '200':
+          description: Effective permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EffectivePermissionsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/slas:
+    get:
+      operationId: listSLAPolicies
+      tags: [SLA]
+      summary: List SLA policies
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+        - name: client_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated SLA policies
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLAPolicyListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createSLAPolicy
+      tags: [SLA]
+      summary: Create an SLA policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSLAPolicyRequest'
+      responses:
+        '201':
+          description: SLA policy created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLAPolicy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/slas/breaches:
+    get:
+      operationId: listSLABreaches
+      tags: [SLA]
+      summary: List breached or at-risk ticket SLAs
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [breached, at_risk]
+      responses:
+        '200':
+          description: Paginated ticket SLA states
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketSLAListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/slas/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getSLAPolicy
+      tags: [SLA]
+      summary: Get an SLA policy
+      responses:
+        '200':
+          description: SLA policy details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLAPolicy'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateSLAPolicy
+      tags: [SLA]
+      summary: Update an SLA policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSLAPolicyRequest'
+      responses:
+        '200':
+          description: SLA policy updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLAPolicy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteSLAPolicy
+      tags: [SLA]
+      summary: Delete an SLA policy
+      responses:
+        '204':
+          description: SLA policy deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/tickets/{id}/sla:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getTicketSLA
+      tags: [SLA]
+      summary: Get SLA state for a ticket
+      responses:
+        '200':
+          description: Ticket SLA state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketSLA'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: attachTicketSLA
+      tags: [SLA]
+      summary: Attach or re-evaluate a ticket SLA
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttachTicketSLARequest'
+      responses:
+        '200':
+          description: Ticket SLA state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketSLA'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
 
 components:
   securitySchemes:
@@ -5056,6 +5316,186 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/TicketComment'
+
+
+    Permission:
+      type: object
+      required: [key, resource, action, description]
+      properties:
+        key:
+          type: string
+        resource:
+          type: string
+        action:
+          type: string
+        description:
+          type: string
+
+    RolePermissionGrant:
+      type: object
+      required: [organization_id, role_id, permission_key, granted_at]
+      properties:
+        organization_id:
+          type: string
+        role_id:
+          type: string
+        permission_key:
+          type: string
+        granted_at:
+          type: string
+          format: date-time
+        granted_by:
+          type: string
+
+    ReplaceRolePermissionsRequest:
+      type: object
+      required: [permission_keys]
+      properties:
+        permission_keys:
+          type: array
+          items:
+            type: string
+
+    EffectivePermissionsResponse:
+      type: object
+      required: [permissions]
+      properties:
+        user_id:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+
+    SLAPolicy:
+      type: object
+      required: [id, organization_id, name, priority, response_target_minutes, resolution_target_minutes, business_calendar, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        client_id:
+          type: string
+        name:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        response_target_minutes:
+          type: integer
+        resolution_target_minutes:
+          type: integer
+        business_calendar:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateSLAPolicyRequest:
+      type: object
+      required: [name, priority, response_target_minutes, resolution_target_minutes]
+      properties:
+        client_id:
+          type: string
+        name:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        response_target_minutes:
+          type: integer
+          minimum: 1
+        resolution_target_minutes:
+          type: integer
+          minimum: 1
+        business_calendar:
+          type: boolean
+
+    UpdateSLAPolicyRequest:
+      type: object
+      properties:
+        client_id:
+          type: string
+        name:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        response_target_minutes:
+          type: integer
+          minimum: 1
+        resolution_target_minutes:
+          type: integer
+          minimum: 1
+        business_calendar:
+          type: boolean
+
+    SLAPolicyListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/SLAPolicy'
+
+    TicketSLA:
+      type: object
+      required: [id, organization_id, ticket_id, sla_id, response_due_at, resolution_due_at, response_breached, resolution_breached, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        ticket_id:
+          type: string
+        sla_id:
+          type: string
+        response_due_at:
+          type: string
+          format: date-time
+        resolution_due_at:
+          type: string
+          format: date-time
+        first_response_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+        response_breached:
+          type: boolean
+        resolution_breached:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AttachTicketSLARequest:
+      type: object
+      properties:
+        sla_id:
+          type: string
+
+    TicketSLAListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/TicketSLA'
 
     User:
       type: object

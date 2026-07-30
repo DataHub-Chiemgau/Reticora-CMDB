@@ -24,8 +24,10 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
@@ -55,6 +57,8 @@ type Repositories struct {
 	Contact           contact.Repository
 	IPAM              ipam.Repository
 	Metrics           monitoring.MetricStore
+	Permission        permission.Repository
+	SLA               sla.Repository
 }
 
 // Options carries everything the router needs beyond the repositories.
@@ -103,8 +107,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 		assignment.NewHandler(repos.Assignment),
 		document.NewHandler(repos.Document),
 		stocktake.NewHandler(repos.Stocktake),
-		ticket.NewHandler(repos.Ticket),
+		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
 		user.NewHandler(repos.User),
+		permission.NewHandler(repos.Permission),
+		sla.NewHandler(repos.SLA, repos.Ticket),
 		tenantapi.NewHandler(repos.TenantHierarchy),
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
@@ -128,6 +134,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 
 func validate(repos Repositories, opts Options) error {
 	switch {
+	case repos.Permission == nil:
+		return fmt.Errorf("server: permission repository is required")
+	case repos.SLA == nil:
+		return fmt.Errorf("server: SLA repository is required")
 	case repos.CI == nil:
 		return fmt.Errorf("server: CI repository is required")
 	case repos.Relationship == nil:

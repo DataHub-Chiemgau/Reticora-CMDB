@@ -16,8 +16,10 @@ import { CIListPage } from './pages/CIListPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DiscoveryPage } from './pages/DiscoveryPage';
 import { DocumentListPage } from './pages/DocumentListPage';
+import { PermissionsPage } from './pages/PermissionsPage';
 import { RackPage } from './pages/RackPage';
 import { TopologyPage } from './pages/TopologyPage';
+import { SLAPage } from './pages/SLAPage';
 import { StocktakeListPage } from './pages/StocktakeListPage';
 import { TicketListPage } from './pages/TicketListPage';
 import { UserManagementPage } from './pages/UserManagementPage';
@@ -35,6 +37,8 @@ const pageToPath: Record<AppPage, string> = {
   stocktake: '/stocktake',
   tickets: '/tickets',
   users: '/users',
+  permissions: '/permissions',
+  slas: '/slas',
 };
 
 const pathToPage: Record<string, AppPage> = Object.fromEntries(
@@ -177,6 +181,15 @@ function App() {
                 <NavButton active={currentPage === 'users'} onClick={() => handleNavigate('users')}>
                   {t('nav.users', 'Benutzer')}
                 </NavButton>
+                <NavButton
+                  active={currentPage === 'permissions'}
+                  onClick={() => handleNavigate('permissions')}
+                >
+                  {t('nav.permissions')}
+                </NavButton>
+                <NavButton active={currentPage === 'slas'} onClick={() => handleNavigate('slas')}>
+                  {t('nav.slas')}
+                </NavButton>
               </nav>
             ) : null}
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -247,6 +260,8 @@ function App() {
             <Route path="/stocktake" element={<StocktakeListPage />} />
             <Route path="/tickets" element={<TicketListPage />} />
             <Route path="/users" element={<UserManagementPage />} />
+            <Route path="/permissions" element={<PermissionsPage />} />
+            <Route path="/slas" element={<SLAPage />} />
             <Route path="*" element={<CIListPage onCreateCI={openCreateCI} />} />
           </Route>
         </Routes>

@@ -16,7 +16,9 @@
     "stocktake": "Inventur",
     "tickets": "Tickets",
     "users": "Benutzer",
-    "racks": "Racks"
+    "racks": "Racks",
+    "permissions": "Berechtigungen",
+    "slas": "SLAs"
   },
   "common": {
     "save": "Speichern",
@@ -52,7 +54,9 @@
       "tickets": "Tickets öffnen",
       "users": "Benutzer & Teams öffnen",
       "topology": "Topologie öffnen",
-      "racks": "Racks öffnen"
+      "racks": "Racks öffnen",
+      "permissions": "Berechtigungen öffnen",
+      "slas": "SLAs öffnen"
     }
   },
   "dashboard": {
@@ -245,5 +249,37 @@
     "emptyHint": "Legen Sie Räume und Racks an, um die Rackbelegung zu visualisieren.",
     "loadError": "Die Racks konnten nicht geladen werden",
     "mountsLoadError": "Die Einbauten konnten nicht geladen werden"
+  },
+  "permissions": {
+    "title": "Berechtigungen",
+    "subtitle": "Katalog und eigene effektive Rechte für RBAC/ABAC.",
+    "loading": "Berechtigungen werden geladen",
+    "errorTitle": "Berechtigungen konnten nicht geladen werden",
+    "emptyTitle": "Keine Berechtigungen vorhanden",
+    "emptyHint": "Der globale Katalog wird durch die Migration bereitgestellt.",
+    "catalogue": "Berechtigungskatalog",
+    "key": "Schlüssel",
+    "resource": "Ressource",
+    "action": "Aktion",
+    "effective": "Effektiv",
+    "granted": "Gewährt",
+    "notGranted": "Nicht gewährt"
+  },
+  "sla": {
+    "title": "SLA-Richtlinien",
+    "subtitle": "Antwort- und Lösungsziele werden pro Ticket nach Priorität verfolgt.",
+    "loading": "SLAs werden geladen",
+    "errorTitle": "SLAs konnten nicht geladen werden",
+    "createPolicy": "SLA-Richtlinie erstellen",
+    "name": "Name",
+    "responseMinutes": "Antwort (Min.)",
+    "resolutionMinutes": "Lösung (Min.)",
+    "policies": "Richtlinien",
+    "emptyTitle": "Keine SLA-Richtlinien vorhanden",
+    "emptyHint": "Erstellen Sie eine Richtlinie, damit Tickets automatisch SLA-Ziele erhalten.",
+    "breaches": "Verletzungen",
+    "breached": "Verletzt",
+    "noBreaches": "Keine Verletzungen",
+    "noBreachesHint": "Aktuell sind keine Tickets außerhalb ihrer SLA-Ziele."
   }
 }

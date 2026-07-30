@@ -12,6 +12,8 @@ import {
   userApi,
   teamApi,
   roleApi,
+  permissionApi,
+  slaApi,
 } from '../api/client';
 import type {
   CICreateRequest,
@@ -33,6 +35,9 @@ import type {
   UserListParams,
   TopologyParams,
   RackListParams,
+  SLAListParams,
+  SLABreachParams,
+  SLAPolicyRequest,
 } from '../api/client';
 
 export function useCIList(params: CIListParams) {
@@ -350,5 +355,45 @@ export function useRoleList(params: ListParams = {}) {
   return useQuery({
     queryKey: ['roles', params],
     queryFn: () => roleApi.list(params),
+  });
+}
+
+// --- Permissions / SLA ---
+
+export function usePermissionCatalogue() {
+  return useQuery({
+    queryKey: ['permissions'],
+    queryFn: () => permissionApi.list(),
+  });
+}
+
+export function useEffectivePermissions() {
+  return useQuery({
+    queryKey: ['me-permissions'],
+    queryFn: () => permissionApi.effective(),
+  });
+}
+
+export function useSLAList(params: SLAListParams = {}) {
+  return useQuery({
+    queryKey: ['slas', params],
+    queryFn: () => slaApi.list(params),
+  });
+}
+
+export function useSLABreaches(params: SLABreachParams = {}) {
+  return useQuery({
+    queryKey: ['sla-breaches', params],
+    queryFn: () => slaApi.breaches(params),
+  });
+}
+
+export function useCreateSLA() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: SLAPolicyRequest) => slaApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['slas'] });
+    },
   });
 }

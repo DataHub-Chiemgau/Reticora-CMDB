@@ -88,6 +88,7 @@ Database schema is managed with [golang-migrate](https://github.com/golang-migra
 | 0023 | rls_variable_unification | One RLS session variable (`app.org_id`), legacy `ci.last_seen`/`ci.source` removed, identity-resolution indexes |
 | 0024 | durable_webhook_delivery | Retry state (`status`, `max_attempts`, `next_retry_at`, `error`) and due-delivery index on `webhook_delivery` |
 | 0025 | reconciliation_topology | Discovery job runs, the reconciliation `review_item` queue, relationship suppressions and the `powered_by` relationship type |
+| 0026 | permissions_sla | First-class permission catalogue/role grants and SLA policy plus per-ticket clock state |
 
 **Running migrations:**
 
@@ -161,6 +162,8 @@ internal/
 ├── document/       # Document management
 ├── stocktake/      # Inventory counting
 ├── ticket/         # Ticket/issue tracking
+├── permission/     # RBAC/ABAC permission catalogue and effective grants
+├── sla/            # SLA policies and ticket clock state
 ├── entitlement/    # License/feature-flag enforcement
 ├── export/         # Async export jobs (CSV, DATEV)
 ├── monitoring/     # Metric ingestion and queries
@@ -216,6 +219,20 @@ Repository errors deny access (fail-closed). Plan matrix:
 | standard | + documents, stocktake, ticketing, export, webhooks |
 | pro | + monitoring |
 | enterprise | + iga, endpoint_agent |
+
+
+**Permissions and SLA:** migration 0026 turns permissions into data instead of
+leaving them as ad-hoc JSON strings. `permission` is the global catalogue,
+`role_permission` grants catalogue entries to tenant roles, and the effective
+permissions endpoint also folds in existing custom-role JSON grants so old data
+continues to work while new code can validate against the catalogue. SLA policy
+rows define priority-based response and resolution targets, while `ticket_sla`
+stores the applied policy and clock outcomes. Ticket creation, first visible
+response and resolution transitions update that state so breach listings are
+computed from persisted timestamps, not from UI-only heuristics. The first
+implementation treats `business_calendar` as a policy flag and still calculates
+due times in elapsed minutes; that preserves the contract while leaving calendar
+working-hours expansion for a dedicated scheduler.
 
 **Durable webhook delivery:** every dispatch is persisted to `webhook_delivery`
 before the first HTTP attempt and updated after each attempt. Failed attempts
@@ -326,7 +343,7 @@ npm run e2e                 # Playwright end-to-end tests
 **Routes:** `/dashboard`, `/cmdb` (CI list), `/cmdb/:id` (CI detail with
 overview, attributes, relationships and topology neighbours), `/topology`,
 `/racks`, `/discovery`, `/assets`, `/assignments`, `/documents`, `/stocktake`,
-`/tickets` and `/users`. Every CI is deep-linkable: list rows, topology nodes,
+`/tickets`, `/users`, `/permissions` and `/slas`. Every CI is deep-linkable: list rows, topology nodes,
 rack mounts and relationship entries all link to `/cmdb/:id`, so a CI can be
 shared as a URL.
 

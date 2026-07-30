@@ -12,8 +12,10 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
@@ -45,6 +47,8 @@ func MemoryRepositories() Repositories {
 		Contact:           contact.NewMemoryRepository(),
 		IPAM:              ipam.NewMemoryRepository(),
 		Metrics:           monitoring.NewMemoryMetricStore(),
+		Permission:        permission.NewMemoryRepository(),
+		SLA:               sla.NewMemoryRepository(),
 	}
 }
 
@@ -71,5 +75,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Contact:           contact.NewPGRepository(pool),
 		IPAM:              ipam.NewPGRepository(pool),
 		Metrics:           monitoring.NewMemoryMetricStore(),
+		Permission:        permission.NewPGRepository(pool),
+		SLA:               sla.NewPGRepository(pool),
 	}
 }

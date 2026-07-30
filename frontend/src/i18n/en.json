@@ -16,7 +16,9 @@
     "stocktake": "Stocktake",
     "tickets": "Tickets",
     "users": "Users",
-    "racks": "Racks"
+    "racks": "Racks",
+    "permissions": "Permissions",
+    "slas": "SLAs"
   },
   "common": {
     "save": "Save",
@@ -52,7 +54,9 @@
       "tickets": "Open Tickets",
       "users": "Open Users & Teams",
       "topology": "Open topology",
-      "racks": "Open racks"
+      "racks": "Open racks",
+      "permissions": "Open permissions",
+      "slas": "Open SLAs"
     }
   },
   "dashboard": {
@@ -245,5 +249,37 @@
     "emptyHint": "Create rooms and racks to visualise rack occupancy.",
     "loadError": "The racks could not be loaded",
     "mountsLoadError": "The mounts could not be loaded"
+  },
+  "permissions": {
+    "title": "Permissions",
+    "subtitle": "Catalogue and your own effective RBAC/ABAC permissions.",
+    "loading": "Loading permissions",
+    "errorTitle": "Permissions could not be loaded",
+    "emptyTitle": "No permissions available",
+    "emptyHint": "The global catalogue is provided by the migration.",
+    "catalogue": "Permission catalogue",
+    "key": "Key",
+    "resource": "Resource",
+    "action": "Action",
+    "effective": "Effective",
+    "granted": "Granted",
+    "notGranted": "Not granted"
+  },
+  "sla": {
+    "title": "SLA Policies",
+    "subtitle": "Response and resolution targets are tracked per ticket by priority.",
+    "loading": "Loading SLAs",
+    "errorTitle": "SLAs could not be loaded",
+    "createPolicy": "Create SLA policy",
+    "name": "Name",
+    "responseMinutes": "Response (min.)",
+    "resolutionMinutes": "Resolution (min.)",
+    "policies": "Policies",
+    "emptyTitle": "No SLA policies available",
+    "emptyHint": "Create a policy so tickets receive SLA targets automatically.",
+    "breaches": "Breaches",
+    "breached": "Breached",
+    "noBreaches": "No breaches",
+    "noBreachesHint": "No tickets are currently outside their SLA targets."
   }
 }

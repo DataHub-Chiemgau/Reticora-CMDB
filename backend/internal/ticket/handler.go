@@ -3,20 +3,33 @@ package ticket
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
+// SLAHooks is implemented by the SLA package to keep ticket clocks in sync.
+type SLAHooks interface {
+	ApplyForTicket(orgID string, t *Ticket) error
+	MarkFirstResponse(orgID, ticketID string, at time.Time) error
+	MarkResolved(orgID, ticketID string, at time.Time) error
+}
+
 // Handler provides HTTP handlers for ticket endpoints.
 type Handler struct {
 	repo Repository
+	sla  SLAHooks
 }
 
 // NewHandler creates a new ticket handler.
-func NewHandler(repo Repository) *Handler {
-	return &Handler{repo: repo}
+func NewHandler(repo Repository, hooks ...SLAHooks) *Handler {
+	h := &Handler{repo: repo}
+	if len(hooks) > 0 {
+		h.sla = hooks[0]
+	}
+	return h
 }
 
 // RegisterRoutes registers ticket routes on the given mux.
@@ -147,6 +160,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
+	if h.sla != nil {
+		_ = h.sla.ApplyForTicket(t.OrganizationID, ticket)
+	}
 
 	api.WriteJSON(w, http.StatusCreated, ticket)
 }
@@ -170,6 +186,16 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ticket not found")
 		return
+	}
+	if h.sla != nil && req.Status != nil {
+		now := time.Now().UTC()
+		switch *req.Status {
+		case "in_progress", "waiting":
+			_ = h.sla.MarkFirstResponse(t.OrganizationID, id, now)
+		case "resolved", "closed":
+			_ = h.sla.MarkFirstResponse(t.OrganizationID, id, now)
+			_ = h.sla.MarkResolved(t.OrganizationID, id, now)
+		}
 	}
 
 	api.WriteJSON(w, http.StatusOK, item)
@@ -223,6 +249,9 @@ func (h *Handler) AddComment(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.AddComment(comment); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 		return
+	}
+	if h.sla != nil && !comment.IsInternal {
+		_ = h.sla.MarkFirstResponse(t.OrganizationID, ticketID, time.Now().UTC())
 	}
 
 	api.WriteJSON(w, http.StatusCreated, comment)

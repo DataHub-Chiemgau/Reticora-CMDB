@@ -16,7 +16,9 @@ export type AppPage =
   | 'documents'
   | 'stocktake'
   | 'tickets'
-  | 'users';
+  | 'users'
+  | 'permissions'
+  | 'slas';
 
 interface CommandPaletteProps {
   onNavigate: (page: AppPage) => void;
@@ -141,6 +143,18 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
         label: t('commandPalette.commands.users', 'Benutzer & Teams öffnen'),
         keywords: ['users teams roles benutzer rollen'],
         action: () => onNavigate('users'),
+      },
+      {
+        id: 'nav-permissions',
+        label: t('commandPalette.commands.permissions'),
+        keywords: ['permissions berechtigungen rbac abac'],
+        action: () => onNavigate('permissions'),
+      },
+      {
+        id: 'nav-slas',
+        label: t('commandPalette.commands.slas'),
+        keywords: ['sla service levels breach policies'],
+        action: () => onNavigate('slas'),
       },
     ],
     [onCreateCI, onNavigate, onToggleDarkMode, t],

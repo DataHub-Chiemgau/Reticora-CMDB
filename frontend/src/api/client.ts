@@ -849,3 +849,116 @@ export const roleApi = {
     return fetchAPI('/roles/assign', { method: 'POST', body: JSON.stringify(data) });
   },
 };
+
+// --- Stage 5: Permissions / SLA ---
+
+export interface Permission {
+  key: string;
+  resource: string;
+  action: string;
+  description: string;
+}
+
+export interface RolePermissionGrant {
+  organization_id: string;
+  role_id: string;
+  permission_key: string;
+  granted_at: string;
+  granted_by?: string;
+}
+
+export interface EffectivePermissionsResponse {
+  user_id?: string;
+  permissions: string[];
+}
+
+export const permissionApi = {
+  list(): Promise<Permission[]> {
+    return fetchAPI('/permissions');
+  },
+  listRole(roleId: string): Promise<RolePermissionGrant[]> {
+    return fetchAPI(`/roles/${roleId}/permissions`);
+  },
+  replaceRole(roleId: string, permission_keys: string[]): Promise<RolePermissionGrant[]> {
+    return fetchAPI(`/roles/${roleId}/permissions`, {
+      method: 'PUT',
+      body: JSON.stringify({ permission_keys }),
+    });
+  },
+  effective(): Promise<EffectivePermissionsResponse> {
+    return fetchAPI('/me/permissions');
+  },
+};
+
+export interface SLAPolicy {
+  id: string;
+  organization_id: string;
+  client_id?: string;
+  name: string;
+  priority: string;
+  response_target_minutes: number;
+  resolution_target_minutes: number;
+  business_calendar: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TicketSLA {
+  id: string;
+  organization_id: string;
+  ticket_id: string;
+  sla_id: string;
+  response_due_at: string;
+  resolution_due_at: string;
+  first_response_at?: string;
+  resolved_at?: string;
+  response_breached: boolean;
+  resolution_breached: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SLAPolicyRequest {
+  client_id?: string;
+  name: string;
+  priority: string;
+  response_target_minutes: number;
+  resolution_target_minutes: number;
+  business_calendar?: boolean;
+}
+
+export interface SLAListParams extends ListParams {
+  priority?: string;
+  client_id?: string;
+}
+
+export interface SLABreachParams extends ListParams {
+  status?: 'breached' | 'at_risk' | '';
+}
+
+export const slaApi = {
+  list(params: SLAListParams = {}): Promise<PaginatedResponse<SLAPolicy>> {
+    return fetchAPI(`/slas${buildQuery(params)}`);
+  },
+  create(data: SLAPolicyRequest): Promise<SLAPolicy> {
+    return fetchAPI('/slas', { method: 'POST', body: JSON.stringify(data) });
+  },
+  update(id: string, data: Partial<SLAPolicyRequest>): Promise<SLAPolicy> {
+    return fetchAPI(`/slas/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/slas/${id}`, { method: 'DELETE' });
+  },
+  breaches(params: SLABreachParams = {}): Promise<PaginatedResponse<TicketSLA>> {
+    return fetchAPI(`/slas/breaches${buildQuery(params)}`);
+  },
+  getTicket(ticketId: string): Promise<TicketSLA> {
+    return fetchAPI(`/tickets/${ticketId}/sla`);
+  },
+  attachTicket(ticketId: string, sla_id?: string): Promise<TicketSLA> {
+    return fetchAPI(`/tickets/${ticketId}/sla`, {
+      method: 'POST',
+      body: JSON.stringify({ sla_id }),
+    });
+  },
+};

@@ -1780,6 +1780,139 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/permissions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List permission catalogue */
+    get: operations['listPermissions'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/roles/{id}/permissions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List permissions granted to a role */
+    get: operations['listRolePermissions'];
+    /** Replace permissions granted to a role */
+    put: operations['replaceRolePermissions'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/me/permissions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get effective permissions for the authenticated caller */
+    get: operations['getMyPermissions'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/slas': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List SLA policies */
+    get: operations['listSLAPolicies'];
+    put?: never;
+    /** Create an SLA policy */
+    post: operations['createSLAPolicy'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/slas/breaches': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List breached or at-risk ticket SLAs */
+    get: operations['listSLABreaches'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/slas/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get an SLA policy */
+    get: operations['getSLAPolicy'];
+    put?: never;
+    post?: never;
+    /** Delete an SLA policy */
+    delete: operations['deleteSLAPolicy'];
+    options?: never;
+    head?: never;
+    /** Update an SLA policy */
+    patch: operations['updateSLAPolicy'];
+    trace?: never;
+  };
+  '/api/v1/tickets/{id}/sla': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get SLA state for a ticket */
+    get: operations['getTicketSLA'];
+    put?: never;
+    /** Attach or re-evaluate a ticket SLA */
+    post: operations['attachTicketSLA'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2468,6 +2601,89 @@ export interface components {
     };
     TicketCommentListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['TicketComment'][];
+    };
+    Permission: {
+      key: string;
+      resource: string;
+      action: string;
+      description: string;
+    };
+    RolePermissionGrant: {
+      organization_id: string;
+      role_id: string;
+      permission_key: string;
+      /** Format: date-time */
+      granted_at: string;
+      granted_by?: string;
+    };
+    ReplaceRolePermissionsRequest: {
+      permission_keys: string[];
+    };
+    EffectivePermissionsResponse: {
+      user_id?: string;
+      permissions: string[];
+    };
+    SLAPolicy: {
+      id: string;
+      organization_id: string;
+      client_id?: string;
+      name: string;
+      /** @enum {string} */
+      priority: 'low' | 'medium' | 'high' | 'critical';
+      response_target_minutes: number;
+      resolution_target_minutes: number;
+      business_calendar: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateSLAPolicyRequest: {
+      client_id?: string;
+      name: string;
+      /** @enum {string} */
+      priority: 'low' | 'medium' | 'high' | 'critical';
+      response_target_minutes: number;
+      resolution_target_minutes: number;
+      business_calendar?: boolean;
+    };
+    UpdateSLAPolicyRequest: {
+      client_id?: string;
+      name?: string;
+      /** @enum {string} */
+      priority?: 'low' | 'medium' | 'high' | 'critical';
+      response_target_minutes?: number;
+      resolution_target_minutes?: number;
+      business_calendar?: boolean;
+    };
+    SLAPolicyListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['SLAPolicy'][];
+    };
+    TicketSLA: {
+      id: string;
+      organization_id: string;
+      ticket_id: string;
+      sla_id: string;
+      /** Format: date-time */
+      response_due_at: string;
+      /** Format: date-time */
+      resolution_due_at: string;
+      /** Format: date-time */
+      first_response_at?: string;
+      /** Format: date-time */
+      resolved_at?: string;
+      response_breached: boolean;
+      resolution_breached: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    AttachTicketSLARequest: {
+      sla_id?: string;
+    };
+    TicketSLAListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['TicketSLA'][];
     };
     User: {
       id: string;
@@ -7872,6 +8088,329 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  listPermissions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Permission catalogue */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Permission'][];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listRolePermissions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Role permission grants */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RolePermissionGrant'][];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  replaceRolePermissions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReplaceRolePermissionsRequest'];
+      };
+    };
+    responses: {
+      /** @description Replaced role permission grants */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RolePermissionGrant'][];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getMyPermissions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Effective permissions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['EffectivePermissionsResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listSLAPolicies: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        priority?: 'low' | 'medium' | 'high' | 'critical';
+        client_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated SLA policies */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SLAPolicyListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createSLAPolicy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateSLAPolicyRequest'];
+      };
+    };
+    responses: {
+      /** @description SLA policy created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SLAPolicy'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listSLABreaches: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        status?: 'breached' | 'at_risk';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated ticket SLA states */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TicketSLAListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getSLAPolicy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description SLA policy details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SLAPolicy'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteSLAPolicy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description SLA policy deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateSLAPolicy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateSLAPolicyRequest'];
+      };
+    };
+    responses: {
+      /** @description SLA policy updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SLAPolicy'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  getTicketSLA: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Ticket SLA state */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TicketSLA'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  attachTicketSLA: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['AttachTicketSLARequest'];
+      };
+    };
+    responses: {
+      /** @description Ticket SLA state */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TicketSLA'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
 }
