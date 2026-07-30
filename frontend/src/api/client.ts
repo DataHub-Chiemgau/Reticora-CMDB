@@ -852,6 +852,69 @@ export const roleApi = {
   },
 };
 
+// --- Search / AI assistant ---
+export interface SearchHit {
+  id: string;
+  organization_id: string;
+  entity_type: 'ci' | 'asset' | 'document' | 'ticket' | 'contact' | 'compliance' | string;
+  entity_id: string;
+  title: string;
+  summary?: string;
+  url: string;
+  score: number;
+  highlights?: string[];
+  metadata?: Record<string, string>;
+  updated_at: string;
+}
+
+export interface SearchParams extends ListParams {
+  q?: string;
+  type?: string;
+}
+
+export const searchApi = {
+  query(params: SearchParams): Promise<PaginatedResponse<SearchHit>> {
+    return fetchAPI(`/search${buildQuery(params)}`);
+  },
+  reindex(): Promise<{ indexed: number }> {
+    return fetchAPI('/search/reindex', { method: 'POST' });
+  },
+};
+
+export interface AIConversation {
+  id: string;
+  organization_id: string;
+  user_id?: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface AICitation {
+  entity_type: string;
+  entity_id: string;
+  title: string;
+  url: string;
+  score: number;
+}
+export interface AIAskResponse {
+  conversation_id: string;
+  answer: string;
+  citations: AICitation[];
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+export const aiApi = {
+  conversations(): Promise<AIConversation[]> {
+    return fetchAPI('/ai/conversations');
+  },
+  createConversation(title?: string): Promise<AIConversation> {
+    return fetchAPI('/ai/conversations', { method: 'POST', body: JSON.stringify({ title }) });
+  },
+  ask(data: { question: string; conversation_id?: string }): Promise<AIAskResponse> {
+    return fetchAPI('/ai/ask', { method: 'POST', body: JSON.stringify(data) });
+  },
+};
+
 // --- Stage 5: Permissions / SLA ---
 
 export interface Permission {

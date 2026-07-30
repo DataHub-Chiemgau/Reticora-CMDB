@@ -22,7 +22,8 @@
     "forms": "Forms",
     "workflows": "Workflows",
     "compliance": "Compliance",
-    "iga": "IGA"
+    "iga": "IGA",
+    "assistant": "Assistant"
   },
   "common": {
     "save": "Save",
@@ -64,7 +65,8 @@
       "forms": "Open Forms",
       "workflows": "Open Workflows",
       "compliance": "Open Compliance",
-      "iga": "Open IGA"
+      "iga": "Open IGA",
+      "assistant": "Open AI assistant"
     }
   },
   "dashboard": {
@@ -363,5 +365,20 @@
     "remediate": "Remediate",
     "emptyDrift": "No drift detected",
     "emptyDriftHint": "Connector reconciliation records orphan and missing accounts here."
+  },
+  "assistant": {
+    "title": "AI assistant",
+    "subtitle": "Answers questions only with permitted tenant-owned context.",
+    "loading": "Loading assistant…",
+    "errorTitle": "Assistant could not be loaded",
+    "conversations": "Conversations",
+    "empty": "No conversations yet",
+    "emptyHint": "Ask a question to get started.",
+    "askTitle": "Ask a question",
+    "questionLabel": "Question",
+    "placeholder": "Which critical tickets affect routers?",
+    "ask": "Ask",
+    "answer": "Answer",
+    "citations": "Sources"
   }
 }

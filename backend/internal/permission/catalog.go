@@ -37,4 +37,6 @@ var Catalogue = []Permission{
 	{Key: "rack:write", Resource: "rack", Action: "write", Description: "Manage racks"},
 	{Key: "contact:read", Resource: "contact", Action: "read", Description: "Read contacts"},
 	{Key: "contact:write", Resource: "contact", Action: "write", Description: "Manage contacts"},
+	{Key: "search:write", Resource: "search", Action: "write", Description: "Rebuild tenant search indexes"},
+	{Key: "ai:read", Resource: "ai", Action: "read", Description: "Use the AI assistant"},
 }

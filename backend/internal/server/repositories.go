@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
@@ -18,6 +19,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
@@ -57,6 +59,8 @@ func MemoryRepositories() Repositories {
 		Workflow:          workflow.NewMemoryRepository(),
 		Compliance:        compliance.NewMemoryRepository(),
 		IGA:               iga.NewMemoryRepository(),
+		Search:            search.NewMemoryRepository(),
+		AI:                ai.NewMemoryRepository(),
 	}
 }
 
@@ -89,5 +93,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Workflow:          workflow.NewPGRepository(pool),
 		Compliance:        compliance.NewPGRepository(pool),
 		IGA:               iga.NewPGRepository(pool),
+		Search:            search.NewPGRepository(pool),
+		AI:                ai.NewPGRepository(pool),
 	}
 }

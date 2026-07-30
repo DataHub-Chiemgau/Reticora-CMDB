@@ -75,6 +75,10 @@ tags:
     description: Identity governance, active provisioning and access reviews
   - name: SCIM
     description: SCIM 2.0 service provider endpoints
+  - name: Search
+    description: Tenant-scoped full-text search
+  - name: AI
+    description: Governed LLM/RAG assistant
 
 paths:
   /healthz:
@@ -4821,6 +4825,104 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+
+  /api/v1/search:
+    get:
+      operationId: search
+      tags: [Search]
+      summary: Search tenant data
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: type
+          in: query
+          schema: { type: string }
+          description: Comma-separated entity type filter.
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/search/reindex:
+    post:
+      operationId: reindexSearch
+      tags: [Search]
+      summary: Rebuild the tenant search index
+      responses:
+        '202':
+          description: Reindex accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReindexResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/ai/conversations:
+    get:
+      operationId: listAIConversations
+      tags: [AI]
+      summary: List assistant conversations
+      responses:
+        '200':
+          description: Conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AIConversation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createAIConversation
+      tags: [AI]
+      summary: Create an assistant conversation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+      responses:
+        '201':
+          description: Created conversation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AIConversation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/ai/ask:
+    post:
+      operationId: askAI
+      tags: [AI]
+      summary: Ask the governed RAG assistant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AIAskRequest' }
+      responses:
+        '200':
+          description: Assistant answer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AIAskResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
 components:
   securitySchemes:
     BearerAuth:
@@ -8301,3 +8403,82 @@ components:
           description: Defaults to "organization" when omitted.
         scope_id:
           type: string
+
+    SearchHit:
+      type: object
+      required: [id, organization_id, entity_type, entity_id, title, url, score, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        entity_type: { type: string, enum: [ci, asset, document, ticket, contact, compliance] }
+        entity_id: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        url: { type: string }
+        score: { type: number }
+        highlights:
+          type: array
+          items: { type: string }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+        updated_at: { type: string, format: date-time }
+
+    SearchResponse:
+      type: object
+      required: [data, total, limit, offset, has_more]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/SearchHit' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+
+    ReindexResponse:
+      type: object
+      required: [indexed]
+      properties:
+        indexed: { type: integer }
+
+    AIConversation:
+      type: object
+      required: [id, organization_id, title, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        user_id: { type: string }
+        title: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    AICitation:
+      type: object
+      required: [entity_type, entity_id, title, url, score]
+      properties:
+        entity_type: { type: string }
+        entity_id: { type: string }
+        title: { type: string }
+        url: { type: string }
+        score: { type: number }
+
+    AIAskRequest:
+      type: object
+      required: [question]
+      properties:
+        conversation_id: { type: string }
+        question: { type: string, maxLength: 2000 }
+
+    AIAskResponse:
+      type: object
+      required: [conversation_id, answer, citations, prompt_tokens, completion_tokens]
+      properties:
+        conversation_id: { type: string }
+        answer: { type: string }
+        citations:
+          type: array
+          items: { $ref: '#/components/schemas/AICitation' }
+        prompt_tokens: { type: integer }
+        completion_tokens: { type: integer }
+

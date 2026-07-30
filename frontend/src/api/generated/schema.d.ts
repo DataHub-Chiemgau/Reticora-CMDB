@@ -2661,6 +2661,75 @@ export interface paths {
     patch: operations['patchSCIMGroup'];
     trace?: never;
   };
+  '/api/v1/search': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Search tenant data */
+    get: operations['search'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/search/reindex': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Rebuild the tenant search index */
+    post: operations['reindexSearch'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/conversations': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List assistant conversations */
+    get: operations['listAIConversations'];
+    put?: never;
+    /** Create an assistant conversation */
+    post: operations['createAIConversation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/ask': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Ask the governed RAG assistant */
+    post: operations['askAI'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4450,6 +4519,61 @@ export interface components {
       /** @description Defaults to "organization" when omitted. */
       scope_type?: string;
       scope_id?: string;
+    };
+    SearchHit: {
+      id: string;
+      organization_id: string;
+      /** @enum {string} */
+      entity_type: 'ci' | 'asset' | 'document' | 'ticket' | 'contact' | 'compliance';
+      entity_id: string;
+      title: string;
+      summary?: string;
+      url: string;
+      score: number;
+      highlights?: string[];
+      metadata?: {
+        [key: string]: string;
+      };
+      /** Format: date-time */
+      updated_at: string;
+    };
+    SearchResponse: {
+      data: components['schemas']['SearchHit'][];
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+    };
+    ReindexResponse: {
+      indexed: number;
+    };
+    AIConversation: {
+      id: string;
+      organization_id: string;
+      user_id?: string;
+      title: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    AICitation: {
+      entity_type: string;
+      entity_id: string;
+      title: string;
+      url: string;
+      score: number;
+    };
+    AIAskRequest: {
+      conversation_id?: string;
+      question: string;
+    };
+    AIAskResponse: {
+      conversation_id: string;
+      answer: string;
+      citations: components['schemas']['AICitation'][];
+      prompt_tokens: number;
+      completion_tokens: number;
     };
   };
   responses: {
@@ -11995,6 +12119,139 @@ export interface operations {
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  search: {
+    parameters: {
+      query?: {
+        q?: string;
+        /** @description Comma-separated entity type filter. */
+        type?: string;
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Search results */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SearchResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  reindexSearch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Reindex accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReindexResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+    };
+  };
+  listAIConversations: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Conversations */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AIConversation'][];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+    };
+  };
+  createAIConversation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': {
+          title?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Created conversation */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AIConversation'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+    };
+  };
+  askAI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AIAskRequest'];
+      };
+    };
+    responses: {
+      /** @description Assistant answer */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AIAskResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
 }

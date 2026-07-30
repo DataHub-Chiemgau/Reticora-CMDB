@@ -2,6 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useMemo, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearch } from '../api/hooks';
 import { Badge } from './ui/Badge';
 import { cn } from './ui/utils';
 
@@ -22,7 +23,29 @@ export type AppPage =
   | 'forms'
   | 'workflows'
   | 'compliance'
-  | 'iga';
+  | 'iga'
+  | 'assistant';
+
+export const pageToPath: Record<AppPage, string> = {
+  dashboard: '/dashboard',
+  cmdb: '/cmdb',
+  topology: '/topology',
+  racks: '/racks',
+  discovery: '/discovery',
+  assets: '/assets',
+  assignments: '/assignments',
+  documents: '/documents',
+  stocktake: '/stocktake',
+  tickets: '/tickets',
+  users: '/users',
+  permissions: '/permissions',
+  slas: '/slas',
+  forms: '/forms',
+  workflows: '/workflows',
+  compliance: '/compliance',
+  iga: '/iga',
+  assistant: '/assistant',
+};
 
 interface CommandPaletteProps {
   onNavigate: (page: AppPage) => void;
@@ -67,6 +90,7 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const search = useSearch({ q: open ? query : '', limit: 5 });
 
   const commands = useMemo<CommandItem[]>(
     () => [
@@ -184,17 +208,31 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
         keywords: ['iga provisioning scim access reviews'],
         action: () => onNavigate('iga'),
       },
+      {
+        id: 'nav-assistant',
+        label: t('commandPalette.commands.assistant'),
+        keywords: ['assistant ki ai rag'],
+        action: () => onNavigate('assistant'),
+      },
     ],
     [onCreateCI, onNavigate, onToggleDarkMode, t],
   );
 
-  const filteredCommands = useMemo(
-    () =>
-      commands.filter((command) =>
-        fuzzyMatch(`${command.label} ${command.keywords.join(' ')}`, query),
-      ),
-    [commands, query],
-  );
+  const filteredCommands = useMemo(() => {
+    const local = commands.filter((command) =>
+      fuzzyMatch(`${command.label} ${command.keywords.join(' ')}`, query),
+    );
+    const remote =
+      search.data?.data.map((hit) => ({
+        id: `search-${hit.entity_type}-${hit.entity_id}`,
+        label: `${hit.title} · ${hit.entity_type}`,
+        keywords: [hit.summary ?? '', hit.entity_type],
+        action: () => {
+          window.location.assign(hit.url);
+        },
+      })) ?? [];
+    return [...remote, ...local];
+  }, [commands, query, search.data?.data]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

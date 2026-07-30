@@ -41,6 +41,7 @@ const (
 	FeatureEndpointAgent = "endpoint_agent"
 	FeatureWorkflowForms = "workflow_forms"
 	FeatureCompliance    = "compliance"
+	FeatureAIAssistant   = "ai_assistant"
 )
 
 // planFeatures maps a plan to the features it includes. Higher plans are
@@ -72,6 +73,7 @@ var planFeatures = map[Plan][]string{
 		FeatureWebhooks,
 		FeatureMonitoring,
 		FeatureWorkflowForms,
+		FeatureAIAssistant,
 	},
 	PlanEnterprise: {
 		FeatureCMDB,
@@ -87,6 +89,7 @@ var planFeatures = map[Plan][]string{
 		FeatureEndpointAgent,
 		FeatureWorkflowForms,
 		FeatureCompliance,
+		FeatureAIAssistant,
 	},
 }
 

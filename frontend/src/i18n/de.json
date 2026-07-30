@@ -22,7 +22,8 @@
     "forms": "Formulare",
     "workflows": "Workflows",
     "compliance": "Compliance",
-    "iga": "IGA"
+    "iga": "IGA",
+    "assistant": "Assistent"
   },
   "common": {
     "save": "Speichern",
@@ -64,7 +65,8 @@
       "forms": "Formulare öffnen",
       "workflows": "Workflows öffnen",
       "compliance": "Compliance öffnen",
-      "iga": "IGA öffnen"
+      "iga": "IGA öffnen",
+      "assistant": "KI-Assistent öffnen"
     }
   },
   "dashboard": {
@@ -363,5 +365,20 @@
     "remediate": "Beheben",
     "emptyDrift": "Kein Drift erkannt",
     "emptyDriftHint": "Konnektor-Abgleiche erfassen verwaiste und fehlende Konten hier."
+  },
+  "assistant": {
+    "title": "KI-Assistent",
+    "subtitle": "Beantwortet Fragen nur mit berechtigtem, tenant-eigenem Kontext.",
+    "loading": "Assistent wird geladen…",
+    "errorTitle": "Assistent konnte nicht geladen werden",
+    "conversations": "Unterhaltungen",
+    "empty": "Noch keine Unterhaltungen",
+    "emptyHint": "Stellen Sie eine Frage, um zu beginnen.",
+    "askTitle": "Frage stellen",
+    "questionLabel": "Frage",
+    "placeholder": "Welche kritischen Tickets betreffen Router?",
+    "ask": "Fragen",
+    "answer": "Antwort",
+    "citations": "Quellen"
   }
 }

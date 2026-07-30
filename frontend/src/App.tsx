@@ -2,12 +2,14 @@ import { useMemo, useState } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
+import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
 import { Button } from './components/ui/Button';
 import { useAuthStore } from './auth/authStore';
 import { fetchAuthConfig, getStoredAuthConfig } from './auth/oidc';
 import { AssetListPage } from './pages/AssetListPage';
 import { AssignmentListPage } from './pages/AssignmentListPage';
+import { AssistantPage } from './pages/AssistantPage';
 import { LoginPage } from './pages/auth/LoginPage';
 import { CallbackPage } from './pages/auth/CallbackPage';
 import { CIFormModal } from './pages/CIFormModal';
@@ -28,26 +30,6 @@ import { StocktakeListPage } from './pages/StocktakeListPage';
 import { TicketListPage } from './pages/TicketListPage';
 import { UserManagementPage } from './pages/UserManagementPage';
 import { useThemeStore } from './stores/theme';
-
-const pageToPath: Record<AppPage, string> = {
-  dashboard: '/dashboard',
-  cmdb: '/cmdb',
-  topology: '/topology',
-  racks: '/racks',
-  discovery: '/discovery',
-  assets: '/assets',
-  assignments: '/assignments',
-  documents: '/documents',
-  stocktake: '/stocktake',
-  tickets: '/tickets',
-  users: '/users',
-  permissions: '/permissions',
-  slas: '/slas',
-  forms: '/forms',
-  workflows: '/workflows',
-  compliance: '/compliance',
-  iga: '/iga',
-};
 
 const pathToPage: Record<string, AppPage> = Object.fromEntries(
   Object.entries(pageToPath).map(([k, v]) => [v, k as AppPage]),
@@ -216,6 +198,12 @@ function App() {
                 <NavButton active={currentPage === 'iga'} onClick={() => handleNavigate('iga')}>
                   {t('nav.iga')}
                 </NavButton>
+                <NavButton
+                  active={currentPage === 'assistant'}
+                  onClick={() => handleNavigate('assistant')}
+                >
+                  {t('nav.assistant')}
+                </NavButton>
               </nav>
             ) : null}
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -292,6 +280,7 @@ function App() {
             <Route path="/workflows" element={<WorkflowPage />} />
             <Route path="/compliance" element={<CompliancePage />} />
             <Route path="/iga" element={<IGAPage />} />
+            <Route path="/assistant" element={<AssistantPage />} />
             <Route path="*" element={<CIListPage onCreateCI={openCreateCI} />} />
           </Route>
         </Routes>

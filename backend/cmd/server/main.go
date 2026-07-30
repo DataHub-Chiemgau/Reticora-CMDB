@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -24,6 +25,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
@@ -139,6 +141,27 @@ func main() {
 		repos = server.PostgresRepositories(pool, audit.NewPGRecorder())
 		auditHandler = audit.NewHandler(pool)
 	}
+	if strings.EqualFold(cfg.SearchBackend, "opensearch") {
+		if cfg.OpenSearchURL == "" {
+			slog.Error("RETICORA_OPENSEARCH_URL is required when RETICORA_SEARCH_BACKEND=opensearch")
+			os.Exit(1)
+		}
+		osBackend := search.NewOpenSearchBackend(search.OpenSearchConfig{
+			URL: cfg.OpenSearchURL, Username: cfg.OpenSearchUsername, Password: cfg.OpenSearchPassword, Index: cfg.OpenSearchIndex,
+		}, nil)
+		if err := osBackend.Ping(); err != nil {
+			slog.Error("failed to connect to OpenSearch", "error", err)
+			os.Exit(1)
+		}
+		if pgSearch, ok := repos.Search.(*search.PGRepository); ok {
+			repos.Search = &search.HybridBackend{Remote: osBackend, Source: pgSearch}
+		} else {
+			repos.Search = osBackend
+		}
+	}
+	aiProvider := ai.NewOpenAIProvider(ai.ProviderConfig{
+		BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, ChatModel: cfg.LLMChatModel, EmbeddingModel: cfg.LLMEmbeddingModel,
+	}, nil)
 
 	entitlementSvc := entitlement.NewService(repos.Entitlement, entitlement.Options{
 		DefaultPlan: entitlement.Plan(cfg.DefaultPlan),
@@ -167,6 +190,7 @@ func main() {
 		OIDC:         oidcProvider,
 		Sessions:     sessionIssuer,
 		Audit:        auditHandler,
+		AIProvider:   aiProvider,
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)

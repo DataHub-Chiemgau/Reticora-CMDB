@@ -35,6 +35,7 @@ var gatedRoutes = []struct {
 	{"/api/v1/compliance", FeatureCompliance},
 	{"/api/v1/iga", FeatureIGA},
 	{"/scim/v2", FeatureIGA},
+	{"/api/v1/ai", FeatureAIAssistant},
 }
 
 // RequiredFeature returns the feature key gating the given request path.

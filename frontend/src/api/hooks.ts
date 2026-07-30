@@ -18,6 +18,8 @@ import {
   workflowApi,
   complianceApi,
   igaApi,
+  searchApi,
+  aiApi,
 } from '../api/client';
 import type {
   CICreateRequest,
@@ -43,6 +45,7 @@ import type {
   SLABreachParams,
   SLAPolicyRequest,
   IGACreateConnectorRequest,
+  SearchParams,
 } from '../api/client';
 
 export function useCIList(params: CIListParams) {
@@ -153,6 +156,27 @@ export function useDeleteCI() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cis'] });
     },
+  });
+}
+
+// --- Search / AI assistant ---
+export function useSearch(params: SearchParams) {
+  return useQuery({
+    queryKey: ['search', params],
+    queryFn: () => searchApi.query(params),
+    enabled: Boolean(params.q && params.q.trim().length >= 2),
+  });
+}
+
+export function useAIConversations() {
+  return useQuery({ queryKey: ['ai-conversations'], queryFn: () => aiApi.conversations() });
+}
+
+export function useAskAI() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { question: string; conversation_id?: string }) => aiApi.ask(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ai-conversations'] }),
   });
 }
 

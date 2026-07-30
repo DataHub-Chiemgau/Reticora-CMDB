@@ -117,11 +117,13 @@ func TenantMiddleware(next http.Handler) http.Handler {
 		// unverified development mode and the header-authenticated collector.
 		orgID := ""
 		clientID := ""
+		userID := ""
 
 		claims, err := claimsFromRequestOrContext(r)
 		if err == nil {
 			orgID = claims.Organization()
 			clientID = claims.ClientID
+			userID = claims.Subject
 		}
 
 		if orgID == "" {
@@ -139,6 +141,7 @@ func TenantMiddleware(next http.Handler) http.Handler {
 		ctx := tenant.WithTenant(r.Context(), tenant.TenantInfo{
 			OrganizationID: orgID,
 			ClientID:       clientID,
+			UserID:         userID,
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

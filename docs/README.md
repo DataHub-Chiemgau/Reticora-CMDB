@@ -92,6 +92,7 @@ Database schema is managed with [golang-migrate](https://github.com/golang-migra
 | 0027 | workflows_forms | JSON-Schema form definitions/submissions and workflow definitions, runs and step history |
 | 0028 | compliance | Compliance rules and per-CI evaluation results |
 | 0029 | iga | IGA connectors, provisioning tasks, access requests/reviews and drift findings |
+| 0030 | search_ai | Tenant search index, AI conversations/messages and retrieval chunks |
 
 **Running migrations:**
 
@@ -171,6 +172,8 @@ internal/
 ├── workflow/       # Workflow definitions, deterministic executor and approvals
 ├── compliance/     # Compliance rules, evaluator and results
 ├── iga/            # IGA connectors, SCIM, JML, access reviews and drift
+├── search/         # Postgres/OpenSearch full-text search backend
+├── ai/             # OpenAI-compatible provider and governed RAG assistant
 ├── entitlement/    # License/feature-flag enforcement
 ├── export/         # Async export jobs (CSV, DATEV)
 ├── monitoring/     # Metric ingestion and queries
@@ -332,6 +335,25 @@ hypervisor placement, power feeds) are written as regular
 from being re-derived on the next run. `/api/v1/topology` and
 `/api/v1/topology/cis/{id}/neighbors` serve the resulting graph.
 
+**Search:** `GET /api/v1/search` searches CIs, assets, documents, tickets and
+contacts within the current tenant and filters hits through the caller's
+effective read permissions. PostgreSQL full-text search over `search_document`
+is the default backend. Set `RETICORA_SEARCH_BACKEND=opensearch` together with
+`RETICORA_OPENSEARCH_URL` to use OpenSearch; startup pings OpenSearch and fails
+loudly if it is unreachable. User input is passed as structured parameters (SQL
+bind variables or OpenSearch JSON DSL), never interpolated into query strings.
+`POST /api/v1/search/reindex` rebuilds the tenant index.
+
+**AI/RAG governance:** `/api/v1/ai/conversations` and `/api/v1/ai/ask` are
+gated by the Pro/Enterprise `ai_assistant` entitlement. If no
+OpenAI-compatible provider is configured, the handler returns HTTP 503 with a
+problem document. Retrieval first asks the search backend for tenant-owned
+candidates, applies the same permission checks, then ranks matching `ai_chunk`
+rows with cosine similarity when embeddings are configured or lexical scoring
+otherwise. The prompt contains only those retrieved chunks. Every exchange is
+recorded in `ai_conversation`/`ai_message` with token counts and citations so
+answers remain auditable.
+
 **Binaries (`backend/cmd/`):**
 
 - `server` — Main API server (HTTP + GraphQL BFF).
@@ -390,7 +412,7 @@ npm run e2e                 # Playwright end-to-end tests
 **Routes:** `/dashboard`, `/cmdb` (CI list), `/cmdb/:id` (CI detail with
 overview, attributes, relationships and topology neighbours), `/topology`,
 `/racks`, `/discovery`, `/assets`, `/assignments`, `/documents`, `/stocktake`,
-`/tickets`, `/users`, `/permissions`, `/slas`, `/forms`, `/workflows`, `/compliance` and `/iga`. Every CI is deep-linkable: list rows, topology nodes,
+`/tickets`, `/users`, `/permissions`, `/slas`, `/forms`, `/workflows`, `/compliance`, `/iga` and `/assistant`. Every CI is deep-linkable: list rows, topology nodes,
 rack mounts and relationship entries all link to `/cmdb/:id`, so a CI can be
 shared as a URL.
 
@@ -464,6 +486,9 @@ The server is configured via environment variables:
 - `RETICORA_ENVIRONMENT` — Environment name (development/staging/production).
 - `RETICORA_DEFAULT_PLAN` — Plan applied to tenants without explicit entitlements (default `essential`).
 - `RETICORA_ENTITLEMENT_ENFORCEMENT` — Set to `false` to disable feature/limit enforcement (default `true`).
+- `RETICORA_SEARCH_BACKEND` — `postgres` (default) or `opensearch`.
+- `RETICORA_OPENSEARCH_URL`, `RETICORA_OPENSEARCH_USERNAME`, `RETICORA_OPENSEARCH_PASSWORD`, `RETICORA_OPENSEARCH_INDEX` — OpenSearch connection settings.
+- `RETICORA_LLM_BASE_URL`, `RETICORA_LLM_API_KEY`, `RETICORA_LLM_CHAT_MODEL`, `RETICORA_LLM_EMBEDDING_MODEL` — OpenAI-compatible chat and embedding provider settings.
 
 ### CI/CD
 

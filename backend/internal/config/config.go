@@ -51,6 +51,19 @@ type Config struct {
 
 	// Rate Limiting
 	RateLimitRPM int // requests per minute per key/user (default 600)
+
+	// Search
+	SearchBackend      string
+	OpenSearchURL      string
+	OpenSearchUsername string
+	OpenSearchPassword string
+	OpenSearchIndex    string
+
+	// AI / LLM
+	LLMBaseURL        string
+	LLMAPIKey         string
+	LLMChatModel      string
+	LLMEmbeddingModel string
 }
 
 // Load reads configuration from environment variables with RETICORA_ prefix
@@ -83,6 +96,17 @@ func Load() *Config {
 
 		OTelEndpoint: envOrDefault("RETICORA_OTEL_ENDPOINT", ""),
 		RateLimitRPM: envOrDefaultInt("RETICORA_RATE_LIMIT_RPM", 600),
+
+		SearchBackend:      envOrDefault("RETICORA_SEARCH_BACKEND", "postgres"),
+		OpenSearchURL:      envOrDefault("RETICORA_OPENSEARCH_URL", ""),
+		OpenSearchUsername: envOrDefault("RETICORA_OPENSEARCH_USERNAME", ""),
+		OpenSearchPassword: envOrDefault("RETICORA_OPENSEARCH_PASSWORD", ""),
+		OpenSearchIndex:    envOrDefault("RETICORA_OPENSEARCH_INDEX", "reticora-search"),
+
+		LLMBaseURL:        envOrDefault("RETICORA_LLM_BASE_URL", ""),
+		LLMAPIKey:         envOrDefault("RETICORA_LLM_API_KEY", ""),
+		LLMChatModel:      envOrDefault("RETICORA_LLM_CHAT_MODEL", ""),
+		LLMEmbeddingModel: envOrDefault("RETICORA_LLM_EMBEDDING_MODEL", ""),
 
 		LogLevel: slog.LevelInfo,
 	}

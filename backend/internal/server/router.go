@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
@@ -30,6 +31,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
@@ -67,6 +69,8 @@ type Repositories struct {
 	Workflow          workflow.Repository
 	Compliance        compliance.Repository
 	IGA               iga.Repository
+	Search            search.Backend
+	AI                ai.Repository
 }
 
 // Options carries everything the router needs beyond the repositories.
@@ -84,7 +88,8 @@ type Options struct {
 	OIDC     *identity.OIDCProvider
 	Sessions *identity.SessionIssuer
 	// Audit is registered only when a database-backed audit trail exists.
-	Audit *audit.Handler
+	Audit      *audit.Handler
+	AIProvider ai.Provider
 }
 
 // registrar is implemented by every domain handler.
@@ -118,6 +123,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
 		user.NewHandler(repos.User),
 		permission.NewHandler(repos.Permission),
+		search.NewHandler(repos.Search, repos.Permission),
 		sla.NewHandler(repos.SLA, repos.Ticket),
 		form.NewHandler(repos.Form),
 		workflow.NewHandler(repos.Workflow, workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher)),
@@ -130,6 +136,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 		monitoring.NewHandler(repos.Metrics),
 		graphqlbff.NewHandler(repos.CI, repos.Relationship),
 		credential.NewHandler(opts.Credentials),
+		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
 	}
 	for _, h := range registrars {
 		h.RegisterRoutes(mux)
@@ -158,6 +165,10 @@ func validate(repos Repositories, opts Options) error {
 		return fmt.Errorf("server: compliance repository is required")
 	case repos.IGA == nil:
 		return fmt.Errorf("server: IGA repository is required")
+	case repos.Search == nil:
+		return fmt.Errorf("server: search backend is required")
+	case repos.AI == nil:
+		return fmt.Errorf("server: AI repository is required")
 	case repos.CI == nil:
 		return fmt.Errorf("server: CI repository is required")
 	case repos.Relationship == nil:
