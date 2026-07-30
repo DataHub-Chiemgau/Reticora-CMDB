@@ -20,7 +20,9 @@ function formatHeartbeat(value?: string) {
   }).format(date);
 }
 
-function getCollectorVariant(status: string): 'success' | 'warning' | 'danger' | 'neutral' | 'info' {
+function getCollectorVariant(
+  status: string,
+): 'success' | 'warning' | 'danger' | 'neutral' | 'info' {
   switch (status) {
     case 'online':
       return 'success';
@@ -44,15 +46,21 @@ function CollectorCard({ collector }: { collector: Collector }) {
       <dl className="space-y-2 text-sm">
         <div className="flex justify-between gap-4">
           <dt className="text-gray-500 dark:text-gray-400">{t('discovery.version')}</dt>
-          <dd className="font-medium text-gray-900 dark:text-gray-100">{collector.version || '—'}</dd>
+          <dd className="font-medium text-gray-900 dark:text-gray-100">
+            {collector.version || '—'}
+          </dd>
         </div>
         <div className="flex justify-between gap-4">
           <dt className="text-gray-500 dark:text-gray-400">{t('discovery.lastHeartbeat')}</dt>
-          <dd className="font-medium text-right text-gray-900 dark:text-gray-100">{formatHeartbeat(collector.last_heartbeat)}</dd>
+          <dd className="font-medium text-right text-gray-900 dark:text-gray-100">
+            {formatHeartbeat(collector.last_heartbeat)}
+          </dd>
         </div>
         <div className="flex justify-between gap-4">
           <dt className="text-gray-500 dark:text-gray-400">{t('discovery.createdAt')}</dt>
-          <dd className="font-medium text-right text-gray-900 dark:text-gray-100">{formatHeartbeat(collector.created_at)}</dd>
+          <dd className="font-medium text-right text-gray-900 dark:text-gray-100">
+            {formatHeartbeat(collector.created_at)}
+          </dd>
         </div>
       </dl>
     </Card>
@@ -67,7 +75,9 @@ export function DiscoveryPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{t('nav.discovery')}</h2>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+            {t('nav.discovery')}
+          </h2>
           <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{t('discovery.summary')}</p>
         </div>
         <span className="text-sm text-gray-500 dark:text-gray-400">
@@ -75,7 +85,9 @@ export function DiscoveryPage() {
         </span>
       </div>
 
-      {isLoading ? <p className="text-sm text-gray-600 dark:text-gray-300">{t('app.loading')}</p> : null}
+      {isLoading ? (
+        <p className="text-sm text-gray-600 dark:text-gray-300">{t('app.loading')}</p>
+      ) : null}
       {error ? <p className="text-sm text-red-600 dark:text-red-400">{t('app.error')}</p> : null}
 
       {data?.data.length ? (

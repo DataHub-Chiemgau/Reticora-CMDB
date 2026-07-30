@@ -2,6 +2,7 @@ package ticket
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -70,6 +71,38 @@ func (r *MemoryRepository) List(orgID string, filter FilterParams, page api.Pagi
 	}
 
 	total := len(result)
+
+	column, direction := NormalizeSort(filter)
+	sort.Slice(result, func(i, j int) bool {
+		vi, vj := sortValue(result[i], column), sortValue(result[j], column)
+		if vi == vj {
+			if direction == "asc" {
+				return result[i].ID < result[j].ID
+			}
+			return result[i].ID > result[j].ID
+		}
+		if direction == "asc" {
+			return vi < vj
+		}
+		return vi > vj
+	})
+
+	if page.Cursor != nil {
+		if !page.Cursor.Matches(column, direction) {
+			return nil, 0, fmt.Errorf("%w: sort order changed", api.ErrInvalidCursor)
+		}
+		remaining := make([]Ticket, 0, len(result))
+		for _, item := range result {
+			if api.KeysetCompare(sortValue(item, column), item.ID, *page.Cursor, direction) {
+				remaining = append(remaining, item)
+			}
+		}
+		if len(remaining) > page.Limit {
+			remaining = remaining[:page.Limit]
+		}
+		return remaining, total, nil
+	}
+
 	start := page.Offset
 	if start > total {
 		start = total

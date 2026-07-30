@@ -2,10 +2,50 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useMemo, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearch } from '../api/hooks';
 import { Badge } from './ui/Badge';
 import { cn } from './ui/utils';
 
-export type AppPage = 'dashboard' | 'cmdb' | 'discovery' | 'assets' | 'assignments' | 'documents' | 'stocktake' | 'tickets' | 'users';
+export type AppPage =
+  | 'dashboard'
+  | 'cmdb'
+  | 'topology'
+  | 'racks'
+  | 'discovery'
+  | 'assets'
+  | 'assignments'
+  | 'documents'
+  | 'stocktake'
+  | 'tickets'
+  | 'users'
+  | 'permissions'
+  | 'slas'
+  | 'forms'
+  | 'workflows'
+  | 'compliance'
+  | 'iga'
+  | 'assistant';
+
+export const pageToPath: Record<AppPage, string> = {
+  dashboard: '/dashboard',
+  cmdb: '/cmdb',
+  topology: '/topology',
+  racks: '/racks',
+  discovery: '/discovery',
+  assets: '/assets',
+  assignments: '/assignments',
+  documents: '/documents',
+  stocktake: '/stocktake',
+  tickets: '/tickets',
+  users: '/users',
+  permissions: '/permissions',
+  slas: '/slas',
+  forms: '/forms',
+  workflows: '/workflows',
+  compliance: '/compliance',
+  iga: '/iga',
+  assistant: '/assistant',
+};
 
 interface CommandPaletteProps {
   onNavigate: (page: AppPage) => void;
@@ -50,80 +90,149 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const search = useSearch({ q: open ? query : '', limit: 5 });
 
-  const commands = useMemo<CommandItem[]>(() => [
-    {
-      id: 'nav-dashboard',
-      label: t('commandPalette.commands.dashboard'),
-      keywords: ['dashboard overview'],
-      action: () => onNavigate('dashboard'),
-    },
-    {
-      id: 'nav-cmdb',
-      label: t('commandPalette.commands.cmdb'),
-      keywords: ['cmdb cis configuration items'],
-      action: () => onNavigate('cmdb'),
-    },
-    {
-      id: 'nav-discovery',
-      label: t('commandPalette.commands.discovery'),
-      keywords: ['discovery collectors'],
-      action: () => onNavigate('discovery'),
-    },
-    {
-      id: 'create-ci',
-      label: t('commandPalette.commands.createCI'),
-      keywords: ['create ci new asset item'],
-      action: onCreateCI,
-    },
-    {
-      id: 'toggle-theme',
-      label: t('commandPalette.commands.toggleDarkMode'),
-      keywords: ['theme dark light appearance'],
-      action: onToggleDarkMode,
-    },
-    {
-      id: 'nav-assets',
-      label: t('commandPalette.commands.assets', 'Inventar öffnen'),
-      keywords: ['assets inventar hardware'],
-      action: () => onNavigate('assets'),
-    },
-    {
-      id: 'nav-assignments',
-      label: t('commandPalette.commands.assignments', 'Zuweisungen öffnen'),
-      keywords: ['assignments zuweisungen transfer'],
-      action: () => onNavigate('assignments'),
-    },
-    {
-      id: 'nav-documents',
-      label: t('commandPalette.commands.documents', 'Dokumente öffnen'),
-      keywords: ['documents dokumente files'],
-      action: () => onNavigate('documents'),
-    },
-    {
-      id: 'nav-stocktake',
-      label: t('commandPalette.commands.stocktake', 'Inventur öffnen'),
-      keywords: ['stocktake inventur scan'],
-      action: () => onNavigate('stocktake'),
-    },
-    {
-      id: 'nav-tickets',
-      label: t('commandPalette.commands.tickets', 'Tickets öffnen'),
-      keywords: ['tickets support helpdesk'],
-      action: () => onNavigate('tickets'),
-    },
-    {
-      id: 'nav-users',
-      label: t('commandPalette.commands.users', 'Benutzer & Teams öffnen'),
-      keywords: ['users teams roles benutzer rollen'],
-      action: () => onNavigate('users'),
-    },
-  ], [onCreateCI, onNavigate, onToggleDarkMode, t]);
-
-  const filteredCommands = useMemo(
-    () => commands.filter((command) => fuzzyMatch(`${command.label} ${command.keywords.join(' ')}`, query)),
-    [commands, query],
+  const commands = useMemo<CommandItem[]>(
+    () => [
+      {
+        id: 'nav-dashboard',
+        label: t('commandPalette.commands.dashboard'),
+        keywords: ['dashboard overview'],
+        action: () => onNavigate('dashboard'),
+      },
+      {
+        id: 'nav-cmdb',
+        label: t('commandPalette.commands.cmdb'),
+        keywords: ['cmdb cis configuration items'],
+        action: () => onNavigate('cmdb'),
+      },
+      {
+        id: 'nav-topology',
+        label: t('commandPalette.commands.topology'),
+        keywords: ['topology topologie graph netzwerk'],
+        action: () => onNavigate('topology'),
+      },
+      {
+        id: 'nav-racks',
+        label: t('commandPalette.commands.racks'),
+        keywords: ['racks rack schrank he units'],
+        action: () => onNavigate('racks'),
+      },
+      {
+        id: 'nav-discovery',
+        label: t('commandPalette.commands.discovery'),
+        keywords: ['discovery collectors'],
+        action: () => onNavigate('discovery'),
+      },
+      {
+        id: 'create-ci',
+        label: t('commandPalette.commands.createCI'),
+        keywords: ['create ci new asset item'],
+        action: onCreateCI,
+      },
+      {
+        id: 'toggle-theme',
+        label: t('commandPalette.commands.toggleDarkMode'),
+        keywords: ['theme dark light appearance'],
+        action: onToggleDarkMode,
+      },
+      {
+        id: 'nav-assets',
+        label: t('commandPalette.commands.assets', 'Inventar öffnen'),
+        keywords: ['assets inventar hardware'],
+        action: () => onNavigate('assets'),
+      },
+      {
+        id: 'nav-assignments',
+        label: t('commandPalette.commands.assignments', 'Zuweisungen öffnen'),
+        keywords: ['assignments zuweisungen transfer'],
+        action: () => onNavigate('assignments'),
+      },
+      {
+        id: 'nav-documents',
+        label: t('commandPalette.commands.documents', 'Dokumente öffnen'),
+        keywords: ['documents dokumente files'],
+        action: () => onNavigate('documents'),
+      },
+      {
+        id: 'nav-stocktake',
+        label: t('commandPalette.commands.stocktake', 'Inventur öffnen'),
+        keywords: ['stocktake inventur scan'],
+        action: () => onNavigate('stocktake'),
+      },
+      {
+        id: 'nav-tickets',
+        label: t('commandPalette.commands.tickets', 'Tickets öffnen'),
+        keywords: ['tickets support helpdesk'],
+        action: () => onNavigate('tickets'),
+      },
+      {
+        id: 'nav-users',
+        label: t('commandPalette.commands.users', 'Benutzer & Teams öffnen'),
+        keywords: ['users teams roles benutzer rollen'],
+        action: () => onNavigate('users'),
+      },
+      {
+        id: 'nav-permissions',
+        label: t('commandPalette.commands.permissions'),
+        keywords: ['permissions berechtigungen rbac abac'],
+        action: () => onNavigate('permissions'),
+      },
+      {
+        id: 'nav-slas',
+        label: t('commandPalette.commands.slas'),
+        keywords: ['sla service levels breach policies'],
+        action: () => onNavigate('slas'),
+      },
+      {
+        id: 'nav-forms',
+        label: t('commandPalette.commands.forms'),
+        keywords: ['forms formulare submissions'],
+        action: () => onNavigate('forms'),
+      },
+      {
+        id: 'nav-workflows',
+        label: t('commandPalette.commands.workflows'),
+        keywords: ['workflow automation approvals'],
+        action: () => onNavigate('workflows'),
+      },
+      {
+        id: 'nav-compliance',
+        label: t('commandPalette.commands.compliance'),
+        keywords: ['compliance iso nis2 score'],
+        action: () => onNavigate('compliance'),
+      },
+      {
+        id: 'nav-iga',
+        label: t('commandPalette.commands.iga'),
+        keywords: ['iga provisioning scim access reviews'],
+        action: () => onNavigate('iga'),
+      },
+      {
+        id: 'nav-assistant',
+        label: t('commandPalette.commands.assistant'),
+        keywords: ['assistant ki ai rag'],
+        action: () => onNavigate('assistant'),
+      },
+    ],
+    [onCreateCI, onNavigate, onToggleDarkMode, t],
   );
+
+  const filteredCommands = useMemo(() => {
+    const local = commands.filter((command) =>
+      fuzzyMatch(`${command.label} ${command.keywords.join(' ')}`, query),
+    );
+    const remote =
+      search.data?.data.map((hit) => ({
+        id: `search-${hit.entity_type}-${hit.entity_id}`,
+        label: `${hit.title} · ${hit.entity_type}`,
+        keywords: [hit.summary ?? '', hit.entity_type],
+        action: () => {
+          window.location.assign(hit.url);
+        },
+      })) ?? [];
+    return [...remote, ...local];
+  }, [commands, query, search.data?.data]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -162,7 +271,9 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
   function handleListNavigation(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setSelectedIndex((current) => (filteredCommands.length === 0 ? 0 : (current + 1) % filteredCommands.length));
+      setSelectedIndex((current) =>
+        filteredCommands.length === 0 ? 0 : (current + 1) % filteredCommands.length,
+      );
       return;
     }
 
@@ -207,7 +318,9 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
           </div>
           <div className="max-h-80 overflow-y-auto p-2">
             {filteredCommands.length === 0 ? (
-              <p className="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">{t('common.noResults')}</p>
+              <p className="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">
+                {t('common.noResults')}
+              </p>
             ) : (
               filteredCommands.map((command, index) => (
                 <button

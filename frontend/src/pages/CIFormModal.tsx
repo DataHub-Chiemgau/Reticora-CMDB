@@ -65,13 +65,20 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
   const typeOptions = useMemo(
     () => [
       { value: '', label: t('form.selectPlaceholder') },
-      ...ciTypeValues.map((value) => ({ value, label: value.charAt(0).toUpperCase() + value.slice(1) })),
+      ...ciTypeValues.map((value) => ({
+        value,
+        label: value.charAt(0).toUpperCase() + value.slice(1),
+      })),
     ],
     [t],
   );
 
   const statusOptions = useMemo(
-    () => statusValues.map((value) => ({ value, label: t(`ci.status${value.charAt(0).toUpperCase()}${value.slice(1)}`) })),
+    () =>
+      statusValues.map((value) => ({
+        value,
+        label: t(`ci.status${value.charAt(0).toUpperCase()}${value.slice(1)}`),
+      })),
     [t],
   );
 
@@ -113,7 +120,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
       serial_number: optionalValue(values.serial_number),
       management_ip: optionalValue(values.management_ip),
       firmware_version: optionalValue(values.firmware_version),
-      source: 'manual',
+      discovery_source: 'manual',
     };
 
     const updatePayload: CIUpdateRequest = {
@@ -127,9 +134,10 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
     };
 
     try {
-      const saved = isEditMode && ci
-        ? await updateMutation.mutateAsync({ id: ci.id, data: updatePayload })
-        : await createMutation.mutateAsync(createPayload);
+      const saved =
+        isEditMode && ci
+          ? await updateMutation.mutateAsync({ id: ci.id, data: updatePayload })
+          : await createMutation.mutateAsync(createPayload);
       onSuccess?.(saved);
       onOpenChange(false);
     } catch {
@@ -196,7 +204,9 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
           />
         </div>
 
-        {serverError ? <p className="text-sm text-red-600 dark:text-red-400">{serverError.message}</p> : null}
+        {serverError ? (
+          <p className="text-sm text-red-600 dark:text-red-400">{serverError.message}</p>
+        ) : null}
 
         <div className="flex justify-end gap-3 pt-2">
           <Button variant="secondary" onClick={() => onOpenChange(false)}>

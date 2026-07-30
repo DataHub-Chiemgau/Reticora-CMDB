@@ -42,7 +42,15 @@ export const RackSVG: FC<RackSVGProps> = ({
       xmlns="http://www.w3.org/2000/svg"
     >
       {/* Rack frame */}
-      <rect x={LABEL_WIDTH} y={1} width={rackWidth} height={totalHeight} fill="#1f2937" stroke="#374151" strokeWidth={1} />
+      <rect
+        x={LABEL_WIDTH}
+        y={1}
+        width={rackWidth}
+        height={totalHeight}
+        fill="#1f2937"
+        stroke="#374151"
+        strokeWidth={1}
+      />
 
       {/* Unit lines and labels */}
       {Array.from({ length: units }, (_, i) => {
@@ -50,7 +58,13 @@ export const RackSVG: FC<RackSVGProps> = ({
         return (
           <g key={`unit-${i}`}>
             <line x1={LABEL_WIDTH} y1={y} x2={width} y2={y} stroke="#374151" strokeWidth={0.5} />
-            <text x={LABEL_WIDTH - 4} y={y + UNIT_HEIGHT / 2 + 4} textAnchor="end" fontSize={9} fill="#9ca3af">
+            <text
+              x={LABEL_WIDTH - 4}
+              y={y + UNIT_HEIGHT / 2 + 4}
+              textAnchor="end"
+              fontSize={9}
+              fill="#9ca3af"
+            >
               {units - i}
             </text>
           </g>

@@ -211,11 +211,11 @@ func collectMetrics() map[string]any {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	return map[string]any{
-		"goroutines":   runtime.NumGoroutine(),
-		"heap_alloc":   m.HeapAlloc,
-		"sys_memory":   m.Sys,
-		"num_gc":       m.NumGC,
-		"num_cpu":      runtime.NumCPU(),
+		"goroutines": runtime.NumGoroutine(),
+		"heap_alloc": m.HeapAlloc,
+		"sys_memory": m.Sys,
+		"num_gc":     m.NumGC,
+		"num_cpu":    runtime.NumCPU(),
 	}
 }
 

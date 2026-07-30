@@ -1,7 +1,9 @@
 package ci
 
 import (
+	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -22,7 +24,7 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func (r *MemoryRepository) List(orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
+func (r *MemoryRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -49,6 +51,38 @@ func (r *MemoryRepository) List(orgID string, filter FilterParams, page api.Pagi
 	}
 
 	total := len(result)
+
+	column, direction := NormalizeSort(filter)
+	sort.Slice(result, func(i, j int) bool {
+		vi, vj := sortValue(result[i], column), sortValue(result[j], column)
+		if vi == vj {
+			if direction == "asc" {
+				return result[i].ID < result[j].ID
+			}
+			return result[i].ID > result[j].ID
+		}
+		if direction == "asc" {
+			return vi < vj
+		}
+		return vi > vj
+	})
+
+	if page.Cursor != nil {
+		if !page.Cursor.Matches(column, direction) {
+			return nil, 0, fmt.Errorf("%w: sort order changed", api.ErrInvalidCursor)
+		}
+		remaining := make([]Item, 0, len(result))
+		for _, item := range result {
+			if api.KeysetCompare(sortValue(item, column), item.ID, *page.Cursor, direction) {
+				remaining = append(remaining, item)
+			}
+		}
+		if len(remaining) > page.Limit {
+			remaining = remaining[:page.Limit]
+		}
+		return remaining, total, nil
+	}
+
 	start := page.Offset
 	if start > total {
 		start = total
@@ -61,7 +95,7 @@ func (r *MemoryRepository) List(orgID string, filter FilterParams, page api.Pagi
 	return result[start:end], total, nil
 }
 
-func (r *MemoryRepository) GetByID(orgID, id string) (*Item, error) {
+func (r *MemoryRepository) GetByID(ctx context.Context, orgID, id string) (*Item, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -72,7 +106,7 @@ func (r *MemoryRepository) GetByID(orgID, id string) (*Item, error) {
 	return item, nil
 }
 
-func (r *MemoryRepository) Create(item *Item) error {
+func (r *MemoryRepository) Create(ctx context.Context, item *Item) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -85,7 +119,7 @@ func (r *MemoryRepository) Create(item *Item) error {
 	return nil
 }
 
-func (r *MemoryRepository) Update(orgID, id string, req UpdateRequest) (*Item, error) {
+func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -123,11 +157,11 @@ func (r *MemoryRepository) Update(orgID, id string, req UpdateRequest) (*Item, e
 			item.Attributes[k] = v
 		}
 	}
-	if req.Source != nil {
-		item.Source = *req.Source
+	if req.DiscoverySource != nil {
+		item.DiscoverySource = *req.DiscoverySource
 	}
-	if req.LastSeen != nil {
-		t, err := time.Parse(time.RFC3339, *req.LastSeen)
+	if req.LastSeenAt != nil {
+		t, err := time.Parse(time.RFC3339, *req.LastSeenAt)
 		if err == nil {
 			item.LastSeenAt = &t
 		}
@@ -136,7 +170,7 @@ func (r *MemoryRepository) Update(orgID, id string, req UpdateRequest) (*Item, e
 	return item, nil
 }
 
-func (r *MemoryRepository) Delete(orgID, id string) error {
+func (r *MemoryRepository) Delete(ctx context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -146,6 +180,11 @@ func (r *MemoryRepository) Delete(orgID, id string) error {
 	}
 	delete(r.items, id)
 	return nil
+}
+
+// ListChanges returns no persisted history for the in-memory repository.
+func (r *MemoryRepository) ListChanges(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Change, int, error) {
+	return []Change{}, 0, nil
 }
 
 func containsIgnoreCase(s, sub string) bool {

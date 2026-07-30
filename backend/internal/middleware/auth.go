@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -26,28 +27,79 @@ type Claims struct {
 	IssuedAt       int64  `json:"iat,omitempty"`
 }
 
+// SessionVerifier verifies the signature of session tokens issued by the
+// identity module.
+type SessionVerifier interface {
+	Validate(token string) (*identity.SessionClaims, error)
+}
+
 // AuthMiddleware parses bearer tokens and stores claims in the request context.
-// SECURITY NOTE: This implementation skips JWT signature verification and is
-// intended for DEVELOPMENT ONLY. In production, tokens MUST be verified against
-// the OIDC provider's public keys (JWKS endpoint). A production-ready version
-// should accept an OIDC issuer URL configuration and validate signatures,
-// audience, and expiry cryptographically.
+// SECURITY NOTE: This variant skips JWT signature verification and is intended
+// for DEVELOPMENT ONLY. Production deployments must use
+// AuthMiddlewareWithVerifier so that session tokens are verified
+// cryptographically.
 func AuthMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !requiresTenant(r) {
-			next.ServeHTTP(w, r)
-			return
-		}
+	return AuthMiddlewareWithVerifier(nil)(next)
+}
 
-		claims, err := claimsFromRequest(r)
-		if err != nil {
-			api.WriteError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
-			return
-		}
+// AuthMiddlewareWithVerifier returns an auth middleware that cryptographically
+// verifies session tokens with the given verifier. When verifier is nil the
+// middleware falls back to unverified claim parsing for local development.
+func AuthMiddlewareWithVerifier(verifier SessionVerifier) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !requiresTenant(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 
-		ctx := context.WithValue(r.Context(), claimsContextKey{}, claims)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+			claims, err := authenticate(r, verifier)
+			if err != nil {
+				api.WriteError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), claimsContextKey{}, claims)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func authenticate(r *http.Request, verifier SessionVerifier) (Claims, error) {
+	if verifier == nil {
+		return claimsFromRequest(r)
+	}
+
+	authz := strings.TrimSpace(r.Header.Get("Authorization"))
+	if authz == "" {
+		return Claims{}, fmt.Errorf("missing bearer token")
+	}
+	parts := strings.SplitN(authz, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || strings.TrimSpace(parts[1]) == "" {
+		return Claims{}, fmt.Errorf("invalid authorization header")
+	}
+
+	sessionClaims, err := verifier.Validate(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return Claims{}, fmt.Errorf("invalid session token")
+	}
+	if sessionClaims.OrganizationID == "" {
+		return Claims{}, fmt.Errorf("organization claim is required")
+	}
+	if sessionClaims.ExpiresAt.IsZero() {
+		return Claims{}, fmt.Errorf("session token expiry is required")
+	}
+	if !time.Now().UTC().Before(sessionClaims.ExpiresAt) {
+		return Claims{}, fmt.Errorf("token is expired")
+	}
+
+	return Claims{
+		Subject:        sessionClaims.Subject,
+		OrganizationID: sessionClaims.OrganizationID,
+		ClientID:       sessionClaims.ClientScope,
+		IssuedAt:       sessionClaims.IssuedAt.Unix(),
+		ExpiresAt:      sessionClaims.ExpiresAt.Unix(),
+	}, nil
 }
 
 // TenantMiddleware attaches tenant context from development headers or JWT claims.
@@ -58,19 +110,27 @@ func TenantMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		orgID := strings.TrimSpace(r.Header.Get("X-Organization-ID"))
-		clientID := strings.TrimSpace(r.Header.Get("X-Client-ID"))
+		// The token is authoritative: a verified organization claim must never
+		// be overridable by a request header, otherwise any authenticated
+		// caller could read and write another tenant's data. The headers are
+		// only honoured for requests that carry no claims at all, which is the
+		// unverified development mode and the header-authenticated collector.
+		orgID := ""
+		clientID := ""
+		userID := ""
+
+		claims, err := claimsFromRequestOrContext(r)
+		if err == nil {
+			orgID = claims.Organization()
+			clientID = claims.ClientID
+			userID = claims.Subject
+		}
 
 		if orgID == "" {
-			claims, err := claimsFromRequestOrContext(r)
-			if err != nil {
-				api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
-				return
-			}
-			orgID = claims.Organization()
-			if clientID == "" {
-				clientID = claims.ClientID
-			}
+			orgID = strings.TrimSpace(r.Header.Get("X-Organization-ID"))
+			clientID = strings.TrimSpace(r.Header.Get("X-Client-ID"))
+		} else if clientID == "" {
+			clientID = strings.TrimSpace(r.Header.Get("X-Client-ID"))
 		}
 
 		if orgID == "" {
@@ -81,6 +141,7 @@ func TenantMiddleware(next http.Handler) http.Handler {
 		ctx := tenant.WithTenant(r.Context(), tenant.TenantInfo{
 			OrganizationID: orgID,
 			ClientID:       clientID,
+			UserID:         userID,
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -97,7 +158,7 @@ func requiresTenant(r *http.Request) bool {
 		return false
 	}
 	switch r.URL.Path {
-	case "/api/v1/auth/login", "/api/v1/auth/callback", "/api/v1/auth/refresh":
+	case "/api/v1/auth/config", "/api/v1/auth/login", "/api/v1/auth/callback", "/api/v1/auth/refresh":
 		return false
 	default:
 		return true

@@ -1,3 +1,5 @@
+import { clearSession, getSessionToken, refreshSession } from '../auth/session';
+
 const API_BASE = '/api/v1';
 
 export interface PaginatedResponse<T> {
@@ -6,6 +8,13 @@ export interface PaginatedResponse<T> {
   limit: number;
   offset: number;
   has_more: boolean;
+  /**
+   * Opaque keyset cursor pointing at the row after the last one returned.
+   * Present only while `has_more` is true and only on endpoints that support
+   * cursor pagination. Pass it back as `cursor` with the identical `sort_by`
+   * and `sort_dir` to fetch the next page without skipped or repeated rows.
+   */
+  next_cursor?: string;
 }
 
 export interface CI {
@@ -21,8 +30,9 @@ export interface CI {
   management_ip?: string;
   firmware_version?: string;
   attributes: Record<string, unknown>;
-  source?: string;
-  last_seen?: string;
+  discovery_source?: string;
+  first_seen_at?: string;
+  last_seen_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -38,7 +48,7 @@ export interface CICreateRequest {
   management_ip?: string;
   firmware_version?: string;
   attributes?: Record<string, unknown>;
-  source?: string;
+  discovery_source?: string;
 }
 
 export interface CIUpdateRequest {
@@ -50,6 +60,8 @@ export interface CIUpdateRequest {
   management_ip?: string;
   firmware_version?: string;
   attributes?: Record<string, unknown>;
+  discovery_source?: string;
+  last_seen_at?: string;
 }
 
 export interface Relationship {
@@ -80,6 +92,7 @@ export interface Collector {
 export interface CIListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
   status?: string;
   ci_type_id?: string;
   client_id?: string;
@@ -91,14 +104,46 @@ export interface CIListParams {
 export interface ListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
 }
 
-async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+function mergeHeaders(options?: RequestInit) {
+  const headers = new Headers(options?.headers);
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const token = getSessionToken();
+  if (token) {
+    headers.set('Authorization', ['Bearer', token].join(' '));
+  }
+
+  return headers;
+}
+
+export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
+  const request = () =>
+    fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: mergeHeaders(options),
+    });
+
+  let res = await request();
+
+  if (res.status === 401) {
+    const refreshed = await refreshSession();
+    if (refreshed) {
+      res = await request();
+    } else {
+      clearSession();
+    }
+  }
+
   if (!res.ok) {
+    if (res.status === 401) {
+      clearSession();
+    }
+
     const error = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(error.detail || res.statusText);
   }
@@ -110,11 +155,13 @@ async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
 
 function buildQuery(params: object) {
   const query = new URLSearchParams();
-  Object.entries(params as Record<string, string | number | undefined>).forEach(([key, value]) => {
-    if (value !== undefined && value !== '') {
-      query.set(key, String(value));
-    }
-  });
+  Object.entries(params as Record<string, string | number | boolean | undefined>).forEach(
+    ([key, value]) => {
+      if (value !== undefined && value !== '') {
+        query.set(key, String(value));
+      }
+    },
+  );
   const value = query.toString();
   return value ? `?${value}` : '';
 }
@@ -158,6 +205,93 @@ export const ciApi = {
 export const collectorApi = {
   list(params: ListParams = {}): Promise<PaginatedResponse<Collector>> {
     return fetchAPI(`/collectors${buildQuery(params)}`);
+  },
+};
+
+// --- Topology ---
+
+export interface TopologyNode {
+  id: string;
+  name: string;
+  ci_type: string;
+  status: string;
+  client_id?: string;
+  site_id?: string;
+  management_ip?: string;
+}
+
+export interface TopologyEdge {
+  id: string;
+  source_ci_id: string;
+  target_ci_id: string;
+  rel_type: string;
+  source?: string;
+}
+
+export interface TopologyGraphData {
+  nodes: TopologyNode[];
+  edges: TopologyEdge[];
+}
+
+export interface TopologyParams {
+  client_id?: string;
+  site_id?: string;
+  ci_type?: string;
+  root_ci_id?: string;
+  depth?: number;
+}
+
+export const topologyApi = {
+  get(params: TopologyParams = {}): Promise<TopologyGraphData> {
+    return fetchAPI(`/topology${buildQuery(params)}`);
+  },
+  neighbors(ciId: string): Promise<TopologyGraphData> {
+    return fetchAPI(`/topology/cis/${ciId}/neighbors`);
+  },
+};
+
+// --- Racks ---
+
+export interface Rack {
+  id: string;
+  organization_id: string;
+  room_id: string;
+  name: string;
+  height_u: number;
+  width_mm: number;
+  depth_mm: number;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RackMount {
+  id: string;
+  organization_id: string;
+  rack_id: string;
+  ci_id: string;
+  position_u: number;
+  height_u: number;
+  face: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RackListParams {
+  limit?: number;
+  offset?: number;
+  room_id?: string;
+}
+
+export const rackApi = {
+  list(params: RackListParams = {}): Promise<PaginatedResponse<Rack>> {
+    return fetchAPI(`/racks${buildQuery(params)}`);
+  },
+  get(id: string): Promise<Rack> {
+    return fetchAPI(`/racks/${id}`);
+  },
+  listMounts(rackId: string, params: ListParams = {}): Promise<PaginatedResponse<RackMount>> {
+    return fetchAPI(`/racks/${rackId}/mounts${buildQuery(params)}`);
   },
 };
 
@@ -225,6 +359,7 @@ export interface AssetUpdateRequest {
 export interface AssetListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
   status?: string;
   category?: string;
   client_id?: string;
@@ -283,6 +418,7 @@ export interface AssignmentCreateRequest {
 export interface AssignmentListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
   status?: string;
   assigned_to?: string;
   asset_id?: string;
@@ -299,7 +435,10 @@ export const assignmentApi = {
   create(data: AssignmentCreateRequest): Promise<Assignment> {
     return fetchAPI('/assignments', { method: 'POST', body: JSON.stringify(data) });
   },
-  returnAssignment(id: string, data: { return_condition?: string; notes?: string }): Promise<Assignment> {
+  returnAssignment(
+    id: string,
+    data: { return_condition?: string; notes?: string },
+  ): Promise<Assignment> {
     return fetchAPI(`/assignments/${id}/return`, { method: 'POST', body: JSON.stringify(data) });
   },
   transfer(id: string, data: { new_assignee: string; notes?: string }): Promise<Assignment> {
@@ -343,6 +482,7 @@ export interface DocumentCreateRequest {
 export interface DocumentListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
   category?: string;
   search?: string;
 }
@@ -365,7 +505,10 @@ export const documentApi = {
   create(data: DocumentCreateRequest): Promise<Document> {
     return fetchAPI('/documents', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: { title?: string; description?: string; category?: string; tags?: string[] }): Promise<Document> {
+  update(
+    id: string,
+    data: { title?: string; description?: string; category?: string; tags?: string[] },
+  ): Promise<Document> {
     return fetchAPI(`/documents/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
@@ -424,6 +567,7 @@ export interface StocktakeCreateRequest {
 export interface StocktakeListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
   status?: string;
   scope?: string;
   search?: string;
@@ -439,14 +583,36 @@ export const stocktakeApi = {
   create(data: StocktakeCreateRequest): Promise<Stocktake> {
     return fetchAPI('/stocktakes', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: { title?: string; description?: string; status?: string; due_date?: string; total_expected?: number }): Promise<Stocktake> {
+  update(
+    id: string,
+    data: {
+      title?: string;
+      description?: string;
+      status?: string;
+      due_date?: string;
+      total_expected?: number;
+    },
+  ): Promise<Stocktake> {
     return fetchAPI(`/stocktakes/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/stocktakes/${id}`, { method: 'DELETE' });
   },
-  addScan(stocktakeId: string, data: { asset_id?: string; ci_id?: string; scan_method?: string; scan_result: string; location_found?: string; notes?: string }): Promise<StockScan> {
-    return fetchAPI(`/stocktakes/${stocktakeId}/scans`, { method: 'POST', body: JSON.stringify(data) });
+  addScan(
+    stocktakeId: string,
+    data: {
+      asset_id?: string;
+      ci_id?: string;
+      scan_method?: string;
+      scan_result: string;
+      location_found?: string;
+      notes?: string;
+    },
+  ): Promise<StockScan> {
+    return fetchAPI(`/stocktakes/${stocktakeId}/scans`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
   listScans(stocktakeId: string, params: ListParams = {}): Promise<PaginatedResponse<StockScan>> {
     return fetchAPI(`/stocktakes/${stocktakeId}/scans${buildQuery(params)}`);
@@ -515,6 +681,7 @@ export interface TicketUpdateRequest {
 export interface TicketListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
   status?: string;
   priority?: string;
   category?: string;
@@ -539,10 +706,19 @@ export const ticketApi = {
   delete(id: string): Promise<void> {
     return fetchAPI(`/tickets/${id}`, { method: 'DELETE' });
   },
-  addComment(ticketId: string, data: { content: string; is_internal?: boolean }): Promise<TicketComment> {
-    return fetchAPI(`/tickets/${ticketId}/comments`, { method: 'POST', body: JSON.stringify(data) });
+  addComment(
+    ticketId: string,
+    data: { content: string; is_internal?: boolean },
+  ): Promise<TicketComment> {
+    return fetchAPI(`/tickets/${ticketId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
-  listComments(ticketId: string, params: ListParams = {}): Promise<PaginatedResponse<TicketComment>> {
+  listComments(
+    ticketId: string,
+    params: ListParams = {},
+  ): Promise<PaginatedResponse<TicketComment>> {
     return fetchAPI(`/tickets/${ticketId}/comments${buildQuery(params)}`);
   },
 };
@@ -595,6 +771,7 @@ export interface CustomRole {
 export interface UserListParams {
   limit?: number;
   offset?: number;
+  cursor?: string;
   search?: string;
 }
 
@@ -608,7 +785,10 @@ export const userApi = {
   create(data: { email: string; display_name: string; status?: string }): Promise<AppUser> {
     return fetchAPI('/users', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: { display_name?: string; status?: string; avatar_url?: string }): Promise<AppUser> {
+  update(
+    id: string,
+    data: { display_name?: string; status?: string; avatar_url?: string },
+  ): Promise<AppUser> {
     return fetchAPI(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
@@ -626,7 +806,10 @@ export const teamApi = {
   create(data: { name: string; description?: string; lead_id?: string }): Promise<Team> {
     return fetchAPI('/teams', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: { name?: string; description?: string; lead_id?: string }): Promise<Team> {
+  update(
+    id: string,
+    data: { name?: string; description?: string; lead_id?: string },
+  ): Promise<Team> {
     return fetchAPI(`/teams/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
@@ -650,13 +833,482 @@ export const roleApi = {
   create(data: { name: string; description?: string; permissions: string[] }): Promise<CustomRole> {
     return fetchAPI('/roles', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: { name?: string; description?: string; permissions?: string[] }): Promise<CustomRole> {
+  update(
+    id: string,
+    data: { name?: string; description?: string; permissions?: string[] },
+  ): Promise<CustomRole> {
     return fetchAPI(`/roles/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/roles/${id}`, { method: 'DELETE' });
   },
-  assign(data: { user_id: string; custom_role_id: string; scope_type?: string; scope_id?: string }): Promise<unknown> {
+  assign(data: {
+    user_id: string;
+    custom_role_id: string;
+    scope_type?: string;
+    scope_id?: string;
+  }): Promise<unknown> {
     return fetchAPI('/roles/assign', { method: 'POST', body: JSON.stringify(data) });
+  },
+};
+
+// --- Search / AI assistant ---
+export interface SearchHit {
+  id: string;
+  organization_id: string;
+  entity_type: 'ci' | 'asset' | 'document' | 'ticket' | 'contact' | 'compliance' | string;
+  entity_id: string;
+  title: string;
+  summary?: string;
+  url: string;
+  score: number;
+  highlights?: string[];
+  metadata?: Record<string, string>;
+  updated_at: string;
+}
+
+export interface SearchParams extends ListParams {
+  q?: string;
+  type?: string;
+}
+
+export const searchApi = {
+  query(params: SearchParams): Promise<PaginatedResponse<SearchHit>> {
+    return fetchAPI(`/search${buildQuery(params)}`);
+  },
+  reindex(): Promise<{ indexed: number }> {
+    return fetchAPI('/search/reindex', { method: 'POST' });
+  },
+};
+
+export interface AIConversation {
+  id: string;
+  organization_id: string;
+  user_id?: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface AICitation {
+  entity_type: string;
+  entity_id: string;
+  title: string;
+  url: string;
+  score: number;
+}
+export interface AIAskResponse {
+  conversation_id: string;
+  answer: string;
+  citations: AICitation[];
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+export const aiApi = {
+  conversations(): Promise<AIConversation[]> {
+    return fetchAPI('/ai/conversations');
+  },
+  createConversation(title?: string): Promise<AIConversation> {
+    return fetchAPI('/ai/conversations', { method: 'POST', body: JSON.stringify({ title }) });
+  },
+  ask(data: { question: string; conversation_id?: string }): Promise<AIAskResponse> {
+    return fetchAPI('/ai/ask', { method: 'POST', body: JSON.stringify(data) });
+  },
+};
+
+// --- Stage 5: Permissions / SLA ---
+
+export interface Permission {
+  key: string;
+  resource: string;
+  action: string;
+  description: string;
+}
+
+export interface RolePermissionGrant {
+  organization_id: string;
+  role_id: string;
+  permission_key: string;
+  granted_at: string;
+  granted_by?: string;
+}
+
+export interface EffectivePermissionsResponse {
+  user_id?: string;
+  permissions: string[];
+}
+
+export const permissionApi = {
+  list(): Promise<Permission[]> {
+    return fetchAPI('/permissions');
+  },
+  listRole(roleId: string): Promise<RolePermissionGrant[]> {
+    return fetchAPI(`/roles/${roleId}/permissions`);
+  },
+  replaceRole(roleId: string, permission_keys: string[]): Promise<RolePermissionGrant[]> {
+    return fetchAPI(`/roles/${roleId}/permissions`, {
+      method: 'PUT',
+      body: JSON.stringify({ permission_keys }),
+    });
+  },
+  effective(): Promise<EffectivePermissionsResponse> {
+    return fetchAPI('/me/permissions');
+  },
+};
+
+export interface SLAPolicy {
+  id: string;
+  organization_id: string;
+  client_id?: string;
+  name: string;
+  priority: string;
+  response_target_minutes: number;
+  resolution_target_minutes: number;
+  business_calendar: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TicketSLA {
+  id: string;
+  organization_id: string;
+  ticket_id: string;
+  sla_id: string;
+  response_due_at: string;
+  resolution_due_at: string;
+  first_response_at?: string;
+  resolved_at?: string;
+  response_breached: boolean;
+  resolution_breached: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SLAPolicyRequest {
+  client_id?: string;
+  name: string;
+  priority: string;
+  response_target_minutes: number;
+  resolution_target_minutes: number;
+  business_calendar?: boolean;
+}
+
+export interface SLAListParams extends ListParams {
+  priority?: string;
+  client_id?: string;
+}
+
+export interface SLABreachParams extends ListParams {
+  status?: 'breached' | 'at_risk' | '';
+}
+
+export const slaApi = {
+  list(params: SLAListParams = {}): Promise<PaginatedResponse<SLAPolicy>> {
+    return fetchAPI(`/slas${buildQuery(params)}`);
+  },
+  create(data: SLAPolicyRequest): Promise<SLAPolicy> {
+    return fetchAPI('/slas', { method: 'POST', body: JSON.stringify(data) });
+  },
+  update(id: string, data: Partial<SLAPolicyRequest>): Promise<SLAPolicy> {
+    return fetchAPI(`/slas/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/slas/${id}`, { method: 'DELETE' });
+  },
+  breaches(params: SLABreachParams = {}): Promise<PaginatedResponse<TicketSLA>> {
+    return fetchAPI(`/slas/breaches${buildQuery(params)}`);
+  },
+  getTicket(ticketId: string): Promise<TicketSLA> {
+    return fetchAPI(`/tickets/${ticketId}/sla`);
+  },
+  attachTicket(ticketId: string, sla_id?: string): Promise<TicketSLA> {
+    return fetchAPI(`/tickets/${ticketId}/sla`, {
+      method: 'POST',
+      body: JSON.stringify({ sla_id }),
+    });
+  },
+};
+
+// --- Stage 5: Forms / Workflows / Compliance ---
+
+export type JsonRecord = Record<string, unknown>;
+
+export interface FormDefinition {
+  id: string;
+  organization_id: string;
+  client_id?: string;
+  name: string;
+  description?: string;
+  schema: JsonRecord;
+  ui_hints: JsonRecord;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FormSubmission {
+  id: string;
+  organization_id: string;
+  form_id: string;
+  values: JsonRecord;
+  submitted_by?: string;
+  ci_id?: string;
+  ticket_id?: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowDefinition {
+  id: string;
+  organization_id: string;
+  name: string;
+  description?: string;
+  trigger: JsonRecord;
+  conditions: JsonRecord[];
+  actions: JsonRecord[];
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowStep {
+  id: string;
+  run_id: string;
+  step_index: number;
+  action_type: string;
+  status: string;
+  input: JsonRecord;
+  output: JsonRecord;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowRun {
+  id: string;
+  organization_id: string;
+  workflow_id: string;
+  status: string;
+  trigger: string;
+  context: JsonRecord;
+  started_at: string;
+  finished_at?: string;
+  created_at: string;
+  updated_at: string;
+  steps?: WorkflowStep[];
+}
+
+export interface ComplianceRule {
+  id: string;
+  organization_id: string;
+  ci_type_id?: string;
+  name: string;
+  description?: string;
+  severity: string;
+  category: string;
+  expression: JsonRecord;
+  remediation_hint?: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ComplianceResult {
+  id: string;
+  organization_id: string;
+  rule_id: string;
+  ci_id: string;
+  ci_type_id: string;
+  status: 'pass' | 'fail' | 'not_applicable';
+  details?: string;
+  evaluated_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ComplianceScore {
+  ci_type_id?: string;
+  passed: number;
+  failed: number;
+  not_applicable: number;
+  score: number;
+}
+
+export interface ComplianceEvaluationResponse {
+  overall: ComplianceScore;
+  by_ci_type: ComplianceScore[];
+  results: ComplianceResult[];
+}
+
+export const formApi = {
+  list(params: ListParams & { active?: boolean } = {}): Promise<PaginatedResponse<FormDefinition>> {
+    return fetchAPI(`/forms${buildQuery(params)}`);
+  },
+  create(data: Partial<FormDefinition>): Promise<FormDefinition> {
+    return fetchAPI('/forms', { method: 'POST', body: JSON.stringify(data) });
+  },
+  submit(id: string, data: { values: JsonRecord; ci_id?: string; ticket_id?: string }) {
+    return fetchAPI<FormSubmission>(`/forms/${id}/submissions`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  submissions(params: ListParams & { form_id?: string } = {}) {
+    return fetchAPI<PaginatedResponse<FormSubmission>>(`/form-submissions${buildQuery(params)}`);
+  },
+};
+
+export const workflowApi = {
+  list(params: ListParams & { active?: boolean } = {}) {
+    return fetchAPI<PaginatedResponse<WorkflowDefinition>>(`/workflows${buildQuery(params)}`);
+  },
+  runs(params: ListParams & { workflow_id?: string; status?: string } = {}) {
+    return fetchAPI<PaginatedResponse<WorkflowRun>>(`/workflow-runs${buildQuery(params)}`);
+  },
+  trigger(id: string, context: JsonRecord = {}) {
+    return fetchAPI<WorkflowRun>(`/workflows/${id}/runs`, {
+      method: 'POST',
+      body: JSON.stringify({ trigger: 'manual', context }),
+    });
+  },
+  approve(id: string, decision: 'approved' | 'rejected') {
+    return fetchAPI<WorkflowRun>(`/workflow-runs/${id}/approval`, {
+      method: 'POST',
+      body: JSON.stringify({ decision }),
+    });
+  },
+};
+
+export const complianceApi = {
+  rules(params: ListParams = {}) {
+    return fetchAPI<PaginatedResponse<ComplianceRule>>(`/compliance/rules${buildQuery(params)}`);
+  },
+  results(params: ListParams & { status?: string } = {}) {
+    return fetchAPI<PaginatedResponse<ComplianceResult>>(
+      `/compliance/results${buildQuery(params)}`,
+    );
+  },
+  score() {
+    return fetchAPI<ComplianceEvaluationResponse>('/compliance/score');
+  },
+  evaluate() {
+    return fetchAPI<ComplianceEvaluationResponse>('/compliance/evaluations', { method: 'POST' });
+  },
+};
+
+// --- IGA ---
+export interface IGAConnector {
+  id: string;
+  organization_id: string;
+  name: string;
+  type: 'scim' | 'relay' | string;
+  base_url?: string;
+  credential_id?: string;
+  collector_id?: string;
+  capabilities: Record<string, boolean>;
+  config?: Record<string, unknown>;
+  status: string;
+  last_sync_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IGATask {
+  id: string;
+  connector_id: string;
+  user_id?: string;
+  external_id?: string;
+  action: string;
+  status: string;
+  attempts: number;
+  max_attempts: number;
+  next_run_at: string;
+  error?: string;
+  created_at: string;
+}
+
+export interface IGAAccessRequest {
+  id: string;
+  requester_id: string;
+  subject_user_id: string;
+  connector_id?: string;
+  entitlement: string;
+  reason?: string;
+  status: string;
+  created_at: string;
+}
+
+export interface IGAAccessReview {
+  id: string;
+  name: string;
+  description?: string;
+  status: string;
+  due_at?: string;
+  created_at: string;
+}
+
+export interface IGADriftFinding {
+  id: string;
+  connector_id: string;
+  external_id: string;
+  user_id?: string;
+  drift_type: string;
+  severity: string;
+  status: string;
+  created_at: string;
+}
+
+export interface IGACreateConnectorRequest {
+  name: string;
+  type: string;
+  base_url?: string;
+  collector_id?: string;
+  credential_id?: string;
+  secret?: Record<string, unknown>;
+  config?: Record<string, unknown>;
+}
+
+export const igaApi = {
+  connectors(params: ListParams = {}): Promise<PaginatedResponse<IGAConnector>> {
+    return fetchAPI(`/iga/connectors${buildQuery(params)}`);
+  },
+  createConnector(data: IGACreateConnectorRequest): Promise<IGAConnector> {
+    return fetchAPI('/iga/connectors', { method: 'POST', body: JSON.stringify(data) });
+  },
+  testConnector(id: string): Promise<Record<string, unknown>> {
+    return fetchAPI(`/iga/connectors/${id}/test`, { method: 'POST' });
+  },
+  syncConnector(id: string): Promise<Record<string, unknown>> {
+    return fetchAPI(`/iga/connectors/${id}/sync`, { method: 'POST' });
+  },
+  tasks(params: ListParams & { status?: string } = {}): Promise<PaginatedResponse<IGATask>> {
+    return fetchAPI(`/iga/tasks${buildQuery(params)}`);
+  },
+  retryTask(id: string): Promise<IGATask> {
+    return fetchAPI(`/iga/tasks/${id}/retry`, { method: 'POST' });
+  },
+  accessRequests(params: ListParams = {}): Promise<PaginatedResponse<IGAAccessRequest>> {
+    return fetchAPI(`/iga/access-requests${buildQuery(params)}`);
+  },
+  approveAccessRequest(id: string, comment = ''): Promise<IGAAccessRequest> {
+    return fetchAPI(`/iga/access-requests/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ comment }),
+    });
+  },
+  rejectAccessRequest(id: string, comment = ''): Promise<IGAAccessRequest> {
+    return fetchAPI(`/iga/access-requests/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ comment }),
+    });
+  },
+  reviews(params: ListParams = {}): Promise<PaginatedResponse<IGAAccessReview>> {
+    return fetchAPI(`/iga/access-reviews${buildQuery(params)}`);
+  },
+  drift(params: ListParams = {}): Promise<PaginatedResponse<IGADriftFinding>> {
+    return fetchAPI(`/iga/drift${buildQuery(params)}`);
+  },
+  remediateDrift(id: string): Promise<IGATask> {
+    return fetchAPI(`/iga/drift/${id}/remediate`, { method: 'POST' });
   },
 };

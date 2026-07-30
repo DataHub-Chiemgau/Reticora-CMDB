@@ -26,11 +26,16 @@ const scopeOptions = [
 
 function statusVariant(status: string) {
   switch (status) {
-    case 'planned': return 'neutral' as const;
-    case 'in_progress': return 'warning' as const;
-    case 'completed': return 'success' as const;
-    case 'cancelled': return 'danger' as const;
-    default: return 'neutral' as const;
+    case 'planned':
+      return 'neutral' as const;
+    case 'in_progress':
+      return 'warning' as const;
+    case 'completed':
+      return 'success' as const;
+    case 'cancelled':
+      return 'danger' as const;
+    default:
+      return 'neutral' as const;
   }
 }
 
@@ -49,20 +54,36 @@ export function StocktakeListPage() {
   const handleCreate = () => {
     if (!form.title) return;
     createMutation.mutate(form, {
-      onSuccess: () => { setShowCreate(false); setForm({ title: '', description: '', scope: 'full', due_date: '' }); },
+      onSuccess: () => {
+        setShowCreate(false);
+        setForm({ title: '', description: '', scope: 'full', due_date: '' });
+      },
     });
   };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('stocktake.title', 'Inventur')}</h1>
-        <Button onClick={() => setShowCreate(true)}>{t('stocktake.create', 'Inventur starten')}</Button>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+          {t('stocktake.title', 'Inventur')}
+        </h1>
+        <Button onClick={() => setShowCreate(true)}>
+          {t('stocktake.create', 'Inventur starten')}
+        </Button>
       </div>
 
       <div className="flex gap-4 flex-wrap">
-        <Input label={t('common.search', 'Suche')} value={search} onChange={(e) => setSearch(e.target.value)} />
-        <Select label={t('ci.status', 'Status')} value={status} onChange={(e) => setStatus(e.target.value)} options={statusOptions} />
+        <Input
+          label={t('common.search', 'Suche')}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <Select
+          label={t('ci.status', 'Status')}
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+          options={statusOptions}
+        />
       </div>
 
       {isLoading ? (
@@ -85,19 +106,37 @@ export function StocktakeListPage() {
                 {data?.data.map((st) => (
                   <tr key={st.id} className="text-sm text-gray-700 dark:text-gray-300">
                     <td className="py-2 font-medium">{st.title}</td>
-                    <td className="py-2"><Badge variant={statusVariant(st.status)}>{st.status}</Badge></td>
-                    <td className="py-2">{st.scope}</td>
-                    <td className="py-2">{st.total_scanned}/{st.total_expected}</td>
-                    <td className="py-2">{st.total_missing > 0 ? <Badge variant="danger">{st.total_missing}</Badge> : '0'}</td>
                     <td className="py-2">
-                      <Button variant="ghost" size="sm" onClick={() => deleteMutation.mutate(st.id)}>
+                      <Badge variant={statusVariant(st.status)}>{st.status}</Badge>
+                    </td>
+                    <td className="py-2">{st.scope}</td>
+                    <td className="py-2">
+                      {st.total_scanned}/{st.total_expected}
+                    </td>
+                    <td className="py-2">
+                      {st.total_missing > 0 ? (
+                        <Badge variant="danger">{st.total_missing}</Badge>
+                      ) : (
+                        '0'
+                      )}
+                    </td>
+                    <td className="py-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => deleteMutation.mutate(st.id)}
+                      >
                         {t('common.delete', 'Löschen')}
                       </Button>
                     </td>
                   </tr>
                 ))}
                 {(!data?.data || data.data.length === 0) && (
-                  <tr><td colSpan={6} className="py-4 text-center text-gray-400">{t('common.noData', 'Keine Daten')}</td></tr>
+                  <tr>
+                    <td colSpan={6} className="py-4 text-center text-gray-400">
+                      {t('common.noData', 'Keine Daten')}
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
@@ -105,14 +144,38 @@ export function StocktakeListPage() {
         </Card>
       )}
 
-      <Modal open={showCreate} onOpenChange={setShowCreate} title={t('stocktake.create', 'Inventur starten')}>
+      <Modal
+        open={showCreate}
+        onOpenChange={setShowCreate}
+        title={t('stocktake.create', 'Inventur starten')}
+      >
         <div className="space-y-4">
-          <Input label={t('stocktake.name', 'Bezeichnung')} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
-          <Input label={t('common.description', 'Beschreibung')} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-          <Select label={t('stocktake.scope', 'Umfang')} value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value })} options={scopeOptions} />
-          <Input label={t('stocktake.dueDate', 'Fällig am')} value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
+          <Input
+            label={t('stocktake.name', 'Bezeichnung')}
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            required
+          />
+          <Input
+            label={t('common.description', 'Beschreibung')}
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+          />
+          <Select
+            label={t('stocktake.scope', 'Umfang')}
+            value={form.scope}
+            onChange={(e) => setForm({ ...form, scope: e.target.value })}
+            options={scopeOptions}
+          />
+          <Input
+            label={t('stocktake.dueDate', 'Fällig am')}
+            value={form.due_date}
+            onChange={(e) => setForm({ ...form, due_date: e.target.value })}
+          />
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowCreate(false)}>{t('common.cancel', 'Abbrechen')}</Button>
+            <Button variant="secondary" onClick={() => setShowCreate(false)}>
+              {t('common.cancel', 'Abbrechen')}
+            </Button>
             <Button onClick={handleCreate}>{t('common.save', 'Speichern')}</Button>
           </div>
         </div>

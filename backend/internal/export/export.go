@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -14,14 +15,20 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// streamBatchSize is the number of rows fetched per keyset page while
+// streaming an export. It bounds the memory an export holds at any time,
+// independent of how many CIs the tenant owns.
+const streamBatchSize = 500
+
 // Handler provides HTTP handlers for export endpoints.
 type Handler struct {
-	ciRepo ci.Repository
+	ciRepo    ci.Repository
+	batchSize int
 }
 
 // NewHandler creates a new export handler.
 func NewHandler(ciRepo ci.Repository) *Handler {
-	return &Handler{ciRepo: ciRepo}
+	return &Handler{ciRepo: ciRepo, batchSize: streamBatchSize}
 }
 
 // RegisterRoutes registers export routes.
@@ -29,7 +36,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/export/cis", h.ExportCIs)
 }
 
-// ExportCIs handles GET /api/v1/export/cis?format=csv|json|datev
+// ExportCIs handles GET /api/v1/export/cis?format=csv|json|datev.
+//
+// The export is streamed: rows are fetched in keyset-paginated batches and
+// flushed to the client as they are produced, so an export of a large tenant
+// neither buffers the whole result set in memory nor hits a row cap.
 func (h *Handler) ExportCIs(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -41,41 +52,119 @@ func (h *Handler) ExportCIs(w http.ResponseWriter, r *http.Request) {
 	if format == "" {
 		format = "json"
 	}
+	if format != "csv" && format != "datev" && format != "json" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "format must be 'csv', 'datev' or 'json'")
+		return
+	}
 
 	filter := ci.FilterParams{
 		Status:   r.URL.Query().Get("status"),
 		TypeID:   r.URL.Query().Get("ci_type_id"),
 		ClientID: r.URL.Query().Get("client_id"),
+		SortBy:   "created_at",
+		SortDir:  "asc",
 	}
 
-	items, _, err := h.ciRepo.List(t.OrganizationID, filter, api.PaginationParams{Limit: 10000, Offset: 0})
+	// Probe the first batch before any header is written so that a repository
+	// failure can still be reported as a proper problem+json response.
+	first, err := h.fetch(r, t.OrganizationID, filter, nil)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
 
+	writer := newRowWriter(format, w)
+	writer.begin()
+
+	batch := first
+	for {
+		for _, item := range batch {
+			writer.row(item)
+		}
+		writer.flush(w)
+
+		if len(batch) < h.batchSize {
+			break
+		}
+		cursor := ci.NextCursor(batch, filter, h.batchSize)
+		if cursor == "" {
+			break
+		}
+		decoded, decErr := api.DecodeCursor(cursor)
+		if decErr != nil {
+			break
+		}
+		batch, err = h.fetch(r, t.OrganizationID, filter, &decoded)
+		if err != nil {
+			// Headers are already sent; abort the stream so the client sees a
+			// truncated (and therefore invalid) response instead of silently
+			// receiving partial data that looks complete.
+			writer.abort(w)
+			return
+		}
+		if len(batch) == 0 {
+			break
+		}
+	}
+
+	writer.end()
+	writer.flush(w)
+}
+
+func (h *Handler) fetch(r *http.Request, orgID string, filter ci.FilterParams, cursor *api.Cursor) ([]ci.Item, error) {
+	items, _, err := h.ciRepo.List(r.Context(), orgID, filter, api.PaginationParams{
+		Limit:  h.batchSize,
+		Cursor: cursor,
+	})
+	return items, err
+}
+
+// rowWriter serialises exported rows incrementally for one output format.
+type rowWriter struct {
+	format  string
+	csv     *csv.Writer
+	json    *json.Encoder
+	out     io.Writer
+	written int
+	failed  bool
+}
+
+func newRowWriter(format string, w http.ResponseWriter) *rowWriter {
+	rw := &rowWriter{format: format, out: w}
 	switch format {
 	case "csv":
-		h.writeCSV(w, items)
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment; filename=cis_export.csv")
+		rw.csv = csv.NewWriter(w)
 	case "datev":
-		h.writeDATEV(w, items)
-	case "json":
-		h.writeJSON(w, items)
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment; filename=cis_export_datev.csv")
+		rw.csv = csv.NewWriter(w)
+		rw.csv.Comma = ';'
 	default:
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "format must be 'csv', 'datev' or 'json'")
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", "attachment; filename=cis_export.json")
+		rw.json = json.NewEncoder(w)
+	}
+	w.WriteHeader(http.StatusOK)
+	return rw
+}
+
+func (rw *rowWriter) begin() {
+	switch rw.format {
+	case "csv":
+		_ = rw.csv.Write([]string{"id", "name", "status", "ci_type_id", "manufacturer", "model", "serial_number", "management_ip", "firmware_version", "discovery_source", "created_at", "updated_at"})
+	case "datev":
+		_ = rw.csv.Write([]string{"Inventarnummer", "Bezeichnung", "Hersteller", "Modell", "Seriennummer", "Anschaffungsdatum", "Standort", "Kostenstelle", "Status"})
+	default:
+		_, _ = io.WriteString(rw.out, `{"data":[`)
 	}
 }
 
-func (h *Handler) writeCSV(w http.ResponseWriter, items []ci.Item) {
-	w.Header().Set("Content-Type", "text/csv")
-	w.Header().Set("Content-Disposition", "attachment; filename=cis_export.csv")
-
-	writer := csv.NewWriter(w)
-	defer writer.Flush()
-
-	_ = writer.Write([]string{"id", "name", "status", "ci_type_id", "manufacturer", "model", "serial_number", "management_ip", "firmware_version", "source", "created_at", "updated_at"})
-	for _, item := range items {
-		_ = writer.Write([]string{
+func (rw *rowWriter) row(item ci.Item) {
+	switch rw.format {
+	case "csv":
+		_ = rw.csv.Write([]string{
 			item.ID,
 			item.Name,
 			item.Status,
@@ -85,24 +174,12 @@ func (h *Handler) writeCSV(w http.ResponseWriter, items []ci.Item) {
 			item.SerialNumber,
 			item.ManagementIP,
 			item.FirmwareVersion,
-			item.Source,
+			item.DiscoverySource,
 			item.CreatedAt,
 			item.UpdatedAt,
 		})
-	}
-}
-
-func (h *Handler) writeDATEV(w http.ResponseWriter, items []ci.Item) {
-	w.Header().Set("Content-Type", "text/csv")
-	w.Header().Set("Content-Disposition", "attachment; filename=cis_export_datev.csv")
-
-	writer := csv.NewWriter(w)
-	writer.Comma = ';'
-	defer writer.Flush()
-
-	_ = writer.Write([]string{"Inventarnummer", "Bezeichnung", "Hersteller", "Modell", "Seriennummer", "Anschaffungsdatum", "Standort", "Kostenstelle", "Status"})
-	for _, item := range items {
-		_ = writer.Write([]string{
+	case "datev":
+		_ = rw.csv.Write([]string{
 			item.ID,
 			item.Name,
 			item.Manufacturer,
@@ -113,16 +190,38 @@ func (h *Handler) writeDATEV(w http.ResponseWriter, items []ci.Item) {
 			attributeString(item.Attributes, "cost_center", "kostenstelle"),
 			item.Status,
 		})
+	default:
+		if rw.written > 0 {
+			_, _ = io.WriteString(rw.out, ",")
+		}
+		_ = rw.json.Encode(item)
+	}
+	rw.written++
+}
+
+func (rw *rowWriter) end() {
+	if rw.failed {
+		return
+	}
+	if rw.format == "json" {
+		_, _ = io.WriteString(rw.out, fmt.Sprintf(`],"total":%d}`, rw.written))
 	}
 }
 
-func (h *Handler) writeJSON(w http.ResponseWriter, items []ci.Item) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Disposition", "attachment; filename=cis_export.json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"data":  items,
-		"total": len(items),
-	})
+// abort stops the stream without a closing delimiter so a truncated export is
+// detectable by the client.
+func (rw *rowWriter) abort(w http.ResponseWriter) {
+	rw.failed = true
+	rw.flush(w)
+}
+
+func (rw *rowWriter) flush(w http.ResponseWriter) {
+	if rw.csv != nil {
+		rw.csv.Flush()
+	}
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func attributeString(attrs map[string]any, keys ...string) string {

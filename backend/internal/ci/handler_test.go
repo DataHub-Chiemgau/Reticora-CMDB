@@ -19,7 +19,7 @@ func tenantCtx(r *http.Request) *http.Request {
 
 func TestHandler_CreateAndGet(t *testing.T) {
 	repo := NewMemoryRepository()
-	h := NewHandler(repo)
+	h := NewHandler(NewService(repo))
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
@@ -63,7 +63,7 @@ func TestHandler_CreateAndGet(t *testing.T) {
 
 func TestHandler_List(t *testing.T) {
 	repo := NewMemoryRepository()
-	h := NewHandler(repo)
+	h := NewHandler(NewService(repo))
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
@@ -76,7 +76,7 @@ func TestHandler_List(t *testing.T) {
 			Status:         "active",
 			Attributes:     map[string]any{},
 		}
-		repo.Create(item)
+		repo.Create(context.Background(), item)
 	}
 
 	req := httptest.NewRequest("GET", "/api/v1/cis?limit=10", nil)
@@ -100,7 +100,7 @@ func TestHandler_List(t *testing.T) {
 
 func TestHandler_Update(t *testing.T) {
 	repo := NewMemoryRepository()
-	h := NewHandler(repo)
+	h := NewHandler(NewService(repo))
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
@@ -111,7 +111,7 @@ func TestHandler_Update(t *testing.T) {
 		Status:         "active",
 		Attributes:     map[string]any{},
 	}
-	repo.Create(item)
+	repo.Create(context.Background(), item)
 
 	body := `{"name":"new-name","status":"maintenance"}`
 	req := httptest.NewRequest("PATCH", "/api/v1/cis/"+item.ID, bytes.NewBufferString(body))
@@ -135,7 +135,7 @@ func TestHandler_Update(t *testing.T) {
 
 func TestHandler_Delete(t *testing.T) {
 	repo := NewMemoryRepository()
-	h := NewHandler(repo)
+	h := NewHandler(NewService(repo))
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
@@ -146,7 +146,7 @@ func TestHandler_Delete(t *testing.T) {
 		Status:         "active",
 		Attributes:     map[string]any{},
 	}
-	repo.Create(item)
+	repo.Create(context.Background(), item)
 
 	req := httptest.NewRequest("DELETE", "/api/v1/cis/"+item.ID, nil)
 	req = tenantCtx(req)
@@ -170,7 +170,7 @@ func TestHandler_Delete(t *testing.T) {
 
 func TestHandler_Unauthorized(t *testing.T) {
 	repo := NewMemoryRepository()
-	h := NewHandler(repo)
+	h := NewHandler(NewService(repo))
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
@@ -187,12 +187,12 @@ func TestHandler_Unauthorized(t *testing.T) {
 
 func TestHandler_ListFilter(t *testing.T) {
 	repo := NewMemoryRepository()
-	h := NewHandler(repo)
+	h := NewHandler(NewService(repo))
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
-	repo.Create(&Item{OrganizationID: "org-1", CITypeID: "type-server", Name: "srv-active", Status: "active", Attributes: map[string]any{}})
-	repo.Create(&Item{OrganizationID: "org-1", CITypeID: "type-server", Name: "srv-maint", Status: "maintenance", Attributes: map[string]any{}})
+	repo.Create(context.Background(), &Item{OrganizationID: "org-1", CITypeID: "type-server", Name: "srv-active", Status: "active", Attributes: map[string]any{}})
+	repo.Create(context.Background(), &Item{OrganizationID: "org-1", CITypeID: "type-server", Name: "srv-maint", Status: "maintenance", Attributes: map[string]any{}})
 
 	req := httptest.NewRequest("GET", "/api/v1/cis?status=active", nil)
 	req = tenantCtx(req)

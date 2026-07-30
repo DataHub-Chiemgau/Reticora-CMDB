@@ -2,7 +2,9 @@ package webhook
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -101,5 +103,78 @@ func TestHandler_Delete(t *testing.T) {
 
 	if w.Code != http.StatusNoContent {
 		t.Errorf("expected 204, got %d", w.Code)
+	}
+}
+
+func TestHandler_Test_DeliversSignedPing(t *testing.T) {
+	var (
+		gotEvent     string
+		gotSignature string
+		gotBody      []byte
+	)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEvent = r.Header.Get("X-Webhook-Event")
+		gotSignature = r.Header.Get("X-Webhook-Signature")
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	repo := NewMemoryRepository()
+	sub := &Subscription{
+		OrganizationID: "org-1",
+		Name:           "Ping",
+		URL:            target.URL,
+		Secret:         "s3cr3t",
+		Events:         []string{"ci.created"},
+		IsActive:       true,
+	}
+	if err := repo.Create(sub); err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+
+	dispatcher := NewDispatcher(repo, target.Client())
+	defer dispatcher.Shutdown(context.Background())
+
+	mux := chi.NewRouter()
+	NewHandler(repo, dispatcher).RegisterRoutes(mux)
+
+	req := tenantCtx(httptest.NewRequest("POST", "/api/v1/webhooks/"+sub.ID+"/test", nil))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var delivery Delivery
+	if err := json.Unmarshal(w.Body.Bytes(), &delivery); err != nil {
+		t.Fatalf("decode delivery: %v", err)
+	}
+	if !delivery.Success || delivery.StatusCode != http.StatusOK {
+		t.Errorf("expected a successful delivery, got %+v", delivery)
+	}
+	if gotEvent != TestEvent {
+		t.Errorf("expected event %q, got %q", TestEvent, gotEvent)
+	}
+	if want := signPayload(sub.Secret, gotBody); gotSignature != want {
+		t.Errorf("expected signature %q, got %q", want, gotSignature)
+	}
+}
+
+func TestHandler_Test_UnknownSubscription(t *testing.T) {
+	repo := NewMemoryRepository()
+	dispatcher := NewDispatcher(repo, nil)
+	defer dispatcher.Shutdown(context.Background())
+
+	mux := chi.NewRouter()
+	NewHandler(repo, dispatcher).RegisterRoutes(mux)
+
+	req := tenantCtx(httptest.NewRequest("POST", "/api/v1/webhooks/does-not-exist/test", nil))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }

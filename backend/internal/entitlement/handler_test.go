@@ -17,7 +17,7 @@ func tenantCtx(r *http.Request) *http.Request {
 }
 
 func TestHandlerGrantListAndCheck(t *testing.T) {
-	h := NewHandler(NewService())
+	h := NewHandler(NewService(NewMemoryRepository(), Options{DefaultPlan: PlanEssential, Enforce: true}))
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
@@ -44,8 +44,14 @@ func TestHandlerGrantListAndCheck(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &listResp); err != nil {
 		t.Fatal(err)
 	}
-	if listResp.Total != 1 || listResp.Data[0].FeatureKey != "ticketing" {
-		t.Fatalf("unexpected list response: %+v", listResp)
+	var found bool
+	for _, item := range listResp.Data {
+		if item.FeatureKey == "ticketing" && item.Enabled {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected the granted ticketing entitlement in the list: %+v", listResp)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/entitlements/check/ticketing", nil)
@@ -62,5 +68,55 @@ func TestHandlerGrantListAndCheck(t *testing.T) {
 	}
 	if enabled, _ := checkResp["enabled"].(bool); !enabled {
 		t.Fatalf("expected enabled=true, got %v", checkResp["enabled"])
+	}
+}
+
+func TestMiddlewareBlocksUnentitledModule(t *testing.T) {
+	svc := NewService(NewMemoryRepository(), Options{DefaultPlan: PlanEssential, Enforce: true})
+	handler := svc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := tenantCtx(httptest.NewRequest(http.MethodGet, "/api/v1/tickets", nil))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for an unentitled module, got %d", w.Code)
+	}
+
+	req = tenantCtx(httptest.NewRequest(http.MethodGet, "/api/v1/cis", nil))
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected core routes to stay reachable, got %d", w.Code)
+	}
+
+	if _, err := svc.Grant(req.Context(), Entitlement{
+		OrganizationID: "org-1",
+		FeatureKey:     FeatureTicketing,
+		Plan:           PlanStandard,
+		Enabled:        true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req = tenantCtx(httptest.NewRequest(http.MethodGet, "/api/v1/tickets", nil))
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 after granting the entitlement, got %d", w.Code)
+	}
+}
+
+func TestMiddlewareRequiresTenant(t *testing.T) {
+	svc := NewService(NewMemoryRepository(), Options{DefaultPlan: PlanEssential, Enforce: true})
+	handler := svc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/tickets", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without tenant context, got %d", w.Code)
 	}
 }

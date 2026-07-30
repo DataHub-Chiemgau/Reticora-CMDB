@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -32,7 +33,7 @@ func TestReconcileConflict(t *testing.T) {
 func TestBulkIngestUsesReconciliation(t *testing.T) {
 	discoveryRepo := NewMemoryRepository()
 	ciRepo := ci.NewMemoryRepository()
-	if err := ciRepo.Create(&ci.Item{OrganizationID: "org-1", CITypeID: "server", Name: "srv-01", SerialNumber: "SN-1", Attributes: map[string]any{}}); err != nil {
+	if err := ciRepo.Create(context.Background(), &ci.Item{OrganizationID: "org-1", CITypeID: "server", Name: "srv-01", SerialNumber: "SN-1", Attributes: map[string]any{}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -58,7 +59,7 @@ func TestBulkIngestUsesReconciliation(t *testing.T) {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
 
-	items, total, err := ciRepo.List("org-1", ci.FilterParams{}, api.PaginationParams{Limit: 100, Offset: 0})
+	items, total, err := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 100, Offset: 0})
 	if err != nil {
 		t.Fatal(err)
 	}

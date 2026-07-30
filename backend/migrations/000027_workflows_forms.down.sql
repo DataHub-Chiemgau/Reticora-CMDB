@@ -1,0 +1,11 @@
+DROP POLICY IF EXISTS workflow_step_tenant_isolation ON workflow_step;
+DROP TABLE IF EXISTS workflow_step;
+DROP POLICY IF EXISTS workflow_run_tenant_isolation ON workflow_run;
+DROP TABLE IF EXISTS workflow_run;
+DROP POLICY IF EXISTS workflow_def_tenant_isolation ON workflow_def;
+DROP TABLE IF EXISTS workflow_def;
+DROP POLICY IF EXISTS form_submission_tenant_isolation ON form_submission;
+DROP TABLE IF EXISTS form_submission;
+DROP POLICY IF EXISTS form_def_tenant_isolation ON form_def;
+DROP TABLE IF EXISTS form_def;
+DELETE FROM permission WHERE key IN ('form:read', 'form:write', 'workflow:read', 'workflow:write');

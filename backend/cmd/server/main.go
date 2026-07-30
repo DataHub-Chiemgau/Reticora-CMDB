@@ -3,7 +3,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"flag"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,36 +12,32 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
-	"github.com/go-chi/chi/v5"
 )
 
 // version is set at build-time via -ldflags.
 var version = "dev"
 
 func main() {
+	noDB := flag.Bool("no-db", false,
+		"run with in-memory repositories for local development; all data is lost on restart")
+	flag.Parse()
+
 	cfg := config.Load()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
@@ -54,19 +50,29 @@ func main() {
 	}
 	defer shutdown(context.Background())
 
-	// Initialize envelope encryptor
+	// Initialize envelope encryptor. Credentials are stored encrypted, so a
+	// missing master key must fail startup instead of silently disabling the
+	// credential API.
 	var encryptor *crypto.EnvelopeEncryptor
-	if cfg.MasterKey != "" {
-		var err error
-		encryptor, err = crypto.NewEnvelopeEncryptor(cfg.MasterKey)
-		if err != nil {
-			slog.Error("failed to init envelope encryptor", "error", err)
+	if cfg.MasterKey == "" {
+		if !*noDB {
+			slog.Error("RETICORA_MASTER_KEY is required for credential encryption")
 			os.Exit(1)
 		}
-		slog.Info("envelope encryption initialized")
-	} else {
-		slog.Warn("RETICORA_MASTER_KEY not set, credential encryption unavailable")
+		slog.Warn("RETICORA_MASTER_KEY not set; generating an ephemeral development key")
+		devKey, keyErr := crypto.GenerateMasterKey()
+		if keyErr != nil {
+			slog.Error("failed to generate development master key", "error", keyErr)
+			os.Exit(1)
+		}
+		cfg.MasterKey = devKey
 	}
+	encryptor, err = crypto.NewEnvelopeEncryptor(cfg.MasterKey)
+	if err != nil {
+		slog.Error("failed to init envelope encryptor", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("envelope encryption initialized")
 
 	// Initialize OIDC provider
 	oidcProvider := identity.NewOIDCProvider(identity.OIDCConfig{
@@ -107,59 +113,66 @@ func main() {
 		cacheStore = cache.NewMemoryStore()
 	}
 
-	// Repositories: use PostgreSQL when DATABASE_URL is available, otherwise memory for dev
+	// Repositories. PostgreSQL is the only supported production backend; the
+	// in-memory implementations are reserved for tests and the explicit --no-db
+	// development mode. A configured database that cannot be reached is a fatal
+	// startup error rather than a silent downgrade to per-replica memory state.
 	var (
-		ciRepo        ci.Repository
-		relRepo       relationship.Repository
-		webhookRepo   webhook.Repository
-		discoveryRepo discovery.Repository
-		assetRepo     asset.Repository
-		assignmentRepo assignment.Repository
-		documentRepo  document.Repository
-		stocktakeRepo stocktake.Repository
-		ticketRepo    ticket.Repository
-		userRepo      user.Repository
+		repos        server.Repositories
+		auditHandler *audit.Handler
 	)
 
-	if cfg.DatabaseURL != "" && cfg.Environment != "development" {
+	if *noDB {
+		slog.Warn("running with --no-db: all state is in-memory and lost on restart")
+		repos = server.MemoryRepositories()
+	} else {
+		if cfg.DatabaseURL == "" {
+			slog.Error("RETICORA_DATABASE_URL is required; start with --no-db for an ephemeral development server")
+			os.Exit(1)
+		}
 		pool, err := database.NewPool(context.Background(), cfg.DatabaseURL)
 		if err != nil {
-			slog.Error("failed to connect to database, falling back to memory repositories", "error", err)
-			goto memoryRepos
+			slog.Error("failed to connect to database", "error", err, "url", maskDSN(cfg.DatabaseURL))
+			os.Exit(1)
 		}
 		defer pool.Close()
 
 		slog.Info("connected to PostgreSQL", "url", maskDSN(cfg.DatabaseURL))
-		ciRepo = ci.NewPGRepository(pool)
-		webhookRepo = webhook.NewPGRepository(pool)
-		// Modules without PG implementations use memory repos until migration
-		relRepo = relationship.NewMemoryRepository()
-		discoveryRepo = discovery.NewMemoryRepository()
-		assetRepo = asset.NewMemoryRepository()
-		assignmentRepo = assignment.NewMemoryRepository()
-		documentRepo = document.NewMemoryRepository()
-		stocktakeRepo = stocktake.NewMemoryRepository()
-		ticketRepo = ticket.NewMemoryRepository()
-		userRepo = user.NewMemoryRepository()
-		goto reposReady
+		repos = server.PostgresRepositories(pool, audit.NewPGRecorder())
+		auditHandler = audit.NewHandler(pool)
 	}
+	if strings.EqualFold(cfg.SearchBackend, "opensearch") {
+		if cfg.OpenSearchURL == "" {
+			slog.Error("RETICORA_OPENSEARCH_URL is required when RETICORA_SEARCH_BACKEND=opensearch")
+			os.Exit(1)
+		}
+		osBackend := search.NewOpenSearchBackend(search.OpenSearchConfig{
+			URL: cfg.OpenSearchURL, Username: cfg.OpenSearchUsername, Password: cfg.OpenSearchPassword, Index: cfg.OpenSearchIndex,
+		}, nil)
+		if err := osBackend.Ping(); err != nil {
+			slog.Error("failed to connect to OpenSearch", "error", err)
+			os.Exit(1)
+		}
+		if pgSearch, ok := repos.Search.(*search.PGRepository); ok {
+			repos.Search = &search.HybridBackend{Remote: osBackend, Source: pgSearch}
+		} else {
+			repos.Search = osBackend
+		}
+	}
+	aiProvider := ai.NewOpenAIProvider(ai.ProviderConfig{
+		BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, ChatModel: cfg.LLMChatModel, EmbeddingModel: cfg.LLMEmbeddingModel,
+	}, nil)
 
-memoryRepos:
-	slog.Info("using in-memory repositories (development mode)")
-	ciRepo = ci.NewMemoryRepository()
-	relRepo = relationship.NewMemoryRepository()
-	webhookRepo = webhook.NewMemoryRepository()
-	discoveryRepo = discovery.NewMemoryRepository()
-	assetRepo = asset.NewMemoryRepository()
-	assignmentRepo = assignment.NewMemoryRepository()
-	documentRepo = document.NewMemoryRepository()
-	stocktakeRepo = stocktake.NewMemoryRepository()
-	ticketRepo = ticket.NewMemoryRepository()
-	userRepo = user.NewMemoryRepository()
+	entitlementSvc := entitlement.NewService(repos.Entitlement, entitlement.Options{
+		DefaultPlan: entitlement.Plan(cfg.DefaultPlan),
+		Enforce:     cfg.EntitlementEnforcement,
+	})
+	slog.Info("entitlement enforcement configured",
+		"default_plan", cfg.DefaultPlan, "enforced", cfg.EntitlementEnforcement)
 
-reposReady:
-	entitlementSvc := entitlement.NewService()
-	webhookDispatcher := webhook.NewDispatcher(webhookRepo, nil)
+	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, nil, webhook.DispatcherOptions{
+		Deliveries: repos.WebhookDeliveries,
+	})
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -168,71 +181,30 @@ reposReady:
 		}
 	}()
 
-	// Handlers
-	identityHandler := identity.NewHandler(oidcProvider, sessionIssuer)
-	ciHandler := ci.NewHandler(ciRepo, webhookDispatcher)
-	relHandler := relationship.NewHandler(relRepo)
-	webhookHandler := webhook.NewHandler(webhookRepo)
-	discoveryHandler := discovery.NewHandler(discoveryRepo, ciRepo)
-	exportHandler := export.NewHandler(ciRepo)
-	entitlementHandler := entitlement.NewHandler(entitlementSvc)
-	assetHandler := asset.NewHandler(assetRepo)
-	assignmentHandler := assignment.NewHandler(assignmentRepo)
-	documentHandler := document.NewHandler(documentRepo)
-	stocktakeHandler := stocktake.NewHandler(stocktakeRepo)
-	ticketHandler := ticket.NewHandler(ticketRepo)
-	userHandler := user.NewHandler(userRepo)
-	monitoringHandler := monitoring.NewHandler(monitoring.NewMemoryMetricStore())
-	graphqlHandler := graphqlbff.NewHandler(ciRepo, relRepo)
-
-	// Credential handler (requires encryption)
-	var credentialHandler *credential.Handler
-	if encryptor != nil {
-		credRepo := credential.NewMemoryRepository()
-		credSvc := credential.NewService(credRepo, encryptor)
-		credentialHandler = credential.NewHandler(credSvc)
+	mux, err := server.NewRouter(repos, server.Options{
+		Version:      version,
+		Entitlements: entitlementSvc,
+		Dispatcher:   webhookDispatcher,
+		CIService:    ci.NewServiceWithLimits(repos.CI, entitlementSvc),
+		Credentials:  credential.NewService(repos.Credential, encryptor),
+		OIDC:         oidcProvider,
+		Sessions:     sessionIssuer,
+		Audit:        auditHandler,
+		AIProvider:   aiProvider,
+	})
+	if err != nil {
+		slog.Error("failed to build API router", "error", err)
+		os.Exit(1)
 	}
 
-	mux := chi.NewRouter()
-
-	// Health and metrics endpoints (no auth)
-	mux.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"status":"ok"}`)
-	})
-	mux.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		// Expose application metrics in Prometheus exposition format.
-		// When the OpenTelemetry SDK is fully initialized with a Prometheus exporter,
-		// replace this with promhttp.Handler() from the OTel prometheus bridge.
-		fmt.Fprintf(w, "# HELP reticora_up Whether the Reticora server is up.\n")
-		fmt.Fprintf(w, "# TYPE reticora_up gauge\n")
-		fmt.Fprintf(w, "reticora_up 1\n")
-		fmt.Fprintf(w, "# HELP reticora_info Build and version information.\n")
-		fmt.Fprintf(w, "# TYPE reticora_info gauge\n")
-		fmt.Fprintf(w, "reticora_info{version=\"%s\"} 1\n", version)
-	})
-
-	// Register routes
-	identityHandler.RegisterRoutes(mux)
-	entitlementHandler.RegisterRoutes(mux)
-	ciHandler.RegisterRoutes(mux)
-	relHandler.RegisterRoutes(mux)
-	webhookHandler.RegisterRoutes(mux)
-	discoveryHandler.RegisterRoutes(mux)
-	exportHandler.RegisterRoutes(mux)
-	assetHandler.RegisterRoutes(mux)
-	assignmentHandler.RegisterRoutes(mux)
-	documentHandler.RegisterRoutes(mux)
-	stocktakeHandler.RegisterRoutes(mux)
-	ticketHandler.RegisterRoutes(mux)
-	userHandler.RegisterRoutes(mux)
-	monitoringHandler.RegisterRoutes(mux)
-	graphqlHandler.RegisterRoutes(mux)
-	if credentialHandler != nil {
-		credentialHandler.RegisterRoutes(mux)
+	// Session tokens are verified cryptographically whenever a session key is
+	// configured. Without a key the server falls back to unverified claim
+	// parsing, which is only acceptable for local development.
+	authMiddleware := middleware.AuthMiddleware
+	if sessionIssuer != nil {
+		authMiddleware = middleware.AuthMiddlewareWithVerifier(sessionIssuer)
+	} else {
+		slog.Warn("RETICORA_SESSION_KEY_PATH not set; bearer tokens are accepted without signature verification")
 	}
 
 	// Middleware chain per spec:
@@ -242,8 +214,9 @@ reposReady:
 		middleware.RequestID,
 		middleware.Recovery,
 		middleware.Logger,
-		middleware.AuthMiddleware,
+		authMiddleware,
 		middleware.TenantMiddleware,
+		entitlementSvc.Middleware,
 		middleware.RateLimiterWithStore(cfg.RateLimitRPM, cacheStore),
 		middleware.IdempotencyWithStore(cacheStore),
 	)(mux)

@@ -18,7 +18,11 @@ export function Card({ children, className, title, actions }: CardProps) {
     >
       {title || actions ? (
         <div className="mb-4 flex items-start justify-between gap-4">
-          <div>{title ? <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{title}</h3> : null}</div>
+          <div>
+            {title ? (
+              <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+            ) : null}
+          </div>
           {actions ? <div className="shrink-0">{actions}</div> : null}
         </div>
       ) : null}

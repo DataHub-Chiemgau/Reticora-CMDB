@@ -1,6 +1,7 @@
 package ci
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -8,29 +9,27 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// isEntitlementError reports whether the error was raised by the entitlement
+// service because a licensed limit or feature restriction was violated.
+func isEntitlementError(err error) bool {
+	var entitlementErr interface{ LimitExceeded() bool }
+	return errors.As(err, &entitlementErr) && entitlementErr.LimitExceeded()
+}
+
 // EventDispatcher publishes CI lifecycle events.
 type EventDispatcher interface {
 	Dispatch(orgID, event string, payload any)
 }
 
-// Repository defines persistence operations for CIs.
-type Repository interface {
-	List(orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error)
-	GetByID(orgID, id string) (*Item, error)
-	Create(item *Item) error
-	Update(orgID, id string, req UpdateRequest) (*Item, error)
-	Delete(orgID, id string) error
-}
-
 // Handler provides HTTP handlers for CI endpoints.
 type Handler struct {
-	repo       Repository
+	svc        *Service
 	dispatcher EventDispatcher
 }
 
 // NewHandler creates a new CI handler.
-func NewHandler(repo Repository, dispatcher ...EventDispatcher) *Handler {
-	h := &Handler{repo: repo}
+func NewHandler(svc *Service, dispatcher ...EventDispatcher) *Handler {
+	h := &Handler{svc: svc}
 	if len(dispatcher) > 0 {
 		h.dispatcher = dispatcher[0]
 	}
@@ -42,6 +41,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/cis", h.List)
 	r.Post("/api/v1/cis", h.Create)
 	r.Get("/api/v1/cis/{id}", h.Get)
+	r.Get("/api/v1/cis/{id}/changes", h.ListChanges)
 	r.Patch("/api/v1/cis/{id}", h.Update)
 	r.Delete("/api/v1/cis/{id}", h.Delete)
 }
@@ -55,6 +55,10 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	page := api.ParsePagination(r)
+	if page.CursorError != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", page.CursorError.Error())
+		return
+	}
 	filter := FilterParams{
 		Status:   r.URL.Query().Get("status"),
 		TypeID:   r.URL.Query().Get("ci_type_id"),
@@ -64,18 +68,27 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		SortDir:  r.URL.Query().Get("sort_dir"),
 	}
 
-	items, total, err := h.repo.List(t.OrganizationID, filter, page)
+	items, total, err := h.svc.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
+		if errors.Is(err, api.ErrInvalidCursor) {
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
 
+	hasMore := page.Offset+page.Limit < total
+	if page.Cursor != nil {
+		hasMore = len(items) == page.Limit
+	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Item]{
-		Data:    items,
-		Total:   total,
-		Limit:   page.Limit,
-		Offset:  page.Offset,
-		HasMore: page.Offset+page.Limit < total,
+		Data:       items,
+		Total:      total,
+		Limit:      page.Limit,
+		Offset:     page.Offset,
+		HasMore:    hasMore,
+		NextCursor: NextCursor(items, filter, page.Limit),
 	})
 }
 
@@ -88,7 +101,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	item, err := h.repo.GetByID(t.OrganizationID, id)
+	item, err := h.svc.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
 		return
@@ -133,16 +146,20 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		ManagementIP:    req.ManagementIP,
 		FirmwareVersion: req.FirmwareVersion,
 		Attributes:      req.Attributes,
-		Source:          req.Source,
+		DiscoverySource: req.DiscoverySource,
 	}
 	if item.Attributes == nil {
 		item.Attributes = make(map[string]any)
 	}
-	if item.Source == "" {
-		item.Source = "manual"
+	if item.DiscoverySource == "" {
+		item.DiscoverySource = SourceManual
 	}
 
-	if err := h.repo.Create(item); err != nil {
+	if err := h.svc.Create(r.Context(), item); err != nil {
+		if isEntitlementError(err) {
+			api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
+			return
+		}
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -168,7 +185,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := h.repo.Update(t.OrganizationID, id, req)
+	item, err := h.svc.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
 		return
@@ -189,12 +206,8 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	item, err := h.repo.GetByID(t.OrganizationID, id)
+	item, err := h.svc.Delete(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
-		return
-	}
-	if err := h.repo.Delete(t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
 		return
 	}
@@ -203,4 +216,29 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListChanges handles GET /api/v1/cis/{id}/changes.
+func (h *Handler) ListChanges(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+	page := api.ParsePagination(r)
+	changes, total, err := h.svc.ListChanges(r.Context(), t.OrganizationID, id, page)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[Change]{
+		Data:    changes,
+		Total:   total,
+		Limit:   page.Limit,
+		Offset:  page.Offset,
+		HasMore: page.Offset+page.Limit < total,
+	})
 }

@@ -1,6 +1,7 @@
 package document
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -38,6 +39,10 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	page := api.ParsePagination(r)
+	if page.CursorError != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", page.CursorError.Error())
+		return
+	}
 	filter := FilterParams{
 		Category: r.URL.Query().Get("category"),
 		Search:   r.URL.Query().Get("search"),
@@ -47,16 +52,25 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	items, total, err := h.repo.List(t.OrganizationID, filter, page)
 	if err != nil {
+		if errors.Is(err, api.ErrInvalidCursor) {
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
 
+	hasMore := page.Offset+page.Limit < total
+	if page.Cursor != nil {
+		hasMore = len(items) == page.Limit
+	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Document]{
-		Data:    items,
-		Total:   total,
-		Limit:   page.Limit,
-		Offset:  page.Offset,
-		HasMore: page.Offset+page.Limit < total,
+		Data:       items,
+		Total:      total,
+		Limit:      page.Limit,
+		Offset:     page.Offset,
+		HasMore:    hasMore,
+		NextCursor: NextCursor(items, filter, page.Limit),
 	})
 }
 

@@ -39,6 +39,10 @@ type Config struct {
 	OIDCRedirectURL  string
 	SessionKeyPath   string // path to RS256 private key PEM for session JWTs
 
+	// Entitlements
+	DefaultPlan            string // plan applied to tenants without entitlement rows
+	EntitlementEnforcement bool   // when false, feature gating is reported but not enforced
+
 	// Encryption
 	MasterKey string // 32-byte base64-encoded master key for envelope encryption
 
@@ -47,6 +51,19 @@ type Config struct {
 
 	// Rate Limiting
 	RateLimitRPM int // requests per minute per key/user (default 600)
+
+	// Search
+	SearchBackend      string
+	OpenSearchURL      string
+	OpenSearchUsername string
+	OpenSearchPassword string
+	OpenSearchIndex    string
+
+	// AI / LLM
+	LLMBaseURL        string
+	LLMAPIKey         string
+	LLMChatModel      string
+	LLMEmbeddingModel string
 }
 
 // Load reads configuration from environment variables with RETICORA_ prefix
@@ -72,10 +89,24 @@ func Load() *Config {
 		OIDCRedirectURL:  envOrDefault("RETICORA_OIDC_REDIRECT_URL", ""),
 		SessionKeyPath:   envOrDefault("RETICORA_SESSION_KEY_PATH", ""),
 
+		DefaultPlan:            envOrDefault("RETICORA_DEFAULT_PLAN", "essential"),
+		EntitlementEnforcement: envOrDefault("RETICORA_ENTITLEMENT_ENFORCEMENT", "true") != "false",
+
 		MasterKey: envOrDefault("RETICORA_MASTER_KEY", ""),
 
 		OTelEndpoint: envOrDefault("RETICORA_OTEL_ENDPOINT", ""),
 		RateLimitRPM: envOrDefaultInt("RETICORA_RATE_LIMIT_RPM", 600),
+
+		SearchBackend:      envOrDefault("RETICORA_SEARCH_BACKEND", "postgres"),
+		OpenSearchURL:      envOrDefault("RETICORA_OPENSEARCH_URL", ""),
+		OpenSearchUsername: envOrDefault("RETICORA_OPENSEARCH_USERNAME", ""),
+		OpenSearchPassword: envOrDefault("RETICORA_OPENSEARCH_PASSWORD", ""),
+		OpenSearchIndex:    envOrDefault("RETICORA_OPENSEARCH_INDEX", "reticora-search"),
+
+		LLMBaseURL:        envOrDefault("RETICORA_LLM_BASE_URL", ""),
+		LLMAPIKey:         envOrDefault("RETICORA_LLM_API_KEY", ""),
+		LLMChatModel:      envOrDefault("RETICORA_LLM_CHAT_MODEL", ""),
+		LLMEmbeddingModel: envOrDefault("RETICORA_LLM_EMBEDDING_MODEL", ""),
 
 		LogLevel: slog.LevelInfo,
 	}

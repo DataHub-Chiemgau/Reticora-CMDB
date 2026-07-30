@@ -3,11 +3,15 @@ package ci
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -35,7 +39,6 @@ const ciSelectColumns = `
 	COALESCE(sys_object_id, ''),
 	attributes,
 	COALESCE(discovery_source, ''),
-	COALESCE(source, ''),
 	first_seen_at,
 	last_seen_at,
 	is_manual,
@@ -46,12 +49,18 @@ const ciSelectColumns = `
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
-	pool *pgxpool.Pool
+	pool     *pgxpool.Pool
+	recorder audit.TxRecorder
 }
 
 // NewPGRepository creates a new PostgreSQL-backed CI repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
-	return &PGRepository{pool: pool}
+	return NewPGRepositoryWithAudit(pool, nil)
+}
+
+// NewPGRepositoryWithAudit creates a new PostgreSQL-backed CI repository with audit recording.
+func NewPGRepositoryWithAudit(pool *pgxpool.Pool, recorder audit.TxRecorder) *PGRepository {
+	return &PGRepository{pool: pool, recorder: recorder}
 }
 
 // withTenant executes fn within a transaction that has app.org_id set for RLS.
@@ -74,8 +83,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 }
 
 // List returns paginated CIs filtered by the given parameters.
-func (r *PGRepository) List(orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
 	var items []Item
 	var total int
 
@@ -116,26 +124,37 @@ func (r *PGRepository) List(orgID string, filter FilterParams, page api.Paginati
 			return fmt.Errorf("count cis: %w", err)
 		}
 
-		sortColumn := "created_at"
-		switch filter.SortBy {
-		case "name", "status", "created_at", "updated_at":
-			sortColumn = filter.SortBy
-		}
-		sortDirection := "DESC"
-		if strings.EqualFold(filter.SortDir, "asc") {
-			sortDirection = "ASC"
+		sortColumn, sortDirection := NormalizeSort(filter)
+
+		// Keyset pagination: when a cursor is supplied it replaces the OFFSET
+		// so page boundaries stay stable while rows are inserted or removed.
+		listWhere := whereClause
+		listArgs := append([]any{}, args...)
+		if page.Cursor != nil {
+			if !page.Cursor.Matches(sortColumn, sortDirection) {
+				return fmt.Errorf("%w: sort order changed", api.ErrInvalidCursor)
+			}
+			listWhere += " AND " + api.KeysetClause(sortColumn, sortColumnCasts[sortColumn], sortDirection, argPos)
+			listArgs = append(listArgs, page.Cursor.Value, page.Cursor.ID)
+			argPos += 2
 		}
 
-		listArgs := append(append([]any{}, args...), page.Limit, page.Offset)
-		listQuery := fmt.Sprintf(
-			"SELECT %s FROM ci WHERE %s ORDER BY %s %s LIMIT $%d OFFSET $%d",
-			ciSelectColumns,
-			whereClause,
-			sortColumn,
-			sortDirection,
-			argPos,
-			argPos+1,
-		)
+		var listQuery string
+		if page.Cursor != nil {
+			listArgs = append(listArgs, page.Limit)
+			listQuery = fmt.Sprintf(
+				"SELECT %s FROM ci WHERE %s ORDER BY %s %s, id %s LIMIT $%d",
+				ciSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
+				strings.ToUpper(sortDirection), argPos,
+			)
+		} else {
+			listArgs = append(listArgs, page.Limit, page.Offset)
+			listQuery = fmt.Sprintf(
+				"SELECT %s FROM ci WHERE %s ORDER BY %s %s, id %s LIMIT $%d OFFSET $%d",
+				ciSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
+				strings.ToUpper(sortDirection), argPos, argPos+1,
+			)
+		}
 
 		rows, err := tx.Query(ctx, listQuery, listArgs...)
 		if err != nil {
@@ -162,8 +181,7 @@ func (r *PGRepository) List(orgID string, filter FilterParams, page api.Paginati
 }
 
 // GetByID retrieves a single CI by ID within the tenant scope.
-func (r *PGRepository) GetByID(orgID, id string) (*Item, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, error) {
 	var item *Item
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -186,8 +204,7 @@ func (r *PGRepository) GetByID(orgID, id string) (*Item, error) {
 }
 
 // Create inserts a new CI.
-func (r *PGRepository) Create(item *Item) error {
-	ctx := context.Background()
+func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 	return r.withTenant(ctx, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if item.Attributes == nil {
 			item.Attributes = make(map[string]any)
@@ -216,7 +233,6 @@ func (r *PGRepository) Create(item *Item) error {
 				sys_object_id,
 				attributes,
 				discovery_source,
-				source,
 				first_seen_at,
 				last_seen_at,
 				is_manual
@@ -225,7 +241,7 @@ func (r *PGRepository) Create(item *Item) error {
 				$6, $7, $8, $9, $10,
 				$11, $12, $13, $14, $15,
 				$16, $17, $18, $19, $20,
-				$21, $22, $23, $24, $25
+				$21, $22, $23, $24
 			)
 			RETURNING id::text, created_at, updated_at
 		`
@@ -254,7 +270,6 @@ func (r *PGRepository) Create(item *Item) error {
 			nilIfEmpty(item.SysObjectID),
 			item.Attributes,
 			nilIfEmpty(item.DiscoverySource),
-			nilIfEmpty(item.Source),
 			item.FirstSeenAt,
 			item.LastSeenAt,
 			item.IsManual,
@@ -264,16 +279,30 @@ func (r *PGRepository) Create(item *Item) error {
 
 		item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+		if err := r.recordCIChange(ctx, tx, item.OrganizationID, item.ID, "create", "", nil, item); err != nil {
+			return err
+		}
+		if err := r.recordAudit(ctx, tx, "ci.created", item, map[string]interface{}{"after": item}); err != nil {
+			return err
+		}
 		return nil
 	})
 }
 
 // Update modifies an existing CI.
-func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Item, error) {
-	ctx := context.Background()
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
 	var item *Item
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		beforeQuery := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND deleted_at IS NULL", ciSelectColumns)
+		before, err := scanCI(tx.QueryRow(ctx, beforeQuery, id))
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return fmt.Errorf("not found")
+			}
+			return fmt.Errorf("get ci before update: %w", err)
+		}
+
 		setClauses := make([]string, 0, 18)
 		args := []any{id}
 		argPos := 2
@@ -302,7 +331,6 @@ func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Item, error
 		addStringField("firmware_version", req.FirmwareVersion)
 		addStringField("sys_object_id", req.SysObjectID)
 		addStringField("discovery_source", req.DiscoverySource)
-		addStringField("source", req.Source)
 
 		if req.Attributes != nil {
 			setClauses = append(setClauses, fmt.Sprintf("attributes = COALESCE(attributes, '{}'::jsonb) || $%d", argPos))
@@ -310,10 +338,10 @@ func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Item, error
 			argPos++
 		}
 
-		if req.LastSeen != nil {
-			parsed, err := time.Parse(time.RFC3339, *req.LastSeen)
+		if req.LastSeenAt != nil {
+			parsed, err := time.Parse(time.RFC3339, *req.LastSeenAt)
 			if err != nil {
-				return fmt.Errorf("parse last_seen: %w", err)
+				return fmt.Errorf("parse last_seen_at: %w", err)
 			}
 			setClauses = append(setClauses, fmt.Sprintf("last_seen_at = $%d", argPos))
 			args = append(args, parsed)
@@ -321,15 +349,7 @@ func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Item, error
 		}
 
 		if len(setClauses) == 0 {
-			query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND deleted_at IS NULL", ciSelectColumns)
-			var err error
-			item, err = scanCI(tx.QueryRow(ctx, query, id))
-			if err != nil {
-				if err == pgx.ErrNoRows {
-					return fmt.Errorf("not found")
-				}
-				return fmt.Errorf("get ci for update: %w", err)
-			}
+			item = before
 			return nil
 		}
 
@@ -340,7 +360,6 @@ func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Item, error
 			ciSelectColumns,
 		)
 
-		var err error
 		item, err = scanCI(tx.QueryRow(ctx, query, args...))
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -349,6 +368,28 @@ func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Item, error
 			return fmt.Errorf("update ci: %w", err)
 		}
 
+		changes := diffCI(before, item)
+		if len(changes) == 0 {
+			return nil
+		}
+		changeType := "update"
+		action := "ci.updated"
+		if len(changes) == 1 && changes[0].Field == "status" {
+			changeType = "status_change"
+			action = "ci.status_changed"
+		}
+		for _, change := range changes {
+			fieldChangeType := changeType
+			if change.Field == "status" {
+				fieldChangeType = "status_change"
+			}
+			if err := r.recordCIChange(ctx, tx, orgID, id, fieldChangeType, change.Field, change.Old, change.New); err != nil {
+				return err
+			}
+		}
+		if err := r.recordAudit(ctx, tx, action, item, map[string]interface{}{"before": before, "after": item, "fields": changes}); err != nil {
+			return err
+		}
 		return nil
 	})
 
@@ -356,9 +397,17 @@ func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Item, error
 }
 
 // Delete soft-deletes a CI.
-func (r *PGRepository) Delete(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND deleted_at IS NULL", ciSelectColumns)
+		before, err := scanCI(tx.QueryRow(ctx, query, id))
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return fmt.Errorf("not found")
+			}
+			return fmt.Errorf("get ci for delete: %w", err)
+		}
+
 		cmdTag, err := tx.Exec(ctx, "UPDATE ci SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL", id)
 		if err != nil {
 			return fmt.Errorf("delete ci: %w", err)
@@ -366,8 +415,83 @@ func (r *PGRepository) Delete(orgID, id string) error {
 		if cmdTag.RowsAffected() == 0 {
 			return fmt.Errorf("not found")
 		}
+		if err := r.recordCIChange(ctx, tx, orgID, id, "delete", "", before, nil); err != nil {
+			return err
+		}
+		if err := r.recordAudit(ctx, tx, "ci.deleted", before, map[string]interface{}{"before": before}); err != nil {
+			return err
+		}
 		return nil
 	})
+}
+
+// ListChanges returns paginated change history for a CI.
+func (r *PGRepository) ListChanges(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Change, int, error) {
+	changes := []Change{}
+	var total int
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `
+			SELECT COUNT(*)
+			FROM ci_change
+			WHERE organization_id = $1 AND ci_id = $2
+		`, orgID, ciID).Scan(&total); err != nil {
+			return fmt.Errorf("count ci changes: %w", err)
+		}
+
+		rows, err := tx.Query(ctx, `
+			SELECT
+				id::text,
+				organization_id::text,
+				ci_id::text,
+				COALESCE(actor_id::text, ''),
+				change_type,
+				COALESCE(field_name, ''),
+				COALESCE(old_value, 'null'::jsonb),
+				COALESCE(new_value, 'null'::jsonb),
+				COALESCE(comment, ''),
+				created_at
+			FROM ci_change
+			WHERE organization_id = $1 AND ci_id = $2
+			ORDER BY created_at DESC, id DESC
+			LIMIT $3 OFFSET $4
+		`, orgID, ciID, page.Limit, page.Offset)
+		if err != nil {
+			return fmt.Errorf("list ci changes: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var change Change
+			var oldValue []byte
+			var newValue []byte
+			if err := rows.Scan(
+				&change.ID,
+				&change.OrganizationID,
+				&change.CIID,
+				&change.ActorID,
+				&change.ChangeType,
+				&change.FieldName,
+				&oldValue,
+				&newValue,
+				&change.Comment,
+				&change.CreatedAt,
+			); err != nil {
+				return fmt.Errorf("scan ci change: %w", err)
+			}
+			if err := json.Unmarshal(oldValue, &change.OldValue); err != nil {
+				return fmt.Errorf("decode old ci change value: %w", err)
+			}
+			if err := json.Unmarshal(newValue, &change.NewValue); err != nil {
+				return fmt.Errorf("decode new ci change value: %w", err)
+			}
+			changes = append(changes, change)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate ci changes: %w", err)
+		}
+		return nil
+	})
+	return changes, total, err
 }
 
 type ciScanner interface {
@@ -405,7 +529,6 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		&item.SysObjectID,
 		&item.Attributes,
 		&item.DiscoverySource,
-		&item.Source,
 		&firstSeen,
 		&lastSeen,
 		&item.IsManual,
@@ -435,6 +558,119 @@ func scanCI(scanner ciScanner) (*Item, error) {
 	item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
 
 	return item, nil
+}
+
+type ciFieldChange struct {
+	Field string `json:"field"`
+	Old   any    `json:"old_value"`
+	New   any    `json:"new_value"`
+}
+
+func (r *PGRepository) recordAudit(ctx context.Context, tx pgx.Tx, action string, item *Item, changes map[string]interface{}) error {
+	if r.recorder == nil {
+		return nil
+	}
+	t := tenant.FromContext(ctx)
+	actorType := "system"
+	if strings.TrimSpace(t.UserID) != "" {
+		actorType = "user"
+	}
+	if _, err := r.recorder.Record(ctx, tx, audit.Entry{
+		OrganizationID: item.OrganizationID,
+		ActorID:        strings.TrimSpace(t.UserID),
+		ActorType:      actorType,
+		Action:         action,
+		ResourceType:   "ci",
+		ResourceID:     item.ID,
+		Changes:        changes,
+	}); err != nil {
+		return fmt.Errorf("record audit: %w", err)
+	}
+	return nil
+}
+
+func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciID, changeType, fieldName string, oldValue, newValue any) error {
+	oldJSON, err := marshalJSONValue(oldValue)
+	if err != nil {
+		return fmt.Errorf("marshal old ci change value: %w", err)
+	}
+	newJSON, err := marshalJSONValue(newValue)
+	if err != nil {
+		return fmt.Errorf("marshal new ci change value: %w", err)
+	}
+	actorID := nilIfEmpty(tenant.FromContext(ctx).UserID)
+	_, err = tx.Exec(ctx, `
+		INSERT INTO ci_change (
+			organization_id,
+			ci_id,
+			actor_id,
+			change_type,
+			field_name,
+			old_value,
+			new_value
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
+	`, orgID, ciID, actorID, changeType, nilIfEmpty(fieldName), oldJSON, newJSON)
+	if err != nil {
+		return fmt.Errorf("record ci change: %w", err)
+	}
+	return nil
+}
+
+func marshalJSONValue(value any) (string, error) {
+	if value == nil {
+		return "null", nil
+	}
+	b, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func diffCI(before, after *Item) []ciFieldChange {
+	fields := []struct {
+		name string
+		old  any
+		new  any
+	}{
+		{"client_id", before.ClientID, after.ClientID},
+		{"site_id", before.SiteID, after.SiteID},
+		{"room_id", before.RoomID, after.RoomID},
+		{"ci_type_id", before.CITypeID, after.CITypeID},
+		{"name", before.Name, after.Name},
+		{"status", before.Status, after.Status},
+		{"manufacturer", before.Manufacturer, after.Manufacturer},
+		{"model", before.Model, after.Model},
+		{"serial_number", before.SerialNumber, after.SerialNumber},
+		{"hardware_uuid", before.HardwareUUID, after.HardwareUUID},
+		{"management_ip", before.ManagementIP, after.ManagementIP},
+		{"primary_mac", before.PrimaryMAC, after.PrimaryMAC},
+		{"hostname", before.Hostname, after.Hostname},
+		{"fqdn", before.FQDN, after.FQDN},
+		{"os_name", before.OSName, after.OSName},
+		{"os_version", before.OSVersion, after.OSVersion},
+		{"firmware_version", before.FirmwareVersion, after.FirmwareVersion},
+		{"sys_object_id", before.SysObjectID, after.SysObjectID},
+		{"attributes", before.Attributes, after.Attributes},
+		{"discovery_source", before.DiscoverySource, after.DiscoverySource},
+		{"first_seen_at", timePtrRFC3339(before.FirstSeenAt), timePtrRFC3339(after.FirstSeenAt)},
+		{"last_seen_at", timePtrRFC3339(before.LastSeenAt), timePtrRFC3339(after.LastSeenAt)},
+		{"is_manual", before.IsManual, after.IsManual},
+	}
+	changes := make([]ciFieldChange, 0, len(fields))
+	for _, field := range fields {
+		if !reflect.DeepEqual(field.old, field.new) {
+			changes = append(changes, ciFieldChange{Field: field.name, Old: field.old, New: field.new})
+		}
+	}
+	return changes
+}
+
+func timePtrRFC3339(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
 func nilIfEmpty(value string) any {

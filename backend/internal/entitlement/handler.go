@@ -2,6 +2,7 @@ package entitlement
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -33,7 +34,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items := h.service.List(t.OrganizationID)
+	items, err := h.service.List(r.Context(), t.OrganizationID)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Entitlement]{
 		Data:    items,
 		Total:   len(items),
@@ -44,8 +50,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 type grantRequest struct {
-	FeatureKey string `json:"feature_key"`
-	Plan       Plan   `json:"plan"`
+	FeatureKey string     `json:"feature_key"`
+	Plan       Plan       `json:"plan"`
+	Enabled    *bool      `json:"enabled,omitempty"`
+	Limit      *int64     `json:"limit,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 }
 
 // Grant handles POST /api/v1/entitlements.
@@ -69,14 +78,22 @@ func (h *Handler) Grant(w http.ResponseWriter, r *http.Request) {
 		req.Plan = PlanEssential
 	}
 
-	h.service.Grant(t.OrganizationID, req.FeatureKey, req.Plan)
-	items := h.service.List(t.OrganizationID)
-	var granted Entitlement
-	for _, item := range items {
-		if item.FeatureKey == req.FeatureKey {
-			granted = item
-			break
-		}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	granted, err := h.service.Grant(r.Context(), Entitlement{
+		OrganizationID: t.OrganizationID,
+		FeatureKey:     req.FeatureKey,
+		Plan:           req.Plan,
+		Enabled:        enabled,
+		Limit:          req.Limit,
+		ExpiresAt:      req.ExpiresAt,
+	})
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
 	}
 
 	api.WriteJSON(w, http.StatusCreated, granted)
@@ -96,8 +113,16 @@ func (h *Handler) Check(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ent, enabled, err := h.service.Check(r.Context(), t.OrganizationID, feature)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
 	api.WriteJSON(w, http.StatusOK, map[string]any{
 		"feature": feature,
-		"enabled": h.service.IsEnabled(r.Context(), t.OrganizationID, feature),
+		"enabled": enabled,
+		"plan":    ent.Plan,
+		"limit":   ent.Limit,
 	})
 }
