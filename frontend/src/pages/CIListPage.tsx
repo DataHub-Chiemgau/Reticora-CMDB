@@ -149,7 +149,7 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
                       <td className="px-4 py-3">{ci.manufacturer || '—'}</td>
                       <td className="px-4 py-3">{ci.model || '—'}</td>
                       <td className="px-4 py-3 font-mono text-xs">{ci.management_ip || '—'}</td>
-                      <td className="px-4 py-3">{ci.source || '—'}</td>
+                      <td className="px-4 py-3">{ci.discovery_source || '—'}</td>
                     </tr>
                   ))
                 )}
@@ -231,8 +231,8 @@ function CIDetailPanel({ ci, onClose, onEdit }: { ci: CI; onClose: () => void; o
         <DetailRow label={t('ci.serialNumber')} value={ci.serial_number} />
         <DetailRow label={t('ci.managementIp')} value={ci.management_ip} />
         <DetailRow label={t('ci.firmware')} value={ci.firmware_version} />
-        <DetailRow label={t('ci.source')} value={ci.source} />
-        <DetailRow label={t('ci.lastSeen')} value={ci.last_seen} />
+        <DetailRow label={t('ci.source')} value={ci.discovery_source} />
+        <DetailRow label={t('ci.lastSeen')} value={ci.last_seen_at} />
         <DetailRow label={t('ci.created')} value={ci.created_at} />
         <DetailRow label={t('ci.updated')} value={ci.updated_at} />
       </dl>

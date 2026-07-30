@@ -21,8 +21,9 @@ export interface CI {
   management_ip?: string;
   firmware_version?: string;
   attributes: Record<string, unknown>;
-  source?: string;
-  last_seen?: string;
+  discovery_source?: string;
+  first_seen_at?: string;
+  last_seen_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -38,7 +39,7 @@ export interface CICreateRequest {
   management_ip?: string;
   firmware_version?: string;
   attributes?: Record<string, unknown>;
-  source?: string;
+  discovery_source?: string;
 }
 
 export interface CIUpdateRequest {
@@ -50,6 +51,8 @@ export interface CIUpdateRequest {
   management_ip?: string;
   firmware_version?: string;
   attributes?: Record<string, unknown>;
+  discovery_source?: string;
+  last_seen_at?: string;
 }
 
 export interface Relationship {

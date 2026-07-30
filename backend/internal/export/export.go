@@ -73,7 +73,7 @@ func (h *Handler) writeCSV(w http.ResponseWriter, items []ci.Item) {
 	writer := csv.NewWriter(w)
 	defer writer.Flush()
 
-	_ = writer.Write([]string{"id", "name", "status", "ci_type_id", "manufacturer", "model", "serial_number", "management_ip", "firmware_version", "source", "created_at", "updated_at"})
+	_ = writer.Write([]string{"id", "name", "status", "ci_type_id", "manufacturer", "model", "serial_number", "management_ip", "firmware_version", "discovery_source", "created_at", "updated_at"})
 	for _, item := range items {
 		_ = writer.Write([]string{
 			item.ID,
@@ -85,7 +85,7 @@ func (h *Handler) writeCSV(w http.ResponseWriter, items []ci.Item) {
 			item.SerialNumber,
 			item.ManagementIP,
 			item.FirmwareVersion,
-			item.Source,
+			item.DiscoverySource,
 			item.CreatedAt,
 			item.UpdatedAt,
 		})

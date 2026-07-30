@@ -66,6 +66,17 @@ func GenerateDEK() ([]byte, error) {
 	return dek, nil
 }
 
+// GenerateMasterKey creates a base64-encoded random master key. It is intended
+// for local development only; production deployments must supply a persistent
+// key via RETICORA_MASTER_KEY so that stored ciphertext stays decryptable.
+func GenerateMasterKey() (string, error) {
+	key, err := GenerateDEK()
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(key), nil
+}
+
 // WrapDEK encrypts a DEK with the master key (AES-256-GCM).
 func (e *EnvelopeEncryptor) WrapDEK(dek []byte) ([]byte, error) {
 	if len(dek) != KeySize {

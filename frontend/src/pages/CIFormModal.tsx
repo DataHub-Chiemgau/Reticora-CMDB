@@ -113,7 +113,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
       serial_number: optionalValue(values.serial_number),
       management_ip: optionalValue(values.management_ip),
       firmware_version: optionalValue(values.firmware_version),
-      source: 'manual',
+      discovery_source: 'manual',
     };
 
     const updatePayload: CIUpdateRequest = {

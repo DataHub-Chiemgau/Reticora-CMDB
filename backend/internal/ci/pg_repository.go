@@ -35,7 +35,6 @@ const ciSelectColumns = `
 	COALESCE(sys_object_id, ''),
 	attributes,
 	COALESCE(discovery_source, ''),
-	COALESCE(source, ''),
 	first_seen_at,
 	last_seen_at,
 	is_manual,
@@ -216,7 +215,6 @@ func (r *PGRepository) Create(item *Item) error {
 				sys_object_id,
 				attributes,
 				discovery_source,
-				source,
 				first_seen_at,
 				last_seen_at,
 				is_manual
@@ -225,7 +223,7 @@ func (r *PGRepository) Create(item *Item) error {
 				$6, $7, $8, $9, $10,
 				$11, $12, $13, $14, $15,
 				$16, $17, $18, $19, $20,
-				$21, $22, $23, $24, $25
+				$21, $22, $23, $24
 			)
 			RETURNING id::text, created_at, updated_at
 		`
@@ -254,7 +252,6 @@ func (r *PGRepository) Create(item *Item) error {
 			nilIfEmpty(item.SysObjectID),
 			item.Attributes,
 			nilIfEmpty(item.DiscoverySource),
-			nilIfEmpty(item.Source),
 			item.FirstSeenAt,
 			item.LastSeenAt,
 			item.IsManual,
@@ -302,7 +299,6 @@ func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Item, error
 		addStringField("firmware_version", req.FirmwareVersion)
 		addStringField("sys_object_id", req.SysObjectID)
 		addStringField("discovery_source", req.DiscoverySource)
-		addStringField("source", req.Source)
 
 		if req.Attributes != nil {
 			setClauses = append(setClauses, fmt.Sprintf("attributes = COALESCE(attributes, '{}'::jsonb) || $%d", argPos))
@@ -310,10 +306,10 @@ func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Item, error
 			argPos++
 		}
 
-		if req.LastSeen != nil {
-			parsed, err := time.Parse(time.RFC3339, *req.LastSeen)
+		if req.LastSeenAt != nil {
+			parsed, err := time.Parse(time.RFC3339, *req.LastSeenAt)
 			if err != nil {
-				return fmt.Errorf("parse last_seen: %w", err)
+				return fmt.Errorf("parse last_seen_at: %w", err)
 			}
 			setClauses = append(setClauses, fmt.Sprintf("last_seen_at = $%d", argPos))
 			args = append(args, parsed)
@@ -405,7 +401,6 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		&item.SysObjectID,
 		&item.Attributes,
 		&item.DiscoverySource,
-		&item.Source,
 		&firstSeen,
 		&lastSeen,
 		&item.IsManual,

@@ -27,7 +27,6 @@ type Item struct {
 	SysObjectID     string         `json:"sys_object_id,omitempty"`
 	Attributes      map[string]any `json:"attributes"`
 	DiscoverySource string         `json:"discovery_source,omitempty"` // snmp|ssh|redfish|ipmi|wmi|api|agent|sweep|manual
-	Source          string         `json:"source,omitempty"`           // deprecated: use discovery_source
 	FirstSeenAt     *time.Time     `json:"first_seen_at,omitempty"`
 	LastSeenAt      *time.Time     `json:"last_seen_at,omitempty"`
 	IsManual        bool           `json:"is_manual"`
@@ -58,7 +57,6 @@ type CreateRequest struct {
 	SysObjectID     string         `json:"sys_object_id,omitempty"`
 	Attributes      map[string]any `json:"attributes,omitempty"`
 	DiscoverySource string         `json:"discovery_source,omitempty"`
-	Source          string         `json:"source,omitempty"`
 }
 
 // UpdateRequest is the payload for updating a CI.
@@ -79,8 +77,7 @@ type UpdateRequest struct {
 	SysObjectID     *string        `json:"sys_object_id,omitempty"`
 	Attributes      map[string]any `json:"attributes,omitempty"`
 	DiscoverySource *string        `json:"discovery_source,omitempty"`
-	Source          *string        `json:"source,omitempty"`
-	LastSeen        *string        `json:"last_seen,omitempty"`
+	LastSeenAt      *string        `json:"last_seen_at,omitempty"`
 }
 
 // FilterParams holds query filter parameters for listing CIs.

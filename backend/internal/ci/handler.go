@@ -133,13 +133,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		ManagementIP:    req.ManagementIP,
 		FirmwareVersion: req.FirmwareVersion,
 		Attributes:      req.Attributes,
-		Source:          req.Source,
+		DiscoverySource: req.DiscoverySource,
 	}
 	if item.Attributes == nil {
 		item.Attributes = make(map[string]any)
 	}
-	if item.Source == "" {
-		item.Source = "manual"
+	if item.DiscoverySource == "" {
+		item.DiscoverySource = SourceManual
 	}
 
 	if err := h.repo.Create(item); err != nil {

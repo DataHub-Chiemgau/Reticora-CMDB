@@ -1,4 +1,4 @@
-.PHONY: generate build test lint migrate-up migrate-down up down seed e2e fmt vet sqlc oapi-codegen
+.PHONY: generate build test lint migrate-up migrate-down migrate-roundtrip up down seed e2e fmt vet oapi-codegen
 
 # ─── Variables ──────────────────────────────────────────────────────────────────
 BACKEND_DIR := backend
@@ -8,13 +8,9 @@ MIGRATIONS_DIR := $(BACKEND_DIR)/migrations
 DATABASE_URL ?= ******localhost:5432/reticora?sslmode=disable
 
 # ─── Generate ───────────────────────────────────────────────────────────────────
-generate: sqlc oapi-codegen
+generate: oapi-codegen
 	@echo "==> Generating code..."
 	cd $(BACKEND_DIR) && go generate ./...
-
-sqlc:
-	@echo "==> Generating sqlc..."
-	cd sqlc && sqlc generate 2>/dev/null || echo "sqlc not installed, skipping (install: go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest)"
 
 oapi-codegen:
 	@echo "==> Generating OpenAPI server..."
@@ -86,6 +82,12 @@ migrate-up:
 migrate-down:
 	@echo "==> Running migrations down..."
 	migrate -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" down 1
+
+migrate-roundtrip:
+	@echo "==> Verifying migrations apply and revert cleanly..."
+	migrate -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" up
+	migrate -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" down -all
+	migrate -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" up
 
 migrate-create:
 	@echo "==> Creating migration: $(name)"

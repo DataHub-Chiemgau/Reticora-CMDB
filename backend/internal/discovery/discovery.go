@@ -253,7 +253,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 	for _, item := range req.Items {
 		result := Reconcile(existing, item)
 		now := time.Now().UTC().Format(time.RFC3339)
-		source := "discovery"
+		source := ci.SourceSweep
 		attributes := map[string]any{
 			"fingerprint": item.Fingerprint,
 			"raw_data":    item.RawData,
@@ -272,8 +272,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 				SerialNumber:    item.SerialNumber,
 				ManagementIP:    item.ManagementIP,
 				Attributes:      attributes,
-				DiscoverySource: "sweep",
-				Source:          source,
+				DiscoverySource: source,
 				FirstSeenAt:     &nowTime,
 				LastSeenAt:      &nowTime,
 			}
@@ -285,14 +284,14 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			resp.Created++
 		case ReconcileMatched:
 			updated, err := h.ciRepo.Update(t.OrganizationID, result.MatchedCIID, ci.UpdateRequest{
-				Name:         stringPtr(item.Name),
-				Manufacturer: stringPtr(item.Manufacturer),
-				Model:        stringPtr(item.Model),
-				SerialNumber: stringPtr(item.SerialNumber),
-				ManagementIP: stringPtr(item.ManagementIP),
-				Attributes:   attributes,
-				Source:       &source,
-				LastSeen:     &now,
+				Name:            stringPtr(item.Name),
+				Manufacturer:    stringPtr(item.Manufacturer),
+				Model:           stringPtr(item.Model),
+				SerialNumber:    stringPtr(item.SerialNumber),
+				ManagementIP:    stringPtr(item.ManagementIP),
+				Attributes:      attributes,
+				DiscoverySource: &source,
+				LastSeenAt:      &now,
 			})
 			if err != nil {
 				api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())

@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// UpdateRequest captures mutable webhook subscription fields for future sqlc-backed updates.
+// UpdateRequest captures mutable webhook subscription fields.
 type UpdateRequest struct {
 	Name     *string  `json:"name,omitempty"`
 	URL      *string  `json:"url,omitempty"`

@@ -123,11 +123,11 @@ func (r *MemoryRepository) Update(orgID, id string, req UpdateRequest) (*Item, e
 			item.Attributes[k] = v
 		}
 	}
-	if req.Source != nil {
-		item.Source = *req.Source
+	if req.DiscoverySource != nil {
+		item.DiscoverySource = *req.DiscoverySource
 	}
-	if req.LastSeen != nil {
-		t, err := time.Parse(time.RFC3339, *req.LastSeen)
+	if req.LastSeenAt != nil {
+		t, err := time.Parse(time.RFC3339, *req.LastSeenAt)
 		if err == nil {
 			item.LastSeenAt = &t
 		}

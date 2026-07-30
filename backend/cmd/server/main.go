@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -42,6 +43,10 @@ import (
 var version = "dev"
 
 func main() {
+	noDB := flag.Bool("no-db", false,
+		"run with in-memory repositories for local development; all data is lost on restart")
+	flag.Parse()
+
 	cfg := config.Load()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
@@ -54,19 +59,29 @@ func main() {
 	}
 	defer shutdown(context.Background())
 
-	// Initialize envelope encryptor
+	// Initialize envelope encryptor. Credentials are stored encrypted, so a
+	// missing master key must fail startup instead of silently disabling the
+	// credential API.
 	var encryptor *crypto.EnvelopeEncryptor
-	if cfg.MasterKey != "" {
-		var err error
-		encryptor, err = crypto.NewEnvelopeEncryptor(cfg.MasterKey)
-		if err != nil {
-			slog.Error("failed to init envelope encryptor", "error", err)
+	if cfg.MasterKey == "" {
+		if !*noDB {
+			slog.Error("RETICORA_MASTER_KEY is required for credential encryption")
 			os.Exit(1)
 		}
-		slog.Info("envelope encryption initialized")
-	} else {
-		slog.Warn("RETICORA_MASTER_KEY not set, credential encryption unavailable")
+		slog.Warn("RETICORA_MASTER_KEY not set; generating an ephemeral development key")
+		devKey, keyErr := crypto.GenerateMasterKey()
+		if keyErr != nil {
+			slog.Error("failed to generate development master key", "error", keyErr)
+			os.Exit(1)
+		}
+		cfg.MasterKey = devKey
 	}
+	encryptor, err = crypto.NewEnvelopeEncryptor(cfg.MasterKey)
+	if err != nil {
+		slog.Error("failed to init envelope encryptor", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("envelope encryption initialized")
 
 	// Initialize OIDC provider
 	oidcProvider := identity.NewOIDCProvider(identity.OIDCConfig{
@@ -107,33 +122,29 @@ func main() {
 		cacheStore = cache.NewMemoryStore()
 	}
 
-	// Repositories: use PostgreSQL when DATABASE_URL is available, otherwise memory for dev
+	// Repositories. PostgreSQL is the only supported production backend; the
+	// in-memory implementations are reserved for tests and the explicit --no-db
+	// development mode. A configured database that cannot be reached is a fatal
+	// startup error rather than a silent downgrade to per-replica memory state.
 	var (
-		ciRepo        ci.Repository
-		relRepo       relationship.Repository
-		webhookRepo   webhook.Repository
-		discoveryRepo discovery.Repository
-		assetRepo     asset.Repository
+		ciRepo         ci.Repository
+		relRepo        relationship.Repository
+		webhookRepo    webhook.Repository
+		discoveryRepo  discovery.Repository
+		assetRepo      asset.Repository
 		assignmentRepo assignment.Repository
-		documentRepo  document.Repository
-		stocktakeRepo stocktake.Repository
-		ticketRepo    ticket.Repository
-		userRepo      user.Repository
+		documentRepo   document.Repository
+		stocktakeRepo  stocktake.Repository
+		ticketRepo     ticket.Repository
+		userRepo       user.Repository
+		credentialRepo credential.Repository
 	)
 
-	if cfg.DatabaseURL != "" && cfg.Environment != "development" {
-		pool, err := database.NewPool(context.Background(), cfg.DatabaseURL)
-		if err != nil {
-			slog.Error("failed to connect to database, falling back to memory repositories", "error", err)
-			goto memoryRepos
-		}
-		defer pool.Close()
-
-		slog.Info("connected to PostgreSQL", "url", maskDSN(cfg.DatabaseURL))
-		ciRepo = ci.NewPGRepository(pool)
-		webhookRepo = webhook.NewPGRepository(pool)
-		// Modules without PG implementations use memory repos until migration
+	if *noDB {
+		slog.Warn("running with --no-db: all state is in-memory and lost on restart")
+		ciRepo = ci.NewMemoryRepository()
 		relRepo = relationship.NewMemoryRepository()
+		webhookRepo = webhook.NewMemoryRepository()
 		discoveryRepo = discovery.NewMemoryRepository()
 		assetRepo = asset.NewMemoryRepository()
 		assignmentRepo = assignment.NewMemoryRepository()
@@ -141,23 +152,33 @@ func main() {
 		stocktakeRepo = stocktake.NewMemoryRepository()
 		ticketRepo = ticket.NewMemoryRepository()
 		userRepo = user.NewMemoryRepository()
-		goto reposReady
+		credentialRepo = credential.NewMemoryRepository()
+	} else {
+		if cfg.DatabaseURL == "" {
+			slog.Error("RETICORA_DATABASE_URL is required; start with --no-db for an ephemeral development server")
+			os.Exit(1)
+		}
+		pool, err := database.NewPool(context.Background(), cfg.DatabaseURL)
+		if err != nil {
+			slog.Error("failed to connect to database", "error", err, "url", maskDSN(cfg.DatabaseURL))
+			os.Exit(1)
+		}
+		defer pool.Close()
+
+		slog.Info("connected to PostgreSQL", "url", maskDSN(cfg.DatabaseURL))
+		ciRepo = ci.NewPGRepository(pool)
+		relRepo = relationship.NewPGRepository(pool)
+		webhookRepo = webhook.NewPGRepository(pool)
+		discoveryRepo = discovery.NewPGRepository(pool)
+		assetRepo = asset.NewPGRepository(pool)
+		assignmentRepo = assignment.NewPGRepository(pool)
+		documentRepo = document.NewPGRepository(pool)
+		stocktakeRepo = stocktake.NewPGRepository(pool)
+		ticketRepo = ticket.NewPGRepository(pool)
+		userRepo = user.NewPGRepository(pool)
+		credentialRepo = credential.NewPGRepository(pool)
 	}
 
-memoryRepos:
-	slog.Info("using in-memory repositories (development mode)")
-	ciRepo = ci.NewMemoryRepository()
-	relRepo = relationship.NewMemoryRepository()
-	webhookRepo = webhook.NewMemoryRepository()
-	discoveryRepo = discovery.NewMemoryRepository()
-	assetRepo = asset.NewMemoryRepository()
-	assignmentRepo = assignment.NewMemoryRepository()
-	documentRepo = document.NewMemoryRepository()
-	stocktakeRepo = stocktake.NewMemoryRepository()
-	ticketRepo = ticket.NewMemoryRepository()
-	userRepo = user.NewMemoryRepository()
-
-reposReady:
 	entitlementSvc := entitlement.NewService()
 	webhookDispatcher := webhook.NewDispatcher(webhookRepo, nil)
 	defer func() {
@@ -185,13 +206,8 @@ reposReady:
 	monitoringHandler := monitoring.NewHandler(monitoring.NewMemoryMetricStore())
 	graphqlHandler := graphqlbff.NewHandler(ciRepo, relRepo)
 
-	// Credential handler (requires encryption)
-	var credentialHandler *credential.Handler
-	if encryptor != nil {
-		credRepo := credential.NewMemoryRepository()
-		credSvc := credential.NewService(credRepo, encryptor)
-		credentialHandler = credential.NewHandler(credSvc)
-	}
+	// Credential handler (requires envelope encryption)
+	credentialHandler := credential.NewHandler(credential.NewService(credentialRepo, encryptor))
 
 	mux := chi.NewRouter()
 
@@ -231,9 +247,7 @@ reposReady:
 	userHandler.RegisterRoutes(mux)
 	monitoringHandler.RegisterRoutes(mux)
 	graphqlHandler.RegisterRoutes(mux)
-	if credentialHandler != nil {
-		credentialHandler.RegisterRoutes(mux)
-	}
+	credentialHandler.RegisterRoutes(mux)
 
 	// Middleware chain per spec:
 	// RequestID/Tracing -> Panic-Recovery -> Auth -> Tenant -> Entitlement ->

@@ -1807,9 +1807,6 @@ components:
           additionalProperties: true
         discovery_source:
           $ref: '#/components/schemas/CIDiscoverySource'
-        source:
-          type: string
-          description: Deprecated alias for discovery source.
         first_seen_at:
           type: string
           format: date-time
@@ -1873,8 +1870,6 @@ components:
           additionalProperties: true
         discovery_source:
           $ref: '#/components/schemas/CIDiscoverySource'
-        source:
-          type: string
 
     UpdateCIRequest:
       type: object
@@ -1912,9 +1907,7 @@ components:
           additionalProperties: true
         discovery_source:
           $ref: '#/components/schemas/CIDiscoverySource'
-        source:
-          type: string
-        last_seen:
+        last_seen_at:
           type: string
           format: date-time
 
