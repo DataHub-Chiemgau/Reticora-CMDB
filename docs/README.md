@@ -86,6 +86,7 @@ Database schema is managed with [golang-migrate](https://github.com/golang-migra
 | 0021 | spec_alignment | Schema alignment with latest spec |
 | 0022 | ci_change | CI change history feeding the audit trail |
 | 0023 | rls_variable_unification | One RLS session variable (`app.org_id`), legacy `ci.last_seen`/`ci.source` removed, identity-resolution indexes |
+| 0024 | durable_webhook_delivery | Retry state (`status`, `max_attempts`, `next_retry_at`, `error`) and due-delivery index on `webhook_delivery` |
 
 **Running migrations:**
 
@@ -108,6 +109,11 @@ Migration 0023 unified the three variable names that had accumulated
 the missing `WITH CHECK` clauses and `FORCE ROW LEVEL SECURITY`. The
 `migrations` CI job fails if a policy reintroduces one of the legacy names or if
 a table has RLS enabled but not forced.
+
+The single exception is `webhook_delivery`: its policy additionally accepts
+`current_setting('app.system', true) = 'on'` so that the retry worker can claim
+due deliveries across tenants. That flag is set exclusively inside
+`webhook.PGDeliveryStore.ClaimDue` and is never derived from request input.
 
 ### Backend Architektur
 
@@ -167,6 +173,41 @@ internal/
 3. Handler calls domain service → repository (hand-written pgx queries in each domain's `pg_repository.go`).
 4. Domain events published to NATS JetStream for async side-effects (webhooks, audit, cache invalidation).
 5. Response serialized as JSON with RFC 7807 error format on failure.
+
+**Authentication:** the SPA runs an OpenID Connect authorization-code flow with
+PKCE. `GET /api/v1/auth/config` returns the public parameters (issuer, client
+ID, redirect URI, scopes, endpoints) — never the client secret. The browser
+redirects to the identity provider, and posts `code`, `state` and
+`code_verifier` to `POST /api/v1/auth/callback`, which exchanges them for an
+RS256 session token. Every subsequent request carries that token as
+a bearer token in the `Authorization` header; the client refreshes it via
+`POST /api/v1/auth/refresh` once on a 401 and retries the request. Server-side
+the token signature is verified by `middleware.AuthMiddlewareWithVerifier`;
+only `/api/v1/auth/{config,login,callback,refresh}` are unauthenticated.
+
+**Entitlement enforcement:** `entitlement.Service` resolves the effective plan
+per tenant (falling back to `RETICORA_DEFAULT_PLAN`) and caches it for 30
+seconds. Its middleware maps add-on route prefixes to features and answers with
+HTTP 403 when the plan does not include them; core routes (CIs, auth, users,
+audit, entitlements) are never gated. Record limits are enforced in the domain
+service (`ci.Service.Create`), so limit violations surface as 403 as well.
+Repository errors deny access (fail-closed). Plan matrix:
+
+| Plan | Features |
+|------|----------|
+| essential | cmdb, discovery, inventory |
+| standard | + documents, stocktake, ticketing, export, webhooks |
+| pro | + monitoring |
+| enterprise | + iga, endpoint_agent |
+
+**Durable webhook delivery:** every dispatch is persisted to `webhook_delivery`
+before the first HTTP attempt and updated after each attempt. Failed attempts
+are rescheduled with exponential backoff (30s base, capped at 1h, 5 attempts by
+default); a background worker claims due deliveries with
+`FOR UPDATE SKIP LOCKED` and a short lease, so several replicas can share the
+queue and deliveries survive a restart. `GET /api/v1/webhooks/{id}/deliveries`
+exposes the history. Without a delivery store (`--no-db`) the dispatcher falls
+back to in-process retries.
 
 **Binaries (`backend/cmd/`):**
 
@@ -262,6 +303,8 @@ The server is configured via environment variables:
 - `RETICORA_NATS_URL` — NATS server URL.
 - `RETICORA_REDIS_URL` — Redis connection string.
 - `RETICORA_ENVIRONMENT` — Environment name (development/staging/production).
+- `RETICORA_DEFAULT_PLAN` — Plan applied to tenants without explicit entitlements (default `essential`).
+- `RETICORA_ENTITLEMENT_ENFORCEMENT` — Set to `false` to disable feature/limit enforcement (default `true`).
 
 ### CI/CD
 

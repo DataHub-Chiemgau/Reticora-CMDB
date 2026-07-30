@@ -200,3 +200,77 @@ func unsignedJWT(t *testing.T, payload map[string]any) string {
 	}
 	return base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payloadBytes) + ".sig"
 }
+
+func TestConfigExposesPublicOIDCParameters(t *testing.T) {
+	handler := NewHandler(NewOIDCProvider(OIDCConfig{
+		IssuerURL:    "https://idp.example.com/realms/reticora",
+		ClientID:     "reticora-app",
+		ClientSecret: "top-secret",
+		RedirectURL:  "https://app.example.com/auth/callback",
+	}), nil)
+
+	w := httptest.NewRecorder()
+	handler.Config(w, httptest.NewRequest(http.MethodGet, "/api/v1/auth/config", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "top-secret") {
+		t.Fatal("the client secret must never be exposed")
+	}
+
+	var cfg PublicConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ClientID != "reticora-app" {
+		t.Fatalf("unexpected client_id %q", cfg.ClientID)
+	}
+	if cfg.AuthorizationEndpoint != "https://idp.example.com/realms/reticora/protocol/openid-connect/auth" {
+		t.Fatalf("unexpected authorization endpoint %q", cfg.AuthorizationEndpoint)
+	}
+	if !cfg.PKCERequired {
+		t.Fatal("expected PKCE to be required")
+	}
+}
+
+func TestCallbackForwardsPKCEVerifier(t *testing.T) {
+	sessionIssuer := testSessionIssuer(t)
+	orgID := "123e4567-e89b-12d3-a456-426614174000"
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.Form.Get("code_verifier"); got != "verifier-123" {
+			t.Fatalf("unexpected code_verifier %q", got)
+		}
+
+		idToken := unsignedJWT(t, map[string]any{
+			"iss":    server.URL,
+			"sub":    "user-123",
+			"groups": []string{orgID},
+			"exp":    time.Now().Add(5 * time.Minute).Unix(),
+		})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id_token": idToken, "expires_in": 300})
+	}))
+	defer server.Close()
+
+	handler := NewHandler(NewOIDCProvider(OIDCConfig{
+		IssuerURL: server.URL,
+		ClientID:  "reticora-app",
+	}), sessionIssuer)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/callback",
+		strings.NewReader(`{"code":"auth-code","state":"nonce","code_verifier":"verifier-123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.Callback(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
