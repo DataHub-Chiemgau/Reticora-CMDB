@@ -15,7 +15,8 @@
     "documents": "Dokumente",
     "stocktake": "Inventur",
     "tickets": "Tickets",
-    "users": "Benutzer"
+    "users": "Benutzer",
+    "racks": "Racks"
   },
   "common": {
     "save": "Speichern",
@@ -32,7 +33,8 @@
     "export": "Exportieren",
     "actions": "Aktionen",
     "description": "Beschreibung",
-    "notes": "Notizen"
+    "notes": "Notizen",
+    "retry": "Erneut versuchen"
   },
   "commandPalette": {
     "title": "Befehlsmenü",
@@ -48,7 +50,9 @@
       "documents": "Dokumente öffnen",
       "stocktake": "Inventur öffnen",
       "tickets": "Tickets öffnen",
-      "users": "Benutzer & Teams öffnen"
+      "users": "Benutzer & Teams öffnen",
+      "topology": "Topologie öffnen",
+      "racks": "Racks öffnen"
     }
   },
   "dashboard": {
@@ -85,7 +89,15 @@
     "statusDecommissioned": "Außer Betrieb",
     "allStatus": "Alle Status",
     "exportCsv": "CSV exportieren",
-    "exportJson": "JSON exportieren"
+    "exportJson": "JSON exportieren",
+    "overview": "Übersicht",
+    "noAttributes": "Keine Attribute hinterlegt",
+    "noRelationships": "Keine Beziehungen vorhanden",
+    "detailLoadError": "Das Configuration Item konnte nicht geladen werden",
+    "listLoadError": "Die Configuration Items konnten nicht geladen werden",
+    "relationshipsLoadError": "Die Beziehungen konnten nicht geladen werden",
+    "emptyTitle": "Noch keine Configuration Items",
+    "emptyHint": "Legen Sie ein CI manuell an oder starten Sie eine Discovery, um Geräte automatisch zu erfassen."
   },
   "form": {
     "createCI": "CI erstellen",
@@ -130,7 +142,8 @@
     "commandPaletteSearch": "Befehle durchsuchen",
     "searchCIs": "Configuration Items durchsuchen",
     "filterCIStatus": "CI-Status filtern",
-    "primaryNavigation": "Hauptnavigation"
+    "primaryNavigation": "Hauptnavigation",
+    "breadcrumb": "Brotkrumen-Navigation"
   },
   "asset": {
     "title": "Inventar",
@@ -200,5 +213,36 @@
     "callbackProgress": "Bitte warten Sie, während Ihre Sitzung geprüft wird.",
     "callbackError": "Die Anmeldung konnte nicht abgeschlossen werden.",
     "sessionExpired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an."
+  },
+  "topology": {
+    "subtitle": "Beziehungen zwischen Configuration Items als Graph.",
+    "neighbors": "Nachbarn",
+    "noNeighbors": "Keine direkten Nachbarn",
+    "neighborsLoadError": "Die Nachbarn konnten nicht geladen werden",
+    "loadError": "Die Topologie konnte nicht geladen werden",
+    "empty": "Keine Topologiedaten",
+    "emptyHint": "Sobald Beziehungen erfasst oder aus Discovery abgeleitet wurden, erscheinen sie hier.",
+    "allTypes": "Alle CI-Typen",
+    "filterType": "Nach CI-Typ filtern",
+    "filterDepth": "Traversierungstiefe",
+    "depth": "Tiefe",
+    "focus": "Fokussieren",
+    "clearRoot": "Fokus aufheben",
+    "showInTopology": "In Topologie anzeigen",
+    "nodeList": "Knotenliste",
+    "nodeListHint": "Tastatur- und screenreaderfreundliche Alternative zur Graphdarstellung."
+  },
+  "rack": {
+    "title": "Racks",
+    "subtitle": "HE-genaue Darstellung der Rackbelegung.",
+    "selectRack": "Rack auswählen",
+    "mounts": "Einbauten",
+    "position": "Position",
+    "noMounts": "Keine Einbauten in diesem Rack",
+    "noMountsHint": "Weisen Sie CIs einer Höheneinheit zu, um die Belegung zu sehen.",
+    "empty": "Keine Racks vorhanden",
+    "emptyHint": "Legen Sie Räume und Racks an, um die Rackbelegung zu visualisieren.",
+    "loadError": "Die Racks konnten nicht geladen werden",
+    "mountsLoadError": "Die Einbauten konnten nicht geladen werden"
   }
 }

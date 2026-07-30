@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ciApi,
   collectorApi,
+  topologyApi,
+  rackApi,
   assetApi,
   assignmentApi,
   documentApi,
@@ -29,6 +31,8 @@ import type {
   TicketUpdateRequest,
   TicketListParams,
   UserListParams,
+  TopologyParams,
+  RackListParams,
 } from '../api/client';
 
 export function useCIList(params: CIListParams) {
@@ -58,6 +62,36 @@ export function useCollectors(params: ListParams = {}) {
   return useQuery({
     queryKey: ['collectors', params],
     queryFn: () => collectorApi.list(params),
+  });
+}
+
+export function useTopology(params: TopologyParams = {}) {
+  return useQuery({
+    queryKey: ['topology', params],
+    queryFn: () => topologyApi.get(params),
+  });
+}
+
+export function useCINeighbors(id: string) {
+  return useQuery({
+    queryKey: ['topology-neighbors', id],
+    queryFn: () => topologyApi.neighbors(id),
+    enabled: !!id,
+  });
+}
+
+export function useRackList(params: RackListParams = {}) {
+  return useQuery({
+    queryKey: ['racks', params],
+    queryFn: () => rackApi.list(params),
+  });
+}
+
+export function useRackMounts(rackId: string) {
+  return useQuery({
+    queryKey: ['rack-mounts', rackId],
+    queryFn: () => rackApi.listMounts(rackId, { limit: 200 }),
+    enabled: !!rackId,
   });
 }
 

@@ -15,7 +15,8 @@
     "documents": "Documents",
     "stocktake": "Stocktake",
     "tickets": "Tickets",
-    "users": "Users"
+    "users": "Users",
+    "racks": "Racks"
   },
   "common": {
     "save": "Save",
@@ -32,7 +33,8 @@
     "export": "Export",
     "actions": "Actions",
     "description": "Description",
-    "notes": "Notes"
+    "notes": "Notes",
+    "retry": "Try again"
   },
   "commandPalette": {
     "title": "Command Menu",
@@ -48,7 +50,9 @@
       "documents": "Open Documents",
       "stocktake": "Open Stocktake",
       "tickets": "Open Tickets",
-      "users": "Open Users & Teams"
+      "users": "Open Users & Teams",
+      "topology": "Open topology",
+      "racks": "Open racks"
     }
   },
   "dashboard": {
@@ -85,7 +89,15 @@
     "statusDecommissioned": "Decommissioned",
     "allStatus": "All Statuses",
     "exportCsv": "Export CSV",
-    "exportJson": "Export JSON"
+    "exportJson": "Export JSON",
+    "overview": "Overview",
+    "noAttributes": "No attributes recorded",
+    "noRelationships": "No relationships",
+    "detailLoadError": "The configuration item could not be loaded",
+    "listLoadError": "The configuration items could not be loaded",
+    "relationshipsLoadError": "The relationships could not be loaded",
+    "emptyTitle": "No configuration items yet",
+    "emptyHint": "Create a CI manually or run a discovery to record devices automatically."
   },
   "form": {
     "createCI": "Create CI",
@@ -130,7 +142,8 @@
     "commandPaletteSearch": "Search commands",
     "searchCIs": "Search Configuration Items",
     "filterCIStatus": "Filter CI status",
-    "primaryNavigation": "Primary navigation"
+    "primaryNavigation": "Primary navigation",
+    "breadcrumb": "Breadcrumb navigation"
   },
   "asset": {
     "title": "Assets",
@@ -200,5 +213,36 @@
     "callbackProgress": "Please wait while we verify your session.",
     "callbackError": "Sign-in could not be completed.",
     "sessionExpired": "Your session has expired. Please sign in again."
+  },
+  "topology": {
+    "subtitle": "Relationships between configuration items as a graph.",
+    "neighbors": "Neighbors",
+    "noNeighbors": "No direct neighbors",
+    "neighborsLoadError": "The neighbors could not be loaded",
+    "loadError": "The topology could not be loaded",
+    "empty": "No topology data",
+    "emptyHint": "Relationships appear here once they are recorded or derived from discovery.",
+    "allTypes": "All CI types",
+    "filterType": "Filter by CI type",
+    "filterDepth": "Traversal depth",
+    "depth": "Depth",
+    "focus": "Focus",
+    "clearRoot": "Clear focus",
+    "showInTopology": "Show in topology",
+    "nodeList": "Node list",
+    "nodeListHint": "Keyboard and screen-reader friendly alternative to the graph."
+  },
+  "rack": {
+    "title": "Racks",
+    "subtitle": "Rack occupancy rendered unit by unit.",
+    "selectRack": "Select rack",
+    "mounts": "Mounts",
+    "position": "Position",
+    "noMounts": "No mounts in this rack",
+    "noMountsHint": "Assign CIs to a rack unit to see the occupancy.",
+    "empty": "No racks yet",
+    "emptyHint": "Create rooms and racks to visualise rack occupancy.",
+    "loadError": "The racks could not be loaded",
+    "mountsLoadError": "The mounts could not be loaded"
   }
 }

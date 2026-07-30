@@ -8,6 +8,8 @@ import { cn } from './ui/utils';
 export type AppPage =
   | 'dashboard'
   | 'cmdb'
+  | 'topology'
+  | 'racks'
   | 'discovery'
   | 'assets'
   | 'assignments'
@@ -73,6 +75,18 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
         label: t('commandPalette.commands.cmdb'),
         keywords: ['cmdb cis configuration items'],
         action: () => onNavigate('cmdb'),
+      },
+      {
+        id: 'nav-topology',
+        label: t('commandPalette.commands.topology'),
+        keywords: ['topology topologie graph netzwerk'],
+        action: () => onNavigate('topology'),
+      },
+      {
+        id: 'nav-racks',
+        label: t('commandPalette.commands.racks'),
+        keywords: ['racks rack schrank he units'],
+        action: () => onNavigate('racks'),
       },
       {
         id: 'nav-discovery',

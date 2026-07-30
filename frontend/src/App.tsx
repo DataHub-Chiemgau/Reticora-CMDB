@@ -11,10 +11,13 @@ import { AssignmentListPage } from './pages/AssignmentListPage';
 import { LoginPage } from './pages/auth/LoginPage';
 import { CallbackPage } from './pages/auth/CallbackPage';
 import { CIFormModal } from './pages/CIFormModal';
+import { CIDetailPage } from './pages/CIDetailPage';
 import { CIListPage } from './pages/CIListPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DiscoveryPage } from './pages/DiscoveryPage';
 import { DocumentListPage } from './pages/DocumentListPage';
+import { RackPage } from './pages/RackPage';
+import { TopologyPage } from './pages/TopologyPage';
 import { StocktakeListPage } from './pages/StocktakeListPage';
 import { TicketListPage } from './pages/TicketListPage';
 import { UserManagementPage } from './pages/UserManagementPage';
@@ -23,6 +26,8 @@ import { useThemeStore } from './stores/theme';
 const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
   cmdb: '/cmdb',
+  topology: '/topology',
+  racks: '/racks',
   discovery: '/discovery',
   assets: '/assets',
   assignments: '/assignments',
@@ -47,7 +52,12 @@ function App() {
   const clearSession = useAuthStore((state) => state.clearSession);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated());
 
-  const currentPage: AppPage = pathToPage[location.pathname] || 'cmdb';
+  const currentPage: AppPage =
+    pathToPage[location.pathname] ||
+    (Object.entries(pageToPath).find(
+      ([, path]) => path !== '/' && location.pathname.startsWith(`${path}/`),
+    )?.[0] as AppPage) ||
+    'cmdb';
 
   const shortcutHint = useMemo(() => {
     if (typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)) {
@@ -112,6 +122,15 @@ function App() {
                 </NavButton>
                 <NavButton active={currentPage === 'cmdb'} onClick={() => handleNavigate('cmdb')}>
                   {t('nav.cmdb')}
+                </NavButton>
+                <NavButton
+                  active={currentPage === 'topology'}
+                  onClick={() => handleNavigate('topology')}
+                >
+                  {t('nav.topology')}
+                </NavButton>
+                <NavButton active={currentPage === 'racks'} onClick={() => handleNavigate('racks')}>
+                  {t('nav.racks', 'Racks')}
                 </NavButton>
                 <NavButton
                   active={currentPage === 'assets'}
@@ -212,6 +231,9 @@ function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/cmdb" element={<CIListPage onCreateCI={openCreateCI} />} />
+            <Route path="/cmdb/:id" element={<CIDetailPage />} />
+            <Route path="/topology" element={<TopologyPage />} />
+            <Route path="/racks" element={<RackPage />} />
             <Route path="/discovery" element={<DiscoveryPage />} />
             <Route path="/assets" element={<AssetListPage />} />
             <Route path="/assignments" element={<AssignmentListPage />} />

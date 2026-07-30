@@ -206,6 +206,93 @@ export const collectorApi = {
   },
 };
 
+// --- Topology ---
+
+export interface TopologyNode {
+  id: string;
+  name: string;
+  ci_type: string;
+  status: string;
+  client_id?: string;
+  site_id?: string;
+  management_ip?: string;
+}
+
+export interface TopologyEdge {
+  id: string;
+  source_ci_id: string;
+  target_ci_id: string;
+  rel_type: string;
+  source?: string;
+}
+
+export interface TopologyGraphData {
+  nodes: TopologyNode[];
+  edges: TopologyEdge[];
+}
+
+export interface TopologyParams {
+  client_id?: string;
+  site_id?: string;
+  ci_type?: string;
+  root_ci_id?: string;
+  depth?: number;
+}
+
+export const topologyApi = {
+  get(params: TopologyParams = {}): Promise<TopologyGraphData> {
+    return fetchAPI(`/topology${buildQuery(params)}`);
+  },
+  neighbors(ciId: string): Promise<TopologyGraphData> {
+    return fetchAPI(`/topology/cis/${ciId}/neighbors`);
+  },
+};
+
+// --- Racks ---
+
+export interface Rack {
+  id: string;
+  organization_id: string;
+  room_id: string;
+  name: string;
+  height_u: number;
+  width_mm: number;
+  depth_mm: number;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RackMount {
+  id: string;
+  organization_id: string;
+  rack_id: string;
+  ci_id: string;
+  position_u: number;
+  height_u: number;
+  face: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RackListParams {
+  limit?: number;
+  offset?: number;
+  room_id?: string;
+}
+
+export const rackApi = {
+  list(params: RackListParams = {}): Promise<PaginatedResponse<Rack>> {
+    return fetchAPI(`/racks${buildQuery(params)}`);
+  },
+  get(id: string): Promise<Rack> {
+    return fetchAPI(`/racks/${id}`);
+  },
+  listMounts(rackId: string, params: ListParams = {}): Promise<PaginatedResponse<RackMount>> {
+    return fetchAPI(`/racks/${rackId}/mounts${buildQuery(params)}`);
+  },
+};
+
 // --- Phase 2: Asset Management ---
 
 export interface Asset {
