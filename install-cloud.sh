@@ -199,7 +199,7 @@ ask_secret() {
 # default (e.g. a missing https:// scheme is filled in). It is called
 # in-process (no command substitution) so the nameref assignment survives.
 ask_validated() {
-    local var="$1" prompt="$2" default="${3:-}" validator="$4" hint="${5:-}" value
+    local var="$1" prompt="$2" default="${3:-}" validator="$4" hint="${5:-}" value suggested
     while true; do
         ask value "$prompt" "$default"
         if "$validator" "$value"; then
@@ -209,7 +209,7 @@ ask_validated() {
             die "Invalid value for $prompt: '$value'"
         fi
         if [ -n "$hint" ]; then
-            local suggested=''
+            suggested=''
             # Run the hint in-process (no command substitution) so the
             # nameref assignment to 'suggested' survives. The hint prints its
             # message via warn; if the suggested value passes validation, it
@@ -217,6 +217,9 @@ ask_validated() {
             "$hint" "$value" suggested
             if [ -n "$suggested" ] && "$validator" "$suggested"; then
                 default="$suggested"
+            else
+                # Keep showing the user's last entry on the next prompt.
+                default="$value"
             fi
         else
             warn "Invalid input — please try again."
