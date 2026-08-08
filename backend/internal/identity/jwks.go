@@ -123,6 +123,9 @@ func (c *jwksCache) verificationKeys(ctx context.Context, p *OIDCProvider) ([]jw
 
 	var set jwksResponse
 	if err := json.Unmarshal(body, &set); err != nil {
+		if len(c.keys) > 0 {
+			return c.keys, nil
+		}
 		return nil, fmt.Errorf("identity: parse JWKS: %w", err)
 	}
 

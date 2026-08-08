@@ -391,8 +391,8 @@ func TestCallbackRejectsForgedIDToken(t *testing.T) {
 
 	handler.Callback(w, req)
 
-	if w.Code == http.StatusOK {
-		t.Fatal("expected the forged ID token to fail the exchange")
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for a forged ID token, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

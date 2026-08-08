@@ -390,6 +390,10 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 		strings.Contains(err.Error(), "unexpected ID token issuer"),
 		strings.Contains(err.Error(), "ID token is expired"),
 		strings.Contains(err.Error(), "ID token subject is required"),
+		strings.Contains(err.Error(), "verify ID token signature"),
+		strings.Contains(err.Error(), "ID token audience"),
+		strings.Contains(err.Error(), "authorized party"),
+		strings.Contains(err.Error(), "unexpected ID token nonce"),
 		strings.Contains(err.Error(), "missing ID token"):
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
 	case strings.Contains(err.Error(), "session issuer is not configured"),
