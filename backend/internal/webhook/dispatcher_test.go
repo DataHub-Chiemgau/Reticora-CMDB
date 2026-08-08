@@ -29,7 +29,7 @@ func TestDispatcherDeliversSignedWebhook(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if err := repo.Create(&Subscription{OrganizationID: "org-1", Name: "hook", URL: server.URL, Secret: "secret", Events: []string{"ci.created"}, IsActive: true}); err != nil {
+	if err := repo.Create(context.Background(), &Subscription{OrganizationID: "org-1", Name: "hook", URL: server.URL, Secret: "secret", Events: []string{"ci.created"}, IsActive: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -40,7 +40,7 @@ func TestDispatcherDeliversSignedWebhook(t *testing.T) {
 		_ = dispatcher.Shutdown(ctx)
 	}()
 
-	dispatcher.Dispatch("org-1", "ci.created", map[string]any{"id": "ci-1"})
+	dispatcher.Dispatch(context.Background(), "org-1", "ci.created", map[string]any{"id": "ci-1"})
 	deadline := time.Now().Add(2 * time.Second)
 	for len(dispatcher.Deliveries()) == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
@@ -69,7 +69,7 @@ func TestDispatcherPersistsAndRetriesFailedDelivery(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if err := repo.Create(&Subscription{
+	if err := repo.Create(context.Background(), &Subscription{
 		OrganizationID: "org-1", Name: "hook", URL: server.URL,
 		Secret: "secret", Events: []string{"ci.created"}, IsActive: true,
 	}); err != nil {
@@ -88,7 +88,7 @@ func TestDispatcherPersistsAndRetriesFailedDelivery(t *testing.T) {
 		_ = dispatcher.Shutdown(ctx)
 	}()
 
-	dispatcher.Dispatch("org-1", "ci.created", map[string]any{"id": "ci-1"})
+	dispatcher.Dispatch(context.Background(), "org-1", "ci.created", map[string]any{"id": "ci-1"})
 
 	page := api.PaginationParams{Limit: 10}
 	deadline := time.Now().Add(2 * time.Second)
@@ -144,7 +144,7 @@ func TestDispatcherMarksDeliveryFailedAfterMaxAttempts(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if err := repo.Create(&Subscription{
+	if err := repo.Create(context.Background(), &Subscription{
 		OrganizationID: "org-1", Name: "hook", URL: server.URL,
 		Secret: "secret", Events: []string{"ci.created"}, IsActive: true,
 	}); err != nil {
@@ -163,7 +163,7 @@ func TestDispatcherMarksDeliveryFailedAfterMaxAttempts(t *testing.T) {
 		_ = dispatcher.Shutdown(ctx)
 	}()
 
-	dispatcher.Dispatch("org-1", "ci.created", map[string]any{"id": "ci-1"})
+	dispatcher.Dispatch(context.Background(), "org-1", "ci.created", map[string]any{"id": "ci-1"})
 
 	page := api.PaginationParams{Limit: 10}
 	deadline := time.Now().Add(2 * time.Second)
@@ -185,7 +185,7 @@ func TestDispatcherMarksDeliveryFailedAfterMaxAttempts(t *testing.T) {
 
 func subscriptionID(t *testing.T, repo *MemoryRepository) string {
 	t.Helper()
-	subs, err := repo.ListByEvent("org-1", "ci.created")
+	subs, err := repo.ListByEvent(context.Background(), "org-1", "ci.created")
 	if err != nil {
 		t.Fatal(err)
 	}

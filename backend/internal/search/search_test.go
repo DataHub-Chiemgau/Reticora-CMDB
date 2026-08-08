@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -49,7 +50,7 @@ func TestOpenSearchHTTPQuery(t *testing.T) {
 	}))
 	defer srv.Close()
 	b := NewOpenSearchBackend(OpenSearchConfig{URL: srv.URL, Index: "idx"}, srv.Client())
-	res, err := b.Query(Query{OrganizationID: "org", Text: "router"})
+	res, err := b.Query(context.Background(), Query{OrganizationID: "org", Text: "router"})
 	if err != nil || len(res.Data) != 1 {
 		t.Fatalf("res=%#v err=%v", res, err)
 	}
@@ -64,14 +65,14 @@ func (f failingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) { 
 
 func TestOpenSearchPingInvalidURL(t *testing.T) {
 	b := NewOpenSearchBackend(OpenSearchConfig{URL: "://bad-url"}, nil)
-	if err := b.Ping(); err == nil {
+	if err := b.Ping(context.Background()); err == nil {
 		t.Fatal("expected error for invalid URL")
 	}
 }
 
 func TestOpenSearchPingUnreachable(t *testing.T) {
 	b := NewOpenSearchBackend(OpenSearchConfig{URL: "http://opensearch.local"}, &http.Client{Transport: failingRoundTripper{err: errTest}})
-	if err := b.Ping(); err == nil {
+	if err := b.Ping(context.Background()); err == nil {
 		t.Fatal("expected error for unreachable backend")
 	}
 }
@@ -79,7 +80,7 @@ func TestOpenSearchPingUnreachable(t *testing.T) {
 func TestOpenSearchIndexDocumentMarshalError(t *testing.T) {
 	b := NewOpenSearchBackend(OpenSearchConfig{URL: "http://opensearch.local"}, &http.Client{Transport: failingRoundTripper{err: errTest}})
 	doc := Document{OrganizationID: "org", EntityType: "ci", EntityID: "1", Metadata: map[string]string{"bad": "\xff\xfe"}}
-	if err := b.IndexDocument(doc); err == nil {
+	if err := b.IndexDocument(context.Background(), doc); err == nil {
 		t.Fatal("expected marshal error for invalid UTF-8 metadata")
 	}
 }
@@ -91,10 +92,10 @@ func TestOpenSearchQueryRoundTrip(t *testing.T) {
 	}))
 	defer srv.Close()
 	b := NewOpenSearchBackend(OpenSearchConfig{URL: srv.URL}, srv.Client())
-	if err := b.Ping(); err != nil {
+	if err := b.Ping(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	res, err := b.Query(Query{OrganizationID: "org", Text: "switch", Limit: 10, Highlight: true})
+	res, err := b.Query(context.Background(), Query{OrganizationID: "org", Text: "switch", Limit: 10, Highlight: true})
 	if err != nil {
 		t.Fatal(err)
 	}

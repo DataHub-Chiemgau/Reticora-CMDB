@@ -16,7 +16,7 @@ type MemoryRepository struct {
 	docs map[string]Document
 }
 
-func NewMemoryRepository() *MemoryRepository { return &MemoryRepository{docs: map[string]Document{}} }
+func NewMemoryRepository() *MemoryRepository             { return &MemoryRepository{docs: map[string]Document{}} }
 func (r *MemoryRepository) Ping(_ context.Context) error { return nil }
 func (r *MemoryRepository) IndexDocument(_ context.Context, doc Document) error {
 	r.mu.Lock()
@@ -36,6 +36,7 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, entityType, entityID
 	delete(r.docs, key(orgID, entityType, entityID))
 	return nil
 }
+
 // ReindexTenant reports the documents already held for the tenant as indexed.
 // The in-memory backend has no external index to rebuild: documents are
 // searchable as soon as they are written, so reindexing is a no-op by design.

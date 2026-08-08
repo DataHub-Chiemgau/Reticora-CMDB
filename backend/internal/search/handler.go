@@ -34,7 +34,7 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := Query{OrganizationID: t.OrganizationID, UserID: t.UserID, Text: r.URL.Query().Get("q"), EntityTypes: splitTypes(r.URL.Query().Get("type")), Limit: page.Limit, Offset: page.Offset, Highlight: true}
-	res, err := h.backend.Query(q)
+	res, err := h.backend.Query(r.Context(), q)
 	if err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
@@ -54,7 +54,7 @@ func (h *Handler) Reindex(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	out, err := h.backend.ReindexTenant(t.OrganizationID)
+	out, err := h.backend.ReindexTenant(r.Context(), t.OrganizationID)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return

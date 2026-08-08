@@ -89,7 +89,7 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "conversation not found")
 		return
 	}
-	chunks, cites, err := h.retriever.Retrieve(t.OrganizationID, t.UserID, req.Question, 6)
+	chunks, cites, err := h.retriever.Retrieve(r.Context(), t.OrganizationID, t.UserID, req.Question, 6)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return

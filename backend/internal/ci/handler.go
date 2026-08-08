@@ -1,6 +1,7 @@
 package ci
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -18,7 +19,7 @@ func isEntitlementError(err error) bool {
 
 // EventDispatcher publishes CI lifecycle events.
 type EventDispatcher interface {
-	Dispatch(orgID, event string, payload any)
+	Dispatch(ctx context.Context, orgID, event string, payload any)
 }
 
 // Handler provides HTTP handlers for CI endpoints.
@@ -164,7 +165,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.dispatcher != nil {
-		h.dispatcher.Dispatch(t.OrganizationID, "ci.created", item)
+		h.dispatcher.Dispatch(r.Context(), t.OrganizationID, "ci.created", item)
 	}
 
 	api.WriteJSON(w, http.StatusCreated, item)
@@ -191,7 +192,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.dispatcher != nil {
-		h.dispatcher.Dispatch(t.OrganizationID, "ci.updated", item)
+		h.dispatcher.Dispatch(r.Context(), t.OrganizationID, "ci.updated", item)
 	}
 
 	api.WriteJSON(w, http.StatusOK, item)
@@ -212,7 +213,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.dispatcher != nil {
-		h.dispatcher.Dispatch(t.OrganizationID, "ci.deleted", item)
+		h.dispatcher.Dispatch(r.Context(), t.OrganizationID, "ci.deleted", item)
 	}
 
 	w.WriteHeader(http.StatusNoContent)

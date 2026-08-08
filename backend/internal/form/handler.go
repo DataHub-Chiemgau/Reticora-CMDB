@@ -40,7 +40,7 @@ func (h *Handler) ListDefinitions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListDefinitions(t.OrganizationID, r.URL.Query().Get("client_id"), activeOnly(r), page)
+	items, total, err := h.repo.ListDefinitions(r.Context(), t.OrganizationID, r.URL.Query().Get("client_id"), activeOnly(r), page)
 	if err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
@@ -52,7 +52,7 @@ func (h *Handler) GetDefinition(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := h.repo.GetDefinition(t.OrganizationID, chi.URLParam(r, "id"))
+	item, err := h.repo.GetDefinition(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "form definition not found")
 		return
@@ -81,7 +81,7 @@ func (h *Handler) CreateDefinition(w http.ResponseWriter, r *http.Request) {
 	if item.UIHints == nil {
 		item.UIHints = JSONMap{}
 	}
-	if err := h.repo.CreateDefinition(item); err != nil {
+	if err := h.repo.CreateDefinition(r.Context(), item); err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
 	}
@@ -97,7 +97,7 @@ func (h *Handler) UpdateDefinition(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
-	item, err := h.repo.UpdateDefinition(t.OrganizationID, chi.URLParam(r, "id"), req)
+	item, err := h.repo.UpdateDefinition(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "form definition not found")
 		return
@@ -109,7 +109,7 @@ func (h *Handler) DeleteDefinition(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteDefinition(t.OrganizationID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeleteDefinition(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, 404, "Not Found", "form definition not found")
 		return
 	}
@@ -122,7 +122,7 @@ func (h *Handler) ListFormSubmissions(w http.ResponseWriter, r *http.Request) {
 	}
 	page := api.ParsePagination(r)
 	filter := SubmissionFilter{FormID: chi.URLParam(r, "id"), Status: r.URL.Query().Get("status")}
-	items, total, err := h.repo.ListSubmissions(t.OrganizationID, filter, page)
+	items, total, err := h.repo.ListSubmissions(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
@@ -136,7 +136,7 @@ func (h *Handler) ListSubmissions(w http.ResponseWriter, r *http.Request) {
 	}
 	page := api.ParsePagination(r)
 	filter := SubmissionFilter{FormID: r.URL.Query().Get("form_id"), Status: r.URL.Query().Get("status"), TicketID: r.URL.Query().Get("ticket_id"), CIID: r.URL.Query().Get("ci_id")}
-	items, total, err := h.repo.ListSubmissions(t.OrganizationID, filter, page)
+	items, total, err := h.repo.ListSubmissions(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
@@ -148,7 +148,7 @@ func (h *Handler) GetSubmission(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := h.repo.GetSubmission(t.OrganizationID, chi.URLParam(r, "id"))
+	item, err := h.repo.GetSubmission(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "form submission not found")
 		return
@@ -160,7 +160,7 @@ func (h *Handler) CreateSubmission(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	def, err := h.repo.GetDefinition(t.OrganizationID, chi.URLParam(r, "id"))
+	def, err := h.repo.GetDefinition(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "form definition not found")
 		return
@@ -191,7 +191,7 @@ func (h *Handler) CreateSubmission(w http.ResponseWriter, r *http.Request) {
 		status = "submitted"
 	}
 	sub := &Submission{OrganizationID: t.OrganizationID, FormID: def.ID, Values: req.Values, SubmittedBy: t.UserID, CIID: req.CIID, TicketID: req.TicketID, Status: status}
-	if err := h.repo.CreateSubmission(sub); err != nil {
+	if err := h.repo.CreateSubmission(r.Context(), sub); err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
 	}

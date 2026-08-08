@@ -11,7 +11,6 @@ import (
 	"encoding/pem"
 	"io"
 	"math/big"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"

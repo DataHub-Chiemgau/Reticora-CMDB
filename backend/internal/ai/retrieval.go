@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"math"
 	"sort"
 	"strings"
@@ -34,11 +35,11 @@ func Cosine(a, b []float64) float64 {
 	}
 	return dot / (math.Sqrt(na) * math.Sqrt(nb))
 }
-func (r *Retriever) Retrieve(orgID, userID, question string, limit int) ([]Chunk, []Citation, error) {
+func (r *Retriever) Retrieve(ctx context.Context, orgID, userID, question string, limit int) ([]Chunk, []Citation, error) {
 	if limit <= 0 {
 		limit = 5
 	}
-	sr, err := r.search.Query(search.Query{OrganizationID: orgID, UserID: userID, Text: question, Limit: 25, Highlight: false})
+	sr, err := r.search.Query(ctx, search.Query{OrganizationID: orgID, UserID: userID, Text: question, Limit: 25, Highlight: false})
 	if err != nil {
 		return nil, nil, err
 	}

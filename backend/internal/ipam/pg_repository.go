@@ -64,8 +64,7 @@ func dnsServersArg(dns []string) any {
 	return dns
 }
 
-func (r *PGRepository) ListSubnets(orgID string, f SubnetFilter, page api.PaginationParams) ([]Subnet, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListSubnets(ctx context.Context, orgID string, f SubnetFilter, page api.PaginationParams) ([]Subnet, int, error) {
 	var out []Subnet
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -104,8 +103,7 @@ func (r *PGRepository) ListSubnets(orgID string, f SubnetFilter, page api.Pagina
 	return out, total, err
 }
 
-func (r *PGRepository) GetSubnet(orgID, id string) (*Subnet, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetSubnet(ctx context.Context, orgID, id string) (*Subnet, error) {
 	var sn *Subnet
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -118,8 +116,7 @@ func (r *PGRepository) GetSubnet(orgID, id string) (*Subnet, error) {
 	return sn, err
 }
 
-func (r *PGRepository) CreateSubnet(s *Subnet) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateSubnet(ctx context.Context, s *Subnet) error {
 	return r.withTenant(ctx, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
 			`INSERT INTO subnet (organization_id, client_id, site_id, cidr, name, vlan_id, gateway, dns_servers, description, is_management)
@@ -130,8 +127,7 @@ func (r *PGRepository) CreateSubnet(s *Subnet) error {
 	})
 }
 
-func (r *PGRepository) UpdateSubnet(orgID, id string, req UpdateSubnetRequest) (*Subnet, error) {
-	ctx := context.Background()
+func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req UpdateSubnetRequest) (*Subnet, error) {
 	var sn *Subnet
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
@@ -193,12 +189,11 @@ func (r *PGRepository) UpdateSubnet(orgID, id string, req UpdateSubnetRequest) (
 	return sn, err
 }
 
-func (r *PGRepository) DeleteSubnet(orgID, id string) error {
-	return r.deleteByID(orgID, "subnet", id)
+func (r *PGRepository) DeleteSubnet(ctx context.Context, orgID, id string) error {
+	return r.deleteByID(ctx, orgID, "subnet", id)
 }
 
-func (r *PGRepository) deleteByID(orgID, table, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
@@ -232,8 +227,7 @@ func scanIP(s scanner) (*IPAddress, error) {
 	return a, nil
 }
 
-func (r *PGRepository) ListIPAddresses(orgID, subnetID string, page api.PaginationParams) ([]IPAddress, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListIPAddresses(ctx context.Context, orgID, subnetID string, page api.PaginationParams) ([]IPAddress, int, error) {
 	var out []IPAddress
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -265,8 +259,7 @@ func (r *PGRepository) ListIPAddresses(orgID, subnetID string, page api.Paginati
 	return out, total, err
 }
 
-func (r *PGRepository) GetIPAddress(orgID, id string) (*IPAddress, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetIPAddress(ctx context.Context, orgID, id string) (*IPAddress, error) {
 	var a *IPAddress
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -279,8 +272,7 @@ func (r *PGRepository) GetIPAddress(orgID, id string) (*IPAddress, error) {
 	return a, err
 }
 
-func (r *PGRepository) CreateIPAddress(a *IPAddress) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateIPAddress(ctx context.Context, a *IPAddress) error {
 	return r.withTenant(ctx, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
 			`INSERT INTO ip_address (organization_id, subnet_id, interface_id, address, status, dns_name, description)
@@ -291,8 +283,7 @@ func (r *PGRepository) CreateIPAddress(a *IPAddress) error {
 	})
 }
 
-func (r *PGRepository) UpdateIPAddress(orgID, id string, req UpdateIPAddressRequest) (*IPAddress, error) {
-	ctx := context.Background()
+func (r *PGRepository) UpdateIPAddress(ctx context.Context, orgID, id string, req UpdateIPAddressRequest) (*IPAddress, error) {
 	var a *IPAddress
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
@@ -339,8 +330,8 @@ func (r *PGRepository) UpdateIPAddress(orgID, id string, req UpdateIPAddressRequ
 	return a, err
 }
 
-func (r *PGRepository) DeleteIPAddress(orgID, id string) error {
-	return r.deleteByID(orgID, "ip_address", id)
+func (r *PGRepository) DeleteIPAddress(ctx context.Context, orgID, id string) error {
+	return r.deleteByID(ctx, orgID, "ip_address", id)
 }
 
 // --- Network Interfaces ---
@@ -360,8 +351,7 @@ func scanNIC(s scanner) (*NetworkInterface, error) {
 	return ni, nil
 }
 
-func (r *PGRepository) ListInterfacesForCI(orgID, ciID string, page api.PaginationParams) ([]NetworkInterface, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListInterfacesForCI(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]NetworkInterface, int, error) {
 	var out []NetworkInterface
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -385,8 +375,7 @@ func (r *PGRepository) ListInterfacesForCI(orgID, ciID string, page api.Paginati
 	return out, total, err
 }
 
-func (r *PGRepository) GetInterface(orgID, id string) (*NetworkInterface, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetInterface(ctx context.Context, orgID, id string) (*NetworkInterface, error) {
 	var ni *NetworkInterface
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -399,8 +388,7 @@ func (r *PGRepository) GetInterface(orgID, id string) (*NetworkInterface, error)
 	return ni, err
 }
 
-func (r *PGRepository) CreateInterface(ni *NetworkInterface) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateInterface(ctx context.Context, ni *NetworkInterface) error {
 	return r.withTenant(ctx, ni.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
 			`INSERT INTO network_interface (organization_id, ci_id, name, mac_address, interface_type, speed_mbps, is_management, is_uplink, admin_status, oper_status, description)
@@ -411,8 +399,7 @@ func (r *PGRepository) CreateInterface(ni *NetworkInterface) error {
 	})
 }
 
-func (r *PGRepository) UpdateInterface(orgID, id string, req UpdateInterfaceRequest) (*NetworkInterface, error) {
-	ctx := context.Background()
+func (r *PGRepository) UpdateInterface(ctx context.Context, orgID, id string, req UpdateInterfaceRequest) (*NetworkInterface, error) {
 	var ni *NetworkInterface
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
@@ -479,6 +466,6 @@ func (r *PGRepository) UpdateInterface(orgID, id string, req UpdateInterfaceRequ
 	return ni, err
 }
 
-func (r *PGRepository) DeleteInterface(orgID, id string) error {
-	return r.deleteByID(orgID, "network_interface", id)
+func (r *PGRepository) DeleteInterface(ctx context.Context, orgID, id string) error {
+	return r.deleteByID(ctx, orgID, "network_interface", id)
 }

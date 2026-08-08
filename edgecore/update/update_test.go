@@ -4,17 +4,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeSource struct {
@@ -103,14 +102,10 @@ func TestApplyRequiresDownloadURL(t *testing.T) {
 	}
 }
 
-// TestApply runs the real Apply in a helper subprocess so os.Executable
-// inside Apply points at a scratch binary we control, never the test runner.
+// TestApply drives Apply against a fake executable in a temp dir via the
+// package-internal executablePath seam. Each case serves a binary over
+// httptest and asserts the swap/backup/marker or failure-cleanup behavior.
 func TestApply(t *testing.T) {
-	if os.Getenv("GO_WANT_APPLY_HELPER") == "1" {
-		runApplyHelper(t)
-		return
-	}
-
 	binary := []byte("#!/bin/sh\necho v2\n")
 	sum := sha256.Sum256(binary)
 	platformKey := fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH)
@@ -120,7 +115,7 @@ func TestApply(t *testing.T) {
 		handler       http.HandlerFunc
 		checksums     map[string]string
 		wantErr       string // empty means success expected
-		wantInstalled []byte  // expected content of the binary after Apply
+		wantInstalled []byte // expected content of the binary after Apply
 		wantMarker    string // expected .update-applied content (success only)
 	}{
 		{
@@ -166,12 +161,22 @@ func TestApply(t *testing.T) {
 			wantErr:       "status 404",
 			wantInstalled: []byte("original-binary"),
 		},
+		{
+			name:          "unreachable server keeps original",
+			handler:       nil, // no server; port 1 is never listening
+			wantErr:       "download release",
+			wantInstalled: []byte("original-binary"),
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(tt.handler)
-			defer srv.Close()
+			downloadURL := "http://127.0.0.1:1/binary"
+			if tt.handler != nil {
+				srv := httptest.NewServer(tt.handler)
+				defer srv.Close()
+				downloadURL = srv.URL + "/binary"
+			}
 
 			dir := t.TempDir()
 			fakeExec := filepath.Join(dir, "edge-agent")
@@ -179,31 +184,25 @@ func TestApply(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			checksumJSON, err := json.Marshal(tt.checksums)
-			if err != nil {
-				t.Fatal(err)
+			c := &Checker{
+				executablePath: func() (string, error) { return fakeExec, nil },
 			}
-
-			cmd := exec.Command(os.Args[0], "-test.run", "^TestApply$", "-test.v")
-			cmd.Env = append(os.Environ(),
-				"GO_WANT_APPLY_HELPER=1",
-				"APPLY_FAKE_EXEC="+fakeExec,
-				"APPLY_DOWNLOAD_URL="+srv.URL,
-				"APPLY_CHECKSUMS="+string(checksumJSON),
-			)
-			out, err := cmd.CombinedOutput()
-			output := string(out)
+			err := c.Apply(context.Background(), ReleaseInfo{
+				Version:     "v2.0.0",
+				DownloadURL: downloadURL,
+				Checksums:   tt.checksums,
+			})
 
 			if tt.wantErr == "" {
 				if err != nil {
-					t.Fatalf("helper failed: %v\n%s", err, output)
+					t.Fatalf("Apply: %v", err)
 				}
 			} else {
 				if err == nil {
-					t.Fatalf("helper succeeded, want error containing %q\n%s", tt.wantErr, output)
+					t.Fatalf("Apply succeeded, want error containing %q", tt.wantErr)
 				}
-				if !strings.Contains(output, tt.wantErr) {
-					t.Errorf("helper output %q does not contain expected error %q", output, tt.wantErr)
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("Apply error = %q, want it to contain %q", err, tt.wantErr)
 				}
 			}
 
@@ -224,7 +223,8 @@ func TestApply(t *testing.T) {
 				if string(data) != tt.wantMarker {
 					t.Errorf("marker = %q, want %q", data, tt.wantMarker)
 				}
-				// The previous binary must have been kept as a .old backup.
+				// The previous binary must have been kept as a .old backup
+				// so the service manager can roll back.
 				backup, rerr := os.ReadFile(fakeExec + ".old")
 				if rerr != nil {
 					t.Fatalf("read backup: %v", rerr)
@@ -233,7 +233,7 @@ func TestApply(t *testing.T) {
 					t.Errorf("backup = %q, want original-binary", backup)
 				}
 			} else {
-				// Failure paths must not leave staging files or markers behind.
+				// Failure paths must not leave markers or staging files behind.
 				if _, rerr := os.Stat(marker); !os.IsNotExist(rerr) {
 					t.Errorf("marker should not exist on failure, stat err = %v", rerr)
 				}
@@ -245,43 +245,35 @@ func TestApply(t *testing.T) {
 	}
 }
 
-// runApplyHelper executes in the child process: it plants a fake executable
-// path by pointing the process at a wrapper is impossible, so instead it
-// uses the fact that Apply resolves os.Executable — which for the helper is
-// the test binary in a temp dir. To keep Apply's writes scoped to our
-// scratch dir we copy nothing; the helper instead swaps via APPLY_FAKE_EXEC
-// using a bind trick is unavailable, so it simply runs Apply and relies on
-// the test binary living in a writable temp build dir. The result is
-// reported via stdout for the parent to assert.
-func runApplyHelper(t *testing.T) {
-	url := os.Getenv("APPLY_DOWNLOAD_URL")
-	checksums := parseChecksums(os.Getenv("APPLY_CHECKSUMS"))
+func TestApplyRespectsContextCancellation(t *testing.T) {
+	unblock := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-unblock
+	}))
+	defer srv.Close()
+	defer close(unblock)
 
-	c := &Checker{}
-	err := c.Apply(context.Background(), ReleaseInfo{
-		Version:     "v2.0.0",
-		DownloadURL: url,
-		Checksums:   checksums,
-	})
-	if err != nil {
-		fmt.Printf("APPLY_ERROR: %v\n", err)
-		os.Exit(1)
+	dir := t.TempDir()
+	fakeExec := filepath.Join(dir, "edge-agent")
+	if err := os.WriteFile(fakeExec, []byte("original-binary"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	fmt.Println("APPLY_OK")
-}
 
-func parseChecksums(s string) map[string]string {
-	out := map[string]string{}
-	s = strings.Trim(s, "{}")
-	if s == "" {
-		return nil
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	c := &Checker{executablePath: func() (string, error) { return fakeExec, nil }}
+	err := c.Apply(ctx, ReleaseInfo{Version: "v2", DownloadURL: srv.URL + "/binary"})
+	if err == nil {
+		t.Fatal("expected error for cancelled context, got nil")
 	}
-	for _, part := range strings.Split(s, ", ") {
-		kv := strings.SplitN(part, ": ", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		out[strings.Trim(kv[0], `"`)] = strings.Trim(kv[1], `"`)
+
+	// Original binary must remain untouched.
+	installed, rerr := os.ReadFile(fakeExec)
+	if rerr != nil {
+		t.Fatalf("read binary: %v", rerr)
 	}
-	return out
+	if string(installed) != "original-binary" {
+		t.Errorf("installed content = %q, want original-binary", installed)
+	}
 }

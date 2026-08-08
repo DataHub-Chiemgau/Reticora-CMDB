@@ -174,7 +174,7 @@ func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, ac
 	case "send_webhook":
 		event := str(action, "event", "workflow.event")
 		if e.dispatcher != nil {
-			e.dispatcher.Dispatch(orgID, event, map[string]any{"run_id": run.ID, "context": run.Context})
+			e.dispatcher.Dispatch(ctx, orgID, event, map[string]any{"run_id": run.ID, "context": run.Context})
 		}
 		return JSONMap{"event": event}, false, nil
 	case "set_ci_field":
@@ -216,7 +216,7 @@ func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, ac
 			vals = v
 		}
 		sub := &form.Submission{OrganizationID: orgID, FormID: formID, Values: form.JSONMap(vals), SubmittedBy: "workflow", Status: "submitted"}
-		if err := e.forms.CreateSubmission(sub); err != nil {
+		if err := e.forms.CreateSubmission(ctx, sub); err != nil {
 			return nil, false, err
 		}
 		return JSONMap{"submission_id": sub.ID}, false, nil

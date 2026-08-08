@@ -74,7 +74,7 @@ func (h *Handler) ListSubnets(w http.ResponseWriter, r *http.Request) {
 		ClientID: r.URL.Query().Get("client_id"),
 		SiteID:   r.URL.Query().Get("site_id"),
 	}
-	items, total, err := h.repo.ListSubnets(orgID, f, page)
+	items, total, err := h.repo.ListSubnets(r.Context(), orgID, f, page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -129,7 +129,7 @@ func (h *Handler) CreateSubnet(w http.ResponseWriter, r *http.Request) {
 		Description:    req.Description,
 		IsManagement:   req.IsManagement,
 	}
-	if err := h.repo.CreateSubnet(s); err != nil {
+	if err := h.repo.CreateSubnet(r.Context(), s); err != nil {
 		writeRepoError(w, err, "subnet not found")
 		return
 	}
@@ -142,7 +142,7 @@ func (h *Handler) GetSubnet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s, err := h.repo.GetSubnet(orgID, chi.URLParam(r, "id"))
+	s, err := h.repo.GetSubnet(r.Context(), orgID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
 		return
@@ -173,7 +173,7 @@ func (h *Handler) UpdateSubnet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s, err := h.repo.UpdateSubnet(orgID, chi.URLParam(r, "id"), req)
+	s, err := h.repo.UpdateSubnet(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
 		return
@@ -187,7 +187,7 @@ func (h *Handler) DeleteSubnet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteSubnet(orgID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeleteSubnet(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
 		return
 	}
@@ -201,12 +201,12 @@ func (h *Handler) ListSubnetAddresses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subnetID := chi.URLParam(r, "id")
-	if _, err := h.repo.GetSubnet(orgID, subnetID); err != nil {
+	if _, err := h.repo.GetSubnet(r.Context(), orgID, subnetID); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListIPAddresses(orgID, subnetID, page)
+	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, subnetID, page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -226,7 +226,7 @@ func (h *Handler) ListIPAddresses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListIPAddresses(orgID, r.URL.Query().Get("subnet_id"), page)
+	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, r.URL.Query().Get("subnet_id"), page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -266,7 +266,7 @@ func (h *Handler) CreateIPAddress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.SubnetID != "" {
-		subnet, err := h.repo.GetSubnet(orgID, req.SubnetID)
+		subnet, err := h.repo.GetSubnet(r.Context(), orgID, req.SubnetID)
 		if err != nil {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", "subnet not found")
 			return
@@ -290,7 +290,7 @@ func (h *Handler) CreateIPAddress(w http.ResponseWriter, r *http.Request) {
 		DNSName:        req.DNSName,
 		Description:    req.Description,
 	}
-	if err := h.repo.CreateIPAddress(a); err != nil {
+	if err := h.repo.CreateIPAddress(r.Context(), a); err != nil {
 		writeRepoError(w, err, "ip address not found")
 		return
 	}
@@ -303,7 +303,7 @@ func (h *Handler) GetIPAddress(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	a, err := h.repo.GetIPAddress(orgID, chi.URLParam(r, "id"))
+	a, err := h.repo.GetIPAddress(r.Context(), orgID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ip address not found")
 		return
@@ -328,12 +328,12 @@ func (h *Handler) UpdateIPAddress(w http.ResponseWriter, r *http.Request) {
 	}
 	// Validate address still belongs to a newly-assigned subnet.
 	if req.SubnetID != nil && *req.SubnetID != "" {
-		current, err := h.repo.GetIPAddress(orgID, chi.URLParam(r, "id"))
+		current, err := h.repo.GetIPAddress(r.Context(), orgID, chi.URLParam(r, "id"))
 		if err != nil {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "ip address not found")
 			return
 		}
-		subnet, err := h.repo.GetSubnet(orgID, *req.SubnetID)
+		subnet, err := h.repo.GetSubnet(r.Context(), orgID, *req.SubnetID)
 		if err != nil {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", "subnet not found")
 			return
@@ -348,7 +348,7 @@ func (h *Handler) UpdateIPAddress(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	a, err := h.repo.UpdateIPAddress(orgID, chi.URLParam(r, "id"), req)
+	a, err := h.repo.UpdateIPAddress(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ip address not found")
 		return
@@ -362,7 +362,7 @@ func (h *Handler) DeleteIPAddress(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteIPAddress(orgID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeleteIPAddress(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ip address not found")
 		return
 	}
@@ -378,7 +378,7 @@ func (h *Handler) ListInterfaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListInterfacesForCI(orgID, chi.URLParam(r, "id"), page)
+	items, total, err := h.repo.ListInterfacesForCI(r.Context(), orgID, chi.URLParam(r, "id"), page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -433,7 +433,7 @@ func (h *Handler) CreateInterface(w http.ResponseWriter, r *http.Request) {
 		OperStatus:     operStatus,
 		Description:    req.Description,
 	}
-	if err := h.repo.CreateInterface(ni); err != nil {
+	if err := h.repo.CreateInterface(r.Context(), ni); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -446,7 +446,7 @@ func (h *Handler) GetInterface(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ni, err := h.repo.GetInterface(orgID, chi.URLParam(r, "id"))
+	ni, err := h.repo.GetInterface(r.Context(), orgID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "network interface not found")
 		return
@@ -469,7 +469,7 @@ func (h *Handler) UpdateInterface(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid interface_type")
 		return
 	}
-	ni, err := h.repo.UpdateInterface(orgID, chi.URLParam(r, "id"), req)
+	ni, err := h.repo.UpdateInterface(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "network interface not found")
 		return
@@ -483,7 +483,7 @@ func (h *Handler) DeleteInterface(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteInterface(orgID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeleteInterface(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "network interface not found")
 		return
 	}
