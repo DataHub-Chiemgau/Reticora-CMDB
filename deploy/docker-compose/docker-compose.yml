@@ -8,9 +8,14 @@
 # builds the images, applies the database migrations and starts the stack:
 #   ./install-cloud.sh
 #
-# Manual usage:
-#   docker compose --env-file deploy/docker-compose/.env \
-#     -f deploy/docker-compose/docker-compose.yml up -d
+# Manual usage (from the deploy/docker-compose directory, so that
+# docker-compose.override.yml with the source-build config is merged
+# automatically):
+#   cd deploy/docker-compose
+#   docker compose --env-file .env up -d
+# To run with prebuilt registry images instead, set RETICORA_SERVER_IMAGE /
+# RETICORA_FRONTEND_IMAGE in .env and rename docker-compose.override.yml to
+# docker-compose.override.yml.disabled (install-cloud.sh does this for you).
 
 services:
   postgres:

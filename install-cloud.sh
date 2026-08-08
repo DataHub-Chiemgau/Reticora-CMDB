@@ -127,7 +127,17 @@ EOF
     fi
 }
 
-compose_cmd() { "${COMPOSE[@]}" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"; }
+compose_cmd() {
+    # Passing -f explicitly disables compose's automatic merging of
+    # docker-compose.override.yml, so merge it by hand whenever it exists
+    # (it carries the build: sections for the local source build). The
+    # prebuilt-image path renames it to .disabled to opt out.
+    local files=(-f "$COMPOSE_FILE")
+    if [ -f "$OVERRIDE_FILE" ]; then
+        files+=(-f "$OVERRIDE_FILE")
+    fi
+    "${COMPOSE[@]}" --env-file "$ENV_FILE" "${files[@]}" "$@"
+}
 
 # ─── Prompting helpers ────────────────────────────────────────────────────────
 # ask <variable> <prompt> [default]
