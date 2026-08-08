@@ -14,8 +14,12 @@ type CIIndexer struct {
 	Backend Backend
 }
 
-// NewCIIndexer wraps a search backend for use with ci.Service.WithIndexer.
+// NewCIIndexer wraps a search backend for use with ci.NewIndexingRepository.
+// A nil backend returns nil so the repository is used undecorated.
 func NewCIIndexer(backend Backend) *CIIndexer {
+	if backend == nil {
+		return nil
+	}
 	return &CIIndexer{Backend: backend}
 }
 
