@@ -192,6 +192,11 @@ ask_secret() {
 }
 
 # ask_validated <variable> <prompt> [default] <validator-function> [hint-function]
+#
+# The optional hint function receives the rejected value and a nameref; it
+# prints a short explanation of why the value was rejected and may set the
+# nameref variable to a corrected value, which is then offered as the next
+# prompt's default (e.g. a missing https:// scheme is filled in).
 ask_validated() {
     local var="$1" prompt="$2" default="${3:-}" validator="$4" hint="${5:-}" value
     while true; do
@@ -203,13 +208,18 @@ ask_validated() {
             die "Invalid value for $prompt: '$value'"
         fi
         if [ -n "$hint" ]; then
-            local hint_text suggested
-            hint_text="$("$hint" "$value")"
+            local suggested='' hint_text=''
+            # Run the hint with stdout captured into a variable via a temp
+            # file, so the nameref assignment to 'suggested' happens in this
+            # shell (a command substitution would run in a subshell and lose
+            # it). If the suggested value passes validation, offer it as the
+            # next prompt's default.
+            local hint_out
+            hint_out="$(mktemp)"
+            "$hint" "$value" suggested > "$hint_out"
+            hint_text="$(cat "$hint_out")"
+            rm -f "$hint_out"
             warn "Invalid input — $hint_text"
-            # Offer the corrected value as the next default when the hint
-            # suggests one (e.g. a missing https:// scheme); otherwise keep
-            # the original default instead of the rejected input.
-            suggested="$(printf '%s' "$hint_text" | sed -n 's/.*for example \(http[^ ]*\).*/\1/p')"
             if [ -n "$suggested" ] && "$validator" "$suggested"; then
                 default="$suggested"
             fi
@@ -254,15 +264,19 @@ valid_url() {
     return 1
 }
 
-# explain_url_error <value> — prints a short hint why a URL was rejected.
+# explain_url_error <value> <suggestion-nameref> — prints a short hint why a
+# URL was rejected and, for a missing scheme, suggests the corrected value via
+# the nameref.
 explain_url_error() {
+    local -n _suggest="$2"
     case "$1" in
         http://*|https://*)
             echo "The URL must contain a host (e.g. https://cmdb.example.com)." ;;
         *"://"*)
             echo "Only http:// and https:// URLs are supported." ;;
         *)
-            printf 'The URL must start with http:// or https:// — for example https://%s\n' "$1" ;;
+            _suggest="https://$1"
+            printf 'The URL must start with http:// or https:// — for example %s\n' "$_suggest" ;;
     esac
 }
 
