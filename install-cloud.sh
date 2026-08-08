@@ -140,6 +140,13 @@ compose_cmd() {
 }
 
 # ─── Prompting helpers ────────────────────────────────────────────────────────
+# Interactive answers are read from /dev/tty (when available) instead of
+# stdin: several steps of the installation (openssl genpkey, find | sort -z,
+# docker compose …) inherit stdin and would otherwise swallow buffered
+# answers that the user type-ahead typed for later prompts.
+PROMPT_IN=0
+[ -e /dev/tty ] && [ -r /dev/tty ] && PROMPT_IN=/dev/tty
+
 # ask <variable> <prompt> [default]
 ask() {
     local var="$1" prompt="$2" default="${3:-}" reply
@@ -148,18 +155,23 @@ ask() {
         return
     fi
     if [ -n "$default" ]; then
-        read -r -p "$prompt [$default]: " reply || true
+        read -r -p "$prompt [$default]: " reply <"$PROMPT_IN" || true
         reply="$(trim "$reply")"
         printf -v "$var" '%s' "${reply:-$default}"
     else
         # Questions whose prompt is explicitly marked as optional accept an
-        # empty answer; all others require a value.
+        # empty answer; all others require a value. EOF on stdin (e.g. a
+        # scripted run that stops answering) is treated like an empty answer
+        # so optional questions fall through instead of looping forever.
         local optional=0
         case "$prompt" in
             *"optional"*|*"usually empty"*|*"empty = "*) optional=1 ;;
         esac
         while true; do
-            read -r -p "$prompt: " reply || true
+            if ! read -r -p "$prompt: " reply <"$PROMPT_IN"; then
+                reply=''
+                echo
+            fi
             reply="$(trim "$reply")"
             [ -n "$reply" ] && break
             [ "$optional" -eq 1 ] && break
@@ -169,23 +181,34 @@ ask() {
     fi
 }
 
-# ask_secret <variable> <prompt> [default] — hidden input, empty keeps default.
+# ask_secret <variable> <prompt> [default] [min-length] — hidden input, empty
+# keeps default. When a minimum length is given, too-short entries are
+# rejected and the prompt repeats.
 ask_secret() {
-    local var="$1" prompt="$2" default="${3:-}" reply
+    local var="$1" prompt="$2" default="${3:-}" min_len="${4:-0}" reply
     if ! is_tty; then
         printf -v "$var" '%s' "$default"
         return
     fi
     if [ -n "$default" ]; then
-        read -r -s -p "$prompt [press Enter to keep current value]: " reply || true
-        echo
+        while true; do
+            read -r -s -p "$prompt [press Enter to keep current value]: " reply <"$PROMPT_IN" || true
+            echo
+            [ -z "$reply" ] && break
+            [ "${#reply}" -ge "$min_len" ] && break
+            warn "Invalid input — the value must be at least $min_len characters long."
+        done
         printf -v "$var" '%s' "${reply:-$default}"
     else
         while true; do
-            read -r -s -p "$prompt: " reply || true
+            read -r -s -p "$prompt: " reply <"$PROMPT_IN" || true
             echo
-            [ -n "$reply" ] && break
-            warn "A value is required."
+            if [ -z "$reply" ]; then
+                warn "A value is required."
+                continue
+            fi
+            [ "${#reply}" -ge "$min_len" ] && break
+            warn "Invalid input — the value must be at least $min_len characters long."
         done
         printf -v "$var" '%s' "$reply"
     fi
@@ -239,7 +262,7 @@ confirm() {
         return
     fi
     while true; do
-        read -r -p "$prompt [$yn]: " reply || true
+        read -r -p "$prompt [$yn]: " reply <"$PROMPT_IN" || true
         reply="$(trim "$reply")"
         case "${reply:-$default}" in
             y|Y|yes|YES|j|J|ja|JA) return 0 ;;
@@ -265,22 +288,46 @@ valid_url() {
 }
 
 # explain_url_error <value> <suggestion-nameref> — warns why a URL was
-# rejected and, for a missing scheme, suggests the corrected value via the
-# nameref.
+# rejected and, when the input looks like a host (optionally with a mistyped
+# scheme such as "https:host" or "http:/host"), suggests the corrected URL
+# via the nameref.
 explain_url_error() {
     local -n _suggest="$2"
+    local host="$1"
     case "$1" in
         http://*|https://*)
-            warn "Invalid input — the URL must contain a host (e.g. https://cmdb.example.com)." ;;
+            warn "Invalid input — the URL must contain a host (e.g. https://cmdb.example.com)."
+            return ;;
         *"://"*)
-            warn "Invalid input — only http:// and https:// URLs are supported." ;;
-        *)
-            _suggest="https://$1"
-            warn "Invalid input — the URL must start with http:// or https://, e.g. $_suggest" ;;
+            warn "Invalid input — only http:// and https:// URLs are supported."
+            return ;;
     esac
+    # Strip a mistyped scheme prefix ("https:host", "http:/host", "https//host").
+    case "$host" in
+        [Hh][Tt][Tt][Pp][Ss]:*) host="${host:6}" ;;
+        [Hh][Tt][Tt][Pp]:*)     host="${host:5}" ;;
+    esac
+    while [[ "$host" == /* ]]; do host="${host#/}"; done
+    # Suggest a correction only when what remains looks like a host name.
+    case "$host" in
+        ""|*[[:space:]/]*|*"://"*) ;;
+        *) _suggest="https://$host" ;;
+    esac
+    if [ -n "$_suggest" ]; then
+        warn "Invalid input — the URL must start with http:// or https://, e.g. $_suggest"
+    else
+        warn "Invalid input — the URL must start with http:// or https://, e.g. https://cmdb.example.com"
+    fi
 }
 
 valid_password() { [ "${#1}" -ge 8 ]; }
+valid_secret()   { [ "${#1}" -ge 16 ]; }
+valid_client_id() {
+    case "$1" in
+        ''|*[[:space:]]*) return 1 ;;
+    esac
+    return 0
+}
 
 # ─── .env handling ────────────────────────────────────────────────────────────
 env_get() {
@@ -393,8 +440,12 @@ collect_config() {
 
     local def_client_id
     def_client_id="$(env_get RETICORA_OIDC_CLIENT_ID || true)"
-    ask RETICORA_OIDC_CLIENT_ID "OIDC client ID" "${def_client_id:-reticora-app}"
-    ask RETICORA_OIDC_CLIENT_SECRET "OIDC client secret" "$def_client_secret"
+    ask_validated RETICORA_OIDC_CLIENT_ID "OIDC client ID" "${def_client_id:-reticora-app}" valid_client_id
+    if is_tty; then
+        ask_secret RETICORA_OIDC_CLIENT_SECRET "OIDC client secret (min. 16 characters)" "$def_client_secret" 16
+    else
+        RETICORA_OIDC_CLIENT_SECRET="$def_client_secret"
+    fi
 
     if is_tty; then
         ask_secret RETICORA_MASTER_KEY "Master key for credential encryption (base64, 32 bytes)" "$def_master_key"
@@ -403,25 +454,34 @@ collect_config() {
     fi
 
     # ── Public URLs / ports ──
-    local def_base def_issuer def_redirect def_port
+    local def_base def_issuer def_redirect def_port def_kc_port saved_base
     def_base="$(env_get RETICORA_PUBLIC_BASE_URL || true)"
     def_base="${def_base:-http://localhost:3000}"
     ask_validated RETICORA_PUBLIC_BASE_URL "Public base URL of the web UI (e.g. https://cmdb.example.com)" "$def_base" valid_url explain_url_error
+    saved_base="$RETICORA_PUBLIC_BASE_URL"
 
-    def_issuer="$(env_get RETICORA_OIDC_ISSUER_URL || true)"
-    def_issuer="${def_issuer:-http://localhost:8180/realms/reticora}"
-    ask_validated RETICORA_OIDC_ISSUER_URL "OIDC issuer URL (Keycloak realm)" "$def_issuer" valid_url explain_url_error
-
-    def_redirect="$(env_get RETICORA_OIDC_REDIRECT_URL || true)"
-    def_redirect="${def_redirect:-${RETICORA_PUBLIC_BASE_URL%/}/auth/callback}"
-    ask_validated RETICORA_OIDC_REDIRECT_URL "OIDC redirect URL (backend callback)" "$def_redirect" valid_url explain_url_error
-
+    # Ports are asked for first so the OIDC URL defaults below can use them.
     def_port="$(env_get RETICORA_FRONTEND_PORT || true)"
     ask_validated RETICORA_FRONTEND_PORT "Host port for the web UI" "${def_port:-3000}" valid_port
     def_port="$(env_get RETICORA_SERVER_PORT || true)"
     ask_validated RETICORA_SERVER_PORT "Host port for the REST API" "${def_port:-8080}" valid_port
-    def_port="$(env_get RETICORA_KEYCLOAK_PORT || true)"
-    ask_validated RETICORA_KEYCLOAK_PORT "Host port for Keycloak" "${def_port:-8180}" valid_port
+    def_kc_port="$(env_get RETICORA_KEYCLOAK_PORT || true)"
+    ask_validated RETICORA_KEYCLOAK_PORT "Host port for Keycloak" "${def_kc_port:-8180}" valid_port
+
+    # Derive sensible defaults from the values just entered; values saved in
+    # .env from a previous run always win so re-runs stay stable.
+    def_issuer="$(env_get RETICORA_OIDC_ISSUER_URL || true)"
+    def_issuer="${def_issuer:-http://localhost:${RETICORA_KEYCLOAK_PORT}/realms/reticora}"
+    ask_validated RETICORA_OIDC_ISSUER_URL "OIDC issuer URL (Keycloak realm)" "$def_issuer" valid_url explain_url_error
+
+    def_redirect="$(env_get RETICORA_OIDC_REDIRECT_URL || true)"
+    if [ -z "$def_redirect" ]; then
+        case "$saved_base" in
+            http://*|https://*) def_redirect="${saved_base%/}/auth/callback" ;;
+            *)                  def_redirect="https://${saved_base%/}/auth/callback" ;;
+        esac
+    fi
+    ask_validated RETICORA_OIDC_REDIRECT_URL "OIDC redirect URL (backend callback)" "$def_redirect" valid_url explain_url_error
 
     # ── Images ──
     ask RETICORA_IMAGE_REGISTRY "Image registry for prebuilt images (empty = build locally)" "$(env_get RETICORA_IMAGE_REGISTRY || true)"
@@ -440,7 +500,9 @@ ensure_session_key() {
     if [ ! -f "$key_file" ]; then
         info "Generating RS256 session signing key …"
         mkdir -p "$key_dir"
-        openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out "$key_file" 2>/dev/null
+        # </dev/null: key generation must not drain the installer's stdin
+        # (the user's answer stream for the remaining prompts).
+        openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out "$key_file" 2>/dev/null </dev/null
     fi
     chmod 600 "$key_file"
     success "Session signing key: $key_file"
@@ -533,7 +595,9 @@ run_migrations() {
 
     local db_url="postgres://reticora:${RETICORA_DB_PASSWORD}@localhost:5432/reticora?sslmode=disable"
     if have_cmd migrate; then
-        migrate -path "$SCRIPT_DIR/backend/migrations" -database "$db_url" up \
+        # </dev/null: never let the tool consume the installer's stdin (it is
+        # the user's answer stream during interactive runs).
+        migrate -path "$SCRIPT_DIR/backend/migrations" -database "$db_url" up </dev/null \
             || die "Database migrations failed."
     else
         # Fallback: apply the migrations with psql inside the postgres
@@ -549,8 +613,12 @@ SQL
         local f version applied
         for f in "${sql_files[@]}"; do
             version="${f%%_*}"
+            # The applied-check and bookkeeping INSERT take no SQL input, so
+            # close their stdin (</dev/null): otherwise docker exec would
+            # drain the script's own stdin — the user's answer stream for the
+            # remaining prompts.
             applied="$(compose_cmd exec -T postgres psql -U reticora -d reticora -tAc \
-                "SELECT 1 FROM public.reticora_schema_migrations WHERE version = '$version'" || true)"
+                "SELECT 1 FROM public.reticora_schema_migrations WHERE version = '$version'" </dev/null || true)"
             if [ "$applied" = "1" ]; then
                 continue
             fi
@@ -559,7 +627,7 @@ SQL
                 < "$SCRIPT_DIR/backend/migrations/$f" \
                 || die "Migration $f failed."
             compose_cmd exec -T postgres psql -U reticora -d reticora -q -c \
-                "INSERT INTO public.reticora_schema_migrations (version) VALUES ('$version')"
+                "INSERT INTO public.reticora_schema_migrations (version) VALUES ('$version')" </dev/null
         done
     fi
     success "Database schema is up to date"

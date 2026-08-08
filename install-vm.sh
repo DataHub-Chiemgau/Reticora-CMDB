@@ -85,6 +85,13 @@ is_tty() { [ "$NON_INTERACTIVE" -eq 0 ] && [ -t 0 ]; }
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
 # ─── Prompting helpers ────────────────────────────────────────────────────────
+# Interactive answers are read from /dev/tty (when available) instead of
+# stdin: several steps of the installation (go build, docker compose, …)
+# inherit stdin and would otherwise swallow buffered answers that the user
+# type-ahead typed for later prompts.
+PROMPT_IN=0
+[ -e /dev/tty ] && [ -r /dev/tty ] && PROMPT_IN=/dev/tty
+
 ask() {
     local var="$1" prompt="$2" default="${3:-}" reply
     if ! is_tty; then
@@ -92,18 +99,23 @@ ask() {
         return
     fi
     if [ -n "$default" ]; then
-        read -r -p "$prompt [$default]: " reply || true
+        read -r -p "$prompt [$default]: " reply <"$PROMPT_IN" || true
         reply="$(trim "$reply")"
         printf -v "$var" '%s' "${reply:-$default}"
     else
         # Questions whose prompt is explicitly marked as optional accept an
-        # empty answer; all others require a value.
+        # empty answer; all others require a value. EOF on stdin (e.g. a
+        # scripted run that stops answering) is treated like an empty answer
+        # so optional questions fall through instead of looping forever.
         local optional=0
         case "$prompt" in
             *"optional"*|*"usually empty"*|*"empty = "*) optional=1 ;;
         esac
         while true; do
-            read -r -p "$prompt: " reply || true
+            if ! read -r -p "$prompt: " reply <"$PROMPT_IN"; then
+                reply=''
+                echo
+            fi
             reply="$(trim "$reply")"
             [ -n "$reply" ] && break
             [ "$optional" -eq 1 ] && break
@@ -120,12 +132,12 @@ ask_secret() {
         return
     fi
     if [ -n "$default" ]; then
-        read -r -s -p "$prompt [press Enter to keep current value]: " reply || true
+        read -r -s -p "$prompt [press Enter to keep current value]: " reply <"$PROMPT_IN" || true
         echo
         printf -v "$var" '%s' "${reply:-$default}"
     else
         while true; do
-            read -r -s -p "$prompt: " reply || true
+            read -r -s -p "$prompt: " reply <"$PROMPT_IN" || true
             echo
             [ -n "$reply" ] && break
             warn "A value is required."
@@ -134,8 +146,15 @@ ask_secret() {
     fi
 }
 
+# ask_validated <variable> <prompt> [default] <validator-function> [hint-function]
+#
+# The optional hint function receives the rejected value plus a nameref; it
+# warns why the value was rejected and may set the nameref to a corrected
+# value, which — if it passes validation — is offered as the next prompt's
+# default (e.g. a missing https:// scheme is filled in). It is called
+# in-process (no command substitution) so the nameref assignment survives.
 ask_validated() {
-    local var="$1" prompt="$2" default="${3:-}" validator="$4" value
+    local var="$1" prompt="$2" default="${3:-}" validator="$4" hint="${5:-}" value suggested
     while true; do
         ask value "$prompt" "$default"
         if "$validator" "$value"; then
@@ -144,8 +163,20 @@ ask_validated() {
         if ! is_tty; then
             die "Invalid value for $prompt: '$value'"
         fi
-        warn "Invalid input — please try again."
-        default="$value"
+        if [ -n "$hint" ]; then
+            suggested=''
+            "$hint" "$value" suggested
+            if [ -n "$suggested" ] && "$validator" "$suggested"; then
+                default="$suggested"
+            else
+                # Keep showing the user's last entry on the next prompt.
+                default="$value"
+            fi
+        else
+            warn "Invalid input — please try again."
+            # Keep showing the user's last entry on the next prompt.
+            default="$value"
+        fi
     done
     printf -v "$var" '%s' "$value"
 }
@@ -158,7 +189,7 @@ confirm() {
         return
     fi
     while true; do
-        read -r -p "$prompt [$yn]: " reply || true
+        read -r -p "$prompt [$yn]: " reply <"$PROMPT_IN" || true
         reply="$(trim "$reply")"
         case "${reply:-$default}" in
             y|Y|yes|YES|j|J|ja|JA) return 0 ;;
@@ -174,6 +205,39 @@ valid_url() {
         http://*/*|https://*/*|http://?*|https://?*) return 0 ;;
     esac
     return 1
+}
+
+# explain_url_error <value> <suggestion-nameref> — warns why a URL was
+# rejected and, when the input looks like a host (optionally with a mistyped
+# scheme such as "https:host" or "http:/host"), suggests the corrected URL
+# via the nameref.
+explain_url_error() {
+    local -n _suggest="$2"
+    local host="$1"
+    case "$1" in
+        http://*|https://*)
+            warn "Invalid input — the URL must contain a host (e.g. https://cmdb.example.com)."
+            return ;;
+        *"://"*)
+            warn "Invalid input — only http:// and https:// URLs are supported."
+            return ;;
+    esac
+    # Strip a mistyped scheme prefix ("https:host", "http:/host", "https//host").
+    case "$host" in
+        [Hh][Tt][Tt][Pp][Ss]:*) host="${host:6}" ;;
+        [Hh][Tt][Tt][Pp]:*)     host="${host:5}" ;;
+    esac
+    while [[ "$host" == /* ]]; do host="${host#/}"; done
+    # Suggest a correction only when what remains looks like a host name.
+    case "$host" in
+        ""|*[[:space:]/]*|*"://"*) ;;
+        *) _suggest="https://$host" ;;
+    esac
+    if [ -n "$_suggest" ]; then
+        warn "Invalid input — the URL must start with http:// or https://, e.g. $_suggest"
+    else
+        warn "Invalid input — the URL must start with http:// or https://, e.g. https://cmdb.example.com"
+    fi
 }
 
 valid_cidr_list() {
@@ -303,7 +367,7 @@ collect_config() {
     local def_server
     def_server="$(env_get RETICORA_SERVER_URL || true)"
     def_server="${def_server:-https://cmdb.example.com}"
-    ask_validated RETICORA_SERVER_URL "URL of the central Reticora cloud (e.g. https://cmdb.example.com)" "$def_server" valid_url
+    ask_validated RETICORA_SERVER_URL "URL of the central Reticora cloud (e.g. https://cmdb.example.com)" "$def_server" valid_url explain_url_error
 
     local def_org
     def_org="$(env_get RETICORA_ORGANIZATION_ID || true)"
