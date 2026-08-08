@@ -206,8 +206,9 @@ const maxIdempotentBodySize = 1 << 20 // 1 MiB
 
 type responseRecorder struct {
 	http.ResponseWriter
-	status int
-	body   []byte
+	status   int
+	body     []byte
+	overflow bool
 }
 
 func newResponseRecorder(w http.ResponseWriter) *responseRecorder {
@@ -220,12 +221,15 @@ func (r *responseRecorder) WriteHeader(status int) {
 }
 
 func (r *responseRecorder) Write(data []byte) (int, error) {
-	if len(r.body)+len(data) <= maxIdempotentBodySize {
-		r.body = append(r.body, data...)
-	} else {
-		// Overflow: drop the buffered body so the entry degrades to a
-		// status-only replay instead of growing without bound.
-		r.body = nil
+	if !r.overflow {
+		if len(r.body)+len(data) <= maxIdempotentBodySize {
+			r.body = append(r.body, data...)
+		} else {
+			// Overflow: drop the buffered body so the entry degrades to a
+			// status-only replay instead of storing a partial tail.
+			r.body = nil
+			r.overflow = true
+		}
 	}
 	return r.ResponseWriter.Write(data)
 }

@@ -36,7 +36,10 @@ const (
 	PermRoleRead          Permission = "role:read"
 	PermRoleManage        Permission = "role:manage"
 	PermPermissionRead    Permission = "permission:read"
-	PermPermissionManage  Permission = "permission:write"
+	// PermPermissionManage grants permission-grant administration. The value
+	// follows the canonical catalog key ("permission:write"), not the
+	// constant name, for backwards compatibility with stored role grants.
+	PermPermissionManage Permission = "permission:write"
 	PermEntitlementRead   Permission = "entitlement:read"
 	PermEntitlementManage Permission = "entitlement:manage"
 	PermAuditRead         Permission = "audit:read"

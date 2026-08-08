@@ -266,4 +266,10 @@ func (a authorizingRouter) Route(pattern string, fn func(r chi.Router)) chi.Rout
 	})
 }
 
-func (a authorizingRouter) Mount(pattern string, h http.Handler) { a.Router.Mount(pattern, h) }
+// Mount is intentionally unsupported on the authorizing router: a mounted
+// sub-router would bypass per-route permission enforcement. Domain handlers
+// must register routes through Get/Post/... or Route so every route resolves
+// to a permission.
+func (a authorizingRouter) Mount(pattern string, h http.Handler) {
+	panic(fmt.Sprintf("server: Mount(%q) on the authorizing router would bypass authorization; register routes explicitly", pattern))
+}
