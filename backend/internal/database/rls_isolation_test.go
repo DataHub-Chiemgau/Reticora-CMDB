@@ -34,11 +34,14 @@ func setupRLSTestRole(t *testing.T, dsn string) {
 		t.Fatalf("create test role: %v", err)
 	}
 	// The DSN user (migration owner) must be able to assume the test role.
-	var currentUser string
-	if err := db.QueryRowContext(ctx, "SELECT current_user").Scan(&currentUser); err != nil {
-		t.Fatalf("current_user: %v", err)
+	// quote_ident protects against usernames containing SQL metacharacters.
+	var grantStmt string
+	if err := db.QueryRowContext(ctx,
+		"SELECT format('GRANT %s TO %s', quote_ident($1), quote_ident(current_user))", rlsTestRole,
+	).Scan(&grantStmt); err != nil {
+		t.Fatalf("build grant statement: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, "GRANT "+rlsTestRole+" TO "+currentUser); err != nil {
+	if _, err := db.ExecContext(ctx, grantStmt); err != nil {
 		t.Fatalf("grant test role: %v", err)
 	}
 	for _, stmt := range []string{
@@ -273,6 +276,9 @@ func assertCINames(t *testing.T, tx *sql.Tx, want []string) {
 			t.Fatalf("scan ci: %v", err)
 		}
 		got = append(got, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate ci: %v", err)
 	}
 	if len(got) != len(want) {
 		t.Fatalf("expected %v, got %v", want, got)
