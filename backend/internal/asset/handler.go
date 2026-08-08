@@ -50,7 +50,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		SortDir:  r.URL.Query().Get("sort_dir"),
 	}
 
-	items, total, err := h.repo.List(t.OrganizationID, filter, page)
+	items, total, err := h.repo.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
 		if errors.Is(err, api.ErrInvalidCursor) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -83,7 +83,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	item, err := h.repo.GetByID(t.OrganizationID, id)
+	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "asset not found")
 		return
@@ -147,7 +147,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		a.CustomFields = make(map[string]any)
 	}
 
-	if err := h.repo.Create(a); err != nil {
+	if err := h.repo.Create(r.Context(), a); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -170,7 +170,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := h.repo.Update(t.OrganizationID, id, req)
+	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "asset not found")
 		return
@@ -188,7 +188,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.repo.Delete(t.OrganizationID, id); err != nil {
+	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "asset not found")
 		return
 	}

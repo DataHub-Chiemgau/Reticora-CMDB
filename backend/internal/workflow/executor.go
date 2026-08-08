@@ -34,25 +34,25 @@ func (e *Executor) Trigger(ctx context.Context, orgID string, def *Definition, t
 		return nil, fmt.Errorf("workflow trigger does not match")
 	}
 	run := &Run{OrganizationID: orgID, WorkflowID: def.ID, Status: StatusPending, Trigger: trigger, Context: payload, StartedAt: time.Now().UTC()}
-	if err := e.repo.CreateRun(run); err != nil {
+	if err := e.repo.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
 	return e.resume(ctx, orgID, def, run, "")
 }
 
 func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment string) (*Run, error) {
-	run, err := e.repo.GetRun(orgID, runID)
+	run, err := e.repo.GetRun(ctx, orgID, runID)
 	if err != nil {
 		return nil, err
 	}
-	def, err := e.repo.GetDefinition(orgID, run.WorkflowID)
+	def, err := e.repo.GetDefinition(ctx, orgID, run.WorkflowID)
 	if err != nil {
 		return nil, err
 	}
 	if run.Status != StatusWaitingApproval {
 		return nil, fmt.Errorf("workflow run is not waiting for approval")
 	}
-	steps, err := e.repo.ListSteps(orgID, runID)
+	steps, err := e.repo.ListSteps(ctx, orgID, runID)
 	if err != nil {
 		return nil, fmt.Errorf("list workflow steps: %w", err)
 	}
@@ -68,16 +68,16 @@ func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment 
 	}
 	out := JSONMap{"decision": decision, "comment": comment}
 	if decision == "rejected" {
-		if _, err := e.repo.UpdateStep(orgID, waiting.ID, StatusCancelled, out, "approval rejected"); err != nil {
+		if _, err := e.repo.UpdateStep(ctx, orgID, waiting.ID, StatusCancelled, out, "approval rejected"); err != nil {
 			return nil, fmt.Errorf("cancel approval step: %w", err)
 		}
 		now := time.Now().UTC()
-		return e.repo.UpdateRunStatus(orgID, runID, StatusCancelled, &now, run.Context)
+		return e.repo.UpdateRunStatus(ctx, orgID, runID, StatusCancelled, &now, run.Context)
 	}
 	if decision != "approved" {
 		return nil, fmt.Errorf("decision must be approved or rejected")
 	}
-	if _, err := e.repo.UpdateStep(orgID, waiting.ID, StatusSucceeded, out, ""); err != nil {
+	if _, err := e.repo.UpdateStep(ctx, orgID, waiting.ID, StatusSucceeded, out, ""); err != nil {
 		return nil, fmt.Errorf("complete approval step: %w", err)
 	}
 	return e.resume(ctx, orgID, def, run, waiting.ID)
@@ -86,14 +86,14 @@ func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment 
 func (e *Executor) resume(ctx context.Context, orgID string, def *Definition, run *Run, _ string) (*Run, error) {
 	if !conditionsMet(def.Conditions, run.Context) {
 		now := time.Now().UTC()
-		return e.repo.UpdateRunStatus(orgID, run.ID, StatusCancelled, &now, run.Context)
+		return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusCancelled, &now, run.Context)
 	}
-	if _, err := e.repo.UpdateRunStatus(orgID, run.ID, StatusRunning, nil, run.Context); err != nil {
+	if _, err := e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusRunning, nil, run.Context); err != nil {
 		slog.Error("workflow: failed to mark run running", "run_id", run.ID, "error", err)
 	}
-	steps, err := e.repo.ListSteps(orgID, run.ID)
+	steps, err := e.repo.ListSteps(ctx, orgID, run.ID)
 	if err != nil {
-		e.failRun(orgID, run, fmt.Errorf("list workflow steps: %w", err))
+		e.failRun(ctx, orgID, run, fmt.Errorf("list workflow steps: %w", err))
 		return nil, fmt.Errorf("list workflow steps: %w", err)
 	}
 	start := len(steps)
@@ -101,41 +101,41 @@ func (e *Executor) resume(ctx context.Context, orgID string, def *Definition, ru
 		action := def.Actions[i]
 		typ, err := actionType(action)
 		if err != nil {
-			e.failRun(orgID, run, err)
+			e.failRun(ctx, orgID, run, err)
 			return nil, err
 		}
 		step := &Step{OrganizationID: orgID, RunID: run.ID, StepIndex: i, ActionType: typ, Status: StatusRunning, Input: action, Output: JSONMap{}}
-		if err := e.repo.AppendStep(step); err != nil {
+		if err := e.repo.AppendStep(ctx, step); err != nil {
 			return nil, err
 		}
 		out, wait, err := e.executeAction(ctx, orgID, run, action)
 		if wait {
-			if _, err := e.repo.UpdateStep(orgID, step.ID, StatusWaitingApproval, out, ""); err != nil {
+			if _, err := e.repo.UpdateStep(ctx, orgID, step.ID, StatusWaitingApproval, out, ""); err != nil {
 				slog.Error("workflow: failed to mark step waiting for approval", "step_id", step.ID, "error", err)
 			}
-			return e.repo.UpdateRunStatus(orgID, run.ID, StatusWaitingApproval, nil, run.Context)
+			return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusWaitingApproval, nil, run.Context)
 		}
 		if err != nil {
-			if _, uerr := e.repo.UpdateStep(orgID, step.ID, StatusFailed, out, err.Error()); uerr != nil {
+			if _, uerr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusFailed, out, err.Error()); uerr != nil {
 				slog.Error("workflow: failed to mark step failed", "step_id", step.ID, "error", uerr)
 			}
 			now := time.Now().UTC()
-			return e.repo.UpdateRunStatus(orgID, run.ID, StatusFailed, &now, run.Context)
+			return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusFailed, &now, run.Context)
 		}
-		if _, err := e.repo.UpdateStep(orgID, step.ID, StatusSucceeded, out, ""); err != nil {
-			e.failRun(orgID, run, fmt.Errorf("update step %s: %w", step.ID, err))
+		if _, err := e.repo.UpdateStep(ctx, orgID, step.ID, StatusSucceeded, out, ""); err != nil {
+			e.failRun(ctx, orgID, run, fmt.Errorf("update step %s: %w", step.ID, err))
 			return nil, fmt.Errorf("update workflow step: %w", err)
 		}
 	}
 	now := time.Now().UTC()
-	return e.repo.UpdateRunStatus(orgID, run.ID, StatusSucceeded, &now, run.Context)
+	return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusSucceeded, &now, run.Context)
 }
 
 // failRun best-effort marks the run failed; the original error is returned to
 // the caller by resume, so persistence failures here are only logged.
-func (e *Executor) failRun(orgID string, run *Run, cause error) {
+func (e *Executor) failRun(ctx context.Context, orgID string, run *Run, cause error) {
 	now := time.Now().UTC()
-	if _, err := e.repo.UpdateRunStatus(orgID, run.ID, StatusFailed, &now, run.Context); err != nil {
+	if _, err := e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusFailed, &now, run.Context); err != nil {
 		slog.Error("workflow: failed to mark run failed", "run_id", run.ID, "cause", cause, "error", err)
 	}
 }
@@ -167,7 +167,7 @@ func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, ac
 		if e.tickets == nil {
 			return nil, false, fmt.Errorf("ticket repository unavailable")
 		}
-		if err := e.tickets.Create(t); err != nil {
+		if err := e.tickets.Create(ctx, t); err != nil {
 			return nil, false, err
 		}
 		return JSONMap{"ticket_id": t.ID}, false, nil

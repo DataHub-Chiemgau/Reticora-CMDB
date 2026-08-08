@@ -18,7 +18,7 @@ func TestExecutorApprovalFlow(t *testing.T) {
 	cis := ci.NewMemoryRepository()
 	exec := NewExecutor(repo, tickets, cis, forms, nil)
 	def := &Definition{OrganizationID: "org-1", Name: "wf", Trigger: JSONMap{"type": "manual"}, Actions: []JSONMap{{"type": "require_approval"}, {"type": "create_ticket", "title": "Do it"}}, Active: true}
-	if err := repo.CreateDefinition(def); err != nil {
+	if err := repo.CreateDefinition(context.Background(), def); err != nil {
 		t.Fatal(err)
 	}
 	run, err := exec.Trigger(context.Background(), "org-1", def, "manual", JSONMap{})
@@ -35,7 +35,7 @@ func TestExecutorApprovalFlow(t *testing.T) {
 	if run.Status != StatusSucceeded {
 		t.Fatalf("want succeeded, got %s", run.Status)
 	}
-	list, total, err := tickets.List("org-1", ticket.FilterParams{}, api.PaginationParams{Limit: 10})
+	list, total, err := tickets.List(context.Background(), "org-1", ticket.FilterParams{}, api.PaginationParams{Limit: 10})
 	_ = list
 	_ = total
 	_ = err
@@ -51,39 +51,39 @@ type failingWorkflowRepository struct {
 	failOnRunCalls map[string]bool
 }
 
-func (f *failingWorkflowRepository) ListSteps(orgID, runID string) ([]Step, error) {
+func (f *failingWorkflowRepository) ListSteps(_ context.Context, orgID, runID string) ([]Step, error) {
 	if f.listStepsErr != nil {
 		return nil, f.listStepsErr
 	}
-	return f.MemoryRepository.ListSteps(orgID, runID)
+	return f.MemoryRepository.ListSteps(context.Background(), orgID, runID)
 }
 
-func (f *failingWorkflowRepository) UpdateStep(orgID, id, status string, output JSONMap, errText string) (*Step, error) {
+func (f *failingWorkflowRepository) UpdateStep(_ context.Context, orgID, id, status string, output JSONMap, errText string) (*Step, error) {
 	if f.updateStepErr != nil {
 		return nil, f.updateStepErr
 	}
-	return f.MemoryRepository.UpdateStep(orgID, id, status, output, errText)
+	return f.MemoryRepository.UpdateStep(context.Background(), orgID, id, status, output, errText)
 }
 
-func (f *failingWorkflowRepository) UpdateRunStatus(orgID, id, status string, finished *time.Time, ctx JSONMap) (*Run, error) {
+func (f *failingWorkflowRepository) UpdateRunStatus(_ context.Context, orgID, id, status string, finished *time.Time, runCtx JSONMap) (*Run, error) {
 	if f.updateRunErr != nil && f.failOnRunCalls[status] {
 		return nil, f.updateRunErr
 	}
-	return f.MemoryRepository.UpdateRunStatus(orgID, id, status, finished, ctx)
+	return f.MemoryRepository.UpdateRunStatus(context.Background(), orgID, id, status, finished, runCtx)
 }
 
 func TestExecutorListStepsFailureFailsRun(t *testing.T) {
 	repo := &failingWorkflowRepository{MemoryRepository: NewMemoryRepository(), listStepsErr: errors.New("db down")}
 	exec := NewExecutor(repo, ticket.NewMemoryRepository(), ci.NewMemoryRepository(), form.NewMemoryRepository(), nil)
 	def := &Definition{OrganizationID: "org-1", Name: "wf", Trigger: JSONMap{"type": "manual"}, Actions: []JSONMap{{"type": "noop"}}, Active: true}
-	if err := repo.CreateDefinition(def); err != nil {
+	if err := repo.CreateDefinition(context.Background(), def); err != nil {
 		t.Fatal(err)
 	}
 	_, err := exec.Trigger(context.Background(), "org-1", def, "manual", JSONMap{})
 	if err == nil {
 		t.Fatal("expected error when ListSteps fails")
 	}
-	runs, _, lerr := repo.MemoryRepository.ListRuns("org-1", "", "", api.PaginationParams{Limit: 10})
+	runs, _, lerr := repo.MemoryRepository.ListRuns(context.Background(), "org-1", "", "", api.PaginationParams{Limit: 10})
 	if lerr != nil {
 		t.Fatal(lerr)
 	}
@@ -96,14 +96,14 @@ func TestExecutorUpdateStepFailurePropagates(t *testing.T) {
 	repo := &failingWorkflowRepository{MemoryRepository: NewMemoryRepository(), updateStepErr: errors.New("write denied")}
 	exec := NewExecutor(repo, ticket.NewMemoryRepository(), ci.NewMemoryRepository(), form.NewMemoryRepository(), nil)
 	def := &Definition{OrganizationID: "org-1", Name: "wf", Trigger: JSONMap{"type": "manual"}, Actions: []JSONMap{{"type": "noop"}}, Active: true}
-	if err := repo.CreateDefinition(def); err != nil {
+	if err := repo.CreateDefinition(context.Background(), def); err != nil {
 		t.Fatal(err)
 	}
 	_, err := exec.Trigger(context.Background(), "org-1", def, "manual", JSONMap{})
 	if err == nil {
 		t.Fatal("expected error when UpdateStep fails")
 	}
-	runs, _, _ := repo.MemoryRepository.ListRuns("org-1", "", "", api.PaginationParams{Limit: 10})
+	runs, _, _ := repo.MemoryRepository.ListRuns(context.Background(), "org-1", "", "", api.PaginationParams{Limit: 10})
 	if len(runs) != 1 || runs[0].Status != StatusFailed {
 		t.Fatalf("expected run failed after UpdateStep failure, got %+v", runs)
 	}
@@ -113,7 +113,7 @@ func TestExecutorApproveListStepsFailure(t *testing.T) {
 	repo := &failingWorkflowRepository{MemoryRepository: NewMemoryRepository()}
 	exec := NewExecutor(repo, ticket.NewMemoryRepository(), ci.NewMemoryRepository(), form.NewMemoryRepository(), nil)
 	def := &Definition{OrganizationID: "org-1", Name: "wf", Trigger: JSONMap{"type": "manual"}, Actions: []JSONMap{{"type": "require_approval"}}, Active: true}
-	if err := repo.CreateDefinition(def); err != nil {
+	if err := repo.CreateDefinition(context.Background(), def); err != nil {
 		t.Fatal(err)
 	}
 	run, err := exec.Trigger(context.Background(), "org-1", def, "manual", JSONMap{})
@@ -146,13 +146,13 @@ func TestExecutorInvalidActionType(t *testing.T) {
 	repo := NewMemoryRepository()
 	exec := NewExecutor(repo, ticket.NewMemoryRepository(), ci.NewMemoryRepository(), form.NewMemoryRepository(), nil)
 	def := &Definition{OrganizationID: "org-1", Name: "wf", Trigger: JSONMap{"type": "manual"}, Actions: []JSONMap{{"type": 42}}, Active: true}
-	if err := repo.CreateDefinition(def); err != nil {
+	if err := repo.CreateDefinition(context.Background(), def); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := exec.Trigger(context.Background(), "org-1", def, "manual", JSONMap{}); err == nil {
 		t.Fatal("expected error for non-string action type")
 	}
-	runs, _, _ := repo.ListRuns("org-1", "", "", api.PaginationParams{Limit: 10})
+	runs, _, _ := repo.ListRuns(context.Background(), "org-1", "", "", api.PaginationParams{Limit: 10})
 	if len(runs) != 1 || runs[0].Status != StatusFailed {
 		t.Fatalf("expected run failed for invalid action type, got %+v", runs)
 	}
@@ -162,7 +162,7 @@ func TestExecutorSubmitFormInvalidValues(t *testing.T) {
 	repo := NewMemoryRepository()
 	exec := NewExecutor(repo, ticket.NewMemoryRepository(), ci.NewMemoryRepository(), form.NewMemoryRepository(), nil)
 	def := &Definition{OrganizationID: "org-1", Name: "wf", Trigger: JSONMap{"type": "manual"}, Actions: []JSONMap{{"type": "submit_form", "form_id": "f1", "values": "not-an-object"}}, Active: true}
-	if err := repo.CreateDefinition(def); err != nil {
+	if err := repo.CreateDefinition(context.Background(), def); err != nil {
 		t.Fatal(err)
 	}
 	run, err := exec.Trigger(context.Background(), "org-1", def, "manual", JSONMap{})
@@ -172,7 +172,7 @@ func TestExecutorSubmitFormInvalidValues(t *testing.T) {
 	if run.Status != StatusFailed {
 		t.Fatalf("expected run failed for non-object form values, got %s", run.Status)
 	}
-	steps, err := repo.ListSteps("org-1", run.ID)
+	steps, err := repo.ListSteps(context.Background(), "org-1", run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

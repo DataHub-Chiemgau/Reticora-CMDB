@@ -49,8 +49,7 @@ func scanConnector(s interface{ Scan(...any) error }) (*ConnectorConfig, error) 
 	}
 	return c, err
 }
-func (r *PGRepository) ListConnectors(orgID string, p api.PaginationParams) ([]ConnectorConfig, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListConnectors(ctx context.Context, orgID string, p api.PaginationParams) ([]ConnectorConfig, int, error) {
 	out := []ConnectorConfig{}
 	total := 0
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -73,8 +72,7 @@ func (r *PGRepository) ListConnectors(orgID string, p api.PaginationParams) ([]C
 	})
 	return out, total, err
 }
-func (r *PGRepository) GetConnector(orgID, id string) (*ConnectorConfig, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetConnector(ctx context.Context, orgID, id string) (*ConnectorConfig, error) {
 	var out *ConnectorConfig
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		v, err := scanConnector(tx.QueryRow(ctx, "SELECT "+connectorCols+" FROM iga_connector WHERE organization_id=$1 AND id=$2", orgID, id))
@@ -86,8 +84,7 @@ func (r *PGRepository) GetConnector(orgID, id string) (*ConnectorConfig, error) 
 	})
 	return out, err
 }
-func (r *PGRepository) CreateConnector(c *ConnectorConfig) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateConnector(ctx context.Context, c *ConnectorConfig) error {
 	if c.Status == "" {
 		c.Status = "active"
 	}
@@ -101,8 +98,8 @@ func (r *PGRepository) CreateConnector(c *ConnectorConfig) error {
 		return tx.QueryRow(ctx, `INSERT INTO iga_connector (organization_id,name,type,base_url,credential_id,collector_id,capabilities,config,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text, created_at, updated_at`, c.OrganizationID, c.Name, c.Type, nullString(c.BaseURL), nullString(c.CredentialID), nullString(c.CollectorID), c.Capabilities, c.Config, c.Status).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
 	})
 }
-func (r *PGRepository) UpdateConnector(orgID, id string, req UpdateConnectorRequest) (*ConnectorConfig, error) {
-	cur, err := r.GetConnector(orgID, id)
+func (r *PGRepository) UpdateConnector(ctx context.Context, orgID, id string, req UpdateConnectorRequest) (*ConnectorConfig, error) {
+	cur, err := r.GetConnector(ctx, orgID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +124,6 @@ func (r *PGRepository) UpdateConnector(orgID, id string, req UpdateConnectorRequ
 	if req.Status != nil {
 		cur.Status = *req.Status
 	}
-	ctx := context.Background()
 	err = r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE iga_connector SET name=$3,base_url=$4,credential_id=$5,collector_id=$6,capabilities=$7,config=$8,status=$9,updated_at=now() WHERE organization_id=$1 AND id=$2`, orgID, id, cur.Name, nullString(cur.BaseURL), nullString(cur.CredentialID), nullString(cur.CollectorID), cur.Capabilities, cur.Config, cur.Status)
 		return err
@@ -135,10 +131,9 @@ func (r *PGRepository) UpdateConnector(orgID, id string, req UpdateConnectorRequ
 	if err != nil {
 		return nil, err
 	}
-	return r.GetConnector(orgID, id)
+	return r.GetConnector(ctx, orgID, id)
 }
-func (r *PGRepository) DeleteConnector(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) DeleteConnector(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "DELETE FROM iga_connector WHERE organization_id=$1 AND id=$2", orgID, id)
 		if err != nil {
@@ -150,8 +145,7 @@ func (r *PGRepository) DeleteConnector(orgID, id string) error {
 		return nil
 	})
 }
-func (r *PGRepository) MarkConnectorSynced(orgID, id string, at time.Time) error {
-	ctx := context.Background()
+func (r *PGRepository) MarkConnectorSynced(ctx context.Context, orgID, id string, at time.Time) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "UPDATE iga_connector SET last_sync_at=$3,updated_at=now() WHERE organization_id=$1 AND id=$2", orgID, id, at)
 		return err
@@ -175,8 +169,7 @@ func scanTask(s interface{ Scan(...any) error }) (*ProvisioningTask, error) {
 	}
 	return t, err
 }
-func (r *PGRepository) ListTasks(orgID, status string, p api.PaginationParams) ([]ProvisioningTask, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListTasks(ctx context.Context, orgID, status string, p api.PaginationParams) ([]ProvisioningTask, int, error) {
 	out := []ProvisioningTask{}
 	total := 0
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -206,8 +199,7 @@ func (r *PGRepository) ListTasks(orgID, status string, p api.PaginationParams) (
 	})
 	return out, total, err
 }
-func (r *PGRepository) GetTask(orgID, id string) (*ProvisioningTask, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetTask(ctx context.Context, orgID, id string) (*ProvisioningTask, error) {
 	var out *ProvisioningTask
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		v, err := scanTask(tx.QueryRow(ctx, "SELECT "+taskCols+" FROM iga_provisioning_task WHERE organization_id=$1 AND id=$2", orgID, id))
@@ -219,8 +211,7 @@ func (r *PGRepository) GetTask(orgID, id string) (*ProvisioningTask, error) {
 	})
 	return out, err
 }
-func (r *PGRepository) CreateTask(t *ProvisioningTask) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateTask(ctx context.Context, t *ProvisioningTask) error {
 	if t.Status == "" {
 		t.Status = TaskStatusPending
 	}
@@ -237,15 +228,13 @@ func (r *PGRepository) CreateTask(t *ProvisioningTask) error {
 		return tx.QueryRow(ctx, `INSERT INTO iga_provisioning_task (organization_id,connector_id,user_id,external_id,action,status,payload,max_attempts,next_run_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text,created_at,updated_at`, t.OrganizationID, t.ConnectorID, nullString(t.UserID), nullString(t.ExternalID), t.Action, t.Status, t.Payload, t.MaxAttempts, t.NextRunAt).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt)
 	})
 }
-func (r *PGRepository) UpdateTask(t *ProvisioningTask) error {
-	ctx := context.Background()
+func (r *PGRepository) UpdateTask(ctx context.Context, t *ProvisioningTask) error {
 	return r.withTenant(ctx, t.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE iga_provisioning_task SET status=$3,result=$4,error=$5,attempts=$6,next_run_at=$7,last_run_at=$8,updated_at=now() WHERE organization_id=$1 AND id=$2`, t.OrganizationID, t.ID, t.Status, t.Result, t.Error, t.Attempts, t.NextRunAt, t.LastRunAt)
 		return err
 	})
 }
-func (r *PGRepository) DueTasks(orgID string, now time.Time, limit int) ([]ProvisioningTask, error) {
-	ctx := context.Background()
+func (r *PGRepository) DueTasks(ctx context.Context, orgID string, now time.Time, limit int) ([]ProvisioningTask, error) {
 	out := []ProvisioningTask{}
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, "SELECT "+taskCols+" FROM iga_provisioning_task WHERE organization_id=$1 AND status='pending' AND next_run_at <= $2 ORDER BY next_run_at LIMIT $3", orgID, now, limit)
@@ -271,8 +260,7 @@ func scanPolicy(s interface{ Scan(...any) error }) (*LifecyclePolicy, error) {
 	p := &LifecyclePolicy{}
 	return p, s.Scan(&p.ID, &p.OrganizationID, &p.Name, &p.Event, &p.Priority, &p.Active, &p.Conditions, &p.Actions, &p.CreatedAt, &p.UpdatedAt)
 }
-func (r *PGRepository) ListPolicies(orgID, event string, activeOnly bool, p api.PaginationParams) ([]LifecyclePolicy, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListPolicies(ctx context.Context, orgID, event string, activeOnly bool, p api.PaginationParams) ([]LifecyclePolicy, int, error) {
 	out := []LifecyclePolicy{}
 	total := 0
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -305,8 +293,7 @@ func (r *PGRepository) ListPolicies(orgID, event string, activeOnly bool, p api.
 	})
 	return out, total, err
 }
-func (r *PGRepository) CreatePolicy(p *LifecyclePolicy) error {
-	ctx := context.Background()
+func (r *PGRepository) CreatePolicy(ctx context.Context, p *LifecyclePolicy) error {
 	if p.Conditions == nil {
 		p.Conditions = JSONMap{}
 	}
@@ -326,8 +313,7 @@ func scanReq(s interface{ Scan(...any) error }) (*AccessRequest, error) {
 	}
 	return a, err
 }
-func (r *PGRepository) ListAccessRequests(orgID, status string, p api.PaginationParams) ([]AccessRequest, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListAccessRequests(ctx context.Context, orgID, status string, p api.PaginationParams) ([]AccessRequest, int, error) {
 	out := []AccessRequest{}
 	total := 0
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -357,8 +343,7 @@ func (r *PGRepository) ListAccessRequests(orgID, status string, p api.Pagination
 	})
 	return out, total, err
 }
-func (r *PGRepository) CreateAccessRequest(a *AccessRequest) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateAccessRequest(ctx context.Context, a *AccessRequest) error {
 	if a.Status == "" {
 		a.Status = "pending"
 	}
@@ -366,8 +351,7 @@ func (r *PGRepository) CreateAccessRequest(a *AccessRequest) error {
 		return tx.QueryRow(ctx, `INSERT INTO iga_access_request (organization_id,requester_id,subject_user_id,connector_id,entitlement,reason,status,workflow_run_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id::text,created_at,updated_at`, a.OrganizationID, a.RequesterID, a.SubjectUserID, nullString(a.ConnectorID), a.Entitlement, a.Reason, a.Status, nullString(a.WorkflowRunID)).Scan(&a.ID, &a.CreatedAt, &a.UpdatedAt)
 	})
 }
-func (r *PGRepository) DecideAccessRequest(orgID, id, status, actor, comment string) (*AccessRequest, error) {
-	ctx := context.Background()
+func (r *PGRepository) DecideAccessRequest(ctx context.Context, orgID, id, status, actor, comment string) (*AccessRequest, error) {
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE iga_access_request SET status=$3,decision_by=$4,decision_comment=$5,decided_at=now(),updated_at=now() WHERE organization_id=$1 AND id=$2`, orgID, id, status, nullString(actor), comment)
 		return err
@@ -407,8 +391,7 @@ func scanItem(s interface{ Scan(...any) error }) (*AccessReviewItem, error) {
 	}
 	return v, err
 }
-func (r *PGRepository) ListReviews(orgID, status string, p api.PaginationParams) ([]AccessReview, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListReviews(ctx context.Context, orgID, status string, p api.PaginationParams) ([]AccessReview, int, error) {
 	out := []AccessReview{}
 	total := 0
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -436,8 +419,7 @@ func (r *PGRepository) ListReviews(orgID, status string, p api.PaginationParams)
 	})
 	return out, total, err
 }
-func (r *PGRepository) CreateReview(rv *AccessReview, items []AccessReviewItem) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateReview(ctx context.Context, rv *AccessReview, items []AccessReviewItem) error {
 	if rv.Status == "" {
 		rv.Status = "active"
 	}
@@ -456,8 +438,7 @@ func (r *PGRepository) CreateReview(rv *AccessReview, items []AccessReviewItem) 
 		return nil
 	})
 }
-func (r *PGRepository) ListReviewItems(orgID, reviewID string, p api.PaginationParams) ([]AccessReviewItem, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListReviewItems(ctx context.Context, orgID, reviewID string, p api.PaginationParams) ([]AccessReviewItem, int, error) {
 	out := []AccessReviewItem{}
 	total := 0
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -478,8 +459,7 @@ func (r *PGRepository) ListReviewItems(orgID, reviewID string, p api.PaginationP
 	})
 	return out, total, err
 }
-func (r *PGRepository) DecideReviewItem(orgID, id, decision, actor string) (*AccessReviewItem, error) {
-	ctx := context.Background()
+func (r *PGRepository) DecideReviewItem(ctx context.Context, orgID, id, decision, actor string) (*AccessReviewItem, error) {
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE iga_access_review_item SET decision=$3,decision_by=$4,decided_at=now(),updated_at=now() WHERE organization_id=$1 AND id=$2`, orgID, id, decision, nullString(actor))
 		return err
@@ -503,8 +483,7 @@ func scanDrift(s interface{ Scan(...any) error }) (*DriftFinding, error) {
 	err := s.Scan(&v.ID, &v.OrganizationID, &v.ConnectorID, &v.ExternalID, &v.UserID, &v.DriftType, &v.Severity, &v.Expected, &v.Observed, &v.Status, &v.RemediationTaskID, &v.CreatedAt, &v.UpdatedAt)
 	return v, err
 }
-func (r *PGRepository) ListDrift(orgID, status string, p api.PaginationParams) ([]DriftFinding, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListDrift(ctx context.Context, orgID, status string, p api.PaginationParams) ([]DriftFinding, int, error) {
 	out := []DriftFinding{}
 	total := 0
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -532,8 +511,7 @@ func (r *PGRepository) ListDrift(orgID, status string, p api.PaginationParams) (
 	})
 	return out, total, err
 }
-func (r *PGRepository) CreateDrift(f *DriftFinding) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateDrift(ctx context.Context, f *DriftFinding) error {
 	if f.Status == "" {
 		f.Status = "open"
 	}
@@ -544,15 +522,13 @@ func (r *PGRepository) CreateDrift(f *DriftFinding) error {
 		return tx.QueryRow(ctx, `INSERT INTO iga_drift_finding (organization_id,connector_id,external_id,user_id,drift_type,severity,expected,observed,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text,created_at,updated_at`, f.OrganizationID, f.ConnectorID, f.ExternalID, nullString(f.UserID), f.DriftType, f.Severity, f.Expected, f.Observed, f.Status).Scan(&f.ID, &f.CreatedAt, &f.UpdatedAt)
 	})
 }
-func (r *PGRepository) UpdateDrift(f *DriftFinding) error {
-	ctx := context.Background()
+func (r *PGRepository) UpdateDrift(ctx context.Context, f *DriftFinding) error {
 	return r.withTenant(ctx, f.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE iga_drift_finding SET status=$3,remediation_task_id=$4,updated_at=now() WHERE organization_id=$1 AND id=$2`, f.OrganizationID, f.ID, f.Status, nullString(f.RemediationTaskID))
 		return err
 	})
 }
-func (r *PGRepository) GetDrift(orgID, id string) (*DriftFinding, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetDrift(ctx context.Context, orgID, id string) (*DriftFinding, error) {
 	var out *DriftFinding
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		v, err := scanDrift(tx.QueryRow(ctx, "SELECT "+driftCols+" FROM iga_drift_finding WHERE organization_id=$1 AND id=$2", orgID, id))

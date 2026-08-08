@@ -31,7 +31,7 @@ func Require(repo Repository, key string) func(http.Handler) http.Handler {
 				api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant or user context")
 				return
 			}
-			allowed, err := repo.HasPermission(t.OrganizationID, t.UserID, key)
+			allowed, err := repo.HasPermission(r.Context(), t.OrganizationID, t.UserID, key)
 			if err != nil {
 				api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 				return
@@ -58,7 +58,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if _, ok := tenantInfo(w, r); !ok {
 		return
 	}
-	items, err := h.repo.ListPermissions()
+	items, err := h.repo.ListPermissions(r.Context())
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -71,7 +71,7 @@ func (h *Handler) ListRole(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := h.repo.ListRolePermissions(t.OrganizationID, chi.URLParam(r, "id"))
+	items, err := h.repo.ListRolePermissions(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -92,7 +92,7 @@ func (h *Handler) ReplaceRole(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	items, err := h.repo.ReplaceRolePermissions(t.OrganizationID, chi.URLParam(r, "id"), t.UserID, req.PermissionKeys)
+	items, err := h.repo.ReplaceRolePermissions(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), t.UserID, req.PermissionKeys)
 	if err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
@@ -109,7 +109,7 @@ func (h *Handler) Effective(w http.ResponseWriter, r *http.Request) {
 		api.WriteJSON(w, http.StatusOK, EffectivePermissionsResponse{Permissions: []string{}})
 		return
 	}
-	keys, err := h.repo.EffectivePermissions(t.OrganizationID, t.UserID)
+	keys, err := h.repo.EffectivePermissions(r.Context(), t.OrganizationID, t.UserID)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return

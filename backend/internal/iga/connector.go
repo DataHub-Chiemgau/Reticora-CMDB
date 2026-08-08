@@ -218,11 +218,10 @@ func (c *RelayConnector) Capabilities() ConnectorCapabilities {
 	return DefaultCapabilities(ConnectorTypeRelay)
 }
 func (c *RelayConnector) enqueue(ctx context.Context, action string, payload JSONMap) error {
-	_ = ctx
 	if c.discovery == nil {
 		return fmt.Errorf("discovery repository unavailable")
 	}
-	return c.discovery.CreateJob(&discovery.Job{OrganizationID: c.cfg.OrganizationID, CollectorID: c.cfg.CollectorID, JobType: discovery.JobTypePoll, Status: discovery.JobStatusPending, Config: map[string]any{"kind": "iga_relay", "connector_id": c.cfg.ID, "action": action, "payload": payload}})
+	return c.discovery.CreateJob(ctx, &discovery.Job{OrganizationID: c.cfg.OrganizationID, CollectorID: c.cfg.CollectorID, JobType: discovery.JobTypePoll, Status: discovery.JobStatusPending, Config: map[string]any{"kind": "iga_relay", "connector_id": c.cfg.ID, "action": action, "payload": payload}})
 }
 func (c *RelayConnector) CreateAccount(ctx context.Context, a Account) (Account, error) {
 	return a, c.enqueue(ctx, TaskActionCreateAccount, JSONMap{"account": a})

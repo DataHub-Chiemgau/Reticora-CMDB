@@ -74,8 +74,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 	return tx.Commit(ctx)
 }
 
-func (r *PGRepository) List(orgID string, filter FilterParams, page api.PaginationParams) ([]Ticket, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Ticket, int, error) {
 	var items []Ticket
 	var total int
 
@@ -162,8 +161,7 @@ func (r *PGRepository) List(orgID string, filter FilterParams, page api.Paginati
 	return items, total, err
 }
 
-func (r *PGRepository) GetByID(orgID, id string) (*Ticket, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Ticket, error) {
 	var item *Ticket
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -184,8 +182,7 @@ func (r *PGRepository) GetByID(orgID, id string) (*Ticket, error) {
 	return item, nil
 }
 
-func (r *PGRepository) Create(t *Ticket) error {
-	ctx := context.Background()
+func (r *PGRepository) Create(ctx context.Context, t *Ticket) error {
 	return r.withTenant(ctx, t.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if t.Tags == nil {
 			t.Tags = []string{}
@@ -236,8 +233,7 @@ func (r *PGRepository) Create(t *Ticket) error {
 	})
 }
 
-func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Ticket, error) {
-	ctx := context.Background()
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Ticket, error) {
 	var item *Ticket
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -321,8 +317,7 @@ func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Ticket, err
 	return item, err
 }
 
-func (r *PGRepository) Delete(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM ticket WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
@@ -335,8 +330,7 @@ func (r *PGRepository) Delete(orgID, id string) error {
 	})
 }
 
-func (r *PGRepository) AddComment(c *Comment) error {
-	ctx := context.Background()
+func (r *PGRepository) AddComment(ctx context.Context, c *Comment) error {
 	return r.withTenant(ctx, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ticket WHERE id = $1 AND organization_id = $2)", c.TicketID, c.OrganizationID).Scan(&exists); err != nil {
@@ -369,8 +363,7 @@ func (r *PGRepository) AddComment(c *Comment) error {
 	})
 }
 
-func (r *PGRepository) ListComments(orgID, ticketID string, page api.PaginationParams) ([]Comment, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListComments(ctx context.Context, orgID, ticketID string, page api.PaginationParams) ([]Comment, int, error) {
 	var items []Comment
 	var total int
 

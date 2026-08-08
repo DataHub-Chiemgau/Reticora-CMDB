@@ -1,6 +1,7 @@
 package sla
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -48,7 +49,7 @@ func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListPolicies(t.OrganizationID, r.URL.Query().Get("priority"), r.URL.Query().Get("client_id"), page)
+	items, total, err := h.repo.ListPolicies(r.Context(), t.OrganizationID, r.URL.Query().Get("priority"), r.URL.Query().Get("client_id"), page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -61,7 +62,7 @@ func (h *Handler) GetPolicy(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := h.repo.GetPolicy(t.OrganizationID, chi.URLParam(r, "id"))
+	item, err := h.repo.GetPolicy(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "sla policy not found")
 		return
@@ -84,7 +85,7 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item := &Policy{OrganizationID: t.OrganizationID, ClientID: req.ClientID, Name: req.Name, Priority: req.Priority, ResponseTargetMinutes: req.ResponseTargetMinutes, ResolutionTargetMinutes: req.ResolutionTargetMinutes, BusinessCalendar: req.BusinessCalendar}
-	if err := h.repo.CreatePolicy(item); err != nil {
+	if err := h.repo.CreatePolicy(r.Context(), item); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -101,7 +102,7 @@ func (h *Handler) UpdatePolicy(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	item, err := h.repo.UpdatePolicy(t.OrganizationID, chi.URLParam(r, "id"), req)
+	item, err := h.repo.UpdatePolicy(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "sla policy not found")
 		return
@@ -114,7 +115,7 @@ func (h *Handler) DeletePolicy(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeletePolicy(t.OrganizationID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeletePolicy(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "sla policy not found")
 		return
 	}
@@ -133,12 +134,12 @@ func (h *Handler) AttachTicketSLA(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	ticketItem, err := h.tickets.GetByID(t.OrganizationID, chi.URLParam(r, "id"))
+	ticketItem, err := h.tickets.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ticket not found")
 		return
 	}
-	state, err := h.repo.ApplyForTicket(t.OrganizationID, ticketItem, req.SLAID)
+	state, err := h.repo.ApplyForTicket(r.Context(), t.OrganizationID, ticketItem, req.SLAID)
 	if err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
@@ -151,7 +152,7 @@ func (h *Handler) GetTicketSLA(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	state, err := h.repo.GetForTicket(t.OrganizationID, chi.URLParam(r, "id"))
+	state, err := h.repo.GetForTicket(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ticket sla not found")
 		return
@@ -165,7 +166,7 @@ func (h *Handler) ListBreaches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListBreaches(t.OrganizationID, BreachFilter{Status: r.URL.Query().Get("status")}, page)
+	items, total, err := h.repo.ListBreaches(r.Context(), t.OrganizationID, BreachFilter{Status: r.URL.Query().Get("status")}, page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -177,13 +178,13 @@ func (h *Handler) ListBreaches(w http.ResponseWriter, r *http.Request) {
 // a dependency on this package.
 type TicketHooks struct{ Repo Repository }
 
-func (h TicketHooks) ApplyForTicket(orgID string, t *ticket.Ticket) error {
-	_, err := h.Repo.ApplyForTicket(orgID, t, "")
+func (h TicketHooks) ApplyForTicket(ctx context.Context, orgID string, t *ticket.Ticket) error {
+	_, err := h.Repo.ApplyForTicket(ctx, orgID, t, "")
 	return err
 }
-func (h TicketHooks) MarkFirstResponse(orgID, ticketID string, at time.Time) error {
-	return h.Repo.MarkFirstResponse(orgID, ticketID, at)
+func (h TicketHooks) MarkFirstResponse(ctx context.Context, orgID, ticketID string, at time.Time) error {
+	return h.Repo.MarkFirstResponse(ctx, orgID, ticketID, at)
 }
-func (h TicketHooks) MarkResolved(orgID, ticketID string, at time.Time) error {
-	return h.Repo.MarkResolved(orgID, ticketID, at)
+func (h TicketHooks) MarkResolved(ctx context.Context, orgID, ticketID string, at time.Time) error {
+	return h.Repo.MarkResolved(ctx, orgID, ticketID, at)
 }

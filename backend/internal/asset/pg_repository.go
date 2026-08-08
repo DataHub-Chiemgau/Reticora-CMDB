@@ -67,8 +67,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 }
 
 // List returns paginated assets filtered by the given parameters.
-func (r *PGRepository) List(orgID string, filter FilterParams, page api.PaginationParams) ([]Asset, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Asset, int, error) {
 	var assets []Asset
 	var total int
 
@@ -157,8 +156,7 @@ func (r *PGRepository) List(orgID string, filter FilterParams, page api.Paginati
 }
 
 // GetByID retrieves a single asset by ID within the tenant scope.
-func (r *PGRepository) GetByID(orgID, id string) (*Asset, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Asset, error) {
 	var asset *Asset
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -180,8 +178,7 @@ func (r *PGRepository) GetByID(orgID, id string) (*Asset, error) {
 }
 
 // Create inserts a new asset.
-func (r *PGRepository) Create(a *Asset) error {
-	ctx := context.Background()
+func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
 	return r.withTenant(ctx, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if a.CustomFields == nil {
 			a.CustomFields = make(map[string]any)
@@ -227,8 +224,7 @@ func (r *PGRepository) Create(a *Asset) error {
 }
 
 // Update modifies an existing asset.
-func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Asset, error) {
-	ctx := context.Background()
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Asset, error) {
 	var asset *Asset
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -306,8 +302,7 @@ func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Asset, erro
 }
 
 // Delete deletes an asset. The asset table has no deleted_at column, so this is a hard delete.
-func (r *PGRepository) Delete(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM asset WHERE id = $1", id)
 		if err != nil {

@@ -70,7 +70,7 @@ func (h *Handler) ListRacks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListRacks(orgID, r.URL.Query().Get("room_id"), page)
+	items, total, err := h.repo.ListRacks(r.Context(), orgID, r.URL.Query().Get("room_id"), page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -121,7 +121,7 @@ func (h *Handler) CreateRack(w http.ResponseWriter, r *http.Request) {
 		DepthMM:        depth,
 		Notes:          req.Notes,
 	}
-	if err := h.repo.CreateRack(rk); err != nil {
+	if err := h.repo.CreateRack(r.Context(), rk); err != nil {
 		writeRepoError(w, err, "rack not found")
 		return
 	}
@@ -134,7 +134,7 @@ func (h *Handler) GetRack(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rk, err := h.repo.GetRack(orgID, chi.URLParam(r, "id"))
+	rk, err := h.repo.GetRack(r.Context(), orgID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "rack not found")
 		return
@@ -157,7 +157,7 @@ func (h *Handler) UpdateRack(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "height_u must be between 1 and 60")
 		return
 	}
-	rk, err := h.repo.UpdateRack(orgID, chi.URLParam(r, "id"), req)
+	rk, err := h.repo.UpdateRack(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "rack not found")
 		return
@@ -171,7 +171,7 @@ func (h *Handler) DeleteRack(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteRack(orgID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeleteRack(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "rack not found")
 		return
 	}
@@ -187,7 +187,7 @@ func (h *Handler) ListMounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListMounts(orgID, chi.URLParam(r, "id"), page)
+	items, total, err := h.repo.ListMounts(r.Context(), orgID, chi.URLParam(r, "id"), page)
 	if err != nil {
 		writeRepoError(w, err, "rack not found")
 		return
@@ -233,7 +233,7 @@ func (h *Handler) CreateMount(w http.ResponseWriter, r *http.Request) {
 		HeightU:        height,
 		Face:           face,
 	}
-	if err := h.repo.CreateMount(m); err != nil {
+	if err := h.repo.CreateMount(r.Context(), m); err != nil {
 		writeRepoError(w, err, "rack not found")
 		return
 	}
@@ -246,7 +246,7 @@ func (h *Handler) GetMount(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	m, err := h.repo.GetMount(orgID, chi.URLParam(r, "id"))
+	m, err := h.repo.GetMount(r.Context(), orgID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "rack mount not found")
 		return
@@ -265,7 +265,7 @@ func (h *Handler) UpdateMount(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	m, err := h.repo.UpdateMount(orgID, chi.URLParam(r, "id"), req)
+	m, err := h.repo.UpdateMount(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		writeRepoError(w, err, "rack mount not found")
 		return
@@ -279,7 +279,7 @@ func (h *Handler) DeleteMount(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteMount(orgID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeleteMount(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "rack mount not found")
 		return
 	}
@@ -295,7 +295,7 @@ func (h *Handler) ListCables(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListCables(orgID, page)
+	items, total, err := h.repo.ListCables(r.Context(), orgID, page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -344,7 +344,7 @@ func (h *Handler) CreateCable(w http.ResponseWriter, r *http.Request) {
 		Status:            status,
 		InstalledAt:       req.InstalledAt,
 	}
-	if err := h.repo.CreateCable(c); err != nil {
+	if err := h.repo.CreateCable(r.Context(), c); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -357,7 +357,7 @@ func (h *Handler) GetCable(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	c, err := h.repo.GetCable(orgID, chi.URLParam(r, "id"))
+	c, err := h.repo.GetCable(r.Context(), orgID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "cable not found")
 		return
@@ -384,7 +384,7 @@ func (h *Handler) UpdateCable(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid status")
 		return
 	}
-	c, err := h.repo.UpdateCable(orgID, chi.URLParam(r, "id"), req)
+	c, err := h.repo.UpdateCable(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "cable not found")
 		return
@@ -398,7 +398,7 @@ func (h *Handler) DeleteCable(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteCable(orgID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeleteCable(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "cable not found")
 		return
 	}

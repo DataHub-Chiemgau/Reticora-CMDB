@@ -89,7 +89,7 @@ func (h *Handler) ListConnectors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := api.ParsePagination(r)
-	items, total, err := h.repo.ListConnectors(t.OrganizationID, p)
+	items, total, err := h.repo.ListConnectors(r.Context(), t.OrganizationID, p)
 	respondList(w, items, total, p, err)
 }
 func (h *Handler) GetConnector(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +97,7 @@ func (h *Handler) GetConnector(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	v, err := h.repo.GetConnector(t.OrganizationID, chi.URLParam(r, "id"))
+	v, err := h.repo.GetConnector(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	respondOne(w, v, err, "connector not found")
 }
 func (h *Handler) CreateConnector(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +133,7 @@ func (h *Handler) CreateConnector(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := h.repo.CreateConnector(c); err != nil {
+	if err := h.repo.CreateConnector(r.Context(), c); err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
 	}
@@ -157,7 +157,7 @@ func (h *Handler) UpdateConnector(w http.ResponseWriter, r *http.Request) {
 		}
 		req.CredentialID = &c.ID
 	}
-	v, err := h.repo.UpdateConnector(t.OrganizationID, chi.URLParam(r, "id"), req)
+	v, err := h.repo.UpdateConnector(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	respondOne(w, v, err, "connector not found")
 }
 func (h *Handler) DeleteConnector(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +165,7 @@ func (h *Handler) DeleteConnector(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteConnector(t.OrganizationID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeleteConnector(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, 404, "Not Found", "connector not found")
 		return
 	}
@@ -176,7 +176,7 @@ func (h *Handler) TestConnector(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	c, err := h.repo.GetConnector(t.OrganizationID, chi.URLParam(r, "id"))
+	c, err := h.repo.GetConnector(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "connector not found")
 		return
@@ -197,11 +197,11 @@ func (h *Handler) SyncConnector(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 	now := time.Now().UTC()
-	_ = h.repo.MarkConnectorSynced(t.OrganizationID, id, now)
+	_ = h.repo.MarkConnectorSynced(r.Context(), t.OrganizationID, id, now)
 	findings, err := h.drift.Reconcile(r.Context(), t.OrganizationID, id, nil)
 	if err == nil {
 		for i := range findings {
-			_ = h.repo.CreateDrift(&findings[i])
+			_ = h.repo.CreateDrift(r.Context(), &findings[i])
 		}
 	}
 	api.WriteJSON(w, 202, JSONMap{"status": "queued", "findings": len(findings)})
@@ -212,7 +212,7 @@ func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := api.ParsePagination(r)
-	items, total, err := h.repo.ListTasks(t.OrganizationID, r.URL.Query().Get("status"), p)
+	items, total, err := h.repo.ListTasks(r.Context(), t.OrganizationID, r.URL.Query().Get("status"), p)
 	respondList(w, items, total, p, err)
 }
 func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +220,7 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	v, err := h.repo.GetTask(t.OrganizationID, chi.URLParam(r, "id"))
+	v, err := h.repo.GetTask(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	respondOne(w, v, err, "task not found")
 }
 func (h *Handler) RetryTask(w http.ResponseWriter, r *http.Request) {
@@ -228,7 +228,7 @@ func (h *Handler) RetryTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	task, err := h.repo.GetTask(t.OrganizationID, chi.URLParam(r, "id"))
+	task, err := h.repo.GetTask(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "task not found")
 		return
@@ -236,7 +236,7 @@ func (h *Handler) RetryTask(w http.ResponseWriter, r *http.Request) {
 	task.Status = TaskStatusPending
 	task.NextRunAt = time.Now().UTC()
 	task.Error = ""
-	_ = h.repo.UpdateTask(task)
+	_ = h.repo.UpdateTask(r.Context(), task)
 	api.WriteJSON(w, 200, task)
 }
 func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
@@ -245,7 +245,7 @@ func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := api.ParsePagination(r)
-	items, total, err := h.repo.ListPolicies(t.OrganizationID, r.URL.Query().Get("event"), false, p)
+	items, total, err := h.repo.ListPolicies(r.Context(), t.OrganizationID, r.URL.Query().Get("event"), false, p)
 	respondList(w, items, total, p, err)
 }
 func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
@@ -263,7 +263,7 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 		active = *req.Active
 	}
 	p := &LifecyclePolicy{OrganizationID: t.OrganizationID, Name: req.Name, Event: req.Event, Priority: req.Priority, Active: active, Conditions: req.Conditions, Actions: req.Actions}
-	if err := h.repo.CreatePolicy(p); err != nil {
+	if err := h.repo.CreatePolicy(r.Context(), p); err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
 	}
@@ -292,7 +292,7 @@ func (h *Handler) ListAccessRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := api.ParsePagination(r)
-	items, total, err := h.repo.ListAccessRequests(t.OrganizationID, r.URL.Query().Get("status"), p)
+	items, total, err := h.repo.ListAccessRequests(r.Context(), t.OrganizationID, r.URL.Query().Get("status"), p)
 	respondList(w, items, total, p, err)
 }
 func (h *Handler) CreateAccessRequest(w http.ResponseWriter, r *http.Request) {
@@ -307,7 +307,7 @@ func (h *Handler) CreateAccessRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	ar := &AccessRequest{OrganizationID: t.OrganizationID, RequesterID: t.UserID, SubjectUserID: req.SubjectUserID, ConnectorID: req.ConnectorID, Entitlement: req.Entitlement, Reason: req.Reason, Status: "pending"}
 	if h.workflows != nil {
-		defs, _, _ := h.workflows.ListDefinitions(t.OrganizationID, true, api.PaginationParams{Limit: 50})
+		defs, _, _ := h.workflows.ListDefinitions(r.Context(), t.OrganizationID, true, api.PaginationParams{Limit: 50})
 		for _, d := range defs {
 			if m, ok := d.Trigger["event"].(string); ok && m == "iga.access_request" {
 				ar.WorkflowRunID = d.ID
@@ -315,7 +315,7 @@ func (h *Handler) CreateAccessRequest(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if err := h.repo.CreateAccessRequest(ar); err != nil {
+	if err := h.repo.CreateAccessRequest(r.Context(), ar); err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
 	}
@@ -334,13 +334,13 @@ func (h *Handler) decideAccess(w http.ResponseWriter, r *http.Request, status st
 	}
 	var req DecisionRequest
 	_ = api.ReadJSON(r, &req)
-	ar, err := h.repo.DecideAccessRequest(t.OrganizationID, chi.URLParam(r, "id"), status, t.UserID, req.Comment)
+	ar, err := h.repo.DecideAccessRequest(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), status, t.UserID, req.Comment)
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "access request not found")
 		return
 	}
 	if status == "approved" && ar.ConnectorID != "" {
-		_ = h.repo.CreateTask(&ProvisioningTask{OrganizationID: t.OrganizationID, ConnectorID: ar.ConnectorID, UserID: ar.SubjectUserID, Action: TaskActionAddGroupMember, Payload: JSONMap{"entitlement": ar.Entitlement, "group_id": ar.Entitlement, "account_id": ar.SubjectUserID}})
+		_ = h.repo.CreateTask(r.Context(), &ProvisioningTask{OrganizationID: t.OrganizationID, ConnectorID: ar.ConnectorID, UserID: ar.SubjectUserID, Action: TaskActionAddGroupMember, Payload: JSONMap{"entitlement": ar.Entitlement, "group_id": ar.Entitlement, "account_id": ar.SubjectUserID}})
 	}
 	api.WriteJSON(w, 200, ar)
 }
@@ -350,7 +350,7 @@ func (h *Handler) ListReviews(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := api.ParsePagination(r)
-	items, total, err := h.repo.ListReviews(t.OrganizationID, r.URL.Query().Get("status"), p)
+	items, total, err := h.repo.ListReviews(r.Context(), t.OrganizationID, r.URL.Query().Get("status"), p)
 	respondList(w, items, total, p, err)
 }
 func (h *Handler) CreateReview(w http.ResponseWriter, r *http.Request) {
@@ -364,7 +364,7 @@ func (h *Handler) CreateReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rv := &AccessReview{OrganizationID: t.OrganizationID, Name: req.Name, Description: req.Description, DueAt: req.DueAt, Status: "active"}
-	if err := h.repo.CreateReview(rv, req.Items); err != nil {
+	if err := h.repo.CreateReview(r.Context(), rv, req.Items); err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
 	}
@@ -376,7 +376,7 @@ func (h *Handler) ListReviewItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := api.ParsePagination(r)
-	items, total, err := h.repo.ListReviewItems(t.OrganizationID, chi.URLParam(r, "id"), p)
+	items, total, err := h.repo.ListReviewItems(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), p)
 	respondList(w, items, total, p, err)
 }
 func (h *Handler) DecideReviewItem(w http.ResponseWriter, r *http.Request) {
@@ -392,13 +392,13 @@ func (h *Handler) DecideReviewItem(w http.ResponseWriter, r *http.Request) {
 	if req.Decision == "" {
 		req.Decision = ReviewDecisionApprove
 	}
-	it, err := h.repo.DecideReviewItem(t.OrganizationID, chi.URLParam(r, "itemId"), req.Decision, t.UserID)
+	it, err := h.repo.DecideReviewItem(r.Context(), t.OrganizationID, chi.URLParam(r, "itemId"), req.Decision, t.UserID)
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "review item not found")
 		return
 	}
 	if req.Decision == ReviewDecisionRevoke && it.ConnectorID != "" {
-		_ = h.repo.CreateTask(&ProvisioningTask{OrganizationID: t.OrganizationID, ConnectorID: it.ConnectorID, UserID: it.UserID, Action: TaskActionRemoveGroupMember, Payload: JSONMap{"entitlement": it.Entitlement, "group_id": it.Entitlement, "account_id": it.UserID}})
+		_ = h.repo.CreateTask(r.Context(), &ProvisioningTask{OrganizationID: t.OrganizationID, ConnectorID: it.ConnectorID, UserID: it.UserID, Action: TaskActionRemoveGroupMember, Payload: JSONMap{"entitlement": it.Entitlement, "group_id": it.Entitlement, "account_id": it.UserID}})
 	}
 	api.WriteJSON(w, 200, it)
 }
@@ -408,7 +408,7 @@ func (h *Handler) ListDrift(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := api.ParsePagination(r)
-	items, total, err := h.repo.ListDrift(t.OrganizationID, r.URL.Query().Get("status"), p)
+	items, total, err := h.repo.ListDrift(r.Context(), t.OrganizationID, r.URL.Query().Get("status"), p)
 	respondList(w, items, total, p, err)
 }
 func (h *Handler) ReconcileDrift(w http.ResponseWriter, r *http.Request) {
@@ -427,7 +427,7 @@ func (h *Handler) ReconcileDrift(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range findings {
-		_ = h.repo.CreateDrift(&findings[i])
+		_ = h.repo.CreateDrift(r.Context(), &findings[i])
 	}
 	api.WriteJSON(w, 202, findings)
 }
@@ -436,7 +436,7 @@ func (h *Handler) RemediateDrift(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	f, err := h.repo.GetDrift(t.OrganizationID, chi.URLParam(r, "id"))
+	f, err := h.repo.GetDrift(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "drift not found")
 		return
@@ -446,10 +446,10 @@ func (h *Handler) RemediateDrift(w http.ResponseWriter, r *http.Request) {
 		action = TaskActionDisableAccount
 	}
 	task := &ProvisioningTask{OrganizationID: t.OrganizationID, ConnectorID: f.ConnectorID, UserID: f.UserID, ExternalID: f.ExternalID, Action: action, Payload: JSONMap{"drift_id": f.ID}}
-	_ = h.repo.CreateTask(task)
+	_ = h.repo.CreateTask(r.Context(), task)
 	f.Status = "remediating"
 	f.RemediationTaskID = task.ID
-	_ = h.repo.UpdateDrift(f)
+	_ = h.repo.UpdateDrift(r.Context(), f)
 	api.WriteJSON(w, 202, task)
 }
 func respondList[T any](w http.ResponseWriter, items []T, total int, p api.PaginationParams, err error) {

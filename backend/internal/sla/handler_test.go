@@ -2,6 +2,7 @@ package sla
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -42,7 +43,7 @@ func TestSLAPolicyCRUDAndAttach(t *testing.T) {
 		t.Fatalf("unexpected policy: %#v", policy)
 	}
 	ticketItem := &ticket.Ticket{OrganizationID: "org-1", Title: "Router down", Status: "open", Priority: "high", Category: "incident", ReporterID: "user-1", CreatedAt: time.Now().UTC()}
-	if err := ticketRepo.Create(ticketItem); err != nil {
+	if err := ticketRepo.Create(context.Background(), ticketItem); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,21 +69,21 @@ func TestSLAValidationAndTicketHooks(t *testing.T) {
 		t.Fatalf("invalid policy: expected 400, got %d", w.Code)
 	}
 	p := &Policy{OrganizationID: "org-1", Name: "Medium", Priority: "medium", ResponseTargetMinutes: 60, ResolutionTargetMinutes: 480}
-	if err := slaRepo.CreatePolicy(p); err != nil {
+	if err := slaRepo.CreatePolicy(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
 	ticketItem := &ticket.Ticket{OrganizationID: "org-1", Title: "Need help", Status: "open", Priority: "medium", Category: "request", ReporterID: "user-1", CreatedAt: time.Now().UTC()}
-	if err := ticketRepo.Create(ticketItem); err != nil {
+	if err := ticketRepo.Create(context.Background(), ticketItem); err != nil {
 		t.Fatal(err)
 	}
 	hooks := TicketHooks{Repo: slaRepo}
-	if err := hooks.ApplyForTicket("org-1", ticketItem); err != nil {
+	if err := hooks.ApplyForTicket(context.Background(), "org-1", ticketItem); err != nil {
 		t.Fatal(err)
 	}
-	if err := hooks.MarkFirstResponse("org-1", ticketItem.ID, time.Now().UTC()); err != nil {
+	if err := hooks.MarkFirstResponse(context.Background(), "org-1", ticketItem.ID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	state, err := slaRepo.GetForTicket("org-1", ticketItem.ID)
+	state, err := slaRepo.GetForTicket(context.Background(), "org-1", ticketItem.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

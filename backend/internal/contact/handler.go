@@ -47,7 +47,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.List(orgID, r.URL.Query().Get("client_id"), page)
+	items, total, err := h.repo.List(r.Context(), orgID, r.URL.Query().Get("client_id"), page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -83,7 +83,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Department:     req.Department,
 		Notes:          req.Notes,
 	}
-	if err := h.repo.Create(c); err != nil {
+	if err := h.repo.Create(r.Context(), c); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -96,7 +96,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	c, err := h.repo.GetByID(orgID, chi.URLParam(r, "id"))
+	c, err := h.repo.GetByID(r.Context(), orgID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "contact not found")
 		return
@@ -115,7 +115,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	c, err := h.repo.Update(orgID, chi.URLParam(r, "id"), req)
+	c, err := h.repo.Update(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "contact not found")
 		return
@@ -129,7 +129,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.Delete(orgID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.Delete(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "contact not found")
 		return
 	}
@@ -143,7 +143,7 @@ func (h *Handler) ListForCI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListForCI(orgID, chi.URLParam(r, "id"), page)
+	items, total, err := h.repo.ListForCI(r.Context(), orgID, chi.URLParam(r, "id"), page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -183,7 +183,7 @@ func (h *Handler) Link(w http.ResponseWriter, r *http.Request) {
 		ContactID:        req.ContactID,
 		RelationshipType: relType,
 	}
-	if err := h.repo.Link(link); err != nil {
+	if err := h.repo.Link(r.Context(), link); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
@@ -196,7 +196,7 @@ func (h *Handler) Unlink(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.Unlink(orgID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.Unlink(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ci-contact link not found")
 		return
 	}

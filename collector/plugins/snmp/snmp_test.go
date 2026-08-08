@@ -117,11 +117,10 @@ func (c *fakeResponseConn) SetReadDeadline(time.Time) error  { return nil }
 func (c *fakeResponseConn) SetWriteDeadline(time.Time) error { return nil }
 
 func TestSNMPGetReturnsValueFromResponse(t *testing.T) {
-	// Build a response that is > 20 bytes and contains an OctetString value.
+	// Response > 20 bytes whose only OctetString is the varbind value.
 	resp := make([]byte, 0, 64)
 	resp = append(resp, 0x30, 0x30, 0x02, 0x01, 0x01)
-	resp = append(resp, 0x04, 0x06, 'p', 'u', 'b', 'l', 'i', 'c')
-	resp = append(resp, make([]byte, 10)...) // padding
+	resp = append(resp, make([]byte, 16)...) // padding (no OctetStrings)
 	value := "Cisco IOS Software"
 	resp = append(resp, 0x04, byte(len(value)))
 	resp = append(resp, value...)
@@ -137,6 +136,22 @@ func TestSNMPGetReturnsValueFromResponse(t *testing.T) {
 	}
 	if !bytes.Contains(conn.writes[0], []byte{0xA0}) {
 		t.Error("sent packet is not a GetRequest PDU")
+	}
+}
+
+func TestSNMPGetReturnsFirstOctetString(t *testing.T) {
+	// The simplified parser scans for the first printable OctetString in the
+	// packet, which in a real SNMP response is the echoed community string.
+	resp := make([]byte, 0, 64)
+	resp = append(resp, 0x30, 0x30, 0x02, 0x01, 0x01)
+	resp = append(resp, 0x04, 0x06, 'p', 'u', 'b', 'l', 'i', 'c')
+	resp = append(resp, make([]byte, 10)...)
+	resp = append(resp, 0x04, 0x06, 'r', 'o', 'u', 't', 'e', 'r')
+
+	conn := &fakeResponseConn{resp: resp}
+	p := New()
+	if got := p.snmpGet(conn, "public", oidSysDescr, time.Second); got != "public" {
+		t.Errorf("snmpGet = %q, want first octet string %q", got, "public")
 	}
 }
 

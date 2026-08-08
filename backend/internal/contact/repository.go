@@ -1,6 +1,7 @@
 package contact
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,15 +13,15 @@ import (
 
 // Repository defines persistence operations for contacts and CI-contact links.
 type Repository interface {
-	List(orgID, clientID string, page api.PaginationParams) ([]Contact, int, error)
-	GetByID(orgID, id string) (*Contact, error)
-	Create(c *Contact) error
-	Update(orgID, id string, req UpdateContactRequest) (*Contact, error)
-	Delete(orgID, id string) error
+	List(ctx context.Context, orgID, clientID string, page api.PaginationParams) ([]Contact, int, error)
+	GetByID(ctx context.Context, orgID, id string) (*Contact, error)
+	Create(ctx context.Context, c *Contact) error
+	Update(ctx context.Context, orgID, id string, req UpdateContactRequest) (*Contact, error)
+	Delete(ctx context.Context, orgID, id string) error
 
-	ListForCI(orgID, ciID string, page api.PaginationParams) ([]CIContact, int, error)
-	Link(link *CIContact) error
-	Unlink(orgID, id string) error
+	ListForCI(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]CIContact, int, error)
+	Link(ctx context.Context, link *CIContact) error
+	Unlink(ctx context.Context, orgID, id string) error
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -39,7 +40,7 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func (r *MemoryRepository) List(orgID, clientID string, page api.PaginationParams) ([]Contact, int, error) {
+func (r *MemoryRepository) List(_ context.Context, orgID, clientID string, page api.PaginationParams) ([]Contact, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Contact
@@ -65,7 +66,7 @@ func (r *MemoryRepository) List(orgID, clientID string, page api.PaginationParam
 	return out[start:end], total, nil
 }
 
-func (r *MemoryRepository) GetByID(orgID, id string) (*Contact, error) {
+func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Contact, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	c, ok := r.contacts[id]
@@ -76,7 +77,7 @@ func (r *MemoryRepository) GetByID(orgID, id string) (*Contact, error) {
 	return &cp, nil
 }
 
-func (r *MemoryRepository) Create(c *Contact) error {
+func (r *MemoryRepository) Create(_ context.Context, c *Contact) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.seq++
@@ -88,7 +89,7 @@ func (r *MemoryRepository) Create(c *Contact) error {
 	return nil
 }
 
-func (r *MemoryRepository) Update(orgID, id string, req UpdateContactRequest) (*Contact, error) {
+func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req UpdateContactRequest) (*Contact, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c, ok := r.contacts[id]
@@ -121,7 +122,7 @@ func (r *MemoryRepository) Update(orgID, id string, req UpdateContactRequest) (*
 	return &cp, nil
 }
 
-func (r *MemoryRepository) Delete(orgID, id string) error {
+func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c, ok := r.contacts[id]
@@ -137,7 +138,7 @@ func (r *MemoryRepository) Delete(orgID, id string) error {
 	return nil
 }
 
-func (r *MemoryRepository) ListForCI(orgID, ciID string, page api.PaginationParams) ([]CIContact, int, error) {
+func (r *MemoryRepository) ListForCI(_ context.Context, orgID, ciID string, page api.PaginationParams) ([]CIContact, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []CIContact
@@ -160,7 +161,7 @@ func (r *MemoryRepository) ListForCI(orgID, ciID string, page api.PaginationPara
 	return out[start:end], total, nil
 }
 
-func (r *MemoryRepository) Link(link *CIContact) error {
+func (r *MemoryRepository) Link(_ context.Context, link *CIContact) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c, ok := r.contacts[link.ContactID]
@@ -181,7 +182,7 @@ func (r *MemoryRepository) Link(link *CIContact) error {
 	return nil
 }
 
-func (r *MemoryRepository) Unlink(orgID, id string) error {
+func (r *MemoryRepository) Unlink(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	l, ok := r.links[id]

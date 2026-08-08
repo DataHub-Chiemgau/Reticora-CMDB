@@ -149,7 +149,7 @@ func (h *Handler) buildFull(ctx context.Context, orgID string, filter ci.FilterP
 	edges := make([]Edge, 0)
 	seen := make(map[string]struct{})
 	for id := range nodeSet {
-		rels, err := h.listRelationships(orgID, id)
+		rels, err := h.listRelationships(ctx, orgID, id)
 		if err != nil {
 			return Graph{}, err
 		}
@@ -193,7 +193,7 @@ func (h *Handler) buildFromRoot(ctx context.Context, orgID, rootCIID string, dep
 			}
 			visited[id] = true
 
-			rels, err := h.listRelationships(orgID, id)
+			rels, err := h.listRelationships(ctx, orgID, id)
 			if err != nil {
 				return Graph{}, err
 			}
@@ -248,8 +248,8 @@ func assembleGraph(nodes map[string]Node, edgeSet map[string]Edge, rootCIID, ciT
 	return Graph{Nodes: nodeList, Edges: edgeList}
 }
 
-func (h *Handler) listRelationships(orgID, ciID string) ([]relationship.Relationship, error) {
-	rels, _, err := h.relRepo.List(orgID, ciID, api.PaginationParams{Limit: maxFetch, Offset: 0})
+func (h *Handler) listRelationships(ctx context.Context, orgID, ciID string) ([]relationship.Relationship, error) {
+	rels, _, err := h.relRepo.List(ctx, orgID, ciID, api.PaginationParams{Limit: maxFetch, Offset: 0})
 	return rels, err
 }
 

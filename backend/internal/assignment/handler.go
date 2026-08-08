@@ -52,7 +52,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		SortDir:    r.URL.Query().Get("sort_dir"),
 	}
 
-	items, total, err := h.repo.List(t.OrganizationID, filter, page)
+	items, total, err := h.repo.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
 		if errors.Is(err, api.ErrInvalidCursor) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -85,7 +85,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	item, err := h.repo.GetByID(t.OrganizationID, id)
+	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "assignment not found")
 		return
@@ -134,7 +134,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Notes:          req.Notes,
 	}
 
-	if err := h.repo.Create(a); err != nil {
+	if err := h.repo.Create(r.Context(), a); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -151,7 +151,7 @@ func (h *Handler) Return(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	existing, err := h.repo.GetByID(t.OrganizationID, id)
+	existing, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "assignment not found")
 		return
@@ -171,7 +171,7 @@ func (h *Handler) Return(w http.ResponseWriter, r *http.Request) {
 		updated.Notes = req.Notes
 	}
 
-	if err := h.repo.Update(t.OrganizationID, id, &updated); err != nil {
+	if err := h.repo.Update(r.Context(), t.OrganizationID, id, &updated); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -188,7 +188,7 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	existing, err := h.repo.GetByID(t.OrganizationID, id)
+	existing, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "assignment not found")
 		return
@@ -208,7 +208,7 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 	// Mark old assignment as transferred
 	transferred := *existing
 	transferred.Status = "transferred"
-	if err := h.repo.Update(t.OrganizationID, id, &transferred); err != nil {
+	if err := h.repo.Update(r.Context(), t.OrganizationID, id, &transferred); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -225,7 +225,7 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 		Notes:          req.Notes,
 	}
 
-	if err := h.repo.Create(newAssignment); err != nil {
+	if err := h.repo.Create(r.Context(), newAssignment); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -242,7 +242,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.repo.Delete(t.OrganizationID, id); err != nil {
+	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "assignment not found")
 		return
 	}

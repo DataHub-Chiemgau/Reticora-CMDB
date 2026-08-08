@@ -17,7 +17,7 @@ func TestEncodeOID(t *testing.T) {
 	}{
 		{"1.3.6.1.2.1.33.1.1.2.0", []byte{0x06, 0x0A, 43, 6, 1, 2, 1, 33, 1, 1, 2, 0}},
 		// Enterprise OID with multi-byte component 318 -> 0x82 0x3E
-		{"1.3.6.1.4.1.318", []byte{0x06, 0x06, 43, 6, 1, 4, 1, 0x82, 0x3E}},
+		{"1.3.6.1.4.1.318", []byte{0x06, 0x07, 43, 6, 1, 4, 1, 0x82, 0x3E}},
 		{"", []byte{0x06, 0x01, 0x00}},
 	}
 	for _, c := range cases {

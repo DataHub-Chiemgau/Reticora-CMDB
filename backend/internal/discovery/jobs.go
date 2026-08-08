@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
@@ -58,7 +59,7 @@ var validJobTypes = map[string]bool{
 
 // ---- MemoryRepository job methods ----
 
-func (r *MemoryRepository) CreateJob(j *Job) error {
+func (r *MemoryRepository) CreateJob(_ context.Context, j *Job) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -76,7 +77,7 @@ func (r *MemoryRepository) CreateJob(j *Job) error {
 	return nil
 }
 
-func (r *MemoryRepository) ListJobs(orgID string, filter JobFilter, page api.PaginationParams) ([]Job, int, error) {
+func (r *MemoryRepository) ListJobs(_ context.Context, orgID string, filter JobFilter, page api.PaginationParams) ([]Job, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -107,7 +108,7 @@ func (r *MemoryRepository) ListJobs(orgID string, filter JobFilter, page api.Pag
 	return result[start:end], total, nil
 }
 
-func (r *MemoryRepository) GetJob(orgID, id string) (*Job, error) {
+func (r *MemoryRepository) GetJob(_ context.Context, orgID, id string) (*Job, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -134,7 +135,7 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 		Status:      r.URL.Query().Get("status"),
 		CollectorID: r.URL.Query().Get("collector_id"),
 	}
-	jobs, total, err := h.repo.ListJobs(t.OrganizationID, filter, page)
+	jobs, total, err := h.repo.ListJobs(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -181,7 +182,7 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		Status:         JobStatusPending,
 		Config:         req.Config,
 	}
-	if err := h.repo.CreateJob(job); err != nil {
+	if err := h.repo.CreateJob(r.Context(), job); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -197,7 +198,7 @@ func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	job, err := h.repo.GetJob(t.OrganizationID, id)
+	job, err := h.repo.GetJob(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "discovery job not found")
 		return

@@ -1,7 +1,6 @@
 package wmi
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -196,7 +195,7 @@ func TestCollectRequiresCredentials(t *testing.T) {
 
 func TestCollectParsesWSManResponses(t *testing.T) {
 	// WinRM SOAP responder that echoes field values for the requested class.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/soap+xml")
 		fmt.Fprintf(w, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body>
 <Name>WIN-SERVER-01</Name>
@@ -209,29 +208,22 @@ func TestCollectParsesWSManResponses(t *testing.T) {
 <BuildNumber>20348</BuildNumber>
 <Domain>corp.example</Domain>
 </s:Body></s:Envelope>`)
-	}))
+	})
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	p := New()
 	p.Timeout = 2 * time.Second
 	p.client = srv.Client()
 
-	// Serve the test handler on the default WinRM port so Collect's fixed
+	// Serve the same handler on the default WinRM port so Collect's fixed
 	// http://target:5985/wsman URL reaches it without production changes.
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", defaultHTTPPort))
 	if err != nil {
 		t.Skipf("cannot bind 127.0.0.1:%d: %v", defaultHTTPPort, err)
 	}
 	defer ln.Close()
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go srv.Config.Handler.ServeHTTP(newConnResponseWriter(conn), mustReadRequest(conn))
-		}
-	}()
+	go http.Serve(ln, handler)
 
 	res, err := p.Collect(context.Background(), "127.0.0.1", map[string]string{
 		"username": "admin", "password": "pw",
@@ -257,14 +249,26 @@ func TestCollectParsesWSManResponses(t *testing.T) {
 }
 
 func TestCollectUnreachableWinRMReturnsEmptyFields(t *testing.T) {
-	// Credentials provided, but nothing listens -> wsmanEnumerate silently
-	// returns "" for every class, leaving fields empty but not failing.
-	p := &Plugin{Timeout: 300 * time.Millisecond}
-	res, err := p.Collect(context.Background(), "192.0.2.77", map[string]string{"username": "u", "password": "p"})
+	// Credentials provided, but nothing listens on the WinRM port ->
+	// wsmanEnumerate silently returns "" for every class, leaving fields
+	// empty but not failing. Use New() so the HTTP client is initialized.
+	p := New()
+	p.Timeout = 300 * time.Millisecond
+	p.client.Timeout = 300 * time.Millisecond
+
+	// Bind 5985 to ensure the port is occupied before closing it, then use a
+	// port we control to guarantee connection refusal.
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", defaultHTTPPort))
+	if err != nil {
+		t.Skipf("cannot bind 127.0.0.1:%d: %v", defaultHTTPPort, err)
+	}
+	ln.Close() // now 127.0.0.1:5985 refuses connections
+
+	res, err := p.Collect(context.Background(), "127.0.0.1", map[string]string{"username": "u", "password": "p"})
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
-	if res.Name != "192.0.2.77" {
+	if res.Name != "127.0.0.1" {
 		t.Errorf("Name = %q, want target fallback", res.Name)
 	}
 	if res.CIType != "windows-server" {
@@ -273,42 +277,4 @@ func TestCollectUnreachableWinRMReturnsEmptyFields(t *testing.T) {
 	if res.Manufacturer != "" || res.Serial != "" {
 		t.Errorf("expected empty hardware fields, got mfg=%q serial=%q", res.Manufacturer, res.Serial)
 	}
-}
-
-// connResponseWriter is a minimal http.ResponseWriter over a raw connection,
-// used to serve the httptest handler on the fixed WinRM port.
-type connResponseWriter struct {
-	conn       net.Conn
-	header     http.Header
-	statusCode int
-}
-
-func newConnResponseWriter(conn net.Conn) *connResponseWriter {
-	return &connResponseWriter{conn: conn, header: http.Header{}}
-}
-
-func (w *connResponseWriter) Header() http.Header { return w.header }
-
-func (w *connResponseWriter) Write(b []byte) (int, error) {
-	if w.statusCode == 0 {
-		w.WriteHeader(http.StatusOK)
-	}
-	return w.conn.Write(b)
-}
-
-func (w *connResponseWriter) WriteHeader(code int) {
-	w.statusCode = code
-	w.header.Set("Connection", "close")
-	fmt.Fprintf(w.conn, "HTTP/1.1 %d %s\r\n", code, http.StatusText(code))
-	w.header.Write(w.conn)
-	fmt.Fprintf(w.conn, "\r\n")
-}
-
-func mustReadRequest(conn net.Conn) *http.Request {
-	req, err := http.ReadRequest(bufio.NewReader(conn))
-	if err != nil {
-		conn.Close()
-		return &http.Request{Method: http.MethodPost, Header: http.Header{}, Body: http.NoBody}
-	}
-	return req
 }

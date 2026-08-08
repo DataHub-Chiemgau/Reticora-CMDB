@@ -1,7 +1,10 @@
 // Package ai implements the governed RAG assistant.
 package ai
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 type Message struct {
 	Role    string `json:"role"`
@@ -51,10 +54,10 @@ type Provider interface {
 	EmbeddingsEnabled() bool
 }
 type Repository interface {
-	CreateConversation(orgID, userID, title string) (Conversation, error)
-	GetConversation(orgID, id string) (Conversation, error)
-	ListConversations(orgID, userID string) ([]Conversation, error)
-	AddMessage(orgID, conversationID, role, content string, promptTokens, completionTokens int, citations []Citation) error
-	UpsertChunk(chunk Chunk) error
-	CandidateChunks(orgID string, entityTypes []string, entityIDs []string, limit int) ([]Chunk, error)
+	CreateConversation(ctx context.Context, orgID, userID, title string) (Conversation, error)
+	GetConversation(ctx context.Context, orgID, id string) (Conversation, error)
+	ListConversations(ctx context.Context, orgID, userID string) ([]Conversation, error)
+	AddMessage(ctx context.Context, orgID, conversationID, role, content string, promptTokens, completionTokens int, citations []Citation) error
+	UpsertChunk(ctx context.Context, chunk Chunk) error
+	CandidateChunks(ctx context.Context, orgID string, entityTypes []string, entityIDs []string, limit int) ([]Chunk, error)
 }

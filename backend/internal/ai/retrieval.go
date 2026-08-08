@@ -46,7 +46,7 @@ func (r *Retriever) Retrieve(ctx context.Context, orgID, userID, question string
 	var ids, types []string
 	seen := map[string]bool{}
 	for _, h := range sr.Data {
-		if !r.allowed(orgID, userID, h.EntityType) {
+		if !r.allowed(ctx, orgID, userID, h.EntityType) {
 			continue
 		}
 		ids = append(ids, h.EntityID)
@@ -58,7 +58,7 @@ func (r *Retriever) Retrieve(ctx context.Context, orgID, userID, question string
 	if len(ids) == 0 {
 		return nil, nil, nil
 	}
-	chunks, err := r.repo.CandidateChunks(orgID, types, ids, 50)
+	chunks, err := r.repo.CandidateChunks(ctx, orgID, types, ids, 50)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -91,7 +91,7 @@ func (r *Retriever) Retrieve(ctx context.Context, orgID, userID, question string
 	}
 	return out, cites, nil
 }
-func (r *Retriever) allowed(orgID, userID, entity string) bool {
+func (r *Retriever) allowed(ctx context.Context, orgID, userID, entity string) bool {
 	if r.permissions == nil || userID == "" {
 		return true
 	}
@@ -99,7 +99,7 @@ func (r *Retriever) allowed(orgID, userID, entity string) bool {
 	if key == "" {
 		return false
 	}
-	ok, err := r.permissions.HasPermission(orgID, userID, key)
+	ok, err := r.permissions.HasPermission(ctx, orgID, userID, key)
 	return err == nil && ok
 }
 func searchPermission(entity string) string {

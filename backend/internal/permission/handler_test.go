@@ -2,6 +2,7 @@ package permission
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -31,7 +32,7 @@ func setupPermission() (*MemoryRepository, chi.Router) {
 
 func TestPermissionCatalogueAndRoleGrants(t *testing.T) {
 	repo, mux := setupPermission()
-	if _, err := repo.ReplaceRolePermissions("org-1", "admin-role", "", []string{"permission:write"}); err != nil {
+	if _, err := repo.ReplaceRolePermissions(context.Background(), "org-1", "admin-role", "", []string{"permission:write"}); err != nil {
 		t.Fatal(err)
 	}
 	repo.AssignRoleToUser("org-1", "admin", "admin-role")
@@ -62,7 +63,7 @@ func TestPermissionCatalogueAndRoleGrants(t *testing.T) {
 
 func TestPermissionValidationAndTenant(t *testing.T) {
 	repo, mux := setupPermission()
-	if _, err := repo.ReplaceRolePermissions("org-1", "admin-role", "", []string{"permission:write"}); err != nil {
+	if _, err := repo.ReplaceRolePermissions(context.Background(), "org-1", "admin-role", "", []string{"permission:write"}); err != nil {
 		t.Fatal(err)
 	}
 	repo.AssignRoleToUser("org-1", "admin", "admin-role")

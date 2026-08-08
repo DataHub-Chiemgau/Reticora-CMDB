@@ -30,7 +30,7 @@ func (h *Handler) ListConversations(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	items, err := h.repo.ListConversations(t.OrganizationID, t.UserID)
+	items, err := h.repo.ListConversations(r.Context(), t.OrganizationID, t.UserID)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -50,7 +50,7 @@ func (h *Handler) CreateConversation(w http.ResponseWriter, r *http.Request) {
 	if req.Title == "" {
 		req.Title = "Neue Unterhaltung"
 	}
-	c, err := h.repo.CreateConversation(t.OrganizationID, t.UserID, req.Title)
+	c, err := h.repo.CreateConversation(r.Context(), t.OrganizationID, t.UserID, req.Title)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -79,13 +79,13 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 	}
 	convID := req.ConversationID
 	if convID == "" {
-		c, err := h.repo.CreateConversation(t.OrganizationID, t.UserID, shortTitle(req.Question))
+		c, err := h.repo.CreateConversation(r.Context(), t.OrganizationID, t.UserID, shortTitle(req.Question))
 		if err != nil {
 			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 			return
 		}
 		convID = c.ID
-	} else if _, err := h.repo.GetConversation(t.OrganizationID, convID); err != nil {
+	} else if _, err := h.repo.GetConversation(r.Context(), t.OrganizationID, convID); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "conversation not found")
 		return
 	}
@@ -100,8 +100,8 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadGateway, "AI provider error", err.Error())
 		return
 	}
-	_ = h.repo.AddMessage(t.OrganizationID, convID, "user", req.Question, 0, 0, nil)
-	_ = h.repo.AddMessage(t.OrganizationID, convID, "assistant", answer, pt, ct, cites)
+	_ = h.repo.AddMessage(r.Context(), t.OrganizationID, convID, "user", req.Question, 0, 0, nil)
+	_ = h.repo.AddMessage(r.Context(), t.OrganizationID, convID, "assistant", answer, pt, ct, cites)
 	api.WriteJSON(w, http.StatusOK, AskResponse{ConversationID: convID, Answer: answer, Citations: cites, PromptTokens: pt, CompletionTokens: ct})
 }
 func buildPrompt(q string, chunks []Chunk) string {

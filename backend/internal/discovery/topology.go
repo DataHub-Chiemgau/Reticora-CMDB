@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"context"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -141,13 +142,13 @@ func normalizeMAC(value string) string {
 
 // deriveTopology resolves and upserts topology relationships for a bulk ingest
 // batch, returning the number of relationships created.
-func (h *Handler) deriveTopology(orgID string, items []IngestItem, resolvedCIID []string, existing []ci.Item) int {
+func (h *Handler) deriveTopology(ctx context.Context, orgID string, items []IngestItem, resolvedCIID []string, existing []ci.Item) int {
 	if h.relRepo == nil {
 		return 0
 	}
 
 	index := BuildNeighborIndex(existing)
-	suppressed := h.suppressionChecker(orgID)
+	suppressed := h.suppressionChecker(ctx, orgID)
 
 	created := 0
 	for i, item := range items {
@@ -156,7 +157,7 @@ func (h *Handler) deriveTopology(orgID string, items []IngestItem, resolvedCIID 
 			continue
 		}
 		for _, d := range DeriveRelationships(srcID, item.Relationships, index.Resolve, suppressed) {
-			if h.upsertRelationship(orgID, d) {
+			if h.upsertRelationship(ctx, orgID, d) {
 				created++
 			}
 		}
@@ -167,12 +168,12 @@ func (h *Handler) deriveTopology(orgID string, items []IngestItem, resolvedCIID 
 // suppressionChecker returns a predicate that reports whether a (source,target)
 // pair is suppressed. Returns nil when the repository does not expose
 // suppression data (e.g. the in-memory repository).
-func (h *Handler) suppressionChecker(orgID string) func(sourceID, targetID string) bool {
+func (h *Handler) suppressionChecker(ctx context.Context, orgID string) func(sourceID, targetID string) bool {
 	provider, ok := h.repo.(suppressionProvider)
 	if !ok {
 		return nil
 	}
-	pairs, err := provider.SuppressedPairs(orgID)
+	pairs, err := provider.SuppressedPairs(ctx, orgID)
 	if err != nil || len(pairs) == 0 {
 		return nil
 	}
@@ -184,13 +185,13 @@ func (h *Handler) suppressionChecker(orgID string) func(sourceID, targetID strin
 // suppressionProvider is optionally implemented by repositories that persist a
 // relationship_suppression table.
 type suppressionProvider interface {
-	SuppressedPairs(orgID string) (map[string]bool, error)
+	SuppressedPairs(ctx context.Context, orgID string) (map[string]bool, error)
 }
 
 // upsertRelationship creates a discovery-sourced relationship if an equivalent
 // edge does not already exist. Returns true when a new edge was created.
-func (h *Handler) upsertRelationship(orgID string, d DerivedRelationship) bool {
-	existing, _, err := h.relRepo.List(orgID, d.SourceCIID, api.PaginationParams{Limit: 10000, Offset: 0})
+func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d DerivedRelationship) bool {
+	existing, _, err := h.relRepo.List(ctx, orgID, d.SourceCIID, api.PaginationParams{Limit: 10000, Offset: 0})
 	if err == nil {
 		for _, rel := range existing {
 			if rel.SourceCIID == d.SourceCIID && rel.TargetCIID == d.TargetCIID && rel.RelType == d.RelType {
@@ -206,7 +207,7 @@ func (h *Handler) upsertRelationship(orgID string, d DerivedRelationship) bool {
 		Source:         RelationshipSource,
 		Attributes:     map[string]any{"confidence": d.Confidence},
 	}
-	if err := h.relRepo.Create(rel); err != nil {
+	if err := h.relRepo.Create(ctx, rel); err != nil {
 		return false
 	}
 	return true

@@ -1,6 +1,7 @@
 package iga
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,35 +12,35 @@ import (
 )
 
 type Repository interface {
-	ListConnectors(orgID string, page api.PaginationParams) ([]ConnectorConfig, int, error)
-	GetConnector(orgID, id string) (*ConnectorConfig, error)
-	CreateConnector(c *ConnectorConfig) error
-	UpdateConnector(orgID, id string, req UpdateConnectorRequest) (*ConnectorConfig, error)
-	DeleteConnector(orgID, id string) error
-	MarkConnectorSynced(orgID, id string, at time.Time) error
+	ListConnectors(ctx context.Context, orgID string, page api.PaginationParams) ([]ConnectorConfig, int, error)
+	GetConnector(ctx context.Context, orgID, id string) (*ConnectorConfig, error)
+	CreateConnector(ctx context.Context, c *ConnectorConfig) error
+	UpdateConnector(ctx context.Context, orgID, id string, req UpdateConnectorRequest) (*ConnectorConfig, error)
+	DeleteConnector(ctx context.Context, orgID, id string) error
+	MarkConnectorSynced(ctx context.Context, orgID, id string, at time.Time) error
 
-	ListTasks(orgID string, status string, page api.PaginationParams) ([]ProvisioningTask, int, error)
-	GetTask(orgID, id string) (*ProvisioningTask, error)
-	CreateTask(t *ProvisioningTask) error
-	UpdateTask(t *ProvisioningTask) error
-	DueTasks(orgID string, now time.Time, limit int) ([]ProvisioningTask, error)
+	ListTasks(ctx context.Context, orgID string, status string, page api.PaginationParams) ([]ProvisioningTask, int, error)
+	GetTask(ctx context.Context, orgID, id string) (*ProvisioningTask, error)
+	CreateTask(ctx context.Context, t *ProvisioningTask) error
+	UpdateTask(ctx context.Context, t *ProvisioningTask) error
+	DueTasks(ctx context.Context, orgID string, now time.Time, limit int) ([]ProvisioningTask, error)
 
-	ListPolicies(orgID, event string, activeOnly bool, page api.PaginationParams) ([]LifecyclePolicy, int, error)
-	CreatePolicy(p *LifecyclePolicy) error
+	ListPolicies(ctx context.Context, orgID, event string, activeOnly bool, page api.PaginationParams) ([]LifecyclePolicy, int, error)
+	CreatePolicy(ctx context.Context, p *LifecyclePolicy) error
 
-	ListAccessRequests(orgID, status string, page api.PaginationParams) ([]AccessRequest, int, error)
-	CreateAccessRequest(req *AccessRequest) error
-	DecideAccessRequest(orgID, id, status, actorID, comment string) (*AccessRequest, error)
+	ListAccessRequests(ctx context.Context, orgID, status string, page api.PaginationParams) ([]AccessRequest, int, error)
+	CreateAccessRequest(ctx context.Context, req *AccessRequest) error
+	DecideAccessRequest(ctx context.Context, orgID, id, status, actorID, comment string) (*AccessRequest, error)
 
-	ListReviews(orgID, status string, page api.PaginationParams) ([]AccessReview, int, error)
-	CreateReview(r *AccessReview, items []AccessReviewItem) error
-	ListReviewItems(orgID, reviewID string, page api.PaginationParams) ([]AccessReviewItem, int, error)
-	DecideReviewItem(orgID, id, decision, actorID string) (*AccessReviewItem, error)
+	ListReviews(ctx context.Context, orgID, status string, page api.PaginationParams) ([]AccessReview, int, error)
+	CreateReview(ctx context.Context, r *AccessReview, items []AccessReviewItem) error
+	ListReviewItems(ctx context.Context, orgID, reviewID string, page api.PaginationParams) ([]AccessReviewItem, int, error)
+	DecideReviewItem(ctx context.Context, orgID, id, decision, actorID string) (*AccessReviewItem, error)
 
-	ListDrift(orgID, status string, page api.PaginationParams) ([]DriftFinding, int, error)
-	CreateDrift(f *DriftFinding) error
-	UpdateDrift(f *DriftFinding) error
-	GetDrift(orgID, id string) (*DriftFinding, error)
+	ListDrift(ctx context.Context, orgID, status string, page api.PaginationParams) ([]DriftFinding, int, error)
+	CreateDrift(ctx context.Context, f *DriftFinding) error
+	UpdateDrift(ctx context.Context, f *DriftFinding) error
+	GetDrift(ctx context.Context, orgID, id string) (*DriftFinding, error)
 }
 
 type MemoryRepository struct {
@@ -69,7 +70,7 @@ func page[T any](items []T, p api.PaginationParams) ([]T, int, error) {
 	return items[start:end], total, nil
 }
 
-func (r *MemoryRepository) ListConnectors(orgID string, p api.PaginationParams) ([]ConnectorConfig, int, error) {
+func (r *MemoryRepository) ListConnectors(_ context.Context, orgID string, p api.PaginationParams) ([]ConnectorConfig, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []ConnectorConfig{}
@@ -81,7 +82,7 @@ func (r *MemoryRepository) ListConnectors(orgID string, p api.PaginationParams) 
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return page(out, p)
 }
-func (r *MemoryRepository) GetConnector(orgID, id string) (*ConnectorConfig, error) {
+func (r *MemoryRepository) GetConnector(_ context.Context, orgID, id string) (*ConnectorConfig, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	v := r.connectors[id]
@@ -91,7 +92,7 @@ func (r *MemoryRepository) GetConnector(orgID, id string) (*ConnectorConfig, err
 	cp := *v
 	return &cp, nil
 }
-func (r *MemoryRepository) CreateConnector(c *ConnectorConfig) error {
+func (r *MemoryRepository) CreateConnector(_ context.Context, c *ConnectorConfig) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c.ID = r.id("conn")
@@ -108,7 +109,7 @@ func (r *MemoryRepository) CreateConnector(c *ConnectorConfig) error {
 	r.connectors[c.ID] = &cp
 	return nil
 }
-func (r *MemoryRepository) UpdateConnector(orgID, id string, req UpdateConnectorRequest) (*ConnectorConfig, error) {
+func (r *MemoryRepository) UpdateConnector(_ context.Context, orgID, id string, req UpdateConnectorRequest) (*ConnectorConfig, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c := r.connectors[id]
@@ -140,7 +141,7 @@ func (r *MemoryRepository) UpdateConnector(orgID, id string, req UpdateConnector
 	cp := *c
 	return &cp, nil
 }
-func (r *MemoryRepository) DeleteConnector(orgID, id string) error {
+func (r *MemoryRepository) DeleteConnector(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c := r.connectors[id]
@@ -150,7 +151,7 @@ func (r *MemoryRepository) DeleteConnector(orgID, id string) error {
 	delete(r.connectors, id)
 	return nil
 }
-func (r *MemoryRepository) MarkConnectorSynced(orgID, id string, at time.Time) error {
+func (r *MemoryRepository) MarkConnectorSynced(_ context.Context, orgID, id string, at time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c := r.connectors[id]
@@ -162,7 +163,7 @@ func (r *MemoryRepository) MarkConnectorSynced(orgID, id string, at time.Time) e
 	return nil
 }
 
-func (r *MemoryRepository) ListTasks(orgID, status string, p api.PaginationParams) ([]ProvisioningTask, int, error) {
+func (r *MemoryRepository) ListTasks(_ context.Context, orgID, status string, p api.PaginationParams) ([]ProvisioningTask, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []ProvisioningTask{}
@@ -174,7 +175,7 @@ func (r *MemoryRepository) ListTasks(orgID, status string, p api.PaginationParam
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return page(out, p)
 }
-func (r *MemoryRepository) GetTask(orgID, id string) (*ProvisioningTask, error) {
+func (r *MemoryRepository) GetTask(_ context.Context, orgID, id string) (*ProvisioningTask, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	v := r.tasks[id]
@@ -184,7 +185,7 @@ func (r *MemoryRepository) GetTask(orgID, id string) (*ProvisioningTask, error) 
 	cp := *v
 	return &cp, nil
 }
-func (r *MemoryRepository) CreateTask(t *ProvisioningTask) error {
+func (r *MemoryRepository) CreateTask(_ context.Context, t *ProvisioningTask) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	t.ID = r.id("task")
@@ -207,7 +208,7 @@ func (r *MemoryRepository) CreateTask(t *ProvisioningTask) error {
 	r.tasks[t.ID] = &cp
 	return nil
 }
-func (r *MemoryRepository) UpdateTask(t *ProvisioningTask) error {
+func (r *MemoryRepository) UpdateTask(_ context.Context, t *ProvisioningTask) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.tasks[t.ID] == nil {
@@ -218,7 +219,7 @@ func (r *MemoryRepository) UpdateTask(t *ProvisioningTask) error {
 	r.tasks[t.ID] = &cp
 	return nil
 }
-func (r *MemoryRepository) DueTasks(orgID string, now time.Time, limit int) ([]ProvisioningTask, error) {
+func (r *MemoryRepository) DueTasks(_ context.Context, orgID string, now time.Time, limit int) ([]ProvisioningTask, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []ProvisioningTask{}
@@ -234,7 +235,7 @@ func (r *MemoryRepository) DueTasks(orgID string, now time.Time, limit int) ([]P
 	return out, nil
 }
 
-func (r *MemoryRepository) ListPolicies(orgID, event string, activeOnly bool, p api.PaginationParams) ([]LifecyclePolicy, int, error) {
+func (r *MemoryRepository) ListPolicies(_ context.Context, orgID, event string, activeOnly bool, p api.PaginationParams) ([]LifecyclePolicy, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []LifecyclePolicy{}
@@ -246,7 +247,7 @@ func (r *MemoryRepository) ListPolicies(orgID, event string, activeOnly bool, p 
 	sort.Slice(out, func(i, j int) bool { return out[i].Priority > out[j].Priority })
 	return page(out, p)
 }
-func (r *MemoryRepository) CreatePolicy(p *LifecyclePolicy) error {
+func (r *MemoryRepository) CreatePolicy(_ context.Context, p *LifecyclePolicy) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	p.ID = r.id("jml")
@@ -258,7 +259,7 @@ func (r *MemoryRepository) CreatePolicy(p *LifecyclePolicy) error {
 	return nil
 }
 
-func (r *MemoryRepository) ListAccessRequests(orgID, status string, p api.PaginationParams) ([]AccessRequest, int, error) {
+func (r *MemoryRepository) ListAccessRequests(_ context.Context, orgID, status string, p api.PaginationParams) ([]AccessRequest, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []AccessRequest{}
@@ -270,7 +271,7 @@ func (r *MemoryRepository) ListAccessRequests(orgID, status string, p api.Pagina
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return page(out, p)
 }
-func (r *MemoryRepository) CreateAccessRequest(a *AccessRequest) error {
+func (r *MemoryRepository) CreateAccessRequest(_ context.Context, a *AccessRequest) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	a.ID = r.id("ar")
@@ -284,7 +285,7 @@ func (r *MemoryRepository) CreateAccessRequest(a *AccessRequest) error {
 	r.requests[a.ID] = &cp
 	return nil
 }
-func (r *MemoryRepository) DecideAccessRequest(orgID, id, status, actor, comment string) (*AccessRequest, error) {
+func (r *MemoryRepository) DecideAccessRequest(_ context.Context, orgID, id, status, actor, comment string) (*AccessRequest, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	a := r.requests[id]
@@ -301,7 +302,7 @@ func (r *MemoryRepository) DecideAccessRequest(orgID, id, status, actor, comment
 	return &cp, nil
 }
 
-func (r *MemoryRepository) ListReviews(orgID, status string, p api.PaginationParams) ([]AccessReview, int, error) {
+func (r *MemoryRepository) ListReviews(_ context.Context, orgID, status string, p api.PaginationParams) ([]AccessReview, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []AccessReview{}
@@ -313,7 +314,7 @@ func (r *MemoryRepository) ListReviews(orgID, status string, p api.PaginationPar
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return page(out, p)
 }
-func (r *MemoryRepository) CreateReview(rv *AccessReview, items []AccessReviewItem) error {
+func (r *MemoryRepository) CreateReview(_ context.Context, rv *AccessReview, items []AccessReviewItem) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rv.ID = r.id("review")
@@ -336,7 +337,7 @@ func (r *MemoryRepository) CreateReview(rv *AccessReview, items []AccessReviewIt
 	}
 	return nil
 }
-func (r *MemoryRepository) ListReviewItems(orgID, reviewID string, p api.PaginationParams) ([]AccessReviewItem, int, error) {
+func (r *MemoryRepository) ListReviewItems(_ context.Context, orgID, reviewID string, p api.PaginationParams) ([]AccessReviewItem, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []AccessReviewItem{}
@@ -347,7 +348,7 @@ func (r *MemoryRepository) ListReviewItems(orgID, reviewID string, p api.Paginat
 	}
 	return page(out, p)
 }
-func (r *MemoryRepository) DecideReviewItem(orgID, id, decision, actor string) (*AccessReviewItem, error) {
+func (r *MemoryRepository) DecideReviewItem(_ context.Context, orgID, id, decision, actor string) (*AccessReviewItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	it := r.reviewItems[id]
@@ -363,7 +364,7 @@ func (r *MemoryRepository) DecideReviewItem(orgID, id, decision, actor string) (
 	return &cp, nil
 }
 
-func (r *MemoryRepository) ListDrift(orgID, status string, p api.PaginationParams) ([]DriftFinding, int, error) {
+func (r *MemoryRepository) ListDrift(_ context.Context, orgID, status string, p api.PaginationParams) ([]DriftFinding, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []DriftFinding{}
@@ -375,7 +376,7 @@ func (r *MemoryRepository) ListDrift(orgID, status string, p api.PaginationParam
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return page(out, p)
 }
-func (r *MemoryRepository) CreateDrift(f *DriftFinding) error {
+func (r *MemoryRepository) CreateDrift(_ context.Context, f *DriftFinding) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	f.ID = r.id("drift")
@@ -392,7 +393,7 @@ func (r *MemoryRepository) CreateDrift(f *DriftFinding) error {
 	r.drift[f.ID] = &cp
 	return nil
 }
-func (r *MemoryRepository) UpdateDrift(f *DriftFinding) error {
+func (r *MemoryRepository) UpdateDrift(_ context.Context, f *DriftFinding) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.drift[f.ID] == nil {
@@ -403,7 +404,7 @@ func (r *MemoryRepository) UpdateDrift(f *DriftFinding) error {
 	r.drift[f.ID] = &cp
 	return nil
 }
-func (r *MemoryRepository) GetDrift(orgID, id string) (*DriftFinding, error) {
+func (r *MemoryRepository) GetDrift(_ context.Context, orgID, id string) (*DriftFinding, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	v := r.drift[id]

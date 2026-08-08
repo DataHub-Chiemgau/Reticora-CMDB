@@ -59,7 +59,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	search := r.URL.Query().Get("search")
 
-	items, total, err := h.repo.ListUsers(t.OrganizationID, search, page)
+	items, total, err := h.repo.ListUsers(r.Context(), t.OrganizationID, search, page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -82,7 +82,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	item, err := h.repo.GetUser(t.OrganizationID, id)
+	item, err := h.repo.GetUser(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
 		return
@@ -122,7 +122,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		ExternalID:     req.ExternalID,
 	}
 
-	if err := h.repo.CreateUser(u); err != nil {
+	if err := h.repo.CreateUser(r.Context(), u); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -144,7 +144,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := h.repo.UpdateUser(t.OrganizationID, id, req)
+	item, err := h.repo.UpdateUser(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
 		return
@@ -161,7 +161,7 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.repo.DeleteUser(t.OrganizationID, id); err != nil {
+	if err := h.repo.DeleteUser(r.Context(), t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
 		return
 	}
@@ -177,7 +177,7 @@ func (h *Handler) ListUserRoles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := chi.URLParam(r, "id")
-	roles, err := h.repo.ListUserRoles(t.OrganizationID, userID)
+	roles, err := h.repo.ListUserRoles(r.Context(), t.OrganizationID, userID)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -198,7 +198,7 @@ func (h *Handler) ListTeams(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	search := r.URL.Query().Get("search")
 
-	items, total, err := h.repo.ListTeams(t.OrganizationID, search, page)
+	items, total, err := h.repo.ListTeams(r.Context(), t.OrganizationID, search, page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -221,7 +221,7 @@ func (h *Handler) GetTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	item, err := h.repo.GetTeam(t.OrganizationID, id)
+	item, err := h.repo.GetTeam(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "team not found")
 		return
@@ -255,7 +255,7 @@ func (h *Handler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 		LeadID:         req.LeadID,
 	}
 
-	if err := h.repo.CreateTeam(team); err != nil {
+	if err := h.repo.CreateTeam(r.Context(), team); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -277,7 +277,7 @@ func (h *Handler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := h.repo.UpdateTeam(t.OrganizationID, id, req)
+	item, err := h.repo.UpdateTeam(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "team not found")
 		return
@@ -294,7 +294,7 @@ func (h *Handler) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.repo.DeleteTeam(t.OrganizationID, id); err != nil {
+	if err := h.repo.DeleteTeam(r.Context(), t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "team not found")
 		return
 	}
@@ -310,7 +310,7 @@ func (h *Handler) ListTeamMembers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	teamID := chi.URLParam(r, "id")
-	members, err := h.repo.ListTeamMembers(t.OrganizationID, teamID)
+	members, err := h.repo.ListTeamMembers(r.Context(), t.OrganizationID, teamID)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 		return
@@ -349,7 +349,7 @@ func (h *Handler) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 		RoleInTeam: roleInTeam,
 	}
 
-	if err := h.repo.AddTeamMember(t.OrganizationID, member); err != nil {
+	if err := h.repo.AddTeamMember(r.Context(), t.OrganizationID, member); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 		return
 	}
@@ -367,7 +367,7 @@ func (h *Handler) RemoveTeamMember(w http.ResponseWriter, r *http.Request) {
 	teamID := chi.URLParam(r, "teamId")
 	userID := chi.URLParam(r, "userId")
 
-	if err := h.repo.RemoveTeamMember(t.OrganizationID, teamID, userID); err != nil {
+	if err := h.repo.RemoveTeamMember(r.Context(), t.OrganizationID, teamID, userID); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 		return
 	}
@@ -385,7 +385,7 @@ func (h *Handler) ListRoles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListRoles(t.OrganizationID, page)
+	items, total, err := h.repo.ListRoles(r.Context(), t.OrganizationID, page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -408,7 +408,7 @@ func (h *Handler) GetRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	item, err := h.repo.GetRole(t.OrganizationID, id)
+	item, err := h.repo.GetRole(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "role not found")
 		return
@@ -445,7 +445,7 @@ func (h *Handler) CreateRole(w http.ResponseWriter, r *http.Request) {
 		role.Permissions = []string{}
 	}
 
-	if err := h.repo.CreateRole(role); err != nil {
+	if err := h.repo.CreateRole(r.Context(), role); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -467,7 +467,7 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := h.repo.UpdateRole(t.OrganizationID, id, req)
+	item, err := h.repo.UpdateRole(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 		return
@@ -484,7 +484,7 @@ func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.repo.DeleteRole(t.OrganizationID, id); err != nil {
+	if err := h.repo.DeleteRole(r.Context(), t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 		return
 	}
@@ -523,7 +523,7 @@ func (h *Handler) AssignRole(w http.ResponseWriter, r *http.Request) {
 		GrantedBy:    t.UserID,
 	}
 
-	if err := h.repo.AssignRole(t.OrganizationID, assignment); err != nil {
+	if err := h.repo.AssignRole(r.Context(), t.OrganizationID, assignment); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 		return
 	}

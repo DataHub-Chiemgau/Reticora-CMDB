@@ -1,6 +1,7 @@
 package sla
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
@@ -12,16 +13,16 @@ import (
 
 // Repository defines persistence operations for SLA policies and ticket state.
 type Repository interface {
-	ListPolicies(orgID, priority, clientID string, page api.PaginationParams) ([]Policy, int, error)
-	GetPolicy(orgID, id string) (*Policy, error)
-	CreatePolicy(p *Policy) error
-	UpdatePolicy(orgID, id string, req UpdatePolicyRequest) (*Policy, error)
-	DeletePolicy(orgID, id string) error
-	ApplyForTicket(orgID string, t *ticket.Ticket, slaID string) (*TicketSLA, error)
-	GetForTicket(orgID, ticketID string) (*TicketSLA, error)
-	MarkFirstResponse(orgID, ticketID string, at time.Time) error
-	MarkResolved(orgID, ticketID string, at time.Time) error
-	ListBreaches(orgID string, filter BreachFilter, page api.PaginationParams) ([]TicketSLA, int, error)
+	ListPolicies(ctx context.Context, orgID, priority, clientID string, page api.PaginationParams) ([]Policy, int, error)
+	GetPolicy(ctx context.Context, orgID, id string) (*Policy, error)
+	CreatePolicy(ctx context.Context, p *Policy) error
+	UpdatePolicy(ctx context.Context, orgID, id string, req UpdatePolicyRequest) (*Policy, error)
+	DeletePolicy(ctx context.Context, orgID, id string) error
+	ApplyForTicket(ctx context.Context, orgID string, t *ticket.Ticket, slaID string) (*TicketSLA, error)
+	GetForTicket(ctx context.Context, orgID, ticketID string) (*TicketSLA, error)
+	MarkFirstResponse(ctx context.Context, orgID, ticketID string, at time.Time) error
+	MarkResolved(ctx context.Context, orgID, ticketID string, at time.Time) error
+	ListBreaches(ctx context.Context, orgID string, filter BreachFilter, page api.PaginationParams) ([]TicketSLA, int, error)
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -37,7 +38,7 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{policies: make(map[string]*Policy), states: make(map[string]*TicketSLA)}
 }
 
-func (r *MemoryRepository) ListPolicies(orgID, priority, clientID string, page api.PaginationParams) ([]Policy, int, error) {
+func (r *MemoryRepository) ListPolicies(_ context.Context, orgID, priority, clientID string, page api.PaginationParams) ([]Policy, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Policy
@@ -51,7 +52,7 @@ func (r *MemoryRepository) ListPolicies(orgID, priority, clientID string, page a
 	return pagePolicies(out, page)
 }
 
-func (r *MemoryRepository) GetPolicy(orgID, id string) (*Policy, error) {
+func (r *MemoryRepository) GetPolicy(_ context.Context, orgID, id string) (*Policy, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	p, ok := r.policies[id]
@@ -62,7 +63,7 @@ func (r *MemoryRepository) GetPolicy(orgID, id string) (*Policy, error) {
 	return &cp, nil
 }
 
-func (r *MemoryRepository) CreatePolicy(p *Policy) error {
+func (r *MemoryRepository) CreatePolicy(_ context.Context, p *Policy) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.nextID++
@@ -74,7 +75,7 @@ func (r *MemoryRepository) CreatePolicy(p *Policy) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdatePolicy(orgID, id string, req UpdatePolicyRequest) (*Policy, error) {
+func (r *MemoryRepository) UpdatePolicy(_ context.Context, orgID, id string, req UpdatePolicyRequest) (*Policy, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	p, ok := r.policies[id]
@@ -104,7 +105,7 @@ func (r *MemoryRepository) UpdatePolicy(orgID, id string, req UpdatePolicyReques
 	return &cp, nil
 }
 
-func (r *MemoryRepository) DeletePolicy(orgID, id string) error {
+func (r *MemoryRepository) DeletePolicy(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	p, ok := r.policies[id]
@@ -115,7 +116,7 @@ func (r *MemoryRepository) DeletePolicy(orgID, id string) error {
 	return nil
 }
 
-func (r *MemoryRepository) ApplyForTicket(orgID string, t *ticket.Ticket, slaID string) (*TicketSLA, error) {
+func (r *MemoryRepository) ApplyForTicket(_ context.Context, orgID string, t *ticket.Ticket, slaID string) (*TicketSLA, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	policy := r.findPolicyLocked(orgID, t.Priority, t.RelatedCIID, slaID)
@@ -129,7 +130,7 @@ func (r *MemoryRepository) ApplyForTicket(orgID string, t *ticket.Ticket, slaID 
 	return &cp, nil
 }
 
-func (r *MemoryRepository) GetForTicket(orgID, ticketID string) (*TicketSLA, error) {
+func (r *MemoryRepository) GetForTicket(_ context.Context, orgID, ticketID string) (*TicketSLA, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	state, ok := r.states[ticketID]
@@ -141,7 +142,7 @@ func (r *MemoryRepository) GetForTicket(orgID, ticketID string) (*TicketSLA, err
 	return &cp, nil
 }
 
-func (r *MemoryRepository) MarkFirstResponse(orgID, ticketID string, at time.Time) error {
+func (r *MemoryRepository) MarkFirstResponse(_ context.Context, orgID, ticketID string, at time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if state, ok := r.states[ticketID]; ok && state.OrganizationID == orgID && state.FirstResponseAt == nil {
@@ -152,7 +153,7 @@ func (r *MemoryRepository) MarkFirstResponse(orgID, ticketID string, at time.Tim
 	return nil
 }
 
-func (r *MemoryRepository) MarkResolved(orgID, ticketID string, at time.Time) error {
+func (r *MemoryRepository) MarkResolved(_ context.Context, orgID, ticketID string, at time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if state, ok := r.states[ticketID]; ok && state.OrganizationID == orgID && state.ResolvedAt == nil {
@@ -163,7 +164,7 @@ func (r *MemoryRepository) MarkResolved(orgID, ticketID string, at time.Time) er
 	return nil
 }
 
-func (r *MemoryRepository) ListBreaches(orgID string, filter BreachFilter, page api.PaginationParams) ([]TicketSLA, int, error) {
+func (r *MemoryRepository) ListBreaches(_ context.Context, orgID string, filter BreachFilter, page api.PaginationParams) ([]TicketSLA, int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := time.Now().UTC()

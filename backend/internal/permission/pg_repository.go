@@ -30,8 +30,8 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(con
 	return tx.Commit(ctx)
 }
 
-func (r *PGRepository) ListPermissions() ([]Permission, error) {
-	rows, err := r.pool.Query(context.Background(), "SELECT key, resource, action, description FROM permission ORDER BY resource, action, key")
+func (r *PGRepository) ListPermissions(ctx context.Context) ([]Permission, error) {
+	rows, err := r.pool.Query(ctx, "SELECT key, resource, action, description FROM permission ORDER BY resource, action, key")
 	if err != nil {
 		return nil, fmt.Errorf("list permissions: %w", err)
 	}
@@ -47,8 +47,7 @@ func (r *PGRepository) ListPermissions() ([]Permission, error) {
 	return items, rows.Err()
 }
 
-func (r *PGRepository) ListRolePermissions(orgID, roleID string) ([]RolePermissionGrant, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListRolePermissions(ctx context.Context, orgID, roleID string) ([]RolePermissionGrant, error) {
 	var items []RolePermissionGrant
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
@@ -72,8 +71,7 @@ func (r *PGRepository) ListRolePermissions(orgID, roleID string) ([]RolePermissi
 	return items, err
 }
 
-func (r *PGRepository) ReplaceRolePermissions(orgID, roleID, grantedBy string, keys []string) ([]RolePermissionGrant, error) {
-	ctx := context.Background()
+func (r *PGRepository) ReplaceRolePermissions(ctx context.Context, orgID, roleID, grantedBy string, keys []string) ([]RolePermissionGrant, error) {
 	var items []RolePermissionGrant
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
@@ -114,8 +112,7 @@ func (r *PGRepository) ReplaceRolePermissions(orgID, roleID, grantedBy string, k
 	return items, err
 }
 
-func (r *PGRepository) EffectivePermissions(orgID, userID string) ([]string, error) {
-	ctx := context.Background()
+func (r *PGRepository) EffectivePermissions(ctx context.Context, orgID, userID string) ([]string, error) {
 	set := make(map[string]struct{})
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
@@ -161,8 +158,8 @@ func (r *PGRepository) EffectivePermissions(orgID, userID string) ([]string, err
 	return keys, nil
 }
 
-func (r *PGRepository) HasPermission(orgID, userID, key string) (bool, error) {
-	keys, err := r.EffectivePermissions(orgID, userID)
+func (r *PGRepository) HasPermission(ctx context.Context, orgID, userID, key string) (bool, error) {
+	keys, err := r.EffectivePermissions(ctx, orgID, userID)
 	if err != nil {
 		return false, err
 	}

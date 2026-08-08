@@ -1,6 +1,7 @@
 package asset
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,11 +13,11 @@ import (
 
 // Repository defines persistence operations for assets.
 type Repository interface {
-	List(orgID string, filter FilterParams, page api.PaginationParams) ([]Asset, int, error)
-	GetByID(orgID, id string) (*Asset, error)
-	Create(a *Asset) error
-	Update(orgID, id string, req UpdateRequest) (*Asset, error)
-	Delete(orgID, id string) error
+	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Asset, int, error)
+	GetByID(ctx context.Context, orgID, id string) (*Asset, error)
+	Create(ctx context.Context, a *Asset) error
+	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Asset, error)
+	Delete(ctx context.Context, orgID, id string) error
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -31,7 +32,7 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{assets: make(map[string]*Asset)}
 }
 
-func (r *MemoryRepository) List(orgID string, filter FilterParams, page api.PaginationParams) ([]Asset, int, error) {
+func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Asset, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -100,7 +101,7 @@ func (r *MemoryRepository) List(orgID string, filter FilterParams, page api.Pagi
 	return result[start:end], total, nil
 }
 
-func (r *MemoryRepository) GetByID(orgID, id string) (*Asset, error) {
+func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Asset, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -111,7 +112,7 @@ func (r *MemoryRepository) GetByID(orgID, id string) (*Asset, error) {
 	return a, nil
 }
 
-func (r *MemoryRepository) Create(a *Asset) error {
+func (r *MemoryRepository) Create(_ context.Context, a *Asset) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -124,7 +125,7 @@ func (r *MemoryRepository) Create(a *Asset) error {
 	return nil
 }
 
-func (r *MemoryRepository) Update(orgID, id string, req UpdateRequest) (*Asset, error) {
+func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req UpdateRequest) (*Asset, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -179,7 +180,7 @@ func (r *MemoryRepository) Update(orgID, id string, req UpdateRequest) (*Asset, 
 	return a, nil
 }
 
-func (r *MemoryRepository) Delete(orgID, id string) error {
+func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

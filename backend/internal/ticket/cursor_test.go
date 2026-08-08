@@ -1,6 +1,7 @@
 package ticket
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,7 +17,7 @@ import (
 func seedTickets(t *testing.T, repo *MemoryRepository, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		err := repo.Create(&Ticket{
+		err := repo.Create(context.Background(), &Ticket{
 			OrganizationID: "org-1",
 			Title:          fmt.Sprintf("tkt-%02d", i),
 			Status:         "open",

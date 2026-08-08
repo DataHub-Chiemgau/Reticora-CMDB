@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
@@ -89,7 +90,7 @@ func reviewItemFromConflict(orgID string, incoming IngestItem, result ReconcileR
 
 // ---- MemoryRepository review-item methods ----
 
-func (r *MemoryRepository) CreateReviewItem(item *ReviewItem) error {
+func (r *MemoryRepository) CreateReviewItem(_ context.Context, item *ReviewItem) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -109,7 +110,7 @@ func (r *MemoryRepository) CreateReviewItem(item *ReviewItem) error {
 	return nil
 }
 
-func (r *MemoryRepository) ListReviewItems(orgID string, filter ReviewFilter, page api.PaginationParams) ([]ReviewItem, int, error) {
+func (r *MemoryRepository) ListReviewItems(_ context.Context, orgID string, filter ReviewFilter, page api.PaginationParams) ([]ReviewItem, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -140,7 +141,7 @@ func (r *MemoryRepository) ListReviewItems(orgID string, filter ReviewFilter, pa
 	return result[start:end], total, nil
 }
 
-func (r *MemoryRepository) GetReviewItem(orgID, id string) (*ReviewItem, error) {
+func (r *MemoryRepository) GetReviewItem(_ context.Context, orgID, id string) (*ReviewItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -152,7 +153,7 @@ func (r *MemoryRepository) GetReviewItem(orgID, id string) (*ReviewItem, error) 
 	return &clone, nil
 }
 
-func (r *MemoryRepository) ResolveReviewItem(orgID, id string, resolution Resolution) (*ReviewItem, error) {
+func (r *MemoryRepository) ResolveReviewItem(_ context.Context, orgID, id string, resolution Resolution) (*ReviewItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -184,7 +185,7 @@ func (h *Handler) ListReviewItems(w http.ResponseWriter, r *http.Request) {
 		Status: r.URL.Query().Get("status"),
 		Kind:   r.URL.Query().Get("kind"),
 	}
-	items, total, err := h.repo.ListReviewItems(t.OrganizationID, filter, page)
+	items, total, err := h.repo.ListReviewItems(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -217,7 +218,7 @@ func (h *Handler) ResolveReviewItem(w http.ResponseWriter, r *http.Request) {
 		body.ResolvedBy = t.UserID
 	}
 
-	item, err := h.repo.GetReviewItem(t.OrganizationID, id)
+	item, err := h.repo.GetReviewItem(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "review item not found")
 		return
@@ -294,7 +295,7 @@ func (h *Handler) ResolveReviewItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolved, err := h.repo.ResolveReviewItem(t.OrganizationID, id, body)
+	resolved, err := h.repo.ResolveReviewItem(r.Context(), t.OrganizationID, id, body)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return

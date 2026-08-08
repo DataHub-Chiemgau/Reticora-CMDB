@@ -52,8 +52,7 @@ func scanRack(s scanner) (*Rack, error) {
 	return rk, nil
 }
 
-func (r *PGRepository) ListRacks(orgID, roomID string, page api.PaginationParams) ([]Rack, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListRacks(ctx context.Context, orgID, roomID string, page api.PaginationParams) ([]Rack, int, error) {
 	var out []Rack
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -85,8 +84,7 @@ func (r *PGRepository) ListRacks(orgID, roomID string, page api.PaginationParams
 	return out, total, err
 }
 
-func (r *PGRepository) GetRack(orgID, id string) (*Rack, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetRack(ctx context.Context, orgID, id string) (*Rack, error) {
 	var rk *Rack
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -99,8 +97,7 @@ func (r *PGRepository) GetRack(orgID, id string) (*Rack, error) {
 	return rk, err
 }
 
-func (r *PGRepository) CreateRack(rk *Rack) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateRack(ctx context.Context, rk *Rack) error {
 	return r.withTenant(ctx, rk.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
 			`INSERT INTO rack (organization_id, room_id, name, height_u, width_mm, depth_mm, notes)
@@ -110,8 +107,7 @@ func (r *PGRepository) CreateRack(rk *Rack) error {
 	})
 }
 
-func (r *PGRepository) UpdateRack(orgID, id string, req UpdateRackRequest) (*Rack, error) {
-	ctx := context.Background()
+func (r *PGRepository) UpdateRack(ctx context.Context, orgID, id string, req UpdateRackRequest) (*Rack, error) {
 	var rk *Rack
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
@@ -158,8 +154,7 @@ func (r *PGRepository) UpdateRack(orgID, id string, req UpdateRackRequest) (*Rac
 	return rk, err
 }
 
-func (r *PGRepository) DeleteRack(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) DeleteRack(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "DELETE FROM rack WHERE organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
@@ -202,8 +197,7 @@ func mountsForRackTx(ctx context.Context, tx pgx.Tx, orgID, rackID string) ([]Ra
 	return out, rows.Err()
 }
 
-func (r *PGRepository) ListMounts(orgID, rackID string, page api.PaginationParams) ([]RackMount, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListMounts(ctx context.Context, orgID, rackID string, page api.PaginationParams) ([]RackMount, int, error) {
 	var out []RackMount
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -234,8 +228,7 @@ func (r *PGRepository) ListMounts(orgID, rackID string, page api.PaginationParam
 	return out, total, err
 }
 
-func (r *PGRepository) CreateMount(m *RackMount) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateMount(ctx context.Context, m *RackMount) error {
 	return r.withTenant(ctx, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		var height int
 		err := tx.QueryRow(ctx, "SELECT height_u FROM rack WHERE organization_id = $1 AND id = $2", m.OrganizationID, m.RackID).Scan(&height)
@@ -264,8 +257,7 @@ func (r *PGRepository) CreateMount(m *RackMount) error {
 	})
 }
 
-func (r *PGRepository) GetMount(orgID, id string) (*RackMount, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetMount(ctx context.Context, orgID, id string) (*RackMount, error) {
 	var m *RackMount
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -278,8 +270,7 @@ func (r *PGRepository) GetMount(orgID, id string) (*RackMount, error) {
 	return m, err
 }
 
-func (r *PGRepository) UpdateMount(orgID, id string, req UpdateMountRequest) (*RackMount, error) {
-	ctx := context.Background()
+func (r *PGRepository) UpdateMount(ctx context.Context, orgID, id string, req UpdateMountRequest) (*RackMount, error) {
 	var m *RackMount
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		current, err := scanMount(tx.QueryRow(ctx, "SELECT "+mountCols+" FROM rack_mount WHERE organization_id = $1 AND id = $2", orgID, id))
@@ -322,8 +313,7 @@ func (r *PGRepository) UpdateMount(orgID, id string, req UpdateMountRequest) (*R
 	return m, err
 }
 
-func (r *PGRepository) DeleteMount(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) DeleteMount(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "DELETE FROM rack_mount WHERE organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
@@ -355,8 +345,7 @@ func scanCable(s scanner) (*Cable, error) {
 	return c, nil
 }
 
-func (r *PGRepository) ListCables(orgID string, page api.PaginationParams) ([]Cable, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListCables(ctx context.Context, orgID string, page api.PaginationParams) ([]Cable, int, error) {
 	var out []Cable
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -380,8 +369,7 @@ func (r *PGRepository) ListCables(orgID string, page api.PaginationParams) ([]Ca
 	return out, total, err
 }
 
-func (r *PGRepository) GetCable(orgID, id string) (*Cable, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetCable(ctx context.Context, orgID, id string) (*Cable, error) {
 	var c *Cable
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -394,8 +382,7 @@ func (r *PGRepository) GetCable(orgID, id string) (*Cable, error) {
 	return c, err
 }
 
-func (r *PGRepository) CreateCable(c *Cable) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateCable(ctx context.Context, c *Cable) error {
 	return r.withTenant(ctx, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
 			`INSERT INTO cable (organization_id, label, cable_type, length_m, color, source_interface_id, target_interface_id, status, installed_at)
@@ -406,8 +393,7 @@ func (r *PGRepository) CreateCable(c *Cable) error {
 	})
 }
 
-func (r *PGRepository) UpdateCable(orgID, id string, req UpdateCableRequest) (*Cable, error) {
-	ctx := context.Background()
+func (r *PGRepository) UpdateCable(ctx context.Context, orgID, id string, req UpdateCableRequest) (*Cable, error) {
 	var c *Cable
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
@@ -463,8 +449,7 @@ func (r *PGRepository) UpdateCable(orgID, id string, req UpdateCableRequest) (*C
 	return c, err
 }
 
-func (r *PGRepository) DeleteCable(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) DeleteCable(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "DELETE FROM cable WHERE organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
