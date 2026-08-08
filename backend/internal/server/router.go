@@ -41,6 +41,9 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Repositories bundles every persistence port the API depends on.
@@ -197,17 +200,33 @@ func registerOperational(mux *chi.Mux, version string) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
-	mux.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		// Application metrics in Prometheus exposition format. Once the
-		// OpenTelemetry SDK is wired to a Prometheus exporter this is replaced
-		// by promhttp.Handler().
-		fmt.Fprint(w, "# HELP reticora_up Whether the Reticora server is up.\n")
-		fmt.Fprint(w, "# TYPE reticora_up gauge\n")
-		fmt.Fprint(w, "reticora_up 1\n")
-		fmt.Fprint(w, "# HELP reticora_info Build and version information.\n")
-		fmt.Fprint(w, "# TYPE reticora_info gauge\n")
-		fmt.Fprintf(w, "reticora_info{version=%q} 1\n", version)
+	mux.Handle("/metrics", metricsHandler(version))
+}
+
+// metricsHandler serves application and Go runtime metrics in the Prometheus
+// exposition format. The reticora_up/reticora_info series are registered on a
+// dedicated registry so the endpoint stays stable regardless of what else is
+// instrumented.
+func metricsHandler(version string) http.Handler {
+	registry := prometheus.NewRegistry()
+
+	up := prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: "reticora",
+		Name:      "up",
+		Help:      "Whether the Reticora server is up.",
 	})
+	up.Set(1)
+	registry.MustRegister(up)
+
+	info := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "reticora",
+		Name:      "info",
+		Help:      "Build and version information.",
+	}, []string{"version"})
+	info.WithLabelValues(version).Set(1)
+	registry.MustRegister(info)
+
+	registry.MustRegister(collectors.NewGoCollector())
+
+	return promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
 }

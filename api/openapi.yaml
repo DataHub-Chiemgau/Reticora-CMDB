@@ -561,6 +561,32 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/webhooks/dead-letters:
+    get:
+      operationId: listWebhookDeadLetters
+      tags: [Webhooks]
+      summary: List the webhook dead-letter queue
+      description: >-
+        Returns deliveries that exhausted their retry budget and were moved to
+        the dead-letter queue, newest first. Operators inspect this queue to
+        find permanently failed deliveries and replay them.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Dead-letter queue entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookDeadLetterListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/discovery/ingest:
     post:
       operationId: ingestDiscoveryData
@@ -5631,7 +5657,7 @@ components:
           type: string
         status:
           type: string
-          enum: [pending, retrying, success, failed]
+          enum: [pending, retrying, success, failed, dead]
         attempt:
           type: integer
         max_attempts:
@@ -5662,6 +5688,44 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/WebhookDeliveryRecord'
+
+    WebhookDeadLetter:
+      type: object
+      required: [id, delivery_id, organization_id, subscription_id, event, attempts, dead_at]
+      properties:
+        id:
+          type: string
+        delivery_id:
+          type: string
+        organization_id:
+          type: string
+        subscription_id:
+          type: string
+        event:
+          type: string
+        attempts:
+          type: integer
+        last_status_code:
+          type: integer
+        last_error:
+          type: string
+        first_attempt_at:
+          type: string
+          format: date-time
+        dead_at:
+          type: string
+          format: date-time
+
+    WebhookDeadLetterListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/WebhookDeadLetter'
 
     WebhookListResponse:
       allOf:

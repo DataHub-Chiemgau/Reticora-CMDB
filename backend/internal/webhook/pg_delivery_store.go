@@ -237,6 +237,119 @@ func (s *PGDeliveryStore) ListBySubscription(ctx context.Context, orgID, subscri
 	return records, total, err
 }
 
+// MoveToDeadLetter moves a failed delivery into the dead-letter queue and
+// marks the delivery record dead, atomically. Repeating the move for the same
+// delivery is a no-op.
+func (s *PGDeliveryStore) MoveToDeadLetter(ctx context.Context, rec DeliveryRecord) error {
+	return s.inTx(ctx, "app.org_id", rec.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO webhook_dead_letter (
+				delivery_id, organization_id, subscription_id, event, payload,
+				attempts, last_status_code, last_error, first_attempt_at
+			)
+			SELECT d.id, d.organization_id, d.subscription_id, d.event, d.payload,
+			       $2, $3, $4, d.created_at
+			FROM webhook_delivery d
+			WHERE d.id = $1
+			ON CONFLICT (delivery_id) DO NOTHING
+		`,
+			rec.ID,
+			rec.Attempt,
+			nullableInt(rec.ResponseStatus),
+			nullableString(rec.Error),
+		); err != nil {
+			return fmt.Errorf("insert webhook dead letter: %w", err)
+		}
+
+		tag, err := tx.Exec(ctx, `
+			UPDATE webhook_delivery
+			SET status = $2,
+			    attempt = $3,
+			    response_status = $4,
+			    duration_ms = $5,
+			    error = $6,
+			    next_retry_at = NULL,
+			    updated_at = now()
+			WHERE id = $1
+		`,
+			rec.ID,
+			StatusDead,
+			rec.Attempt,
+			nullableInt(rec.ResponseStatus),
+			nullableInt(rec.DurationMS),
+			nullableString(rec.Error),
+		)
+		if err != nil {
+			return fmt.Errorf("mark webhook delivery dead: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("delivery not found")
+		}
+		return nil
+	})
+}
+
+// ListDeadLetters returns the dead-letter queue of one tenant, newest first.
+func (s *PGDeliveryStore) ListDeadLetters(ctx context.Context, orgID string, page api.PaginationParams) ([]DeadLetter, int, error) {
+	letters := make([]DeadLetter, 0)
+	total := 0
+
+	err := s.inTx(ctx, "app.org_id", orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM webhook_dead_letter").Scan(&total); err != nil {
+			return fmt.Errorf("count webhook dead letters: %w", err)
+		}
+
+		rows, err := tx.Query(ctx, `
+			SELECT id::text, delivery_id::text, organization_id::text, subscription_id::text,
+			       event, attempts, last_status_code, last_error, first_attempt_at, dead_at
+			FROM webhook_dead_letter
+			ORDER BY dead_at DESC
+			LIMIT $1 OFFSET $2
+		`, page.Limit, page.Offset)
+		if err != nil {
+			return fmt.Errorf("list webhook dead letters: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var (
+				dl             DeadLetter
+				lastStatusCode *int
+				lastError      *string
+				firstAttemptAt *time.Time
+			)
+			if err := rows.Scan(
+				&dl.ID,
+				&dl.DeliveryID,
+				&dl.OrganizationID,
+				&dl.SubscriptionID,
+				&dl.Event,
+				&dl.Attempts,
+				&lastStatusCode,
+				&lastError,
+				&firstAttemptAt,
+				&dl.DeadAt,
+			); err != nil {
+				return fmt.Errorf("scan webhook dead letter: %w", err)
+			}
+			if lastStatusCode != nil {
+				dl.LastStatusCode = *lastStatusCode
+			}
+			if lastError != nil {
+				dl.LastError = *lastError
+			}
+			if firstAttemptAt != nil {
+				dl.FirstAttemptAt = firstAttemptAt.UTC()
+			}
+			dl.DeadAt = dl.DeadAt.UTC()
+			letters = append(letters, dl)
+		}
+		return rows.Err()
+	})
+
+	return letters, total, err
+}
+
 func statusOrDefault(status string) string {
 	if status == "" {
 		return StatusPending

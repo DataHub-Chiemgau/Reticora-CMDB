@@ -255,6 +255,14 @@ func (d *Dispatcher) ListDeliveries(ctx context.Context, orgID, subscriptionID s
 	return d.store.ListBySubscription(ctx, orgID, subscriptionID, page)
 }
 
+// ListDeadLetters returns the dead-letter queue of a tenant.
+func (d *Dispatcher) ListDeadLetters(ctx context.Context, orgID string, page api.PaginationParams) ([]DeadLetter, int, error) {
+	if d == nil || d.store == nil {
+		return nil, 0, ErrNoDeliveryStore
+	}
+	return d.store.ListDeadLetters(ctx, orgID, page)
+}
+
 // Shutdown stops the workers and waits for in-flight deliveries to finish.
 func (d *Dispatcher) Shutdown(ctx context.Context) error {
 	if d == nil {
@@ -391,6 +399,22 @@ func (d *Dispatcher) finalize(ctx context.Context, rec DeliveryRecord, statusCod
 		rec.Status = StatusRetrying
 		rec.Error = err.Error()
 		rec.NextRetryAt = &next
+	}
+
+	// A delivery that exhausted its retry budget leaves the active queue and
+	// is preserved in the dead-letter queue for operator inspection/replay.
+	if rec.Status == StatusFailed {
+		if dlqErr := d.store.MoveToDeadLetter(ctx, rec); dlqErr != nil {
+			slog.Error("move webhook delivery to dead-letter queue failed",
+				"error", dlqErr, "delivery_id", rec.ID, "organization_id", rec.OrganizationID)
+			// Fall back to marking the delivery failed so the outcome is
+			// still recorded even though the dead letter could not be written.
+			if updateErr := d.store.Update(ctx, rec); updateErr != nil {
+				slog.Error("update webhook delivery failed",
+					"error", updateErr, "delivery_id", rec.ID, "organization_id", rec.OrganizationID)
+			}
+		}
+		return
 	}
 
 	if updateErr := d.store.Update(ctx, rec); updateErr != nil {

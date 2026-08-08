@@ -162,11 +162,17 @@ type DeliveryLister interface {
 	ListDeliveries(ctx context.Context, orgID, subscriptionID string, page api.PaginationParams) ([]DeliveryRecord, int, error)
 }
 
+// DeadLetterLister exposes the dead-letter queue of a tenant.
+type DeadLetterLister interface {
+	ListDeadLetters(ctx context.Context, orgID string, page api.PaginationParams) ([]DeadLetter, int, error)
+}
+
 // Handler provides HTTP handlers for webhook endpoints.
 type Handler struct {
-	repo       Repository
-	deliverer  TestDeliverer
-	deliveries DeliveryLister
+	repo        Repository
+	deliverer   TestDeliverer
+	deliveries  DeliveryLister
+	deadLetters DeadLetterLister
 }
 
 // NewHandler creates a new webhook handler. An optional TestDeliverer enables
@@ -178,6 +184,9 @@ func NewHandler(repo Repository, deliverer ...TestDeliverer) *Handler {
 		if lister, ok := deliverer[0].(DeliveryLister); ok {
 			h.deliveries = lister
 		}
+		if lister, ok := deliverer[0].(DeadLetterLister); ok {
+			h.deadLetters = lister
+		}
 	}
 	return h
 }
@@ -186,6 +195,7 @@ func NewHandler(repo Repository, deliverer ...TestDeliverer) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/webhooks", h.List)
 	r.Post("/api/v1/webhooks", h.Create)
+	r.Get("/api/v1/webhooks/dead-letters", h.ListDeadLetters)
 	r.Get("/api/v1/webhooks/{id}", h.Get)
 	r.Delete("/api/v1/webhooks/{id}", h.Delete)
 	r.Post("/api/v1/webhooks/{id}/test", h.Test)
@@ -258,6 +268,39 @@ func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
 
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[DeliveryRecord]{
 		Data:    records,
+		Total:   total,
+		Limit:   page.Limit,
+		Offset:  page.Offset,
+		HasMore: page.Offset+page.Limit < total,
+	})
+}
+
+// ListDeadLetters handles GET /api/v1/webhooks/dead-letters and returns the
+// deliveries that exhausted their retry budget, newest first.
+func (h *Handler) ListDeadLetters(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	if h.deadLetters == nil {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "webhook delivery store is not configured")
+		return
+	}
+
+	page := api.ParsePagination(r)
+	letters, total, err := h.deadLetters.ListDeadLetters(r.Context(), t.OrganizationID, page)
+	if err != nil {
+		if errors.Is(err, ErrNoDeliveryStore) {
+			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", err.Error())
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[DeadLetter]{
+		Data:    letters,
 		Total:   total,
 		Limit:   page.Limit,
 		Offset:  page.Offset,
