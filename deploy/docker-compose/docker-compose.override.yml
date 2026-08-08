@@ -1,7 +1,8 @@
 # Compose overrides: build the images from source instead of pulling prebuilt
-# ones. Applied automatically because the file is named
-# docker-compose.override.yml — delete it when RETICORA_SERVER_IMAGE /
-# RETICORA_FRONTEND_IMAGE point to a registry.
+# ones. Merged automatically by `docker compose` only when it runs from this
+# directory (or when the file is passed with an explicit -f; install-cloud.sh
+# does exactly that). Rename it to docker-compose.override.yml.disabled when
+# RETICORA_SERVER_IMAGE / RETICORA_FRONTEND_IMAGE point to a registry.
 services:
   server:
     build:
