@@ -728,8 +728,8 @@ paths:
       description: Returns the tenant's export jobs newest first. Completed,
         unexpired jobs carry a time-limited signed download URL.
       parameters:
-        - $ref: '#/components/parameters/PageLimit'
-        - $ref: '#/components/parameters/PageOffset'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
           description: Export jobs

@@ -429,6 +429,53 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/export/jobs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List asynchronous export jobs
+     * @description Returns the tenant's export jobs newest first. Completed, unexpired jobs carry a time-limited signed download URL.
+     */
+    get: operations['listExportJobs'];
+    put?: never;
+    /**
+     * Queue an asynchronous CI export
+     * @description Queues an asynchronous export. A background worker renders the CI set
+     *     in the requested format into object storage; once the job is
+     *     `completed` it exposes a signed download URL until `expires_at`.
+     *     Requires blob storage to be configured — otherwise 503.
+     */
+    post: operations['createExportJob'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/export/jobs/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get an export job */
+    get: operations['getExportJob'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/entitlements': {
     parameters: {
       query?: never;
@@ -3142,6 +3189,53 @@ export interface components {
       data: components['schemas']['CI'][];
       total: number;
     };
+    ExportJobFilters: {
+      status?: string;
+      ci_type_id?: string;
+      client_id?: string;
+    };
+    CreateExportJobRequest: {
+      /**
+       * @default json
+       * @enum {string}
+       */
+      format: 'csv' | 'json' | 'datev';
+      filters?: components['schemas']['ExportJobFilters'];
+    };
+    ExportJob: {
+      id: string;
+      organization_id: string;
+      initiated_by?: string;
+      /** @enum {string} */
+      format: 'csv' | 'json' | 'datev';
+      /** @enum {string} */
+      status: 'pending' | 'running' | 'completed' | 'failed' | 'expired';
+      filters: components['schemas']['ExportJobFilters'];
+      object_key?: string;
+      row_count?: number;
+      /** Format: int64 */
+      file_size_bytes?: number;
+      error_message?: string;
+      /** Format: date-time */
+      started_at?: string;
+      /** Format: date-time */
+      completed_at?: string;
+      /** Format: date-time */
+      expires_at?: string;
+      /** @description Time-limited signed URL; only present on completed, unexpired jobs. */
+      download_url?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    ExportJobListResponse: {
+      data: components['schemas']['ExportJob'][];
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+    };
     /** @enum {string} */
     EntitlementPlan: 'essential' | 'standard' | 'pro' | 'enterprise';
     Entitlement: {
@@ -5472,6 +5566,87 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  listExportJobs: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Export jobs */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ExportJobListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createExportJob: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateExportJobRequest'];
+      };
+    };
+    responses: {
+      /** @description Export job queued */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ExportJob'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getExportJob: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Export job */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ExportJob'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listEntitlements: {

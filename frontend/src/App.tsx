@@ -18,6 +18,8 @@ import { CIListPage } from './pages/CIListPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DiscoveryPage } from './pages/DiscoveryPage';
 import { DocumentListPage } from './pages/DocumentListPage';
+import { ExportPage } from './pages/ExportPage';
+import { MonitoringPage } from './pages/MonitoringPage';
 import { PermissionsPage } from './pages/PermissionsPage';
 import { RackPage } from './pages/RackPage';
 import { TopologyPage } from './pages/TopologyPage';
@@ -29,6 +31,7 @@ import { IGAPage } from './pages/IGAPage';
 import { StocktakeListPage } from './pages/StocktakeListPage';
 import { TicketListPage } from './pages/TicketListPage';
 import { UserManagementPage } from './pages/UserManagementPage';
+import { WebhooksPage } from './pages/WebhooksPage';
 import { useThemeStore } from './stores/theme';
 
 const pathToPage: Record<string, AppPage> = Object.fromEntries(
@@ -204,6 +207,24 @@ function App() {
                 >
                   {t('nav.assistant')}
                 </NavButton>
+                <NavButton
+                  active={currentPage === 'webhooks'}
+                  onClick={() => handleNavigate('webhooks')}
+                >
+                  {t('nav.webhooks')}
+                </NavButton>
+                <NavButton
+                  active={currentPage === 'export'}
+                  onClick={() => handleNavigate('export')}
+                >
+                  {t('nav.export')}
+                </NavButton>
+                <NavButton
+                  active={currentPage === 'monitoring'}
+                  onClick={() => handleNavigate('monitoring')}
+                >
+                  {t('nav.monitoring')}
+                </NavButton>
               </nav>
             ) : null}
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -281,6 +302,9 @@ function App() {
             <Route path="/compliance" element={<CompliancePage />} />
             <Route path="/iga" element={<IGAPage />} />
             <Route path="/assistant" element={<AssistantPage />} />
+            <Route path="/webhooks" element={<WebhooksPage />} />
+            <Route path="/export" element={<ExportPage />} />
+            <Route path="/monitoring" element={<MonitoringPage />} />
             <Route path="*" element={<CIListPage onCreateCI={openCreateCI} />} />
           </Route>
         </Routes>

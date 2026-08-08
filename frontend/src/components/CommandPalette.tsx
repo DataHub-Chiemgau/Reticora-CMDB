@@ -24,7 +24,10 @@ export type AppPage =
   | 'workflows'
   | 'compliance'
   | 'iga'
-  | 'assistant';
+  | 'assistant'
+  | 'webhooks'
+  | 'export'
+  | 'monitoring';
 
 export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
@@ -45,6 +48,9 @@ export const pageToPath: Record<AppPage, string> = {
   compliance: '/compliance',
   iga: '/iga',
   assistant: '/assistant',
+  webhooks: '/webhooks',
+  export: '/export',
+  monitoring: '/monitoring',
 };
 
 interface CommandPaletteProps {
@@ -213,6 +219,24 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
         label: t('commandPalette.commands.assistant'),
         keywords: ['assistant ki ai rag'],
         action: () => onNavigate('assistant'),
+      },
+      {
+        id: 'nav-webhooks',
+        label: t('commandPalette.commands.webhooks'),
+        keywords: ['webhooks subscriptions deliveries dead letter'],
+        action: () => onNavigate('webhooks'),
+      },
+      {
+        id: 'nav-export',
+        label: t('commandPalette.commands.export'),
+        keywords: ['export csv datev json download'],
+        action: () => onNavigate('export'),
+      },
+      {
+        id: 'nav-monitoring',
+        label: t('commandPalette.commands.monitoring'),
+        keywords: ['monitoring metrics alerts'],
+        action: () => onNavigate('monitoring'),
       },
     ],
     [onCreateCI, onNavigate, onToggleDarkMode, t],

@@ -23,7 +23,10 @@
     "workflows": "Workflows",
     "compliance": "Compliance",
     "iga": "IGA",
-    "assistant": "Assistant"
+    "assistant": "Assistant",
+    "webhooks": "Webhooks",
+    "export": "Export",
+    "monitoring": "Monitoring"
   },
   "common": {
     "save": "Save",
@@ -66,7 +69,10 @@
       "workflows": "Open Workflows",
       "compliance": "Open Compliance",
       "iga": "Open IGA",
-      "assistant": "Open AI assistant"
+      "assistant": "Open AI assistant",
+      "webhooks": "Open webhooks",
+      "export": "Open export",
+      "monitoring": "Open monitoring"
     }
   },
   "dashboard": {
@@ -144,10 +150,30 @@
   },
   "webhook": {
     "title": "Webhooks",
+    "subtitle": "Subscriptions notify external systems on CI and discovery events; failed deliveries land in the dead-letter queue.",
     "name": "Name",
     "url": "URL",
     "events": "Events",
-    "active": "Active"
+    "active": "Active",
+    "inactive": "Inactive",
+    "secret": "Secret (HMAC signature)",
+    "loading": "Loading webhooks",
+    "errorTitle": "Webhooks could not be loaded",
+    "createSubscription": "Create webhook subscription",
+    "subscriptions": "Subscriptions",
+    "emptyTitle": "No webhooks configured",
+    "emptyHint": "Create a subscription to be notified about events.",
+    "test": "Send test",
+    "deliveries": "Delivery history",
+    "loadingDeliveries": "Loading deliveries",
+    "noDeliveries": "No deliveries",
+    "noDeliveriesHint": "No deliveries have been recorded for this subscription yet.",
+    "attemptOf": "Attempt {{attempt}} of {{max}}",
+    "deadLetters": "Dead-letter queue",
+    "dead": "Permanently failed",
+    "attempts": "{{count}} attempts",
+    "noDeadLetters": "No dead letters",
+    "noDeadLettersHint": "There are currently no permanently failed deliveries."
   },
   "accessibility": {
     "closeModal": "Close modal",
@@ -380,5 +406,54 @@
     "ask": "Ask",
     "answer": "Answer",
     "citations": "Sources"
+  },
+  "export": {
+    "title": "Export",
+    "subtitle": "Asynchronous exports render the tenant's CI data into object storage; finished exports are available for 24 hours via a signed URL.",
+    "loading": "Loading export jobs",
+    "errorTitle": "Export jobs could not be loaded",
+    "startExport": "Start export",
+    "startJob": "Create job",
+    "format": "Format",
+    "jobs": "Export jobs",
+    "status": "Status",
+    "rows": "Rows",
+    "createdAt": "Created",
+    "download": "Download",
+    "emptyTitle": "No export jobs",
+    "emptyHint": "Start an export to download CI data as CSV, DATEV or JSON.",
+    "status_pending": "Pending",
+    "status_running": "Running",
+    "status_completed": "Completed",
+    "status_failed": "Failed",
+    "status_expired": "Expired"
+  },
+  "monitoring": {
+    "title": "Monitoring",
+    "subtitle": "Query metrics and manage alert rules.",
+    "loading": "Loading monitoring data",
+    "errorTitle": "Monitoring data could not be loaded",
+    "queryMetrics": "Query metrics",
+    "metricName": "Metric name",
+    "ciId": "CI ID (optional)",
+    "runQuery": "Run query",
+    "series": "Time series of metric values",
+    "points": "{{count}} data points",
+    "noData": "No data",
+    "noDataHint": "No values were found for this metric in the selected time range.",
+    "createAlert": "Create alert rule",
+    "ruleName": "Rule name",
+    "condition": "Condition",
+    "threshold": "Threshold",
+    "severity": "Severity",
+    "severityCritical": "Critical",
+    "severityWarning": "Warning",
+    "severityInfo": "Info",
+    "severity_critical": "Critical",
+    "severity_warning": "Warning",
+    "severity_info": "Info",
+    "alertRules": "Alert rules",
+    "noAlerts": "No alert rules",
+    "noAlertsHint": "Create a rule to be notified when thresholds are crossed."
   }
 }

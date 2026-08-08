@@ -1312,3 +1312,174 @@ export const igaApi = {
     return fetchAPI(`/iga/drift/${id}/remediate`, { method: 'POST' });
   },
 };
+
+// --- Webhooks ---
+
+export interface WebhookSubscription {
+  id: string;
+  organization_id: string;
+  name: string;
+  url: string;
+  events: string[];
+  is_active: boolean;
+  headers?: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebhookCreateRequest {
+  name: string;
+  url: string;
+  secret: string;
+  events: string[];
+  headers?: Record<string, string>;
+}
+
+export interface WebhookDeliveryRecord {
+  id: string;
+  organization_id: string;
+  subscription_id: string;
+  event: string;
+  status: 'pending' | 'retrying' | 'success' | 'failed' | 'dead';
+  attempt: number;
+  max_attempts: number;
+  response_status?: number;
+  duration_ms?: number;
+  error?: string;
+  next_retry_at?: string;
+  delivered_at?: string;
+  created_at: string;
+}
+
+export interface WebhookDeadLetter {
+  id: string;
+  delivery_id: string;
+  organization_id: string;
+  subscription_id: string;
+  event: string;
+  attempts: number;
+  last_status_code?: number;
+  last_error?: string;
+  first_attempt_at?: string;
+  dead_at: string;
+}
+
+export const webhookApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<WebhookSubscription>> {
+    return fetchAPI(`/webhooks${buildQuery(params)}`);
+  },
+  create(data: WebhookCreateRequest): Promise<WebhookSubscription> {
+    return fetchAPI('/webhooks', { method: 'POST', body: JSON.stringify(data) });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/webhooks/${id}`, { method: 'DELETE' });
+  },
+  test(id: string): Promise<WebhookDeliveryRecord> {
+    return fetchAPI(`/webhooks/${id}/test`, { method: 'POST' });
+  },
+  deliveries(
+    id: string,
+    params: ListParams = {},
+  ): Promise<PaginatedResponse<WebhookDeliveryRecord>> {
+    return fetchAPI(`/webhooks/${id}/deliveries${buildQuery(params)}`);
+  },
+  deadLetters(params: ListParams = {}): Promise<PaginatedResponse<WebhookDeadLetter>> {
+    return fetchAPI(`/webhooks/dead-letters${buildQuery(params)}`);
+  },
+};
+
+// --- Export ---
+
+export interface ExportJobFilters {
+  status?: string;
+  ci_type_id?: string;
+  client_id?: string;
+}
+
+export interface ExportJob {
+  id: string;
+  organization_id: string;
+  initiated_by?: string;
+  format: 'csv' | 'json' | 'datev';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'expired';
+  filters: ExportJobFilters;
+  object_key?: string;
+  row_count?: number;
+  file_size_bytes?: number;
+  error_message?: string;
+  started_at?: string;
+  completed_at?: string;
+  expires_at?: string;
+  download_url?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExportJobCreateRequest {
+  format: 'csv' | 'json' | 'datev';
+  filters?: ExportJobFilters;
+}
+
+export const exportApi = {
+  listJobs(params: ListParams = {}): Promise<PaginatedResponse<ExportJob>> {
+    return fetchAPI(`/export/jobs${buildQuery(params)}`);
+  },
+  createJob(data: ExportJobCreateRequest): Promise<ExportJob> {
+    return fetchAPI('/export/jobs', { method: 'POST', body: JSON.stringify(data) });
+  },
+  getJob(id: string): Promise<ExportJob> {
+    return fetchAPI(`/export/jobs/${id}`);
+  },
+};
+
+// --- Monitoring ---
+
+export interface MetricPoint {
+  timestamp: string;
+  value: number;
+}
+
+export interface MetricQueryParams {
+  ci_id?: string;
+  name?: string;
+  from?: string;
+  to?: string;
+  step?: string;
+}
+
+export interface AlertRule {
+  id: string;
+  org_id: string;
+  name: string;
+  metric_name: string;
+  condition: 'gt' | 'lt' | 'eq';
+  threshold: number;
+  duration: string;
+  severity: 'critical' | 'warning' | 'info';
+  enabled: boolean;
+}
+
+export interface AlertRuleCreateRequest {
+  name: string;
+  metric_name: string;
+  condition: 'gt' | 'lt' | 'eq';
+  threshold: number;
+  duration?: string;
+  severity?: 'critical' | 'warning' | 'info';
+  enabled?: boolean;
+}
+
+export const monitoringApi = {
+  queryMetrics(params: MetricQueryParams = {}): Promise<MetricPoint[]> {
+    return fetchAPI(`/monitoring/metrics${buildQuery(params)}`);
+  },
+  listAlerts(): Promise<AlertRule[]> {
+    return fetchAPI('/monitoring/alerts');
+  },
+  createAlert(data: AlertRuleCreateRequest): Promise<AlertRule> {
+    return fetchAPI('/monitoring/alerts', { method: 'POST', body: JSON.stringify(data) });
+  },
+  deleteAlert(id: string): Promise<void> {
+    return fetchAPI(`/monitoring/alerts/${id}`, { method: 'DELETE' });
+  },
+};

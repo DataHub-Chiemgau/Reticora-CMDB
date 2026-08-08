@@ -20,6 +20,9 @@ import {
   igaApi,
   searchApi,
   aiApi,
+  webhookApi,
+  exportApi,
+  monitoringApi,
 } from '../api/client';
 import type {
   CICreateRequest,
@@ -46,6 +49,10 @@ import type {
   SLAPolicyRequest,
   IGACreateConnectorRequest,
   SearchParams,
+  WebhookCreateRequest,
+  ExportJobCreateRequest,
+  MetricQueryParams,
+  AlertRuleCreateRequest,
 } from '../api/client';
 
 export function useCIList(params: CIListParams) {
@@ -563,5 +570,111 @@ export function useRemediateIGADrift() {
   return useMutation({
     mutationFn: (id: string) => igaApi.remediateDrift(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['iga-drift'] }),
+  });
+}
+
+// --- Webhooks ---
+
+export function useWebhookList(params: ListParams = {}) {
+  return useQuery({
+    queryKey: ['webhooks', params],
+    queryFn: () => webhookApi.list(params),
+  });
+}
+
+export function useCreateWebhook() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: WebhookCreateRequest) => webhookApi.create(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['webhooks'] }),
+  });
+}
+
+export function useDeleteWebhook() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => webhookApi.delete(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['webhooks'] }),
+  });
+}
+
+export function useTestWebhook() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => webhookApi.test(id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ['webhook-deliveries', id] });
+      queryClient.invalidateQueries({ queryKey: ['webhook-dead-letters'] });
+    },
+  });
+}
+
+export function useWebhookDeliveries(id: string | null, params: ListParams = {}) {
+  return useQuery({
+    queryKey: ['webhook-deliveries', id, params],
+    queryFn: () => webhookApi.deliveries(id as string, params),
+    enabled: Boolean(id),
+  });
+}
+
+export function useWebhookDeadLetters(params: ListParams = {}) {
+  return useQuery({
+    queryKey: ['webhook-dead-letters', params],
+    queryFn: () => webhookApi.deadLetters(params),
+  });
+}
+
+// --- Export ---
+
+export function useExportJobs(params: ListParams = {}) {
+  return useQuery({
+    queryKey: ['export-jobs', params],
+    queryFn: () => exportApi.listJobs(params),
+    // Poll while jobs are in flight so the page reflects worker progress.
+    refetchInterval: (query) =>
+      query.state.data?.data.some((job) => job.status === 'pending' || job.status === 'running')
+        ? 2000
+        : false,
+  });
+}
+
+export function useCreateExportJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: ExportJobCreateRequest) => exportApi.createJob(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['export-jobs'] }),
+  });
+}
+
+// --- Monitoring ---
+
+export function useMetricPoints(params: MetricQueryParams) {
+  return useQuery({
+    queryKey: ['monitoring-metrics', params],
+    queryFn: () => monitoringApi.queryMetrics(params),
+    enabled: Boolean(params.name),
+  });
+}
+
+export function useAlertRules() {
+  return useQuery({
+    queryKey: ['alert-rules'],
+    queryFn: () => monitoringApi.listAlerts(),
+  });
+}
+
+export function useCreateAlertRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: AlertRuleCreateRequest) => monitoringApi.createAlert(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alert-rules'] }),
+  });
+}
+
+export function useDeleteAlertRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => monitoringApi.deleteAlert(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alert-rules'] }),
   });
 }
