@@ -46,7 +46,9 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        # TimescaleDB is required by migration 000020 (metric_sample hypertable);
+        # matches the docker-compose database image.
+        image: timescale/timescaledb:2.17.2-pg16
         env:
           POSTGRES_USER: reticora
           POSTGRES_PASSWORD: reticora
@@ -115,7 +117,7 @@ jobs:
           go-version: "1.25"
 
       - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
           version: latest
           working-directory: backend

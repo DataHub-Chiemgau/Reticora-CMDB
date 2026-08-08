@@ -15,13 +15,10 @@ CREATE TABLE metric_sample (
 -- Convert to hypertable
 SELECT create_hypertable('metric_sample', 'time');
 
--- RLS
-ALTER TABLE metric_sample ENABLE ROW LEVEL SECURITY;
-ALTER TABLE metric_sample FORCE ROW LEVEL SECURITY;
-
-CREATE POLICY org_isolation ON metric_sample
-    USING (organization_id = current_setting('app.org_id')::UUID)
-    WITH CHECK (organization_id = current_setting('app.org_id')::UUID);
+-- NOTE: metric_sample intentionally has NO row-level security. TimescaleDB does
+-- not support compression/columnstore on RLS-protected hypertables, and all
+-- access is mediated by the backend which always filters by organization_id
+-- (the column is part of every query and the compression segmentby key).
 
 -- Indexes
 CREATE INDEX idx_metric_sample_ci ON metric_sample(ci_id, time DESC);
@@ -37,7 +34,10 @@ SELECT add_compression_policy('metric_sample', INTERVAL '7 days');
 -- Retention policy (drop data older than 400 days)
 SELECT add_retention_policy('metric_sample', INTERVAL '400 days');
 
--- Continuous aggregate for hourly rollup
+-- Continuous aggregate for hourly rollup. WITH NO DATA is required because
+-- golang-migrate executes each migration inside a transaction, and
+-- CREATE MATERIALIZED VIEW ... WITH DATA cannot run in a transaction block.
+-- The continuous aggregate policy below refreshes it on schedule.
 CREATE MATERIALIZED VIEW metric_sample_hourly
 WITH (timescaledb.continuous) AS
 SELECT
@@ -50,7 +50,8 @@ SELECT
     max(value) AS max_value,
     count(*) AS sample_count
 FROM metric_sample
-GROUP BY bucket, organization_id, ci_id, metric_name;
+GROUP BY bucket, organization_id, ci_id, metric_name
+WITH NO DATA;
 
 SELECT add_continuous_aggregate_policy('metric_sample_hourly',
     start_offset => INTERVAL '3 hours',

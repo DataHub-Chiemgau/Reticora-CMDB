@@ -37,15 +37,19 @@ type CreateRequest struct {
 
 // ValidRelTypes lists allowed relationship types.
 var ValidRelTypes = map[string]bool{
-	"connected_to": true,
-	"hosted_on":    true,
-	"depends_on":   true,
-	"member_of":    true,
-	"powers":       true,
-	"powered_by":   true,
-	"stores":       true,
-	"monitors":     true,
-	"backs_up":     true,
+	"connected_to":      true,
+	"hosted_on":         true,
+	"depends_on":        true,
+	"member_of":         true,
+	"member_of_cluster": true,
+	"powers":            true,
+	"powered_by":        true,
+	"runs_on":           true,
+	"mounted_in":        true,
+	"uplink_to":         true,
+	"stores":            true,
+	"monitors":          true,
+	"backs_up":          true,
 }
 
 // Repository defines persistence operations for relationships.

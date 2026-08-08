@@ -12,7 +12,11 @@ const AUTH_CONFIG = {
 test.describe('login flow', () => {
   test('redirects to the identity provider when signing in', async ({ page }) => {
     await page.route('**/api/v1/auth/config', (route) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(AUTH_CONFIG) }),
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(AUTH_CONFIG),
+      }),
     );
 
     const redirectRequest = page.waitForRequest((request) =>
