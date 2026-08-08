@@ -331,6 +331,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/webhooks/dead-letters': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the webhook dead-letter queue
+     * @description Returns deliveries that exhausted their retry budget and were moved to the dead-letter queue, newest first. Operators inspect this queue to find permanently failed deliveries and replay them.
+     */
+    get: operations['listWebhookDeadLetters'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/discovery/ingest': {
     parameters: {
       query?: never;
@@ -3052,7 +3072,7 @@ export interface components {
       subscription_id: string;
       event: string;
       /** @enum {string} */
-      status: 'pending' | 'retrying' | 'success' | 'failed';
+      status: 'pending' | 'retrying' | 'success' | 'failed' | 'dead';
       attempt: number;
       max_attempts: number;
       response_status?: number;
@@ -3067,6 +3087,23 @@ export interface components {
     };
     WebhookDeliveryListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['WebhookDeliveryRecord'][];
+    };
+    WebhookDeadLetter: {
+      id: string;
+      delivery_id: string;
+      organization_id: string;
+      subscription_id: string;
+      event: string;
+      attempts: number;
+      last_status_code?: number;
+      last_error?: string;
+      /** Format: date-time */
+      first_attempt_at?: string;
+      /** Format: date-time */
+      dead_at: string;
+    };
+    WebhookDeadLetterListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['WebhookDeadLetter'][];
     };
     WebhookListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['WebhookSubscription'][];
@@ -5263,6 +5300,37 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listWebhookDeadLetters: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Dead-letter queue entries */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebhookDeadLetterListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       503: components['responses']['ServiceUnavailable'];
     };
   };

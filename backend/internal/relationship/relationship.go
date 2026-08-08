@@ -144,6 +144,7 @@ func (r *MemoryRepository) TraverseFrom(_ context.Context, orgID, rootCIID strin
 	visited := map[string]bool{rootCIID: true}
 	frontier := []string{rootCIID}
 	result := make([]Relationship, 0)
+	reported := map[string]bool{}
 
 	for depth := 0; depth < maxDepth && len(frontier) > 0 && len(visited) <= maxNodes; depth++ {
 		var next []string
@@ -155,10 +156,17 @@ func (r *MemoryRepository) TraverseFrom(_ context.Context, orgID, rootCIID strin
 				if rel.SourceCIID != id && rel.TargetCIID != id {
 					continue
 				}
-				result = append(result, *rel)
 				neighborID := rel.TargetCIID
 				if neighborID == id {
 					neighborID = rel.SourceCIID
+				}
+				// Mirror the recursive CTE: an edge is reported when it is
+				// first discovered; expansion continues only to endpoints
+				// that are not yet on the visited set. Self-loops are only
+				// reported when attached to the root (the CTE anchor).
+				if !reported[rel.ID] && (neighborID != id || id == rootCIID) {
+					reported[rel.ID] = true
+					result = append(result, *rel)
 				}
 				if neighborID == "" || neighborID == id || visited[neighborID] {
 					continue

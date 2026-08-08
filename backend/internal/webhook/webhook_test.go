@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -60,6 +61,80 @@ func TestHandler_CreateAndList(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp.Total != 1 {
 		t.Errorf("expected 1, got %d", resp.Total)
+	}
+}
+
+func TestHandler_ListDeadLetters(t *testing.T) {
+	repo := NewMemoryRepository()
+	store := NewMemoryDeliveryStore()
+
+	if err := repo.Create(context.Background(), &Subscription{
+		OrganizationID: "org-1", Name: "hook", URL: "https://example.com/hook",
+		Secret: "secret", Events: []string{"ci.created"}, IsActive: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatcher := NewDispatcher(repo, nil, DispatcherOptions{
+		Deliveries:   store,
+		MaxAttempts:  1,
+		BaseBackoff:  time.Millisecond,
+		PollInterval: -1,
+	})
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = dispatcher.Shutdown(ctx)
+	}()
+
+	h := NewHandler(repo, dispatcher)
+	mux := chi.NewRouter()
+	h.RegisterRoutes(mux)
+
+	// Empty queue initially.
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("GET", "/api/v1/webhooks/dead-letters", nil)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data  []DeadLetter `json:"data"`
+		Total int          `json:"total"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Total != 0 {
+		t.Fatalf("expected empty dead-letter queue, got %d", resp.Total)
+	}
+
+	// Dispatch to an unreachable endpoint and let the attempt exhaust.
+	dispatcher.Dispatch(context.Background(), "org-1", "ci.created", map[string]any{"id": "ci-1"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		w = httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("GET", "/api/v1/webhooks/dead-letters", nil)))
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		if resp.Total == 1 {
+			if resp.Data[0].Event != "ci.created" || resp.Data[0].Attempts != 1 {
+				t.Fatalf("unexpected dead letter: %+v", resp.Data[0])
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("dead letter never surfaced on the API")
+}
+
+func TestHandler_ListDeadLetters_Unauthorized(t *testing.T) {
+	repo := NewMemoryRepository()
+	h := NewHandler(repo)
+	mux := chi.NewRouter()
+	h.RegisterRoutes(mux)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/webhooks/dead-letters", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
 	}
 }
 
