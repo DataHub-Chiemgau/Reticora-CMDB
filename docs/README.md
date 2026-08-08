@@ -210,15 +210,19 @@ operator explicitly opts into the insecure development mode with
 `RETICORA_ALLOW_INSECURE_DEV_AUTH=true`. Only
 `/api/v1/auth/{config,callback,refresh}` are unauthenticated.
 
-**Tenant resolution:** `TenantMiddleware` derives the organization from the
-verified session token. The `X-Organization-ID` header is only consulted for
-requests that carry no claims at all (the unverified `--no-db` development mode
-and the header-authenticated collector), and it can never override a token
-claim — otherwise any authenticated caller could read and write another
-tenant's data by changing a header. Handlers therefore read the tenant from the
-request context only. Credentials, which store decryptable secret material,
-additionally ignore `organization_id` in the request body and answer 401 when
-the context is missing.
+**Authorization and tenant resolution:** the auth middleware authenticates
+session bearer tokens and `X-API-Key` service tokens and populates a single
+authenticated principal (subject, organization, scopes, principal type) in the
+request context. `TenantMiddleware` derives the organization exclusively from
+that principal — request headers such as `X-Organization-ID` are never
+consulted, so no caller can impersonate another tenant by changing a header.
+Every route is wrapped with a permission middleware resolved from the route
+table in `internal/server/authz.go`; routes without a mapping fail closed, and
+a router test fails the build when a route is registered without a permission.
+Rate limiting and idempotency are keyed off the principal as well, so spoofed
+headers cannot reset rate budgets or collide across tenants; unauthenticated
+endpoints are rate-limited per client IP and the rate limiter fails closed
+when its cache is unavailable.
 
 **Entitlement enforcement:** `entitlement.Service` resolves the effective plan
 per tenant (falling back to `RETICORA_DEFAULT_PLAN`) and caches it for 30

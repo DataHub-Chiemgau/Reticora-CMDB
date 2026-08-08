@@ -79,22 +79,12 @@ func (h *Handler) ListRole(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, items)
 }
 
+// ReplaceRole handles PUT /api/v1/roles/{id}/permissions. The route is gated
+// by the permission:write authorization middleware; the handler only needs
+// the tenant context.
 func (h *Handler) ReplaceRole(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
 	if !ok {
-		return
-	}
-	if t.UserID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing user context")
-		return
-	}
-	allowed, err := h.repo.HasPermission(t.OrganizationID, t.UserID, "permission:write")
-	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
-		return
-	}
-	if !allowed {
-		api.WriteError(w, http.StatusForbidden, "Forbidden", "missing permission permission:write")
 		return
 	}
 	var req ReplaceRolePermissionsRequest

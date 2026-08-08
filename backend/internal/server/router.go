@@ -105,7 +105,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 	}
 
 	mux := chi.NewRouter()
+
 	registerOperational(mux, opts.Version)
+
+	// Every domain route is registered through the authorizing router, which
+	// attaches the permission middleware resolved from the route table.
+	// Routes without a mapping fail closed; the router test locks in that
+	// every route is mapped.
+	protected := authorizingRouter{Router: mux}
 
 	registrars := []registrar{
 		identity.NewHandler(opts.OIDC, opts.Sessions),
@@ -139,13 +146,13 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
 	}
 	for _, h := range registrars {
-		h.RegisterRoutes(mux)
+		h.RegisterRoutes(protected)
 	}
 
 	// The audit trail is hash-chained in PostgreSQL and therefore has no
 	// in-memory counterpart; it is only served when a pool was configured.
 	if opts.Audit != nil {
-		opts.Audit.RegisterRoutes(mux)
+		opts.Audit.RegisterRoutes(protected)
 	}
 
 	return mux, nil

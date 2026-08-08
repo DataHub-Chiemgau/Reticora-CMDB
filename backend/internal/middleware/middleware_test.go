@@ -11,13 +11,12 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
-func TestTenantMiddlewareFromHeader(t *testing.T) {
-	handler := TenantMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tenantInfo := tenant.FromContext(r.Context())
-		if tenantInfo.OrganizationID != "org-dev" {
-			t.Fatalf("expected org-dev, got %s", tenantInfo.OrganizationID)
-		}
-		w.WriteHeader(http.StatusNoContent)
+// TestTenantMiddlewareRejectsHeaderOnlyRequests locks in the WS-2 tenant
+// isolation rule: the X-Organization-ID header is client-controlled and must
+// never establish a tenant context on its own.
+func TestTenantMiddlewareRejectsHeaderOnlyRequests(t *testing.T) {
+	handler := Chain(AuthMiddleware, TenantMiddleware)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("a header-only request must not reach the handler")
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/cis", nil)
@@ -25,13 +24,13 @@ func TestTenantMiddlewareFromHeader(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d", w.Code)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
 	}
 }
 
 func TestTenantMiddlewareFromJWT(t *testing.T) {
-	handler := TenantMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := Chain(AuthMiddleware, TenantMiddleware)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tenantInfo := tenant.FromContext(r.Context())
 		if tenantInfo.OrganizationID != "org-jwt" {
 			t.Fatalf("expected org-jwt, got %s", tenantInfo.OrganizationID)
@@ -84,7 +83,7 @@ func TestAuthMiddlewareSkipsPublicAuthRoutes(t *testing.T) {
 }
 
 func TestTenantMiddlewareFromSessionStyleJWT(t *testing.T) {
-	handler := TenantMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := Chain(AuthMiddleware, TenantMiddleware)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tenantInfo := tenant.FromContext(r.Context())
 		if tenantInfo.OrganizationID != "org-session" {
 			t.Fatalf("expected org-session, got %s", tenantInfo.OrganizationID)
@@ -173,7 +172,7 @@ func testRawToken(t *testing.T, claims map[string]any) string {
 // be able to act on another organization by sending an X-Organization-ID
 // header. The token claim always wins.
 func TestTenantMiddlewareIgnoresHeaderWhenTokenCarriesOrganization(t *testing.T) {
-	handler := TenantMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := Chain(AuthMiddleware, TenantMiddleware)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tenantInfo := tenant.FromContext(r.Context())
 		if tenantInfo.OrganizationID != "org-jwt" {
 			t.Fatalf("expected the token organization org-jwt, got %s", tenantInfo.OrganizationID)

@@ -119,17 +119,23 @@ func tenantFromHeaderSafe(r *http.Request) struct {
 	ClientID       string
 	UserID         string
 } {
-	tenantInfo := tenant.TenantInfo{
-		OrganizationID: r.Header.Get("X-Organization-ID"),
-		ClientID:       r.Header.Get("X-Client-ID"),
-	}
-	userID := ""
-	if claims, ok := ClaimsFromContext(r.Context()); ok {
-		userID = claims.Subject
-	}
-	return struct {
+	// Identity fields are sourced from the authenticated principal only; the
+	// request headers are client-controlled and must not be trusted.
+	var info struct {
 		OrganizationID string
 		ClientID       string
 		UserID         string
-	}{OrganizationID: tenantInfo.OrganizationID, ClientID: tenantInfo.ClientID, UserID: userID}
+	}
+	if tenantInfo := tenant.FromContext(r.Context()); tenantInfo.OrganizationID != "" {
+		info.OrganizationID = tenantInfo.OrganizationID
+		info.ClientID = tenantInfo.ClientID
+		info.UserID = tenantInfo.UserID
+		return info
+	}
+	if principal, ok := PrincipalFromContext(r.Context()); ok {
+		info.OrganizationID = principal.OrganizationID
+		info.ClientID = principal.ClientScope
+		info.UserID = principal.Subject
+	}
+	return info
 }

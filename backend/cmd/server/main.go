@@ -117,6 +117,7 @@ func main() {
 	var (
 		repos        server.Repositories
 		auditHandler *audit.Handler
+		apiKeyStore  identity.APIKeyStore
 	)
 
 	if *noDB {
@@ -137,6 +138,7 @@ func main() {
 		slog.Info("connected to PostgreSQL", "url", maskDSN(cfg.DatabaseURL))
 		repos = server.PostgresRepositories(pool, audit.NewPGRecorder())
 		auditHandler = audit.NewHandler(pool)
+		apiKeyStore = identity.NewPGAPIKeyStore(pool)
 	}
 	if strings.EqualFold(cfg.SearchBackend, "opensearch") {
 		if cfg.OpenSearchURL == "" {
@@ -195,11 +197,12 @@ func main() {
 	}
 
 	// Session tokens are always verified cryptographically unless the operator
-	// explicitly opted into the insecure development mode.
-	authMiddleware := middleware.AuthMiddlewareWithVerifier(sessionIssuer)
+	// explicitly opted into the insecure development mode. API keys are
+	// verified against the database when available, which gives service
+	// tokens the same authenticated principal as interactive users.
+	authMiddleware := middleware.AuthMiddlewareWithAPIKeys(sessionIssuer, identity.NewAPIKeyServiceWithStore(apiKeyStore))
 	if sessionIssuer == nil {
 		slog.Warn("INSECURE DEVELOPMENT MODE: bearer tokens are accepted without signature verification")
-		authMiddleware = middleware.AuthMiddleware
 	}
 
 	// Middleware chain per spec:
@@ -209,6 +212,7 @@ func main() {
 		middleware.RequestID,
 		middleware.Recovery,
 		middleware.Logger,
+		middleware.OpenAPIValidation,
 		authMiddleware,
 		middleware.TenantMiddleware,
 		entitlementSvc.Middleware,

@@ -286,12 +286,13 @@ func permissionsFromGroups(groups []string) []Permission {
 }
 
 func readerPermissions() []Permission {
-	return []Permission{
-		PermCIRead,
-		PermSiteRead,
-		PermTopologyRead,
-		PermAuditRead,
+	readers := make([]Permission, 0)
+	for _, permission := range allPermissions() {
+		if strings.HasSuffix(string(permission), ":read") {
+			readers = append(readers, permission)
+		}
 	}
+	return readers
 }
 
 func editorPermissions() []Permission {
@@ -301,37 +302,38 @@ func editorPermissions() []Permission {
 		PermCIDelete,
 		PermSiteRead,
 		PermSiteWrite,
+		PermRackRead,
 		PermRackWrite,
+		PermRelationshipRead,
 		PermRelationshipWrite,
+		PermContactRead,
 		PermContactWrite,
 		PermTopologyRead,
+		PermDiscoveryRead,
+		PermDiscoveryWrite,
 		PermDiscoveryIngest,
+		PermAssetRead,
+		PermAssetWrite,
+		PermAssignmentRead,
+		PermAssignmentWrite,
+		PermDocumentRead,
+		PermDocumentWrite,
+		PermStocktakeRead,
+		PermStocktakeWrite,
+		PermTicketRead,
+		PermTicketWrite,
+		PermSLARead,
+		PermIPAMRead,
+		PermIPAMWrite,
+		PermFormRead,
+		PermFormWrite,
+		PermWorkflowRead,
+		PermWorkflowWrite,
+		PermComplianceRead,
+		PermMonitoringRead,
+		PermSearchRead,
+		PermAIRead,
 		PermExportRun,
-	}
-}
-
-func allPermissions() []Permission {
-	return []Permission{
-		PermCIRead,
-		PermCIWrite,
-		PermCIDelete,
-		PermCITypeManage,
-		PermSiteRead,
-		PermSiteWrite,
-		PermRackWrite,
-		PermRelationshipWrite,
-		PermContactWrite,
-		PermTopologyRead,
-		PermDiscoveryIngest,
-		PermCollectorManage,
-		PermCredentialManage,
-		PermWebhookManage,
-		PermExportRun,
-		PermUserManage,
-		PermRoleManage,
-		PermEntitlementManage,
-		PermAuditRead,
-		PermAPIKeyManage,
 	}
 }
 
