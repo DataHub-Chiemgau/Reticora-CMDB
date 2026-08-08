@@ -20,7 +20,7 @@ const (
 type Job struct {
 	ID             string     `json:"id"`
 	OrganizationID string     `json:"organization_id"`
-	InitiatedBy    string     `json:"initiated_by"`
+	InitiatedBy    string     `json:"initiated_by,omitempty"`
 	Format         string     `json:"format"`
 	Status         string     `json:"status"`
 	Filters        JobFilters `json:"filters"`

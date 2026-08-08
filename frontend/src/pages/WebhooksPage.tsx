@@ -68,6 +68,17 @@ export function WebhooksPage() {
     );
   }
 
+  if (deadLetters.isError) {
+    return (
+      <ErrorState
+        title={t('webhook.errorTitle')}
+        description={deadLetters.error.message}
+        retryLabel={t('common.retry')}
+        onRetry={() => deadLetters.refetch()}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
