@@ -1,6 +1,7 @@
 package stocktake
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,7 +17,7 @@ import (
 func seedStocktakes(t *testing.T, repo *MemoryRepository, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		err := repo.Create(&Stocktake{
+		err := repo.Create(context.Background(), &Stocktake{
 			OrganizationID: "org-1",
 			Title:          fmt.Sprintf("count-%02d", i),
 			Status:         "planned",

@@ -14,7 +14,7 @@ import (
 type PGRepository struct{ pool *pgxpool.Pool }
 
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
-func (r *PGRepository) Ping() error                    { return r.pool.Ping(context.Background()) }
+func (r *PGRepository) Ping(ctx context.Context) error { return r.pool.Ping(ctx) }
 func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(context.Context, pgx.Tx) error) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -29,7 +29,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(con
 	}
 	return tx.Commit(ctx)
 }
-func (r *PGRepository) IndexDocument(doc Document) error {
+func (r *PGRepository) IndexDocument(ctx context.Context, doc Document) error {
 	if doc.OrganizationID == "" || doc.EntityType == "" || doc.EntityID == "" {
 		return fmt.Errorf("organization_id, entity_type and entity_id are required")
 	}
@@ -37,13 +37,13 @@ func (r *PGRepository) IndexDocument(doc Document) error {
 	if err != nil {
 		return fmt.Errorf("marshal document metadata: %w", err)
 	}
-	return r.withTenant(context.Background(), doc.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return r.withTenant(ctx, doc.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO search_document (organization_id, entity_type, entity_id, title, summary, url, metadata) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (organization_id, entity_type, entity_id) DO UPDATE SET title=EXCLUDED.title, summary=EXCLUDED.summary, url=EXCLUDED.url, metadata=EXCLUDED.metadata, updated_at=now()`, doc.OrganizationID, doc.EntityType, doc.EntityID, doc.Title, doc.Summary, doc.URL, meta)
 		return err
 	})
 }
-func (r *PGRepository) Delete(orgID, entityType, entityID string) error {
-	return r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+func (r *PGRepository) Delete(ctx context.Context, orgID, entityType, entityID string) error {
+	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `DELETE FROM search_document WHERE organization_id=$1 AND entity_type=$2 AND entity_id=$3`, orgID, entityType, entityID)
 		return err
 	})
@@ -82,13 +82,13 @@ func buildPostgresQuery(q Query) (string, []any, error) {
 	query := fmt.Sprintf(`SELECT id::text, organization_id::text, entity_type, entity_id::text, title, summary, url, metadata, updated_at, %s AS score, %s AS snippet, COUNT(*) OVER() FROM search_document WHERE %s ORDER BY score DESC, updated_at DESC LIMIT $%d OFFSET $%d`, score, snippet, strings.Join(where, " AND "), pos, pos+1)
 	return query, args, nil
 }
-func (r *PGRepository) Query(q Query) (Result, error) {
+func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
 	limit := q.Limit
 	if limit <= 0 || limit > api.MaxPageLimit {
 		limit = api.DefaultPageLimit
 	}
 	var res Result
-	err := r.withTenant(context.Background(), q.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.withTenant(ctx, q.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		sql, args, err := buildPostgresQuery(q)
 		if err != nil {
 			return err
@@ -119,9 +119,9 @@ func (r *PGRepository) Query(q Query) (Result, error) {
 	res.HasMore = q.Offset+len(res.Data) < res.Total
 	return res, err
 }
-func (r *PGRepository) ReindexTenant(orgID string) (ReindexResult, error) {
+func (r *PGRepository) ReindexTenant(ctx context.Context, orgID string) (ReindexResult, error) {
 	var count int64
-	err := r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM search_document WHERE organization_id=$1`, orgID); err != nil {
 			return err
 		}

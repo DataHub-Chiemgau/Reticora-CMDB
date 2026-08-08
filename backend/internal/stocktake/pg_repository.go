@@ -78,8 +78,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 }
 
 // List returns paginated stocktakes filtered by the given parameters.
-func (r *PGRepository) List(orgID string, filter FilterParams, page api.PaginationParams) ([]Stocktake, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Stocktake, int, error) {
 	var stocktakes []Stocktake
 	var total int
 
@@ -163,8 +162,7 @@ func (r *PGRepository) List(orgID string, filter FilterParams, page api.Paginati
 }
 
 // GetByID retrieves a single stocktake by ID within the tenant scope.
-func (r *PGRepository) GetByID(orgID, id string) (*Stocktake, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Stocktake, error) {
 	var stocktake *Stocktake
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -186,8 +184,7 @@ func (r *PGRepository) GetByID(orgID, id string) (*Stocktake, error) {
 }
 
 // Create inserts a new stocktake.
-func (r *PGRepository) Create(s *Stocktake) error {
-	ctx := context.Background()
+func (r *PGRepository) Create(ctx context.Context, s *Stocktake) error {
 	return r.withTenant(ctx, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		query := `
 			INSERT INTO stocktake (
@@ -222,8 +219,7 @@ func (r *PGRepository) Create(s *Stocktake) error {
 }
 
 // Update modifies an existing stocktake.
-func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Stocktake, error) {
-	ctx := context.Background()
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Stocktake, error) {
 	var stocktake *Stocktake
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -293,8 +289,7 @@ func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Stocktake, 
 }
 
 // Delete deletes a stocktake. The stocktake table has no deleted_at column, so this is a hard delete.
-func (r *PGRepository) Delete(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM stocktake WHERE id = $1", id)
 		if err != nil {
@@ -308,8 +303,7 @@ func (r *PGRepository) Delete(orgID, id string) error {
 }
 
 // AddScan records a stocktake scan and updates stocktake counters.
-func (r *PGRepository) AddScan(scan *StockScan) error {
-	ctx := context.Background()
+func (r *PGRepository) AddScan(ctx context.Context, scan *StockScan) error {
 	return r.withTenant(ctx, scan.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM stocktake WHERE id = $1)", scan.StocktakeID).Scan(&exists); err != nil {
@@ -360,8 +354,7 @@ func (r *PGRepository) AddScan(scan *StockScan) error {
 }
 
 // ListScans returns paginated scans for a stocktake.
-func (r *PGRepository) ListScans(orgID, stocktakeID string, page api.PaginationParams) ([]StockScan, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListScans(ctx context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]StockScan, int, error) {
 	var scans []StockScan
 	var total int
 

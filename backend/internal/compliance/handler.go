@@ -40,7 +40,7 @@ func (h *Handler) ListRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListRules(t.OrganizationID, r.URL.Query().Get("ci_type_id"), r.URL.Query().Get("category"), r.URL.Query().Get("active") == "true", page)
+	items, total, err := h.repo.ListRules(r.Context(), t.OrganizationID, r.URL.Query().Get("ci_type_id"), r.URL.Query().Get("category"), r.URL.Query().Get("active") == "true", page)
 	if err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
@@ -52,7 +52,7 @@ func (h *Handler) GetRule(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := h.repo.GetRule(t.OrganizationID, chi.URLParam(r, "id"))
+	item, err := h.repo.GetRule(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "compliance rule not found")
 		return
@@ -78,7 +78,7 @@ func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		active = *req.Active
 	}
 	item := &Rule{OrganizationID: t.OrganizationID, CITypeID: req.CITypeID, Name: req.Name, Description: req.Description, Severity: req.Severity, Category: req.Category, Expression: req.Expression, RemediationHint: req.RemediationHint, Active: active}
-	if err := h.repo.CreateRule(item); err != nil {
+	if err := h.repo.CreateRule(r.Context(), item); err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
 	}
@@ -94,7 +94,7 @@ func (h *Handler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
-	item, err := h.repo.UpdateRule(t.OrganizationID, chi.URLParam(r, "id"), req)
+	item, err := h.repo.UpdateRule(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "compliance rule not found")
 		return
@@ -106,7 +106,7 @@ func (h *Handler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteRule(t.OrganizationID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeleteRule(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, 404, "Not Found", "compliance rule not found")
 		return
 	}
@@ -130,7 +130,7 @@ func (h *Handler) ListResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListResults(t.OrganizationID, r.URL.Query().Get("ci_type_id"), r.URL.Query().Get("status"), page)
+	items, total, err := h.repo.ListResults(r.Context(), t.OrganizationID, r.URL.Query().Get("ci_type_id"), r.URL.Query().Get("status"), page)
 	if err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
@@ -142,7 +142,7 @@ func (h *Handler) Score(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, _, err := h.repo.ListResults(t.OrganizationID, r.URL.Query().Get("ci_type_id"), "", api.PaginationParams{Limit: 100})
+	items, _, err := h.repo.ListResults(r.Context(), t.OrganizationID, r.URL.Query().Get("ci_type_id"), "", api.PaginationParams{Limit: 100})
 	if err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return

@@ -1,6 +1,7 @@
 package stocktake
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,13 +13,13 @@ import (
 
 // Repository defines persistence operations for stocktakes.
 type Repository interface {
-	List(orgID string, filter FilterParams, page api.PaginationParams) ([]Stocktake, int, error)
-	GetByID(orgID, id string) (*Stocktake, error)
-	Create(s *Stocktake) error
-	Update(orgID, id string, req UpdateRequest) (*Stocktake, error)
-	Delete(orgID, id string) error
-	AddScan(scan *StockScan) error
-	ListScans(orgID, stocktakeID string, page api.PaginationParams) ([]StockScan, int, error)
+	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Stocktake, int, error)
+	GetByID(ctx context.Context, orgID, id string) (*Stocktake, error)
+	Create(ctx context.Context, s *Stocktake) error
+	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Stocktake, error)
+	Delete(ctx context.Context, orgID, id string) error
+	AddScan(ctx context.Context, scan *StockScan) error
+	ListScans(ctx context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]StockScan, int, error)
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -38,7 +39,7 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func (r *MemoryRepository) List(orgID string, filter FilterParams, page api.PaginationParams) ([]Stocktake, int, error) {
+func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Stocktake, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -103,7 +104,7 @@ func (r *MemoryRepository) List(orgID string, filter FilterParams, page api.Pagi
 	return result[start:end], total, nil
 }
 
-func (r *MemoryRepository) GetByID(orgID, id string) (*Stocktake, error) {
+func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Stocktake, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -114,7 +115,7 @@ func (r *MemoryRepository) GetByID(orgID, id string) (*Stocktake, error) {
 	return s, nil
 }
 
-func (r *MemoryRepository) Create(s *Stocktake) error {
+func (r *MemoryRepository) Create(_ context.Context, s *Stocktake) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -127,7 +128,7 @@ func (r *MemoryRepository) Create(s *Stocktake) error {
 	return nil
 }
 
-func (r *MemoryRepository) Update(orgID, id string, req UpdateRequest) (*Stocktake, error) {
+func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req UpdateRequest) (*Stocktake, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -161,7 +162,7 @@ func (r *MemoryRepository) Update(orgID, id string, req UpdateRequest) (*Stockta
 	return s, nil
 }
 
-func (r *MemoryRepository) Delete(orgID, id string) error {
+func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -179,7 +180,7 @@ func (r *MemoryRepository) Delete(orgID, id string) error {
 	return nil
 }
 
-func (r *MemoryRepository) AddScan(scan *StockScan) error {
+func (r *MemoryRepository) AddScan(_ context.Context, scan *StockScan) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -207,7 +208,7 @@ func (r *MemoryRepository) AddScan(scan *StockScan) error {
 	return nil
 }
 
-func (r *MemoryRepository) ListScans(orgID, stocktakeID string, page api.PaginationParams) ([]StockScan, int, error) {
+func (r *MemoryRepository) ListScans(_ context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]StockScan, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 

@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,8 +17,8 @@ type MemoryRepository struct {
 }
 
 func NewMemoryRepository() *MemoryRepository { return &MemoryRepository{docs: map[string]Document{}} }
-func (r *MemoryRepository) Ping() error      { return nil }
-func (r *MemoryRepository) IndexDocument(doc Document) error {
+func (r *MemoryRepository) Ping(_ context.Context) error { return nil }
+func (r *MemoryRepository) IndexDocument(_ context.Context, doc Document) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if doc.OrganizationID == "" || doc.EntityType == "" || doc.EntityID == "" {
@@ -29,16 +30,27 @@ func (r *MemoryRepository) IndexDocument(doc Document) error {
 	r.docs[key(doc.OrganizationID, doc.EntityType, doc.EntityID)] = doc
 	return nil
 }
-func (r *MemoryRepository) Delete(orgID, entityType, entityID string) error {
+func (r *MemoryRepository) Delete(_ context.Context, orgID, entityType, entityID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.docs, key(orgID, entityType, entityID))
 	return nil
 }
-func (r *MemoryRepository) ReindexTenant(orgID string) (ReindexResult, error) {
-	return ReindexResult{}, nil
+// ReindexTenant reports the documents already held for the tenant as indexed.
+// The in-memory backend has no external index to rebuild: documents are
+// searchable as soon as they are written, so reindexing is a no-op by design.
+func (r *MemoryRepository) ReindexTenant(_ context.Context, orgID string) (ReindexResult, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	count := 0
+	for _, d := range r.docs {
+		if d.OrganizationID == orgID {
+			count++
+		}
+	}
+	return ReindexResult{Indexed: count}, nil
 }
-func (r *MemoryRepository) Query(q Query) (Result, error) {
+func (r *MemoryRepository) Query(_ context.Context, q Query) (Result, error) {
 	if err := validateQuery(q.Text); err != nil {
 		return Result{}, err
 	}

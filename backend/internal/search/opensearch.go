@@ -37,8 +37,8 @@ func NewOpenSearchBackend(cfg OpenSearchConfig, client *http.Client) *OpenSearch
 	cfg.URL = strings.TrimRight(cfg.URL, "/")
 	return &OpenSearchBackend{cfg: cfg, client: client}
 }
-func (b *OpenSearchBackend) Ping() error {
-	req, err := http.NewRequest(http.MethodGet, b.cfg.URL, nil)
+func (b *OpenSearchBackend) Ping(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.cfg.URL, nil)
 	if err != nil {
 		return fmt.Errorf("opensearch ping: build request: %w", err)
 	}
@@ -53,12 +53,12 @@ func (b *OpenSearchBackend) Ping() error {
 	}
 	return nil
 }
-func (b *OpenSearchBackend) IndexDocument(doc Document) error {
+func (b *OpenSearchBackend) IndexDocument(ctx context.Context, doc Document) error {
 	body, err := json.Marshal(doc)
 	if err != nil {
 		return fmt.Errorf("opensearch index: marshal document: %w", err)
 	}
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/%s/_doc/%s-%s-%s", b.cfg.URL, b.cfg.Index, doc.OrganizationID, doc.EntityType, doc.EntityID), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, fmt.Sprintf("%s/%s/_doc/%s-%s-%s", b.cfg.URL, b.cfg.Index, doc.OrganizationID, doc.EntityType, doc.EntityID), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -74,8 +74,8 @@ func (b *OpenSearchBackend) IndexDocument(doc Document) error {
 	}
 	return nil
 }
-func (b *OpenSearchBackend) Delete(orgID, entityType, entityID string) error {
-	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/%s/_doc/%s-%s-%s", b.cfg.URL, b.cfg.Index, orgID, entityType, entityID), nil)
+func (b *OpenSearchBackend) Delete(ctx context.Context, orgID, entityType, entityID string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/%s/_doc/%s-%s-%s", b.cfg.URL, b.cfg.Index, orgID, entityType, entityID), nil)
 	if err != nil {
 		return err
 	}
@@ -90,7 +90,7 @@ func (b *OpenSearchBackend) Delete(orgID, entityType, entityID string) error {
 	}
 	return nil
 }
-func (b *OpenSearchBackend) ReindexTenant(orgID string) (ReindexResult, error) {
+func (b *OpenSearchBackend) ReindexTenant(ctx context.Context, orgID string) (ReindexResult, error) {
 	return ReindexResult{}, fmt.Errorf("opensearch reindex requires the PostgreSQL coordinator")
 }
 
@@ -119,7 +119,7 @@ func buildOpenSearchQuery(q Query) (map[string]any, error) {
 	}
 	return body, nil
 }
-func (b *OpenSearchBackend) Query(q Query) (Result, error) {
+func (b *OpenSearchBackend) Query(ctx context.Context, q Query) (Result, error) {
 	body, err := buildOpenSearchQuery(q)
 	if err != nil {
 		return Result{}, err
@@ -128,7 +128,7 @@ func (b *OpenSearchBackend) Query(q Query) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("opensearch query: marshal request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, fmt.Sprintf("%s/%s/_search", b.cfg.URL, b.cfg.Index), bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/%s/_search", b.cfg.URL, b.cfg.Index), bytes.NewReader(raw))
 	if err != nil {
 		return Result{}, err
 	}

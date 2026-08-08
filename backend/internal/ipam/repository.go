@@ -1,6 +1,7 @@
 package ipam
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -25,23 +26,23 @@ type SubnetFilter struct {
 
 // Repository defines persistence operations for IPAM entities.
 type Repository interface {
-	ListSubnets(orgID string, f SubnetFilter, page api.PaginationParams) ([]Subnet, int, error)
-	GetSubnet(orgID, id string) (*Subnet, error)
-	CreateSubnet(s *Subnet) error
-	UpdateSubnet(orgID, id string, req UpdateSubnetRequest) (*Subnet, error)
-	DeleteSubnet(orgID, id string) error
+	ListSubnets(ctx context.Context, orgID string, f SubnetFilter, page api.PaginationParams) ([]Subnet, int, error)
+	GetSubnet(ctx context.Context, orgID, id string) (*Subnet, error)
+	CreateSubnet(ctx context.Context, s *Subnet) error
+	UpdateSubnet(ctx context.Context, orgID, id string, req UpdateSubnetRequest) (*Subnet, error)
+	DeleteSubnet(ctx context.Context, orgID, id string) error
 
-	ListIPAddresses(orgID, subnetID string, page api.PaginationParams) ([]IPAddress, int, error)
-	GetIPAddress(orgID, id string) (*IPAddress, error)
-	CreateIPAddress(a *IPAddress) error
-	UpdateIPAddress(orgID, id string, req UpdateIPAddressRequest) (*IPAddress, error)
-	DeleteIPAddress(orgID, id string) error
+	ListIPAddresses(ctx context.Context, orgID, subnetID string, page api.PaginationParams) ([]IPAddress, int, error)
+	GetIPAddress(ctx context.Context, orgID, id string) (*IPAddress, error)
+	CreateIPAddress(ctx context.Context, a *IPAddress) error
+	UpdateIPAddress(ctx context.Context, orgID, id string, req UpdateIPAddressRequest) (*IPAddress, error)
+	DeleteIPAddress(ctx context.Context, orgID, id string) error
 
-	ListInterfacesForCI(orgID, ciID string, page api.PaginationParams) ([]NetworkInterface, int, error)
-	GetInterface(orgID, id string) (*NetworkInterface, error)
-	CreateInterface(ni *NetworkInterface) error
-	UpdateInterface(orgID, id string, req UpdateInterfaceRequest) (*NetworkInterface, error)
-	DeleteInterface(orgID, id string) error
+	ListInterfacesForCI(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]NetworkInterface, int, error)
+	GetInterface(ctx context.Context, orgID, id string) (*NetworkInterface, error)
+	CreateInterface(ctx context.Context, ni *NetworkInterface) error
+	UpdateInterface(ctx context.Context, orgID, id string, req UpdateInterfaceRequest) (*NetworkInterface, error)
+	DeleteInterface(ctx context.Context, orgID, id string) error
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -77,7 +78,7 @@ func pageSlice[T any](items []T, page api.PaginationParams) ([]T, int) {
 
 // --- Subnets ---
 
-func (r *MemoryRepository) ListSubnets(orgID string, f SubnetFilter, page api.PaginationParams) ([]Subnet, int, error) {
+func (r *MemoryRepository) ListSubnets(_ context.Context, orgID string, f SubnetFilter, page api.PaginationParams) ([]Subnet, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Subnet
@@ -98,7 +99,7 @@ func (r *MemoryRepository) ListSubnets(orgID string, f SubnetFilter, page api.Pa
 	return items, total, nil
 }
 
-func (r *MemoryRepository) GetSubnet(orgID, id string) (*Subnet, error) {
+func (r *MemoryRepository) GetSubnet(_ context.Context, orgID, id string) (*Subnet, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	s, ok := r.subnets[id]
@@ -109,7 +110,7 @@ func (r *MemoryRepository) GetSubnet(orgID, id string) (*Subnet, error) {
 	return &cp, nil
 }
 
-func (r *MemoryRepository) CreateSubnet(s *Subnet) error {
+func (r *MemoryRepository) CreateSubnet(_ context.Context, s *Subnet) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, e := range r.subnets {
@@ -126,7 +127,7 @@ func (r *MemoryRepository) CreateSubnet(s *Subnet) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateSubnet(orgID, id string, req UpdateSubnetRequest) (*Subnet, error) {
+func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req UpdateSubnetRequest) (*Subnet, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.subnets[id]
@@ -162,7 +163,7 @@ func (r *MemoryRepository) UpdateSubnet(orgID, id string, req UpdateSubnetReques
 	return &cp, nil
 }
 
-func (r *MemoryRepository) DeleteSubnet(orgID, id string) error {
+func (r *MemoryRepository) DeleteSubnet(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.subnets[id]
@@ -175,7 +176,7 @@ func (r *MemoryRepository) DeleteSubnet(orgID, id string) error {
 
 // --- IP Addresses ---
 
-func (r *MemoryRepository) ListIPAddresses(orgID, subnetID string, page api.PaginationParams) ([]IPAddress, int, error) {
+func (r *MemoryRepository) ListIPAddresses(_ context.Context, orgID, subnetID string, page api.PaginationParams) ([]IPAddress, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []IPAddress
@@ -193,7 +194,7 @@ func (r *MemoryRepository) ListIPAddresses(orgID, subnetID string, page api.Pagi
 	return items, total, nil
 }
 
-func (r *MemoryRepository) GetIPAddress(orgID, id string) (*IPAddress, error) {
+func (r *MemoryRepository) GetIPAddress(_ context.Context, orgID, id string) (*IPAddress, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	a, ok := r.addresses[id]
@@ -204,7 +205,7 @@ func (r *MemoryRepository) GetIPAddress(orgID, id string) (*IPAddress, error) {
 	return &cp, nil
 }
 
-func (r *MemoryRepository) CreateIPAddress(a *IPAddress) error {
+func (r *MemoryRepository) CreateIPAddress(_ context.Context, a *IPAddress) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, e := range r.addresses {
@@ -221,7 +222,7 @@ func (r *MemoryRepository) CreateIPAddress(a *IPAddress) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateIPAddress(orgID, id string, req UpdateIPAddressRequest) (*IPAddress, error) {
+func (r *MemoryRepository) UpdateIPAddress(_ context.Context, orgID, id string, req UpdateIPAddressRequest) (*IPAddress, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	a, ok := r.addresses[id]
@@ -248,7 +249,7 @@ func (r *MemoryRepository) UpdateIPAddress(orgID, id string, req UpdateIPAddress
 	return &cp, nil
 }
 
-func (r *MemoryRepository) DeleteIPAddress(orgID, id string) error {
+func (r *MemoryRepository) DeleteIPAddress(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	a, ok := r.addresses[id]
@@ -261,7 +262,7 @@ func (r *MemoryRepository) DeleteIPAddress(orgID, id string) error {
 
 // --- Network Interfaces ---
 
-func (r *MemoryRepository) ListInterfacesForCI(orgID, ciID string, page api.PaginationParams) ([]NetworkInterface, int, error) {
+func (r *MemoryRepository) ListInterfacesForCI(_ context.Context, orgID, ciID string, page api.PaginationParams) ([]NetworkInterface, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []NetworkInterface
@@ -276,7 +277,7 @@ func (r *MemoryRepository) ListInterfacesForCI(orgID, ciID string, page api.Pagi
 	return items, total, nil
 }
 
-func (r *MemoryRepository) GetInterface(orgID, id string) (*NetworkInterface, error) {
+func (r *MemoryRepository) GetInterface(_ context.Context, orgID, id string) (*NetworkInterface, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	ni, ok := r.interfaces[id]
@@ -287,7 +288,7 @@ func (r *MemoryRepository) GetInterface(orgID, id string) (*NetworkInterface, er
 	return &cp, nil
 }
 
-func (r *MemoryRepository) CreateInterface(ni *NetworkInterface) error {
+func (r *MemoryRepository) CreateInterface(_ context.Context, ni *NetworkInterface) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.seq++
@@ -299,7 +300,7 @@ func (r *MemoryRepository) CreateInterface(ni *NetworkInterface) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateInterface(orgID, id string, req UpdateInterfaceRequest) (*NetworkInterface, error) {
+func (r *MemoryRepository) UpdateInterface(_ context.Context, orgID, id string, req UpdateInterfaceRequest) (*NetworkInterface, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ni, ok := r.interfaces[id]
@@ -338,7 +339,7 @@ func (r *MemoryRepository) UpdateInterface(orgID, id string, req UpdateInterface
 	return &cp, nil
 }
 
-func (r *MemoryRepository) DeleteInterface(orgID, id string) error {
+func (r *MemoryRepository) DeleteInterface(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ni, ok := r.interfaces[id]

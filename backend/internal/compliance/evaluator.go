@@ -20,7 +20,7 @@ func NewEvaluator(repo Repository, cis ci.Repository) *Evaluator {
 	return &Evaluator{repo: repo, cis: cis}
 }
 func (e *Evaluator) Evaluate(ctx context.Context, orgID string) (EvaluationResponse, error) {
-	rules, _, err := e.repo.ListRules(orgID, "", "", true, api.PaginationParams{Limit: 100})
+	rules, _, err := e.repo.ListRules(ctx, orgID, "", "", true, api.PaginationParams{Limit: 100})
 	if err != nil {
 		return EvaluationResponse{}, err
 	}
@@ -49,7 +49,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, orgID string) (EvaluationRespo
 			results = append(results, Result{OrganizationID: orgID, RuleID: rule.ID, CIID: item.ID, CITypeID: item.CITypeID, Status: status, Details: details, EvaluatedAt: now})
 		}
 	}
-	if err := e.repo.ReplaceResults(orgID, results); err != nil {
+	if err := e.repo.ReplaceResults(ctx, orgID, results); err != nil {
 		return EvaluationResponse{}, err
 	}
 	return summarize(results), nil

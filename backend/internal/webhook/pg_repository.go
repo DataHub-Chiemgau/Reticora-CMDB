@@ -51,8 +51,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 const webhookSelectColumns = `id, organization_id, name, url, secret, events, is_active, headers, created_at, updated_at`
 
 // List returns paginated subscriptions.
-func (r *PGRepository) List(orgID string, page api.PaginationParams) ([]Subscription, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) List(ctx context.Context, orgID string, page api.PaginationParams) ([]Subscription, int, error) {
 	var subs []Subscription
 	var total int
 
@@ -87,8 +86,7 @@ func (r *PGRepository) List(orgID string, page api.PaginationParams) ([]Subscrip
 	return subs, total, err
 }
 
-func (r *PGRepository) GetByID(orgID, id string) (*Subscription, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Subscription, error) {
 	var sub *Subscription
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -110,8 +108,7 @@ func (r *PGRepository) GetByID(orgID, id string) (*Subscription, error) {
 	return sub, nil
 }
 
-func (r *PGRepository) Create(sub *Subscription) error {
-	ctx := context.Background()
+func (r *PGRepository) Create(ctx context.Context, sub *Subscription) error {
 	return r.withTenant(ctx, sub.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		headersJSON, err := json.Marshal(sub.Headers)
 		if err != nil {
@@ -142,8 +139,7 @@ func (r *PGRepository) Create(sub *Subscription) error {
 }
 
 // Update modifies an existing subscription.
-func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Subscription, error) {
-	ctx := context.Background()
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Subscription, error) {
 	var sub *Subscription
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -206,8 +202,7 @@ func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Subscriptio
 	return sub, err
 }
 
-func (r *PGRepository) Delete(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM webhook_subscription WHERE id = $1", id)
 		if err != nil {
@@ -221,8 +216,7 @@ func (r *PGRepository) Delete(orgID, id string) error {
 }
 
 // GetActiveForEvent returns active subscriptions that match the event type.
-func (r *PGRepository) GetActiveForEvent(orgID, eventType string) ([]Subscription, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetActiveForEvent(ctx context.Context, orgID, eventType string) ([]Subscription, error) {
 	var subs []Subscription
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -253,8 +247,8 @@ func (r *PGRepository) GetActiveForEvent(orgID, eventType string) ([]Subscriptio
 }
 
 // ListByEvent satisfies the current webhook.Repository interface.
-func (r *PGRepository) ListByEvent(orgID, event string) ([]Subscription, error) {
-	return r.GetActiveForEvent(orgID, event)
+func (r *PGRepository) ListByEvent(ctx context.Context, orgID, event string) ([]Subscription, error) {
+	return r.GetActiveForEvent(ctx, orgID, event)
 }
 
 type webhookScanner interface {
