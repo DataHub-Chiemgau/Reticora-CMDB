@@ -193,19 +193,18 @@ ask_validated() {
             die "Invalid value for $prompt: '$value'"
         fi
         if [ -n "$hint" ]; then
-            warn "Invalid input — $("$hint" "$value")"
-        else
-            warn "Invalid input — please try again."
-        fi
-        # Offer the corrected value as the next default when the hint function
-        # suggests one (e.g. a missing https:// scheme); otherwise keep the
-        # original default instead of the rejected input.
-        if [ -n "$hint" ]; then
-            local suggested
-            suggested="$("$hint" "$value" | sed -n 's/.*for example \(http[^ ]*\).*/\1/p')"
+            local hint_text suggested
+            hint_text="$("$hint" "$value")"
+            warn "Invalid input — $hint_text"
+            # Offer the corrected value as the next default when the hint
+            # suggests one (e.g. a missing https:// scheme); otherwise keep
+            # the original default instead of the rejected input.
+            suggested="$(printf '%s' "$hint_text" | sed -n 's/.*for example \(http[^ ]*\).*/\1/p')"
             if [ -n "$suggested" ] && "$validator" "$suggested"; then
                 default="$suggested"
             fi
+        else
+            warn "Invalid input — please try again."
         fi
     done
     printf -v "$var" '%s' "$value"
@@ -253,7 +252,7 @@ explain_url_error() {
         *"://"*)
             echo "Only http:// and https:// URLs are supported." ;;
         *)
-            echo "The URL must start with http:// or https:// — for example https://$1" ;;
+            printf 'The URL must start with http:// or https:// — for example https://%s\n' "$1" ;;
     esac
 }
 
