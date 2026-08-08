@@ -720,6 +720,73 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/export/jobs:
+    get:
+      operationId: listExportJobs
+      tags: [Export]
+      summary: List asynchronous export jobs
+      description: Returns the tenant's export jobs newest first. Completed,
+        unexpired jobs carry a time-limited signed download URL.
+      parameters:
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/PageOffset'
+      responses:
+        '200':
+          description: Export jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportJobListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createExportJob
+      tags: [Export]
+      summary: Queue an asynchronous CI export
+      description: |
+        Queues an asynchronous export. A background worker renders the CI set
+        in the requested format into object storage; once the job is
+        `completed` it exposes a signed download URL until `expires_at`.
+        Requires blob storage to be configured — otherwise 503.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExportJobRequest'
+      responses:
+        '202':
+          description: Export job queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportJob'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/export/jobs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getExportJob
+      tags: [Export]
+      summary: Get an export job
+      responses:
+        '200':
+          description: Export job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportJob'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/entitlements:
     get:
       operationId: listEntitlements
@@ -5812,6 +5879,90 @@ components:
             $ref: '#/components/schemas/CI'
         total:
           type: integer
+
+    ExportJobFilters:
+      type: object
+      properties:
+        status:
+          type: string
+        ci_type_id:
+          type: string
+        client_id:
+          type: string
+
+    CreateExportJobRequest:
+      type: object
+      required: [format]
+      properties:
+        format:
+          type: string
+          enum: [csv, json, datev]
+          default: json
+        filters:
+          $ref: '#/components/schemas/ExportJobFilters'
+
+    ExportJob:
+      type: object
+      required: [id, organization_id, format, status, filters, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        initiated_by:
+          type: string
+        format:
+          type: string
+          enum: [csv, json, datev]
+        status:
+          type: string
+          enum: [pending, running, completed, failed, expired]
+        filters:
+          $ref: '#/components/schemas/ExportJobFilters'
+        object_key:
+          type: string
+        row_count:
+          type: integer
+        file_size_bytes:
+          type: integer
+          format: int64
+        error_message:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        download_url:
+          type: string
+          description: Time-limited signed URL; only present on completed, unexpired jobs.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ExportJobListResponse:
+      type: object
+      required: [data, total, limit, offset, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExportJob'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
 
     EntitlementPlan:
       type: string

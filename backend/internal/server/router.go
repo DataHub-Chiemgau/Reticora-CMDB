@@ -29,6 +29,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
@@ -74,6 +75,7 @@ type Repositories struct {
 	IGA               iga.Repository
 	Search            search.Backend
 	AI                ai.Repository
+	ExportJobs        export.JobRepository
 }
 
 // Options carries everything the router needs beyond the repositories.
@@ -93,6 +95,9 @@ type Options struct {
 	// Audit is registered only when a database-backed audit trail exists.
 	Audit      *audit.Handler
 	AIProvider ai.Provider
+	// Blobs persists asynchronous export results; nil disables export-job
+	// creation (the streaming export endpoint stays available).
+	Blobs blob.Store
 }
 
 // registrar is implemented by every domain handler.
@@ -126,6 +131,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 		discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship),
 		topology.NewHandler(repos.CI, repos.Relationship),
 		export.NewHandler(repos.CI),
+		export.NewJobHandler(repos.ExportJobs, export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs), opts.Blobs),
 		asset.NewHandler(repos.Asset),
 		assignment.NewHandler(repos.Assignment),
 		document.NewHandler(repos.Document),

@@ -31,6 +31,8 @@ type Config struct {
 	S3AccessKey string
 	S3SecretKey string
 	S3UseSSL    bool
+	// BlobDir backs export storage in --no-db development mode.
+	BlobDir string
 
 	// Auth / OIDC
 	OIDCIssuerURL        string
@@ -83,6 +85,9 @@ func Load() *Config {
 		S3AccessKey: envOrDefault("RETICORA_S3_ACCESS_KEY", "reticora"),
 		S3SecretKey: envOrDefault("RETICORA_S3_SECRET_KEY", "reticora_dev"),
 		S3UseSSL:    envOrDefault("RETICORA_S3_USE_SSL", "false") == "true",
+		// BlobDir backs export storage in --no-db development mode; in
+		// database mode the S3 settings above are used instead.
+		BlobDir: envOrDefault("RETICORA_BLOB_DIR", ""),
 
 		OIDCIssuerURL:        envOrDefault("RETICORA_OIDC_ISSUER_URL", "http://localhost:8180/realms/reticora"),
 		OIDCClientID:         envOrDefault("RETICORA_OIDC_CLIENT_ID", "reticora-app"),

@@ -12,6 +12,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
@@ -61,6 +62,7 @@ func MemoryRepositories() Repositories {
 		IGA:               iga.NewMemoryRepository(),
 		Search:            search.NewMemoryRepository(),
 		AI:                ai.NewMemoryRepository(),
+		ExportJobs:        export.NewMemoryJobRepository(),
 	}
 }
 
@@ -95,5 +97,6 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		IGA:               iga.NewPGRepository(pool),
 		Search:            search.NewPGRepository(pool),
 		AI:                ai.NewPGRepository(pool),
+		ExportJobs:        export.NewPGJobRepository(pool),
 	}
 }
