@@ -72,26 +72,28 @@ func TestTopologyTraversalRecursiveCTE(t *testing.T) {
 	mkRel(orgA, ids[0], ids[0]) // root self-loop
 	mkRel(orgB, foreignID, foreignID)
 
+	// Keep in sync with relationship.PGRepository.TraverseFrom.
 	const traversalQuery = `
 		WITH RECURSIVE walk AS (
 			SELECT
 				r.id, r.source_ci_id, r.target_ci_id,
+				CASE WHEN r.source_ci_id = $2 THEN r.target_ci_id ELSE r.source_ci_id END AS frontier_ci_id,
 				1 AS depth,
 				ARRAY[r.source_ci_id, r.target_ci_id] AS visited
 			FROM ci_relationship r
 			WHERE r.organization_id = $1
 			  AND (r.source_ci_id = $2 OR r.target_ci_id = $2)
 
-			UNION ALL
+			UNION
 
 			SELECT
 				r.id, r.source_ci_id, r.target_ci_id,
+				CASE WHEN r.source_ci_id = w.frontier_ci_id THEN r.target_ci_id ELSE r.source_ci_id END,
 				w.depth + 1,
 				w.visited || r.source_ci_id || r.target_ci_id
 			FROM ci_relationship r
 			JOIN walk w
-			  ON (r.source_ci_id = w.target_ci_id OR r.target_ci_id = w.source_ci_id
-			   OR r.source_ci_id = w.source_ci_id OR r.target_ci_id = w.target_ci_id)
+			  ON (r.source_ci_id = w.frontier_ci_id OR r.target_ci_id = w.frontier_ci_id)
 			WHERE r.organization_id = $1
 			  AND w.depth < $3
 			  AND cardinality(w.visited) < $4
@@ -208,6 +210,86 @@ func TestWebhookDeadLetterSchema(t *testing.T) {
 		}
 		if n != 1 {
 			t.Fatalf("org A must see exactly its own dead letter, got %d", n)
+		}
+	})
+}
+
+// Denser mesh: every node connected to every other node (K6) plus a long tail,
+// to assert the CTE terminates quickly and reports each edge once.
+func TestTopologyTraversalDenseMesh(t *testing.T) {
+	dsn := testDatabaseURL(t)
+	setupRLSTestRole(t, dsn)
+
+	org := "a0000000-0000-4000-8000-0000000000f1"
+	ciType := "c1000000-0000-4000-8000-0000000000f1"
+
+	seed := openAdmin(t, dsn)
+	defer seed.Close()
+	ctx := context.Background()
+
+	cleanup := func() {
+		c := context.Background()
+		_, _ = seed.ExecContext(c, `DELETE FROM ci_relationship WHERE organization_id = $1`, org)
+		_, _ = seed.ExecContext(c, `DELETE FROM ci WHERE organization_id = $1`, org)
+		_, _ = seed.ExecContext(c, `DELETE FROM ci_type WHERE organization_id = $1`, org)
+		_, _ = seed.ExecContext(c, `DELETE FROM organization WHERE id = $1`, org)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	if _, err := seed.ExecContext(ctx, `INSERT INTO organization (id, name, slug) VALUES ($1, 'Mesh Org', 'mesh-org')`, org); err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	if _, err := seed.ExecContext(ctx, `INSERT INTO ci_type (id, organization_id, name) VALUES ($1, $2, 'Server')`, ciType, org); err != nil {
+		t.Fatalf("seed ci_type: %v", err)
+	}
+
+	const n = 6
+	ids := make([]string, n)
+	for i := 0; i < n; i++ {
+		if err := seed.QueryRowContext(ctx, `INSERT INTO ci (organization_id, ci_type_id, name)
+			VALUES ($1, $2, $3) RETURNING id::text`, org, ciType, "mesh-"+string(rune('a'+i))).Scan(&ids[i]); err != nil {
+			t.Fatalf("seed ci: %v", err)
+		}
+	}
+	edges := 0
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			if _, err := seed.ExecContext(ctx, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type)
+				VALUES ($1, $2, $3, 'connected_to')`, org, ids[i], ids[j]); err != nil {
+				t.Fatalf("seed rel: %v", err)
+			}
+			edges++
+		}
+	}
+
+	withRLS(t, dsn, org, "", func(tx *sql.Tx) {
+		var got int
+		err := tx.QueryRow(`
+			WITH RECURSIVE walk AS (
+				SELECT r.id, r.source_ci_id, r.target_ci_id,
+					CASE WHEN r.source_ci_id = $2 THEN r.target_ci_id ELSE r.source_ci_id END AS frontier_ci_id,
+					1 AS depth,
+					ARRAY[r.source_ci_id, r.target_ci_id] AS visited
+				FROM ci_relationship r
+				WHERE r.organization_id = $1 AND (r.source_ci_id = $2 OR r.target_ci_id = $2)
+				UNION
+				SELECT r.id, r.source_ci_id, r.target_ci_id,
+					CASE WHEN r.source_ci_id = w.frontier_ci_id THEN r.target_ci_id ELSE r.source_ci_id END,
+					w.depth + 1,
+					w.visited || r.source_ci_id || r.target_ci_id
+				FROM ci_relationship r
+				JOIN walk w ON (r.source_ci_id = w.frontier_ci_id OR r.target_ci_id = w.frontier_ci_id)
+				WHERE r.organization_id = $1 AND w.depth < $3 AND cardinality(w.visited) < $4
+				  AND NOT (r.source_ci_id = ANY (w.visited) AND r.target_ci_id = ANY (w.visited))
+			)
+			SELECT COUNT(DISTINCT id) FROM walk
+		`, org, ids[0], 10, 10000).Scan(&got)
+		if err != nil {
+			t.Fatalf("traverse mesh: %v", err)
+		}
+		if got != edges {
+			t.Fatalf("expected all %d mesh edges exactly once, got %d", edges, got)
 		}
 	})
 }

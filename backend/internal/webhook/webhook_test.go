@@ -131,10 +131,26 @@ func TestHandler_ListDeadLetters_Unauthorized(t *testing.T) {
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
+	// No tenant context: the handler checks the tenant before touching the
+	// (here deliberately absent) dead-letter store, so this exercises the 401
+	// path rather than the 503 path.
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/webhooks/dead-letters", nil))
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestHandler_ListDeadLetters_NoStore(t *testing.T) {
+	repo := NewMemoryRepository()
+	h := NewHandler(repo) // no dispatcher: dead-letter listing unavailable
+	mux := chi.NewRouter()
+	h.RegisterRoutes(mux)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("GET", "/api/v1/webhooks/dead-letters", nil)))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", w.Code)
 	}
 }
 

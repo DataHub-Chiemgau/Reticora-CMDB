@@ -295,7 +295,9 @@ func (s *PGDeliveryStore) ListDeadLetters(ctx context.Context, orgID string, pag
 	total := 0
 
 	err := s.inTx(ctx, "app.org_id", orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM webhook_dead_letter").Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx,
+			"SELECT COUNT(*) FROM webhook_dead_letter WHERE organization_id = $1", orgID,
+		).Scan(&total); err != nil {
 			return fmt.Errorf("count webhook dead letters: %w", err)
 		}
 
@@ -303,9 +305,10 @@ func (s *PGDeliveryStore) ListDeadLetters(ctx context.Context, orgID string, pag
 			SELECT id::text, delivery_id::text, organization_id::text, subscription_id::text,
 			       event, attempts, last_status_code, last_error, first_attempt_at, dead_at
 			FROM webhook_dead_letter
+			WHERE organization_id = $1
 			ORDER BY dead_at DESC
-			LIMIT $1 OFFSET $2
-		`, page.Limit, page.Offset)
+			LIMIT $2 OFFSET $3
+		`, orgID, page.Limit, page.Offset)
 		if err != nil {
 			return fmt.Errorf("list webhook dead letters: %w", err)
 		}
