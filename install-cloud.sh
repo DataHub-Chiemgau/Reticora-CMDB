@@ -181,9 +181,9 @@ ask_secret() {
     fi
 }
 
-# ask_validated <variable> <prompt> [default] <validator-function>
+# ask_validated <variable> <prompt> [default] <validator-function> [hint-function]
 ask_validated() {
-    local var="$1" prompt="$2" default="${3:-}" validator="$4" value
+    local var="$1" prompt="$2" default="${3:-}" validator="$4" hint="${5:-}" value
     while true; do
         ask value "$prompt" "$default"
         if "$validator" "$value"; then
@@ -192,8 +192,21 @@ ask_validated() {
         if ! is_tty; then
             die "Invalid value for $prompt: '$value'"
         fi
-        warn "Invalid input — please try again."
-        default="$value"
+        if [ -n "$hint" ]; then
+            warn "Invalid input — $("$hint" "$value")"
+        else
+            warn "Invalid input — please try again."
+        fi
+        # Offer the corrected value as the next default when the hint function
+        # suggests one (e.g. a missing https:// scheme); otherwise keep the
+        # original default instead of the rejected input.
+        if [ -n "$hint" ]; then
+            local suggested
+            suggested="$("$hint" "$value" | sed -n 's/.*for example \(http[^ ]*\).*/\1/p')"
+            if [ -n "$suggested" ] && "$validator" "$suggested"; then
+                default="$suggested"
+            fi
+        fi
     done
     printf -v "$var" '%s' "$value"
 }
@@ -230,6 +243,18 @@ valid_url() {
         http://*/*|https://*/*|http://?*|https://?*) return 0 ;;
     esac
     return 1
+}
+
+# explain_url_error <value> — prints a short hint why a URL was rejected.
+explain_url_error() {
+    case "$1" in
+        http://*|https://*)
+            echo "The URL must contain a host (e.g. https://cmdb.example.com)." ;;
+        *"://"*)
+            echo "Only http:// and https:// URLs are supported." ;;
+        *)
+            echo "The URL must start with http:// or https:// — for example https://$1" ;;
+    esac
 }
 
 valid_password() { [ "${#1}" -ge 8 ]; }
@@ -358,15 +383,15 @@ collect_config() {
     local def_base def_issuer def_redirect def_port
     def_base="$(env_get RETICORA_PUBLIC_BASE_URL || true)"
     def_base="${def_base:-http://localhost:3000}"
-    ask_validated RETICORA_PUBLIC_BASE_URL "Public base URL of the web UI (e.g. https://cmdb.example.com)" "$def_base" valid_url
+    ask_validated RETICORA_PUBLIC_BASE_URL "Public base URL of the web UI (e.g. https://cmdb.example.com)" "$def_base" valid_url explain_url_error
 
     def_issuer="$(env_get RETICORA_OIDC_ISSUER_URL || true)"
     def_issuer="${def_issuer:-http://localhost:8180/realms/reticora}"
-    ask_validated RETICORA_OIDC_ISSUER_URL "OIDC issuer URL (Keycloak realm)" "$def_issuer" valid_url
+    ask_validated RETICORA_OIDC_ISSUER_URL "OIDC issuer URL (Keycloak realm)" "$def_issuer" valid_url explain_url_error
 
     def_redirect="$(env_get RETICORA_OIDC_REDIRECT_URL || true)"
     def_redirect="${def_redirect:-${RETICORA_PUBLIC_BASE_URL%/}/auth/callback}"
-    ask_validated RETICORA_OIDC_REDIRECT_URL "OIDC redirect URL (backend callback)" "$def_redirect" valid_url
+    ask_validated RETICORA_OIDC_REDIRECT_URL "OIDC redirect URL (backend callback)" "$def_redirect" valid_url explain_url_error
 
     def_port="$(env_get RETICORA_FRONTEND_PORT || true)"
     ask_validated RETICORA_FRONTEND_PORT "Host port for the web UI" "${def_port:-3000}" valid_port
