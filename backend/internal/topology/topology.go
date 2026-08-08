@@ -49,14 +49,21 @@ type Graph struct {
 
 // Handler exposes topology query endpoints.
 type Handler struct {
-	ciRepo  ci.Repository
-	relRepo relationship.Repository
+	ciRepo    ci.Repository
+	relRepo   relationship.Repository
+	traverser relationship.Traverser
 }
 
 // NewHandler creates a topology handler backed by the CI and relationship
-// repositories.
+// repositories. When the relationship repository also implements
+// relationship.Traverser, graph walks run as a single recursive query
+// instead of iterative hop-by-hop lookups.
 func NewHandler(ciRepo ci.Repository, relRepo relationship.Repository) *Handler {
-	return &Handler{ciRepo: ciRepo, relRepo: relRepo}
+	h := &Handler{ciRepo: ciRepo, relRepo: relRepo}
+	if traverser, ok := relRepo.(relationship.Traverser); ok {
+		h.traverser = traverser
+	}
+	return h
 }
 
 // RegisterRoutes registers topology routes.
@@ -171,10 +178,59 @@ func (h *Handler) buildFull(ctx context.Context, orgID string, filter ci.FilterP
 	return Graph{Nodes: nodes, Edges: edges}, nil
 }
 
-// buildFromRoot performs a breadth-first traversal from rootCIID up to depth
-// hops. When ciType is non-empty, non-root nodes not matching the type are
-// dropped along with any edges that dangle as a result.
+// buildFromRoot walks the configuration graph from rootCIID up to depth hops.
+// It prefers the repository's recursive-CTE traversal (one query for the whole
+// walk) and falls back to iterative breadth-first expansion when the
+// repository does not implement relationship.Traverser. When ciType is
+// non-empty, non-root nodes not matching the type are dropped along with any
+// edges that dangle as a result.
 func (h *Handler) buildFromRoot(ctx context.Context, orgID, rootCIID string, depth int, ciType string) (Graph, error) {
+	if h.traverser != nil {
+		return h.buildFromRootViaTraversal(ctx, orgID, rootCIID, depth, ciType)
+	}
+	return h.buildFromRootIterative(ctx, orgID, rootCIID, depth, ciType)
+}
+
+// buildFromRootViaTraversal expands the subgraph with a single recursive
+// traversal query, then resolves the discovered nodes.
+func (h *Handler) buildFromRootViaTraversal(ctx context.Context, orgID, rootCIID string, depth int, ciType string) (Graph, error) {
+	root, err := h.ciRepo.GetByID(ctx, orgID, rootCIID)
+	if err != nil {
+		return Graph{}, err
+	}
+
+	rels, err := h.traverser.TraverseFrom(ctx, orgID, rootCIID, depth, maxFetch)
+	if err != nil {
+		return Graph{}, err
+	}
+
+	nodes := map[string]Node{rootCIID: nodeFromItem(*root)}
+	edgeSet := make(map[string]Edge, len(rels))
+	for _, rel := range rels {
+		edgeSet[rel.ID] = edgeFromRel(rel)
+		for _, neighborID := range []string{rel.SourceCIID, rel.TargetCIID} {
+			if neighborID == "" || neighborID == rootCIID {
+				continue
+			}
+			if _, ok := nodes[neighborID]; ok {
+				continue
+			}
+			item, err := h.ciRepo.GetByID(ctx, orgID, neighborID)
+			if err != nil {
+				// The CI is not visible to this tenant or was removed; the
+				// dangling edge is dropped when the graph is assembled.
+				continue
+			}
+			nodes[neighborID] = nodeFromItem(*item)
+		}
+	}
+
+	return assembleGraph(nodes, edgeSet, rootCIID, ciType), nil
+}
+
+// buildFromRootIterative performs a breadth-first traversal from rootCIID up
+// to depth hops, querying relationships one frontier at a time.
+func (h *Handler) buildFromRootIterative(ctx context.Context, orgID, rootCIID string, depth int, ciType string) (Graph, error) {
 	root, err := h.ciRepo.GetByID(ctx, orgID, rootCIID)
 	if err != nil {
 		return Graph{}, err

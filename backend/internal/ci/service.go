@@ -2,6 +2,7 @@ package ci
 
 import (
 	"context"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
@@ -28,6 +29,57 @@ type ChangeReader interface {
 // It is implemented by the entitlement service.
 type LimitGuard interface {
 	AllowCreate(ctx context.Context, orgID, featureKey string, current int64) error
+}
+
+// Indexer keeps the tenant search index in sync with CI mutations. It is
+// implemented by the search backends (Postgres FTS, OpenSearch, hybrid).
+// Indexing is best-effort: failures are logged and never fail the underlying
+// CI mutation, because the index can always be rebuilt with
+// POST /api/v1/search/reindex.
+type Indexer interface {
+	IndexDocument(ctx context.Context, doc Document) error
+	DeleteDocument(ctx context.Context, orgID, entityType, entityID string) error
+}
+
+// Document is the search-index representation of a CI. It mirrors
+// search.Document; the ci package declares its own copy so it does not
+// depend on the search package (search already depends on shared api types,
+// and keeping the dependency direction ci-free avoids an import cycle).
+type Document struct {
+	OrganizationID string
+	EntityType     string
+	EntityID       string
+	Title          string
+	Summary        string
+	URL            string
+	Metadata       map[string]string
+}
+
+// EntityTypeCI is the search entity type under which CIs are indexed.
+const EntityTypeCI = "ci"
+
+// IndexDocumentFor builds the search document for a CI, matching the field
+// selection the reindex path uses in search.PGRepository.ReindexTenant.
+func IndexDocumentFor(item *Item) Document {
+	return Document{
+		OrganizationID: item.OrganizationID,
+		EntityType:     EntityTypeCI,
+		EntityID:       item.ID,
+		Title:          item.Name,
+		Summary:        ciSummary(item),
+		URL:            "/cmdb/" + item.ID,
+	}
+}
+
+func ciSummary(item *Item) string {
+	parts := []string{item.Hostname, item.Manufacturer, item.Model, item.SerialNumber, item.OSName, item.OSVersion}
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, " ")
 }
 
 // Service coordinates CI persistence with mutation semantics. Audit-log and

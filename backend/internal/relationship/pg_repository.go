@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -43,6 +44,12 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 
 	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
 		return fmt.Errorf("set tenant context: %w", err)
+	}
+
+	if scope := tenant.ClientScope(ctx); scope != "" {
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.client_scope', $1, true)", scope); err != nil {
+			return fmt.Errorf("set client scope: %w", err)
+		}
 	}
 
 	if err := fn(ctx, tx); err != nil {
@@ -150,6 +157,84 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		return nil
 	})
 }
+
+// TraverseFrom walks the configuration graph from rootCIID with a single
+// recursive CTE instead of hop-by-hop queries. The traversal follows
+// relationships in both directions, is limited to maxDepth hops, stops
+// expanding once maxNodes distinct CIs are on the frontier, and is
+// cycle-guarded by the visited set. The recursive term joins on the endpoint
+// reached in the previous step (target, falling back to source for the root's
+// own rows is unnecessary because the anchor records both directions), and
+// UNION (not UNION ALL) deduplicates relationship rows during recursion so
+// dense graphs cannot fan out combinatorially. Tenant isolation is enforced
+// twice: inside the query and by the RLS policy on ci_relationship.
+func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error) {
+	items := make([]Relationship, 0)
+
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			WITH RECURSIVE walk AS (
+				SELECT
+					r.id,
+					r.source_ci_id,
+					r.target_ci_id,
+					-- The endpoint the walk entered through; expansion
+					-- continues from the other endpoint.
+					CASE WHEN r.source_ci_id = $2 THEN r.target_ci_id ELSE r.source_ci_id END AS frontier_ci_id,
+					1 AS depth,
+					ARRAY[r.source_ci_id, r.target_ci_id] AS visited
+				FROM ci_relationship r
+				WHERE r.organization_id = $1
+				  AND (r.source_ci_id = $2 OR r.target_ci_id = $2)
+
+				UNION
+
+				SELECT
+					r.id,
+					r.source_ci_id,
+					r.target_ci_id,
+					CASE WHEN r.source_ci_id = w.frontier_ci_id THEN r.target_ci_id ELSE r.source_ci_id END,
+					w.depth + 1,
+					w.visited || r.source_ci_id || r.target_ci_id
+				FROM ci_relationship r
+				JOIN walk w
+				  ON (r.source_ci_id = w.frontier_ci_id OR r.target_ci_id = w.frontier_ci_id)
+				WHERE r.organization_id = $1
+				  AND w.depth < $3
+				  AND cardinality(w.visited) < $4
+				  AND NOT (r.source_ci_id = ANY (w.visited) AND r.target_ci_id = ANY (w.visited))
+			)
+			SELECT DISTINCT `+traversalSelectColumns+`
+			FROM walk
+		`, orgID, rootCIID, maxDepth, maxNodes)
+		if err != nil {
+			return fmt.Errorf("traverse relationships: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var item Relationship
+			if err := rows.Scan(&item.ID, &item.SourceCIID, &item.TargetCIID, &item.RelType, &item.Source); err != nil {
+				return fmt.Errorf("scan traversed relationship: %w", err)
+			}
+			items = append(items, item)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate traversed relationships: %w", err)
+		}
+		return nil
+	})
+
+	return items, err
+}
+
+const traversalSelectColumns = `
+	id::text,
+	source_ci_id::text,
+	target_ci_id::text,
+	rel_type,
+	source
+`
 
 type relationshipScanner interface {
 	Scan(dest ...any) error

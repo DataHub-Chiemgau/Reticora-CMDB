@@ -93,6 +93,9 @@ Database schema is managed with [golang-migrate](https://github.com/golang-migra
 | 0028 | compliance | Compliance rules and per-CI evaluation results |
 | 0029 | iga | IGA connectors, provisioning tasks, access requests/reviews and drift findings |
 | 0030 | search_ai | Tenant search index, AI conversations/messages and retrieval chunks |
+| 0031–0033 | schema corrections, role seeds, client_scope RLS | Batch 1–2 hardening |
+| 0034 | webhook_dead_letter | Dead-letter queue for exhausted webhook deliveries |
+| 0035 | export_job_formats | `datev` in the export_job format CHECK; `app.system` worker exception |
 
 **Running migrations:**
 
@@ -334,6 +337,19 @@ the status code, so the writer aborts without emitting the JSON terminator —
 truncated output is detectable by the client instead of silently looking
 complete.
 
+**Asynchronous export jobs:** `POST /api/v1/export/jobs` queues an export in
+the `export_job` table (migration 0017) instead of streaming it in the request.
+A background worker shared by all replicas claims pending jobs
+(`FOR UPDATE SKIP LOCKED`), renders the CI set in the requested format (CSV,
+DATEV or JSON — the same row shape as the streaming endpoint) into object
+storage, and marks the job completed with the object key, row count, size and a
+24-hour expiry. `GET /api/v1/export/jobs` and `/api/v1/export/jobs/{id}` report
+progress; a completed, unexpired job carries a `download_url` minted via
+`blob.PresignedGetURL` (S3 SigV4, 15-minute TTL; a `file:` URL in `--no-db`
+development mode). Failed jobs keep their error message; expired jobs no longer
+expose a URL. When no blob store is configured the endpoint answers 503 and the
+streaming export remains available.
+
 **Reconciliation and topology:** discovery runs are recorded as jobs
 (`/api/v1/discovery/jobs`). Findings that cannot be matched to an existing CI
 with sufficient confidence are not applied directly; they land in the review
@@ -351,7 +367,25 @@ is the default backend. Set `RETICORA_SEARCH_BACKEND=opensearch` together with
 `RETICORA_OPENSEARCH_URL` to use OpenSearch; startup pings OpenSearch and fails
 loudly if it is unreachable. User input is passed as structured parameters (SQL
 bind variables or OpenSearch JSON DSL), never interpolated into query strings.
-`POST /api/v1/search/reindex` rebuilds the tenant index.
+`POST /api/v1/search/reindex` rebuilds the tenant index. The index is kept
+fresh between rebuilds: the CI repository is wrapped by an indexing decorator
+(`ci.NewIndexingRepository`) that mirrors every successful create, update and
+delete into the search backend — on every write path, including collector bulk
+ingest. Indexing is best-effort: a failing search backend is logged and never
+fails the CI mutation, because the index can always be rebuilt via reindex.
+
+**Collector connectivity:** the collector authenticates uploads with mTLS when
+client-certificate material is available — from `RETICORA_TLS_CLIENT_CERT`/
+`RETICORA_TLS_CLIENT_KEY` (or the `_FILE` variants), or from the enrollment
+keystore at `RETICORA_CREDENTIALS_PATH` (default
+`/var/lib/reticora-collector/credentials.json`). The mTLS HTTP client is built
+by `edgecore/transport.NewMTLS` (TLS 1.3 minimum). Without certificate
+material the collector logs a warning and falls back to plain HTTPS/HTTP so
+local development keeps working. Discovery results are uploaded as
+gzip-compressed batches; when the backend is unreachable the batch is spooled
+to the on-disk buffer (`RETICORA_SPOOL_DIR`, default
+`/var/lib/reticora-collector/spool`, implemented by `edgecore/buffer`) and
+flushed in oldest-first order once connectivity returns.
 
 **AI/RAG governance:** `/api/v1/ai/conversations` and `/api/v1/ai/ask` are
 gated by the Pro/Enterprise `ai_assistant` entitlement. If no
@@ -421,7 +455,7 @@ npm run e2e                 # Playwright end-to-end tests
 **Routes:** `/dashboard`, `/cmdb` (CI list), `/cmdb/:id` (CI detail with
 overview, attributes, relationships and topology neighbours), `/topology`,
 `/racks`, `/discovery`, `/assets`, `/assignments`, `/documents`, `/stocktake`,
-`/tickets`, `/users`, `/permissions`, `/slas`, `/forms`, `/workflows`, `/compliance`, `/iga` and `/assistant`. Every CI is deep-linkable: list rows, topology nodes,
+`/tickets`, `/users`, `/permissions`, `/slas`, `/forms`, `/workflows`, `/compliance`, `/iga`, `/assistant`, `/webhooks`, `/export` and `/monitoring`. Every CI is deep-linkable: list rows, topology nodes,
 rack mounts and relationship entries all link to `/cmdb/:id`, so a CI can be
 shared as a URL.
 
@@ -498,6 +532,8 @@ The server is configured via environment variables:
 - `RETICORA_SEARCH_BACKEND` — `postgres` (default) or `opensearch`.
 - `RETICORA_OPENSEARCH_URL`, `RETICORA_OPENSEARCH_USERNAME`, `RETICORA_OPENSEARCH_PASSWORD`, `RETICORA_OPENSEARCH_INDEX` — OpenSearch connection settings.
 - `RETICORA_LLM_BASE_URL`, `RETICORA_LLM_API_KEY`, `RETICORA_LLM_CHAT_MODEL`, `RETICORA_LLM_EMBEDDING_MODEL` — OpenAI-compatible chat and embedding provider settings.
+- `RETICORA_S3_ENDPOINT`, `RETICORA_S3_BUCKET`, `RETICORA_S3_ACCESS_KEY`, `RETICORA_S3_SECRET_KEY`, `RETICORA_S3_USE_SSL` — object storage for asynchronous export jobs (MinIO/S3).
+- `RETICORA_BLOB_DIR` — filesystem blob storage used by export jobs in `--no-db` development mode (defaults to a temp directory).
 
 ### CI/CD
 

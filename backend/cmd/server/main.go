@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -21,9 +22,11 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
@@ -118,11 +121,19 @@ func main() {
 		repos        server.Repositories
 		auditHandler *audit.Handler
 		apiKeyStore  identity.APIKeyStore
+		blobStore    blob.Store
 	)
 
 	if *noDB {
 		slog.Warn("running with --no-db: all state is in-memory and lost on restart")
 		repos = server.MemoryRepositories()
+		// File-backed blob storage keeps asynchronous exports usable in the
+		// development mode; the signed URL is a development-only file: URL.
+		blobDir := cfg.BlobDir
+		if blobDir == "" {
+			blobDir = filepath.Join(os.TempDir(), "reticora-dev-blobs")
+		}
+		blobStore = blob.NewFileStore(blobDir)
 	} else {
 		if cfg.DatabaseURL == "" {
 			slog.Error("RETICORA_DATABASE_URL is required; start with --no-db for an ephemeral development server")
@@ -139,6 +150,16 @@ func main() {
 		repos = server.PostgresRepositories(pool, audit.NewPGRecorder())
 		auditHandler = audit.NewHandler(pool)
 		apiKeyStore = identity.NewPGAPIKeyStore(pool)
+
+		// Asynchronous exports render into object storage and are served via
+		// signed URLs. A missing or unreachable store disables job creation
+		// (503) but never the streaming export.
+		s3Store, s3Err := blob.NewS3Store(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3UseSSL)
+		if s3Err != nil {
+			slog.Warn("S3 blob storage unavailable; asynchronous export jobs are disabled", "error", s3Err)
+		} else {
+			blobStore = s3Store
+		}
 	}
 	if strings.EqualFold(cfg.SearchBackend, "opensearch") {
 		if cfg.OpenSearchURL == "" {
@@ -158,6 +179,11 @@ func main() {
 			repos.Search = osBackend
 		}
 	}
+	// Keep the tenant search index in sync with every CI write (REST handler,
+	// collector bulk ingest, workflow executor). Indexing is best-effort: a
+	// failing search backend never breaks CI persistence, and the index can
+	// always be rebuilt via POST /api/v1/search/reindex.
+	repos.CI = ci.NewIndexingRepository(repos.CI, search.NewCIIndexer(repos.Search))
 	aiProvider := ai.NewOpenAIProvider(ai.ProviderConfig{
 		BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, ChatModel: cfg.LLMChatModel, EmbeddingModel: cfg.LLMEmbeddingModel,
 	}, nil)
@@ -190,10 +216,20 @@ func main() {
 		Sessions:     sessionIssuer,
 		Audit:        auditHandler,
 		AIProvider:   aiProvider,
+		Blobs:        blobStore,
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
 		os.Exit(1)
+	}
+
+	// Process queued asynchronous export jobs until shutdown. All replicas
+	// share the queue via FOR UPDATE SKIP LOCKED, so jobs are never run twice.
+	if blobStore != nil {
+		exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, blobStore)
+		workerCtx, stopWorker := context.WithCancel(context.Background())
+		defer stopWorker()
+		go exportWorker.Run(workerCtx, 2*time.Second)
 	}
 
 	// Session tokens are always verified cryptographically unless the operator

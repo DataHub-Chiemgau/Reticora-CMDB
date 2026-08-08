@@ -1,0 +1,610 @@
+#!/usr/bin/env bash
+#
+# install-cloud.sh — Reticora CMDB central-cloud installer.
+#
+# Interactive ("foolproof") installer for the central Reticora cloud stack
+# (PostgreSQL/TimescaleDB, NATS JetStream, Redis, MinIO, Keycloak, backend
+# server, frontend). It prompts for every important setting, generates all
+# required secrets, writes a .env file, builds the container images, applies
+# the database migrations, starts the stack and verifies its health.
+#
+# Re-running the script reuses the existing .env values as defaults and is
+# idempotent: existing volumes, keys and configuration are preserved.
+#
+# Usage:
+#   ./install-cloud.sh                    interactive installation
+#   ./install-cloud.sh --non-interactive  use existing .env / defaults /
+#                                         generated secrets without prompting
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMPOSE_DIR="$SCRIPT_DIR/deploy/docker-compose"
+COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
+OVERRIDE_FILE="$COMPOSE_DIR/docker-compose.override.yml"
+ENV_FILE="$COMPOSE_DIR/.env"
+NON_INTERACTIVE=0
+
+print_usage() {
+    cat <<'EOF'
+install-cloud.sh — Reticora CMDB central-cloud installer.
+
+Interactive ("foolproof") installer for the central Reticora cloud stack
+(PostgreSQL/TimescaleDB, NATS JetStream, Redis, MinIO, Keycloak, backend
+server, frontend). It prompts for every important setting, generates all
+required secrets, writes a .env file, builds the container images, applies
+the database migrations, starts the stack and verifies its health.
+
+Re-running the script reuses the existing .env values as defaults and is
+idempotent: existing volumes, keys and configuration are preserved.
+
+Usage:
+  ./install-cloud.sh                    interactive installation
+  ./install-cloud.sh --non-interactive  use existing .env / defaults /
+                                        generated secrets without prompting
+EOF
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        --non-interactive) NON_INTERACTIVE=1 ;;
+        -h|--help)
+            print_usage
+            exit 0
+            ;;
+        *) echo "Unknown option: $arg" >&2; exit 2 ;;
+    esac
+done
+
+# ─── Output helpers ───────────────────────────────────────────────────────────
+if [ -t 1 ]; then
+    C_BLUE=$'\033[0;34m'; C_GREEN=$'\033[0;32m'; C_YELLOW=$'\033[1;33m'
+    C_RED=$'\033[0;31m'; C_BOLD=$'\033[1m'; C_RESET=$'\033[0m'
+else
+    C_BLUE=''; C_GREEN=''; C_YELLOW=''; C_RED=''; C_BOLD=''; C_RESET=''
+fi
+
+info()    { printf '%s==>%s %s\n' "$C_BLUE" "$C_RESET" "$*"; }
+success() { printf '%s✔%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
+warn()    { printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
+die()     { printf '%s✘ Error:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
+
+# ─── Generic helpers ──────────────────────────────────────────────────────────
+trim() {
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
+is_tty() { [ "$NON_INTERACTIVE" -eq 0 ] && [ -t 0 ]; }
+
+have_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+# ─── Docker / compose detection ───────────────────────────────────────────────
+DOCKER="docker"
+COMPOSE=()
+
+detect_container_tooling() {
+    if ! have_cmd docker; then
+        cat >&2 <<'EOF'
+Docker was not found on this machine.
+
+Install Docker Engine first, for example:
+  curl -fsSL https://get.docker.com | sudo sh
+  sudo usermod -aG docker "$USER"   # then log out and back in
+
+EOF
+        if is_tty && confirm "Try to install Docker automatically now (https://get.docker.com)?" "no"; then
+            curl -fsSL https://get.docker.com | sudo sh || die "Automatic Docker installation failed."
+        else
+            die "Docker is required. Aborting."
+        fi
+        have_cmd docker || die "Docker is still not available after the installation attempt."
+    fi
+
+    if ! docker info >/dev/null 2>&1; then
+        if sudo -n docker info >/dev/null 2>&1; then
+            warn "Your user cannot talk to the Docker daemon directly; using 'sudo docker'."
+            DOCKER="sudo docker"
+        else
+            die "Cannot reach the Docker daemon. Is it running, and is your user in the 'docker' group?"
+        fi
+    fi
+
+    if $DOCKER compose version >/dev/null 2>&1; then
+        COMPOSE=(docker compose)
+        if [ "$DOCKER" != "docker" ]; then
+            COMPOSE=(sudo docker compose)
+        fi
+    elif have_cmd docker-compose; then
+        COMPOSE=(docker-compose)
+        if [ "$DOCKER" != "docker" ]; then
+            COMPOSE=(sudo docker-compose)
+        fi
+    else
+        die "Docker Compose (plugin or docker-compose binary) is required but was not found."
+    fi
+}
+
+compose_cmd() { "${COMPOSE[@]}" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"; }
+
+# ─── Prompting helpers ────────────────────────────────────────────────────────
+# ask <variable> <prompt> [default]
+ask() {
+    local var="$1" prompt="$2" default="${3:-}" reply
+    if ! is_tty; then
+        printf -v "$var" '%s' "$default"
+        return
+    fi
+    if [ -n "$default" ]; then
+        read -r -p "$prompt [$default]: " reply || true
+        reply="$(trim "$reply")"
+        printf -v "$var" '%s' "${reply:-$default}"
+    else
+        # Questions whose prompt is explicitly marked as optional accept an
+        # empty answer; all others require a value.
+        local optional=0
+        case "$prompt" in
+            *"optional"*|*"usually empty"*|*"empty = "*) optional=1 ;;
+        esac
+        while true; do
+            read -r -p "$prompt: " reply || true
+            reply="$(trim "$reply")"
+            [ -n "$reply" ] && break
+            [ "$optional" -eq 1 ] && break
+            warn "A value is required."
+        done
+        printf -v "$var" '%s' "$reply"
+    fi
+}
+
+# ask_secret <variable> <prompt> [default] — hidden input, empty keeps default.
+ask_secret() {
+    local var="$1" prompt="$2" default="${3:-}" reply
+    if ! is_tty; then
+        printf -v "$var" '%s' "$default"
+        return
+    fi
+    if [ -n "$default" ]; then
+        read -r -s -p "$prompt [press Enter to keep current value]: " reply || true
+        echo
+        printf -v "$var" '%s' "${reply:-$default}"
+    else
+        while true; do
+            read -r -s -p "$prompt: " reply || true
+            echo
+            [ -n "$reply" ] && break
+            warn "A value is required."
+        done
+        printf -v "$var" '%s' "$reply"
+    fi
+}
+
+# ask_validated <variable> <prompt> [default] <validator-function>
+ask_validated() {
+    local var="$1" prompt="$2" default="${3:-}" validator="$4" value
+    while true; do
+        ask value "$prompt" "$default"
+        if "$validator" "$value"; then
+            break
+        fi
+        if ! is_tty; then
+            die "Invalid value for $prompt: '$value'"
+        fi
+        warn "Invalid input — please try again."
+        default="$value"
+    done
+    printf -v "$var" '%s' "$value"
+}
+
+# confirm <prompt> [yes|no] — returns 0 for yes, 1 for no.
+confirm() {
+    local prompt="$1" default="${2:-yes}" yn reply
+    if [ "$default" = "yes" ]; then yn="Y/n"; else yn="y/N"; fi
+    if ! is_tty; then
+        [ "$default" = "yes" ]
+        return
+    fi
+    while true; do
+        read -r -p "$prompt [$yn]: " reply || true
+        reply="$(trim "$reply")"
+        case "${reply:-$default}" in
+            y|Y|yes|YES|j|J|ja|JA) return 0 ;;
+            n|N|no|NO|nein|NEIN)   return 1 ;;
+            *) warn "Please answer yes or no." ;;
+        esac
+    done
+}
+
+# ─── Validators ───────────────────────────────────────────────────────────────
+valid_port() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+valid_url() {
+    case "$1" in
+        http://*/*|https://*/*|http://?*|https://?*) return 0 ;;
+    esac
+    return 1
+}
+
+valid_password() { [ "${#1}" -ge 8 ]; }
+
+# ─── .env handling ────────────────────────────────────────────────────────────
+env_get() {
+    # env_get <key> — prints the raw value from the existing .env, if any.
+    local key="$1" line
+    [ -f "$ENV_FILE" ] || return 1
+    line="$(grep -E "^${key}=" "$ENV_FILE" | tail -n 1)" || return 1
+    printf '%s' "${line#*=}"
+}
+
+write_env() {
+    local tmp
+    tmp="$(mktemp)"
+    cat > "$tmp" <<EOF
+# Reticora CMDB — central cloud environment
+# Generated by install-cloud.sh on $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+# Keep this file secret — it contains passwords and private key material.
+
+# Database
+RETICORA_DB_PASSWORD=$RETICORA_DB_PASSWORD
+
+# Object storage (MinIO / S3-compatible)
+RETICORA_S3_ACCESS_KEY=$RETICORA_S3_ACCESS_KEY
+RETICORA_S3_SECRET_KEY=$RETICORA_S3_SECRET_KEY
+
+# Keycloak (identity & access management)
+KEYCLOAK_ADMIN=$KEYCLOAK_ADMIN
+KEYCLOAK_ADMIN_PASSWORD=$KEYCLOAK_ADMIN_PASSWORD
+KEYCLOAK_DB_PASSWORD=$KEYCLOAK_DB_PASSWORD
+RETICORA_OIDC_CLIENT_SECRET=$RETICORA_OIDC_CLIENT_SECRET
+
+# Credential envelope encryption (32-byte key, base64-encoded)
+RETICORA_MASTER_KEY=$RETICORA_MASTER_KEY
+
+# Public URLs
+RETICORA_PUBLIC_BASE_URL=$RETICORA_PUBLIC_BASE_URL
+RETICORA_OIDC_ISSUER_URL=$RETICORA_OIDC_ISSUER_URL
+RETICORA_OIDC_CLIENT_ID=$RETICORA_OIDC_CLIENT_ID
+RETICORA_OIDC_REDIRECT_URL=$RETICORA_OIDC_REDIRECT_URL
+
+# Published host ports
+RETICORA_FRONTEND_PORT=$RETICORA_FRONTEND_PORT
+RETICORA_SERVER_PORT=$RETICORA_SERVER_PORT
+RETICORA_KEYCLOAK_PORT=$RETICORA_KEYCLOAK_PORT
+
+# Source of prebuilt images (leave empty to build from this checkout)
+RETICORA_IMAGE_REGISTRY=$RETICORA_IMAGE_REGISTRY
+RETICORA_IMAGE_TAG=$RETICORA_IMAGE_TAG
+
+# Container image garbage collection
+RETICORA_GC_KEEP_IMAGES=$RETICORA_GC_KEEP_IMAGES
+EOF
+    mv "$tmp" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+}
+
+# ─── Preflight checks ─────────────────────────────────────────────────────────
+preflight() {
+    info "Checking prerequisites …"
+    detect_container_tooling
+    success "Container tooling: ${COMPOSE[*]}"
+
+    for tool in openssl curl; do
+        have_cmd "$tool" || die "'$tool' is required but not installed."
+    done
+
+    if [ ! -f "$COMPOSE_FILE" ]; then
+        die "Compose file not found at $COMPOSE_FILE — run this script from the repository root."
+    fi
+
+    if [ ! -f "$SCRIPT_DIR/backend/Dockerfile" ] && [ -z "$(env_get RETICORA_IMAGE_REGISTRY || true)" ]; then
+        warn "backend/Dockerfile not found; image build will fail unless RETICORA_IMAGE_REGISTRY points to prebuilt images."
+    fi
+}
+
+# ─── Interactive configuration ────────────────────────────────────────────────
+collect_config() {
+    echo
+    printf '%s%sReticora CMDB — central cloud installation%s\n' "$C_BOLD" "$C_BLUE" "$C_RESET"
+    echo "The installer now asks for all important settings. Suggested defaults"
+    echo "can be accepted with Enter; existing values are reused on re-runs."
+    echo
+
+    # ── Secrets (generated by default; reused on re-run) ──
+    local def_db_pw def_s3_key def_s3_secret def_kc_pw def_kc_db_pw def_client_secret def_master_key
+    def_db_pw="$(env_get RETICORA_DB_PASSWORD || true)"
+    def_db_pw="${def_db_pw:-$(openssl rand -hex 16)}"
+    def_s3_key="$(env_get RETICORA_S3_ACCESS_KEY || true)"
+    def_s3_key="${def_s3_key:-reticora}"
+    def_s3_secret="$(env_get RETICORA_S3_SECRET_KEY || true)"
+    def_s3_secret="${def_s3_secret:-$(openssl rand -hex 16)}"
+    def_kc_pw="$(env_get KEYCLOAK_ADMIN_PASSWORD || true)"
+    def_kc_pw="${def_kc_pw:-$(openssl rand -hex 16)}"
+    def_kc_db_pw="$(env_get KEYCLOAK_DB_PASSWORD || true)"
+    def_kc_db_pw="${def_kc_db_pw:-$(openssl rand -hex 16)}"
+    def_client_secret="$(env_get RETICORA_OIDC_CLIENT_SECRET || true)"
+    def_client_secret="${def_client_secret:-$(openssl rand -hex 24)}"
+    def_master_key="$(env_get RETICORA_MASTER_KEY || true)"
+    def_master_key="${def_master_key:-$(openssl rand -base64 32)}"
+
+    ask_validated RETICORA_DB_PASSWORD "Database password (PostgreSQL)" "$def_db_pw" valid_password
+    ask RETICORA_S3_ACCESS_KEY "S3/MinIO access key" "$def_s3_key"
+    ask_validated RETICORA_S3_SECRET_KEY "S3/MinIO secret key" "$def_s3_secret" valid_password
+
+    local def_kc_admin
+    def_kc_admin="$(env_get KEYCLOAK_ADMIN || true)"
+    ask KEYCLOAK_ADMIN "Keycloak admin user" "${def_kc_admin:-admin}"
+    ask_validated KEYCLOAK_ADMIN_PASSWORD "Keycloak admin password" "$def_kc_pw" valid_password
+    ask_validated KEYCLOAK_DB_PASSWORD "Keycloak database password" "$def_kc_db_pw" valid_password
+
+    local def_client_id
+    def_client_id="$(env_get RETICORA_OIDC_CLIENT_ID || true)"
+    ask RETICORA_OIDC_CLIENT_ID "OIDC client ID" "${def_client_id:-reticora-app}"
+    ask RETICORA_OIDC_CLIENT_SECRET "OIDC client secret" "$def_client_secret"
+
+    if is_tty; then
+        ask_secret RETICORA_MASTER_KEY "Master key for credential encryption (base64, 32 bytes)" "$def_master_key"
+    else
+        RETICORA_MASTER_KEY="$def_master_key"
+    fi
+
+    # ── Public URLs / ports ──
+    local def_base def_issuer def_redirect def_port
+    def_base="$(env_get RETICORA_PUBLIC_BASE_URL || true)"
+    def_base="${def_base:-http://localhost:3000}"
+    ask_validated RETICORA_PUBLIC_BASE_URL "Public base URL of the web UI (e.g. https://cmdb.example.com)" "$def_base" valid_url
+
+    def_issuer="$(env_get RETICORA_OIDC_ISSUER_URL || true)"
+    def_issuer="${def_issuer:-http://localhost:8180/realms/reticora}"
+    ask_validated RETICORA_OIDC_ISSUER_URL "OIDC issuer URL (Keycloak realm)" "$def_issuer" valid_url
+
+    def_redirect="$(env_get RETICORA_OIDC_REDIRECT_URL || true)"
+    def_redirect="${def_redirect:-${RETICORA_PUBLIC_BASE_URL%/}/auth/callback}"
+    ask_validated RETICORA_OIDC_REDIRECT_URL "OIDC redirect URL (backend callback)" "$def_redirect" valid_url
+
+    def_port="$(env_get RETICORA_FRONTEND_PORT || true)"
+    ask_validated RETICORA_FRONTEND_PORT "Host port for the web UI" "${def_port:-3000}" valid_port
+    def_port="$(env_get RETICORA_SERVER_PORT || true)"
+    ask_validated RETICORA_SERVER_PORT "Host port for the REST API" "${def_port:-8080}" valid_port
+    def_port="$(env_get RETICORA_KEYCLOAK_PORT || true)"
+    ask_validated RETICORA_KEYCLOAK_PORT "Host port for Keycloak" "${def_port:-8180}" valid_port
+
+    # ── Images ──
+    ask RETICORA_IMAGE_REGISTRY "Image registry for prebuilt images (empty = build locally)" "$(env_get RETICORA_IMAGE_REGISTRY || true)"
+    local def_tag
+    def_tag="$(env_get RETICORA_IMAGE_TAG || true)"
+    ask RETICORA_IMAGE_TAG "Image tag" "${def_tag:-latest}"
+
+    RETICORA_GC_KEEP_IMAGES="$(env_get RETICORA_GC_KEEP_IMAGES || true)"
+    RETICORA_GC_KEEP_IMAGES="${RETICORA_GC_KEEP_IMAGES:-3}"
+}
+
+# ─── Session signing key ──────────────────────────────────────────────────────
+ensure_session_key() {
+    local key_dir="$COMPOSE_DIR/secrets"
+    local key_file="$key_dir/session-private.pem"
+    if [ ! -f "$key_file" ]; then
+        info "Generating RS256 session signing key …"
+        mkdir -p "$key_dir"
+        openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out "$key_file" 2>/dev/null
+    fi
+    chmod 600 "$key_file"
+    success "Session signing key: $key_file"
+}
+
+# ─── Keycloak realm provisioning ──────────────────────────────────────────────
+configure_realm() {
+    local realm_src="$SCRIPT_DIR/deploy/keycloak/realm-reticora.json"
+    local out_dir="$COMPOSE_DIR/.generated"
+    [ -f "$realm_src" ] || die "Realm template not found: $realm_src"
+    mkdir -p "$out_dir"
+    # Substitute the configured client secret so the backend and Keycloak agree
+    # on it; the .generated copy is git-ignored and never committed.
+    sed "s/RETICORA_OIDC_CLIENT_SECRET_PLACEHOLDER/$RETICORA_OIDC_CLIENT_SECRET/g" \
+        "$realm_src" > "$out_dir/realm-reticora.json"
+    chmod 600 "$out_dir/realm-reticora.json"
+    success "Keycloak realm prepared with the configured OIDC client secret"
+}
+
+# ─── Images: build / pull ─────────────────────────────────────────────────────
+provide_images() {
+    if [ -n "$RETICORA_IMAGE_REGISTRY" ]; then
+        # Prebuilt images: disable the source-build override so compose uses
+        # the registry images referenced by RETICORA_SERVER_IMAGE /
+        # RETICORA_FRONTEND_IMAGE.
+        if [ -f "$OVERRIDE_FILE" ]; then
+            mv "$OVERRIDE_FILE" "$OVERRIDE_FILE.disabled"
+        fi
+        info "Using prebuilt images from registry: $RETICORA_IMAGE_REGISTRY (tag $RETICORA_IMAGE_TAG)"
+        RETICORA_SERVER_IMAGE="$RETICORA_IMAGE_REGISTRY/reticora-server:$RETICORA_IMAGE_TAG" \
+        RETICORA_FRONTEND_IMAGE="$RETICORA_IMAGE_REGISTRY/reticora-frontend:$RETICORA_IMAGE_TAG" \
+            compose_cmd pull server frontend || die "Pulling the images failed."
+    else
+        # Local source build: make sure the build override is active.
+        if [ -f "$OVERRIDE_FILE.disabled" ]; then
+            mv "$OVERRIDE_FILE.disabled" "$OVERRIDE_FILE"
+        fi
+        info "Building the Reticora images (this can take a few minutes) …"
+        compose_cmd build server frontend || die "Image build failed."
+    fi
+    success "Server and frontend images are available"
+}
+
+# ─── Stack startup ────────────────────────────────────────────────────────────
+wait_for_service() {
+    local service="$1" attempts=60
+    local cid status
+    cid="$(compose_cmd ps -q "$service" 2>/dev/null || true)"
+    [ -n "$cid" ] || return 1
+    while [ "$attempts" -gt 0 ]; do
+        status="$($DOCKER inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || echo unknown)"
+        case "$status" in
+            healthy|running) return 0 ;;
+            unhealthy|exited|dead) return 1 ;;
+        esac
+        sleep 2
+        attempts=$((attempts - 1))
+    done
+    return 1
+}
+
+start_stack() {
+    info "Starting the infrastructure services …"
+    compose_cmd up -d postgres nats redis minio keycloak-db
+    wait_for_service postgres || die "PostgreSQL did not become healthy."
+    wait_for_service keycloak-db || die "Keycloak PostgreSQL did not become healthy."
+    success "Database and infrastructure services are running"
+
+    run_migrations
+
+    info "Starting Keycloak …"
+    compose_cmd up -d keycloak
+    wait_for_service keycloak || warn "Keycloak is not healthy yet; it may still be importing the realm."
+
+    info "Starting the Reticora server and frontend …"
+    compose_cmd up -d server frontend
+    wait_for_service server || die "Reticora server did not become healthy."
+    wait_for_service frontend || die "Frontend did not become healthy."
+    success "All services are up"
+}
+
+run_migrations() {
+    info "Applying database migrations …"
+    local sql_files=()
+    while IFS= read -r -d '' f; do
+        sql_files+=("$(basename "$f")")
+    done < <(find "$SCRIPT_DIR/backend/migrations" -maxdepth 1 -name '*.up.sql' -print0 | sort -z)
+
+    [ "${#sql_files[@]}" -gt 0 ] || die "No migrations found in backend/migrations."
+
+    local db_url="postgres://reticora:${RETICORA_DB_PASSWORD}@localhost:5432/reticora?sslmode=disable"
+    if have_cmd migrate; then
+        migrate -path "$SCRIPT_DIR/backend/migrations" -database "$db_url" up \
+            || die "Database migrations failed."
+    else
+        # Fallback: apply the migrations with psql inside the postgres
+        # container. *.up.sql files are applied in name order, exactly like
+        # golang-migrate would. Applied versions are tracked in a bookkeeping
+        # table so re-runs are no-ops.
+        compose_cmd exec -T postgres psql -U reticora -d reticora -v ON_ERROR_STOP=1 -q <<'SQL'
+CREATE TABLE IF NOT EXISTS public.reticora_schema_migrations (
+    version TEXT PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+SQL
+        local f version applied
+        for f in "${sql_files[@]}"; do
+            version="${f%%_*}"
+            applied="$(compose_cmd exec -T postgres psql -U reticora -d reticora -tAc \
+                "SELECT 1 FROM public.reticora_schema_migrations WHERE version = '$version'" || true)"
+            if [ "$applied" = "1" ]; then
+                continue
+            fi
+            info "  → migration $f"
+            compose_cmd exec -T postgres psql -U reticora -d reticora -v ON_ERROR_STOP=1 -q \
+                < "$SCRIPT_DIR/backend/migrations/$f" \
+                || die "Migration $f failed."
+            compose_cmd exec -T postgres psql -U reticora -d reticora -q -c \
+                "INSERT INTO public.reticora_schema_migrations (version) VALUES ('$version')"
+        done
+    fi
+    success "Database schema is up to date"
+}
+
+# ─── Health verification ──────────────────────────────────────────────────────
+verify_stack() {
+    info "Verifying the installation …"
+    local url="http://localhost:${RETICORA_SERVER_PORT}/healthz" attempts=30
+    while [ "$attempts" -gt 0 ]; do
+        if curl -fsS "$url" >/dev/null 2>&1; then
+            success "Backend health check passed ($url)"
+            return 0
+        fi
+        sleep 2
+        attempts=$((attempts - 1))
+    done
+    die "Backend health check failed at $url — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs server"
+}
+
+# ─── Container image garbage collection ───────────────────────────────────────
+gc_images() {
+    local keep="${RETICORA_GC_KEEP_IMAGES:-3}"
+    local pattern img ids
+
+    if is_tty; then
+        confirm "Run container image garbage collection now (keep newest $keep per image)?" "no" || return 0
+    fi
+
+    for pattern in "reticora-server" "reticora-frontend"; do
+        # Newest-first list of image IDs for this repository.
+        ids="$($DOCKER images --format '{{.CreatedAt}} {{.ID}}' "$pattern" 2>/dev/null \
+            | sort -r | awk '!seen[$2]++ {print $2}' || true)"
+        [ -n "$ids" ] || continue
+        echo "$ids" | tail -n +"$((keep + 1))" | while read -r img; do
+            [ -n "$img" ] || continue
+            $DOCKER rmi "$img" >/dev/null 2>&1 || true
+        done
+    done
+
+    $DOCKER image prune -f >/dev/null 2>&1 || true
+    success "Image garbage collection finished (kept newest $keep per image)"
+}
+
+# ─── Summary ──────────────────────────────────────────────────────────────────
+print_summary() {
+    echo
+    printf '%s%sInstallation complete%s\n' "$C_BOLD" "$C_GREEN" "$C_RESET"
+    cat <<EOF
+
+  Web UI:            $RETICORA_PUBLIC_BASE_URL  (host port $RETICORA_FRONTEND_PORT)
+  REST API:          http://localhost:$RETICORA_SERVER_PORT  (health: /healthz)
+  Keycloak console:  http://localhost:$RETICORA_KEYCLOAK_PORT  (user: $KEYCLOAK_ADMIN)
+  Initial login:     admin@reticora.local / admin123  (change immediately!)
+
+  Configuration:     $ENV_FILE
+  Session key:       $COMPOSE_DIR/secrets/session-private.pem
+
+  Useful commands:
+    ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE ps
+    ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs -f server
+    ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE down
+
+  Next step: install a collector in the customer network with ./install-vm.sh
+EOF
+}
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+main() {
+    preflight
+    collect_config
+    echo
+    info "Configuration:"
+    cat <<EOF
+  Public base URL:   $RETICORA_PUBLIC_BASE_URL
+  OIDC issuer:       $RETICORA_OIDC_ISSUER_URL
+  OIDC redirect:     $RETICORA_OIDC_REDIRECT_URL
+  Ports:             UI=$RETICORA_FRONTEND_PORT API=$RETICORA_SERVER_PORT Keycloak=$RETICORA_KEYCLOAK_PORT
+  Image source:      ${RETICORA_IMAGE_REGISTRY:-<local build>} (tag $RETICORA_IMAGE_TAG)
+EOF
+    if is_tty; then
+        confirm "Start the installation with these settings?" "yes" || die "Aborted by user."
+    fi
+
+    write_env
+    success "Environment written to $ENV_FILE"
+    ensure_session_key
+    configure_realm
+    provide_images
+    start_stack
+    verify_stack
+    gc_images
+    print_summary
+}
+
+main "$@"

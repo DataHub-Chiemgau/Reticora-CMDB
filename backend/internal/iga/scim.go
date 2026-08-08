@@ -273,7 +273,7 @@ func (h *Handler) SCIMCreateGroup(w http.ResponseWriter, r *http.Request) {
 		scimErr(w, 500, "", err.Error())
 		return
 	}
-	applyMembers(h, r.Context(), t.OrganizationID, g.ID, body)
+	applyMembers(r.Context(), h, t.OrganizationID, g.ID, body)
 	members, _ := h.users.ListTeamMembers(r.Context(), t.OrganizationID, g.ID)
 	api.WriteJSON(w, 201, scimGroup(*g, members))
 }
@@ -293,7 +293,7 @@ func (h *Handler) SCIMPutGroup(w http.ResponseWriter, r *http.Request) {
 		scimErr(w, 404, "", "group not found")
 		return
 	}
-	applyMembers(h, r.Context(), t.OrganizationID, g.ID, body)
+	applyMembers(r.Context(), h, t.OrganizationID, g.ID, body)
 	members, _ := h.users.ListTeamMembers(r.Context(), t.OrganizationID, g.ID)
 	api.WriteJSON(w, 200, scimGroup(*g, members))
 }
@@ -309,7 +309,7 @@ func (h *Handler) SCIMDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
-func applyMembers(h *Handler, ctx context.Context, orgID, groupID string, body map[string]any) {
+func applyMembers(ctx context.Context, h *Handler, orgID, groupID string, body map[string]any) {
 	arr, ok := body["members"].([]any)
 	if !ok {
 		return

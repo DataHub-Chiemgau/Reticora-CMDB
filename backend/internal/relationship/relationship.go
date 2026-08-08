@@ -37,15 +37,19 @@ type CreateRequest struct {
 
 // ValidRelTypes lists allowed relationship types.
 var ValidRelTypes = map[string]bool{
-	"connected_to": true,
-	"hosted_on":    true,
-	"depends_on":   true,
-	"member_of":    true,
-	"powers":       true,
-	"powered_by":   true,
-	"stores":       true,
-	"monitors":     true,
-	"backs_up":     true,
+	"connected_to":      true,
+	"hosted_on":         true,
+	"depends_on":        true,
+	"member_of":         true,
+	"member_of_cluster": true,
+	"powers":            true,
+	"powered_by":        true,
+	"runs_on":           true,
+	"mounted_in":        true,
+	"uplink_to":         true,
+	"stores":            true,
+	"monitors":          true,
+	"backs_up":          true,
 }
 
 // Repository defines persistence operations for relationships.
@@ -53,6 +57,13 @@ type Repository interface {
 	List(ctx context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error)
 	Create(ctx context.Context, rel *Relationship) error
 	Delete(ctx context.Context, orgID, id string) error
+}
+
+// Traverser walks the configuration graph from a root CI up to maxDepth hops
+// away, following relationships in both directions. maxDepth is clamped to the
+// given bounds and maxNodes caps the number of distinct CIs returned.
+type Traverser interface {
+	TraverseFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error)
 }
 
 // MemoryRepository is an in-memory relationship store.
@@ -117,6 +128,56 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	}
 	delete(r.items, id)
 	return nil
+}
+
+// TraverseFrom walks the in-memory graph breadth-first from rootCIID. It
+// mirrors the recursive-CTE traversal of the PostgreSQL repository for tests
+// and the no-db development mode.
+func (r *MemoryRepository) TraverseFrom(_ context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if maxDepth < 1 || maxNodes < 1 {
+		return nil, nil
+	}
+
+	visited := map[string]bool{rootCIID: true}
+	frontier := []string{rootCIID}
+	result := make([]Relationship, 0)
+	reported := map[string]bool{}
+
+	for depth := 0; depth < maxDepth && len(frontier) > 0 && len(visited) <= maxNodes; depth++ {
+		var next []string
+		for _, id := range frontier {
+			for _, rel := range r.items {
+				if rel.OrganizationID != orgID {
+					continue
+				}
+				if rel.SourceCIID != id && rel.TargetCIID != id {
+					continue
+				}
+				neighborID := rel.TargetCIID
+				if neighborID == id {
+					neighborID = rel.SourceCIID
+				}
+				// Mirror the recursive CTE: an edge is reported when it is
+				// first discovered; expansion continues only to endpoints
+				// that are not yet on the visited set. Self-loops are only
+				// reported when attached to the root (the CTE anchor).
+				if !reported[rel.ID] && (neighborID != id || id == rootCIID) {
+					reported[rel.ID] = true
+					result = append(result, *rel)
+				}
+				if neighborID == "" || neighborID == id || visited[neighborID] {
+					continue
+				}
+				visited[neighborID] = true
+				next = append(next, neighborID)
+			}
+		}
+		frontier = next
+	}
+	return result, nil
 }
 
 // Handler provides HTTP handlers for relationship endpoints.

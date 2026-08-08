@@ -23,7 +23,10 @@
     "workflows": "Workflows",
     "compliance": "Compliance",
     "iga": "IGA",
-    "assistant": "Assistent"
+    "assistant": "Assistent",
+    "webhooks": "Webhooks",
+    "export": "Export",
+    "monitoring": "Monitoring"
   },
   "common": {
     "save": "Speichern",
@@ -66,7 +69,10 @@
       "workflows": "Workflows öffnen",
       "compliance": "Compliance öffnen",
       "iga": "IGA öffnen",
-      "assistant": "KI-Assistent öffnen"
+      "assistant": "KI-Assistent öffnen",
+      "webhooks": "Webhooks öffnen",
+      "export": "Export öffnen",
+      "monitoring": "Monitoring öffnen"
     }
   },
   "dashboard": {
@@ -144,10 +150,30 @@
   },
   "webhook": {
     "title": "Webhooks",
+    "subtitle": "Abonnements benachrichtigen externe Systeme bei CI- und Discovery-Ereignissen; fehlgeschlagene Zustellungen landen in der Dead-Letter-Queue.",
     "name": "Name",
     "url": "URL",
     "events": "Events",
-    "active": "Aktiv"
+    "active": "Aktiv",
+    "inactive": "Inaktiv",
+    "secret": "Geheimnis (HMAC-Signatur)",
+    "loading": "Webhooks werden geladen",
+    "errorTitle": "Webhooks konnten nicht geladen werden",
+    "createSubscription": "Webhook-Abonnement erstellen",
+    "subscriptions": "Abonnements",
+    "emptyTitle": "Keine Webhooks vorhanden",
+    "emptyHint": "Erstellen Sie ein Abonnement, um bei Ereignissen benachrichtigt zu werden.",
+    "test": "Test senden",
+    "deliveries": "Zustellverlauf",
+    "loadingDeliveries": "Zustellungen werden geladen",
+    "noDeliveries": "Keine Zustellungen",
+    "noDeliveriesHint": "Für dieses Abonnement wurden noch keine Zustellungen aufgezeichnet.",
+    "attemptOf": "Versuch {{attempt}} von {{max}}",
+    "deadLetters": "Dead-Letter-Queue",
+    "dead": "Endgültig fehlgeschlagen",
+    "attempts": "{{count}} Versuche",
+    "noDeadLetters": "Keine Dead Letters",
+    "noDeadLettersHint": "Aktuell gibt es keine endgültig fehlgeschlagenen Zustellungen."
   },
   "accessibility": {
     "closeModal": "Modal schließen",
@@ -380,5 +406,54 @@
     "ask": "Fragen",
     "answer": "Antwort",
     "citations": "Quellen"
+  },
+  "export": {
+    "title": "Export",
+    "subtitle": "Asynchrone Exporte rendern die CI-Daten des Mandants in Objektspeicher; fertige Exporte stehen 24 Stunden über eine signierte URL zum Download bereit.",
+    "loading": "Exportaufträge werden geladen",
+    "errorTitle": "Exportaufträge konnten nicht geladen werden",
+    "startExport": "Export starten",
+    "startJob": "Auftrag erstellen",
+    "format": "Format",
+    "jobs": "Exportaufträge",
+    "status": "Status",
+    "rows": "Zeilen",
+    "createdAt": "Erstellt",
+    "download": "Herunterladen",
+    "emptyTitle": "Keine Exportaufträge",
+    "emptyHint": "Starten Sie einen Export, um die CI-Daten als CSV, DATEV oder JSON herunterzuladen.",
+    "status_pending": "Ausstehend",
+    "status_running": "Läuft",
+    "status_completed": "Abgeschlossen",
+    "status_failed": "Fehlgeschlagen",
+    "status_expired": "Abgelaufen"
+  },
+  "monitoring": {
+    "title": "Monitoring",
+    "subtitle": "Metriken abfragen und Alarmregeln verwalten.",
+    "loading": "Monitoring-Daten werden geladen",
+    "errorTitle": "Monitoring-Daten konnten nicht geladen werden",
+    "queryMetrics": "Metriken abfragen",
+    "metricName": "Metrikname",
+    "ciId": "CI-ID (optional)",
+    "runQuery": "Abfragen",
+    "series": "Zeitreihe der Metrikwerte",
+    "points": "{{count}} Datenpunkte",
+    "noData": "Keine Daten",
+    "noDataHint": "Für diese Metrik wurden im gewählten Zeitraum keine Werte gefunden.",
+    "createAlert": "Alarmregel erstellen",
+    "ruleName": "Regelname",
+    "condition": "Bedingung",
+    "threshold": "Schwellenwert",
+    "severity": "Schweregrad",
+    "severityCritical": "Kritisch",
+    "severityWarning": "Warnung",
+    "severityInfo": "Info",
+    "severity_critical": "Kritisch",
+    "severity_warning": "Warnung",
+    "severity_info": "Info",
+    "alertRules": "Alarmregeln",
+    "noAlerts": "Keine Alarmregeln",
+    "noAlertsHint": "Erstellen Sie eine Regel, um bei Schwellenwertüberschreitungen benachrichtigt zu werden."
   }
 }

@@ -172,15 +172,27 @@ func TestDispatcherMarksDeliveryFailedAfterMaxAttempts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(records) == 1 && records[0].Status == StatusFailed {
+		// Exhausted deliveries are moved to the dead-letter queue and marked
+		// dead on the delivery record.
+		if len(records) == 1 && records[0].Status == StatusDead {
 			if records[0].NextRetryAt != nil || records[0].Error == "" {
-				t.Fatalf("unexpected failed delivery record: %+v", records[0])
+				t.Fatalf("unexpected dead delivery record: %+v", records[0])
+			}
+			letters, total, err := store.ListDeadLetters(context.Background(), "org-1", page)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if total != 1 || len(letters) != 1 {
+				t.Fatalf("expected exactly one dead letter, got %d", total)
+			}
+			if letters[0].DeliveryID != records[0].ID || letters[0].Attempts != 1 || letters[0].LastError == "" {
+				t.Fatalf("unexpected dead letter: %+v", letters[0])
 			}
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatal("delivery was not marked failed after exhausting its attempts")
+	t.Fatal("delivery was not moved to the dead-letter queue after exhausting its attempts")
 }
 
 func subscriptionID(t *testing.T, repo *MemoryRepository) string {

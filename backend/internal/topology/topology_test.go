@@ -162,6 +162,87 @@ func TestTopologyUnauthorized(t *testing.T) {
 	}
 }
 
+// TestTraversalCycleGuard seeds a cyclic graph and asserts the traversal
+// terminates with every relationship reported exactly once.
+func TestTraversalCycleGuard(t *testing.T) {
+	ciRepo := ci.NewMemoryRepository()
+	relRepo := relationship.NewMemoryRepository()
+
+	mkCI := func(name string) string {
+		item := &ci.Item{OrganizationID: "org-1", Name: name, CITypeID: "server", Status: "active"}
+		ciRepo.Create(context.Background(), item)
+		return item.ID
+	}
+	a, b, c := mkCI("a"), mkCI("b"), mkCI("c")
+
+	mkRel := func(src, dst string) {
+		relRepo.Create(context.Background(), &relationship.Relationship{
+			OrganizationID: "org-1", SourceCIID: src, TargetCIID: dst, RelType: "connected_to", Source: "manual",
+		})
+	}
+	// Cycle a -> b -> c -> a, a self-loop on the root a, and a self-loop on b
+	// (self-loops away from the root are dropped by the traversal guard, which
+	// matches the recursive-CTE implementation).
+	mkRel(a, b)
+	mkRel(b, c)
+	mkRel(c, a)
+	mkRel(a, a)
+	mkRel(b, b)
+
+	rels, err := relRepo.TraverseFrom(context.Background(), "org-1", a, maxDepth, maxFetch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rels) != 4 {
+		t.Fatalf("expected 4 relationships in cyclic graph, got %d (%+v)", len(rels), rels)
+	}
+	seen := map[string]int{}
+	for _, rel := range rels {
+		seen[rel.ID]++
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Errorf("relationship %s reported %d times", id, n)
+		}
+	}
+}
+
+// TestTraversalDepthLimit ensures the memory traverser honours maxDepth.
+func TestTraversalDepthLimit(t *testing.T) {
+	ciRepo := ci.NewMemoryRepository()
+	relRepo := relationship.NewMemoryRepository()
+
+	mkCI := func(name string) string {
+		item := &ci.Item{OrganizationID: "org-1", Name: name, CITypeID: "server", Status: "active"}
+		ciRepo.Create(context.Background(), item)
+		return item.ID
+	}
+	// Chain: n0 - n1 - n2 - n3.
+	ids := []string{mkCI("n0"), mkCI("n1"), mkCI("n2"), mkCI("n3")}
+	for i := 0; i+1 < len(ids); i++ {
+		relRepo.Create(context.Background(), &relationship.Relationship{
+			OrganizationID: "org-1", SourceCIID: ids[i], TargetCIID: ids[i+1], RelType: "connected_to", Source: "manual",
+		})
+	}
+
+	rels, err := relRepo.TraverseFrom(context.Background(), "org-1", ids[0], 2, maxFetch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rels) != 2 {
+		t.Fatalf("depth 2: expected 2 relationships, got %d", len(rels))
+	}
+
+	// Cross-org relationships must never be traversed.
+	rels, err = relRepo.TraverseFrom(context.Background(), "org-2", ids[0], maxDepth, maxFetch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rels) != 0 {
+		t.Fatalf("expected no relationships for foreign org, got %d", len(rels))
+	}
+}
+
 func TestParseDepth(t *testing.T) {
 	cases := map[string]int{"": defaultDepth, "0": defaultDepth, "-1": defaultDepth, "abc": defaultDepth, "3": 3, "999": maxDepth}
 	for in, want := range cases {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -44,6 +45,12 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 
 	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
 		return fmt.Errorf("set tenant context: %w", err)
+	}
+
+	if scope := tenant.ClientScope(ctx); scope != "" {
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.client_scope', $1, true)", scope); err != nil {
+			return fmt.Errorf("set client scope: %w", err)
+		}
 	}
 
 	if err := fn(ctx, tx); err != nil {

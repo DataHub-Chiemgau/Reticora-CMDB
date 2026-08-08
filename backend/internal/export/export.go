@@ -81,7 +81,7 @@ func (h *Handler) ExportCIs(w http.ResponseWriter, r *http.Request) {
 		for _, item := range batch {
 			writer.row(item)
 		}
-		writer.flush(w)
+		writer.flushHTTP(w)
 
 		if len(batch) < h.batchSize {
 			break
@@ -108,7 +108,7 @@ func (h *Handler) ExportCIs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writer.end()
-	writer.flush(w)
+	writer.flushHTTP(w)
 }
 
 func (h *Handler) fetch(r *http.Request, orgID string, filter ci.FilterParams, cursor *api.Cursor) ([]ci.Item, error) {
@@ -130,23 +130,36 @@ type rowWriter struct {
 }
 
 func newRowWriter(format string, w http.ResponseWriter) *rowWriter {
-	rw := &rowWriter{format: format, out: w}
+	rw := newFormatWriter(format, w)
 	switch format {
 	case "csv":
 		w.Header().Set("Content-Type", "text/csv")
 		w.Header().Set("Content-Disposition", "attachment; filename=cis_export.csv")
-		rw.csv = csv.NewWriter(w)
 	case "datev":
 		w.Header().Set("Content-Type", "text/csv")
 		w.Header().Set("Content-Disposition", "attachment; filename=cis_export_datev.csv")
-		rw.csv = csv.NewWriter(w)
-		rw.csv.Comma = ';'
 	default:
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Disposition", "attachment; filename=cis_export.json")
-		rw.json = json.NewEncoder(w)
 	}
 	w.WriteHeader(http.StatusOK)
+	return rw
+}
+
+// newFormatWriter serialises rows to an arbitrary writer without HTTP
+// concerns; it backs both the streaming endpoint and export-job rendering so
+// the output is identical.
+func newFormatWriter(format string, out io.Writer) *rowWriter {
+	rw := &rowWriter{format: format, out: out}
+	switch format {
+	case "csv":
+		rw.csv = csv.NewWriter(out)
+	case "datev":
+		rw.csv = csv.NewWriter(out)
+		rw.csv.Comma = ';'
+	default:
+		rw.json = json.NewEncoder(out)
+	}
 	return rw
 }
 
@@ -212,16 +225,28 @@ func (rw *rowWriter) end() {
 // detectable by the client.
 func (rw *rowWriter) abort(w http.ResponseWriter) {
 	rw.failed = true
-	rw.flush(w)
+	rw.flushHTTP(w)
 }
 
-func (rw *rowWriter) flush(w http.ResponseWriter) {
-	if rw.csv != nil {
-		rw.csv.Flush()
-	}
+func (rw *rowWriter) flushHTTP(w http.ResponseWriter) {
+	_ = rw.flush()
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
+}
+
+// flush pushes buffered CSV data to the underlying writer and surfaces its
+// error so job rendering can fail the job instead of persisting a corrupt
+// object.
+func (rw *rowWriter) flush() error {
+	if rw.csv == nil {
+		return nil
+	}
+	rw.csv.Flush()
+	if err := rw.csv.Error(); err != nil {
+		return fmt.Errorf("write export row: %w", err)
+	}
+	return nil
 }
 
 func attributeString(attrs map[string]any, keys ...string) string {
