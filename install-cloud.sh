@@ -193,10 +193,11 @@ ask_secret() {
 
 # ask_validated <variable> <prompt> [default] <validator-function> [hint-function]
 #
-# The optional hint function receives the rejected value and a nameref; it
-# prints a short explanation of why the value was rejected and may set the
-# nameref variable to a corrected value, which is then offered as the next
-# prompt's default (e.g. a missing https:// scheme is filled in).
+# The optional hint function receives the rejected value plus a nameref; it
+# warns why the value was rejected and may set the nameref to a corrected
+# value, which — if it passes validation — is offered as the next prompt's
+# default (e.g. a missing https:// scheme is filled in). It is called
+# in-process (no command substitution) so the nameref assignment survives.
 ask_validated() {
     local var="$1" prompt="$2" default="${3:-}" validator="$4" hint="${5:-}" value
     while true; do
@@ -208,23 +209,19 @@ ask_validated() {
             die "Invalid value for $prompt: '$value'"
         fi
         if [ -n "$hint" ]; then
-            local suggested='' hint_text=''
-            # Run the hint with stdout captured into a variable via a temp
-            # file, so the nameref assignment to 'suggested' happens in this
-            # shell (a command substitution would run in a subshell and lose
-            # it). If the suggested value passes validation, offer it as the
-            # next prompt's default.
-            local hint_out
-            hint_out="$(mktemp)"
-            "$hint" "$value" suggested > "$hint_out"
-            hint_text="$(cat "$hint_out")"
-            rm -f "$hint_out"
-            warn "Invalid input — $hint_text"
+            local suggested=''
+            # Run the hint in-process (no command substitution) so the
+            # nameref assignment to 'suggested' survives. The hint prints its
+            # message via warn; if the suggested value passes validation, it
+            # is offered as the next prompt's default.
+            "$hint" "$value" suggested
             if [ -n "$suggested" ] && "$validator" "$suggested"; then
                 default="$suggested"
             fi
         else
             warn "Invalid input — please try again."
+            # Keep showing the user's last entry on the next prompt.
+            default="$value"
         fi
     done
     printf -v "$var" '%s' "$value"
@@ -264,19 +261,19 @@ valid_url() {
     return 1
 }
 
-# explain_url_error <value> <suggestion-nameref> — prints a short hint why a
-# URL was rejected and, for a missing scheme, suggests the corrected value via
-# the nameref.
+# explain_url_error <value> <suggestion-nameref> — warns why a URL was
+# rejected and, for a missing scheme, suggests the corrected value via the
+# nameref.
 explain_url_error() {
     local -n _suggest="$2"
     case "$1" in
         http://*|https://*)
-            echo "The URL must contain a host (e.g. https://cmdb.example.com)." ;;
+            warn "Invalid input — the URL must contain a host (e.g. https://cmdb.example.com)." ;;
         *"://"*)
-            echo "Only http:// and https:// URLs are supported." ;;
+            warn "Invalid input — only http:// and https:// URLs are supported." ;;
         *)
             _suggest="https://$1"
-            printf 'The URL must start with http:// or https:// — for example %s\n' "$_suggest" ;;
+            warn "Invalid input — the URL must start with http:// or https://, e.g. $_suggest" ;;
     esac
 }
 
