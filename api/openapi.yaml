@@ -117,32 +117,6 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/auth/login:
-    post:
-      operationId: login
-      tags: [Auth]
-      security: []
-      summary: Exchange an authorization code for a session token
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LoginRequest'
-      responses:
-        '200':
-          description: Session token issued
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthTokenResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
   /api/v1/auth/callback:
     post:
       operationId: authCallback
@@ -5134,16 +5108,9 @@ components:
           type: string
           example: ok
 
-    LoginRequest:
-      type: object
-      required: [code]
-      properties:
-        code:
-          type: string
-
     CallbackRequest:
       type: object
-      required: [code, state]
+      required: [code, state, code_verifier]
       properties:
         code:
           type: string

@@ -86,6 +86,11 @@ services:
       RETICORA_OIDC_ISSUER_URL: "http://keycloak:8080/realms/reticora"
       RETICORA_OIDC_CLIENT_ID: "reticora-app"
       RETICORA_ENVIRONMENT: "production"
+      # Session-token signature verification is mandatory. This local stack
+      # has no session signing key provisioned, so it explicitly opts into
+      # the insecure development mode. Production deployments must mount an
+      # RS256 key and set RETICORA_SESSION_KEY_PATH instead.
+      RETICORA_ALLOW_INSECURE_DEV_AUTH: "true"
     ports:
       - "8080:8080"
     depends_on:

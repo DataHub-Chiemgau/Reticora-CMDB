@@ -99,6 +99,27 @@ func TestAuthMiddlewareWithVerifierRejectsUnsignedAndExpiredTokens(t *testing.T)
 	}
 }
 
+// TestAuthMiddlewareWithVerifierRejectsForgedAlgNoneToken proves that a
+// self-minted token with an arbitrary organization cannot bypass the verifier
+// by declaring alg=none or an unexpected algorithm.
+func TestAuthMiddlewareWithVerifierRejectsForgedAlgNoneToken(t *testing.T) {
+	issuer := newTestIssuer(t)
+	handler := AuthMiddlewareWithVerifier(issuer)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("forged token must not reach the handler")
+	}))
+
+	// testToken builds a token with alg=none and a bogus signature.
+	forged := testToken(t, Claims{Subject: "attacker", OrganizationID: "victim-org"})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/cis", nil)
+	req.Header.Set("Authorization", "Bearer "+forged)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for a forged token, got %d", w.Code)
+	}
+}
+
 func TestAuthMiddlewareWithVerifierSkipsPublicAuthRoutes(t *testing.T) {
 	handler := AuthMiddlewareWithVerifier(newTestIssuer(t))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

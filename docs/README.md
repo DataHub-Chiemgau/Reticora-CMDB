@@ -199,11 +199,16 @@ PKCE. `GET /api/v1/auth/config` returns the public parameters (issuer, client
 ID, redirect URI, scopes, endpoints) — never the client secret. The browser
 redirects to the identity provider, and posts `code`, `state` and
 `code_verifier` to `POST /api/v1/auth/callback`, which exchanges them for an
-RS256 session token. Every subsequent request carries that token as
+RS256 session token. The verifier is mandatory and the returned ID token is
+signature-verified against the provider's JWKS with issuer, audience, expiry
+and issued-at checks. Every subsequent request carries that token as
 a bearer token in the `Authorization` header; the client refreshes it via
 `POST /api/v1/auth/refresh` once on a 401 and retries the request. Server-side
-the token signature is verified by `middleware.AuthMiddlewareWithVerifier`;
-only `/api/v1/auth/{config,login,callback,refresh}` are unauthenticated.
+the token signature is always verified by `middleware.AuthMiddlewareWithVerifier`
+— a missing `RETICORA_SESSION_KEY_PATH` is a fatal startup error unless the
+operator explicitly opts into the insecure development mode with
+`RETICORA_ALLOW_INSECURE_DEV_AUTH=true`. Only
+`/api/v1/auth/{config,callback,refresh}` are unauthenticated.
 
 **Tenant resolution:** `TenantMiddleware` derives the organization from the
 verified session token. The `X-Organization-ID` header is only consulted for

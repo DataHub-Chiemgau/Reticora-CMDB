@@ -30,7 +30,6 @@ func NewHandler(oidc *OIDCProvider, sessions *SessionIssuer) *Handler {
 // RegisterRoutes registers authentication routes on the provided router.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/auth/config", h.Config)
-	r.Post("/api/v1/auth/login", h.Login)
 	r.Post("/api/v1/auth/callback", h.Callback)
 	r.Post("/api/v1/auth/refresh", h.Refresh)
 	r.Get("/api/v1/auth/me", h.Me)
@@ -58,34 +57,10 @@ func (h *Handler) Config(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, cfg)
 }
 
-// Login initiates the OIDC authentication flow.
-func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	if err := r.Context().Err(); err != nil {
-		writeContextError(w, err)
-		return
-	}
-
-	var req struct {
-		Code string `json:"code"`
-	}
-	if err := api.ReadJSON(r, &req); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
-
-	sessionToken, expiresAt, _, err := h.exchangeAndIssue(r.Context(), req.Code, "")
-	if err != nil {
-		writeIdentityError(w, err)
-		return
-	}
-
-	api.WriteJSON(w, http.StatusOK, map[string]string{
-		"token":      sessionToken,
-		"expires_at": expiresAt.Format(time.RFC3339),
-	})
-}
-
 // Callback handles the OIDC callback and issues an internal session token.
+// The authorization code exchange is only accepted together with the PKCE
+// code verifier and the transaction state, so an injected or stolen code
+// cannot be redeemed without the browser-side secrets.
 func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	if err := r.Context().Err(); err != nil {
 		writeContextError(w, err)
@@ -103,6 +78,10 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.State) == "" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "state is required")
+		return
+	}
+	if strings.TrimSpace(req.CodeVerifier) == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "code_verifier is required")
 		return
 	}
 
@@ -403,6 +382,7 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		writeContextError(w, err)
 	case strings.Contains(err.Error(), "authorization code is required"),
+		strings.Contains(err.Error(), "PKCE code verifier is required"),
 		strings.Contains(err.Error(), "ID token is required"),
 		strings.Contains(err.Error(), "groups claim"):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())

@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -82,18 +83,14 @@ func main() {
 		RedirectURL:  cfg.OIDCRedirectURL,
 	})
 
-	// Initialize session issuer (optional in dev mode)
-	var sessionIssuer *identity.SessionIssuer
-	if cfg.SessionKeyPath != "" {
-		keyData, err := os.ReadFile(cfg.SessionKeyPath)
-		if err != nil {
-			slog.Warn("failed to read session key, using dev mode", "error", err)
-		} else {
-			sessionIssuer, err = identity.NewSessionIssuer(keyData)
-			if err != nil {
-				slog.Warn("failed to init session issuer, using dev mode", "error", err)
-			}
-		}
+	// Initialize the session issuer. Signature verification of session tokens
+	// is mandatory: without an explicit insecure-development opt-in a missing
+	// or unreadable key is a fatal startup error instead of a silent downgrade
+	// to accepting forged tokens.
+	sessionIssuer, err := loadSessionIssuer(cfg)
+	if err != nil {
+		slog.Error("session token setup failed", "error", err)
+		os.Exit(1)
 	}
 
 	// Initialize Redis-backed cache store
@@ -197,14 +194,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Session tokens are verified cryptographically whenever a session key is
-	// configured. Without a key the server falls back to unverified claim
-	// parsing, which is only acceptable for local development.
-	authMiddleware := middleware.AuthMiddleware
-	if sessionIssuer != nil {
-		authMiddleware = middleware.AuthMiddlewareWithVerifier(sessionIssuer)
-	} else {
-		slog.Warn("RETICORA_SESSION_KEY_PATH not set; bearer tokens are accepted without signature verification")
+	// Session tokens are always verified cryptographically unless the operator
+	// explicitly opted into the insecure development mode.
+	authMiddleware := middleware.AuthMiddlewareWithVerifier(sessionIssuer)
+	if sessionIssuer == nil {
+		slog.Warn("INSECURE DEVELOPMENT MODE: bearer tokens are accepted without signature verification")
+		authMiddleware = middleware.AuthMiddleware
 	}
 
 	// Middleware chain per spec:
@@ -247,6 +242,39 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("server shutdown error", "error", err)
 	}
+}
+
+// loadSessionIssuer reads and parses the RS256 session signing key. A nil
+// issuer (unverified development mode) is only returned when the operator
+// explicitly opted in via RETICORA_ALLOW_INSECURE_DEV_AUTH; otherwise a
+// missing or unreadable key is an error so the server fails fast instead of
+// silently accepting unsigned tokens.
+func loadSessionIssuer(cfg *config.Config) (*identity.SessionIssuer, error) {
+	if cfg.SessionKeyPath == "" {
+		if cfg.AllowInsecureDevAuth {
+			slog.Warn("RETICORA_SESSION_KEY_PATH not set and RETICORA_ALLOW_INSECURE_DEV_AUTH=true; " +
+				"session tokens will NOT be signature-verified — never use this outside local development")
+			return nil, nil
+		}
+		return nil, fmt.Errorf("RETICORA_SESSION_KEY_PATH is required; " +
+			"set RETICORA_ALLOW_INSECURE_DEV_AUTH=true to explicitly opt into insecure development mode")
+	}
+
+	keyData, err := os.ReadFile(cfg.SessionKeyPath)
+	if err != nil {
+		if cfg.AllowInsecureDevAuth {
+			slog.Warn("failed to read session key and RETICORA_ALLOW_INSECURE_DEV_AUTH=true; "+
+				"session tokens will NOT be signature-verified", "path", cfg.SessionKeyPath, "error", err)
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read session key %q: %w", cfg.SessionKeyPath, err)
+	}
+
+	issuer, err := identity.NewSessionIssuer(keyData)
+	if err != nil {
+		return nil, fmt.Errorf("parse session key %q: %w", cfg.SessionKeyPath, err)
+	}
+	return issuer, nil
 }
 
 // maskDSN hides password from database URL for logging.

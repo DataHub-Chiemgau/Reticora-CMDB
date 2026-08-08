@@ -158,7 +158,7 @@ func requiresTenant(r *http.Request) bool {
 		return false
 	}
 	switch r.URL.Path {
-	case "/api/v1/auth/config", "/api/v1/auth/login", "/api/v1/auth/callback", "/api/v1/auth/refresh":
+	case "/api/v1/auth/config", "/api/v1/auth/callback", "/api/v1/auth/refresh":
 		return false
 	default:
 		return true
@@ -188,6 +188,23 @@ func parseJWTClaims(token string) (Claims, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) < 2 {
 		return Claims{}, fmt.Errorf("invalid JWT format")
+	}
+
+	// Even in unverified development mode the token header must declare the
+	// expected asymmetric algorithm, so that alg=none or HMAC-confusion
+	// tokens are rejected instead of trusted.
+	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return Claims{}, fmt.Errorf("decode JWT header: %w", err)
+	}
+	var header struct {
+		Algorithm string `json:"alg"`
+	}
+	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		return Claims{}, fmt.Errorf("parse JWT header: %w", err)
+	}
+	if header.Algorithm != "RS256" {
+		return Claims{}, fmt.Errorf("unexpected JWT algorithm %q", header.Algorithm)
 	}
 
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
