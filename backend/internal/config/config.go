@@ -33,11 +33,12 @@ type Config struct {
 	S3UseSSL    bool
 
 	// Auth / OIDC
-	OIDCIssuerURL    string
-	OIDCClientID     string
-	OIDCClientSecret string
-	OIDCRedirectURL  string
-	SessionKeyPath   string // path to RS256 private key PEM for session JWTs
+	OIDCIssuerURL        string
+	OIDCClientID         string
+	OIDCClientSecret     string
+	OIDCRedirectURL      string
+	SessionKeyPath       string // path to RS256 private key PEM for session JWTs
+	AllowInsecureDevAuth bool   // opt-in: accept session tokens without signature verification
 
 	// Entitlements
 	DefaultPlan            string // plan applied to tenants without entitlement rows
@@ -83,11 +84,12 @@ func Load() *Config {
 		S3SecretKey: envOrDefault("RETICORA_S3_SECRET_KEY", "reticora_dev"),
 		S3UseSSL:    envOrDefault("RETICORA_S3_USE_SSL", "false") == "true",
 
-		OIDCIssuerURL:    envOrDefault("RETICORA_OIDC_ISSUER_URL", "http://localhost:8180/realms/reticora"),
-		OIDCClientID:     envOrDefault("RETICORA_OIDC_CLIENT_ID", "reticora-app"),
-		OIDCClientSecret: envOrDefault("RETICORA_OIDC_CLIENT_SECRET", ""),
-		OIDCRedirectURL:  envOrDefault("RETICORA_OIDC_REDIRECT_URL", ""),
-		SessionKeyPath:   envOrDefault("RETICORA_SESSION_KEY_PATH", ""),
+		OIDCIssuerURL:        envOrDefault("RETICORA_OIDC_ISSUER_URL", "http://localhost:8180/realms/reticora"),
+		OIDCClientID:         envOrDefault("RETICORA_OIDC_CLIENT_ID", "reticora-app"),
+		OIDCClientSecret:     envOrDefault("RETICORA_OIDC_CLIENT_SECRET", ""),
+		OIDCRedirectURL:      envOrDefault("RETICORA_OIDC_REDIRECT_URL", ""),
+		SessionKeyPath:       envOrDefault("RETICORA_SESSION_KEY_PATH", ""),
+		AllowInsecureDevAuth: envOrDefault("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false") == "true",
 
 		DefaultPlan:            envOrDefault("RETICORA_DEFAULT_PLAN", "essential"),
 		EntitlementEnforcement: envOrDefault("RETICORA_ENTITLEMENT_ENFORCEMENT", "true") != "false",

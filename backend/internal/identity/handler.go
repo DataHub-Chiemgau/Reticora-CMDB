@@ -30,7 +30,6 @@ func NewHandler(oidc *OIDCProvider, sessions *SessionIssuer) *Handler {
 // RegisterRoutes registers authentication routes on the provided router.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/auth/config", h.Config)
-	r.Post("/api/v1/auth/login", h.Login)
 	r.Post("/api/v1/auth/callback", h.Callback)
 	r.Post("/api/v1/auth/refresh", h.Refresh)
 	r.Get("/api/v1/auth/me", h.Me)
@@ -58,34 +57,10 @@ func (h *Handler) Config(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, cfg)
 }
 
-// Login initiates the OIDC authentication flow.
-func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	if err := r.Context().Err(); err != nil {
-		writeContextError(w, err)
-		return
-	}
-
-	var req struct {
-		Code string `json:"code"`
-	}
-	if err := api.ReadJSON(r, &req); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
-
-	sessionToken, expiresAt, _, err := h.exchangeAndIssue(r.Context(), req.Code, "")
-	if err != nil {
-		writeIdentityError(w, err)
-		return
-	}
-
-	api.WriteJSON(w, http.StatusOK, map[string]string{
-		"token":      sessionToken,
-		"expires_at": expiresAt.Format(time.RFC3339),
-	})
-}
-
 // Callback handles the OIDC callback and issues an internal session token.
+// The authorization code exchange is only accepted together with the PKCE
+// code verifier and the transaction state, so an injected or stolen code
+// cannot be redeemed without the browser-side secrets.
 func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	if err := r.Context().Err(); err != nil {
 		writeContextError(w, err)
@@ -103,6 +78,10 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.State) == "" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "state is required")
+		return
+	}
+	if strings.TrimSpace(req.CodeVerifier) == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "code_verifier is required")
 		return
 	}
 
@@ -307,12 +286,13 @@ func permissionsFromGroups(groups []string) []Permission {
 }
 
 func readerPermissions() []Permission {
-	return []Permission{
-		PermCIRead,
-		PermSiteRead,
-		PermTopologyRead,
-		PermAuditRead,
+	readers := make([]Permission, 0)
+	for _, permission := range allPermissions() {
+		if strings.HasSuffix(string(permission), ":read") {
+			readers = append(readers, permission)
+		}
 	}
+	return readers
 }
 
 func editorPermissions() []Permission {
@@ -322,37 +302,38 @@ func editorPermissions() []Permission {
 		PermCIDelete,
 		PermSiteRead,
 		PermSiteWrite,
+		PermRackRead,
 		PermRackWrite,
+		PermRelationshipRead,
 		PermRelationshipWrite,
+		PermContactRead,
 		PermContactWrite,
 		PermTopologyRead,
+		PermDiscoveryRead,
+		PermDiscoveryWrite,
 		PermDiscoveryIngest,
+		PermAssetRead,
+		PermAssetWrite,
+		PermAssignmentRead,
+		PermAssignmentWrite,
+		PermDocumentRead,
+		PermDocumentWrite,
+		PermStocktakeRead,
+		PermStocktakeWrite,
+		PermTicketRead,
+		PermTicketWrite,
+		PermSLARead,
+		PermIPAMRead,
+		PermIPAMWrite,
+		PermFormRead,
+		PermFormWrite,
+		PermWorkflowRead,
+		PermWorkflowWrite,
+		PermComplianceRead,
+		PermMonitoringRead,
+		PermSearchRead,
+		PermAIRead,
 		PermExportRun,
-	}
-}
-
-func allPermissions() []Permission {
-	return []Permission{
-		PermCIRead,
-		PermCIWrite,
-		PermCIDelete,
-		PermCITypeManage,
-		PermSiteRead,
-		PermSiteWrite,
-		PermRackWrite,
-		PermRelationshipWrite,
-		PermContactWrite,
-		PermTopologyRead,
-		PermDiscoveryIngest,
-		PermCollectorManage,
-		PermCredentialManage,
-		PermWebhookManage,
-		PermExportRun,
-		PermUserManage,
-		PermRoleManage,
-		PermEntitlementManage,
-		PermAuditRead,
-		PermAPIKeyManage,
 	}
 }
 
@@ -403,6 +384,7 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		writeContextError(w, err)
 	case strings.Contains(err.Error(), "authorization code is required"),
+		strings.Contains(err.Error(), "PKCE code verifier is required"),
 		strings.Contains(err.Error(), "ID token is required"),
 		strings.Contains(err.Error(), "groups claim"):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -410,6 +392,10 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 		strings.Contains(err.Error(), "unexpected ID token issuer"),
 		strings.Contains(err.Error(), "ID token is expired"),
 		strings.Contains(err.Error(), "ID token subject is required"),
+		strings.Contains(err.Error(), "verify ID token signature"),
+		strings.Contains(err.Error(), "ID token audience"),
+		strings.Contains(err.Error(), "authorized party"),
+		strings.Contains(err.Error(), "unexpected ID token nonce"),
 		strings.Contains(err.Error(), "missing ID token"):
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
 	case strings.Contains(err.Error(), "session issuer is not configured"),

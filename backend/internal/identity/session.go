@@ -100,6 +100,22 @@ func (s *SessionIssuer) Validate(token string) (*SessionClaims, error) {
 		return nil, errors.New("identity: invalid JWT format")
 	}
 
+	// Pin the signing algorithm so that alg=none or HMAC-confusion tokens are
+	// rejected before any signature material is processed.
+	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, fmt.Errorf("identity: decode JWT header: %w", err)
+	}
+	var header struct {
+		Algorithm string `json:"alg"`
+	}
+	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		return nil, fmt.Errorf("identity: parse JWT header: %w", err)
+	}
+	if header.Algorithm != "RS256" {
+		return nil, fmt.Errorf("identity: unexpected JWT algorithm %q", header.Algorithm)
+	}
+
 	signingInput := parts[0] + "." + parts[1]
 	hash := sha256.Sum256([]byte(signingInput))
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])

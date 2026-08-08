@@ -32,6 +32,18 @@ spec:
               value: "redis://redis:6379"
             - name: RETICORA_ENVIRONMENT
               value: "production"
+            # Session-token signature verification is mandatory in
+            # production; the pod refuses to start without the key.
+            - name: RETICORA_SESSION_KEY_PATH
+              value: "/etc/reticora/session/private.pem"
+          volumeMounts:
+            - name: session-key
+              mountPath: /etc/reticora/session
+              readOnly: true
+      volumes:
+        - name: session-key
+          secret:
+            secretName: reticora-session-key
           livenessProbe:
             httpGet:
               path: /healthz

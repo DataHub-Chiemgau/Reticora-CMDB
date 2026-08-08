@@ -3,7 +3,10 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,8 +30,9 @@ type memoryRateLimiterStore struct {
 }
 
 // RateLimiter returns middleware that enforces a token-bucket rate limit.
-// Default: 600 requests/minute per key (user ID or API key).
-// The key is extracted from X-Organization-ID + authenticated user/API key.
+// Default: 600 requests/minute per principal (user ID or API key).
+// The key is derived exclusively from the authenticated principal context;
+// unauthenticated requests (public auth endpoints) are keyed by client IP.
 // When a cache.Store is provided (Redis), it uses a sliding-window counter.
 // Otherwise falls back to an in-memory token bucket.
 func RateLimiter(requestsPerMinute int) func(http.Handler) http.Handler {
@@ -43,13 +47,7 @@ func RateLimiter(requestsPerMinute int) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := rateLimitKey(r)
-			if key == "" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			if !store.allow(key) {
+			if !store.allow(rateLimitKey(r)) {
 				httpx.RateLimited(w, r, "rate limit exceeded, try again later")
 				return
 			}
@@ -68,16 +66,13 @@ func RateLimiterWithStore(requestsPerMinute int, store cache.Store) func(http.Ha
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := rateLimitKey(r)
-			if key == "" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			allowed, err := allowWithStore(r.Context(), store, key, requestsPerMinute)
+			allowed, err := allowWithStore(r.Context(), store, rateLimitKey(r), requestsPerMinute)
 			if err != nil {
-				// On Redis errors, allow the request (fail-open)
-				next.ServeHTTP(w, r)
+				// Fail closed: a cache outage must not turn the rate limiter
+				// off, otherwise brute-force protection silently disappears
+				// exactly when the system is under stress.
+				slog.Warn("rate limiter backend error, rejecting request", "error", err)
+				httpx.RateLimited(w, r, "rate limiter unavailable, try again later")
 				return
 			}
 			if !allowed {
@@ -136,15 +131,29 @@ func (s *memoryRateLimiterStore) allow(key string) bool {
 	return true
 }
 
+// rateLimitKey derives the bucket key from the authenticated principal so the
+// caller cannot influence its own limit by rotating headers. Requests without
+// a principal (public auth endpoints) are bucketed by client IP, which keeps
+// credential-stuffing and code-exchange brute force throttled.
 func rateLimitKey(r *http.Request) string {
-	// Use org + user/apikey as the rate limit key
-	orgID := r.Header.Get("X-Organization-ID")
-	userID := r.Header.Get("X-User-ID")
-	if userID == "" {
-		userID = r.RemoteAddr
+	if principal, ok := PrincipalFromContext(r.Context()); ok && principal.OrganizationID != "" {
+		subject := principal.Subject
+		if subject == "" {
+			subject = "anonymous"
+		}
+		return "principal:" + principal.OrganizationID + ":" + string(principal.Type) + ":" + subject
 	}
-	if orgID == "" {
-		return ""
+	return "ip:" + clientIP(r)
+}
+
+// clientIP extracts the client IP from RemoteAddr, stripping the port.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil || host == "" {
+		if trimmed := strings.TrimSpace(r.RemoteAddr); trimmed != "" {
+			return trimmed
+		}
+		return "unknown"
 	}
-	return orgID + ":" + userID
+	return host
 }

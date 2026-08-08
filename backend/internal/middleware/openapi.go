@@ -188,7 +188,6 @@ func (v *OpenAPIValidator) registerKnownRoutes() {
 		"POST /api/v1/webhooks",
 		"POST /api/v1/collectors",
 		"POST /api/v1/ingest/bulk",
-		"POST /api/v1/auth/login",
 		"POST /api/v1/auth/callback",
 		"POST /api/v1/auth/refresh",
 		"POST /api/v1/entitlements",

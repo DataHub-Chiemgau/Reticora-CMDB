@@ -44,22 +44,15 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	res.HasMore = false
 	api.WriteJSON(w, http.StatusOK, res)
 }
+
+// Reindex handles POST /api/v1/search/reindex. The route is gated by the
+// search:write permission in the router's authorization layer; the handler
+// only needs the tenant context.
 func (h *Handler) Reindex(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
-	}
-	if h.permissions != nil && t.UserID != "" {
-		ok, err := h.permissions.HasPermission(t.OrganizationID, t.UserID, "search:write")
-		if err != nil {
-			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
-			return
-		}
-		if !ok {
-			api.WriteError(w, http.StatusForbidden, "Forbidden", "missing permission search:write")
-			return
-		}
 	}
 	out, err := h.backend.ReindexTenant(t.OrganizationID)
 	if err != nil {
