@@ -176,7 +176,10 @@ func (c *SCIMConnector) do(ctx context.Context, method, path string, body any, o
 	defer resp.Body.Close()
 	limited := io.LimitReader(resp.Body, maxSCIMResponseBytes)
 	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(limited)
+		b, rerr := io.ReadAll(limited)
+		if rerr != nil {
+			return fmt.Errorf("SCIM %s %s failed: %s (error body unreadable: %v)", method, path, resp.Status, rerr)
+		}
 		return fmt.Errorf("SCIM %s %s failed: %s", method, path, strings.TrimSpace(string(b)))
 	}
 	if out != nil && resp.StatusCode != http.StatusNoContent {

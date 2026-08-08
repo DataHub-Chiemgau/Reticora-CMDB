@@ -235,7 +235,10 @@ func (p *Plugin) redfishGet(ctx context.Context, url, username, password string,
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		body, rerr := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		if rerr != nil {
+			return fmt.Errorf("HTTP %d (error body unreadable: %v)", resp.StatusCode, rerr)
+		}
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 

@@ -16,3 +16,30 @@ func TestValidateSubset(t *testing.T) {
 		t.Fatalf("expected field errors, got %#v", ve.Fields)
 	}
 }
+
+func TestValidateInvalidSchemaStructure(t *testing.T) {
+	cases := []JSONMap{
+		{"type": "object", "required": "name"},
+		{"type": "object", "required": []any{42}},
+		{"type": "object", "properties": "name"},
+		{"type": "object", "properties": map[string]any{"name": "string"}},
+		{"type": "array", "items": "string"},
+	}
+	values := []any{
+		map[string]any{"name": "Alice"},
+		map[string]any{"name": "Alice"},
+		map[string]any{"name": "Alice"},
+		map[string]any{"name": "Alice"},
+		[]any{"a"},
+	}
+	for i, schema := range cases {
+		err := Validate(schema, values[i])
+		if err == nil {
+			t.Fatalf("case %d: expected schema error", i)
+		}
+		ve, ok := err.(ValidationError)
+		if !ok || len(ve.Fields) == 0 {
+			t.Fatalf("case %d: expected field errors, got %#v", i, err)
+		}
+	}
+}

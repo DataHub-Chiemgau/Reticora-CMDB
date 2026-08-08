@@ -77,7 +77,10 @@ func (c *HTTPClient) Enroll(ctx context.Context, req EnrollmentRequest) (*Enroll
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		payload, rerr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if rerr != nil {
+			return nil, fmt.Errorf("enrollment: unexpected status %s (error body unreadable: %v)", resp.Status, rerr)
+		}
 		return nil, fmt.Errorf("enrollment: unexpected status %s: %s", resp.Status, strings.TrimSpace(string(payload)))
 	}
 

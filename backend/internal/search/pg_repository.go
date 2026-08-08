@@ -33,7 +33,10 @@ func (r *PGRepository) IndexDocument(doc Document) error {
 	if doc.OrganizationID == "" || doc.EntityType == "" || doc.EntityID == "" {
 		return fmt.Errorf("organization_id, entity_type and entity_id are required")
 	}
-	meta, _ := json.Marshal(doc.Metadata)
+	meta, err := json.Marshal(doc.Metadata)
+	if err != nil {
+		return fmt.Errorf("marshal document metadata: %w", err)
+	}
 	return r.withTenant(context.Background(), doc.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO search_document (organization_id, entity_type, entity_id, title, summary, url, metadata) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (organization_id, entity_type, entity_id) DO UPDATE SET title=EXCLUDED.title, summary=EXCLUDED.summary, url=EXCLUDED.url, metadata=EXCLUDED.metadata, updated_at=now()`, doc.OrganizationID, doc.EntityType, doc.EntityID, doc.Title, doc.Summary, doc.URL, meta)
 		return err
@@ -102,7 +105,9 @@ func (r *PGRepository) Query(q Query) (Result, error) {
 			if err := rows.Scan(&h.ID, &h.OrganizationID, &h.EntityType, &h.EntityID, &h.Title, &h.Summary, &h.URL, &meta, &h.UpdatedAt, &h.Score, &snippet, &res.Total); err != nil {
 				return err
 			}
-			_ = json.Unmarshal(meta, &h.Metadata)
+			if err := json.Unmarshal(meta, &h.Metadata); err != nil {
+				return fmt.Errorf("unmarshal document metadata for %s: %w", h.ID, err)
+			}
 			if snippet != "" {
 				h.Highlights = []string{snippet}
 			}

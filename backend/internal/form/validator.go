@@ -87,21 +87,36 @@ func validateValue(schema JSONMap, value any, path string, fields *[]FieldError)
 type jsonNumber interface{ String() string }
 
 func validateObject(schema JSONMap, obj map[string]any, path string, fields *[]FieldError) {
-	if req, ok := schema["required"].([]any); ok {
-		for _, raw := range req {
-			name, _ := raw.(string)
-			if name == "" {
-				continue
-			}
-			if _, exists := obj[name]; !exists {
-				add(fields, join(path, name), "is required")
+	if raw, exists := schema["required"]; exists && raw != nil {
+		req, ok := raw.([]any)
+		if !ok {
+			add(fields, path, "schema 'required' must be an array")
+		} else {
+			for _, item := range req {
+				name, ok := item.(string)
+				if !ok || name == "" {
+					add(fields, path, "schema 'required' entries must be non-empty strings")
+					continue
+				}
+				if _, exists := obj[name]; !exists {
+					add(fields, join(path, name), "is required")
+				}
 			}
 		}
 	}
-	props, _ := schema["properties"].(map[string]any)
+	rawProps, exists := schema["properties"]
+	if !exists || rawProps == nil {
+		return
+	}
+	props, ok := rawProps.(map[string]any)
+	if !ok {
+		add(fields, path, "schema 'properties' must be an object")
+		return
+	}
 	for name, raw := range props {
-		child, _ := raw.(map[string]any)
-		if child == nil {
+		child, ok := raw.(map[string]any)
+		if !ok {
+			add(fields, join(path, name), "schema property must be an object")
 			continue
 		}
 		if val, exists := obj[name]; exists {
@@ -117,8 +132,13 @@ func validateArray(schema JSONMap, arr []any, path string, fields *[]FieldError)
 	if max, ok := number(schema["maxItems"]); ok && float64(len(arr)) > max {
 		add(fields, path, "has too many items")
 	}
-	itemSchema, _ := schema["items"].(map[string]any)
-	if itemSchema == nil {
+	rawItems, exists := schema["items"]
+	if !exists || rawItems == nil {
+		return
+	}
+	itemSchema, ok := rawItems.(map[string]any)
+	if !ok {
+		add(fields, path, "schema 'items' must be an object")
 		return
 	}
 	for i, item := range arr {

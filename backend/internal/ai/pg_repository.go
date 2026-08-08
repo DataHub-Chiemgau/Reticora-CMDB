@@ -63,14 +63,20 @@ func (r *PGRepository) ListConversations(orgID, userID string) ([]Conversation, 
 	return out, err
 }
 func (r *PGRepository) AddMessage(orgID, conversationID, role, content string, promptTokens, completionTokens int, citations []Citation) error {
-	cites, _ := json.Marshal(citations)
+	cites, err := json.Marshal(citations)
+	if err != nil {
+		return fmt.Errorf("marshal citations: %w", err)
+	}
 	return r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO ai_message (organization_id,conversation_id,role,content,prompt_tokens,completion_tokens,citations) VALUES ($1,$2,$3,$4,$5,$6,$7); UPDATE ai_conversation SET updated_at=now() WHERE organization_id=$1 AND id=$2`, orgID, conversationID, role, content, promptTokens, completionTokens, cites)
 		return err
 	})
 }
 func (r *PGRepository) UpsertChunk(ch Chunk) error {
-	emb, _ := json.Marshal(ch.Embedding)
+	emb, err := json.Marshal(ch.Embedding)
+	if err != nil {
+		return fmt.Errorf("marshal embedding: %w", err)
+	}
 	return r.withTenant(context.Background(), ch.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO ai_chunk (organization_id,entity_type,entity_id,title,content,url,embedding) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (organization_id,entity_type,entity_id) DO UPDATE SET title=EXCLUDED.title, content=EXCLUDED.content, url=EXCLUDED.url, embedding=EXCLUDED.embedding, updated_at=now()`, ch.OrganizationID, ch.EntityType, ch.EntityID, ch.Title, ch.Content, ch.URL, emb)
 		return err

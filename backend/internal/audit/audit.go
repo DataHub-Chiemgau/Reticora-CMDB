@@ -79,7 +79,13 @@ func ComputeHash(entry *Entry) string {
 		PreviousHash: entry.PreviousHash,
 	}
 
-	b, _ := json.Marshal(data)
+	// The struct above contains only JSON-marshalable fields, so an error here
+	// is impossible in practice; fall back to the type-quoted value if the
+	// representation ever changes.
+	b, err := json.Marshal(data)
+	if err != nil {
+		b = []byte(fmt.Sprintf("%#v", data))
+	}
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }
