@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const jobColumns = `id::text, organization_id::text, initiated_by::text, format, status, filters,
+const jobColumns = `id::text, organization_id::text, COALESCE(initiated_by::text, ''), format, status, filters,
 	COALESCE(object_key, ''), row_count, file_size_bytes, COALESCE(error_message, ''),
 	started_at, completed_at, expires_at, created_at, updated_at`
 

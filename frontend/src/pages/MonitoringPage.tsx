@@ -22,6 +22,16 @@ const severityVariants = {
   info: 'info',
 } as const;
 
+const initialAlertForm: AlertRuleCreateRequest = {
+  name: '',
+  metric_name: '',
+  condition: 'gt',
+  threshold: 0,
+  duration: '5m',
+  severity: 'warning',
+  enabled: true,
+};
+
 export function MonitoringPage() {
   const { t } = useTranslation();
   const alerts = useAlertRules();
@@ -33,19 +43,11 @@ export function MonitoringPage() {
   const [query, setQuery] = useState({ name: '', ci_id: '' });
   const points = useMetricPoints({ name: query.name, ci_id: query.ci_id });
 
-  const [form, setForm] = useState<AlertRuleCreateRequest>({
-    name: '',
-    metric_name: '',
-    condition: 'gt',
-    threshold: 0,
-    duration: '5m',
-    severity: 'warning',
-    enabled: true,
-  });
+  const [form, setForm] = useState<AlertRuleCreateRequest>(initialAlertForm);
 
   const submitRule = () => {
     if (!form.name || !form.metric_name) return;
-    createAlert.mutate(form, { onSuccess: () => setForm({ ...form, name: '' }) });
+    createAlert.mutate(form, { onSuccess: () => setForm(initialAlertForm) });
   };
 
   if (alerts.isLoading) {
