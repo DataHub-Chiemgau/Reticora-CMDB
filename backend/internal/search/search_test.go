@@ -2,6 +2,7 @@ package search
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -56,3 +57,50 @@ func TestOpenSearchHTTPQuery(t *testing.T) {
 func contains(s, sub string) bool {
 	return len(sub) == 0 || (len(s) >= len(sub) && (s == sub || contains(s[1:], sub) || s[:len(sub)] == sub))
 }
+
+type failingRoundTripper struct{ err error }
+
+func (f failingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) { return nil, f.err }
+
+func TestOpenSearchPingInvalidURL(t *testing.T) {
+	b := NewOpenSearchBackend(OpenSearchConfig{URL: "://bad-url"}, nil)
+	if err := b.Ping(); err == nil {
+		t.Fatal("expected error for invalid URL")
+	}
+}
+
+func TestOpenSearchPingUnreachable(t *testing.T) {
+	b := NewOpenSearchBackend(OpenSearchConfig{URL: "http://opensearch.local"}, &http.Client{Transport: failingRoundTripper{err: errTest}})
+	if err := b.Ping(); err == nil {
+		t.Fatal("expected error for unreachable backend")
+	}
+}
+
+func TestOpenSearchIndexDocumentMarshalError(t *testing.T) {
+	b := NewOpenSearchBackend(OpenSearchConfig{URL: "http://opensearch.local"}, &http.Client{Transport: failingRoundTripper{err: errTest}})
+	doc := Document{OrganizationID: "org", EntityType: "ci", EntityID: "1", Metadata: map[string]string{"bad": "\xff\xfe"}}
+	if err := b.IndexDocument(doc); err == nil {
+		t.Fatal("expected marshal error for invalid UTF-8 metadata")
+	}
+}
+
+func TestOpenSearchQueryRoundTrip(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"hits":{"total":{"value":1},"hits":[{"_score":1.5,"_source":{"id":"d1","organization_id":"org","entity_type":"ci","entity_id":"1","title":"switch"},"highlight":{"title":["<em>switch</em>"]}}]}}`))
+	}))
+	defer srv.Close()
+	b := NewOpenSearchBackend(OpenSearchConfig{URL: srv.URL}, srv.Client())
+	if err := b.Ping(); err != nil {
+		t.Fatal(err)
+	}
+	res, err := b.Query(Query{OrganizationID: "org", Text: "switch", Limit: 10, Highlight: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Total != 1 || len(res.Data) != 1 || res.Data[0].Title != "switch" || len(res.Data[0].Highlights) != 1 {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+var errTest = errors.New("transport failure")

@@ -38,7 +38,10 @@ func NewOpenSearchBackend(cfg OpenSearchConfig, client *http.Client) *OpenSearch
 	return &OpenSearchBackend{cfg: cfg, client: client}
 }
 func (b *OpenSearchBackend) Ping() error {
-	req, _ := http.NewRequest(http.MethodGet, b.cfg.URL, nil)
+	req, err := http.NewRequest(http.MethodGet, b.cfg.URL, nil)
+	if err != nil {
+		return fmt.Errorf("opensearch ping: build request: %w", err)
+	}
 	b.auth(req)
 	res, err := b.client.Do(req)
 	if err != nil {
@@ -51,7 +54,10 @@ func (b *OpenSearchBackend) Ping() error {
 	return nil
 }
 func (b *OpenSearchBackend) IndexDocument(doc Document) error {
-	body, _ := json.Marshal(doc)
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("opensearch index: marshal document: %w", err)
+	}
 	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/%s/_doc/%s-%s-%s", b.cfg.URL, b.cfg.Index, doc.OrganizationID, doc.EntityType, doc.EntityID), bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -118,7 +124,10 @@ func (b *OpenSearchBackend) Query(q Query) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	raw, _ := json.Marshal(body)
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return Result{}, fmt.Errorf("opensearch query: marshal request: %w", err)
+	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, fmt.Sprintf("%s/%s/_search", b.cfg.URL, b.cfg.Index), bytes.NewReader(raw))
 	if err != nil {
 		return Result{}, err
