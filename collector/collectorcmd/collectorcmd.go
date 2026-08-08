@@ -9,8 +9,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -30,6 +30,9 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/ssh"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/sweep"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/wmi"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/transport"
 )
 
 type collectorConfig struct {
@@ -41,6 +44,20 @@ type collectorConfig struct {
 	DiscoveryInterval time.Duration
 	HeartbeatInterval time.Duration
 	Credentials       map[string]string
+	// SpoolDir is the disk buffer location for discovery results collected
+	// while the backend is unreachable (offline operation per spec §5.2).
+	SpoolDir string
+	// TLS identity material. When CertPEM/KeyPEM are set (directly, via
+	// CertFile/KeyFile, or via the keystore at CredentialsPath) the upload
+	// and heartbeat clients authenticate with mTLS.
+	TLSCertPEM      []byte
+	TLSKeyPEM       []byte
+	TLSCAPEM        []byte
+	TLSCertFile     string
+	TLSKeyFile      string
+	TLSCAFile       string
+	TLSServerName   string
+	CredentialsPath string
 }
 
 // pluginRegistry maps protocol names to plugin instances.
@@ -70,8 +87,14 @@ func Main() {
 
 	slog.Info("starting collector", "environment", environment)
 
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13}
-	_ = tlsConfig
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	uploader, err := newUploader(ctx, collectorCfg)
+	if err != nil {
+		slog.Error("collector upload setup failed", "error", err)
+		os.Exit(1)
+	}
 
 	natsURL := envOrDefault("RETICORA_NATS_URL", "nats://localhost:4222")
 	slog.Info("collector configured",
@@ -81,13 +104,12 @@ func Main() {
 		"protocols", collectorCfg.Protocols,
 		"discovery_interval", collectorCfg.DiscoveryInterval.String(),
 		"heartbeat_interval", collectorCfg.HeartbeatInterval.String(),
+		"mtls", uploader.mtls,
+		"spool_dir", collectorCfg.SpoolDir,
 	)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go runDiscoveryLoop(ctx, collectorCfg)
-	go runHeartbeatLoop(ctx, collectorCfg)
+	go runDiscoveryLoop(ctx, collectorCfg, uploader)
+	go runHeartbeatLoop(ctx, collectorCfg, uploader)
 	go runAgentRelay(ctx)
 
 	quit := make(chan os.Signal, 1)
@@ -97,7 +119,112 @@ func Main() {
 	cancel()
 }
 
-func runDiscoveryLoop(ctx context.Context, cfg collectorConfig) {
+// spoolTopic is the buffer topic under which discovery result batches are
+// persisted while the backend is unreachable.
+const spoolTopic = "discovery-results"
+
+// uploader delivers discovery results and heartbeats to the backend. When
+// client-certificate material is configured it uses the mTLS transport from
+// edgecore; otherwise it falls back to plain HTTPS/HTTP so local development
+// keeps working. Failed uploads are spooled to the on-disk buffer and flushed
+// once the backend is reachable again (spec §5.2: "Batch-Upload komprimiert
+// via mTLS (offline: lokaler Puffer)").
+type uploader struct {
+	cfg    collectorConfig
+	client *http.Client
+	mtls   bool
+	spool  *buffer.DiskBuffer
+}
+
+// newUploader builds the upload path: mTLS when certificate material is
+// available, plus the disk spool used for offline buffering.
+func newUploader(ctx context.Context, cfg collectorConfig) (*uploader, error) {
+	u := &uploader{cfg: cfg}
+	if cfg.SpoolDir != "" {
+		u.spool = &buffer.DiskBuffer{Dir: cfg.SpoolDir}
+	}
+
+	certPEM, keyPEM, caPEM, err := loadTLSMaterial(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if len(certPEM) > 0 && len(keyPEM) > 0 {
+		mtlsTransport, err := transport.NewMTLS(transport.Config{
+			ServerName:    cfg.TLSServerName,
+			RootCAsPEM:    caPEM,
+			ClientCertPEM: certPEM,
+			ClientKeyPEM:  keyPEM,
+			Timeout:       30 * time.Second,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("mTLS setup: %w", err)
+		}
+		u.client = mtlsTransport.HTTPClient()
+		u.mtls = true
+	} else {
+		slog.Warn("no collector client certificate configured; uploads use plain TLS/HTTP without client authentication",
+			"hint", "set RETICORA_TLS_CLIENT_CERT_FILE/RETICORA_TLS_CLIENT_KEY_FILE or RETICORA_CREDENTIALS_PATH")
+		u.client = &http.Client{Timeout: 30 * time.Second}
+	}
+	return u, nil
+}
+
+// loadTLSMaterial resolves the collector's client identity from PEM env
+// variables, PEM files, or the keystore written by enrollment.
+func loadTLSMaterial(ctx context.Context, cfg collectorConfig) (certPEM, keyPEM, caPEM []byte, err error) {
+	certPEM, keyPEM, caPEM = cfg.TLSCertPEM, cfg.TLSKeyPEM, cfg.TLSCAPEM
+
+	readIfEmpty := func(current []byte, path string) ([]byte, error) {
+		if len(current) > 0 || path == "" {
+			return current, nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read TLS material from %s: %w", path, err)
+		}
+		return data, nil
+	}
+
+	if certPEM, err = readIfEmpty(certPEM, cfg.TLSCertFile); err != nil {
+		return nil, nil, nil, err
+	}
+	if keyPEM, err = readIfEmpty(keyPEM, cfg.TLSKeyFile); err != nil {
+		return nil, nil, nil, err
+	}
+	if caPEM, err = readIfEmpty(caPEM, cfg.TLSCAFile); err != nil {
+		return nil, nil, nil, err
+	}
+
+	if (len(certPEM) == 0 || len(keyPEM) == 0) && cfg.CredentialsPath != "" {
+		creds, loadErr := (&keystore.FileStore{Path: cfg.CredentialsPath}).Load(ctx)
+		switch {
+		case loadErr == nil:
+			if len(certPEM) == 0 {
+				certPEM = []byte(creds.ClientCertificatePEM)
+			}
+			if len(keyPEM) == 0 {
+				keyPEM = []byte(creds.ClientPrivateKeyPEM)
+			}
+			if len(caPEM) == 0 {
+				caPEM = []byte(creds.CertificateAuthority)
+			}
+		case errors.Is(loadErr, keystore.ErrNotFound):
+			// Not enrolled yet; plain client remains active.
+		default:
+			return nil, nil, nil, fmt.Errorf("load collector credentials: %w", loadErr)
+		}
+	}
+
+	if len(certPEM) == 0 && len(keyPEM) == 0 {
+		return nil, nil, caPEM, nil
+	}
+	if len(certPEM) == 0 || len(keyPEM) == 0 {
+		return nil, nil, nil, fmt.Errorf("collector TLS configuration is incomplete: client certificate and key must both be provided")
+	}
+	return certPEM, keyPEM, caPEM, nil
+}
+
+func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 	ticker := time.NewTicker(cfg.DiscoveryInterval)
 	defer ticker.Stop()
 
@@ -131,14 +258,16 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig) {
 			allResults = append(allResults, results...)
 		}
 
-		// Upload results to backend in a compressed batch
+		// Upload results to the backend in a compressed batch, then flush any
+		// results spooled while the backend was unreachable.
 		if len(allResults) > 0 {
-			if err := uploadResults(ctx, cfg, allResults); err != nil {
+			if err := up.uploadResults(ctx, allResults); err != nil {
 				slog.Error("failed to upload discovery results", "error", err, "count", len(allResults))
 			} else {
 				slog.Info("discovery results uploaded", "count", len(allResults))
 			}
 		}
+		up.flushSpool(ctx)
 
 		slog.Info("discovery cycle completed", "duration_ms", time.Since(cycleStart).Milliseconds(), "total_results", len(allResults))
 
@@ -195,8 +324,12 @@ func incrementIP(ip net.IP) {
 	}
 }
 
-// uploadResults sends discovery results to the backend via compressed JSON POST.
-func uploadResults(ctx context.Context, cfg collectorConfig, results []plugins.Result) error {
+// uploadResults sends discovery results to the backend via compressed JSON
+// POST. When the upload fails and a spool directory is configured, the batch
+// is persisted to the disk buffer and delivered by flushSpool once the
+// backend is reachable again.
+func (u *uploader) uploadResults(ctx context.Context, results []plugins.Result) error {
+	cfg := u.cfg
 	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
 		slog.Warn("skipping upload due to incomplete configuration")
 		return nil
@@ -207,7 +340,17 @@ func uploadResults(ctx context.Context, cfg collectorConfig, results []plugins.R
 		return fmt.Errorf("marshal results: %w", err)
 	}
 
-	// Compress with gzip
+	if err := u.postPayload(ctx, payload); err != nil {
+		if spoolErr := u.spoolResults(ctx, payload); spoolErr != nil {
+			return fmt.Errorf("upload failed (%v) and spooling failed: %w", err, spoolErr)
+		}
+		return err
+	}
+	return nil
+}
+
+// postPayload compresses and POSTs a single JSON payload to the ingest endpoint.
+func (u *uploader) postPayload(ctx context.Context, payload []byte) error {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(payload); err != nil {
@@ -217,18 +360,17 @@ func uploadResults(ctx context.Context, cfg collectorConfig, results []plugins.R
 		return fmt.Errorf("finalize compression: %w", err)
 	}
 
-	endpoint := strings.TrimRight(cfg.ServerURL, "/") + "/api/v1/discovery/ingest"
+	endpoint := strings.TrimRight(u.cfg.ServerURL, "/") + "/api/v1/discovery/ingest"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &buf)
 	if err != nil {
 		return fmt.Errorf("build upload request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Set("X-Organization-ID", cfg.OrganizationID)
-	req.Header.Set("X-Collector-ID", cfg.CollectorID)
+	req.Header.Set("X-Organization-ID", u.cfg.OrganizationID)
+	req.Header.Set("X-Collector-ID", u.cfg.CollectorID)
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := u.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("upload request: %w", err)
 	}
@@ -240,13 +382,55 @@ func uploadResults(ctx context.Context, cfg collectorConfig, results []plugins.R
 	return nil
 }
 
-func runHeartbeatLoop(ctx context.Context, cfg collectorConfig) {
+// spoolResults persists an undeliverable batch to the disk buffer.
+func (u *uploader) spoolResults(ctx context.Context, payload []byte) error {
+	if u.spool == nil {
+		return nil
+	}
+	id, err := u.spool.Enqueue(ctx, buffer.Message{Topic: spoolTopic, Payload: payload})
+	if err != nil {
+		return err
+	}
+	slog.Info("discovery results spooled for later delivery", "message_id", id)
+	return nil
+}
+
+// flushSpool delivers buffered batches in oldest-first order. Delivery stops
+// at the first failure so spooled batches are never reordered or dropped.
+func (u *uploader) flushSpool(ctx context.Context) {
+	if u.spool == nil || u.cfg.ServerURL == "" {
+		return
+	}
+	msgs, err := u.spool.PeekBatch(ctx, 16)
+	if err != nil {
+		slog.Error("read upload spool failed", "error", err)
+		return
+	}
+	for _, msg := range msgs {
+		if ctx.Err() != nil {
+			return
+		}
+		if msg.Topic != spoolTopic {
+			continue
+		}
+		if err := u.postPayload(ctx, msg.Payload); err != nil {
+			slog.Warn("spool flush postponed; backend still unreachable", "message_id", msg.ID, "error", err)
+			return
+		}
+		if err := u.spool.Ack(ctx, []string{msg.ID}); err != nil {
+			slog.Error("spool ack failed", "message_id", msg.ID, "error", err)
+			return
+		}
+		slog.Info("spooled discovery results delivered", "message_id", msg.ID)
+	}
+}
+
+func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 	ticker := time.NewTicker(cfg.HeartbeatInterval)
 	defer ticker.Stop()
 
-	client := &http.Client{Timeout: 10 * time.Second}
 	for {
-		postHeartbeat(ctx, client, cfg)
+		postHeartbeat(ctx, up.client, cfg)
 		select {
 		case <-ctx.Done():
 			slog.Info("heartbeat loop stopped")
@@ -366,6 +550,15 @@ func loadCollectorConfig() collectorConfig {
 		DiscoveryInterval: durationEnvOrDefault("RETICORA_DISCOVERY_INTERVAL", 15*time.Minute),
 		HeartbeatInterval: durationEnvOrDefault("RETICORA_HEARTBEAT_INTERVAL", time.Minute),
 		Credentials:       creds,
+		SpoolDir:          envOrDefault("RETICORA_SPOOL_DIR", "/var/lib/reticora-collector/spool"),
+		TLSCertPEM:        []byte(os.Getenv("RETICORA_TLS_CLIENT_CERT")),
+		TLSKeyPEM:         []byte(os.Getenv("RETICORA_TLS_CLIENT_KEY")),
+		TLSCAPEM:          []byte(os.Getenv("RETICORA_TLS_CA")),
+		TLSCertFile:       os.Getenv("RETICORA_TLS_CLIENT_CERT_FILE"),
+		TLSKeyFile:        os.Getenv("RETICORA_TLS_CLIENT_KEY_FILE"),
+		TLSCAFile:         os.Getenv("RETICORA_TLS_CA_FILE"),
+		TLSServerName:     os.Getenv("RETICORA_TLS_SERVER_NAME"),
+		CredentialsPath:   envOrDefault("RETICORA_CREDENTIALS_PATH", "/var/lib/reticora-collector/credentials.json"),
 	}
 }
 

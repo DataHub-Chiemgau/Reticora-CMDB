@@ -351,7 +351,25 @@ is the default backend. Set `RETICORA_SEARCH_BACKEND=opensearch` together with
 `RETICORA_OPENSEARCH_URL` to use OpenSearch; startup pings OpenSearch and fails
 loudly if it is unreachable. User input is passed as structured parameters (SQL
 bind variables or OpenSearch JSON DSL), never interpolated into query strings.
-`POST /api/v1/search/reindex` rebuilds the tenant index.
+`POST /api/v1/search/reindex` rebuilds the tenant index. The index is kept
+fresh between rebuilds: the CI repository is wrapped by an indexing decorator
+(`ci.NewIndexingRepository`) that mirrors every successful create, update and
+delete into the search backend — on every write path, including collector bulk
+ingest. Indexing is best-effort: a failing search backend is logged and never
+fails the CI mutation, because the index can always be rebuilt via reindex.
+
+**Collector connectivity:** the collector authenticates uploads with mTLS when
+client-certificate material is available — from `RETICORA_TLS_CLIENT_CERT`/
+`RETICORA_TLS_CLIENT_KEY` (or the `_FILE` variants), or from the enrollment
+keystore at `RETICORA_CREDENTIALS_PATH` (default
+`/var/lib/reticora-collector/credentials.json`). The mTLS HTTP client is built
+by `edgecore/transport.NewMTLS` (TLS 1.3 minimum). Without certificate
+material the collector logs a warning and falls back to plain HTTPS/HTTP so
+local development keeps working. Discovery results are uploaded as
+gzip-compressed batches; when the backend is unreachable the batch is spooled
+to the on-disk buffer (`RETICORA_SPOOL_DIR`, default
+`/var/lib/reticora-collector/spool`, implemented by `edgecore/buffer`) and
+flushed in oldest-first order once connectivity returns.
 
 **AI/RAG governance:** `/api/v1/ai/conversations` and `/api/v1/ai/ask` are
 gated by the Pro/Enterprise `ai_assistant` entitlement. If no

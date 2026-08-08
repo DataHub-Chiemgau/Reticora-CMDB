@@ -158,6 +158,11 @@ func main() {
 			repos.Search = osBackend
 		}
 	}
+	// Keep the tenant search index in sync with every CI write (REST handler,
+	// collector bulk ingest, workflow executor). Indexing is best-effort: a
+	// failing search backend never breaks CI persistence, and the index can
+	// always be rebuilt via POST /api/v1/search/reindex.
+	repos.CI = ci.NewIndexingRepository(repos.CI, search.NewCIIndexer(repos.Search))
 	aiProvider := ai.NewOpenAIProvider(ai.ProviderConfig{
 		BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, ChatModel: cfg.LLMChatModel, EmbeddingModel: cfg.LLMEmbeddingModel,
 	}, nil)
