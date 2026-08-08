@@ -1,0 +1,16 @@
+# Compose overrides: build the images from source instead of pulling prebuilt
+# ones. Applied automatically because the file is named
+# docker-compose.override.yml — delete it when RETICORA_SERVER_IMAGE /
+# RETICORA_FRONTEND_IMAGE point to a registry.
+services:
+  server:
+    build:
+      # The backend module replace-directs to the sibling collector/edgecore
+      # modules, so the build context must be the repository root.
+      context: ../../
+      dockerfile: backend/Dockerfile
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile

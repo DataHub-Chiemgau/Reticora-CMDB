@@ -40,10 +40,6 @@ spec:
             - name: session-key
               mountPath: /etc/reticora/session
               readOnly: true
-      volumes:
-        - name: session-key
-          secret:
-            secretName: reticora-session-key
           livenessProbe:
             httpGet:
               path: /healthz
@@ -63,3 +59,7 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+      volumes:
+        - name: session-key
+          secret:
+            secretName: reticora-session-key

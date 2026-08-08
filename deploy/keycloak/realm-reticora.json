@@ -59,6 +59,7 @@
       "protocol": "openid-connect",
       "enabled": true,
       "publicClient": false,
+      "secret": "RETICORA_OIDC_CLIENT_SECRET_PLACEHOLDER",
       "directAccessGrantsEnabled": true,
       "standardFlowEnabled": true,
       "serviceAccountsEnabled": false,

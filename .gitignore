@@ -32,7 +32,16 @@ Thumbs.db
 coverage.out
 
 # Docker
-docker-compose.override.yml
+# NOTE: deploy/docker-compose/docker-compose.override.yml is intentionally
+# tracked (it carries the source-build configuration); the root-level override
+# remains ignored for local development.
+/docker-compose.override.yml
+
+# Installer-generated secrets and rendered configs
+deploy/docker-compose/.env
+deploy/docker-compose/.generated/
+deploy/docker-compose/secrets/
+deploy/docker-compose/docker-compose.override.yml.disabled
 
 # Temporary
 /tmp/
