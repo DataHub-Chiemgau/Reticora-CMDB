@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -34,12 +35,12 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := Query{OrganizationID: t.OrganizationID, UserID: t.UserID, Text: r.URL.Query().Get("q"), EntityTypes: splitTypes(r.URL.Query().Get("type")), Limit: page.Limit, Offset: page.Offset, Highlight: true}
-	res, err := h.backend.Query(q)
+	res, err := h.backend.Query(r.Context(), q)
 	if err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	res.Data = h.filterAllowed(t, res.Data)
+	res.Data = h.filterAllowed(r.Context(), t, res.Data)
 	res.Total = len(res.Data)
 	res.HasMore = false
 	api.WriteJSON(w, http.StatusOK, res)
@@ -54,14 +55,14 @@ func (h *Handler) Reindex(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	out, err := h.backend.ReindexTenant(t.OrganizationID)
+	out, err := h.backend.ReindexTenant(r.Context(), t.OrganizationID)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
 	api.WriteJSON(w, http.StatusAccepted, out)
 }
-func (h *Handler) filterAllowed(t tenant.TenantInfo, hits []Hit) []Hit {
+func (h *Handler) filterAllowed(ctx context.Context, t tenant.TenantInfo, hits []Hit) []Hit {
 	if h.permissions == nil || t.UserID == "" {
 		return hits
 	}
@@ -71,7 +72,7 @@ func (h *Handler) filterAllowed(t tenant.TenantInfo, hits []Hit) []Hit {
 		if key == "" {
 			continue
 		}
-		ok, err := h.permissions.HasPermission(t.OrganizationID, t.UserID, key)
+		ok, err := h.permissions.HasPermission(ctx, t.OrganizationID, t.UserID, key)
 		if err == nil && ok {
 			out = append(out, hit)
 		}

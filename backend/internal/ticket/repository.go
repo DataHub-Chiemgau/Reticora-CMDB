@@ -1,6 +1,7 @@
 package ticket
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,13 +13,13 @@ import (
 
 // Repository defines persistence operations for tickets.
 type Repository interface {
-	List(orgID string, filter FilterParams, page api.PaginationParams) ([]Ticket, int, error)
-	GetByID(orgID, id string) (*Ticket, error)
-	Create(t *Ticket) error
-	Update(orgID, id string, req UpdateRequest) (*Ticket, error)
-	Delete(orgID, id string) error
-	AddComment(c *Comment) error
-	ListComments(orgID, ticketID string, page api.PaginationParams) ([]Comment, int, error)
+	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Ticket, int, error)
+	GetByID(ctx context.Context, orgID, id string) (*Ticket, error)
+	Create(ctx context.Context, t *Ticket) error
+	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Ticket, error)
+	Delete(ctx context.Context, orgID, id string) error
+	AddComment(ctx context.Context, c *Comment) error
+	ListComments(ctx context.Context, orgID, ticketID string, page api.PaginationParams) ([]Comment, int, error)
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -39,7 +40,7 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func (r *MemoryRepository) List(orgID string, filter FilterParams, page api.PaginationParams) ([]Ticket, int, error) {
+func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Ticket, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -114,7 +115,7 @@ func (r *MemoryRepository) List(orgID string, filter FilterParams, page api.Pagi
 	return result[start:end], total, nil
 }
 
-func (r *MemoryRepository) GetByID(orgID, id string) (*Ticket, error) {
+func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Ticket, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -125,7 +126,7 @@ func (r *MemoryRepository) GetByID(orgID, id string) (*Ticket, error) {
 	return t, nil
 }
 
-func (r *MemoryRepository) Create(t *Ticket) error {
+func (r *MemoryRepository) Create(_ context.Context, t *Ticket) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -140,7 +141,7 @@ func (r *MemoryRepository) Create(t *Ticket) error {
 	return nil
 }
 
-func (r *MemoryRepository) Update(orgID, id string, req UpdateRequest) (*Ticket, error) {
+func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req UpdateRequest) (*Ticket, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -192,7 +193,7 @@ func (r *MemoryRepository) Update(orgID, id string, req UpdateRequest) (*Ticket,
 	return t, nil
 }
 
-func (r *MemoryRepository) Delete(orgID, id string) error {
+func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -210,7 +211,7 @@ func (r *MemoryRepository) Delete(orgID, id string) error {
 	return nil
 }
 
-func (r *MemoryRepository) AddComment(c *Comment) error {
+func (r *MemoryRepository) AddComment(_ context.Context, c *Comment) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -229,7 +230,7 @@ func (r *MemoryRepository) AddComment(c *Comment) error {
 	return nil
 }
 
-func (r *MemoryRepository) ListComments(orgID, ticketID string, page api.PaginationParams) ([]Comment, int, error) {
+func (r *MemoryRepository) ListComments(_ context.Context, orgID, ticketID string, page api.PaginationParams) ([]Comment, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 

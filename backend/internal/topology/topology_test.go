@@ -42,8 +42,8 @@ func seed(t *testing.T) (*ci.MemoryRepository, *relationship.MemoryRepository, m
 	foreign := &ci.Item{OrganizationID: "org-2", Name: "foreign", CITypeID: "server"}
 	ciRepo.Create(context.Background(), foreign)
 
-	relRepo.Create(&relationship.Relationship{OrganizationID: "org-1", SourceCIID: sw1, TargetCIID: srv1, RelType: "connected_to", Source: "discovery"})
-	relRepo.Create(&relationship.Relationship{OrganizationID: "org-1", SourceCIID: srv1, TargetCIID: pdu1, RelType: "powered_by", Source: "discovery"})
+	relRepo.Create(context.Background(), &relationship.Relationship{OrganizationID: "org-1", SourceCIID: sw1, TargetCIID: srv1, RelType: "connected_to", Source: "discovery"})
+	relRepo.Create(context.Background(), &relationship.Relationship{OrganizationID: "org-1", SourceCIID: srv1, TargetCIID: pdu1, RelType: "powered_by", Source: "discovery"})
 	return ciRepo, relRepo, ids
 }
 

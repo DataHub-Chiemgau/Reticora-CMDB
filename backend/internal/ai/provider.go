@@ -51,7 +51,10 @@ func (p *OpenAIProvider) Enabled() bool           { return true }
 func (p *OpenAIProvider) EmbeddingsEnabled() bool { return p.cfg.EmbeddingModel != "" }
 func (p *OpenAIProvider) Chat(messages []Message) (string, int, int, error) {
 	body := map[string]any{"model": p.cfg.ChatModel, "messages": messages, "temperature": 0.2}
-	data, _ := json.Marshal(body)
+	data, err := json.Marshal(body)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("marshal chat request: %w", err)
+	}
 	req, err := http.NewRequest(http.MethodPost, p.cfg.BaseURL+"/chat/completions", bytes.NewReader(data))
 	if err != nil {
 		return "", 0, 0, err
@@ -91,7 +94,10 @@ func (p *OpenAIProvider) Embed(text string) ([]float64, error) {
 		return nil, fmt.Errorf("embedding model is not configured")
 	}
 	body := map[string]any{"model": p.cfg.EmbeddingModel, "input": text}
-	data, _ := json.Marshal(body)
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal embedding request: %w", err)
+	}
 	req, err := http.NewRequest(http.MethodPost, p.cfg.BaseURL+"/embeddings", bytes.NewReader(data))
 	if err != nil {
 		return nil, err

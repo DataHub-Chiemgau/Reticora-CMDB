@@ -22,7 +22,8 @@ type SessionIssuer struct {
 
 // NewSessionIssuer creates a session issuer from a PEM-encoded RSA private key.
 func NewSessionIssuer(privateKeyPEM []byte) (*SessionIssuer, error) {
-	block, _ := pem.Decode(privateKeyPEM)
+	block, rest := pem.Decode(privateKeyPEM)
+	_ = rest // trailing data after the first PEM block is intentionally ignored
 	if block == nil {
 		return nil, errors.New("identity: decode private key PEM: no PEM block found")
 	}

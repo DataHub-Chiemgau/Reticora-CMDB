@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"strings"
 	"time"
@@ -120,8 +121,9 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 	osInfo := parseOSFromBanner(banner)
 
 	hostname := target
-	names, _ := net.LookupAddr(target)
-	if len(names) > 0 {
+	if names, err := net.LookupAddr(target); err != nil {
+		slog.Debug("ssh: reverse DNS lookup failed, falling back to target address", "target", target, "error", err)
+	} else if len(names) > 0 {
 		hostname = strings.TrimSuffix(names[0], ".")
 	}
 

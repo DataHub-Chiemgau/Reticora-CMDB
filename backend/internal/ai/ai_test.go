@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,12 +49,12 @@ func TestOpenAIProviderHTTP(t *testing.T) {
 }
 func TestRetrievalPermissionScoping(t *testing.T) {
 	sr := search.NewMemoryRepository()
-	sr.IndexDocument(search.Document{OrganizationID: "org", EntityType: "ticket", EntityID: "t1", Title: "Secret"})
+	sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org", EntityType: "ticket", EntityID: "t1", Title: "Secret"})
 	repo := NewMemoryRepository()
-	repo.UpsertChunk(Chunk{OrganizationID: "org", EntityType: "ticket", EntityID: "t1", Title: "Secret", Content: "secret text"})
+	repo.UpsertChunk(context.Background(), Chunk{OrganizationID: "org", EntityType: "ticket", EntityID: "t1", Title: "Secret", Content: "secret text"})
 	perms := permission.NewMemoryRepository()
 	retr := NewRetriever(repo, sr, perms, DisabledProvider{})
-	chunks, _, err := retr.Retrieve("org", "user", "Secret", 5)
+	chunks, _, err := retr.Retrieve(context.Background(), "org", "user", "Secret", 5)
 	if err != nil {
 		t.Fatal(err)
 	}

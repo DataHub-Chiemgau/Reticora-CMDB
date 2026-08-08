@@ -12,7 +12,7 @@ func NewDriftDetector(repo Repository, registry *Registry, decrypt func(context.
 	return &DriftDetector{repo: repo, registry: registry, decrypt: decrypt}
 }
 func (d *DriftDetector) Reconcile(ctx context.Context, orgID, connectorID string, expected []Account) ([]DriftFinding, error) {
-	cfg, err := d.repo.GetConnector(orgID, connectorID)
+	cfg, err := d.repo.GetConnector(ctx, orgID, connectorID)
 	if err != nil {
 		return nil, err
 	}

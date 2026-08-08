@@ -94,7 +94,7 @@ func TestHandler_Delete(t *testing.T) {
 		Events:         []string{"ci.created"},
 		IsActive:       true,
 	}
-	repo.Create(sub)
+	repo.Create(context.Background(), sub)
 
 	req := httptest.NewRequest("DELETE", "/api/v1/webhooks/"+sub.ID, nil)
 	req = tenantCtx(req)
@@ -129,7 +129,7 @@ func TestHandler_Test_DeliversSignedPing(t *testing.T) {
 		Events:         []string{"ci.created"},
 		IsActive:       true,
 	}
-	if err := repo.Create(sub); err != nil {
+	if err := repo.Create(context.Background(), sub); err != nil {
 		t.Fatalf("create subscription: %v", err)
 	}
 

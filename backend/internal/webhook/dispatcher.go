@@ -137,12 +137,12 @@ func NewDispatcher(repo Repository, client *http.Client, opts ...DispatcherOptio
 }
 
 // Dispatch persists and queues webhook deliveries for matching subscriptions.
-func (d *Dispatcher) Dispatch(orgID, event string, payload any) {
+func (d *Dispatcher) Dispatch(ctx context.Context, orgID, event string, payload any) {
 	if d == nil || d.repo == nil {
 		return
 	}
 
-	subs, err := d.repo.ListByEvent(orgID, event)
+	subs, err := d.repo.ListByEvent(ctx, orgID, event)
 	if err != nil {
 		slog.Error("list webhook subscriptions failed", "error", err, "organization_id", orgID, "event", event)
 		return
@@ -169,7 +169,7 @@ func (d *Dispatcher) Dispatch(orgID, event string, payload any) {
 
 		if d.store != nil {
 			now := d.now()
-			rec, err := d.store.Enqueue(context.Background(), DeliveryRecord{
+			rec, err := d.store.Enqueue(ctx, DeliveryRecord{
 				OrganizationID: orgID,
 				SubscriptionID: sub.ID,
 				Event:          event,
@@ -290,6 +290,7 @@ func (d *Dispatcher) retryLoop(interval time.Duration) {
 		case <-d.stop:
 			return
 		case <-ticker.C:
+			// background worker: no request context
 			d.ProcessDue(context.Background())
 		}
 	}
@@ -309,7 +310,7 @@ func (d *Dispatcher) ProcessDue(ctx context.Context) {
 	}
 
 	for _, rec := range records {
-		sub, err := d.repo.GetByID(rec.OrganizationID, rec.SubscriptionID)
+		sub, err := d.repo.GetByID(ctx, rec.OrganizationID, rec.SubscriptionID)
 		if err != nil {
 			rec.Attempt++
 			d.finalize(ctx, rec, 0, 0, fmt.Errorf("subscription unavailable: %w", err), true)
@@ -352,6 +353,7 @@ func (d *Dispatcher) attempt(job deliveryJob) {
 		return
 	}
 
+	// background worker: no request context
 	d.finalize(context.Background(), DeliveryRecord{
 		ID:             job.deliveryID,
 		OrganizationID: job.orgID,

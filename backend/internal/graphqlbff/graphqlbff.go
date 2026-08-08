@@ -256,7 +256,7 @@ func (h *Handler) resolveRelationships(ctx context.Context, args map[string]any)
 		return nil, fmt.Errorf("ciId is required")
 	}
 
-	rels, _, err := h.relRepo.List(t.OrganizationID, ciID, api.PaginationParams{Limit: 100, Offset: 0})
+	rels, _, err := h.relRepo.List(ctx, t.OrganizationID, ciID, api.PaginationParams{Limit: 100, Offset: 0})
 	if err != nil {
 		return nil, err
 	}

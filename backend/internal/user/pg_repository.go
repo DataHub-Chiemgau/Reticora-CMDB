@@ -94,8 +94,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 	return tx.Commit(ctx)
 }
 
-func (r *PGRepository) ListUsers(orgID, search string, page api.PaginationParams) ([]User, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListUsers(ctx context.Context, orgID, search string, page api.PaginationParams) ([]User, int, error) {
 	var items []User
 	var total int
 
@@ -142,8 +141,7 @@ func (r *PGRepository) ListUsers(orgID, search string, page api.PaginationParams
 	return items, total, err
 }
 
-func (r *PGRepository) GetUser(orgID, id string) (*User, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetUser(ctx context.Context, orgID, id string) (*User, error) {
 	var item *User
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM app_user WHERE id = $1 AND organization_id = $2", userSelectColumns)
@@ -163,8 +161,7 @@ func (r *PGRepository) GetUser(orgID, id string) (*User, error) {
 	return item, nil
 }
 
-func (r *PGRepository) CreateUser(u *User) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateUser(ctx context.Context, u *User) error {
 	return r.withTenant(ctx, u.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		query := `
 			INSERT INTO app_user (
@@ -194,8 +191,7 @@ func (r *PGRepository) CreateUser(u *User) error {
 	})
 }
 
-func (r *PGRepository) UpdateUser(orgID, id string, req UpdateUserRequest) (*User, error) {
-	ctx := context.Background()
+func (r *PGRepository) UpdateUser(ctx context.Context, orgID, id string, req UpdateUserRequest) (*User, error) {
 	var item *User
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		setClauses := make([]string, 0, 4)
@@ -249,8 +245,7 @@ func (r *PGRepository) UpdateUser(orgID, id string, req UpdateUserRequest) (*Use
 	return item, err
 }
 
-func (r *PGRepository) DeleteUser(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) DeleteUser(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM app_user WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
@@ -263,8 +258,7 @@ func (r *PGRepository) DeleteUser(orgID, id string) error {
 	})
 }
 
-func (r *PGRepository) ListTeams(orgID, search string, page api.PaginationParams) ([]Team, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListTeams(ctx context.Context, orgID, search string, page api.PaginationParams) ([]Team, int, error) {
 	var items []Team
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -308,8 +302,7 @@ func (r *PGRepository) ListTeams(orgID, search string, page api.PaginationParams
 	return items, total, err
 }
 
-func (r *PGRepository) GetTeam(orgID, id string) (*Team, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetTeam(ctx context.Context, orgID, id string) (*Team, error) {
 	var item *Team
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM team WHERE id = $1 AND organization_id = $2", teamSelectColumns)
@@ -329,8 +322,7 @@ func (r *PGRepository) GetTeam(orgID, id string) (*Team, error) {
 	return item, nil
 }
 
-func (r *PGRepository) CreateTeam(t *Team) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateTeam(ctx context.Context, t *Team) error {
 	return r.withTenant(ctx, t.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		query := `
 			INSERT INTO team (
@@ -353,8 +345,7 @@ func (r *PGRepository) CreateTeam(t *Team) error {
 	})
 }
 
-func (r *PGRepository) UpdateTeam(orgID, id string, req UpdateTeamRequest) (*Team, error) {
-	ctx := context.Background()
+func (r *PGRepository) UpdateTeam(ctx context.Context, orgID, id string, req UpdateTeamRequest) (*Team, error) {
 	var item *Team
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		setClauses := make([]string, 0, 4)
@@ -404,8 +395,7 @@ func (r *PGRepository) UpdateTeam(orgID, id string, req UpdateTeamRequest) (*Tea
 	return item, err
 }
 
-func (r *PGRepository) DeleteTeam(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) DeleteTeam(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM team WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
@@ -418,8 +408,7 @@ func (r *PGRepository) DeleteTeam(orgID, id string) error {
 	})
 }
 
-func (r *PGRepository) AddTeamMember(orgID string, m *TeamMember) error {
-	ctx := context.Background()
+func (r *PGRepository) AddTeamMember(ctx context.Context, orgID string, m *TeamMember) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM team WHERE id = $1 AND organization_id = $2)", m.TeamID, orgID).Scan(&exists); err != nil {
@@ -447,8 +436,7 @@ func (r *PGRepository) AddTeamMember(orgID string, m *TeamMember) error {
 	})
 }
 
-func (r *PGRepository) RemoveTeamMember(orgID, teamID, userID string) error {
-	ctx := context.Background()
+func (r *PGRepository) RemoveTeamMember(ctx context.Context, orgID, teamID, userID string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM team WHERE id = $1 AND organization_id = $2)", teamID, orgID).Scan(&exists); err != nil {
@@ -468,8 +456,7 @@ func (r *PGRepository) RemoveTeamMember(orgID, teamID, userID string) error {
 	})
 }
 
-func (r *PGRepository) ListTeamMembers(orgID, teamID string) ([]TeamMember, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListTeamMembers(ctx context.Context, orgID, teamID string) ([]TeamMember, error) {
 	var items []TeamMember
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
@@ -500,8 +487,7 @@ func (r *PGRepository) ListTeamMembers(orgID, teamID string) ([]TeamMember, erro
 	return items, err
 }
 
-func (r *PGRepository) ListRoles(orgID string, page api.PaginationParams) ([]CustomRole, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListRoles(ctx context.Context, orgID string, page api.PaginationParams) ([]CustomRole, int, error) {
 	var items []CustomRole
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -529,8 +515,7 @@ func (r *PGRepository) ListRoles(orgID string, page api.PaginationParams) ([]Cus
 	return items, total, err
 }
 
-func (r *PGRepository) GetRole(orgID, id string) (*CustomRole, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetRole(ctx context.Context, orgID, id string) (*CustomRole, error) {
 	var item *CustomRole
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM custom_role WHERE id = $1 AND organization_id = $2", customRoleSelectColumns)
@@ -550,8 +535,7 @@ func (r *PGRepository) GetRole(orgID, id string) (*CustomRole, error) {
 	return item, nil
 }
 
-func (r *PGRepository) CreateRole(role *CustomRole) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateRole(ctx context.Context, role *CustomRole) error {
 	return r.withTenant(ctx, role.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if role.Permissions == nil {
 			role.Permissions = []string{}
@@ -579,8 +563,7 @@ func (r *PGRepository) CreateRole(role *CustomRole) error {
 	})
 }
 
-func (r *PGRepository) UpdateRole(orgID, id string, req UpdateRoleRequest) (*CustomRole, error) {
-	ctx := context.Background()
+func (r *PGRepository) UpdateRole(ctx context.Context, orgID, id string, req UpdateRoleRequest) (*CustomRole, error) {
 	var item *CustomRole
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var isSystem bool
@@ -642,8 +625,7 @@ func (r *PGRepository) UpdateRole(orgID, id string, req UpdateRoleRequest) (*Cus
 	return item, err
 }
 
-func (r *PGRepository) DeleteRole(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) DeleteRole(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var isSystem bool
 		if err := tx.QueryRow(ctx, "SELECT is_system FROM custom_role WHERE id = $1 AND organization_id = $2", id, orgID).Scan(&isSystem); err != nil {
@@ -666,8 +648,7 @@ func (r *PGRepository) DeleteRole(orgID, id string) error {
 	})
 }
 
-func (r *PGRepository) AssignRole(orgID string, a *UserRoleAssignment) error {
-	ctx := context.Background()
+func (r *PGRepository) AssignRole(ctx context.Context, orgID string, a *UserRoleAssignment) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM custom_role WHERE id = $1 AND organization_id = $2)", a.CustomRoleID, orgID).Scan(&exists); err != nil {
@@ -702,8 +683,7 @@ func (r *PGRepository) AssignRole(orgID string, a *UserRoleAssignment) error {
 	})
 }
 
-func (r *PGRepository) ListUserRoles(orgID, userID string) ([]UserRoleAssignment, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListUserRoles(ctx context.Context, orgID, userID string) ([]UserRoleAssignment, error) {
 	var items []UserRoleAssignment
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf(`

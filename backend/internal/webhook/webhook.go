@@ -54,11 +54,11 @@ var ValidEvents = map[string]bool{
 
 // Repository defines persistence operations for webhooks.
 type Repository interface {
-	List(orgID string, page api.PaginationParams) ([]Subscription, int, error)
-	GetByID(orgID, id string) (*Subscription, error)
-	Create(sub *Subscription) error
-	Delete(orgID, id string) error
-	ListByEvent(orgID, event string) ([]Subscription, error)
+	List(ctx context.Context, orgID string, page api.PaginationParams) ([]Subscription, int, error)
+	GetByID(ctx context.Context, orgID, id string) (*Subscription, error)
+	Create(ctx context.Context, sub *Subscription) error
+	Delete(ctx context.Context, orgID, id string) error
+	ListByEvent(ctx context.Context, orgID, event string) ([]Subscription, error)
 }
 
 // MemoryRepository is an in-memory webhook store.
@@ -73,7 +73,7 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{items: make(map[string]*Subscription)}
 }
 
-func (r *MemoryRepository) List(orgID string, page api.PaginationParams) ([]Subscription, int, error) {
+func (r *MemoryRepository) List(_ context.Context, orgID string, page api.PaginationParams) ([]Subscription, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -97,7 +97,7 @@ func (r *MemoryRepository) List(orgID string, page api.PaginationParams) ([]Subs
 	return result[start:end], total, nil
 }
 
-func (r *MemoryRepository) GetByID(orgID, id string) (*Subscription, error) {
+func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Subscription, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -108,7 +108,7 @@ func (r *MemoryRepository) GetByID(orgID, id string) (*Subscription, error) {
 	return sub, nil
 }
 
-func (r *MemoryRepository) Create(sub *Subscription) error {
+func (r *MemoryRepository) Create(_ context.Context, sub *Subscription) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -121,7 +121,7 @@ func (r *MemoryRepository) Create(sub *Subscription) error {
 	return nil
 }
 
-func (r *MemoryRepository) Delete(orgID, id string) error {
+func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -133,7 +133,7 @@ func (r *MemoryRepository) Delete(orgID, id string) error {
 	return nil
 }
 
-func (r *MemoryRepository) ListByEvent(orgID, event string) ([]Subscription, error) {
+func (r *MemoryRepository) ListByEvent(_ context.Context, orgID, event string) ([]Subscription, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -206,7 +206,7 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	sub, err := h.repo.GetByID(t.OrganizationID, id)
+	sub, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
 		return
@@ -240,7 +240,7 @@ func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if _, err := h.repo.GetByID(t.OrganizationID, id); err != nil {
+	if _, err := h.repo.GetByID(r.Context(), t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
 		return
 	}
@@ -274,7 +274,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	page := api.ParsePagination(r)
-	subs, total, err := h.repo.List(t.OrganizationID, page)
+	subs, total, err := h.repo.List(r.Context(), t.OrganizationID, page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -298,7 +298,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	sub, err := h.repo.GetByID(t.OrganizationID, id)
+	sub, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
 		return
@@ -343,7 +343,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Headers:        req.Headers,
 	}
 
-	if err := h.repo.Create(sub); err != nil {
+	if err := h.repo.Create(r.Context(), sub); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -360,7 +360,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.repo.Delete(t.OrganizationID, id); err != nil {
+	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
 		return
 	}

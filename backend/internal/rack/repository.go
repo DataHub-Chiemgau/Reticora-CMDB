@@ -1,6 +1,7 @@
 package rack
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -21,23 +22,23 @@ var (
 
 // Repository defines persistence operations for racks, mounts, and cables.
 type Repository interface {
-	ListRacks(orgID, roomID string, page api.PaginationParams) ([]Rack, int, error)
-	GetRack(orgID, id string) (*Rack, error)
-	CreateRack(rk *Rack) error
-	UpdateRack(orgID, id string, req UpdateRackRequest) (*Rack, error)
-	DeleteRack(orgID, id string) error
+	ListRacks(ctx context.Context, orgID, roomID string, page api.PaginationParams) ([]Rack, int, error)
+	GetRack(ctx context.Context, orgID, id string) (*Rack, error)
+	CreateRack(ctx context.Context, rk *Rack) error
+	UpdateRack(ctx context.Context, orgID, id string, req UpdateRackRequest) (*Rack, error)
+	DeleteRack(ctx context.Context, orgID, id string) error
 
-	ListMounts(orgID, rackID string, page api.PaginationParams) ([]RackMount, int, error)
-	CreateMount(m *RackMount) error
-	GetMount(orgID, id string) (*RackMount, error)
-	UpdateMount(orgID, id string, req UpdateMountRequest) (*RackMount, error)
-	DeleteMount(orgID, id string) error
+	ListMounts(ctx context.Context, orgID, rackID string, page api.PaginationParams) ([]RackMount, int, error)
+	CreateMount(ctx context.Context, m *RackMount) error
+	GetMount(ctx context.Context, orgID, id string) (*RackMount, error)
+	UpdateMount(ctx context.Context, orgID, id string, req UpdateMountRequest) (*RackMount, error)
+	DeleteMount(ctx context.Context, orgID, id string) error
 
-	ListCables(orgID string, page api.PaginationParams) ([]Cable, int, error)
-	GetCable(orgID, id string) (*Cable, error)
-	CreateCable(c *Cable) error
-	UpdateCable(orgID, id string, req UpdateCableRequest) (*Cable, error)
-	DeleteCable(orgID, id string) error
+	ListCables(ctx context.Context, orgID string, page api.PaginationParams) ([]Cable, int, error)
+	GetCable(ctx context.Context, orgID, id string) (*Cable, error)
+	CreateCable(ctx context.Context, c *Cable) error
+	UpdateCable(ctx context.Context, orgID, id string, req UpdateCableRequest) (*Cable, error)
+	DeleteCable(ctx context.Context, orgID, id string) error
 }
 
 // validateMountFit ensures the proposed mount fits within the rack height and
@@ -102,7 +103,7 @@ func pageSlice[T any](items []T, page api.PaginationParams) ([]T, int) {
 
 // --- Racks ---
 
-func (r *MemoryRepository) ListRacks(orgID, roomID string, page api.PaginationParams) ([]Rack, int, error) {
+func (r *MemoryRepository) ListRacks(_ context.Context, orgID, roomID string, page api.PaginationParams) ([]Rack, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Rack
@@ -120,7 +121,7 @@ func (r *MemoryRepository) ListRacks(orgID, roomID string, page api.PaginationPa
 	return items, total, nil
 }
 
-func (r *MemoryRepository) GetRack(orgID, id string) (*Rack, error) {
+func (r *MemoryRepository) GetRack(_ context.Context, orgID, id string) (*Rack, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	rk, ok := r.racks[id]
@@ -131,7 +132,7 @@ func (r *MemoryRepository) GetRack(orgID, id string) (*Rack, error) {
 	return &cp, nil
 }
 
-func (r *MemoryRepository) CreateRack(rk *Rack) error {
+func (r *MemoryRepository) CreateRack(_ context.Context, rk *Rack) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.seq++
@@ -143,7 +144,7 @@ func (r *MemoryRepository) CreateRack(rk *Rack) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateRack(orgID, id string, req UpdateRackRequest) (*Rack, error) {
+func (r *MemoryRepository) UpdateRack(_ context.Context, orgID, id string, req UpdateRackRequest) (*Rack, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rk, ok := r.racks[id]
@@ -170,7 +171,7 @@ func (r *MemoryRepository) UpdateRack(orgID, id string, req UpdateRackRequest) (
 	return &cp, nil
 }
 
-func (r *MemoryRepository) DeleteRack(orgID, id string) error {
+func (r *MemoryRepository) DeleteRack(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rk, ok := r.racks[id]
@@ -198,7 +199,7 @@ func (r *MemoryRepository) mountsForRack(rackID string) []RackMount {
 	return out
 }
 
-func (r *MemoryRepository) ListMounts(orgID, rackID string, page api.PaginationParams) ([]RackMount, int, error) {
+func (r *MemoryRepository) ListMounts(_ context.Context, orgID, rackID string, page api.PaginationParams) ([]RackMount, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	rk, ok := r.racks[rackID]
@@ -211,7 +212,7 @@ func (r *MemoryRepository) ListMounts(orgID, rackID string, page api.PaginationP
 	return items, total, nil
 }
 
-func (r *MemoryRepository) CreateMount(m *RackMount) error {
+func (r *MemoryRepository) CreateMount(_ context.Context, m *RackMount) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rk, ok := r.racks[m.RackID]
@@ -235,7 +236,7 @@ func (r *MemoryRepository) CreateMount(m *RackMount) error {
 	return nil
 }
 
-func (r *MemoryRepository) GetMount(orgID, id string) (*RackMount, error) {
+func (r *MemoryRepository) GetMount(_ context.Context, orgID, id string) (*RackMount, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	m, ok := r.mounts[id]
@@ -246,7 +247,7 @@ func (r *MemoryRepository) GetMount(orgID, id string) (*RackMount, error) {
 	return &cp, nil
 }
 
-func (r *MemoryRepository) UpdateMount(orgID, id string, req UpdateMountRequest) (*RackMount, error) {
+func (r *MemoryRepository) UpdateMount(_ context.Context, orgID, id string, req UpdateMountRequest) (*RackMount, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	m, ok := r.mounts[id]
@@ -278,7 +279,7 @@ func (r *MemoryRepository) UpdateMount(orgID, id string, req UpdateMountRequest)
 	return &cp, nil
 }
 
-func (r *MemoryRepository) DeleteMount(orgID, id string) error {
+func (r *MemoryRepository) DeleteMount(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	m, ok := r.mounts[id]
@@ -291,7 +292,7 @@ func (r *MemoryRepository) DeleteMount(orgID, id string) error {
 
 // --- Cables ---
 
-func (r *MemoryRepository) ListCables(orgID string, page api.PaginationParams) ([]Cable, int, error) {
+func (r *MemoryRepository) ListCables(_ context.Context, orgID string, page api.PaginationParams) ([]Cable, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Cable
@@ -305,7 +306,7 @@ func (r *MemoryRepository) ListCables(orgID string, page api.PaginationParams) (
 	return items, total, nil
 }
 
-func (r *MemoryRepository) GetCable(orgID, id string) (*Cable, error) {
+func (r *MemoryRepository) GetCable(_ context.Context, orgID, id string) (*Cable, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	c, ok := r.cables[id]
@@ -316,7 +317,7 @@ func (r *MemoryRepository) GetCable(orgID, id string) (*Cable, error) {
 	return &cp, nil
 }
 
-func (r *MemoryRepository) CreateCable(c *Cable) error {
+func (r *MemoryRepository) CreateCable(_ context.Context, c *Cable) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.seq++
@@ -328,7 +329,7 @@ func (r *MemoryRepository) CreateCable(c *Cable) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateCable(orgID, id string, req UpdateCableRequest) (*Cable, error) {
+func (r *MemoryRepository) UpdateCable(_ context.Context, orgID, id string, req UpdateCableRequest) (*Cable, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c, ok := r.cables[id]
@@ -364,7 +365,7 @@ func (r *MemoryRepository) UpdateCable(orgID, id string, req UpdateCableRequest)
 	return &cp, nil
 }
 
-func (r *MemoryRepository) DeleteCable(orgID, id string) error {
+func (r *MemoryRepository) DeleteCable(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c, ok := r.cables[id]

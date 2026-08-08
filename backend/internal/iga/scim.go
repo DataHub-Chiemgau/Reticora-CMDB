@@ -1,6 +1,7 @@
 package iga
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -76,7 +77,7 @@ func (h *Handler) SCIMListUsers(w http.ResponseWriter, r *http.Request) {
 		scimErr(w, 400, "invalidFilter", "only userName eq filters are supported")
 		return
 	}
-	users, total, err := h.users.ListUsers(t.OrganizationID, filter, api.PaginationParams{Limit: count, Offset: start - 1})
+	users, total, err := h.users.ListUsers(r.Context(), t.OrganizationID, filter, api.PaginationParams{Limit: count, Offset: start - 1})
 	if err != nil {
 		scimErr(w, 500, "", err.Error())
 		return
@@ -97,7 +98,7 @@ func (h *Handler) SCIMGetUser(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	u, err := h.users.GetUser(t.OrganizationID, chi.URLParam(r, "id"))
+	u, err := h.users.GetUser(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		scimErr(w, 404, "", "user not found")
 		return
@@ -137,7 +138,7 @@ func (h *Handler) SCIMCreateUser(w http.ResponseWriter, r *http.Request) {
 	if v, ok := body["externalId"].(string); ok {
 		u.ExternalID = v
 	}
-	if err := h.users.CreateUser(u); err != nil {
+	if err := h.users.CreateUser(r.Context(), u); err != nil {
 		scimErr(w, 500, "", err.Error())
 		return
 	}
@@ -164,7 +165,7 @@ func (h *Handler) SCIMPutUser(w http.ResponseWriter, r *http.Request) {
 		status = "inactive"
 	}
 	req := user.UpdateUserRequest{DisplayName: &display, Status: &status}
-	u, err := h.users.UpdateUser(t.OrganizationID, id, req)
+	u, err := h.users.UpdateUser(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
 		scimErr(w, 404, "", "user not found")
 		return
@@ -200,7 +201,7 @@ func (h *Handler) SCIMPatchUser(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	u, err := h.users.UpdateUser(t.OrganizationID, chi.URLParam(r, "id"), req)
+	u, err := h.users.UpdateUser(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		scimErr(w, 404, "", "user not found")
 		return
@@ -213,7 +214,7 @@ func (h *Handler) SCIMDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := "inactive"
-	_, err := h.users.UpdateUser(t.OrganizationID, chi.URLParam(r, "id"), user.UpdateUserRequest{Status: &status})
+	_, err := h.users.UpdateUser(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), user.UpdateUserRequest{Status: &status})
 	if err != nil {
 		scimErr(w, 404, "", "user not found")
 		return
@@ -227,14 +228,14 @@ func (h *Handler) SCIMListGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start, count := scimPaging(r)
-	teams, total, err := h.users.ListTeams(t.OrganizationID, "", api.PaginationParams{Limit: count, Offset: start - 1})
+	teams, total, err := h.users.ListTeams(r.Context(), t.OrganizationID, "", api.PaginationParams{Limit: count, Offset: start - 1})
 	if err != nil {
 		scimErr(w, 500, "", err.Error())
 		return
 	}
 	res := []scimResource{}
 	for _, g := range teams {
-		members, _ := h.users.ListTeamMembers(t.OrganizationID, g.ID)
+		members, _ := h.users.ListTeamMembers(r.Context(), t.OrganizationID, g.ID)
 		res = append(res, scimGroup(g, members))
 	}
 	api.WriteJSON(w, 200, scimResource{"schemas": []string{scimListSchema}, "totalResults": total, "startIndex": start, "itemsPerPage": len(res), "Resources": res})
@@ -244,12 +245,12 @@ func (h *Handler) SCIMGetGroup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	g, err := h.users.GetTeam(t.OrganizationID, chi.URLParam(r, "id"))
+	g, err := h.users.GetTeam(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		scimErr(w, 404, "", "group not found")
 		return
 	}
-	members, _ := h.users.ListTeamMembers(t.OrganizationID, g.ID)
+	members, _ := h.users.ListTeamMembers(r.Context(), t.OrganizationID, g.ID)
 	api.WriteJSON(w, 200, scimGroup(*g, members))
 }
 func (h *Handler) SCIMCreateGroup(w http.ResponseWriter, r *http.Request) {
@@ -268,12 +269,12 @@ func (h *Handler) SCIMCreateGroup(w http.ResponseWriter, r *http.Request) {
 		scimErr(w, 400, "invalidValue", "displayName is required")
 		return
 	}
-	if err := h.users.CreateTeam(g); err != nil {
+	if err := h.users.CreateTeam(r.Context(), g); err != nil {
 		scimErr(w, 500, "", err.Error())
 		return
 	}
-	applyMembers(h, t.OrganizationID, g.ID, body)
-	members, _ := h.users.ListTeamMembers(t.OrganizationID, g.ID)
+	applyMembers(h, r.Context(), t.OrganizationID, g.ID, body)
+	members, _ := h.users.ListTeamMembers(r.Context(), t.OrganizationID, g.ID)
 	api.WriteJSON(w, 201, scimGroup(*g, members))
 }
 func (h *Handler) SCIMPutGroup(w http.ResponseWriter, r *http.Request) {
@@ -287,13 +288,13 @@ func (h *Handler) SCIMPutGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := fmt.Sprint(body["displayName"])
-	g, err := h.users.UpdateTeam(t.OrganizationID, chi.URLParam(r, "id"), user.UpdateTeamRequest{Name: &name})
+	g, err := h.users.UpdateTeam(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), user.UpdateTeamRequest{Name: &name})
 	if err != nil {
 		scimErr(w, 404, "", "group not found")
 		return
 	}
-	applyMembers(h, t.OrganizationID, g.ID, body)
-	members, _ := h.users.ListTeamMembers(t.OrganizationID, g.ID)
+	applyMembers(h, r.Context(), t.OrganizationID, g.ID, body)
+	members, _ := h.users.ListTeamMembers(r.Context(), t.OrganizationID, g.ID)
 	api.WriteJSON(w, 200, scimGroup(*g, members))
 }
 func (h *Handler) SCIMPatchGroup(w http.ResponseWriter, r *http.Request) { h.SCIMPutGroup(w, r) }
@@ -302,26 +303,26 @@ func (h *Handler) SCIMDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.users.DeleteTeam(t.OrganizationID, chi.URLParam(r, "id")); err != nil {
+	if err := h.users.DeleteTeam(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
 		scimErr(w, 404, "", "group not found")
 		return
 	}
 	w.WriteHeader(204)
 }
-func applyMembers(h *Handler, orgID, groupID string, body map[string]any) {
+func applyMembers(h *Handler, ctx context.Context, orgID, groupID string, body map[string]any) {
 	arr, ok := body["members"].([]any)
 	if !ok {
 		return
 	}
-	existing, _ := h.users.ListTeamMembers(orgID, groupID)
+	existing, _ := h.users.ListTeamMembers(ctx, orgID, groupID)
 	for _, m := range existing {
-		_ = h.users.RemoveTeamMember(orgID, groupID, m.UserID)
+		_ = h.users.RemoveTeamMember(ctx, orgID, groupID, m.UserID)
 	}
 	for _, v := range arr {
 		m, _ := v.(map[string]any)
 		uid := fmt.Sprint(m["value"])
 		if uid != "" {
-			_ = h.users.AddTeamMember(orgID, &user.TeamMember{TeamID: groupID, UserID: uid, RoleInTeam: "member"})
+			_ = h.users.AddTeamMember(ctx, orgID, &user.TeamMember{TeamID: groupID, UserID: uid, RoleInTeam: "member"})
 		}
 	}
 }

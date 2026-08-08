@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -136,8 +137,9 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 	}
 
 	hostname := target
-	names, _ := net.LookupAddr(target)
-	if len(names) > 0 {
+	if names, err := net.LookupAddr(target); err != nil {
+		slog.Debug("ipmi: reverse DNS lookup failed, falling back to target address", "target", target, "error", err)
+	} else if len(names) > 0 {
 		hostname = names[0]
 		if len(hostname) > 0 && hostname[len(hostname)-1] == '.' {
 			hostname = hostname[:len(hostname)-1]

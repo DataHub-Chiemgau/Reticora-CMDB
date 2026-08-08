@@ -37,8 +37,12 @@ func (r *MemoryRepository) GetOrgDEK(_ context.Context, orgID string) (*OrgDEK, 
 func (r *MemoryRepository) CreateOrgDEK(_ context.Context, orgID string, encryptedDEK []byte, keyVersion int) (*OrgDEK, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	id, err := generateID()
+	if err != nil {
+		return nil, err
+	}
 	dek := &OrgDEK{
-		ID:             generateID(),
+		ID:             id,
 		OrganizationID: orgID,
 		EncryptedDEK:   encryptedDEK,
 		KeyVersion:     keyVersion,
@@ -51,7 +55,11 @@ func (r *MemoryRepository) CreateOrgDEK(_ context.Context, orgID string, encrypt
 func (r *MemoryRepository) Create(_ context.Context, cred *StoredCredential) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	cred.ID = generateID()
+	id, err := generateID()
+	if err != nil {
+		return err
+	}
+	cred.ID = id
 	stored := *cred
 	r.credentials[cred.ID] = &stored
 	return nil
@@ -104,12 +112,12 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 }
 
 // generateID creates a simple random hex ID for in-memory use.
-func generateID() string {
+func generateID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {
-		panic("credential: failed to generate random ID: " + err.Error())
+		return "", fmt.Errorf("credential: failed to generate random ID: %w", err)
 	}
 	// Format as UUID-like string
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }

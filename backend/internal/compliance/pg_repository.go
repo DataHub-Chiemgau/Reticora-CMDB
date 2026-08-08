@@ -31,10 +31,10 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(con
 	}
 	return tx.Commit(ctx)
 }
-func (r *PGRepository) ListRules(orgID, ciTypeID, category string, activeOnly bool, page api.PaginationParams) ([]Rule, int, error) {
+func (r *PGRepository) ListRules(ctx context.Context, orgID, ciTypeID, category string, activeOnly bool, page api.PaginationParams) ([]Rule, int, error) {
 	var out []Rule
 	var total int
-	err := r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id=$1"}
 		args := []any{orgID}
 		pos := 2
@@ -71,9 +71,9 @@ func (r *PGRepository) ListRules(orgID, ciTypeID, category string, activeOnly bo
 	})
 	return out, total, err
 }
-func (r *PGRepository) GetRule(orgID, id string) (*Rule, error) {
+func (r *PGRepository) GetRule(ctx context.Context, orgID, id string) (*Rule, error) {
 	var rule *Rule
-	err := r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		rule, err = scanRule(tx.QueryRow(ctx, "SELECT "+ruleCols+" FROM compliance_rule WHERE organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -83,17 +83,17 @@ func (r *PGRepository) GetRule(orgID, id string) (*Rule, error) {
 	})
 	return rule, err
 }
-func (r *PGRepository) CreateRule(rule *Rule) error {
-	return r.withTenant(context.Background(), rule.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+func (r *PGRepository) CreateRule(ctx context.Context, rule *Rule) error {
+	return r.withTenant(ctx, rule.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if rule.Expression == nil {
 			rule.Expression = JSONMap{}
 		}
 		return tx.QueryRow(ctx, `INSERT INTO compliance_rule (organization_id,ci_type_id,name,description,severity,category,expression,remediation_hint,active) VALUES ($1,NULLIF($2,'')::uuid,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text, created_at, updated_at`, rule.OrganizationID, rule.CITypeID, rule.Name, rule.Description, rule.Severity, rule.Category, rule.Expression, rule.RemediationHint, rule.Active).Scan(&rule.ID, &rule.CreatedAt, &rule.UpdatedAt)
 	})
 }
-func (r *PGRepository) UpdateRule(orgID, id string, req UpdateRuleRequest) (*Rule, error) {
+func (r *PGRepository) UpdateRule(ctx context.Context, orgID, id string, req UpdateRuleRequest) (*Rule, error) {
 	var rule *Rule
-	err := r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		set := []string{}
 		args := []any{id, orgID}
 		pos := 3
@@ -152,8 +152,8 @@ func (r *PGRepository) UpdateRule(orgID, id string, req UpdateRuleRequest) (*Rul
 	})
 	return rule, err
 }
-func (r *PGRepository) DeleteRule(orgID, id string) error {
-	return r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+func (r *PGRepository) DeleteRule(ctx context.Context, orgID, id string) error {
+	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx, "DELETE FROM compliance_rule WHERE organization_id=$1 AND id=$2", orgID, id)
 		if err != nil {
 			return err
@@ -164,8 +164,8 @@ func (r *PGRepository) DeleteRule(orgID, id string) error {
 		return nil
 	})
 }
-func (r *PGRepository) ReplaceResults(orgID string, results []Result) error {
-	return r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+func (r *PGRepository) ReplaceResults(ctx context.Context, orgID string, results []Result) error {
+	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "DELETE FROM compliance_result WHERE organization_id=$1", orgID); err != nil {
 			return err
 		}
@@ -178,10 +178,10 @@ func (r *PGRepository) ReplaceResults(orgID string, results []Result) error {
 		return nil
 	})
 }
-func (r *PGRepository) ListResults(orgID, ciTypeID, status string, page api.PaginationParams) ([]Result, int, error) {
+func (r *PGRepository) ListResults(ctx context.Context, orgID, ciTypeID, status string, page api.PaginationParams) ([]Result, int, error) {
 	var out []Result
 	var total int
-	err := r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id=$1"}
 		args := []any{orgID}
 		pos := 2

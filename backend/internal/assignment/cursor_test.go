@@ -1,6 +1,7 @@
 package assignment
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,7 +17,7 @@ import (
 func seedAssignments(t *testing.T, repo *MemoryRepository, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		err := repo.Create(&Assignment{
+		err := repo.Create(context.Background(), &Assignment{
 			OrganizationID: "org-1",
 			AssignedTo:     fmt.Sprintf("user-%02d", i),
 			AssignmentType: "asset",

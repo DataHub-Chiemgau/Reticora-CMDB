@@ -63,8 +63,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 }
 
 // List returns paginated assignments filtered by the given parameters.
-func (r *PGRepository) List(orgID string, filter FilterParams, page api.PaginationParams) ([]Assignment, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Assignment, int, error) {
 	var assignments []Assignment
 	var total int
 
@@ -153,8 +152,7 @@ func (r *PGRepository) List(orgID string, filter FilterParams, page api.Paginati
 }
 
 // GetByID retrieves a single assignment by ID within the tenant scope.
-func (r *PGRepository) GetByID(orgID, id string) (*Assignment, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Assignment, error) {
 	var assignment *Assignment
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -176,8 +174,7 @@ func (r *PGRepository) GetByID(orgID, id string) (*Assignment, error) {
 }
 
 // Create inserts a new assignment.
-func (r *PGRepository) Create(a *Assignment) error {
-	ctx := context.Background()
+func (r *PGRepository) Create(ctx context.Context, a *Assignment) error {
 	return r.withTenant(ctx, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		query := `
 			INSERT INTO assignment (
@@ -213,8 +210,7 @@ func (r *PGRepository) Create(a *Assignment) error {
 }
 
 // Update replaces mutable fields on an existing assignment.
-func (r *PGRepository) Update(orgID, id string, a *Assignment) error {
-	ctx := context.Background()
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, a *Assignment) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := `
 			UPDATE assignment SET
@@ -258,8 +254,7 @@ func (r *PGRepository) Update(orgID, id string, a *Assignment) error {
 }
 
 // Delete deletes an assignment. The assignment table has no deleted_at column, so this is a hard delete.
-func (r *PGRepository) Delete(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM assignment WHERE id = $1", id)
 		if err != nil {

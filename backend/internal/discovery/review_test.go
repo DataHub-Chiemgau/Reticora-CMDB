@@ -110,7 +110,7 @@ func TestResolveReviewItemMerge(t *testing.T) {
 		CandidateCIIDs: []string{a.ID, b.ID},
 		Payload:        map[string]any{"management_ip": "10.0.0.5"},
 	}
-	repo.CreateReviewItem(item)
+	repo.CreateReviewItem(context.Background(), item)
 
 	// Merge into an invalid candidate → 400.
 	bad := doJSON(t, mux, "POST", "/api/v1/discovery/review-items/"+item.ID+"/resolve", `{"action":"merge","ci_id":"nope"}`)
@@ -149,7 +149,7 @@ func TestResolveReviewItemCreate(t *testing.T) {
 		CandidateCIIDs: []string{"ci-a"},
 		Payload:        map[string]any{"name": "brand-new", "ci_type_name": "server"},
 	}
-	repo.CreateReviewItem(item)
+	repo.CreateReviewItem(context.Background(), item)
 
 	resp := doJSON(t, mux, "POST", "/api/v1/discovery/review-items/"+item.ID+"/resolve", `{"action":"create"}`)
 	if resp.Code != http.StatusOK {
@@ -186,7 +186,7 @@ func TestBulkIngestDerivesTopology(t *testing.T) {
 		t.Fatalf("expected 1 relationship derived, got %+v", ingest)
 	}
 
-	rels, _, _ := relRepo.List("org-1", pdu.ID, api.PaginationParams{Limit: 10, Offset: 0})
+	rels, _, _ := relRepo.List(context.Background(), "org-1", pdu.ID, api.PaginationParams{Limit: 10, Offset: 0})
 	if len(rels) != 1 {
 		t.Fatalf("expected 1 relationship persisted, got %d", len(rels))
 	}

@@ -53,8 +53,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 	return tx.Commit(ctx)
 }
 
-func (r *PGRepository) ListCollectors(orgID string, page api.PaginationParams) ([]Collector, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListCollectors(ctx context.Context, orgID string, page api.PaginationParams) ([]Collector, int, error) {
 	var items []Collector
 	var total int
 
@@ -89,8 +88,7 @@ func (r *PGRepository) ListCollectors(orgID string, page api.PaginationParams) (
 	return items, total, err
 }
 
-func (r *PGRepository) RegisterCollector(c *Collector) error {
-	ctx := context.Background()
+func (r *PGRepository) RegisterCollector(ctx context.Context, c *Collector) error {
 	return r.withTenant(ctx, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if c.Config == nil {
 			c.Config = make(map[string]any)
@@ -135,8 +133,7 @@ func (r *PGRepository) RegisterCollector(c *Collector) error {
 	})
 }
 
-func (r *PGRepository) Heartbeat(orgID, collectorID string) error {
-	ctx := context.Background()
+func (r *PGRepository) Heartbeat(ctx context.Context, orgID, collectorID string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx,
 			"UPDATE collector SET status = 'online', last_heartbeat = NOW(), updated_at = NOW() WHERE id = $1 AND organization_id = $2",
@@ -209,8 +206,7 @@ const jobSelectColumns = `
 	created_at
 `
 
-func (r *PGRepository) ListJobs(orgID string, filter JobFilter, page api.PaginationParams) ([]Job, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListJobs(ctx context.Context, orgID string, filter JobFilter, page api.PaginationParams) ([]Job, int, error) {
 	var items []Job
 	var total int
 
@@ -254,8 +250,7 @@ func (r *PGRepository) ListJobs(orgID string, filter JobFilter, page api.Paginat
 	return items, total, err
 }
 
-func (r *PGRepository) CreateJob(j *Job) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateJob(ctx context.Context, j *Job) error {
 	return r.withTenant(ctx, j.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if j.Config == nil {
 			j.Config = map[string]any{}
@@ -284,8 +279,7 @@ func (r *PGRepository) CreateJob(j *Job) error {
 	})
 }
 
-func (r *PGRepository) GetJob(orgID, id string) (*Job, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetJob(ctx context.Context, orgID, id string) (*Job, error) {
 	var job *Job
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM discovery_job WHERE id = $1 AND organization_id = $2", jobSelectColumns)
@@ -351,8 +345,7 @@ const reviewSelectColumns = `
 	updated_at
 `
 
-func (r *PGRepository) ListReviewItems(orgID string, filter ReviewFilter, page api.PaginationParams) ([]ReviewItem, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListReviewItems(ctx context.Context, orgID string, filter ReviewFilter, page api.PaginationParams) ([]ReviewItem, int, error) {
 	var items []ReviewItem
 	var total int
 
@@ -396,8 +389,7 @@ func (r *PGRepository) ListReviewItems(orgID string, filter ReviewFilter, page a
 	return items, total, err
 }
 
-func (r *PGRepository) CreateReviewItem(item *ReviewItem) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateReviewItem(ctx context.Context, item *ReviewItem) error {
 	return r.withTenant(ctx, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if item.Payload == nil {
 			item.Payload = map[string]any{}
@@ -432,8 +424,7 @@ func (r *PGRepository) CreateReviewItem(item *ReviewItem) error {
 	})
 }
 
-func (r *PGRepository) GetReviewItem(orgID, id string) (*ReviewItem, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetReviewItem(ctx context.Context, orgID, id string) (*ReviewItem, error) {
 	var item *ReviewItem
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM review_item WHERE id = $1 AND organization_id = $2", reviewSelectColumns)
@@ -451,8 +442,7 @@ func (r *PGRepository) GetReviewItem(orgID, id string) (*ReviewItem, error) {
 	return item, nil
 }
 
-func (r *PGRepository) ResolveReviewItem(orgID, id string, resolution Resolution) (*ReviewItem, error) {
-	ctx := context.Background()
+func (r *PGRepository) ResolveReviewItem(ctx context.Context, orgID, id string, resolution Resolution) (*ReviewItem, error) {
 	var item *ReviewItem
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf(`
@@ -516,8 +506,7 @@ func scanReviewItem(scanner collectorScanner) (*ReviewItem, error) {
 
 // SuppressedPairs returns the set of suppressed (source|target) CI pairs for the
 // organization, used to skip discovery-derived topology edges.
-func (r *PGRepository) SuppressedPairs(orgID string) (map[string]bool, error) {
-	ctx := context.Background()
+func (r *PGRepository) SuppressedPairs(ctx context.Context, orgID string) (map[string]bool, error) {
 	pairs := make(map[string]bool)
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,

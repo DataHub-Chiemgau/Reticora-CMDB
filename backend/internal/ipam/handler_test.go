@@ -75,7 +75,7 @@ func TestSubnetCRUDAndCIDRValidation(t *testing.T) {
 func TestIPAddressSubnetMembership(t *testing.T) {
 	repo, mux := newMux()
 	s := &Subnet{OrganizationID: "org-1", CIDR: "10.0.0.0/24"}
-	repo.CreateSubnet(s)
+	repo.CreateSubnet(context.Background(), s)
 
 	// invalid ip
 	if w := do(mux, "POST", "/api/v1/ip-addresses", `{"address":"nope"}`, "org-1"); w.Code != http.StatusBadRequest {

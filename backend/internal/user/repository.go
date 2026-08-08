@@ -1,6 +1,7 @@
 package user
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -12,30 +13,30 @@ import (
 // Repository defines persistence operations for users, teams, and roles.
 type Repository interface {
 	// Users
-	ListUsers(orgID, search string, page api.PaginationParams) ([]User, int, error)
-	GetUser(orgID, id string) (*User, error)
-	CreateUser(u *User) error
-	UpdateUser(orgID, id string, req UpdateUserRequest) (*User, error)
-	DeleteUser(orgID, id string) error
+	ListUsers(ctx context.Context, orgID, search string, page api.PaginationParams) ([]User, int, error)
+	GetUser(ctx context.Context, orgID, id string) (*User, error)
+	CreateUser(ctx context.Context, u *User) error
+	UpdateUser(ctx context.Context, orgID, id string, req UpdateUserRequest) (*User, error)
+	DeleteUser(ctx context.Context, orgID, id string) error
 
 	// Teams
-	ListTeams(orgID, search string, page api.PaginationParams) ([]Team, int, error)
-	GetTeam(orgID, id string) (*Team, error)
-	CreateTeam(t *Team) error
-	UpdateTeam(orgID, id string, req UpdateTeamRequest) (*Team, error)
-	DeleteTeam(orgID, id string) error
-	AddTeamMember(orgID string, m *TeamMember) error
-	RemoveTeamMember(orgID, teamID, userID string) error
-	ListTeamMembers(orgID, teamID string) ([]TeamMember, error)
+	ListTeams(ctx context.Context, orgID, search string, page api.PaginationParams) ([]Team, int, error)
+	GetTeam(ctx context.Context, orgID, id string) (*Team, error)
+	CreateTeam(ctx context.Context, t *Team) error
+	UpdateTeam(ctx context.Context, orgID, id string, req UpdateTeamRequest) (*Team, error)
+	DeleteTeam(ctx context.Context, orgID, id string) error
+	AddTeamMember(ctx context.Context, orgID string, m *TeamMember) error
+	RemoveTeamMember(ctx context.Context, orgID, teamID, userID string) error
+	ListTeamMembers(ctx context.Context, orgID, teamID string) ([]TeamMember, error)
 
 	// Custom Roles
-	ListRoles(orgID string, page api.PaginationParams) ([]CustomRole, int, error)
-	GetRole(orgID, id string) (*CustomRole, error)
-	CreateRole(r *CustomRole) error
-	UpdateRole(orgID, id string, req UpdateRoleRequest) (*CustomRole, error)
-	DeleteRole(orgID, id string) error
-	AssignRole(orgID string, a *UserRoleAssignment) error
-	ListUserRoles(orgID, userID string) ([]UserRoleAssignment, error)
+	ListRoles(ctx context.Context, orgID string, page api.PaginationParams) ([]CustomRole, int, error)
+	GetRole(ctx context.Context, orgID, id string) (*CustomRole, error)
+	CreateRole(ctx context.Context, r *CustomRole) error
+	UpdateRole(ctx context.Context, orgID, id string, req UpdateRoleRequest) (*CustomRole, error)
+	DeleteRole(ctx context.Context, orgID, id string) error
+	AssignRole(ctx context.Context, orgID string, a *UserRoleAssignment) error
+	ListUserRoles(ctx context.Context, orgID, userID string) ([]UserRoleAssignment, error)
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -67,7 +68,7 @@ func (r *MemoryRepository) nextIDStr(prefix string) string {
 
 // --- Users ---
 
-func (r *MemoryRepository) ListUsers(orgID, search string, page api.PaginationParams) ([]User, int, error) {
+func (r *MemoryRepository) ListUsers(_ context.Context, orgID, search string, page api.PaginationParams) ([]User, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -95,7 +96,7 @@ func (r *MemoryRepository) ListUsers(orgID, search string, page api.PaginationPa
 	return result[start:end], total, nil
 }
 
-func (r *MemoryRepository) GetUser(orgID, id string) (*User, error) {
+func (r *MemoryRepository) GetUser(_ context.Context, orgID, id string) (*User, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -106,7 +107,7 @@ func (r *MemoryRepository) GetUser(orgID, id string) (*User, error) {
 	return u, nil
 }
 
-func (r *MemoryRepository) CreateUser(u *User) error {
+func (r *MemoryRepository) CreateUser(_ context.Context, u *User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -118,7 +119,7 @@ func (r *MemoryRepository) CreateUser(u *User) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateUser(orgID, id string, req UpdateUserRequest) (*User, error) {
+func (r *MemoryRepository) UpdateUser(_ context.Context, orgID, id string, req UpdateUserRequest) (*User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -139,7 +140,7 @@ func (r *MemoryRepository) UpdateUser(orgID, id string, req UpdateUserRequest) (
 	return u, nil
 }
 
-func (r *MemoryRepository) DeleteUser(orgID, id string) error {
+func (r *MemoryRepository) DeleteUser(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -153,7 +154,7 @@ func (r *MemoryRepository) DeleteUser(orgID, id string) error {
 
 // --- Teams ---
 
-func (r *MemoryRepository) ListTeams(orgID, search string, page api.PaginationParams) ([]Team, int, error) {
+func (r *MemoryRepository) ListTeams(_ context.Context, orgID, search string, page api.PaginationParams) ([]Team, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -180,7 +181,7 @@ func (r *MemoryRepository) ListTeams(orgID, search string, page api.PaginationPa
 	return result[start:end], total, nil
 }
 
-func (r *MemoryRepository) GetTeam(orgID, id string) (*Team, error) {
+func (r *MemoryRepository) GetTeam(_ context.Context, orgID, id string) (*Team, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -191,7 +192,7 @@ func (r *MemoryRepository) GetTeam(orgID, id string) (*Team, error) {
 	return t, nil
 }
 
-func (r *MemoryRepository) CreateTeam(t *Team) error {
+func (r *MemoryRepository) CreateTeam(_ context.Context, t *Team) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -203,7 +204,7 @@ func (r *MemoryRepository) CreateTeam(t *Team) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateTeam(orgID, id string, req UpdateTeamRequest) (*Team, error) {
+func (r *MemoryRepository) UpdateTeam(_ context.Context, orgID, id string, req UpdateTeamRequest) (*Team, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -224,7 +225,7 @@ func (r *MemoryRepository) UpdateTeam(orgID, id string, req UpdateTeamRequest) (
 	return t, nil
 }
 
-func (r *MemoryRepository) DeleteTeam(orgID, id string) error {
+func (r *MemoryRepository) DeleteTeam(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -242,7 +243,7 @@ func (r *MemoryRepository) DeleteTeam(orgID, id string) error {
 	return nil
 }
 
-func (r *MemoryRepository) AddTeamMember(orgID string, m *TeamMember) error {
+func (r *MemoryRepository) AddTeamMember(_ context.Context, orgID string, m *TeamMember) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -258,7 +259,7 @@ func (r *MemoryRepository) AddTeamMember(orgID string, m *TeamMember) error {
 	return nil
 }
 
-func (r *MemoryRepository) RemoveTeamMember(orgID, teamID, userID string) error {
+func (r *MemoryRepository) RemoveTeamMember(_ context.Context, orgID, teamID, userID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -277,7 +278,7 @@ func (r *MemoryRepository) RemoveTeamMember(orgID, teamID, userID string) error 
 	return fmt.Errorf("member not found")
 }
 
-func (r *MemoryRepository) ListTeamMembers(orgID, teamID string) ([]TeamMember, error) {
+func (r *MemoryRepository) ListTeamMembers(_ context.Context, orgID, teamID string) ([]TeamMember, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -297,7 +298,7 @@ func (r *MemoryRepository) ListTeamMembers(orgID, teamID string) ([]TeamMember, 
 
 // --- Custom Roles ---
 
-func (r *MemoryRepository) ListRoles(orgID string, page api.PaginationParams) ([]CustomRole, int, error) {
+func (r *MemoryRepository) ListRoles(_ context.Context, orgID string, page api.PaginationParams) ([]CustomRole, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -321,7 +322,7 @@ func (r *MemoryRepository) ListRoles(orgID string, page api.PaginationParams) ([
 	return result[start:end], total, nil
 }
 
-func (r *MemoryRepository) GetRole(orgID, id string) (*CustomRole, error) {
+func (r *MemoryRepository) GetRole(_ context.Context, orgID, id string) (*CustomRole, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -332,7 +333,7 @@ func (r *MemoryRepository) GetRole(orgID, id string) (*CustomRole, error) {
 	return role, nil
 }
 
-func (r *MemoryRepository) CreateRole(role *CustomRole) error {
+func (r *MemoryRepository) CreateRole(_ context.Context, role *CustomRole) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -344,7 +345,7 @@ func (r *MemoryRepository) CreateRole(role *CustomRole) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateRole(orgID, id string, req UpdateRoleRequest) (*CustomRole, error) {
+func (r *MemoryRepository) UpdateRole(_ context.Context, orgID, id string, req UpdateRoleRequest) (*CustomRole, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -368,7 +369,7 @@ func (r *MemoryRepository) UpdateRole(orgID, id string, req UpdateRoleRequest) (
 	return role, nil
 }
 
-func (r *MemoryRepository) DeleteRole(orgID, id string) error {
+func (r *MemoryRepository) DeleteRole(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -383,7 +384,7 @@ func (r *MemoryRepository) DeleteRole(orgID, id string) error {
 	return nil
 }
 
-func (r *MemoryRepository) AssignRole(orgID string, a *UserRoleAssignment) error {
+func (r *MemoryRepository) AssignRole(_ context.Context, orgID string, a *UserRoleAssignment) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -399,7 +400,7 @@ func (r *MemoryRepository) AssignRole(orgID string, a *UserRoleAssignment) error
 	return nil
 }
 
-func (r *MemoryRepository) ListUserRoles(orgID, userID string) ([]UserRoleAssignment, error) {
+func (r *MemoryRepository) ListUserRoles(_ context.Context, orgID, userID string) ([]UserRoleAssignment, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 

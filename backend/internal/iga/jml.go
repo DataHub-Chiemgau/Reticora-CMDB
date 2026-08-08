@@ -12,8 +12,7 @@ type LifecycleService struct{ repo Repository }
 
 func NewLifecycleService(repo Repository) *LifecycleService { return &LifecycleService{repo: repo} }
 func (s *LifecycleService) Resolve(ctx context.Context, orgID string, change IdentityChange) ([]ProvisioningTask, error) {
-	_ = ctx
-	policies, _, err := s.repo.ListPolicies(orgID, change.Event, true, api.PaginationParams{Limit: 100})
+	policies, _, err := s.repo.ListPolicies(ctx, orgID, change.Event, true, api.PaginationParams{Limit: 100})
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +32,7 @@ func (s *LifecycleService) Resolve(ctx context.Context, orgID string, change Ide
 				payload[k] = v
 			}
 			t := ProvisioningTask{OrganizationID: orgID, ConnectorID: connectorID, UserID: change.UserID, Action: action, Status: TaskStatusPending, Payload: payload, MaxAttempts: 3, NextRunAt: time.Now().UTC()}
-			if err := s.repo.CreateTask(&t); err != nil {
+			if err := s.repo.CreateTask(ctx, &t); err != nil {
 				return nil, err
 			}
 			tasks = append(tasks, t)
@@ -62,7 +61,7 @@ func NewTaskRunner(repo Repository, registry *Registry, decrypt func(context.Con
 	return &TaskRunner{repo: repo, registry: registry, decrypt: decrypt}
 }
 func (r *TaskRunner) RunDue(ctx context.Context, orgID string, limit int) error {
-	tasks, err := r.repo.DueTasks(orgID, time.Now().UTC(), limit)
+	tasks, err := r.repo.DueTasks(ctx, orgID, time.Now().UTC(), limit)
 	if err != nil {
 		return err
 	}
@@ -78,8 +77,8 @@ func (r *TaskRunner) RunTask(ctx context.Context, t *ProvisioningTask) error {
 	t.Attempts++
 	t.LastRunAt = &now
 	t.Status = TaskStatusRunning
-	_ = r.repo.UpdateTask(t)
-	cfg, err := r.repo.GetConnector(t.OrganizationID, t.ConnectorID)
+	_ = r.repo.UpdateTask(ctx, t)
+	cfg, err := r.repo.GetConnector(ctx, t.OrganizationID, t.ConnectorID)
 	if err == nil {
 		var secret JSONMap
 		if r.decrypt != nil && cfg.CredentialID != "" {
@@ -102,12 +101,12 @@ func (r *TaskRunner) RunTask(ctx context.Context, t *ProvisioningTask) error {
 			t.Status = TaskStatusPending
 			t.NextRunAt = now.Add(BackoffDelay(t.Attempts))
 		}
-		return r.repo.UpdateTask(t)
+		return r.repo.UpdateTask(ctx, t)
 	}
 	t.Status = TaskStatusSucceeded
 	t.Error = ""
 	t.NextRunAt = now
-	return r.repo.UpdateTask(t)
+	return r.repo.UpdateTask(ctx, t)
 }
 func executeConnectorTask(ctx context.Context, conn Connector, t *ProvisioningTask) error {
 	account := Account{ID: t.ExternalID}

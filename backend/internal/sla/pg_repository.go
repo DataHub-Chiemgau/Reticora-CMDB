@@ -37,8 +37,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(con
 	return tx.Commit(ctx)
 }
 
-func (r *PGRepository) ListPolicies(orgID, priority, clientID string, page api.PaginationParams) ([]Policy, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListPolicies(ctx context.Context, orgID, priority, clientID string, page api.PaginationParams) ([]Policy, int, error) {
 	var items []Policy
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -77,8 +76,7 @@ func (r *PGRepository) ListPolicies(orgID, priority, clientID string, page api.P
 	return items, total, err
 }
 
-func (r *PGRepository) GetPolicy(orgID, id string) (*Policy, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetPolicy(ctx context.Context, orgID, id string) (*Policy, error) {
 	var item *Policy
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -91,8 +89,7 @@ func (r *PGRepository) GetPolicy(orgID, id string) (*Policy, error) {
 	return item, err
 }
 
-func (r *PGRepository) CreatePolicy(p *Policy) error {
-	ctx := context.Background()
+func (r *PGRepository) CreatePolicy(ctx context.Context, p *Policy) error {
 	return r.withTenant(ctx, p.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
 			INSERT INTO sla (organization_id, client_id, name, priority, response_target_minutes, resolution_target_minutes, business_calendar)
@@ -101,8 +98,7 @@ func (r *PGRepository) CreatePolicy(p *Policy) error {
 	})
 }
 
-func (r *PGRepository) UpdatePolicy(orgID, id string, req UpdatePolicyRequest) (*Policy, error) {
-	ctx := context.Background()
+func (r *PGRepository) UpdatePolicy(ctx context.Context, orgID, id string, req UpdatePolicyRequest) (*Policy, error) {
 	var item *Policy
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		set := []string{}
@@ -157,8 +153,8 @@ func (r *PGRepository) UpdatePolicy(orgID, id string, req UpdatePolicyRequest) (
 	return item, err
 }
 
-func (r *PGRepository) DeletePolicy(orgID, id string) error {
-	return r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+func (r *PGRepository) DeletePolicy(ctx context.Context, orgID, id string) error {
+	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx, "DELETE FROM sla WHERE organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
 			return fmt.Errorf("delete sla policy: %w", err)
@@ -170,8 +166,7 @@ func (r *PGRepository) DeletePolicy(orgID, id string) error {
 	})
 }
 
-func (r *PGRepository) ApplyForTicket(orgID string, t *ticket.Ticket, slaID string) (*TicketSLA, error) {
-	ctx := context.Background()
+func (r *PGRepository) ApplyForTicket(ctx context.Context, orgID string, t *ticket.Ticket, slaID string) (*TicketSLA, error) {
 	var state *TicketSLA
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		policyID := slaID
@@ -213,11 +208,10 @@ func (r *PGRepository) ApplyForTicket(orgID string, t *ticket.Ticket, slaID stri
 	if err != nil {
 		return nil, err
 	}
-	return r.GetForTicket(orgID, state.TicketID)
+	return r.GetForTicket(ctx, orgID, state.TicketID)
 }
 
-func (r *PGRepository) GetForTicket(orgID, ticketID string) (*TicketSLA, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetForTicket(ctx context.Context, orgID, ticketID string) (*TicketSLA, error) {
 	var state *TicketSLA
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var id string
@@ -237,8 +231,8 @@ func (r *PGRepository) GetForTicket(orgID, ticketID string) (*TicketSLA, error) 
 	return state, err
 }
 
-func (r *PGRepository) MarkFirstResponse(orgID, ticketID string, at time.Time) error {
-	return r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+func (r *PGRepository) MarkFirstResponse(ctx context.Context, orgID, ticketID string, at time.Time) error {
+	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE ticket_sla SET first_response_at = COALESCE(first_response_at, $3), updated_at = now() WHERE organization_id = $1 AND ticket_id = $2`, orgID, ticketID, at.UTC())
 		if err != nil {
 			return fmt.Errorf("mark first response: %w", err)
@@ -247,8 +241,8 @@ func (r *PGRepository) MarkFirstResponse(orgID, ticketID string, at time.Time) e
 	})
 }
 
-func (r *PGRepository) MarkResolved(orgID, ticketID string, at time.Time) error {
-	return r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+func (r *PGRepository) MarkResolved(ctx context.Context, orgID, ticketID string, at time.Time) error {
+	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE ticket_sla SET resolved_at = COALESCE(resolved_at, $3), updated_at = now() WHERE organization_id = $1 AND ticket_id = $2`, orgID, ticketID, at.UTC())
 		if err != nil {
 			return fmt.Errorf("mark resolved: %w", err)
@@ -257,8 +251,7 @@ func (r *PGRepository) MarkResolved(orgID, ticketID string, at time.Time) error 
 	})
 }
 
-func (r *PGRepository) ListBreaches(orgID string, filter BreachFilter, page api.PaginationParams) ([]TicketSLA, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListBreaches(ctx context.Context, orgID string, filter BreachFilter, page api.PaginationParams) ([]TicketSLA, int, error) {
 	var items []TicketSLA
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {

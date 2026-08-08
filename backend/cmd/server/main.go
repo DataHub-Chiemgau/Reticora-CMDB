@@ -148,7 +148,7 @@ func main() {
 		osBackend := search.NewOpenSearchBackend(search.OpenSearchConfig{
 			URL: cfg.OpenSearchURL, Username: cfg.OpenSearchUsername, Password: cfg.OpenSearchPassword, Index: cfg.OpenSearchIndex,
 		}, nil)
-		if err := osBackend.Ping(); err != nil {
+		if err := osBackend.Ping(context.Background()); err != nil {
 			slog.Error("failed to connect to OpenSearch", "error", err)
 			os.Exit(1)
 		}

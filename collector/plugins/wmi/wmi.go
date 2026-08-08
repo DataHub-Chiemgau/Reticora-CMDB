@@ -198,7 +198,15 @@ func (p *Plugin) wsmanEnumerate(ctx context.Context, baseURL, username, password
 	req.SetBasicAuth(username, password)
 	req.Header.Set("Content-Type", "application/soap+xml;charset=UTF-8")
 
-	resp, err := p.client.Do(req)
+	client := p.client
+	if client == nil {
+		// Plugin constructed via struct literal instead of New().
+		client = &http.Client{Timeout: p.Timeout}
+		if client.Timeout <= 0 {
+			client.Timeout = defaultTimeout
+		}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return ""
 	}

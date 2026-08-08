@@ -71,7 +71,7 @@ func TestRackCRUD(t *testing.T) {
 func TestRackTenantIsolation(t *testing.T) {
 	repo, mux := newMux()
 	rk := &Rack{OrganizationID: "org-1", RoomID: "room-1", Name: "R1", HeightU: 42, WidthMM: 600, DepthMM: 1000}
-	repo.CreateRack(rk)
+	repo.CreateRack(context.Background(), rk)
 	if w := do(mux, "GET", "/api/v1/racks/"+rk.ID, "", "org-2"); w.Code != http.StatusNotFound {
 		t.Errorf("cross-tenant: expected 404, got %d", w.Code)
 	}
@@ -80,7 +80,7 @@ func TestRackTenantIsolation(t *testing.T) {
 func TestMountFitAndOverlap(t *testing.T) {
 	repo, mux := newMux()
 	rk := &Rack{OrganizationID: "org-1", RoomID: "room-1", Name: "R1", HeightU: 10, WidthMM: 600, DepthMM: 1000}
-	repo.CreateRack(rk)
+	repo.CreateRack(context.Background(), rk)
 	base := "/api/v1/racks/" + rk.ID + "/mounts"
 
 	// exceeds rack height

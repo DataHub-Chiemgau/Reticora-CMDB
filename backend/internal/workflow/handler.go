@@ -39,7 +39,7 @@ func (h *Handler) ListDefinitions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListDefinitions(t.OrganizationID, r.URL.Query().Get("active") == "true", page)
+	items, total, err := h.repo.ListDefinitions(r.Context(), t.OrganizationID, r.URL.Query().Get("active") == "true", page)
 	if err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
@@ -51,7 +51,7 @@ func (h *Handler) GetDefinition(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := h.repo.GetDefinition(t.OrganizationID, chi.URLParam(r, "id"))
+	item, err := h.repo.GetDefinition(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "workflow definition not found")
 		return
@@ -77,7 +77,7 @@ func (h *Handler) CreateDefinition(w http.ResponseWriter, r *http.Request) {
 		active = *req.Active
 	}
 	item := &Definition{OrganizationID: t.OrganizationID, Name: req.Name, Description: req.Description, Trigger: req.Trigger, Conditions: req.Conditions, Actions: req.Actions, Active: active}
-	if err := h.repo.CreateDefinition(item); err != nil {
+	if err := h.repo.CreateDefinition(r.Context(), item); err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
 	}
@@ -93,7 +93,7 @@ func (h *Handler) UpdateDefinition(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
-	item, err := h.repo.UpdateDefinition(t.OrganizationID, chi.URLParam(r, "id"), req)
+	item, err := h.repo.UpdateDefinition(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "workflow definition not found")
 		return
@@ -105,7 +105,7 @@ func (h *Handler) DeleteDefinition(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteDefinition(t.OrganizationID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeleteDefinition(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, 404, "Not Found", "workflow definition not found")
 		return
 	}
@@ -116,7 +116,7 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	def, err := h.repo.GetDefinition(t.OrganizationID, chi.URLParam(r, "id"))
+	def, err := h.repo.GetDefinition(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "workflow definition not found")
 		return
@@ -145,7 +145,7 @@ func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListRuns(t.OrganizationID, r.URL.Query().Get("workflow_id"), r.URL.Query().Get("status"), page)
+	items, total, err := h.repo.ListRuns(r.Context(), t.OrganizationID, r.URL.Query().Get("workflow_id"), r.URL.Query().Get("status"), page)
 	if err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
 		return
@@ -157,7 +157,7 @@ func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	run, err := h.repo.GetRun(t.OrganizationID, chi.URLParam(r, "id"))
+	run, err := h.repo.GetRun(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, 404, "Not Found", "workflow run not found")
 		return

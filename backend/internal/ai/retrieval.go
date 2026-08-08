@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"math"
 	"sort"
 	"strings"
@@ -34,18 +35,18 @@ func Cosine(a, b []float64) float64 {
 	}
 	return dot / (math.Sqrt(na) * math.Sqrt(nb))
 }
-func (r *Retriever) Retrieve(orgID, userID, question string, limit int) ([]Chunk, []Citation, error) {
+func (r *Retriever) Retrieve(ctx context.Context, orgID, userID, question string, limit int) ([]Chunk, []Citation, error) {
 	if limit <= 0 {
 		limit = 5
 	}
-	sr, err := r.search.Query(search.Query{OrganizationID: orgID, UserID: userID, Text: question, Limit: 25, Highlight: false})
+	sr, err := r.search.Query(ctx, search.Query{OrganizationID: orgID, UserID: userID, Text: question, Limit: 25, Highlight: false})
 	if err != nil {
 		return nil, nil, err
 	}
 	var ids, types []string
 	seen := map[string]bool{}
 	for _, h := range sr.Data {
-		if !r.allowed(orgID, userID, h.EntityType) {
+		if !r.allowed(ctx, orgID, userID, h.EntityType) {
 			continue
 		}
 		ids = append(ids, h.EntityID)
@@ -57,7 +58,7 @@ func (r *Retriever) Retrieve(orgID, userID, question string, limit int) ([]Chunk
 	if len(ids) == 0 {
 		return nil, nil, nil
 	}
-	chunks, err := r.repo.CandidateChunks(orgID, types, ids, 50)
+	chunks, err := r.repo.CandidateChunks(ctx, orgID, types, ids, 50)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -90,7 +91,7 @@ func (r *Retriever) Retrieve(orgID, userID, question string, limit int) ([]Chunk
 	}
 	return out, cites, nil
 }
-func (r *Retriever) allowed(orgID, userID, entity string) bool {
+func (r *Retriever) allowed(ctx context.Context, orgID, userID, entity string) bool {
 	if r.permissions == nil || userID == "" {
 		return true
 	}
@@ -98,7 +99,7 @@ func (r *Retriever) allowed(orgID, userID, entity string) bool {
 	if key == "" {
 		return false
 	}
-	ok, err := r.permissions.HasPermission(orgID, userID, key)
+	ok, err := r.permissions.HasPermission(ctx, orgID, userID, key)
 	return err == nil && ok
 }
 func searchPermission(entity string) string {

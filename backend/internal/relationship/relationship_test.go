@@ -2,6 +2,7 @@ package relationship
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -89,7 +90,7 @@ func TestHandler_Delete(t *testing.T) {
 		RelType:        "depends_on",
 		Attributes:     map[string]any{},
 	}
-	repo.Create(rel)
+	repo.Create(context.Background(), rel)
 
 	req := httptest.NewRequest("DELETE", "/api/v1/relationships/"+rel.ID, nil)
 	req = tenantCtx(req)
@@ -110,7 +111,7 @@ func TestListAllRelationships(t *testing.T) {
 		{OrganizationID: "org-1", SourceCIID: "ci-3", TargetCIID: "ci-4", RelType: "hosts"},
 		{OrganizationID: "org-2", SourceCIID: "ci-5", TargetCIID: "ci-6", RelType: "hosts"},
 	} {
-		if err := repo.Create(rel); err != nil {
+		if err := repo.Create(context.Background(), rel); err != nil {
 			t.Fatalf("create relationship: %v", err)
 		}
 	}

@@ -86,8 +86,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 }
 
 // List returns paginated documents filtered by the given parameters.
-func (r *PGRepository) List(orgID string, filter FilterParams, page api.PaginationParams) ([]Document, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Document, int, error) {
 	var docs []Document
 	var total int
 
@@ -166,8 +165,7 @@ func (r *PGRepository) List(orgID string, filter FilterParams, page api.Paginati
 }
 
 // GetByID retrieves a single document by ID within the tenant scope.
-func (r *PGRepository) GetByID(orgID, id string) (*Document, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Document, error) {
 	var doc *Document
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -189,8 +187,7 @@ func (r *PGRepository) GetByID(orgID, id string) (*Document, error) {
 }
 
 // Create inserts a new document.
-func (r *PGRepository) Create(d *Document) error {
-	ctx := context.Background()
+func (r *PGRepository) Create(ctx context.Context, d *Document) error {
 	return r.withTenant(ctx, d.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if d.Tags == nil {
 			d.Tags = []string{}
@@ -227,8 +224,7 @@ func (r *PGRepository) Create(d *Document) error {
 }
 
 // Update modifies an existing document.
-func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Document, error) {
-	ctx := context.Background()
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Document, error) {
 	var doc *Document
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -287,8 +283,7 @@ func (r *PGRepository) Update(orgID, id string, req UpdateRequest) (*Document, e
 }
 
 // Delete deletes a document. The document table has no deleted_at column, so this is a hard delete.
-func (r *PGRepository) Delete(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM document WHERE id = $1", id)
 		if err != nil {
@@ -302,8 +297,7 @@ func (r *PGRepository) Delete(orgID, id string) error {
 }
 
 // LinkDocument creates a link between a document and an entity.
-func (r *PGRepository) LinkDocument(link *DocumentLink) error {
-	ctx := context.Background()
+func (r *PGRepository) LinkDocument(ctx context.Context, link *DocumentLink) error {
 	return r.withTenant(ctx, link.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		query := `
 			INSERT INTO document_link (organization_id, document_id, entity_type, entity_id)
@@ -324,8 +318,7 @@ func (r *PGRepository) LinkDocument(link *DocumentLink) error {
 }
 
 // GetLinks returns all entity links for a document.
-func (r *PGRepository) GetLinks(orgID, docID string) ([]DocumentLink, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetLinks(ctx context.Context, orgID, docID string) ([]DocumentLink, error) {
 	var links []DocumentLink
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -352,8 +345,7 @@ func (r *PGRepository) GetLinks(orgID, docID string) ([]DocumentLink, error) {
 }
 
 // GetLinksForEntity returns documents linked to an entity.
-func (r *PGRepository) GetLinksForEntity(orgID, entityType, entityID string) ([]Document, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetLinksForEntity(ctx context.Context, orgID, entityType, entityID string) ([]Document, error) {
 	var docs []Document
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {

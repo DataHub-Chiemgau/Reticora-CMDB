@@ -1,6 +1,7 @@
 package tenantapi
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,32 +14,32 @@ import (
 // Repository defines persistence operations for the location hierarchy.
 type Repository interface {
 	// Clients
-	ListClients(orgID string, page api.PaginationParams) ([]Client, int, error)
-	GetClient(orgID, id string) (*Client, error)
-	CreateClient(c *Client) error
-	UpdateClient(orgID, id string, req UpdateClientRequest) (*Client, error)
-	DeleteClient(orgID, id string) error
+	ListClients(ctx context.Context, orgID string, page api.PaginationParams) ([]Client, int, error)
+	GetClient(ctx context.Context, orgID, id string) (*Client, error)
+	CreateClient(ctx context.Context, c *Client) error
+	UpdateClient(ctx context.Context, orgID, id string, req UpdateClientRequest) (*Client, error)
+	DeleteClient(ctx context.Context, orgID, id string) error
 
 	// Sites
-	ListSites(orgID, clientID string, page api.PaginationParams) ([]Site, int, error)
-	GetSite(orgID, id string) (*Site, error)
-	CreateSite(s *Site) error
-	UpdateSite(orgID, id string, req UpdateSiteRequest) (*Site, error)
-	DeleteSite(orgID, id string) error
+	ListSites(ctx context.Context, orgID, clientID string, page api.PaginationParams) ([]Site, int, error)
+	GetSite(ctx context.Context, orgID, id string) (*Site, error)
+	CreateSite(ctx context.Context, s *Site) error
+	UpdateSite(ctx context.Context, orgID, id string, req UpdateSiteRequest) (*Site, error)
+	DeleteSite(ctx context.Context, orgID, id string) error
 
 	// Buildings
-	ListBuildings(orgID, siteID string, page api.PaginationParams) ([]Building, int, error)
-	GetBuilding(orgID, id string) (*Building, error)
-	CreateBuilding(b *Building) error
-	UpdateBuilding(orgID, id string, req UpdateBuildingRequest) (*Building, error)
-	DeleteBuilding(orgID, id string) error
+	ListBuildings(ctx context.Context, orgID, siteID string, page api.PaginationParams) ([]Building, int, error)
+	GetBuilding(ctx context.Context, orgID, id string) (*Building, error)
+	CreateBuilding(ctx context.Context, b *Building) error
+	UpdateBuilding(ctx context.Context, orgID, id string, req UpdateBuildingRequest) (*Building, error)
+	DeleteBuilding(ctx context.Context, orgID, id string) error
 
 	// Rooms
-	ListRooms(orgID, buildingID string, page api.PaginationParams) ([]Room, int, error)
-	GetRoom(orgID, id string) (*Room, error)
-	CreateRoom(rm *Room) error
-	UpdateRoom(orgID, id string, req UpdateRoomRequest) (*Room, error)
-	DeleteRoom(orgID, id string) error
+	ListRooms(ctx context.Context, orgID, buildingID string, page api.PaginationParams) ([]Room, int, error)
+	GetRoom(ctx context.Context, orgID, id string) (*Room, error)
+	CreateRoom(ctx context.Context, rm *Room) error
+	UpdateRoom(ctx context.Context, orgID, id string, req UpdateRoomRequest) (*Room, error)
+	DeleteRoom(ctx context.Context, orgID, id string) error
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -81,7 +82,7 @@ func paginate[T any](items []T, page api.PaginationParams) ([]T, int) {
 
 // --- Clients ---
 
-func (r *MemoryRepository) ListClients(orgID string, page api.PaginationParams) ([]Client, int, error) {
+func (r *MemoryRepository) ListClients(_ context.Context, orgID string, page api.PaginationParams) ([]Client, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Client
@@ -95,7 +96,7 @@ func (r *MemoryRepository) ListClients(orgID string, page api.PaginationParams) 
 	return items, total, nil
 }
 
-func (r *MemoryRepository) GetClient(orgID, id string) (*Client, error) {
+func (r *MemoryRepository) GetClient(_ context.Context, orgID, id string) (*Client, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	c, ok := r.clients[id]
@@ -106,7 +107,7 @@ func (r *MemoryRepository) GetClient(orgID, id string) (*Client, error) {
 	return &cp, nil
 }
 
-func (r *MemoryRepository) CreateClient(c *Client) error {
+func (r *MemoryRepository) CreateClient(_ context.Context, c *Client) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.clients {
@@ -125,7 +126,7 @@ func (r *MemoryRepository) CreateClient(c *Client) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateClient(orgID, id string, req UpdateClientRequest) (*Client, error) {
+func (r *MemoryRepository) UpdateClient(_ context.Context, orgID, id string, req UpdateClientRequest) (*Client, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c, ok := r.clients[id]
@@ -146,7 +147,7 @@ func (r *MemoryRepository) UpdateClient(orgID, id string, req UpdateClientReques
 	return &cp, nil
 }
 
-func (r *MemoryRepository) DeleteClient(orgID, id string) error {
+func (r *MemoryRepository) DeleteClient(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c, ok := r.clients[id]
@@ -159,7 +160,7 @@ func (r *MemoryRepository) DeleteClient(orgID, id string) error {
 
 // --- Sites ---
 
-func (r *MemoryRepository) ListSites(orgID, clientID string, page api.PaginationParams) ([]Site, int, error) {
+func (r *MemoryRepository) ListSites(_ context.Context, orgID, clientID string, page api.PaginationParams) ([]Site, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Site
@@ -177,7 +178,7 @@ func (r *MemoryRepository) ListSites(orgID, clientID string, page api.Pagination
 	return items, total, nil
 }
 
-func (r *MemoryRepository) GetSite(orgID, id string) (*Site, error) {
+func (r *MemoryRepository) GetSite(_ context.Context, orgID, id string) (*Site, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	s, ok := r.sites[id]
@@ -188,7 +189,7 @@ func (r *MemoryRepository) GetSite(orgID, id string) (*Site, error) {
 	return &cp, nil
 }
 
-func (r *MemoryRepository) CreateSite(s *Site) error {
+func (r *MemoryRepository) CreateSite(_ context.Context, s *Site) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.clients[s.ClientID]; !ok || r.clients[s.ClientID].OrganizationID != s.OrganizationID {
@@ -202,7 +203,7 @@ func (r *MemoryRepository) CreateSite(s *Site) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateSite(orgID, id string, req UpdateSiteRequest) (*Site, error) {
+func (r *MemoryRepository) UpdateSite(_ context.Context, orgID, id string, req UpdateSiteRequest) (*Site, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.sites[id]
@@ -229,7 +230,7 @@ func (r *MemoryRepository) UpdateSite(orgID, id string, req UpdateSiteRequest) (
 	return &cp, nil
 }
 
-func (r *MemoryRepository) DeleteSite(orgID, id string) error {
+func (r *MemoryRepository) DeleteSite(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.sites[id]
@@ -242,7 +243,7 @@ func (r *MemoryRepository) DeleteSite(orgID, id string) error {
 
 // --- Buildings ---
 
-func (r *MemoryRepository) ListBuildings(orgID, siteID string, page api.PaginationParams) ([]Building, int, error) {
+func (r *MemoryRepository) ListBuildings(_ context.Context, orgID, siteID string, page api.PaginationParams) ([]Building, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Building
@@ -260,7 +261,7 @@ func (r *MemoryRepository) ListBuildings(orgID, siteID string, page api.Paginati
 	return items, total, nil
 }
 
-func (r *MemoryRepository) GetBuilding(orgID, id string) (*Building, error) {
+func (r *MemoryRepository) GetBuilding(_ context.Context, orgID, id string) (*Building, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	b, ok := r.buildings[id]
@@ -271,7 +272,7 @@ func (r *MemoryRepository) GetBuilding(orgID, id string) (*Building, error) {
 	return &cp, nil
 }
 
-func (r *MemoryRepository) CreateBuilding(b *Building) error {
+func (r *MemoryRepository) CreateBuilding(_ context.Context, b *Building) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if s, ok := r.sites[b.SiteID]; !ok || s.OrganizationID != b.OrganizationID {
@@ -285,7 +286,7 @@ func (r *MemoryRepository) CreateBuilding(b *Building) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateBuilding(orgID, id string, req UpdateBuildingRequest) (*Building, error) {
+func (r *MemoryRepository) UpdateBuilding(_ context.Context, orgID, id string, req UpdateBuildingRequest) (*Building, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	b, ok := r.buildings[id]
@@ -306,7 +307,7 @@ func (r *MemoryRepository) UpdateBuilding(orgID, id string, req UpdateBuildingRe
 	return &cp, nil
 }
 
-func (r *MemoryRepository) DeleteBuilding(orgID, id string) error {
+func (r *MemoryRepository) DeleteBuilding(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	b, ok := r.buildings[id]
@@ -319,7 +320,7 @@ func (r *MemoryRepository) DeleteBuilding(orgID, id string) error {
 
 // --- Rooms ---
 
-func (r *MemoryRepository) ListRooms(orgID, buildingID string, page api.PaginationParams) ([]Room, int, error) {
+func (r *MemoryRepository) ListRooms(_ context.Context, orgID, buildingID string, page api.PaginationParams) ([]Room, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Room
@@ -337,7 +338,7 @@ func (r *MemoryRepository) ListRooms(orgID, buildingID string, page api.Paginati
 	return items, total, nil
 }
 
-func (r *MemoryRepository) GetRoom(orgID, id string) (*Room, error) {
+func (r *MemoryRepository) GetRoom(_ context.Context, orgID, id string) (*Room, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	rm, ok := r.rooms[id]
@@ -348,7 +349,7 @@ func (r *MemoryRepository) GetRoom(orgID, id string) (*Room, error) {
 	return &cp, nil
 }
 
-func (r *MemoryRepository) CreateRoom(rm *Room) error {
+func (r *MemoryRepository) CreateRoom(_ context.Context, rm *Room) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if b, ok := r.buildings[rm.BuildingID]; !ok || b.OrganizationID != rm.OrganizationID {
@@ -365,7 +366,7 @@ func (r *MemoryRepository) CreateRoom(rm *Room) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateRoom(orgID, id string, req UpdateRoomRequest) (*Room, error) {
+func (r *MemoryRepository) UpdateRoom(_ context.Context, orgID, id string, req UpdateRoomRequest) (*Room, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rm, ok := r.rooms[id]
@@ -386,7 +387,7 @@ func (r *MemoryRepository) UpdateRoom(orgID, id string, req UpdateRoomRequest) (
 	return &cp, nil
 }
 
-func (r *MemoryRepository) DeleteRoom(orgID, id string) error {
+func (r *MemoryRepository) DeleteRoom(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rm, ok := r.rooms[id]

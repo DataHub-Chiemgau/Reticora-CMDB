@@ -68,7 +68,14 @@ func (m *MemoryStore) Increment(_ context.Context, key string, ttl time.Duration
 		return 1, nil
 	}
 
-	count, _ := strconv.ParseInt(entry.value, 10, 64)
+	count, err := strconv.ParseInt(entry.value, 10, 64)
+	if err != nil {
+		// Corrupted (non-numeric) entry: reset the counter instead of
+		// silently treating it as 0 while keeping the bogus value.
+		count = 1
+		m.entries[key] = memEntry{value: "1", expiresAt: entry.expiresAt}
+		return count, nil
+	}
 	count++
 
 	m.entries[key] = memEntry{

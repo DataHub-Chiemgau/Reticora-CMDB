@@ -1,7 +1,10 @@
 // Package search provides tenant-scoped full-text search backends.
 package search
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 const MaxQueryLength = 512
 
@@ -46,9 +49,9 @@ type ReindexResult struct {
 }
 
 type Backend interface {
-	Ping() error
-	IndexDocument(doc Document) error
-	Delete(orgID, entityType, entityID string) error
-	Query(q Query) (Result, error)
-	ReindexTenant(orgID string) (ReindexResult, error)
+	Ping(ctx context.Context) error
+	IndexDocument(ctx context.Context, doc Document) error
+	Delete(ctx context.Context, orgID, entityType, entityID string) error
+	Query(ctx context.Context, q Query) (Result, error)
+	ReindexTenant(ctx context.Context, orgID string) (ReindexResult, error)
 }

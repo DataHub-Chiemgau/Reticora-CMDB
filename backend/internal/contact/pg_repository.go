@@ -54,8 +54,7 @@ func scanContact(s scanner) (*Contact, error) {
 	return c, nil
 }
 
-func (r *PGRepository) List(orgID, clientID string, page api.PaginationParams) ([]Contact, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) List(ctx context.Context, orgID, clientID string, page api.PaginationParams) ([]Contact, int, error) {
 	var out []Contact
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -87,8 +86,7 @@ func (r *PGRepository) List(orgID, clientID string, page api.PaginationParams) (
 	return out, total, err
 }
 
-func (r *PGRepository) GetByID(orgID, id string) (*Contact, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Contact, error) {
 	var c *Contact
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -101,8 +99,7 @@ func (r *PGRepository) GetByID(orgID, id string) (*Contact, error) {
 	return c, err
 }
 
-func (r *PGRepository) Create(c *Contact) error {
-	ctx := context.Background()
+func (r *PGRepository) Create(ctx context.Context, c *Contact) error {
 	return r.withTenant(ctx, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
 			`INSERT INTO contact (organization_id, client_id, display_name, email, phone, role, department, notes)
@@ -113,8 +110,7 @@ func (r *PGRepository) Create(c *Contact) error {
 	})
 }
 
-func (r *PGRepository) Update(orgID, id string, req UpdateContactRequest) (*Contact, error) {
-	ctx := context.Background()
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateContactRequest) (*Contact, error) {
 	var c *Contact
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
@@ -155,8 +151,7 @@ func (r *PGRepository) Update(orgID, id string, req UpdateContactRequest) (*Cont
 	return c, err
 }
 
-func (r *PGRepository) Delete(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "DELETE FROM contact WHERE organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
@@ -180,8 +175,7 @@ func scanCIContact(s scanner) (*CIContact, error) {
 	return l, nil
 }
 
-func (r *PGRepository) ListForCI(orgID, ciID string, page api.PaginationParams) ([]CIContact, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListForCI(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]CIContact, int, error) {
 	var out []CIContact
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -205,8 +199,7 @@ func (r *PGRepository) ListForCI(orgID, ciID string, page api.PaginationParams) 
 	return out, total, err
 }
 
-func (r *PGRepository) Link(link *CIContact) error {
-	ctx := context.Background()
+func (r *PGRepository) Link(ctx context.Context, link *CIContact) error {
 	return r.withTenant(ctx, link.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
 			`INSERT INTO ci_contact (organization_id, ci_id, contact_id, relationship_type)
@@ -216,8 +209,7 @@ func (r *PGRepository) Link(link *CIContact) error {
 	})
 }
 
-func (r *PGRepository) Unlink(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) Unlink(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "DELETE FROM ci_contact WHERE organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {

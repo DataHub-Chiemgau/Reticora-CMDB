@@ -2,6 +2,7 @@
 package discovery
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sync"
@@ -75,20 +76,20 @@ type BulkIngestResponse struct {
 // Repository defines persistence operations for collectors, discovery jobs and
 // reconciliation review items.
 type Repository interface {
-	ListCollectors(orgID string, page api.PaginationParams) ([]Collector, int, error)
-	RegisterCollector(c *Collector) error
-	Heartbeat(orgID, collectorID string) error
+	ListCollectors(ctx context.Context, orgID string, page api.PaginationParams) ([]Collector, int, error)
+	RegisterCollector(ctx context.Context, c *Collector) error
+	Heartbeat(ctx context.Context, orgID, collectorID string) error
 
 	// Discovery jobs.
-	ListJobs(orgID string, filter JobFilter, page api.PaginationParams) ([]Job, int, error)
-	CreateJob(j *Job) error
-	GetJob(orgID, id string) (*Job, error)
+	ListJobs(ctx context.Context, orgID string, filter JobFilter, page api.PaginationParams) ([]Job, int, error)
+	CreateJob(ctx context.Context, j *Job) error
+	GetJob(ctx context.Context, orgID, id string) (*Job, error)
 
 	// Reconciliation review queue.
-	ListReviewItems(orgID string, filter ReviewFilter, page api.PaginationParams) ([]ReviewItem, int, error)
-	CreateReviewItem(item *ReviewItem) error
-	GetReviewItem(orgID, id string) (*ReviewItem, error)
-	ResolveReviewItem(orgID, id string, resolution Resolution) (*ReviewItem, error)
+	ListReviewItems(ctx context.Context, orgID string, filter ReviewFilter, page api.PaginationParams) ([]ReviewItem, int, error)
+	CreateReviewItem(ctx context.Context, item *ReviewItem) error
+	GetReviewItem(ctx context.Context, orgID, id string) (*ReviewItem, error)
+	ResolveReviewItem(ctx context.Context, orgID, id string, resolution Resolution) (*ReviewItem, error)
 }
 
 // MemoryRepository is an in-memory collector store.
@@ -109,7 +110,7 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func (r *MemoryRepository) ListCollectors(orgID string, page api.PaginationParams) ([]Collector, int, error) {
+func (r *MemoryRepository) ListCollectors(_ context.Context, orgID string, page api.PaginationParams) ([]Collector, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -133,7 +134,7 @@ func (r *MemoryRepository) ListCollectors(orgID string, page api.PaginationParam
 	return result[start:end], total, nil
 }
 
-func (r *MemoryRepository) RegisterCollector(c *Collector) error {
+func (r *MemoryRepository) RegisterCollector(_ context.Context, c *Collector) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -148,7 +149,7 @@ func (r *MemoryRepository) RegisterCollector(c *Collector) error {
 	return nil
 }
 
-func (r *MemoryRepository) Heartbeat(orgID, collectorID string) error {
+func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -208,7 +209,7 @@ func (h *Handler) ListCollectors(w http.ResponseWriter, r *http.Request) {
 	}
 
 	page := api.ParsePagination(r)
-	collectors, total, err := h.repo.ListCollectors(t.OrganizationID, page)
+	collectors, total, err := h.repo.ListCollectors(r.Context(), t.OrganizationID, page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -247,7 +248,7 @@ func (h *Handler) RegisterCollector(w http.ResponseWriter, r *http.Request) {
 		c.Config = make(map[string]any)
 	}
 
-	if err := h.repo.RegisterCollector(&c); err != nil {
+	if err := h.repo.RegisterCollector(r.Context(), &c); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -264,7 +265,7 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.repo.Heartbeat(t.OrganizationID, id); err != nil {
+	if err := h.repo.Heartbeat(r.Context(), t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "collector not found")
 		return
 	}
@@ -369,7 +370,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 		case ReconcileConflict:
 			resp.Conflicts++
 			if reviewItem := reviewItemFromConflict(t.OrganizationID, item, result); reviewItem != nil {
-				if err := h.repo.CreateReviewItem(reviewItem); err != nil {
+				if err := h.repo.CreateReviewItem(r.Context(), reviewItem); err != nil {
 					api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 					return
 				}
@@ -378,7 +379,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp.Relationships = h.deriveTopology(t.OrganizationID, req.Items, resolvedCIID, existing)
+	resp.Relationships = h.deriveTopology(r.Context(), t.OrganizationID, req.Items, resolvedCIID, existing)
 
 	api.WriteJSON(w, http.StatusAccepted, resp)
 }

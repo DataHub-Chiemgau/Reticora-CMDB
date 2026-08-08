@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
@@ -10,18 +11,18 @@ import (
 )
 
 type Repository interface {
-	ListDefinitions(orgID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error)
-	GetDefinition(orgID, id string) (*Definition, error)
-	CreateDefinition(def *Definition) error
-	UpdateDefinition(orgID, id string, req UpdateDefinitionRequest) (*Definition, error)
-	DeleteDefinition(orgID, id string) error
-	ListRuns(orgID, workflowID, status string, page api.PaginationParams) ([]Run, int, error)
-	GetRun(orgID, id string) (*Run, error)
-	CreateRun(run *Run) error
-	UpdateRunStatus(orgID, id, status string, finished *time.Time, ctx JSONMap) (*Run, error)
-	AppendStep(step *Step) error
-	UpdateStep(orgID, id, status string, output JSONMap, errText string) (*Step, error)
-	ListSteps(orgID, runID string) ([]Step, error)
+	ListDefinitions(ctx context.Context, orgID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error)
+	GetDefinition(ctx context.Context, orgID, id string) (*Definition, error)
+	CreateDefinition(ctx context.Context, def *Definition) error
+	UpdateDefinition(ctx context.Context, orgID, id string, req UpdateDefinitionRequest) (*Definition, error)
+	DeleteDefinition(ctx context.Context, orgID, id string) error
+	ListRuns(ctx context.Context, orgID, workflowID, status string, page api.PaginationParams) ([]Run, int, error)
+	GetRun(ctx context.Context, orgID, id string) (*Run, error)
+	CreateRun(ctx context.Context, run *Run) error
+	UpdateRunStatus(ctx context.Context, orgID, id, status string, finished *time.Time, runCtx JSONMap) (*Run, error)
+	AppendStep(ctx context.Context, step *Step) error
+	UpdateStep(ctx context.Context, orgID, id, status string, output JSONMap, errText string) (*Step, error)
+	ListSteps(ctx context.Context, orgID, runID string) ([]Step, error)
 }
 
 type MemoryRepository struct {
@@ -39,7 +40,7 @@ func (r *MemoryRepository) nextID(prefix string) string {
 	r.next++
 	return fmt.Sprintf("%s-%d", prefix, r.next)
 }
-func (r *MemoryRepository) ListDefinitions(orgID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error) {
+func (r *MemoryRepository) ListDefinitions(_ context.Context, orgID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []Definition{}
@@ -51,7 +52,7 @@ func (r *MemoryRepository) ListDefinitions(orgID string, activeOnly bool, page a
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return pageDefs(out, page)
 }
-func (r *MemoryRepository) GetDefinition(orgID, id string) (*Definition, error) {
+func (r *MemoryRepository) GetDefinition(_ context.Context, orgID, id string) (*Definition, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	d := r.definitions[id]
@@ -61,7 +62,7 @@ func (r *MemoryRepository) GetDefinition(orgID, id string) (*Definition, error) 
 	cp := *d
 	return &cp, nil
 }
-func (r *MemoryRepository) CreateDefinition(def *Definition) error {
+func (r *MemoryRepository) CreateDefinition(_ context.Context, def *Definition) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	def.ID = r.nextID("workflow")
@@ -72,7 +73,7 @@ func (r *MemoryRepository) CreateDefinition(def *Definition) error {
 	r.definitions[def.ID] = &cp
 	return nil
 }
-func (r *MemoryRepository) UpdateDefinition(orgID, id string, req UpdateDefinitionRequest) (*Definition, error) {
+func (r *MemoryRepository) UpdateDefinition(_ context.Context, orgID, id string, req UpdateDefinitionRequest) (*Definition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	d := r.definitions[id]
@@ -101,7 +102,7 @@ func (r *MemoryRepository) UpdateDefinition(orgID, id string, req UpdateDefiniti
 	cp := *d
 	return &cp, nil
 }
-func (r *MemoryRepository) DeleteDefinition(orgID, id string) error {
+func (r *MemoryRepository) DeleteDefinition(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	d := r.definitions[id]
@@ -111,7 +112,7 @@ func (r *MemoryRepository) DeleteDefinition(orgID, id string) error {
 	delete(r.definitions, id)
 	return nil
 }
-func (r *MemoryRepository) ListRuns(orgID, workflowID, status string, page api.PaginationParams) ([]Run, int, error) {
+func (r *MemoryRepository) ListRuns(_ context.Context, orgID, workflowID, status string, page api.PaginationParams) ([]Run, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []Run{}
@@ -125,7 +126,7 @@ func (r *MemoryRepository) ListRuns(orgID, workflowID, status string, page api.P
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return pageRuns(out, page)
 }
-func (r *MemoryRepository) GetRun(orgID, id string) (*Run, error) {
+func (r *MemoryRepository) GetRun(_ context.Context, orgID, id string) (*Run, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	run := r.runs[id]
@@ -136,7 +137,7 @@ func (r *MemoryRepository) GetRun(orgID, id string) (*Run, error) {
 	cp.Steps = r.stepsForLocked(orgID, id)
 	return &cp, nil
 }
-func (r *MemoryRepository) CreateRun(run *Run) error {
+func (r *MemoryRepository) CreateRun(_ context.Context, run *Run) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	run.ID = r.nextID("run")
@@ -150,7 +151,7 @@ func (r *MemoryRepository) CreateRun(run *Run) error {
 	r.runs[run.ID] = &cp
 	return nil
 }
-func (r *MemoryRepository) UpdateRunStatus(orgID, id, status string, finished *time.Time, ctx JSONMap) (*Run, error) {
+func (r *MemoryRepository) UpdateRunStatus(_ context.Context, orgID, id, status string, finished *time.Time, runCtx JSONMap) (*Run, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	run := r.runs[id]
@@ -159,15 +160,15 @@ func (r *MemoryRepository) UpdateRunStatus(orgID, id, status string, finished *t
 	}
 	run.Status = status
 	run.FinishedAt = finished
-	if ctx != nil {
-		run.Context = ctx
+	if runCtx != nil {
+		run.Context = runCtx
 	}
 	run.UpdatedAt = time.Now().UTC()
 	cp := *run
 	cp.Steps = r.stepsForLocked(orgID, id)
 	return &cp, nil
 }
-func (r *MemoryRepository) AppendStep(step *Step) error {
+func (r *MemoryRepository) AppendStep(_ context.Context, step *Step) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	step.ID = r.nextID("step")
@@ -178,7 +179,7 @@ func (r *MemoryRepository) AppendStep(step *Step) error {
 	r.steps[step.ID] = &cp
 	return nil
 }
-func (r *MemoryRepository) UpdateStep(orgID, id, status string, output JSONMap, errText string) (*Step, error) {
+func (r *MemoryRepository) UpdateStep(_ context.Context, orgID, id, status string, output JSONMap, errText string) (*Step, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.steps[id]
@@ -192,7 +193,7 @@ func (r *MemoryRepository) UpdateStep(orgID, id, status string, output JSONMap, 
 	cp := *s
 	return &cp, nil
 }
-func (r *MemoryRepository) ListSteps(orgID, runID string) ([]Step, error) {
+func (r *MemoryRepository) ListSteps(_ context.Context, orgID, runID string) ([]Step, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.stepsForLocked(orgID, runID), nil

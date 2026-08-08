@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
@@ -9,11 +10,11 @@ import (
 
 // Repository defines persistence operations for permission grants.
 type Repository interface {
-	ListPermissions() ([]Permission, error)
-	ListRolePermissions(orgID, roleID string) ([]RolePermissionGrant, error)
-	ReplaceRolePermissions(orgID, roleID, grantedBy string, keys []string) ([]RolePermissionGrant, error)
-	EffectivePermissions(orgID, userID string) ([]string, error)
-	HasPermission(orgID, userID, key string) (bool, error)
+	ListPermissions(ctx context.Context) ([]Permission, error)
+	ListRolePermissions(ctx context.Context, orgID, roleID string) ([]RolePermissionGrant, error)
+	ReplaceRolePermissions(ctx context.Context, orgID, roleID, grantedBy string, keys []string) ([]RolePermissionGrant, error)
+	EffectivePermissions(ctx context.Context, orgID, userID string) ([]string, error)
+	HasPermission(ctx context.Context, orgID, userID, key string) (bool, error)
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -37,7 +38,7 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func (r *MemoryRepository) ListPermissions() ([]Permission, error) {
+func (r *MemoryRepository) ListPermissions(_ context.Context) ([]Permission, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	items := make([]Permission, 0, len(r.catalogue))
@@ -48,14 +49,14 @@ func (r *MemoryRepository) ListPermissions() ([]Permission, error) {
 	return items, nil
 }
 
-func (r *MemoryRepository) ListRolePermissions(orgID, roleID string) ([]RolePermissionGrant, error) {
+func (r *MemoryRepository) ListRolePermissions(_ context.Context, orgID, roleID string) ([]RolePermissionGrant, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	items := grantsToSlice(r.roleGrants[grantKey(orgID, roleID)])
 	return items, nil
 }
 
-func (r *MemoryRepository) ReplaceRolePermissions(orgID, roleID, grantedBy string, keys []string) ([]RolePermissionGrant, error) {
+func (r *MemoryRepository) ReplaceRolePermissions(_ context.Context, orgID, roleID, grantedBy string, keys []string) ([]RolePermissionGrant, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	unique := make(map[string]RolePermissionGrant)
@@ -70,7 +71,7 @@ func (r *MemoryRepository) ReplaceRolePermissions(orgID, roleID, grantedBy strin
 	return grantsToSlice(unique), nil
 }
 
-func (r *MemoryRepository) EffectivePermissions(orgID, userID string) ([]string, error) {
+func (r *MemoryRepository) EffectivePermissions(_ context.Context, orgID, userID string) ([]string, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	set := make(map[string]struct{})
@@ -82,8 +83,8 @@ func (r *MemoryRepository) EffectivePermissions(orgID, userID string) ([]string,
 	return sortedKeys(set), nil
 }
 
-func (r *MemoryRepository) HasPermission(orgID, userID, key string) (bool, error) {
-	keys, err := r.EffectivePermissions(orgID, userID)
+func (r *MemoryRepository) HasPermission(ctx context.Context, orgID, userID, key string) (bool, error) {
+	keys, err := r.EffectivePermissions(ctx, orgID, userID)
 	if err != nil {
 		return false, err
 	}

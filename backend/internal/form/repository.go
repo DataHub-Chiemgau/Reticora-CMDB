@@ -1,6 +1,7 @@
 package form
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
@@ -11,14 +12,14 @@ import (
 
 // Repository defines persistence for form definitions and submissions.
 type Repository interface {
-	ListDefinitions(orgID, clientID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error)
-	GetDefinition(orgID, id string) (*Definition, error)
-	CreateDefinition(def *Definition) error
-	UpdateDefinition(orgID, id string, req UpdateDefinitionRequest) (*Definition, error)
-	DeleteDefinition(orgID, id string) error
-	ListSubmissions(orgID string, filter SubmissionFilter, page api.PaginationParams) ([]Submission, int, error)
-	GetSubmission(orgID, id string) (*Submission, error)
-	CreateSubmission(sub *Submission) error
+	ListDefinitions(ctx context.Context, orgID, clientID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error)
+	GetDefinition(ctx context.Context, orgID, id string) (*Definition, error)
+	CreateDefinition(ctx context.Context, def *Definition) error
+	UpdateDefinition(ctx context.Context, orgID, id string, req UpdateDefinitionRequest) (*Definition, error)
+	DeleteDefinition(ctx context.Context, orgID, id string) error
+	ListSubmissions(ctx context.Context, orgID string, filter SubmissionFilter, page api.PaginationParams) ([]Submission, int, error)
+	GetSubmission(ctx context.Context, orgID, id string) (*Submission, error)
+	CreateSubmission(ctx context.Context, sub *Submission) error
 }
 
 type MemoryRepository struct {
@@ -32,7 +33,7 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{definitions: map[string]*Definition{}, submissions: map[string]*Submission{}}
 }
 
-func (r *MemoryRepository) ListDefinitions(orgID, clientID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error) {
+func (r *MemoryRepository) ListDefinitions(_ context.Context, orgID, clientID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []Definition{}
@@ -45,7 +46,7 @@ func (r *MemoryRepository) ListDefinitions(orgID, clientID string, activeOnly bo
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return pageDefinitions(out, page)
 }
-func (r *MemoryRepository) GetDefinition(orgID, id string) (*Definition, error) {
+func (r *MemoryRepository) GetDefinition(_ context.Context, orgID, id string) (*Definition, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	def := r.definitions[id]
@@ -55,7 +56,7 @@ func (r *MemoryRepository) GetDefinition(orgID, id string) (*Definition, error) 
 	cp := *def
 	return &cp, nil
 }
-func (r *MemoryRepository) CreateDefinition(def *Definition) error {
+func (r *MemoryRepository) CreateDefinition(_ context.Context, def *Definition) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.next++
@@ -73,7 +74,7 @@ func (r *MemoryRepository) CreateDefinition(def *Definition) error {
 	r.definitions[def.ID] = &cp
 	return nil
 }
-func (r *MemoryRepository) UpdateDefinition(orgID, id string, req UpdateDefinitionRequest) (*Definition, error) {
+func (r *MemoryRepository) UpdateDefinition(_ context.Context, orgID, id string, req UpdateDefinitionRequest) (*Definition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	def := r.definitions[id]
@@ -102,7 +103,7 @@ func (r *MemoryRepository) UpdateDefinition(orgID, id string, req UpdateDefiniti
 	cp := *def
 	return &cp, nil
 }
-func (r *MemoryRepository) DeleteDefinition(orgID, id string) error {
+func (r *MemoryRepository) DeleteDefinition(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	def := r.definitions[id]
@@ -112,7 +113,7 @@ func (r *MemoryRepository) DeleteDefinition(orgID, id string) error {
 	delete(r.definitions, id)
 	return nil
 }
-func (r *MemoryRepository) ListSubmissions(orgID string, filter SubmissionFilter, page api.PaginationParams) ([]Submission, int, error) {
+func (r *MemoryRepository) ListSubmissions(_ context.Context, orgID string, filter SubmissionFilter, page api.PaginationParams) ([]Submission, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []Submission{}
@@ -125,7 +126,7 @@ func (r *MemoryRepository) ListSubmissions(orgID string, filter SubmissionFilter
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return pageSubmissions(out, page)
 }
-func (r *MemoryRepository) GetSubmission(orgID, id string) (*Submission, error) {
+func (r *MemoryRepository) GetSubmission(_ context.Context, orgID, id string) (*Submission, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	sub := r.submissions[id]
@@ -135,7 +136,7 @@ func (r *MemoryRepository) GetSubmission(orgID, id string) (*Submission, error) 
 	cp := *sub
 	return &cp, nil
 }
-func (r *MemoryRepository) CreateSubmission(sub *Submission) error {
+func (r *MemoryRepository) CreateSubmission(_ context.Context, sub *Submission) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	def := r.definitions[sub.FormID]

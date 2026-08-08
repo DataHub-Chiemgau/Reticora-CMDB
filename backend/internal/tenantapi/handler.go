@@ -73,7 +73,7 @@ func (h *Handler) ListClients(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListClients(orgID, page)
+	items, total, err := h.repo.ListClients(r.Context(), orgID, page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -97,7 +97,7 @@ func (h *Handler) CreateClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := &Client{OrganizationID: orgID, Name: req.Name, Slug: req.Slug, Settings: req.Settings}
-	if err := h.repo.CreateClient(c); err != nil {
+	if err := h.repo.CreateClient(r.Context(), c); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
@@ -110,7 +110,7 @@ func (h *Handler) GetClient(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	c, err := h.repo.GetClient(orgID, chi.URLParam(r, "id"))
+	c, err := h.repo.GetClient(r.Context(), orgID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "client not found")
 		return
@@ -129,7 +129,7 @@ func (h *Handler) UpdateClient(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	c, err := h.repo.UpdateClient(orgID, chi.URLParam(r, "id"), req)
+	c, err := h.repo.UpdateClient(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "client not found")
 		return
@@ -143,7 +143,7 @@ func (h *Handler) DeleteClient(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteClient(orgID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeleteClient(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "client not found")
 		return
 	}
@@ -159,7 +159,7 @@ func (h *Handler) ListSites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListSites(orgID, r.URL.Query().Get("client_id"), page)
+	items, total, err := h.repo.ListSites(r.Context(), orgID, r.URL.Query().Get("client_id"), page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -191,7 +191,7 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 		GeoLon:         req.GeoLon,
 		Notes:          req.Notes,
 	}
-	if err := h.repo.CreateSite(s); err != nil {
+	if err := h.repo.CreateSite(r.Context(), s); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
@@ -204,7 +204,7 @@ func (h *Handler) GetSite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s, err := h.repo.GetSite(orgID, chi.URLParam(r, "id"))
+	s, err := h.repo.GetSite(r.Context(), orgID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "site not found")
 		return
@@ -223,7 +223,7 @@ func (h *Handler) UpdateSite(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	s, err := h.repo.UpdateSite(orgID, chi.URLParam(r, "id"), req)
+	s, err := h.repo.UpdateSite(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "site not found")
 		return
@@ -237,7 +237,7 @@ func (h *Handler) DeleteSite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteSite(orgID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeleteSite(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "site not found")
 		return
 	}
@@ -253,7 +253,7 @@ func (h *Handler) ListBuildings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListBuildings(orgID, r.URL.Query().Get("site_id"), page)
+	items, total, err := h.repo.ListBuildings(r.Context(), orgID, r.URL.Query().Get("site_id"), page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -283,7 +283,7 @@ func (h *Handler) CreateBuilding(w http.ResponseWriter, r *http.Request) {
 		Floors:             req.Floors,
 		FloorplanObjectKey: req.FloorplanObjectKey,
 	}
-	if err := h.repo.CreateBuilding(b); err != nil {
+	if err := h.repo.CreateBuilding(r.Context(), b); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
@@ -296,7 +296,7 @@ func (h *Handler) GetBuilding(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	b, err := h.repo.GetBuilding(orgID, chi.URLParam(r, "id"))
+	b, err := h.repo.GetBuilding(r.Context(), orgID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "building not found")
 		return
@@ -315,7 +315,7 @@ func (h *Handler) UpdateBuilding(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	b, err := h.repo.UpdateBuilding(orgID, chi.URLParam(r, "id"), req)
+	b, err := h.repo.UpdateBuilding(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "building not found")
 		return
@@ -329,7 +329,7 @@ func (h *Handler) DeleteBuilding(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteBuilding(orgID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeleteBuilding(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "building not found")
 		return
 	}
@@ -345,7 +345,7 @@ func (h *Handler) ListRooms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListRooms(orgID, r.URL.Query().Get("building_id"), page)
+	items, total, err := h.repo.ListRooms(r.Context(), orgID, r.URL.Query().Get("building_id"), page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -375,7 +375,7 @@ func (h *Handler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 		Floor:          req.Floor,
 		RoomType:       req.RoomType,
 	}
-	if err := h.repo.CreateRoom(rm); err != nil {
+	if err := h.repo.CreateRoom(r.Context(), rm); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
@@ -388,7 +388,7 @@ func (h *Handler) GetRoom(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rm, err := h.repo.GetRoom(orgID, chi.URLParam(r, "id"))
+	rm, err := h.repo.GetRoom(r.Context(), orgID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "room not found")
 		return
@@ -407,7 +407,7 @@ func (h *Handler) UpdateRoom(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	rm, err := h.repo.UpdateRoom(orgID, chi.URLParam(r, "id"), req)
+	rm, err := h.repo.UpdateRoom(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "room not found")
 		return
@@ -421,7 +421,7 @@ func (h *Handler) DeleteRoom(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteRoom(orgID, chi.URLParam(r, "id")); err != nil {
+	if err := h.repo.DeleteRoom(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "room not found")
 		return
 	}

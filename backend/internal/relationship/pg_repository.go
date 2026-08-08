@@ -52,8 +52,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 	return tx.Commit(ctx)
 }
 
-func (r *PGRepository) List(orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) List(ctx context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
 	var items []Relationship
 	var total int
 
@@ -102,8 +101,7 @@ func (r *PGRepository) List(orgID string, ciID string, page api.PaginationParams
 	return items, total, err
 }
 
-func (r *PGRepository) Create(rel *Relationship) error {
-	ctx := context.Background()
+func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 	return r.withTenant(ctx, rel.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if rel.Attributes == nil {
 			rel.Attributes = make(map[string]any)
@@ -140,8 +138,7 @@ func (r *PGRepository) Create(rel *Relationship) error {
 	})
 }
 
-func (r *PGRepository) Delete(orgID, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {

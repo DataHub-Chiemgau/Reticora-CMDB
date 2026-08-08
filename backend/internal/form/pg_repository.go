@@ -34,10 +34,10 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(con
 	return tx.Commit(ctx)
 }
 
-func (r *PGRepository) ListDefinitions(orgID, clientID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error) {
+func (r *PGRepository) ListDefinitions(ctx context.Context, orgID, clientID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error) {
 	var out []Definition
 	var total int
-	err := r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id = $1"}
 		args := []any{orgID}
 		pos := 2
@@ -69,9 +69,9 @@ func (r *PGRepository) ListDefinitions(orgID, clientID string, activeOnly bool, 
 	})
 	return out, total, err
 }
-func (r *PGRepository) GetDefinition(orgID, id string) (*Definition, error) {
+func (r *PGRepository) GetDefinition(ctx context.Context, orgID, id string) (*Definition, error) {
 	var item *Definition
-	err := r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		item, err = scanDefinition(tx.QueryRow(ctx, "SELECT "+definitionColumns+" FROM form_def WHERE organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -81,8 +81,8 @@ func (r *PGRepository) GetDefinition(orgID, id string) (*Definition, error) {
 	})
 	return item, err
 }
-func (r *PGRepository) CreateDefinition(def *Definition) error {
-	return r.withTenant(context.Background(), def.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+func (r *PGRepository) CreateDefinition(ctx context.Context, def *Definition) error {
+	return r.withTenant(ctx, def.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if def.Schema == nil {
 			def.Schema = JSONMap{}
 		}
@@ -92,9 +92,9 @@ func (r *PGRepository) CreateDefinition(def *Definition) error {
 		return tx.QueryRow(ctx, `INSERT INTO form_def (organization_id, client_id, name, description, schema, ui_hints, active) VALUES ($1, NULLIF($2,'')::uuid, $3, $4, $5, $6, $7) RETURNING id::text, created_at, updated_at`, def.OrganizationID, def.ClientID, def.Name, def.Description, def.Schema, def.UIHints, def.Active).Scan(&def.ID, &def.CreatedAt, &def.UpdatedAt)
 	})
 }
-func (r *PGRepository) UpdateDefinition(orgID, id string, req UpdateDefinitionRequest) (*Definition, error) {
+func (r *PGRepository) UpdateDefinition(ctx context.Context, orgID, id string, req UpdateDefinitionRequest) (*Definition, error) {
 	var item *Definition
-	err := r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		set := []string{}
 		args := []any{id, orgID}
 		pos := 3
@@ -143,8 +143,8 @@ func (r *PGRepository) UpdateDefinition(orgID, id string, req UpdateDefinitionRe
 	})
 	return item, err
 }
-func (r *PGRepository) DeleteDefinition(orgID, id string) error {
-	return r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+func (r *PGRepository) DeleteDefinition(ctx context.Context, orgID, id string) error {
+	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx, "DELETE FROM form_def WHERE organization_id=$1 AND id=$2", orgID, id)
 		if err != nil {
 			return err
@@ -155,10 +155,10 @@ func (r *PGRepository) DeleteDefinition(orgID, id string) error {
 		return nil
 	})
 }
-func (r *PGRepository) ListSubmissions(orgID string, filter SubmissionFilter, page api.PaginationParams) ([]Submission, int, error) {
+func (r *PGRepository) ListSubmissions(ctx context.Context, orgID string, filter SubmissionFilter, page api.PaginationParams) ([]Submission, int, error) {
 	var out []Submission
 	var total int
-	err := r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id=$1"}
 		args := []any{orgID}
 		pos := 2
@@ -193,9 +193,9 @@ func (r *PGRepository) ListSubmissions(orgID string, filter SubmissionFilter, pa
 	})
 	return out, total, err
 }
-func (r *PGRepository) GetSubmission(orgID, id string) (*Submission, error) {
+func (r *PGRepository) GetSubmission(ctx context.Context, orgID, id string) (*Submission, error) {
 	var item *Submission
-	err := r.withTenant(context.Background(), orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		item, err = scanSubmission(tx.QueryRow(ctx, "SELECT "+submissionColumns+" FROM form_submission WHERE organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -205,8 +205,8 @@ func (r *PGRepository) GetSubmission(orgID, id string) (*Submission, error) {
 	})
 	return item, err
 }
-func (r *PGRepository) CreateSubmission(sub *Submission) error {
-	return r.withTenant(context.Background(), sub.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+func (r *PGRepository) CreateSubmission(ctx context.Context, sub *Submission) error {
+	return r.withTenant(ctx, sub.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if sub.Values == nil {
 			sub.Values = JSONMap{}
 		}

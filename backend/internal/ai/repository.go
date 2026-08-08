@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
@@ -17,7 +18,7 @@ type MemoryRepository struct {
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{conversations: map[string]Conversation{}, chunks: map[string]Chunk{}}
 }
-func (r *MemoryRepository) CreateConversation(orgID, userID, title string) (Conversation, error) {
+func (r *MemoryRepository) CreateConversation(_ context.Context, orgID, userID, title string) (Conversation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.next++
@@ -26,7 +27,7 @@ func (r *MemoryRepository) CreateConversation(orgID, userID, title string) (Conv
 	r.conversations[c.ID] = c
 	return c, nil
 }
-func (r *MemoryRepository) GetConversation(orgID, id string) (Conversation, error) {
+func (r *MemoryRepository) GetConversation(_ context.Context, orgID, id string) (Conversation, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	c, ok := r.conversations[id]
@@ -35,7 +36,7 @@ func (r *MemoryRepository) GetConversation(orgID, id string) (Conversation, erro
 	}
 	return c, nil
 }
-func (r *MemoryRepository) ListConversations(orgID, userID string) ([]Conversation, error) {
+func (r *MemoryRepository) ListConversations(_ context.Context, orgID, userID string) ([]Conversation, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Conversation
@@ -47,7 +48,7 @@ func (r *MemoryRepository) ListConversations(orgID, userID string) ([]Conversati
 	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
 	return out, nil
 }
-func (r *MemoryRepository) AddMessage(orgID, conversationID, role, content string, promptTokens, completionTokens int, citations []Citation) error {
+func (r *MemoryRepository) AddMessage(_ context.Context, orgID, conversationID, role, content string, promptTokens, completionTokens int, citations []Citation) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c := r.conversations[conversationID]
@@ -55,7 +56,7 @@ func (r *MemoryRepository) AddMessage(orgID, conversationID, role, content strin
 	r.conversations[conversationID] = c
 	return nil
 }
-func (r *MemoryRepository) UpsertChunk(ch Chunk) error {
+func (r *MemoryRepository) UpsertChunk(_ context.Context, ch Chunk) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if ch.ID == "" {
@@ -67,7 +68,7 @@ func (r *MemoryRepository) UpsertChunk(ch Chunk) error {
 	r.chunks[ch.OrganizationID+":"+ch.ID] = ch
 	return nil
 }
-func (r *MemoryRepository) CandidateChunks(orgID string, entityTypes []string, entityIDs []string, limit int) ([]Chunk, error) {
+func (r *MemoryRepository) CandidateChunks(_ context.Context, orgID string, entityTypes []string, entityIDs []string, limit int) ([]Chunk, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	types := set(entityTypes)

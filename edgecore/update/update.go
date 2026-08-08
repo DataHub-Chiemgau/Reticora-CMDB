@@ -39,6 +39,10 @@ type Updater interface {
 // Checker is a minimal implementation that compares the current version to the latest release.
 type Checker struct {
 	Source Source
+
+	// executablePath, when set, overrides os.Executable as the binary to
+	// replace during Apply. It is a test seam; production code leaves it nil.
+	executablePath func() (string, error)
 }
 
 // Check returns the latest release when it differs from the currently running version.
@@ -82,7 +86,11 @@ func (c *Checker) Apply(ctx context.Context, release ReleaseInfo) error {
 	}
 
 	// Write to a staging file
-	execPath, err := os.Executable()
+	resolveExec := c.executablePath
+	if resolveExec == nil {
+		resolveExec = os.Executable
+	}
+	execPath, err := resolveExec()
 	if err != nil {
 		return fmt.Errorf("update: resolve executable path: %w", err)
 	}

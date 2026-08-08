@@ -136,7 +136,12 @@ func (w *MemoryWriter) Verify(_ context.Context, orgID string) (bool, error) {
 }
 
 func computeHash(previousHash string, seq int64, entry Entry) string {
-	payload, _ := json.Marshal(entry.Payload)
+	// Hashing must be deterministic and never fail, so an unmarshalable
+	// payload falls back to its type-quoted representation.
+	payload, err := json.Marshal(entry.Payload)
+	if err != nil {
+		payload = []byte(fmt.Sprintf("%#v", entry.Payload))
+	}
 	data := fmt.Sprintf("%s|%d|%s|%s|%s|%s|%s|%s|%s|%s",
 		previousHash, seq,
 		entry.OrgID, entry.ActorType, entry.ActorID,

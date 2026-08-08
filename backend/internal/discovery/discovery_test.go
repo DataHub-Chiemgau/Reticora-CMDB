@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -68,7 +69,7 @@ func TestHandler_Heartbeat(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	c := &Collector{OrganizationID: "org-1", Name: "test-collector", Config: map[string]any{}}
-	repo.RegisterCollector(c)
+	repo.RegisterCollector(context.Background(), c)
 
 	req := httptest.NewRequest("POST", "/api/v1/collectors/"+c.ID+"/heartbeat", nil)
 	req = tenantCtx(req)

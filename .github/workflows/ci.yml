@@ -34,6 +34,14 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.out
+          retention-days: 14
+
   migrations:
     runs-on: ubuntu-latest
     services:
@@ -71,6 +79,12 @@ jobs:
 
       - name: Re-apply all migrations
         run: migrate -path backend/migrations -database "$DATABASE_URL" up
+
+      - name: PostgreSQL integration tests
+        working-directory: backend
+        env:
+          TEST_DATABASE_URL: "******localhost:5432/reticora_migrations?sslmode=disable"
+        run: go test -run 'Integration|PGRepository|Migrations' ./...
 
       - name: Assert every tenant policy uses app.org_id
         run: |

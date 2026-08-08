@@ -57,8 +57,7 @@ func scanClient(s scanner) (*Client, error) {
 
 // --- Clients ---
 
-func (r *PGRepository) ListClients(orgID string, page api.PaginationParams) ([]Client, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListClients(ctx context.Context, orgID string, page api.PaginationParams) ([]Client, int, error) {
 	var out []Client
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -82,8 +81,7 @@ func (r *PGRepository) ListClients(orgID string, page api.PaginationParams) ([]C
 	return out, total, err
 }
 
-func (r *PGRepository) GetClient(orgID, id string) (*Client, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetClient(ctx context.Context, orgID, id string) (*Client, error) {
 	var c *Client
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -96,8 +94,7 @@ func (r *PGRepository) GetClient(orgID, id string) (*Client, error) {
 	return c, err
 }
 
-func (r *PGRepository) CreateClient(c *Client) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateClient(ctx context.Context, c *Client) error {
 	if c.Settings == nil {
 		c.Settings = map[string]any{}
 	}
@@ -109,8 +106,7 @@ func (r *PGRepository) CreateClient(c *Client) error {
 	})
 }
 
-func (r *PGRepository) UpdateClient(orgID, id string, req UpdateClientRequest) (*Client, error) {
-	ctx := context.Background()
+func (r *PGRepository) UpdateClient(ctx context.Context, orgID, id string, req UpdateClientRequest) (*Client, error) {
 	var c *Client
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
@@ -147,12 +143,11 @@ func (r *PGRepository) UpdateClient(orgID, id string, req UpdateClientRequest) (
 	return c, err
 }
 
-func (r *PGRepository) DeleteClient(orgID, id string) error {
-	return r.deleteByID(orgID, "client", id)
+func (r *PGRepository) DeleteClient(ctx context.Context, orgID, id string) error {
+	return r.deleteByID(ctx, orgID, "client", id)
 }
 
-func (r *PGRepository) deleteByID(orgID, table, id string) error {
-	ctx := context.Background()
+func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
@@ -179,8 +174,7 @@ func scanSite(s scanner) (*Site, error) {
 	return si, nil
 }
 
-func (r *PGRepository) ListSites(orgID, clientID string, page api.PaginationParams) ([]Site, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListSites(ctx context.Context, orgID, clientID string, page api.PaginationParams) ([]Site, int, error) {
 	var out []Site
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -212,8 +206,7 @@ func (r *PGRepository) ListSites(orgID, clientID string, page api.PaginationPara
 	return out, total, err
 }
 
-func (r *PGRepository) GetSite(orgID, id string) (*Site, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetSite(ctx context.Context, orgID, id string) (*Site, error) {
 	var si *Site
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -226,8 +219,7 @@ func (r *PGRepository) GetSite(orgID, id string) (*Site, error) {
 	return si, err
 }
 
-func (r *PGRepository) CreateSite(s *Site) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateSite(ctx context.Context, s *Site) error {
 	return r.withTenant(ctx, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
 			`INSERT INTO site (organization_id, client_id, name, address, geo_lat, geo_lon, notes)
@@ -237,8 +229,7 @@ func (r *PGRepository) CreateSite(s *Site) error {
 	})
 }
 
-func (r *PGRepository) UpdateSite(orgID, id string, req UpdateSiteRequest) (*Site, error) {
-	ctx := context.Background()
+func (r *PGRepository) UpdateSite(ctx context.Context, orgID, id string, req UpdateSiteRequest) (*Site, error) {
 	var si *Site
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
@@ -285,8 +276,8 @@ func (r *PGRepository) UpdateSite(orgID, id string, req UpdateSiteRequest) (*Sit
 	return si, err
 }
 
-func (r *PGRepository) DeleteSite(orgID, id string) error {
-	return r.deleteByID(orgID, "site", id)
+func (r *PGRepository) DeleteSite(ctx context.Context, orgID, id string) error {
+	return r.deleteByID(ctx, orgID, "site", id)
 }
 
 // --- Buildings ---
@@ -303,8 +294,7 @@ func scanBuilding(s scanner) (*Building, error) {
 	return b, nil
 }
 
-func (r *PGRepository) ListBuildings(orgID, siteID string, page api.PaginationParams) ([]Building, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListBuildings(ctx context.Context, orgID, siteID string, page api.PaginationParams) ([]Building, int, error) {
 	var out []Building
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -336,8 +326,7 @@ func (r *PGRepository) ListBuildings(orgID, siteID string, page api.PaginationPa
 	return out, total, err
 }
 
-func (r *PGRepository) GetBuilding(orgID, id string) (*Building, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetBuilding(ctx context.Context, orgID, id string) (*Building, error) {
 	var b *Building
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -350,8 +339,7 @@ func (r *PGRepository) GetBuilding(orgID, id string) (*Building, error) {
 	return b, err
 }
 
-func (r *PGRepository) CreateBuilding(b *Building) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateBuilding(ctx context.Context, b *Building) error {
 	return r.withTenant(ctx, b.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
 			`INSERT INTO building (organization_id, site_id, name, floors, floorplan_object_key)
@@ -361,8 +349,7 @@ func (r *PGRepository) CreateBuilding(b *Building) error {
 	})
 }
 
-func (r *PGRepository) UpdateBuilding(orgID, id string, req UpdateBuildingRequest) (*Building, error) {
-	ctx := context.Background()
+func (r *PGRepository) UpdateBuilding(ctx context.Context, orgID, id string, req UpdateBuildingRequest) (*Building, error) {
 	var b *Building
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
@@ -399,8 +386,8 @@ func (r *PGRepository) UpdateBuilding(orgID, id string, req UpdateBuildingReques
 	return b, err
 }
 
-func (r *PGRepository) DeleteBuilding(orgID, id string) error {
-	return r.deleteByID(orgID, "building", id)
+func (r *PGRepository) DeleteBuilding(ctx context.Context, orgID, id string) error {
+	return r.deleteByID(ctx, orgID, "building", id)
 }
 
 // --- Rooms ---
@@ -417,8 +404,7 @@ func scanRoom(s scanner) (*Room, error) {
 	return rm, nil
 }
 
-func (r *PGRepository) ListRooms(orgID, buildingID string, page api.PaginationParams) ([]Room, int, error) {
-	ctx := context.Background()
+func (r *PGRepository) ListRooms(ctx context.Context, orgID, buildingID string, page api.PaginationParams) ([]Room, int, error) {
 	var out []Room
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -450,8 +436,7 @@ func (r *PGRepository) ListRooms(orgID, buildingID string, page api.PaginationPa
 	return out, total, err
 }
 
-func (r *PGRepository) GetRoom(orgID, id string) (*Room, error) {
-	ctx := context.Background()
+func (r *PGRepository) GetRoom(ctx context.Context, orgID, id string) (*Room, error) {
 	var rm *Room
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -464,8 +449,7 @@ func (r *PGRepository) GetRoom(orgID, id string) (*Room, error) {
 	return rm, err
 }
 
-func (r *PGRepository) CreateRoom(rm *Room) error {
-	ctx := context.Background()
+func (r *PGRepository) CreateRoom(ctx context.Context, rm *Room) error {
 	if rm.RoomType == "" {
 		rm.RoomType = "general"
 	}
@@ -478,8 +462,7 @@ func (r *PGRepository) CreateRoom(rm *Room) error {
 	})
 }
 
-func (r *PGRepository) UpdateRoom(orgID, id string, req UpdateRoomRequest) (*Room, error) {
-	ctx := context.Background()
+func (r *PGRepository) UpdateRoom(ctx context.Context, orgID, id string, req UpdateRoomRequest) (*Room, error) {
 	var rm *Room
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
@@ -516,6 +499,6 @@ func (r *PGRepository) UpdateRoom(orgID, id string, req UpdateRoomRequest) (*Roo
 	return rm, err
 }
 
-func (r *PGRepository) DeleteRoom(orgID, id string) error {
-	return r.deleteByID(orgID, "room", id)
+func (r *PGRepository) DeleteRoom(ctx context.Context, orgID, id string) error {
+	return r.deleteByID(ctx, orgID, "room", id)
 }

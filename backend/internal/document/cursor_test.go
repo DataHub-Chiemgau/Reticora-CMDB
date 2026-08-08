@@ -1,6 +1,7 @@
 package document
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,7 +17,7 @@ import (
 func seedDocuments(t *testing.T, repo *MemoryRepository, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		err := repo.Create(&Document{
+		err := repo.Create(context.Background(), &Document{
 			OrganizationID: "org-1",
 			Title:          fmt.Sprintf("doc-%02d", i),
 			FileName:       fmt.Sprintf("doc-%02d.pdf", i),

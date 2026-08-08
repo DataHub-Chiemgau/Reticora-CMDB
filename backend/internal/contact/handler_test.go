@@ -80,7 +80,7 @@ func TestContactTenantIsolation(t *testing.T) {
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 	c := &Contact{OrganizationID: "org-1", DisplayName: "Jane"}
-	repo.Create(c)
+	repo.Create(context.Background(), c)
 	if w := do(mux, "GET", "/api/v1/contacts/"+c.ID, "", "org-2"); w.Code != http.StatusNotFound {
 		t.Errorf("cross-tenant: expected 404, got %d", w.Code)
 	}
@@ -92,7 +92,7 @@ func TestCIContactLinkUnlink(t *testing.T) {
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 	c := &Contact{OrganizationID: "org-1", DisplayName: "Jane"}
-	repo.Create(c)
+	repo.Create(context.Background(), c)
 
 	// invalid relationship type
 	if w := do(mux, "POST", "/api/v1/cis/ci-1/contacts", `{"contact_id":"`+c.ID+`","relationship_type":"bogus"}`, "org-1"); w.Code != http.StatusBadRequest {

@@ -1,6 +1,7 @@
 package compliance
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
@@ -10,13 +11,13 @@ import (
 )
 
 type Repository interface {
-	ListRules(orgID, ciTypeID, category string, activeOnly bool, page api.PaginationParams) ([]Rule, int, error)
-	GetRule(orgID, id string) (*Rule, error)
-	CreateRule(rule *Rule) error
-	UpdateRule(orgID, id string, req UpdateRuleRequest) (*Rule, error)
-	DeleteRule(orgID, id string) error
-	ReplaceResults(orgID string, results []Result) error
-	ListResults(orgID, ciTypeID, status string, page api.PaginationParams) ([]Result, int, error)
+	ListRules(ctx context.Context, orgID, ciTypeID, category string, activeOnly bool, page api.PaginationParams) ([]Rule, int, error)
+	GetRule(ctx context.Context, orgID, id string) (*Rule, error)
+	CreateRule(ctx context.Context, rule *Rule) error
+	UpdateRule(ctx context.Context, orgID, id string, req UpdateRuleRequest) (*Rule, error)
+	DeleteRule(ctx context.Context, orgID, id string) error
+	ReplaceResults(ctx context.Context, orgID string, results []Result) error
+	ListResults(ctx context.Context, orgID, ciTypeID, status string, page api.PaginationParams) ([]Result, int, error)
 }
 type MemoryRepository struct {
 	mu      sync.RWMutex
@@ -32,7 +33,7 @@ func (r *MemoryRepository) nextID(prefix string) string {
 	r.next++
 	return fmt.Sprintf("%s-%d", prefix, r.next)
 }
-func (r *MemoryRepository) ListRules(orgID, ciTypeID, category string, activeOnly bool, page api.PaginationParams) ([]Rule, int, error) {
+func (r *MemoryRepository) ListRules(_ context.Context, orgID, ciTypeID, category string, activeOnly bool, page api.PaginationParams) ([]Rule, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []Rule{}
@@ -44,7 +45,7 @@ func (r *MemoryRepository) ListRules(orgID, ciTypeID, category string, activeOnl
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return pageRules(out, page)
 }
-func (r *MemoryRepository) GetRule(orgID, id string) (*Rule, error) {
+func (r *MemoryRepository) GetRule(_ context.Context, orgID, id string) (*Rule, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	rule := r.rules[id]
@@ -54,7 +55,7 @@ func (r *MemoryRepository) GetRule(orgID, id string) (*Rule, error) {
 	cp := *rule
 	return &cp, nil
 }
-func (r *MemoryRepository) CreateRule(rule *Rule) error {
+func (r *MemoryRepository) CreateRule(_ context.Context, rule *Rule) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rule.ID = r.nextID("rule")
@@ -65,7 +66,7 @@ func (r *MemoryRepository) CreateRule(rule *Rule) error {
 	r.rules[rule.ID] = &cp
 	return nil
 }
-func (r *MemoryRepository) UpdateRule(orgID, id string, req UpdateRuleRequest) (*Rule, error) {
+func (r *MemoryRepository) UpdateRule(_ context.Context, orgID, id string, req UpdateRuleRequest) (*Rule, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rule := r.rules[id]
@@ -100,7 +101,7 @@ func (r *MemoryRepository) UpdateRule(orgID, id string, req UpdateRuleRequest) (
 	cp := *rule
 	return &cp, nil
 }
-func (r *MemoryRepository) DeleteRule(orgID, id string) error {
+func (r *MemoryRepository) DeleteRule(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rule := r.rules[id]
@@ -110,7 +111,7 @@ func (r *MemoryRepository) DeleteRule(orgID, id string) error {
 	delete(r.rules, id)
 	return nil
 }
-func (r *MemoryRepository) ReplaceResults(orgID string, results []Result) error {
+func (r *MemoryRepository) ReplaceResults(_ context.Context, orgID string, results []Result) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for id, res := range r.results {
@@ -133,7 +134,7 @@ func (r *MemoryRepository) ReplaceResults(orgID string, results []Result) error 
 	}
 	return nil
 }
-func (r *MemoryRepository) ListResults(orgID, ciTypeID, status string, page api.PaginationParams) ([]Result, int, error) {
+func (r *MemoryRepository) ListResults(_ context.Context, orgID, ciTypeID, status string, page api.PaginationParams) ([]Result, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []Result{}

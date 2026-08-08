@@ -2,6 +2,7 @@
 package relationship
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sync"
@@ -49,9 +50,9 @@ var ValidRelTypes = map[string]bool{
 
 // Repository defines persistence operations for relationships.
 type Repository interface {
-	List(orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error)
-	Create(rel *Relationship) error
-	Delete(orgID, id string) error
+	List(ctx context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error)
+	Create(ctx context.Context, rel *Relationship) error
+	Delete(ctx context.Context, orgID, id string) error
 }
 
 // MemoryRepository is an in-memory relationship store.
@@ -66,7 +67,7 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{items: make(map[string]*Relationship)}
 }
 
-func (r *MemoryRepository) List(orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
+func (r *MemoryRepository) List(_ context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -93,7 +94,7 @@ func (r *MemoryRepository) List(orgID string, ciID string, page api.PaginationPa
 	return result[start:end], total, nil
 }
 
-func (r *MemoryRepository) Create(rel *Relationship) error {
+func (r *MemoryRepository) Create(_ context.Context, rel *Relationship) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -106,7 +107,7 @@ func (r *MemoryRepository) Create(rel *Relationship) error {
 	return nil
 }
 
-func (r *MemoryRepository) Delete(orgID, id string) error {
+func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -147,7 +148,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	ciID := chi.URLParam(r, "id")
 	page := api.ParsePagination(r)
 
-	rels, total, err := h.repo.List(t.OrganizationID, ciID, page)
+	rels, total, err := h.repo.List(r.Context(), t.OrganizationID, ciID, page)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
@@ -200,7 +201,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		rel.Source = "manual"
 	}
 
-	if err := h.repo.Create(rel); err != nil {
+	if err := h.repo.Create(r.Context(), rel); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -217,7 +218,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.repo.Delete(t.OrganizationID, id); err != nil {
+	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "relationship not found")
 		return
 	}

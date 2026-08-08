@@ -95,7 +95,7 @@ func TestClientUnauthorized(t *testing.T) {
 func TestTenantIsolation(t *testing.T) {
 	_, repo, mux := setup()
 	c := &Client{OrganizationID: "org-1", Name: "A", Slug: "a"}
-	repo.CreateClient(c)
+	repo.CreateClient(context.Background(), c)
 
 	// org-2 must not see org-1's client
 	if w := do(mux, "GET", "/api/v1/clients/"+c.ID, "", "org-2"); w.Code != http.StatusNotFound {
@@ -114,7 +114,7 @@ func TestTenantIsolation(t *testing.T) {
 func TestSiteBuildingRoomHierarchy(t *testing.T) {
 	_, repo, mux := setup()
 	c := &Client{OrganizationID: "org-1", Name: "A", Slug: "a"}
-	repo.CreateClient(c)
+	repo.CreateClient(context.Background(), c)
 
 	// site requires valid client
 	if w := do(mux, "POST", "/api/v1/sites", `{"client_id":"nope","name":"S"}`, "org-1"); w.Code != http.StatusBadRequest {

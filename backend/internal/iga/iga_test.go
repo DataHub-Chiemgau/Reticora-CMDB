@@ -66,7 +66,7 @@ func TestLifecycleResolutionCreatesTasks(t *testing.T) {
 	repo := NewMemoryRepository()
 	active := true
 	p := &LifecyclePolicy{OrganizationID: "org", Name: "join", Event: "joiner", Active: active, Conditions: JSONMap{"department": "IT"}, Actions: []JSONMap{{"connector_id": "c1", "action": TaskActionCreateAccount, "userName": "ignored"}}}
-	if err := repo.CreatePolicy(p); err != nil {
+	if err := repo.CreatePolicy(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
 	svc := NewLifecycleService(repo)
@@ -74,20 +74,20 @@ func TestLifecycleResolutionCreatesTasks(t *testing.T) {
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("tasks=%d err=%v", len(tasks), err)
 	}
-	listed, total, _ := repo.ListTasks("org", "", api.PaginationParams{Limit: 10})
+	listed, total, _ := repo.ListTasks(context.Background(), "org", "", api.PaginationParams{Limit: 10})
 	if total != 1 || listed[0].Action != TaskActionCreateAccount {
 		t.Fatalf("task not persisted")
 	}
 }
 func TestTaskRunnerRetryBackoff(t *testing.T) {
 	repo := NewMemoryRepository()
-	_ = repo.CreateConnector(&ConnectorConfig{OrganizationID: "org", Name: "bad", Type: ConnectorTypeSCIM, BaseURL: "https://bad.invalid"})
-	conns, _, _ := repo.ListConnectors("org", api.PaginationParams{Limit: 1})
+	_ = repo.CreateConnector(context.Background(), &ConnectorConfig{OrganizationID: "org", Name: "bad", Type: ConnectorTypeSCIM, BaseURL: "https://bad.invalid"})
+	conns, _, _ := repo.ListConnectors(context.Background(), "org", api.PaginationParams{Limit: 1})
 	task := &ProvisioningTask{OrganizationID: "org", ConnectorID: conns[0].ID, Action: TaskActionDisableAccount, ExternalID: "u1", MaxAttempts: 3}
-	_ = repo.CreateTask(task)
+	_ = repo.CreateTask(context.Background(), task)
 	runner := NewTaskRunner(repo, NewRegistry(nil, &http.Client{Timeout: time.Millisecond}), nil)
 	_ = runner.RunTask(context.Background(), task)
-	stored, _ := repo.GetTask("org", task.ID)
+	stored, _ := repo.GetTask(context.Background(), "org", task.ID)
 	if stored.Status != TaskStatusPending || stored.Attempts != 1 || !stored.NextRunAt.After(time.Now().UTC()) {
 		t.Fatalf("expected retry with backoff, got %#v", stored)
 	}
