@@ -4,6 +4,13 @@
 # self-hosted production. For development, use the root docker-compose.yml
 # instead.
 #
+# HTTPS: install-cloud.sh can provision a free Let's Encrypt certificate
+# (nginx + Certbot). It writes RETICORA_TLS_DOMAIN into .env, bootstraps a
+# self-signed certificate so nginx can start, and issues the real
+# certificate via the ACME webroot challenge. Prerequisites: a public DNS
+# record for the domain pointing at this host and ports 80/443 reachable
+# from the internet.
+#
 # Recommended: run the interactive installer, which generates the .env file,
 # builds the images, applies the database migrations and starts the stack:
 #   ./install-cloud.sh
@@ -190,8 +197,20 @@ services:
     user: nginx
     tmpfs:
       - /tmp
+    # TLS certificates are provisioned and renewed via Let's Encrypt/Certbot
+    # by install-cloud.sh; RETICORA_TLS_DOMAIN is written into .env there.
+    # When it is set, the nginx image entrypoint renders the TLS template
+    # (nginx-tls.conf.template, mounted below) to /etc/nginx/nginx.conf,
+    # replacing the plain-HTTP configuration baked into the image.
+    environment:
+      RETICORA_TLS_DOMAIN: "${RETICORA_TLS_DOMAIN:-}"
+    volumes:
+      - ./letsencrypt:/etc/letsencrypt:ro
+      - certbot-webroot:/var/www/certbot
+      - ./nginx-tls.conf.template:/etc/nginx/templates/nginx.conf.template:ro
     ports:
       - "${RETICORA_FRONTEND_PORT:-3000}:80"
+      - "${RETICORA_HTTPS_PORT:-443}:443"
     depends_on:
       server:
         condition: service_healthy
@@ -201,9 +220,22 @@ services:
       timeout: 3s
       retries: 6
 
+  certbot:
+    image: certbot/certbot:latest
+    # Idles between renewal checks: certbot renew is a no-op until the
+    # certificate is close to expiry; the real issuance runs once from
+    # install-cloud.sh. Uses the host's /bin/sh loop instead of the image
+    # entrypoint (which requires a certbot subcommand as its first argument).
+    entrypoint: /bin/sh
+    command: -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'
+    volumes:
+      - ./letsencrypt:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot
+
 volumes:
   pgdata:
   natsdata:
   redisdata:
   miniodata:
   keycloakdb:
+  certbot-webroot:
