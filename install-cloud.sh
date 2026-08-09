@@ -425,6 +425,9 @@ collect_config() {
 
     # ── Images ──
     ask RETICORA_IMAGE_REGISTRY "Image registry for prebuilt images (empty = build locally)" "$(env_get RETICORA_IMAGE_REGISTRY || true)"
+    # Normalize a whitespace-only answer to empty so the summary shows
+    # "<local build>" and provide_images takes the local-build branch.
+    RETICORA_IMAGE_REGISTRY="$(trim "$RETICORA_IMAGE_REGISTRY")"
     local def_tag
     def_tag="$(env_get RETICORA_IMAGE_TAG || true)"
     ask RETICORA_IMAGE_TAG "Image tag" "${def_tag:-latest}"
