@@ -575,7 +575,8 @@ tls_live_dir() { printf '%s/letsencrypt/live/%s' "$COMPOSE_DIR" "$RETICORA_TLS_D
 # tls_cert_is_selfsigned — returns 0 when the current certificate is the
 # bootstrap placeholder (issuer == subject) or no certificate exists yet.
 tls_cert_is_selfsigned() {
-    local cert="$(tls_live_dir)/fullchain.pem"
+    local cert
+    cert="$(tls_live_dir)/fullchain.pem"
     [ -f "$cert" ] || return 0
     local subject issuer
     subject="$(openssl x509 -in "$cert" -noout -subject 2>/dev/null || true)"
