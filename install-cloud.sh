@@ -466,7 +466,8 @@ collect_config() {
         echo
         echo "HTTPS (recommended for production): enter a public domain name to"
         echo "automatically obtain a free Let's Encrypt certificate (requires ports"
-        echo "80/443 reachable from the internet). Leave empty to keep plain HTTP."
+        echo "80/443 reachable from the internet; the UI is then served at"
+        echo "https://<domain> on port 443). Leave empty to keep plain HTTP."
         ask_validated RETICORA_TLS_DOMAIN "Public domain for HTTPS (empty = no TLS, optional)" "$def_tls_domain" valid_optional_domain
     elif [ -n "$def_tls_domain" ] && valid_domain "$def_tls_domain"; then
         # Non-interactive run: reuse the configured domain (from .env, or
@@ -484,8 +485,27 @@ collect_config() {
         RETICORA_CERT_EMAIL="$def_cert_email"
     fi
 
-    def_port="$(env_get RETICORA_FRONTEND_PORT || true)"
-    ask_validated RETICORA_FRONTEND_PORT "Host port for the web UI" "${def_port:-3000}" valid_port
+    # With TLS enabled, the UI is served on the standard ports: HTTPS on 443
+    # (RETICORA_HTTPS_PORT) and plain HTTP on 80, which must be reachable from
+    # the internet for the Let's Encrypt ACME http-01 challenge and redirects
+    # everything else to HTTPS. Point RETICORA_FRONTEND_PORT (the host port
+    # published for the container's plain-HTTP port) at 80 then; RETICORA_
+    # HTTP_BIND in .env can bind it elsewhere when port 80 is already taken
+    # (e.g. by an external reverse proxy terminating TLS in front).
+    if [ -n "$RETICORA_TLS_DOMAIN" ]; then
+        def_port="$(env_get RETICORA_FRONTEND_PORT || true)"
+        if [ -z "$def_port" ]; then
+            RETICORA_FRONTEND_PORT=80
+        elif [ "$def_port" != "80" ]; then
+            warn "TLS is enabled: the plain-HTTP UI port is redirected from $def_port to 80 (ACME http-01 challenge + HTTPS redirect)."
+            RETICORA_FRONTEND_PORT=80
+        else
+            RETICORA_FRONTEND_PORT=80
+        fi
+    else
+        def_port="$(env_get RETICORA_FRONTEND_PORT || true)"
+        ask_validated RETICORA_FRONTEND_PORT "Host port for the web UI" "${def_port:-3000}" valid_port
+    fi
     def_port="$(env_get RETICORA_SERVER_PORT || true)"
     ask_validated RETICORA_SERVER_PORT "Host port for the REST API" "${def_port:-8080}" valid_port
     def_port="$(env_get RETICORA_KEYCLOAK_PORT || true)"

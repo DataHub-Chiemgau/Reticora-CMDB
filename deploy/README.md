@@ -29,8 +29,10 @@ The installer asks for:
   When a domain is entered, the installer automatically obtains a free Let's
   Encrypt certificate (nginx + Certbot, ACME http-01 challenge) and enables
   HTTPS with automatic renewal. Leave empty to keep plain HTTP.
-- **Ports** — published host ports for UI (default 3000), API (8080) and
-  Keycloak (8180).
+- **Ports** — published host ports for UI (default 3000; fixed to 80 when
+  HTTPS is enabled — port 80 answers the ACME challenge and redirects to
+  HTTPS, the UI itself is then served at `https://<domain>` on port 443),
+  API (8080) and Keycloak (8180).
 - **Image source** — build from source (default) or pull prebuilt images from
   a registry.
 
@@ -94,6 +96,17 @@ existing real certificate is kept and no new one is requested.
 If issuance fails (e.g. DNS not yet propagated or ports blocked), the stack
 keeps running with the self-signed certificate and the installer prints a
 warning — fix the connectivity and re-run `./install-cloud.sh` to retry.
+
+The TLS server configuration is rendered by the nginx image entrypoint from
+`/etc/nginx/templates/reticora-tls.conf.template` (envsubst) into
+`/etc/nginx/conf.d/reticora-tls.conf`, which the main `nginx.conf` baked into
+the frontend image includes. With TLS enabled the UI is served on the
+standard ports: `443` for HTTPS and `80` for the ACME challenge plus the
+redirect to HTTPS (`RETICORA_FRONTEND_PORT` is set to `80` in `.env`). If
+host port 80 is already taken (e.g. by another reverse proxy terminating TLS
+in front of this stack), set `RETICORA_HTTP_BIND=127.0.0.1` in
+`deploy/docker-compose/.env` to keep the plain-HTTP container port on
+localhost only.
 
 Also set the **public URLs** to the HTTPS address during installation:
 `RETICORA_PUBLIC_BASE_URL=https://cmdb.example.com` (the installer suggests

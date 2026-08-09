@@ -200,22 +200,32 @@ services:
     # TLS certificates are provisioned and renewed via Let's Encrypt/Certbot
     # by install-cloud.sh; RETICORA_TLS_DOMAIN is written into .env there.
     # When it is set, the nginx image entrypoint renders the TLS template
-    # (nginx-tls.conf.template, mounted below) to /etc/nginx/nginx.conf,
-    # replacing the plain-HTTP configuration baked into the image.
+    # (nginx-tls.conf.template, mounted below) to
+    # /etc/nginx/conf.d/reticora-tls.conf, which the nginx.conf baked into the
+    # image includes inside its http block.
     environment:
       RETICORA_TLS_DOMAIN: "${RETICORA_TLS_DOMAIN:-}"
     volumes:
       - ./letsencrypt:/etc/letsencrypt:ro
       - certbot-webroot:/var/www/certbot
-      - ./nginx-tls.conf.template:/etc/nginx/templates/nginx.conf.template:ro
+      - ./nginx-tls.conf.template:/etc/nginx/templates/reticora-tls.conf.template:ro
     ports:
-      - "${RETICORA_FRONTEND_PORT:-3000}:80"
+      # The plain-HTTP port answers ACME http-01 challenges and redirects
+      # everything else to HTTPS when TLS is enabled, so it must be reachable
+      # from the internet as port 80 (install-cloud.sh points
+      # RETICORA_FRONTEND_PORT at 80 then). RETICORA_HTTP_BIND opts out of
+      # publishing it twice (e.g. port 80 already taken by another reverse
+      # proxy terminating TLS in front of this stack).
+      - "${RETICORA_HTTP_BIND:-}${RETICORA_HTTP_BIND:+:}${RETICORA_FRONTEND_PORT:-3000}:80"
       - "${RETICORA_HTTPS_PORT:-443}:443"
     depends_on:
       server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/ || exit 1"]
+      # nginx always answers this endpoint with 200 on the plain-HTTP port,
+      # even when the TLS configuration redirects everything else to HTTPS
+      # (busybox wget cannot follow an http→https redirect).
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/__reticora_http_status || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 6
