@@ -183,13 +183,13 @@ services:
     # build: lives in docker-compose.override.yml so this file also works
     # standalone with prebuilt registry images.
     restart: unless-stopped
-    # The nginx worker must be able to write its pid file and cache dirs.
-    # nginx writes its pid to /var/run/nginx.pid (see frontend/nginx.conf),
-    # which is backed by a writable tmpfs here.
+    # The unprivileged nginx worker must be able to write its pid file and
+    # temp directories. frontend/nginx.conf places all of them under /tmp
+    # (a tmpfs is root-owned and therefore not writable for the nginx user),
+    # so /tmp is backed by a writable tmpfs here.
     user: nginx
     tmpfs:
-      - /var/cache/nginx
-      - /var/run
+      - /tmp
     ports:
       - "${RETICORA_FRONTEND_PORT:-3000}:80"
     depends_on:
