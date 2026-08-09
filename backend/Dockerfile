@@ -20,7 +20,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/server ./cmd/serv
 FROM alpine:3.20
 
 RUN apk --no-cache add ca-certificates tzdata
-COPY --from=builder /bin/server /usr/local/bin/server
+# Install the binary as root:root 0755. /usr/local/bin is root-owned, so the
+# copy must happen before dropping privileges to the nobody user below.
+COPY --from=builder --chmod=0755 /bin/server /usr/local/bin/server
 
 EXPOSE 8080
 USER nobody:nobody

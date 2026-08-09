@@ -35,7 +35,9 @@ It then:
    install Docker if missing,
 2. writes `deploy/docker-compose/.env` (mode `600`),
 3. generates the RS256 session signing key at
-   `deploy/docker-compose/secrets/session-private.pem`,
+   `deploy/docker-compose/secrets/session-private.pem` (group-readable by the
+   container's `nobody` group so the server process can read it; the file is
+   bind-mounted into the server container),
 4. renders the Keycloak realm with the configured OIDC client secret into
    `deploy/docker-compose/.generated/`,
 5. builds or pulls the server/frontend images,

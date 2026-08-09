@@ -445,7 +445,20 @@ ensure_session_key() {
         mkdir -p "$key_dir"
         openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out "$key_file" 2>/dev/null
     fi
-    chmod 600 "$key_file"
+    # The key is bind-mounted into the server container, whose process runs as
+    # the unprivileged nobody user (uid/gid 65534, see backend/Dockerfile).
+    # A root-only 0600 file is therefore unreadable in the container and the
+    # server exits with "read session key: permission denied", which surfaces
+    # as "container docker-compose-server-1 is unhealthy". Group the file to
+    # the nobody gid (0640) so only the owner on the host and the server
+    # process can read it; fall back to world-readable 0644 when chown is not
+    # permitted (e.g. the installer itself runs unprivileged).
+    if chown "$(id -u):65534" "$key_file" 2>/dev/null; then
+        chmod 640 "$key_file"
+    else
+        warn "Cannot chown the session key to the container's nobody group; making it world-readable (0644) so the server container can read it."
+        chmod 644 "$key_file"
+    fi
     success "Session signing key: $key_file"
 }
 
@@ -520,8 +533,8 @@ start_stack() {
 
     info "Starting the Reticora server and frontend …"
     compose_cmd up -d server frontend
-    wait_for_service server || die "Reticora server did not become healthy."
-    wait_for_service frontend || die "Frontend did not become healthy."
+    wait_for_service server || die "Reticora server did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs server"
+    wait_for_service frontend || die "Frontend did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs frontend"
     success "All services are up"
 }
 
