@@ -249,6 +249,7 @@
     "loginDescription": "Melden Sie sich mit Ihrem Organisationskonto bei Reticora CMDB an.",
     "loginButton": "Anmelden",
     "loginError": "Die Anmeldung konnte nicht gestartet werden. Bitte versuchen Sie es später erneut.",
+    "secureContextRequired": "Die Anmeldung erfordert eine sichere Verbindung. Bitte rufen Sie Reticora CMDB über HTTPS (oder auf localhost) auf und versuchen Sie es erneut.",
     "logout": "Abmelden",
     "callbackTitle": "Anmeldung wird abgeschlossen",
     "callbackProgress": "Bitte warten Sie, während Ihre Sitzung geprüft wird.",

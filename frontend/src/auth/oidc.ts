@@ -38,14 +38,24 @@ function base64UrlEncode(bytes: Uint8Array) {
 
 function randomBase64Url(bytes = 32) {
   const values = new Uint8Array(bytes);
-  crypto.getRandomValues(values);
+  getWebCrypto().getRandomValues(values);
   return base64UrlEncode(values);
 }
 
 async function sha256Base64Url(value: string) {
   const data = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest('SHA-256', data);
+  const digest = await getWebCrypto().subtle.digest('SHA-256', data);
   return base64UrlEncode(new Uint8Array(digest));
+}
+
+function getWebCrypto() {
+  const cryptoApi = globalThis.crypto;
+  if (!cryptoApi || typeof cryptoApi.getRandomValues !== 'function' || !cryptoApi.subtle) {
+    throw new Error(
+      'The Web Crypto API is not available. Sign-in requires a secure context: access Reticora CMDB via HTTPS or on localhost.',
+    );
+  }
+  return cryptoApi;
 }
 
 function readTransaction(): AuthTransaction | null {
@@ -92,6 +102,10 @@ export async function fetchAuthConfig() {
 }
 
 export async function startAuthorizationCodeFlow(returnTo: string) {
+  // The PKCE code challenge is derived from the Web Crypto API, which browsers
+  // only expose in secure contexts (HTTPS or localhost). Fail early with a
+  // readable message instead of a "Cannot read properties of undefined" error.
+  getWebCrypto();
   const config = await fetchAuthConfig();
   const state = randomBase64Url();
   const codeVerifier = randomBase64Url();

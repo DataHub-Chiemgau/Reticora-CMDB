@@ -249,6 +249,7 @@
     "loginDescription": "Use your organization account to access Reticora CMDB.",
     "loginButton": "Sign in",
     "loginError": "Sign-in could not be started. Please try again later.",
+    "secureContextRequired": "Sign-in requires a secure connection. Please access Reticora CMDB via HTTPS (or on localhost) and try again.",
     "logout": "Log out",
     "callbackTitle": "Completing sign-in",
     "callbackProgress": "Please wait while we verify your session.",

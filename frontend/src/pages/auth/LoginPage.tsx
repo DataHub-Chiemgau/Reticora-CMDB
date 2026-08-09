@@ -24,7 +24,11 @@ export function LoginPage() {
     try {
       await startAuthorizationCodeFlow(from);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('auth.loginError'));
+      if (err instanceof Error && err.message.startsWith('The Web Crypto API is not available')) {
+        setError(t('auth.secureContextRequired'));
+      } else {
+        setError(err instanceof Error ? err.message : t('auth.loginError'));
+      }
       setLoading(false);
     }
   }
