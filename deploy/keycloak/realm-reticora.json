@@ -64,10 +64,13 @@
       "standardFlowEnabled": true,
       "serviceAccountsEnabled": false,
       "redirectUris": [
+        "RETICORA_OIDC_REDIRECT_URL_PLACEHOLDER",
+        "RETICORA_OIDC_REDIRECT_ORIGIN_PLACEHOLDER/*",
         "http://localhost:5173/*",
         "http://localhost:8080/*"
       ],
       "webOrigins": [
+        "RETICORA_OIDC_REDIRECT_ORIGIN_PLACEHOLDER",
         "http://localhost:5173"
       ],
       "defaultClientScopes": [

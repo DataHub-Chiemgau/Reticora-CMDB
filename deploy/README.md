@@ -23,7 +23,12 @@ The installer asks for:
 - **Passwords/secrets** — database, MinIO/S3, Keycloak admin, Keycloak DB,
   OIDC client secret, master key for credential encryption. Secure random
   defaults are generated automatically and reused on re-runs.
-- **Public URLs** — web UI base URL, OIDC issuer, OIDC redirect URL.
+- **Public URLs** — web UI base URL, OIDC issuer, OIDC redirect URL. The
+  **OIDC issuer URL is handed to the browser** as the Keycloak sign-in
+  endpoint, so it must be reachable from your users' machines. Do **not**
+  leave it at `http://localhost:8180/...` unless the browser runs on the
+  server itself — otherwise sign-in fails with a "cannot reach localhost"
+  error. The installer derives a matching default from the public base URL.
 - **HTTPS / Let's Encrypt (optional)** — a public domain name (e.g.
   `cmdb.example.com`) and an e-mail address for certificate expiry notices.
   When a domain is entered, the installer automatically obtains a free Let's
