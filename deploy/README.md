@@ -56,6 +56,28 @@ login is `admin@reticora.local` / `admin123` — **change it immediately**.
 Non-interactive (CI) usage: `./install-cloud.sh --non-interactive` uses the
 existing `.env` values, generated defaults and never prompts.
 
+### Troubleshooting: `container docker-compose-server-1 is unhealthy`
+
+The API server refuses to start without a readable RS256 session signing key.
+If the stack was ever started before the key existed (for example a plain
+`docker compose up -d` or an installer run that was aborted early), Docker
+creates a root-owned **directory** at
+`deploy/docker-compose/secrets/session-private.pem` — the bind-mount source it
+could not find. The server then exits with
+`read session key … is a directory`, its health check never passes and Compose
+aborts the dependent frontend with
+`dependency failed to start: container docker-compose-server-1 is unhealthy`.
+
+Re-running `./install-cloud.sh` repairs this automatically: it detects the
+placeholder directory (or an empty key file), removes it and regenerates the
+key. If the directory cannot be removed because it is root-owned, delete it
+manually and re-run the installer:
+
+```bash
+sudo rm -rf deploy/docker-compose/secrets/session-private.pem
+./install-cloud.sh
+```
+
 ## 2. Collector VM (customer network)
 
 ```bash

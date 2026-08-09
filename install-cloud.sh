@@ -440,10 +440,34 @@ collect_config() {
 ensure_session_key() {
     local key_dir="$COMPOSE_DIR/secrets"
     local key_file="$key_dir/session-private.pem"
+
+    # Docker creates an empty *directory* at the source path of a file bind
+    # mount when that path does not exist yet, which happens whenever the
+    # stack was started once before the key was generated. The server then
+    # exits with "read session key: is a directory" and the container never
+    # becomes healthy ("container docker-compose-server-1 is unhealthy").
+    # The directory is owned by root, so remove it (with sudo if needed)
+    # before regenerating the key — otherwise every re-run fails again.
+    if [ -e "$key_file" ] && [ ! -f "$key_file" ]; then
+        warn "$key_file is not a regular file (Docker created it as a mount point); recreating it."
+        rm -rf "$key_file" 2>/dev/null || sudo -n rm -rf "$key_file" 2>/dev/null || true
+        if [ -e "$key_file" ]; then
+            die "Cannot remove $key_file. Delete it manually (sudo rm -rf '$key_file') and re-run this installer."
+        fi
+    fi
+    # A previous interrupted run can leave a zero-byte key behind, which fails
+    # the same way; treat it as missing.
+    if [ -f "$key_file" ] && [ ! -s "$key_file" ]; then
+        warn "$key_file is empty; regenerating it."
+        rm -f "$key_file" 2>/dev/null || sudo -n rm -f "$key_file" 2>/dev/null || true
+    fi
+
     if [ ! -f "$key_file" ]; then
         info "Generating RS256 session signing key …"
-        mkdir -p "$key_dir"
-        openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out "$key_file" 2>/dev/null
+        mkdir -p "$key_dir" || die "Cannot create $key_dir."
+        openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out "$key_file" 2>/dev/null \
+            || die "Generating the session signing key at $key_file failed."
+        [ -s "$key_file" ] || die "The session signing key at $key_file is empty."
     fi
     # The key is bind-mounted into the server container, whose process runs as
     # the unprivileged nobody user (uid/gid 65534, see backend/Dockerfile).
@@ -518,6 +542,15 @@ wait_for_service() {
     return 1
 }
 
+# show_service_logs <service> — print the tail of a service's log so the
+# failure reason (e.g. an unreadable session key) is visible immediately
+# instead of hidden behind a separate `docker compose logs` invocation.
+show_service_logs() {
+    local service="$1"
+    warn "Last log lines of the '$service' container:"
+    compose_cmd logs --tail 40 "$service" >&2 || true
+}
+
 start_stack() {
     info "Starting the infrastructure services …"
     compose_cmd up -d postgres nats redis minio keycloak-db
@@ -533,8 +566,14 @@ start_stack() {
 
     info "Starting the Reticora server and frontend …"
     compose_cmd up -d server frontend
-    wait_for_service server || die "Reticora server did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs server"
-    wait_for_service frontend || die "Frontend did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs frontend"
+    wait_for_service server || {
+        show_service_logs server
+        die "Reticora server did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs server"
+    }
+    wait_for_service frontend || {
+        show_service_logs frontend
+        die "Frontend did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs frontend"
+    }
     success "All services are up"
 }
 
