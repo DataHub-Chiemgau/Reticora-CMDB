@@ -453,7 +453,6 @@ ensure_session_key() {
     # the nobody gid (0640) so only the owner on the host and the server
     # process can read it; fall back to world-readable 0644 when chown is not
     # permitted (e.g. the installer itself runs unprivileged).
-    chmod 600 "$key_file"
     if chown "$(id -u):65534" "$key_file" 2>/dev/null; then
         chmod 640 "$key_file"
     else
