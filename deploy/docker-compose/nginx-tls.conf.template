@@ -1,86 +1,72 @@
-# Reticora frontend — TLS-enabled nginx configuration template.
+# Reticora frontend — TLS-enabled nginx server configuration template.
 #
 # This variant is used when RETICORA_TLS_DOMAIN is set in
 # deploy/docker-compose/.env (written by install-cloud.sh after provisioning
 # a Let's Encrypt certificate via Certbot). docker-compose bind-mounts this
-# file as /etc/nginx/templates/nginx.conf.template; the nginx image
+# file as /etc/nginx/templates/reticora-tls.conf.template; the nginx image
 # entrypoint expands ${RETICORA_TLS_DOMAIN} (envsubst) and writes the result
-# to /etc/nginx/nginx.conf, replacing the plain-HTTP configuration baked
-# into the image.
+# to /etc/nginx/conf.d/reticora-tls.conf, which the main nginx.conf includes
+# inside its http block (that is also where the stock default.conf server on
+# port 80 lives).
 #
-# Like nginx.conf, this must be a complete main configuration with all
-# writable paths under /tmp (the container runs as the unprivileged nginx
-# user with a tmpfs on /tmp).
+# This must be a server-fragment configuration: directives that are only
+# valid at main level (pid, events, worker_processes, the http block itself)
+# belong to frontend/nginx.conf and would abort nginx with 'directive is not
+# allowed here' if repeated here.
 
-pid /tmp/nginx.pid;
-worker_processes auto;
-error_log /var/log/nginx/error.log notice;
+# Plain HTTP: answer ACME http-01 challenges from the directory shared with
+# the certbot container and redirect everything else to HTTPS. Declared as
+# the port-80 default server (this file is included before the plain-HTTP
+# server in nginx.conf) so every request without a matching Host lands here;
+# the container health-check endpoint must therefore be answered here too
+# (busybox wget cannot follow an http→https redirect).
+server {
+    listen 80 default_server;
+    server_name ${RETICORA_TLS_DOMAIN};
 
-events {
-    worker_connections 1024;
-}
-
-http {
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
-
-    access_log /var/log/nginx/access.log;
-    sendfile on;
-    keepalive_timeout 65;
-
-    # Writable temp paths for the unprivileged nginx user (see above).
-    client_body_temp_path /tmp/client_temp;
-    proxy_temp_path /tmp/proxy_temp;
-    fastcgi_temp_path /tmp/fastcgi_temp;
-    uwsgi_temp_path /tmp/uwsgi_temp;
-    scgi_temp_path /tmp/scgi_temp;
-
-    # Plain HTTP: answer ACME http-01 challenges from the directory shared
-    # with the certbot container and redirect everything else to HTTPS.
-    server {
-        listen 80;
-        server_name ${RETICORA_TLS_DOMAIN};
-
-        location /.well-known/acme-challenge/ {
-            root /var/www/certbot;
-        }
-
-        location / {
-            return 301 https://$host$request_uri;
-        }
+    location = /__reticora_http_status {
+        return 200 "ok\n";
     }
 
-    # HTTPS: Let's Encrypt certificate under /etc/letsencrypt, bind-mounted
-    # from deploy/docker-compose/letsencrypt (managed by certbot).
-    server {
-        listen 443 ssl;
-        http2 on;
-        server_name ${RETICORA_TLS_DOMAIN};
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
 
-        ssl_certificate     /etc/letsencrypt/live/${RETICORA_TLS_DOMAIN}/fullchain.pem;
-        ssl_certificate_key /etc/letsencrypt/live/${RETICORA_TLS_DOMAIN}/privkey.pem;
-        ssl_session_timeout 1d;
-        ssl_session_cache shared:reticora_ssl:10m;
-        ssl_protocols TLSv1.2 TLSv1.3;
-        ssl_prefer_server_ciphers off;
-        # Mozilla Intermediate profile (TLSv1.3 ciphers are not configurable
-        # and are always preferred).
-        ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256;
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
 
-        root /usr/share/nginx/html;
-        index index.html;
+# HTTPS: Let's Encrypt certificate under /etc/letsencrypt, bind-mounted
+# from deploy/docker-compose/letsencrypt (managed by certbot).
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${RETICORA_TLS_DOMAIN};
 
-        location / {
-            try_files $uri $uri/ /index.html;
-        }
+    ssl_certificate     /etc/letsencrypt/live/${RETICORA_TLS_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${RETICORA_TLS_DOMAIN}/privkey.pem;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:reticora_ssl:10m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    # Mozilla Intermediate profile (TLSv1.3 ciphers are not configurable
+    # and are always preferred).
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256;
 
-        location /api/ {
-            # The backend service is called "server" in docker-compose.yml.
-            proxy_pass http://server:8080;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-        }
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        # The backend service is called "server" in docker-compose.yml.
+        proxy_pass http://server:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
