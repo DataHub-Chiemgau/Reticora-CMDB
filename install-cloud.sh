@@ -535,6 +535,10 @@ wait_for_service() {
         case "$status" in
             healthy|running) return 0 ;;
             unhealthy|exited|dead) return 1 ;;
+            # A restarting container crash-loops (e.g. the frontend exiting on
+            # an nginx '[emerg]' config error) and will never become healthy;
+            # fail fast instead of waiting out the whole timeout.
+            restarting) return 1 ;;
         esac
         sleep 2
         attempts=$((attempts - 1))
