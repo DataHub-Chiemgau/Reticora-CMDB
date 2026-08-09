@@ -587,12 +587,12 @@ tls_cert_is_selfsigned() {
 bootstrap_tls_cert() {
     [ -n "$RETICORA_TLS_DOMAIN" ] || return 0
     local live_dir; live_dir="$(tls_live_dir)"
-    if [ -f "$live_dir/fullchain.pem" ] && ! tls_cert_is_selfsigned; then
-        success "Let's Encrypt certificate for $RETICORA_TLS_DOMAIN already present"
-        return 0
-    fi
-    if tls_cert_is_selfsigned && [ -f "$live_dir/fullchain.pem" ]; then
-        info "Bootstrap self-signed certificate already exists for $RETICORA_TLS_DOMAIN"
+    if [ -f "$live_dir/fullchain.pem" ]; then
+        if tls_cert_is_selfsigned; then
+            info "Bootstrap self-signed certificate already exists for $RETICORA_TLS_DOMAIN"
+        else
+            success "Let's Encrypt certificate for $RETICORA_TLS_DOMAIN already present"
+        fi
         return 0
     fi
     info "Creating a bootstrap self-signed certificate for $RETICORA_TLS_DOMAIN …"

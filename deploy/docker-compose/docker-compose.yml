@@ -221,7 +221,8 @@ services:
       retries: 6
 
   certbot:
-    image: certbot/certbot:latest
+    # Pinned version for reproducible deployments.
+    image: certbot/certbot:v2.11.0
     # Idles between renewal checks: certbot renew is a no-op until the
     # certificate is close to expiry; the real issuance runs once from
     # install-cloud.sh. Uses the host's /bin/sh loop instead of the image
