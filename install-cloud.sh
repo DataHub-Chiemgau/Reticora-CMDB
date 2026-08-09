@@ -555,15 +555,29 @@ show_service_logs() {
 # PostgreSQL data directory (<project>_pgdata), resolved from the running
 # postgres container's mounts (falling back to the compose project name).
 db_volume_name() {
-    local cid project
+    local cid project name
     cid="$(compose_cmd ps -q postgres 2>/dev/null || true)"
     if [ -n "$cid" ]; then
-        $DOCKER inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' \
-            "$cid" 2>/dev/null && return 0
+        name="$($DOCKER inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' \
+            "$cid" 2>/dev/null || true)"
+        if [ -n "$name" ]; then
+            printf '%s' "$name"
+            return 0
+        fi
     fi
     project="$("${COMPOSE[@]}" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config --format json 2>/dev/null \
         | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
     printf '%s_pgdata' "${project:-docker-compose}"
+}
+
+# db_image — prints the container image configured for the postgres service,
+# so the temporary password-reset instance runs exactly the same PostgreSQL
+# version as the real stack (an older binary refuses a newer data directory).
+db_image() {
+    local img
+    img="$("${COMPOSE[@]}" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config 2>/dev/null \
+        | awk '/^[[:space:]]*postgres:/{f=1} f && /^[[:space:]]*image:/{print $2; exit}')"
+    printf '%s' "${img:-timescale/timescaledb:latest-pg16}"
 }
 
 # sync_db_password — the postgres image applies POSTGRES_PASSWORD only when it
@@ -591,8 +605,9 @@ sync_db_password() {
     # outside the volume) so the role password can be changed without knowing
     # the old one. The new password is passed through the PGPASSWORD
     # environment variable and a psql variable, never on a command line.
-    local hba_vol
+    local hba_vol image
     hba_vol="$(db_volume_name)"
+    image="$(db_image)"
     compose_cmd rm -sf postgres >/dev/null 2>&1 || true
     $DOCKER run -d --rm --name reticora-db-pwreset \
         --entrypoint sh \
@@ -600,19 +615,19 @@ sync_db_password() {
         -e POSTGRES_PASSWORD="$RETICORA_DB_PASSWORD" \
         -e RESET_HBA='local all all trust
 host all all all scram-sha-256' \
-        timescale/timescaledb:latest-pg16 \
+        "$image" \
         -c 'mkdir -p /etc/reticora-pwreset && printf "%s\n" "$RESET_HBA" > /etc/reticora-pwreset/pg_hba.conf && chmod 644 /etc/reticora-pwreset/pg_hba.conf && exec docker-entrypoint.sh postgres -c hba_file=/etc/reticora-pwreset/pg_hba.conf' \
         >/dev/null 2>&1 \
         || die "Cannot start the temporary PostgreSQL instance on volume '$hba_vol' — is another postgres container still running?"
 
     local ok=1
     for _ in $(seq 1 30); do
-        # The password travels via stdin (SQL with a psql variable set from
-        # PGPASSWORD), so it never appears in the process list.
-        if printf '%s\n' "ALTER ROLE reticora WITH PASSWORD :'pw'" | \
+        # The password travels only via stdin: the \set meta-command reads it
+        # from the PGPASSWORD environment variable inside psql, so it never
+        # appears in a process list or on a command line.
+        if printf '%s\n' '\set pw `printenv PGPASSWORD`' "ALTER ROLE reticora WITH PASSWORD :'pw'" | \
             $DOCKER exec -i -e PGPASSWORD="$RETICORA_DB_PASSWORD" reticora-db-pwreset \
-                psql -U reticora -d reticora -v ON_ERROR_STOP=1 -q \
-                    --variable pw="$RETICORA_DB_PASSWORD" >/dev/null 2>&1; then
+                psql -U reticora -d reticora -v ON_ERROR_STOP=1 -q >/dev/null 2>&1; then
             ok=0
             break
         fi
