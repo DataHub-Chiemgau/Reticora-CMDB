@@ -184,8 +184,9 @@ services:
     # standalone with prebuilt registry images.
     restart: unless-stopped
     # The nginx worker must be able to write its pid file and cache dirs.
+    # nginx writes its pid to /var/run/nginx.pid (see frontend/nginx.conf),
+    # which is backed by a writable tmpfs here.
     user: nginx
-    pid: /tmp/nginx.pid
     tmpfs:
       - /var/cache/nginx
       - /var/run
