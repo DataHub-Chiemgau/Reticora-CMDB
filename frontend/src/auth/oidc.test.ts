@@ -35,11 +35,9 @@ describe('OIDC login on insecure origins', () => {
     // Browsers only expose Web Crypto in secure contexts (HTTPS or localhost).
     // When the app is served over plain HTTP, window.crypto is missing.
     Object.defineProperty(globalThis, 'crypto', { value: undefined, configurable: true });
-    const { startAuthorizationCodeFlow } = await import('./oidc');
+    const { startAuthorizationCodeFlow, InsecureContextError } = await import('./oidc');
 
-    await expect(startAuthorizationCodeFlow('/dashboard')).rejects.toThrow(
-      'The Web Crypto API is not available',
-    );
+    await expect(startAuthorizationCodeFlow('/dashboard')).rejects.toThrow(InsecureContextError);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

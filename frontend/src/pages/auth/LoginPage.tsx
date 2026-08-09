@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/Button';
-import { startAuthorizationCodeFlow } from '../../auth/oidc';
+import { startAuthorizationCodeFlow, InsecureContextError } from '../../auth/oidc';
 
 type LoginLocationState = {
   from?: string;
@@ -24,7 +24,7 @@ export function LoginPage() {
     try {
       await startAuthorizationCodeFlow(from);
     } catch (err) {
-      if (err instanceof Error && err.message.startsWith('The Web Crypto API is not available')) {
+      if (err instanceof InsecureContextError) {
         setError(t('auth.secureContextRequired'));
       } else {
         setError(err instanceof Error ? err.message : t('auth.loginError'));

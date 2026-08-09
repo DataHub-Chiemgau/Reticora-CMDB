@@ -4,6 +4,15 @@ const API_BASE = '/api/v1';
 const AUTH_TRANSACTION_KEY = 'reticora-auth-transaction';
 const AUTH_CONFIG_KEY = 'reticora-auth-config';
 
+export class InsecureContextError extends Error {
+  constructor() {
+    super(
+      'The Web Crypto API is not available. Sign-in requires a secure context: access Reticora CMDB via HTTPS or on localhost.',
+    );
+    this.name = 'InsecureContextError';
+  }
+}
+
 export interface AuthConfig {
   issuer: string;
   client_id: string;
@@ -51,9 +60,7 @@ async function sha256Base64Url(value: string) {
 function getWebCrypto() {
   const cryptoApi = globalThis.crypto;
   if (!cryptoApi || typeof cryptoApi.getRandomValues !== 'function' || !cryptoApi.subtle) {
-    throw new Error(
-      'The Web Crypto API is not available. Sign-in requires a secure context: access Reticora CMDB via HTTPS or on localhost.',
-    );
+    throw new InsecureContextError();
   }
   return cryptoApi;
 }
