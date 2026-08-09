@@ -176,11 +176,11 @@ func (r *PGJobRepository) ClaimPending(ctx context.Context, limit int) ([]Job, e
 	err := r.inTx(ctx, "app.system", "on", func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			WITH due AS (
-				SELECT id FROM export_job WHERE status = $1 ORDER BY created_at ASC, id ASC LIMIT $2
+				SELECT id AS job_id FROM export_job WHERE status = $1 ORDER BY created_at ASC, id ASC LIMIT $2
 				FOR UPDATE SKIP LOCKED
 			)
 			UPDATE export_job SET status = $3, started_at = now(), updated_at = now()
-			FROM due WHERE export_job.id = due.id
+			FROM due WHERE export_job.id = due.job_id
 			RETURNING `+jobColumns, JobStatusPending, limit, JobStatusRunning)
 		if err != nil {
 			return fmt.Errorf("claim pending export jobs: %w", err)
