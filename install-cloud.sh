@@ -551,12 +551,98 @@ show_service_logs() {
     compose_cmd logs --tail 40 "$service" >&2 || true
 }
 
+# db_volume_name — prints the name of the Docker volume holding the main
+# PostgreSQL data directory (<project>_pgdata), resolved from the running
+# postgres container's mounts (falling back to the compose project name).
+db_volume_name() {
+    local cid project
+    cid="$(compose_cmd ps -q postgres 2>/dev/null || true)"
+    if [ -n "$cid" ]; then
+        $DOCKER inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' \
+            "$cid" 2>/dev/null && return 0
+    fi
+    project="$("${COMPOSE[@]}" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config --format json 2>/dev/null \
+        | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+    printf '%s_pgdata' "${project:-docker-compose}"
+}
+
+# sync_db_password — the postgres image applies POSTGRES_PASSWORD only when it
+# initializes an *empty* data directory. When the installer is re-run with a
+# changed RETICORA_DB_PASSWORD, the persistent pgdata volume still carries the
+# previous password, so every connection fails with SQLSTATE 28P01
+# (password authentication failed) and the server container never becomes
+# healthy ("dependency failed to start: container docker-compose-server-1 is
+# unhealthy"). Probe the authentication here and, on mismatch, resync the
+# stored password so the database matches .env again.
+sync_db_password() {
+    info "Checking database authentication …"
+    if compose_cmd exec -T -e PGPASSWORD="$RETICORA_DB_PASSWORD" postgres \
+        psql -U reticora -d reticora -tAc 'SELECT 1' >/dev/null 2>&1; then
+        success "Database password matches the configuration"
+        return 0
+    fi
+
+    warn "The existing PostgreSQL volume still uses a different password (SQLSTATE 28P01);"
+    warn "PostgreSQL ignores POSTGRES_PASSWORD once its data directory is initialized."
+    info "Updating the password of database role 'reticora' to the configured value …"
+
+    # Start a temporary PostgreSQL instance on the same data volume, but with
+    # 'trust' authentication for local connections (via a throwaway hba config
+    # outside the volume) so the role password can be changed without knowing
+    # the old one. The new password is passed through the PGPASSWORD
+    # environment variable and a psql variable, never on a command line.
+    local hba_vol
+    hba_vol="$(db_volume_name)"
+    compose_cmd rm -sf postgres >/dev/null 2>&1 || true
+    $DOCKER run -d --rm --name reticora-db-pwreset \
+        --entrypoint sh \
+        -v "$hba_vol:/var/lib/postgresql/data" \
+        -e POSTGRES_PASSWORD="$RETICORA_DB_PASSWORD" \
+        -e RESET_HBA='local all all trust
+host all all all scram-sha-256' \
+        timescale/timescaledb:latest-pg16 \
+        -c 'mkdir -p /etc/reticora-pwreset && printf "%s\n" "$RESET_HBA" > /etc/reticora-pwreset/pg_hba.conf && chmod 644 /etc/reticora-pwreset/pg_hba.conf && exec docker-entrypoint.sh postgres -c hba_file=/etc/reticora-pwreset/pg_hba.conf' \
+        >/dev/null 2>&1 \
+        || die "Cannot start the temporary PostgreSQL instance on volume '$hba_vol' — is another postgres container still running?"
+
+    local ok=1
+    for _ in $(seq 1 30); do
+        # The password travels via stdin (SQL with a psql variable set from
+        # PGPASSWORD), so it never appears in the process list.
+        if printf '%s\n' "ALTER ROLE reticora WITH PASSWORD :'pw'" | \
+            $DOCKER exec -i -e PGPASSWORD="$RETICORA_DB_PASSWORD" reticora-db-pwreset \
+                psql -U reticora -d reticora -v ON_ERROR_STOP=1 -q \
+                    --variable pw="$RETICORA_DB_PASSWORD" >/dev/null 2>&1; then
+            ok=0
+            break
+        fi
+        sleep 2
+    done
+    $DOCKER rm -f reticora-db-pwreset >/dev/null 2>&1 || true
+    if [ "$ok" -ne 0 ]; then
+        die "Could not reset the database password. Remove the stale volume with '$DOCKER volume rm $hba_vol' (all CMDB data is lost) and re-run this installer."
+    fi
+    success "Database password updated"
+
+    info "Restarting PostgreSQL with normal authentication …"
+    compose_cmd up -d postgres
+    wait_for_service postgres || die "PostgreSQL did not become healthy."
+    if compose_cmd exec -T -e PGPASSWORD="$RETICORA_DB_PASSWORD" postgres \
+        psql -U reticora -d reticora -tAc 'SELECT 1' >/dev/null 2>&1; then
+        success "Database authentication verified"
+    else
+        die "Database authentication still fails after the password reset. Remove the stale volume with '$DOCKER volume rm $hba_vol' (all CMDB data is lost) and re-run this installer."
+    fi
+}
+
 start_stack() {
     info "Starting the infrastructure services …"
     compose_cmd up -d postgres nats redis minio keycloak-db
     wait_for_service postgres || die "PostgreSQL did not become healthy."
     wait_for_service keycloak-db || die "Keycloak PostgreSQL did not become healthy."
     success "Database and infrastructure services are running"
+
+    sync_db_password
 
     run_migrations
 
