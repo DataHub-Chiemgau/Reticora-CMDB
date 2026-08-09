@@ -41,6 +41,7 @@ coverage.out
 deploy/docker-compose/.env
 deploy/docker-compose/.generated/
 deploy/docker-compose/secrets/
+deploy/docker-compose/letsencrypt/
 deploy/docker-compose/docker-compose.override.yml.disabled
 
 # Temporary

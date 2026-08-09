@@ -482,7 +482,7 @@ on generation order; CI runs `npm run generate:api:check`, which regenerates
 them and fails on any diff. Regenerate with `make generate-api-client` (or
 `npm run generate:api`) after every specification change.
 
-**Production serving:** The built SPA is served via Nginx (`nginx.conf`) in a Docker container with proper SPA fallback routing.
+**Production serving:** The built SPA is served via Nginx (`nginx.conf`) in a Docker container with proper SPA fallback routing. For HTTPS, `install-cloud.sh` can provision a free Let's Encrypt certificate automatically (nginx + Certbot, ACME http-01 challenge): when a public domain is entered, it writes `RETICORA_TLS_DOMAIN` into `.env`, bootstraps a self-signed certificate, issues the real one via the `certbot` compose service and reloads nginx. The TLS configuration lives in `deploy/docker-compose/nginx-tls.conf.template`; certificates are stored under `deploy/docker-compose/letsencrypt/` and renewed automatically.
 
 ### Deployment
 

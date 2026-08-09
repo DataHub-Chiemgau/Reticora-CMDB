@@ -8,6 +8,11 @@
 # required secrets, writes a .env file, builds the container images, applies
 # the database migrations, starts the stack and verifies its health.
 #
+# Optionally provisions HTTPS: when a public domain name is entered, the
+# installer obtains a free Let's Encrypt certificate via Certbot (nginx
+# serves the ACME http-01 challenge) and configures nginx for TLS with
+# automatic renewal.
+#
 # Re-running the script reuses the existing .env values as defaults and is
 # idempotent: existing volumes, keys and configuration are preserved.
 #
@@ -34,6 +39,11 @@ Interactive ("foolproof") installer for the central Reticora cloud stack
 server, frontend). It prompts for every important setting, generates all
 required secrets, writes a .env file, builds the container images, applies
 the database migrations, starts the stack and verifies its health.
+
+Optionally provisions HTTPS: when a public domain name is entered, the
+installer obtains a free Let's Encrypt certificate via Certbot (nginx
+serves the ACME http-01 challenge) and configures nginx for TLS with
+automatic renewal.
 
 Re-running the script reuses the existing .env values as defaults and is
 idempotent: existing volumes, keys and configuration are preserved.
@@ -282,6 +292,24 @@ explain_url_error() {
 
 valid_password() { [ "${#1}" -ge 8 ]; }
 
+valid_domain() {
+    # Hostname labels: 1-63 chars each, alphanumerics and hyphens (no
+    # leading/trailing hyphen), at least one dot, no leading/trailing dot.
+    case "$1" in
+        ''|.*|*..*|*' '|*'/'*) return 1 ;;
+    esac
+    printf '%s' "$1" | grep -qE '^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$'
+}
+
+valid_email() {
+    # Deliberately permissive; only used for the Let's Encrypt expiry notices.
+    printf '%s' "$1" | grep -qE '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'
+}
+
+# Optional variants: empty input keeps the feature disabled.
+valid_optional_domain() { [ -z "$1" ] || valid_domain "$1"; }
+valid_optional_email()  { [ -z "$1" ] || valid_email "$1"; }
+
 # ─── .env handling ────────────────────────────────────────────────────────────
 env_get() {
     # env_get <key> — prints the raw value from the existing .env, if any.
@@ -320,6 +348,10 @@ RETICORA_PUBLIC_BASE_URL=$RETICORA_PUBLIC_BASE_URL
 RETICORA_OIDC_ISSUER_URL=$RETICORA_OIDC_ISSUER_URL
 RETICORA_OIDC_CLIENT_ID=$RETICORA_OIDC_CLIENT_ID
 RETICORA_OIDC_REDIRECT_URL=$RETICORA_OIDC_REDIRECT_URL
+
+# HTTPS / Let's Encrypt (empty = plain HTTP)
+RETICORA_TLS_DOMAIN=$RETICORA_TLS_DOMAIN
+RETICORA_CERT_EMAIL=$RETICORA_CERT_EMAIL
 
 # Published host ports
 RETICORA_FRONTEND_PORT=$RETICORA_FRONTEND_PORT
@@ -416,6 +448,42 @@ collect_config() {
     def_redirect="${def_redirect:-${RETICORA_PUBLIC_BASE_URL%/}/auth/callback}"
     ask_validated RETICORA_OIDC_REDIRECT_URL "OIDC redirect URL (backend callback)" "$def_redirect" valid_url explain_url_error
 
+    # ── HTTPS / Let's Encrypt (optional) ──
+    # A public domain enables automatic TLS via nginx + Certbot: the installer
+    # bootstraps a self-signed certificate so nginx can start, then issues the
+    # real certificate with the ACME http-01 challenge and reloads nginx.
+    local def_tls_domain
+    def_tls_domain="$(env_get RETICORA_TLS_DOMAIN || true)"
+    if [ -z "$def_tls_domain" ]; then
+        # Derive a suggestion from the public base URL when it is not a
+        # localhost/literal-IP address (Let's Encrypt requires a public DNS name).
+        def_tls_domain="$(printf '%s' "$RETICORA_PUBLIC_BASE_URL" | sed -E 's|^https?://||; s|[:/].*$||')"
+        case "$def_tls_domain" in
+            localhost|127.*|0.0.0.0|[0-9]*.[0-9]*.[0-9]*.[0-9]*) def_tls_domain="" ;;
+        esac
+    fi
+    if is_tty; then
+        echo
+        echo "HTTPS (recommended for production): enter a public domain name to"
+        echo "automatically obtain a free Let's Encrypt certificate (requires ports"
+        echo "80/443 reachable from the internet). Leave empty to keep plain HTTP."
+        ask_validated RETICORA_TLS_DOMAIN "Public domain for HTTPS (empty = no TLS, optional)" "$def_tls_domain" valid_optional_domain
+    elif [ -n "$def_tls_domain" ] && valid_domain "$def_tls_domain"; then
+        # Non-interactive run: reuse the configured domain (from .env, or
+        # derived above from an https:// public base URL with a DNS name).
+        RETICORA_TLS_DOMAIN="$def_tls_domain"
+    else
+        RETICORA_TLS_DOMAIN=""
+    fi
+
+    local def_cert_email
+    def_cert_email="$(env_get RETICORA_CERT_EMAIL || true)"
+    if [ -n "$RETICORA_TLS_DOMAIN" ]; then
+        ask_validated RETICORA_CERT_EMAIL "E-mail for Let's Encrypt expiry notices (optional)" "$def_cert_email" valid_optional_email
+    else
+        RETICORA_CERT_EMAIL="$def_cert_email"
+    fi
+
     def_port="$(env_get RETICORA_FRONTEND_PORT || true)"
     ask_validated RETICORA_FRONTEND_PORT "Host port for the web UI" "${def_port:-3000}" valid_port
     def_port="$(env_get RETICORA_SERVER_PORT || true)"
@@ -486,6 +554,99 @@ ensure_session_key() {
     success "Session signing key: $key_file"
 }
 
+# ─── HTTPS / Let's Encrypt (Certbot) ──────────────────────────────────────────
+# Layout on the host (all under $COMPOSE_DIR, git-ignored):
+#   letsencrypt/          /etc/letsencrypt for the certbot + frontend containers
+#   certbot-webroot/      ACME http-01 challenge directory (named compose volume)
+#
+# Flow when RETICORA_TLS_DOMAIN is set:
+#   1. bootstrap_tls_cert   — create a self-signed placeholder certificate so
+#                             nginx can start with the TLS configuration before
+#                             the real certificate exists.
+#   2. issue_tls_certificate — run certbot with the webroot plugin (nginx must
+#                             already serve /.well-known/acme-challenge/),
+#                             then reload nginx to pick up the real cert.
+# The long-running certbot service in the compose file renews the certificate
+# twice a day (no-op until it is close to expiry).
+
+letsencrypt_dir() { printf '%s/letsencrypt' "$COMPOSE_DIR"; }
+
+tls_live_dir() { printf '%s/letsencrypt/live/%s' "$COMPOSE_DIR" "$RETICORA_TLS_DOMAIN"; }
+
+# tls_cert_is_selfsigned — returns 0 when the current certificate is the
+# bootstrap placeholder (issuer == subject) or no certificate exists yet.
+tls_cert_is_selfsigned() {
+    local cert
+    cert="$(tls_live_dir)/fullchain.pem"
+    [ -f "$cert" ] || return 0
+    local subject issuer
+    subject="$(openssl x509 -in "$cert" -noout -subject 2>/dev/null || true)"
+    issuer="$(openssl x509 -in "$cert" -noout -issuer 2>/dev/null || true)"
+    [ -z "$subject" ] || [ "$subject" = "$issuer" ]
+}
+
+bootstrap_tls_cert() {
+    [ -n "$RETICORA_TLS_DOMAIN" ] || return 0
+    local live_dir; live_dir="$(tls_live_dir)"
+    if [ -f "$live_dir/fullchain.pem" ]; then
+        if tls_cert_is_selfsigned; then
+            info "Bootstrap self-signed certificate already exists for $RETICORA_TLS_DOMAIN"
+        else
+            success "Let's Encrypt certificate for $RETICORA_TLS_DOMAIN already present"
+        fi
+        return 0
+    fi
+    info "Creating a bootstrap self-signed certificate for $RETICORA_TLS_DOMAIN …"
+    mkdir -p "$live_dir" || die "Cannot create $live_dir."
+    openssl req -x509 -newkey rsa:2048 -nodes \
+        -keyout "$live_dir/privkey.pem" \
+        -out "$live_dir/fullchain.pem" \
+        -days 1 -subj "/CN=$RETICORA_TLS_DOMAIN" 2>/dev/null \
+        || die "Generating the bootstrap certificate failed."
+    # The frontend container reads these as the unprivileged nginx user via a
+    # read-only bind mount; letsencrypt/ stays host-owned (0600-ish default
+    # umask is fine because only the live/ sub-tree is read inside nginx).
+    chmod 644 "$live_dir/fullchain.pem" "$live_dir/privkey.pem"
+    success "Bootstrap certificate created (will be replaced by Let's Encrypt)"
+}
+
+issue_tls_certificate() {
+    [ -n "$RETICORA_TLS_DOMAIN" ] || return 0
+    if ! tls_cert_is_selfsigned; then
+        return 0  # real certificate already issued (idempotent re-run)
+    fi
+
+    info "Requesting a Let's Encrypt certificate for $RETICORA_TLS_DOMAIN …"
+    info "(requires ports 80/443 reachable from the internet and DNS pointing at this host)"
+
+    local -a email_args=(--register-unsafely-without-email)
+    if [ -n "$RETICORA_CERT_EMAIL" ]; then
+        email_args=(--email "$RETICORA_CERT_EMAIL")
+    fi
+
+    # The certbot container shares the webroot volume with the frontend, and
+    # ./letsencrypt is bind-mounted as /etc/letsencrypt in both. nginx is
+    # already running with the bootstrap certificate, serving the challenge
+    # directory over plain HTTP on port 80.
+    if compose_cmd run --rm --no-deps certbot certonly \
+        --webroot -w /var/www/certbot \
+        -d "$RETICORA_TLS_DOMAIN" \
+        --non-interactive --agree-tos \
+        "${email_args[@]}"; then
+        compose_cmd exec -T frontend nginx -s reload >/dev/null 2>&1 \
+            || warn "Could not reload nginx automatically; restart the frontend to activate the certificate: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE restart frontend"
+        success "Let's Encrypt certificate issued for $RETICORA_TLS_DOMAIN"
+        success "HTTPS is now active at https://$RETICORA_TLS_DOMAIN"
+    else
+        warn "Let's Encrypt certificate issuance failed."
+        warn "Common causes: DNS does not point at this host, or ports 80/443"
+        warn "are not reachable from the internet. The stack keeps running with"
+        warn "the self-signed bootstrap certificate; re-run this installer after"
+        warn "fixing connectivity, or check the logs:"
+        warn "  ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs certbot"
+    fi
+}
+
 # ─── Keycloak realm provisioning ──────────────────────────────────────────────
 configure_realm() {
     local realm_src="$SCRIPT_DIR/deploy/keycloak/realm-reticora.json"
@@ -520,6 +681,9 @@ provide_images() {
         fi
         info "Building the Reticora images (this can take a few minutes) …"
         compose_cmd build server frontend || die "Image build failed."
+    fi
+    if [ -n "$RETICORA_TLS_DOMAIN" ]; then
+        compose_cmd pull certbot || die "Pulling the certbot image failed."
     fi
     success "Server and frontend images are available"
 }
@@ -679,6 +843,11 @@ start_stack() {
         show_service_logs frontend
         die "Frontend did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs frontend"
     }
+    # Start the certbot renewal daemon only when TLS is configured; without a
+    # domain it has nothing to do.
+    if [ -n "$RETICORA_TLS_DOMAIN" ]; then
+        compose_cmd up -d certbot
+    fi
     success "All services are up"
 }
 
@@ -768,13 +937,25 @@ gc_images() {
 print_summary() {
     echo
     printf '%s%sInstallation complete%s\n' "$C_BOLD" "$C_GREEN" "$C_RESET"
+    local ui_url="http://localhost:$RETICORA_FRONTEND_PORT"
+    local tls_note=""
+    if [ -n "$RETICORA_TLS_DOMAIN" ]; then
+        if tls_cert_is_selfsigned; then
+            ui_url="https://$RETICORA_TLS_DOMAIN"
+            tls_note="  ⚠ TLS:             self-signed bootstrap certificate (issuance failed — see warnings above)"
+        else
+            ui_url="https://$RETICORA_TLS_DOMAIN"
+            tls_note="  TLS certificate:   Let's Encrypt (auto-renewed by the certbot service)"
+        fi
+    fi
     cat <<EOF
 
-  Web UI:            $RETICORA_PUBLIC_BASE_URL  (host port $RETICORA_FRONTEND_PORT)
+  Web UI:            $ui_url  (host port $RETICORA_FRONTEND_PORT)
   REST API:          http://localhost:$RETICORA_SERVER_PORT  (health: /healthz)
   Keycloak console:  http://localhost:$RETICORA_KEYCLOAK_PORT  (user: $KEYCLOAK_ADMIN)
   Initial login:     admin@reticora.local / admin123  (change immediately!)
-
+${tls_note:+$tls_note
+}
   Configuration:     $ENV_FILE
   Session key:       $COMPOSE_DIR/secrets/session-private.pem
 
@@ -797,6 +978,7 @@ main() {
   Public base URL:   $RETICORA_PUBLIC_BASE_URL
   OIDC issuer:       $RETICORA_OIDC_ISSUER_URL
   OIDC redirect:     $RETICORA_OIDC_REDIRECT_URL
+  HTTPS (TLS):       ${RETICORA_TLS_DOMAIN:-<disabled — plain HTTP>}
   Ports:             UI=$RETICORA_FRONTEND_PORT API=$RETICORA_SERVER_PORT Keycloak=$RETICORA_KEYCLOAK_PORT
   Image source:      ${RETICORA_IMAGE_REGISTRY:-<local build>} (tag $RETICORA_IMAGE_TAG)
 EOF
@@ -808,8 +990,10 @@ EOF
     success "Environment written to $ENV_FILE"
     ensure_session_key
     configure_realm
+    bootstrap_tls_cert
     provide_images
     start_stack
+    issue_tls_certificate
     verify_stack
     gc_images
     print_summary
