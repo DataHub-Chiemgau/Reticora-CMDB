@@ -468,8 +468,9 @@ collect_config() {
         echo "automatically obtain a free Let's Encrypt certificate (requires ports"
         echo "80/443 reachable from the internet). Leave empty to keep plain HTTP."
         ask_validated RETICORA_TLS_DOMAIN "Public domain for HTTPS (empty = no TLS, optional)" "$def_tls_domain" valid_optional_domain
-    elif [ -n "$def_tls_domain" ]; then
-        # Non-interactive re-run: keep the previously configured domain.
+    elif [ -n "$def_tls_domain" ] && valid_domain "$def_tls_domain"; then
+        # Non-interactive run: reuse the configured domain (from .env, or
+        # derived above from an https:// public base URL with a DNS name).
         RETICORA_TLS_DOMAIN="$def_tls_domain"
     else
         RETICORA_TLS_DOMAIN=""
