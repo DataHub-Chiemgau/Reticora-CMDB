@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { DashboardPage } from './DashboardPage';
 import { renderWithProviders, stubFetchRoutes } from '../test/utils';
 
@@ -40,17 +40,24 @@ describe('DashboardPage', () => {
   });
 
   it('does not crash when a list endpoint returns data:null (legacy/empty backend)', async () => {
-    stubFetchRoutes({
+    const fetchMock = stubFetchRoutes({
       '/cis': { data: null, total: 0, limit: 1, offset: 0, has_more: false },
       '/collectors': { data: null, total: 0, limit: 1000, offset: 0, has_more: false },
     });
 
     renderWithProviders(<DashboardPage />, { route: '/dashboard' });
 
-    // The dashboard heading must render even though the payloads carried null data.
+    // Wait until the collectors request has been issued, so the render path
+    // that previously threw on `.filter(null)` is actually exercised.
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/collectors'))).toBe(true),
+    );
+    // After the null payload resolves, the dashboard must render with 0 counts
+    // instead of crashing to a blank page.
     expect(
       await screen.findByText('Schneller Überblick über Ihre Konfigurationsdaten.'),
     ).toBeInTheDocument();
     expect(screen.getByText('Collector online')).toBeInTheDocument();
+    expect(screen.getAllByText('0').length).toBeGreaterThan(0);
   });
 });
