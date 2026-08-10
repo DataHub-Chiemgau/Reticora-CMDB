@@ -35,10 +35,16 @@ type Config struct {
 	BlobDir string
 
 	// Auth / OIDC
-	OIDCIssuerURL        string
-	OIDCClientID         string
-	OIDCClientSecret     string
-	OIDCRedirectURL      string
+	OIDCIssuerURL    string
+	OIDCClientID     string
+	OIDCClientSecret string
+	OIDCRedirectURL  string
+	// OIDCCACertFile optionally points at a PEM bundle that is trusted in
+	// addition to the system roots when the server talks to the OIDC issuer
+	// (discovery, JWKS and token exchange). Deployments that terminate TLS
+	// with a private or not-yet-issued certificate would otherwise fail the
+	// token exchange with an x509 verification error.
+	OIDCCACertFile       string
 	SessionKeyPath       string // path to RS256 private key PEM for session JWTs
 	AllowInsecureDevAuth bool   // opt-in: accept session tokens without signature verification
 
@@ -93,6 +99,7 @@ func Load() *Config {
 		OIDCClientID:         envOrDefault("RETICORA_OIDC_CLIENT_ID", "reticora-app"),
 		OIDCClientSecret:     envOrDefault("RETICORA_OIDC_CLIENT_SECRET", ""),
 		OIDCRedirectURL:      envOrDefault("RETICORA_OIDC_REDIRECT_URL", ""),
+		OIDCCACertFile:       envOrDefault("RETICORA_OIDC_CA_CERT_FILE", ""),
 		SessionKeyPath:       envOrDefault("RETICORA_SESSION_KEY_PATH", ""),
 		AllowInsecureDevAuth: envOrDefault("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false") == "true",
 
