@@ -972,7 +972,13 @@ start_stack() {
     compose_cmd up -d keycloak
     wait_for_service keycloak || {
         show_service_logs keycloak
-        die "Keycloak did not become healthy — without it the login screen cannot be served (the web UI answers /realms/ requests with 502 Bad Gateway). A common cause is an unreadable bind-mounted realm file (java.nio.file.AccessDeniedException); re-running this installer re-renders deploy/docker-compose/.generated/realm-reticora.json with container-readable permissions."
+        warn "Keycloak did not become healthy. Without it the login screen cannot be"
+        warn "served: the web UI answers /realms/ requests with 502 Bad Gateway."
+        warn "A common cause is an unreadable bind-mounted realm file"
+        warn "(java.nio.file.AccessDeniedException); re-running this installer re-renders"
+        warn "deploy/docker-compose/.generated/realm-reticora.json with container-readable"
+        warn "permissions."
+        die "Keycloak failed to start — see the log output above."
     }
 
     info "Starting the Reticora server and frontend …"
