@@ -61,7 +61,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 }
 
 func (r *PGRepository) ListCollectors(ctx context.Context, orgID string, page api.PaginationParams) ([]Collector, int, error) {
-	var items []Collector
+	items := make([]Collector, 0)
 	var total int
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -214,7 +214,7 @@ const jobSelectColumns = `
 `
 
 func (r *PGRepository) ListJobs(ctx context.Context, orgID string, filter JobFilter, page api.PaginationParams) ([]Job, int, error) {
-	var items []Job
+	items := make([]Job, 0)
 	var total int
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -353,7 +353,7 @@ const reviewSelectColumns = `
 `
 
 func (r *PGRepository) ListReviewItems(ctx context.Context, orgID string, filter ReviewFilter, page api.PaginationParams) ([]ReviewItem, int, error) {
-	var items []ReviewItem
+	items := make([]ReviewItem, 0)
 	var total int
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {

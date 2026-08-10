@@ -85,9 +85,9 @@ func (p *OIDCProvider) PublicConfig() PublicConfig {
 	}
 	issuer := strings.TrimRight(strings.TrimSpace(p.config.IssuerURL), "/")
 	return PublicConfig{
-		Issuer:                issuer,
-		ClientID:              strings.TrimSpace(p.config.ClientID),
-		RedirectURI:           strings.TrimSpace(p.config.RedirectURL),
+		Issuer:      issuer,
+		ClientID:    strings.TrimSpace(p.config.ClientID),
+		RedirectURI: strings.TrimSpace(p.config.RedirectURL),
 		// The realm emits the organization group via a groups claim mapper, so
 		// no dedicated "groups" scope is requested (Keycloak rejects unknown
 		// scopes with invalid_scope).

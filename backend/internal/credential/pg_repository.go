@@ -160,7 +160,7 @@ func (r *PGRepository) Get(ctx context.Context, orgID, id string) (*StoredCreden
 }
 
 func (r *PGRepository) List(ctx context.Context, orgID string) ([]Credential, error) {
-	var items []Credential
+	items := make([]Credential, 0)
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM credential WHERE organization_id = $1 ORDER BY created_at DESC", credentialSelectColumns)
 		rows, err := tx.Query(ctx, query, orgID)

@@ -36,7 +36,7 @@ func (r *PGRepository) ListPermissions(ctx context.Context) ([]Permission, error
 		return nil, fmt.Errorf("list permissions: %w", err)
 	}
 	defer rows.Close()
-	var items []Permission
+	items := make([]Permission, 0)
 	for rows.Next() {
 		var item Permission
 		if err := rows.Scan(&item.Key, &item.Resource, &item.Action, &item.Description); err != nil {
@@ -48,7 +48,7 @@ func (r *PGRepository) ListPermissions(ctx context.Context) ([]Permission, error
 }
 
 func (r *PGRepository) ListRolePermissions(ctx context.Context, orgID, roleID string) ([]RolePermissionGrant, error) {
-	var items []RolePermissionGrant
+	items := make([]RolePermissionGrant, 0)
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT organization_id::text, role_id::text, permission_key, granted_at, COALESCE(granted_by::text, '')
@@ -72,7 +72,7 @@ func (r *PGRepository) ListRolePermissions(ctx context.Context, orgID, roleID st
 }
 
 func (r *PGRepository) ReplaceRolePermissions(ctx context.Context, orgID, roleID, grantedBy string, keys []string) ([]RolePermissionGrant, error) {
-	var items []RolePermissionGrant
+	items := make([]RolePermissionGrant, 0)
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM role WHERE id = $1 AND organization_id = $2)", roleID, orgID).Scan(&exists); err != nil {
@@ -179,7 +179,7 @@ func scanRolePermissions(ctx context.Context, tx pgx.Tx, orgID, roleID string) (
 		return nil, fmt.Errorf("list role permissions: %w", err)
 	}
 	defer rows.Close()
-	var items []RolePermissionGrant
+	items := make([]RolePermissionGrant, 0)
 	for rows.Next() {
 		var item RolePermissionGrant
 		if err := rows.Scan(&item.OrganizationID, &item.RoleID, &item.PermissionKey, &item.GrantedAt, &item.GrantedBy); err != nil {

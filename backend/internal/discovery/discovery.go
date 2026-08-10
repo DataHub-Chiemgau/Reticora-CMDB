@@ -114,7 +114,7 @@ func (r *MemoryRepository) ListCollectors(_ context.Context, orgID string, page 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var result []Collector
+	result := make([]Collector, 0)
 	for _, c := range r.collectors {
 		if c.OrganizationID != orgID {
 			continue

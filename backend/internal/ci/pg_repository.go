@@ -90,7 +90,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 
 // List returns paginated CIs filtered by the given parameters.
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
-	var items []Item
+	items := make([]Item, 0)
 	var total int
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {

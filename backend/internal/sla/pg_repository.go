@@ -38,7 +38,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(con
 }
 
 func (r *PGRepository) ListPolicies(ctx context.Context, orgID, priority, clientID string, page api.PaginationParams) ([]Policy, int, error) {
-	var items []Policy
+	items := make([]Policy, 0)
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id = $1"}
@@ -252,7 +252,7 @@ func (r *PGRepository) MarkResolved(ctx context.Context, orgID, ticketID string,
 }
 
 func (r *PGRepository) ListBreaches(ctx context.Context, orgID string, filter BreachFilter, page api.PaginationParams) ([]TicketSLA, int, error) {
-	var items []TicketSLA
+	items := make([]TicketSLA, 0)
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE ticket_sla SET response_breached = CASE WHEN first_response_at IS NULL THEN now() > response_due_at ELSE first_response_at > response_due_at END, resolution_breached = CASE WHEN resolved_at IS NULL THEN now() > resolution_due_at ELSE resolved_at > resolution_due_at END, updated_at = now() WHERE organization_id = $1`, orgID); err != nil {
