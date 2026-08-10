@@ -40,7 +40,10 @@ func NewHTTPClientWithCA(caCertFile string) (*http.Client, error) {
 		return nil, errors.New("identity: OIDC CA bundle contains no certificates")
 	}
 
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport := &http.Transport{}
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport = base.Clone()
+	}
 	transport.TLSClientConfig = &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		RootCAs:    pool,
