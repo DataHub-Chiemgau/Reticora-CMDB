@@ -170,6 +170,34 @@ sudo rm -rf deploy/docker-compose/secrets/session-private.pem
 ./install-cloud.sh
 ```
 
+### Troubleshooting: `502 Bad Gateway` on the Keycloak login screen
+
+Clicking "Anmelden" redirects the browser to
+`<base URL>/realms/reticora/protocol/openid-connect/auth`, which the web UI's
+nginx proxies to the Keycloak container. A **502 Bad Gateway** there means
+Keycloak is not running — check with `docker compose ps` whether the
+`keycloak` service is `Restarting`, and inspect `docker compose logs keycloak`.
+
+The known cause is a realm import failure:
+
+```
+ERROR: java.nio.file.AccessDeniedException: /opt/keycloak/bin/../data/import/realm-reticora.json
+```
+
+The rendered realm at `deploy/docker-compose/.generated/realm-reticora.json`
+is bind-mounted into the container, where the Keycloak process runs as the
+unprivileged `keycloak` user (uid 1000). If the file is only readable by its
+owner on the host (e.g. mode `600` from an older installer version), the
+container cannot read it, the import aborts and Keycloak crash-loops.
+Re-running `./install-cloud.sh` repairs the permissions automatically (the
+file becomes group-readable for the container, or world-readable as a
+fallback when the installer cannot change the group). Manual alternative:
+
+```bash
+chmod 644 deploy/docker-compose/.generated/realm-reticora.json
+docker compose --env-file deploy/docker-compose/.env -f deploy/docker-compose/docker-compose.yml up -d keycloak
+```
+
 ## 2. Collector VM (customer network)
 
 ```bash
