@@ -782,21 +782,29 @@ configure_realm() {
         -e "s|RETICORA_OIDC_ISSUER_ORIGIN_PLACEHOLDER|$issuer_origin|g" \
         "$realm_src" > "$out_dir/realm-reticora.json"
     # The file is bind-mounted into the Keycloak container, whose process runs
-    # as the unprivileged keycloak user (uid/gid 1000). Mode 600 owned by the
-    # installing user makes the bind-mounted copy unreadable there, so
+    # as the unprivileged keycloak user — uid 1000 with primary group *root*
+    # (gid 0), not gid 1000. A copy owned by the installing user with mode 600
+    # (or 640 with group 1000) is therefore unreadable inside the container, so
     # Keycloak aborts the realm import with
     # "java.nio.file.AccessDeniedException: …/data/import/realm-reticora.json",
     # crash-loops and the UI's nginx answers every /realms/ request with
-    # 502 Bad Gateway. Prefer 640 with the file's group set to gid 1000 so the
-    # client secret stays unreadable for other host users; when the group
-    # cannot be changed (non-root installer, no matching group), fall back to
-    # 644 — the bind mount only works when the container can read the file.
+    # 502 Bad Gateway.
+    #
+    # Preferred fix: hand the file to uid 1000 / gid 0 and keep mode 640, so the
+    # client secret stays unreadable for unprivileged host users. When the
+    # ownership cannot be changed (non-root installer), fall back to 644 — the
+    # bind mount only works when the container can read the file.
+    #
+    # The directory itself must be traversable (o+x) for the same reason; a
+    # restrictive umask would otherwise create it as 700 and the import fails
+    # even with a world-readable file.
     local realm_file="$out_dir/realm-reticora.json"
-    if chgrp 1000 "$realm_file" 2>/dev/null; then
+    if chown 1000:0 "$realm_file" 2>/dev/null; then
         chmod 640 "$realm_file"
     else
         chmod 644 "$realm_file"
     fi
+    chmod o+rx "$out_dir" 2>/dev/null || true
     success "Keycloak realm prepared with the configured OIDC client secret and redirect URL"
 }
 
