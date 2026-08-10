@@ -89,6 +89,7 @@
             "access.token.claim": "true",
             "userinfo.token.claim": "true",
             "claim.name": "groups",
+            "multivalued": "true",
             "jsonType.label": "String"
           }
         },
