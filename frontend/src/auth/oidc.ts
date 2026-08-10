@@ -104,8 +104,25 @@ export async function fetchAuthConfig() {
   }
 
   const config = (await response.json()) as AuthConfig;
+  assertUsableAuthConfig(config);
   storeAuthConfig(config);
   return config;
+}
+
+// The server omits fields it has no value for (e.g. an unset
+// RETICORA_OIDC_REDIRECT_URL). Sending the browser to the identity provider
+// with "undefined" parameters only produces an opaque provider error page, so
+// report the missing configuration here instead.
+function assertUsableAuthConfig(config: AuthConfig) {
+  const missing = (['client_id', 'redirect_uri', 'authorization_endpoint'] as const).filter(
+    (field) => !config?.[field],
+  );
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Authentication is not configured completely on the server (missing: ${missing.join(', ')}).`,
+    );
+  }
 }
 
 export async function startAuthorizationCodeFlow(returnTo: string) {

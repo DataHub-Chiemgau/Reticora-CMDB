@@ -29,6 +29,10 @@ The installer asks for:
   leave it at `http://localhost:8180/...` unless the browser runs on the
   server itself — otherwise sign-in fails with a "cannot reach localhost"
   error. The installer derives a matching default from the public base URL.
+  For a public hostname that default is `<public base URL>/realms/reticora`:
+  the web UI's nginx proxies `/realms/` and `/resources/` to Keycloak, so the
+  login screen is served from the same address as the UI (the admin console
+  stays on the Keycloak host port only).
 - **HTTPS / Let's Encrypt (optional)** — a public domain name (e.g.
   `cmdb.example.com`) and an e-mail address for certificate expiry notices.
   When a domain is entered, the installer automatically obtains a free Let's
