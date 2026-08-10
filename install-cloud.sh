@@ -715,7 +715,8 @@ bootstrap_tls_cert() {
     openssl req -x509 -newkey rsa:2048 -nodes \
         -keyout "$live_dir/privkey.pem" \
         -out "$live_dir/fullchain.pem" \
-        -days 30 -subj "/CN=$RETICORA_TLS_DOMAIN" 2>/dev/null \
+        -days 30 -subj "/CN=$RETICORA_TLS_DOMAIN" \
+        -addext "subjectAltName=DNS:$RETICORA_TLS_DOMAIN" 2>/dev/null \
         || die "Generating the bootstrap certificate failed."
     # The frontend container reads these as the unprivileged nginx user via a
     # read-only bind mount; letsencrypt/ stays host-owned.
