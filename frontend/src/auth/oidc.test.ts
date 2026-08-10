@@ -41,3 +41,23 @@ describe('OIDC login on insecure origins', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('OIDC configuration validation', () => {
+  it('reports an incomplete server configuration instead of redirecting with undefined parameters', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        issuer: 'https://idp.example.com/realms/reticora',
+        client_id: 'reticora-app',
+        scopes: ['openid'],
+        authorization_endpoint:
+          'https://idp.example.com/realms/reticora/protocol/openid-connect/auth',
+        pkce_required: true,
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { startAuthorizationCodeFlow } = await import('./oidc');
+
+    await expect(startAuthorizationCodeFlow('/dashboard')).rejects.toThrow(/redirect_uri/);
+  });
+});

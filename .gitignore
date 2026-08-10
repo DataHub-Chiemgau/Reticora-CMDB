@@ -6,6 +6,10 @@ dist/
 frontend/dist/
 backend/bin/
 
+# Test artifacts
+frontend/test-results/
+frontend/playwright-report/
+
 # Environment
 .env
 .env.local

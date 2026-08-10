@@ -4,9 +4,11 @@
 #
 # Interactive ("foolproof") installer for the central Reticora cloud stack
 # (PostgreSQL/TimescaleDB, NATS JetStream, Redis, MinIO, Keycloak, backend
-# server, frontend). It prompts for every important setting, generates all
-# required secrets, writes a .env file, builds the container images, applies
-# the database migrations, starts the stack and verifies its health.
+# server, frontend). It installs missing prerequisites (Docker Engine,
+# Docker Compose, curl, openssl) automatically, prompts for every important
+# setting, generates all required secrets, writes a .env file, builds or pulls
+# the container images, applies the database migrations, starts the stack and
+# verifies its health.
 #
 # Optionally provisions HTTPS: when a public domain name is entered, the
 # installer obtains a free Let's Encrypt certificate via Certbot (nginx
@@ -36,9 +38,11 @@ install-cloud.sh — Reticora CMDB central-cloud installer.
 
 Interactive ("foolproof") installer for the central Reticora cloud stack
 (PostgreSQL/TimescaleDB, NATS JetStream, Redis, MinIO, Keycloak, backend
-server, frontend). It prompts for every important setting, generates all
-required secrets, writes a .env file, builds the container images, applies
-the database migrations, starts the stack and verifies its health.
+server, frontend). It installs missing prerequisites (Docker Engine,
+Docker Compose, curl, openssl) automatically, prompts for every important
+setting, generates all required secrets, writes a .env file, builds or pulls
+the container images, applies the database migrations, starts the stack and
+verifies its health.
 
 Optionally provisions HTTPS: when a public domain name is entered, the
 installer obtains a free Let's Encrypt certificate via Certbot (nginx
@@ -91,26 +95,83 @@ is_tty() { [ "$NON_INTERACTIVE" -eq 0 ] && [ -t 0 ]; }
 
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+# ─── Dependency installation ──────────────────────────────────────────────────
+SUDO=""
+if [ "$(id -u)" -ne 0 ] && have_cmd sudo; then
+    SUDO="sudo"
+fi
+
+pkg_manager() {
+    local mgr
+    for mgr in apt-get dnf yum zypper pacman apk; do
+        if have_cmd "$mgr"; then printf '%s' "$mgr"; return 0; fi
+    done
+    return 1
+}
+
+# install_packages <package> [...] — installs distro packages, best effort.
+install_packages() {
+    local mgr
+    mgr="$(pkg_manager)" || return 1
+    info "Installing missing packages ($*) with $mgr …"
+    case "$mgr" in
+        apt-get)
+            $SUDO apt-get update -qq || true
+            DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y "$@"
+            ;;
+        dnf|yum)  $SUDO "$mgr" install -y "$@" ;;
+        zypper)   $SUDO zypper --non-interactive install -y "$@" ;;
+        pacman)   $SUDO pacman -Sy --noconfirm "$@" ;;
+        apk)      $SUDO apk add --no-cache "$@" ;;
+    esac
+}
+
+# ensure_command <command> [package …] — makes sure <command> is available.
+ensure_command() {
+    local cmd="$1"; shift
+    have_cmd "$cmd" && return 0
+    local pkgs=("$@")
+    [ "${#pkgs[@]}" -gt 0 ] || pkgs=("$cmd")
+    install_packages "${pkgs[@]}" || true
+    have_cmd "$cmd" || die "'$cmd' is required but could not be installed automatically. Please install it and re-run."
+}
+
 # ─── Docker / compose detection ───────────────────────────────────────────────
 DOCKER="docker"
 COMPOSE=()
 
+install_docker() {
+    info "Installing Docker Engine (https://get.docker.com) …"
+    ensure_command curl curl ca-certificates
+    curl -fsSL https://get.docker.com -o /tmp/reticora-get-docker.sh \
+        || die "Could not download the Docker installation script."
+    $SUDO sh /tmp/reticora-get-docker.sh || die "Automatic Docker installation failed."
+    rm -f /tmp/reticora-get-docker.sh
+    if [ -n "$SUDO" ] && [ -n "${USER:-}" ]; then
+        $SUDO usermod -aG docker "$USER" >/dev/null 2>&1 || true
+    fi
+}
+
+start_docker_daemon() {
+    if have_cmd systemctl; then
+        info "Starting the Docker daemon …"
+        $SUDO systemctl enable --now docker >/dev/null 2>&1 || true
+    elif have_cmd service; then
+        $SUDO service docker start >/dev/null 2>&1 || true
+    fi
+}
+
 detect_container_tooling() {
     if ! have_cmd docker; then
-        cat >&2 <<'EOF'
-Docker was not found on this machine.
-
-Install Docker Engine first, for example:
-  curl -fsSL https://get.docker.com | sudo sh
-  sudo usermod -aG docker "$USER"   # then log out and back in
-
-EOF
-        if is_tty && confirm "Try to install Docker automatically now (https://get.docker.com)?" "no"; then
-            curl -fsSL https://get.docker.com | sudo sh || die "Automatic Docker installation failed."
-        else
-            die "Docker is required. Aborting."
-        fi
+        warn "Docker was not found on this machine — installing it now."
+        install_docker
         have_cmd docker || die "Docker is still not available after the installation attempt."
+        start_docker_daemon
+    fi
+
+    if ! docker info >/dev/null 2>&1 && ! sudo -n docker info >/dev/null 2>&1; then
+        # The daemon may simply not be running yet (fresh install, minimal image).
+        start_docker_daemon
     fi
 
     if ! docker info >/dev/null 2>&1; then
@@ -120,6 +181,11 @@ EOF
         else
             die "Cannot reach the Docker daemon. Is it running, and is your user in the 'docker' group?"
         fi
+    fi
+
+    if ! $DOCKER compose version >/dev/null 2>&1 && ! have_cmd docker-compose; then
+        warn "Docker Compose was not found — installing the compose plugin."
+        install_packages docker-compose-plugin || install_packages docker-compose || true
     fi
 
     if $DOCKER compose version >/dev/null 2>&1; then
@@ -133,7 +199,7 @@ EOF
             COMPOSE=(sudo docker-compose)
         fi
     else
-        die "Docker Compose (plugin or docker-compose binary) is required but was not found."
+        die "Docker Compose (plugin or docker-compose binary) is required but could not be installed automatically."
     fi
 }
 
@@ -372,15 +438,16 @@ EOF
 # ─── Preflight checks ─────────────────────────────────────────────────────────
 preflight() {
     info "Checking prerequisites …"
+
+    # Tools the installer itself needs; missing ones are installed automatically.
+    ensure_command curl curl ca-certificates
+    ensure_command openssl openssl
+
     detect_container_tooling
     success "Container tooling: ${COMPOSE[*]}"
 
-    for tool in openssl curl; do
-        have_cmd "$tool" || die "'$tool' is required but not installed."
-    done
-
     if [ ! -f "$COMPOSE_FILE" ]; then
-        die "Compose file not found at $COMPOSE_FILE — run this script from the repository root."
+        die "Compose file not found at $COMPOSE_FILE — run this script from a full checkout, or use ./install.sh which downloads the sources for you."
     fi
 
     if [ ! -f "$SCRIPT_DIR/backend/Dockerfile" ] && [ -z "$(env_get RETICORA_IMAGE_REGISTRY || true)" ]; then

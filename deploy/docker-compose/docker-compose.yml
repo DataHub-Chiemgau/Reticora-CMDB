@@ -221,6 +221,11 @@ services:
     depends_on:
       server:
         condition: service_healthy
+      # nginx resolves its upstreams when it starts, so the Keycloak container
+      # (proxied under /realms/ and /resources/ for the login screen) has to
+      # exist before the frontend comes up.
+      keycloak:
+        condition: service_started
     healthcheck:
       # nginx always answers this endpoint with 200 on the plain-HTTP port,
       # even when the TLS configuration redirects everything else to HTTPS

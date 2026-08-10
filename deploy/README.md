@@ -12,6 +12,30 @@ the input, generate required secrets and can be re-run safely (idempotent).
 `./install.sh` is a convenience entry point that asks which of the two
 components should be installed and delegates accordingly.
 
+## 0. One-line bootstrap (no checkout required)
+
+The entry point is self-bootstrapping: when the sources are missing it
+installs the tools needed for the download (curl/git/tar), downloads the
+repository and re-executes the matching installer from there. A bare VM only
+needs:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DataHub-Chiemgau/Reticora-CMDB/main/install.sh | bash -s -- --cloud
+```
+
+Options for the bootstrap:
+
+| Option | Environment variable | Default |
+|---|---|---|
+| `--repo <url>` | `RETICORA_REPO_URL` | public repository |
+| `--ref <ref>` | `RETICORA_REPO_REF` | `main` |
+| `--source-dir <dir>` | `RETICORA_SOURCE_DIR` | `/opt/reticora-cmdb` (root) / `~/reticora-cmdb` |
+
+From there on the component installers handle everything else themselves:
+missing dependencies are installed (Docker Engine, Docker Compose, curl,
+openssl, git, tar and — for the collector's source build — the Go toolchain),
+the configuration is generated and the services are started and verified.
+
 ## 1. Central cloud
 
 ```bash
@@ -29,6 +53,10 @@ The installer asks for:
   leave it at `http://localhost:8180/...` unless the browser runs on the
   server itself — otherwise sign-in fails with a "cannot reach localhost"
   error. The installer derives a matching default from the public base URL.
+  For a public hostname that default is `<public base URL>/realms/reticora`:
+  the web UI's nginx proxies `/realms/` and `/resources/` to Keycloak, so the
+  login screen is served from the same address as the UI (the admin console
+  stays on the Keycloak host port only).
 - **HTTPS / Let's Encrypt (optional)** — a public domain name (e.g.
   `cmdb.example.com`) and an e-mail address for certificate expiry notices.
   When a domain is entered, the installer automatically obtains a free Let's
@@ -43,8 +71,10 @@ The installer asks for:
 
 It then:
 
-1. checks the prerequisites (Docker + Compose, openssl, curl) and offers to
-   install Docker if missing,
+1. checks the prerequisites (Docker + Compose, openssl, curl) and installs
+   whatever is missing automatically (Docker Engine via get.docker.com, the
+   Compose plugin and the remaining tools via the distribution's package
+   manager) — it also starts/enables the Docker daemon when it is not running,
 2. writes `deploy/docker-compose/.env` (mode `600`),
 3. generates the RS256 session signing key at
    `deploy/docker-compose/secrets/session-private.pem` (group-readable by the
@@ -162,11 +192,15 @@ The installer asks for:
 - **mTLS identity** — client certificate/key/CA files, or empty to use the
   enrollment keystore at `/opt/reticora-collector/credentials.json`.
 
-It then writes `/opt/reticora-collector/collector.env` (mode `600`), builds
-the collector binary from source (or reuses `bin/collector` / an existing
-installation), installs and starts a `reticora-collector.service` systemd unit
-— or, with `--docker`, a minimal compose project in
-`/opt/reticora-collector/` — and verifies that the collector is running.
+It then writes `/opt/reticora-collector/collector.env` (mode `600`), makes
+sure the build prerequisites exist (downloads the repository sources when the
+script runs outside a checkout, installs the Go toolchain matching `go.work`
+into `/usr/local/go` when the local one is missing or too old, installs
+Docker/Compose in `--docker` mode), builds the collector binary from source
+(or reuses `bin/collector` / an existing installation), installs and starts a
+`reticora-collector.service` systemd unit — or, with `--docker`, a minimal
+compose project in `/opt/reticora-collector/` — and verifies that the
+collector is running.
 
 ## Layout
 
