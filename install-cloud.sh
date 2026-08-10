@@ -440,9 +440,31 @@ collect_config() {
     def_base="${def_base:-http://localhost:3000}"
     ask_validated RETICORA_PUBLIC_BASE_URL "Public base URL of the web UI (e.g. https://cmdb.example.com)" "$def_base" valid_url explain_url_error
 
+    # The issuer URL is handed to the browser as the Keycloak authorization
+    # endpoint, so it must be reachable from the users' machines — a
+    # "localhost" issuer only works when the browser runs on the server itself.
+    # Derive the default from the public base URL instead of silently falling
+    # back to localhost, which breaks sign-in for every remote user.
     def_issuer="$(env_get RETICORA_OIDC_ISSUER_URL || true)"
-    def_issuer="${def_issuer:-http://localhost:8180/realms/reticora}"
-    ask_validated RETICORA_OIDC_ISSUER_URL "OIDC issuer URL (Keycloak realm)" "$def_issuer" valid_url explain_url_error
+    if [ -z "$def_issuer" ]; then
+        local issuer_host issuer_scheme def_kc_port
+        issuer_scheme="$(printf '%s' "$RETICORA_PUBLIC_BASE_URL" | sed -E 's|^(https?)://.*$|\1|')"
+        issuer_host="$(printf '%s' "$RETICORA_PUBLIC_BASE_URL" | sed -E 's|^https?://||; s|[:/].*$||')"
+        def_kc_port="$(env_get RETICORA_KEYCLOAK_PORT || true)"
+        case "$issuer_host" in
+            localhost|127.*|0.0.0.0|[0-9]*.[0-9]*.[0-9]*.[0-9]*)
+                # Local/literal-IP install: Keycloak is published directly on
+                # its host port (8180 unless already configured in .env).
+                def_issuer="${issuer_scheme}://${issuer_host}:${def_kc_port:-8180}/realms/reticora"
+                ;;
+            *)
+                # Public hostname: Keycloak is expected to be reachable on the
+                # same public address (e.g. behind the reverse proxy).
+                def_issuer="${RETICORA_PUBLIC_BASE_URL%/}/realms/reticora"
+                ;;
+        esac
+    fi
+    ask_validated RETICORA_OIDC_ISSUER_URL "OIDC issuer URL (Keycloak realm; must be reachable from users' browsers)" "$def_issuer" valid_url explain_url_error
 
     def_redirect="$(env_get RETICORA_OIDC_REDIRECT_URL || true)"
     def_redirect="${def_redirect:-${RETICORA_PUBLIC_BASE_URL%/}/auth/callback}"
@@ -670,11 +692,17 @@ configure_realm() {
     [ -f "$realm_src" ] || die "Realm template not found: $realm_src"
     mkdir -p "$out_dir"
     # Substitute the configured client secret so the backend and Keycloak agree
-    # on it; the .generated copy is git-ignored and never committed.
-    sed "s/RETICORA_OIDC_CLIENT_SECRET_PLACEHOLDER/$RETICORA_OIDC_CLIENT_SECRET/g" \
+    # on it; the .generated copy is git-ignored and never committed. Also
+    # whitelist the configured OIDC redirect URL (and its origin) so sign-in
+    # does not fail with "Invalid redirect uri" for non-localhost installs.
+    local redirect_origin
+    redirect_origin="$(printf '%s' "$RETICORA_OIDC_REDIRECT_URL" | sed -E 's|^(https?://[^/]*).*$|\1|')"
+    sed -e "s/RETICORA_OIDC_CLIENT_SECRET_PLACEHOLDER/$RETICORA_OIDC_CLIENT_SECRET/g" \
+        -e "s|RETICORA_OIDC_REDIRECT_URL_PLACEHOLDER|$RETICORA_OIDC_REDIRECT_URL|g" \
+        -e "s|RETICORA_OIDC_REDIRECT_ORIGIN_PLACEHOLDER|$redirect_origin|g" \
         "$realm_src" > "$out_dir/realm-reticora.json"
     chmod 600 "$out_dir/realm-reticora.json"
-    success "Keycloak realm prepared with the configured OIDC client secret"
+    success "Keycloak realm prepared with the configured OIDC client secret and redirect URL"
 }
 
 # ─── Images: build / pull ─────────────────────────────────────────────────────
