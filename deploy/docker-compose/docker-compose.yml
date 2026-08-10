@@ -124,6 +124,10 @@ services:
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD must be set}
       KC_HTTP_ENABLED: "true"
       KC_HOSTNAME_STRICT: "false"
+      # Required by the healthcheck below: Keycloak's /health/* endpoints are
+      # disabled by default and answer 404 without this, so the container would
+      # never become healthy even though startup succeeded.
+      KC_HEALTH_ENABLED: "true"
       KC_PROXY: edge
     ports:
       - "${RETICORA_KEYCLOAK_PORT:-8180}:8080"
