@@ -781,7 +781,22 @@ configure_realm() {
         -e "s|RETICORA_OIDC_REDIRECT_ORIGIN_PLACEHOLDER|$redirect_origin|g" \
         -e "s|RETICORA_OIDC_ISSUER_ORIGIN_PLACEHOLDER|$issuer_origin|g" \
         "$realm_src" > "$out_dir/realm-reticora.json"
-    chmod 600 "$out_dir/realm-reticora.json"
+    # The file is bind-mounted into the Keycloak container, whose process runs
+    # as the unprivileged keycloak user (uid/gid 1000). Mode 600 owned by the
+    # installing user makes the bind-mounted copy unreadable there, so
+    # Keycloak aborts the realm import with
+    # "java.nio.file.AccessDeniedException: …/data/import/realm-reticora.json",
+    # crash-loops and the UI's nginx answers every /realms/ request with
+    # 502 Bad Gateway. Prefer 640 with the file's group set to gid 1000 so the
+    # client secret stays unreadable for other host users; when the group
+    # cannot be changed (non-root installer, no matching group), fall back to
+    # 644 — the bind mount only works when the container can read the file.
+    local realm_file="$out_dir/realm-reticora.json"
+    if chgrp 1000 "$realm_file" 2>/dev/null; then
+        chmod 640 "$realm_file"
+    else
+        chmod 644 "$realm_file"
+    fi
     success "Keycloak realm prepared with the configured OIDC client secret and redirect URL"
 }
 
@@ -955,7 +970,16 @@ start_stack() {
 
     info "Starting Keycloak …"
     compose_cmd up -d keycloak
-    wait_for_service keycloak || warn "Keycloak is not healthy yet; it may still be importing the realm."
+    wait_for_service keycloak || {
+        show_service_logs keycloak
+        warn "Keycloak did not become healthy. Without it the login screen cannot be"
+        warn "served: the web UI answers /realms/ requests with 502 Bad Gateway."
+        warn "A common cause is an unreadable bind-mounted realm file"
+        warn "(java.nio.file.AccessDeniedException); re-running this installer re-renders"
+        warn "deploy/docker-compose/.generated/realm-reticora.json with container-readable"
+        warn "permissions."
+        die "Keycloak failed to start — see the log output above."
+    }
 
     info "Starting the Reticora server and frontend …"
     compose_cmd up -d server frontend
