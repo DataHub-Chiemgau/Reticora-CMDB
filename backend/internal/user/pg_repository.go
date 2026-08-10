@@ -95,7 +95,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 }
 
 func (r *PGRepository) ListUsers(ctx context.Context, orgID, search string, page api.PaginationParams) ([]User, int, error) {
-	var items []User
+	items := make([]User, 0)
 	var total int
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -259,7 +259,7 @@ func (r *PGRepository) DeleteUser(ctx context.Context, orgID, id string) error {
 }
 
 func (r *PGRepository) ListTeams(ctx context.Context, orgID, search string, page api.PaginationParams) ([]Team, int, error) {
-	var items []Team
+	items := make([]Team, 0)
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		whereParts := []string{"organization_id = $1"}
@@ -457,7 +457,7 @@ func (r *PGRepository) RemoveTeamMember(ctx context.Context, orgID, teamID, user
 }
 
 func (r *PGRepository) ListTeamMembers(ctx context.Context, orgID, teamID string) ([]TeamMember, error) {
-	var items []TeamMember
+	items := make([]TeamMember, 0)
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM team WHERE id = $1 AND organization_id = $2)", teamID, orgID).Scan(&exists); err != nil {
@@ -488,7 +488,7 @@ func (r *PGRepository) ListTeamMembers(ctx context.Context, orgID, teamID string
 }
 
 func (r *PGRepository) ListRoles(ctx context.Context, orgID string, page api.PaginationParams) ([]CustomRole, int, error) {
-	var items []CustomRole
+	items := make([]CustomRole, 0)
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM custom_role WHERE organization_id = $1", orgID).Scan(&total); err != nil {
@@ -684,7 +684,7 @@ func (r *PGRepository) AssignRole(ctx context.Context, orgID string, a *UserRole
 }
 
 func (r *PGRepository) ListUserRoles(ctx context.Context, orgID, userID string) ([]UserRoleAssignment, error) {
-	var items []UserRoleAssignment
+	items := make([]UserRoleAssignment, 0)
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf(`
 			SELECT %s

@@ -75,7 +75,7 @@ func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx
 }
 
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Ticket, int, error) {
-	var items []Ticket
+	items := make([]Ticket, 0)
 	var total int
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -364,7 +364,7 @@ func (r *PGRepository) AddComment(ctx context.Context, c *Comment) error {
 }
 
 func (r *PGRepository) ListComments(ctx context.Context, orgID, ticketID string, page api.PaginationParams) ([]Comment, int, error) {
-	var items []Comment
+	items := make([]Comment, 0)
 	var total int
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {

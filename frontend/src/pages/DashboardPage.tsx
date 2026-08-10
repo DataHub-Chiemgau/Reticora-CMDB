@@ -9,8 +9,10 @@ export function DashboardPage() {
   const maintenanceCIs = useCIList({ limit: 1, offset: 0, status: 'maintenance' });
   const collectors = useCollectors({ limit: 1000, offset: 0 });
 
-  const collectorCount =
-    collectors.data?.data.filter((collector) => collector.status === 'online').length ?? 0;
+  // Guard against a malformed/legacy payload where `data` is null instead of
+  // an array — `.filter` on null throws during render and blanks the page.
+  const collectorList = collectors.data?.data ?? [];
+  const collectorCount = collectorList.filter((collector) => collector.status === 'online').length;
 
   const summaries = [
     { label: t('dashboard.totalCIs'), value: totalCIs.data?.total, isLoading: totalCIs.isLoading },

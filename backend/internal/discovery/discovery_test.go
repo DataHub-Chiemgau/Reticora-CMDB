@@ -62,6 +62,31 @@ func TestHandler_RegisterAndListCollectors(t *testing.T) {
 	}
 }
 
+func TestHandler_ListCollectorsEmptyReturnsEmptyArray(t *testing.T) {
+	repo := NewMemoryRepository()
+	h := NewHandler(repo, nil)
+	mux := chi.NewRouter()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/api/v1/collectors", nil)
+	req = tenantCtx(req)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	// An empty result must serialize as `"data":[]`, never `"data":null` — the
+	// dashboard calls .filter on this field and a null blanks the page.
+	var resp map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if string(resp["data"]) != "[]" {
+		t.Errorf(`expected data to be [], got %s`, string(resp["data"]))
+	}
+}
+
 func TestHandler_Heartbeat(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo, nil)
