@@ -636,14 +636,22 @@ bootstrap_tls_cert() {
     fi
     info "Creating a bootstrap self-signed certificate for $RETICORA_TLS_DOMAIN …"
     mkdir -p "$live_dir" || die "Cannot create $live_dir."
+    # The frontend container runs as the unprivileged nginx user and reads the
+    # certificate through the ./letsencrypt bind mount, so every directory on
+    # the path must be world-traversable and the files world-readable.
+    chmod 755 "$(letsencrypt_dir)" "$live_dir" || true
+    # Validity: 30 days. The placeholder is replaced by the real Let's Encrypt
+    # certificate later in this run; a longer validity keeps nginx serving a
+    # (still untrusted but parseable) certificate when issuance fails and the
+    # installer is not re-run immediately. A 1-day certificate silently expired
+    # and left browsers with a permanent "insecure" warning.
     openssl req -x509 -newkey rsa:2048 -nodes \
         -keyout "$live_dir/privkey.pem" \
         -out "$live_dir/fullchain.pem" \
-        -days 1 -subj "/CN=$RETICORA_TLS_DOMAIN" 2>/dev/null \
+        -days 30 -subj "/CN=$RETICORA_TLS_DOMAIN" 2>/dev/null \
         || die "Generating the bootstrap certificate failed."
     # The frontend container reads these as the unprivileged nginx user via a
-    # read-only bind mount; letsencrypt/ stays host-owned (0600-ish default
-    # umask is fine because only the live/ sub-tree is read inside nginx).
+    # read-only bind mount; letsencrypt/ stays host-owned.
     chmod 644 "$live_dir/fullchain.pem" "$live_dir/privkey.pem"
     success "Bootstrap certificate created (will be replaced by Let's Encrypt)"
 }
@@ -694,12 +702,17 @@ configure_realm() {
     # Substitute the configured client secret so the backend and Keycloak agree
     # on it; the .generated copy is git-ignored and never committed. Also
     # whitelist the configured OIDC redirect URL (and its origin) so sign-in
-    # does not fail with "Invalid redirect uri" for non-localhost installs.
-    local redirect_origin
+    # does not fail with "Invalid redirect uri" for non-localhost installs,
+    # and the issuer origin so the browser may call Keycloak endpoints from
+    # the SPA origin (CORS) when both are served behind the same reverse
+    # proxy.
+    local redirect_origin issuer_origin
     redirect_origin="$(printf '%s' "$RETICORA_OIDC_REDIRECT_URL" | sed -E 's|^(https?://[^/]*).*$|\1|')"
+    issuer_origin="$(printf '%s' "$RETICORA_OIDC_ISSUER_URL" | sed -E 's|^(https?://[^/]*).*$|\1|')"
     sed -e "s/RETICORA_OIDC_CLIENT_SECRET_PLACEHOLDER/$RETICORA_OIDC_CLIENT_SECRET/g" \
         -e "s|RETICORA_OIDC_REDIRECT_URL_PLACEHOLDER|$RETICORA_OIDC_REDIRECT_URL|g" \
         -e "s|RETICORA_OIDC_REDIRECT_ORIGIN_PLACEHOLDER|$redirect_origin|g" \
+        -e "s|RETICORA_OIDC_ISSUER_ORIGIN_PLACEHOLDER|$issuer_origin|g" \
         "$realm_src" > "$out_dir/realm-reticora.json"
     chmod 600 "$out_dir/realm-reticora.json"
     success "Keycloak realm prepared with the configured OIDC client secret and redirect URL"

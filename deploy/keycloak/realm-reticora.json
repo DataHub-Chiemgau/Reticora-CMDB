@@ -4,8 +4,7 @@
   "displayName": "Reticora",
   "defaultRoles": [
     "default-roles-reticora",
-    "offline_access",
-    "uma_authorization"
+    "offline_access"
   ],
   "roles": {
     "realm": [
@@ -15,8 +14,7 @@
         "composite": true,
         "composites": {
           "realm": [
-            "offline_access",
-            "uma_authorization"
+            "offline_access"
           ]
         },
         "clientRole": false,
@@ -71,6 +69,7 @@
       ],
       "webOrigins": [
         "RETICORA_OIDC_REDIRECT_ORIGIN_PLACEHOLDER",
+        "RETICORA_OIDC_ISSUER_ORIGIN_PLACEHOLDER",
         "http://localhost:5173"
       ],
       "defaultClientScopes": [
@@ -79,6 +78,20 @@
         "email"
       ],
       "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.group.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups",
+            "jsonType.label": "String"
+          }
+        },
         {
           "name": "organization_id",
           "protocol": "openid-connect",
@@ -96,6 +109,16 @@
       ]
     }
   ],
+  "groups": [
+    {
+      "name": "00000000-0000-0000-0000-000000000001",
+      "path": "/00000000-0000-0000-0000-000000000001"
+    },
+    {
+      "name": "reticora-admin",
+      "path": "/reticora-admin"
+    }
+  ],
   "users": [
     {
       "username": "admin@reticora.local",
@@ -109,6 +132,10 @@
           "reticora-demo"
         ]
       },
+      "groups": [
+        "/00000000-0000-0000-0000-000000000001",
+        "/reticora-admin"
+      ],
       "credentials": [
         {
           "type": "password",

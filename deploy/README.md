@@ -84,8 +84,9 @@ The installer then:
 
 1. writes `RETICORA_TLS_DOMAIN` (and `RETICORA_CERT_EMAIL`) into `.env`,
 2. creates a temporary **self-signed bootstrap certificate** under
-   `deploy/docker-compose/letsencrypt/live/<domain>/` so nginx can start
-   with the TLS configuration before the real certificate exists,
+   `deploy/docker-compose/letsencrypt/live/<domain>/` (valid 30 days) so
+   nginx can start with the TLS configuration before the real certificate
+   exists,
 3. starts the stack — the frontend's nginx serves the ACME challenge
    directory from the `certbot-webroot` compose volume and redirects all
    other HTTP traffic to HTTPS

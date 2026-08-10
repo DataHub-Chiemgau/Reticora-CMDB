@@ -88,7 +88,10 @@ func (p *OIDCProvider) PublicConfig() PublicConfig {
 		Issuer:                issuer,
 		ClientID:              strings.TrimSpace(p.config.ClientID),
 		RedirectURI:           strings.TrimSpace(p.config.RedirectURL),
-		Scopes:                []string{"openid", "profile", "email", "groups"},
+		// The realm emits the organization group via a groups claim mapper, so
+		// no dedicated "groups" scope is requested (Keycloak rejects unknown
+		// scopes with invalid_scope).
+		Scopes:                []string{"openid", "profile", "email"},
 		AuthorizationEndpoint: issuer + "/protocol/openid-connect/auth",
 		TokenEndpoint:         issuer + "/protocol/openid-connect/token",
 		EndSessionEndpoint:    issuer + "/protocol/openid-connect/logout",
