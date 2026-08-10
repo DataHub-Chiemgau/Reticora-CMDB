@@ -9,6 +9,11 @@
 #   - generates a systemd unit that runs the collector binary (default), or
 #   - generates a minimal docker-compose setup that runs the collector image.
 #
+# Everything the collector needs is provisioned automatically: missing packages
+# (curl, git, tar), Docker/Compose in --docker mode, the Go toolchain for the
+# source build and the repository sources themselves when the script is run
+# outside a checkout.
+#
 # The installer is idempotent: re-running it reuses the existing configuration
 # as defaults and upgrades the installation in place.
 #
@@ -26,6 +31,8 @@ ENV_FILE="$INSTALL_DIR/collector.env"
 SYSTEMD_UNIT="/etc/systemd/system/reticora-collector.service"
 MODE="systemd"
 NON_INTERACTIVE=0
+REPO_URL="${RETICORA_REPO_URL:-https://github.com/DataHub-Chiemgau/Reticora-CMDB.git}"
+REPO_REF="${RETICORA_REPO_REF:-main}"
 
 print_usage() {
     cat <<'EOF'
@@ -37,6 +44,11 @@ subnets, discovery protocols, credentials, TLS/mTLS material), writes an
 environment file and either
   - generates a systemd unit that runs the collector binary (default), or
   - generates a minimal docker-compose setup that runs the collector image.
+
+Everything the collector needs is provisioned automatically: missing packages
+(curl, git, tar), Docker/Compose in --docker mode, the Go toolchain for the
+source build and the repository sources themselves when the script is run
+outside a checkout.
 
 The installer is idempotent: re-running it reuses the existing configuration
 as defaults and upgrades the installation in place.
@@ -83,6 +95,64 @@ trim() {
 
 is_tty() { [ "$NON_INTERACTIVE" -eq 0 ] && [ -t 0 ]; }
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+# ─── Dependency installation ──────────────────────────────────────────────────
+SUDO=""
+if [ "$(id -u)" -ne 0 ] && have_cmd sudo; then
+    SUDO="sudo"
+fi
+
+pkg_manager() {
+    local mgr
+    for mgr in apt-get dnf yum zypper pacman apk; do
+        if have_cmd "$mgr"; then printf '%s' "$mgr"; return 0; fi
+    done
+    return 1
+}
+
+# install_packages <package> [...] — installs distro packages, best effort.
+install_packages() {
+    local mgr
+    mgr="$(pkg_manager)" || return 1
+    info "Installing missing packages ($*) with $mgr …"
+    case "$mgr" in
+        apt-get)
+            $SUDO apt-get update -qq || true
+            DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y "$@"
+            ;;
+        dnf|yum)  $SUDO "$mgr" install -y "$@" ;;
+        zypper)   $SUDO zypper --non-interactive install -y "$@" ;;
+        pacman)   $SUDO pacman -Sy --noconfirm "$@" ;;
+        apk)      $SUDO apk add --no-cache "$@" ;;
+    esac
+}
+
+# ensure_command <command> [package …] — makes sure <command> is available.
+ensure_command() {
+    local cmd="$1"; shift
+    have_cmd "$cmd" && return 0
+    local pkgs=("$@")
+    [ "${#pkgs[@]}" -gt 0 ] || pkgs=("$cmd")
+    install_packages "${pkgs[@]}" || true
+    have_cmd "$cmd" || die "'$cmd' is required but could not be installed automatically. Please install it and re-run."
+}
+
+install_docker() {
+    info "Installing Docker Engine (https://get.docker.com) …"
+    ensure_command curl curl ca-certificates
+    curl -fsSL https://get.docker.com -o /tmp/reticora-get-docker.sh \
+        || die "Could not download the Docker installation script."
+    $SUDO sh /tmp/reticora-get-docker.sh || die "Automatic Docker installation failed."
+    rm -f /tmp/reticora-get-docker.sh
+}
+
+start_docker_daemon() {
+    if have_cmd systemctl; then
+        $SUDO systemctl enable --now docker >/dev/null 2>&1 || true
+    elif have_cmd service; then
+        $SUDO service docker start >/dev/null 2>&1 || true
+    fi
+}
 
 # ─── Prompting helpers ────────────────────────────────────────────────────────
 ask() {
@@ -282,8 +352,19 @@ preflight() {
     fi
 
     if [ "$MODE" = "docker" ]; then
-        have_cmd docker || die "Docker is required for --docker mode but was not found."
+        if ! have_cmd docker; then
+            warn "Docker was not found on this machine — installing it now."
+            install_docker
+            have_cmd docker || die "Docker is still not available after the installation attempt."
+        fi
+        docker info >/dev/null 2>&1 || start_docker_daemon
         docker info >/dev/null 2>&1 || die "Cannot reach the Docker daemon."
+        if ! docker compose version >/dev/null 2>&1 && ! have_cmd docker-compose; then
+            warn "Docker Compose was not found — installing the compose plugin."
+            install_packages docker-compose-plugin || install_packages docker-compose || true
+        fi
+        docker compose version >/dev/null 2>&1 || have_cmd docker-compose \
+            || die "Docker Compose (plugin or docker-compose binary) is required but could not be installed automatically."
         success "Docker detected"
     else
         have_cmd systemctl || die "systemd is required for the systemd mode; use --docker on systems without systemd."
@@ -366,24 +447,134 @@ collect_config() {
     RETICORA_CREDENTIALS_PATH="${RETICORA_CREDENTIALS_PATH:-$INSTALL_DIR/credentials.json}"
 }
 
+# ─── Source bootstrap ─────────────────────────────────────────────────────────
+# The collector is built from the repository sources. When the installer is
+# executed on its own (e.g. only install-vm.sh was copied to the VM), the
+# sources are downloaded automatically.
+SOURCE_DIR="$SCRIPT_DIR"
+
+# Downloads the sources when they are not next to this script. Failure is not
+# fatal: the systemd mode can still fall back to a prebuilt binary or an
+# existing installation.
+ensure_sources() {
+    [ -f "$SOURCE_DIR/go.work" ] && [ -d "$SOURCE_DIR/collector" ] && return 0
+
+    SOURCE_DIR="${RETICORA_SOURCE_DIR:-/opt/reticora-cmdb}"
+    if [ -f "$SOURCE_DIR/go.work" ] && [ -d "$SOURCE_DIR/collector" ] && [ ! -d "$SOURCE_DIR/.git" ]; then
+        return 0
+    fi
+
+    info "Downloading the Reticora sources from $REPO_URL ($REPO_REF) …"
+    ensure_command curl curl ca-certificates
+    have_cmd git || install_packages git || true
+
+    if have_cmd git; then
+        if [ -d "$SOURCE_DIR/.git" ]; then
+            git -C "$SOURCE_DIR" fetch --depth 1 origin "$REPO_REF" \
+                && git -C "$SOURCE_DIR" checkout -q FETCH_HEAD \
+                || warn "Could not update the existing checkout in $SOURCE_DIR."
+        else
+            mkdir -p "$(dirname "$SOURCE_DIR")"
+            git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" "$SOURCE_DIR" \
+                || warn "Could not clone $REPO_URL into $SOURCE_DIR."
+        fi
+    else
+        local base tarball tmp
+        base="${REPO_URL%.git}"
+        case "$base" in
+            https://github.com/*)
+                tarball="$base/archive/refs/heads/$REPO_REF.tar.gz"
+                ensure_command tar
+                tmp="$(mktemp -d)"
+                if curl -fsSL "$tarball" -o "$tmp/reticora.tar.gz"; then
+                    mkdir -p "$SOURCE_DIR"
+                    tar -xzf "$tmp/reticora.tar.gz" -C "$SOURCE_DIR" --strip-components=1 \
+                        || warn "Could not unpack the downloaded archive."
+                else
+                    warn "Could not download $tarball."
+                fi
+                rm -rf "$tmp"
+                ;;
+            *) warn "git is required to download the sources from $REPO_URL." ;;
+        esac
+    fi
+
+    if [ -f "$SOURCE_DIR/go.work" ]; then
+        success "Sources are available in $SOURCE_DIR"
+        return 0
+    fi
+    warn "The Reticora sources could not be downloaded to $SOURCE_DIR."
+    return 1
+}
+
+# ─── Go toolchain ─────────────────────────────────────────────────────────────
+# Returns 0 when the installed Go is new enough for the workspace.
+go_version_ok() {
+    have_cmd go || return 1
+    local want have
+    want="$(sed -n 's/^go \([0-9.]*\).*/\1/p' "$SOURCE_DIR/go.work" 2>/dev/null | head -n 1)"
+    [ -n "$want" ] || return 0
+    have="$(go env GOVERSION 2>/dev/null || true)"
+    have="${have#go}"
+    [ -n "$have" ] || return 1
+    [ "$(printf '%s\n%s\n' "$want" "$have" | sort -V | head -n 1)" = "$want" ]
+}
+
+ensure_go_toolchain() {
+    go_version_ok && return 0
+
+    local want arch tarball tmp
+    want="$(sed -n 's/^go \([0-9.]*\).*/\1/p' "$SOURCE_DIR/go.work" 2>/dev/null | head -n 1)"
+    want="${want:-1.25.0}"
+    case "$(uname -m)" in
+        x86_64|amd64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        armv6l|armv7l) arch="armv6l" ;;
+        *) arch="" ;;
+    esac
+    if [ -z "$arch" ]; then
+        warn "Unsupported CPU architecture $(uname -m) for the automatic Go installation."
+        return 1
+    fi
+
+    info "Installing the Go $want toolchain to /usr/local/go …"
+    ensure_command curl curl ca-certificates
+    ensure_command tar
+    tarball="https://go.dev/dl/go${want}.linux-${arch}.tar.gz"
+    tmp="$(mktemp -d)"
+    if ! curl -fsSL "$tarball" -o "$tmp/go.tar.gz"; then
+        rm -rf "$tmp"
+        warn "Could not download $tarball."
+        return 1
+    fi
+    rm -rf /usr/local/go
+    tar -C /usr/local -xzf "$tmp/go.tar.gz" || { rm -rf "$tmp"; warn "Could not unpack the Go toolchain."; return 1; }
+    rm -rf "$tmp"
+    export PATH="/usr/local/go/bin:$PATH"
+    go_version_ok || { warn "The installed Go toolchain is still not usable."; return 1; }
+    success "Go toolchain: $(go env GOVERSION)"
+}
+
 # ─── Collector binary / image provisioning ────────────────────────────────────
 provide_collector_systemd() {
     info "Installing the collector binary …"
     mkdir -p "$INSTALL_DIR" "$RETICORA_SPOOL_DIR"
 
     local bin_src=""
-    if have_cmd go && [ -f "$SCRIPT_DIR/go.work" ]; then
+    if [ -f "$SOURCE_DIR/go.work" ] && ensure_go_toolchain; then
         info "Building the collector from source …"
-        (cd "$SCRIPT_DIR" && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" \
+        (cd "$SOURCE_DIR" && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" \
             -o "$INSTALL_DIR/collector.new" ./collector/cmd/collector) \
             || die "Collector build failed."
         bin_src="$INSTALL_DIR/collector.new"
+    elif [ -x "$SOURCE_DIR/bin/collector" ]; then
+        bin_src="$SOURCE_DIR/bin/collector"
     elif [ -x "$SCRIPT_DIR/bin/collector" ]; then
         bin_src="$SCRIPT_DIR/bin/collector"
     elif [ -x "$INSTALL_DIR/collector" ]; then
         warn "No build source found; keeping the existing collector binary."
     else
-        die "No Go toolchain, no prebuilt binary at bin/collector and no existing installation. Provide one of them."
+        die "No usable Go toolchain, no prebuilt binary at bin/collector and no existing installation. Provide one of them."
     fi
 
     if [ -n "$bin_src" ]; then
@@ -425,13 +616,16 @@ install_docker_setup() {
     info "Installing the Docker-based collector …"
     mkdir -p "$INSTALL_DIR" "$RETICORA_SPOOL_DIR"
 
+    [ -f "$SOURCE_DIR/collector/Dockerfile" ] \
+        || die "Collector sources not found in $SOURCE_DIR — the Docker mode needs them as build context."
+
     cat > "$INSTALL_DIR/docker-compose.yml" <<EOF
 # Reticora Collector — generated by install-vm.sh
 services:
   collector:
     image: reticora-collector:latest
     build:
-      context: $SCRIPT_DIR
+      context: $SOURCE_DIR
       dockerfile: collector/Dockerfile
     env_file:
       - $ENV_FILE
@@ -523,6 +717,8 @@ EOF
 
     write_env
     success "Environment written to $ENV_FILE"
+
+    ensure_sources || true
 
     if [ "$MODE" = "docker" ]; then
         install_docker_setup
