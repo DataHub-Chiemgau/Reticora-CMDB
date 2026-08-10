@@ -78,12 +78,21 @@ func main() {
 	}
 	slog.Info("envelope encryption initialized")
 
-	// Initialize OIDC provider
+	// Initialize OIDC provider. When RETICORA_OIDC_CA_CERT_FILE is set the
+	// provider calls (discovery, JWKS, token exchange) additionally trust that
+	// PEM bundle, which is required when the issuer is served with a private
+	// or not-yet-issued (self-signed bootstrap) certificate.
+	oidcHTTPClient, err := identity.NewHTTPClientWithCA(cfg.OIDCCACertFile)
+	if err != nil {
+		slog.Error("OIDC CA bundle setup failed", "path", cfg.OIDCCACertFile, "error", err)
+		os.Exit(1)
+	}
 	oidcProvider := identity.NewOIDCProvider(identity.OIDCConfig{
 		IssuerURL:    cfg.OIDCIssuerURL,
 		ClientID:     cfg.OIDCClientID,
 		ClientSecret: cfg.OIDCClientSecret,
 		RedirectURL:  cfg.OIDCRedirectURL,
+		HTTPClient:   oidcHTTPClient,
 	})
 
 	// Initialize the session issuer. Signature verification of session tokens

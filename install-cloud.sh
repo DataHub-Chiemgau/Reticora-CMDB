@@ -419,6 +419,16 @@ RETICORA_OIDC_REDIRECT_URL=$RETICORA_OIDC_REDIRECT_URL
 RETICORA_TLS_DOMAIN=$RETICORA_TLS_DOMAIN
 RETICORA_CERT_EMAIL=$RETICORA_CERT_EMAIL
 
+# Extra CA bundle the server trusts when it calls the OIDC issuer. The server
+# reaches Keycloak through the public HTTPS endpoint, so while only the
+# self-signed bootstrap certificate is installed (Let's Encrypt not issued
+# yet) Go would reject the token request with
+# "x509: certificate signed by unknown authority". Trusting the certificate
+# that this very host serves keeps the login working until certbot succeeds;
+# with a real Let's Encrypt certificate the file simply duplicates a chain
+# that the system trust store already accepts.
+RETICORA_OIDC_CA_CERT_FILE=$(tls_ca_cert_path_in_container)
+
 # Published host ports
 RETICORA_FRONTEND_PORT=$RETICORA_FRONTEND_PORT
 RETICORA_SERVER_PORT=$RETICORA_SERVER_PORT
@@ -678,6 +688,32 @@ letsencrypt_dir() { printf '%s/letsencrypt' "$COMPOSE_DIR"; }
 
 tls_live_dir() { printf '%s/letsencrypt/live/%s' "$COMPOSE_DIR" "$RETICORA_TLS_DOMAIN"; }
 
+# tls_ca_cert_path_in_container — path of the served certificate as seen by the
+# server container (./letsencrypt is bind-mounted at /etc/letsencrypt there).
+# Empty when TLS is disabled, so the server keeps using the system trust store.
+tls_ca_cert_path_in_container() {
+    [ -n "$RETICORA_TLS_DOMAIN" ] || return 0
+    printf '/etc/letsencrypt/live/%s/fullchain.pem' "$RETICORA_TLS_DOMAIN"
+}
+
+# tls_cert_has_san — returns 0 when the certificate carries a subjectAltName
+# extension. Go (and therefore the backend's OIDC client) rejects certificates
+# that only have a Common Name with
+# "x509: certificate relies on legacy Common Name field, use SANs instead".
+tls_cert_has_san() {
+    local cert="$1"
+    [ -f "$cert" ] || return 1
+    openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null | grep -q 'DNS:'
+}
+
+# tls_cert_expires_soon — returns 0 when the certificate is expired or expires
+# within a day, so a stale bootstrap placeholder gets replaced.
+tls_cert_expires_soon() {
+    local cert="$1"
+    [ -f "$cert" ] || return 0
+    ! openssl x509 -in "$cert" -noout -checkend 86400 >/dev/null 2>&1
+}
+
 # tls_cert_is_selfsigned — returns 0 when the current certificate is the
 # bootstrap placeholder (issuer == subject) or no certificate exists yet.
 tls_cert_is_selfsigned() {
@@ -690,16 +726,37 @@ tls_cert_is_selfsigned() {
     [ -z "$subject" ] || [ "$subject" = "$issuer" ]
 }
 
+# Set to 1 when an existing bootstrap certificate was replaced, so an already
+# running nginx is told to reload it instead of serving the old one from memory.
+TLS_BOOTSTRAP_REGENERATED=0
+
 bootstrap_tls_cert() {
     [ -n "$RETICORA_TLS_DOMAIN" ] || return 0
     local live_dir; live_dir="$(tls_live_dir)"
     if [ -f "$live_dir/fullchain.pem" ]; then
         if tls_cert_is_selfsigned; then
-            info "Bootstrap self-signed certificate already exists for $RETICORA_TLS_DOMAIN"
+            # Placeholders created by older installer versions have no
+            # subjectAltName, which makes the Go OIDC client abort the token
+            # exchange ("certificate relies on legacy Common Name field").
+            # Others may simply have expired. Both must be replaced, otherwise
+            # re-running the installer silently keeps the broken certificate.
+            if ! tls_cert_has_san "$live_dir/fullchain.pem"; then
+                warn "Bootstrap certificate for $RETICORA_TLS_DOMAIN has no subjectAltName; regenerating it."
+            elif tls_cert_expires_soon "$live_dir/fullchain.pem"; then
+                warn "Bootstrap certificate for $RETICORA_TLS_DOMAIN is expired or expires within a day; regenerating it."
+            else
+                info "Bootstrap self-signed certificate already exists for $RETICORA_TLS_DOMAIN"
+                return 0
+            fi
+            TLS_BOOTSTRAP_REGENERATED=1
+            rm -f "$live_dir/fullchain.pem" "$live_dir/privkey.pem" 2>/dev/null \
+                || sudo -n rm -f "$live_dir/fullchain.pem" "$live_dir/privkey.pem" 2>/dev/null || true
+            [ ! -f "$live_dir/fullchain.pem" ] \
+                || die "Cannot replace $live_dir/fullchain.pem. Delete it manually and re-run this installer."
         else
             success "Let's Encrypt certificate for $RETICORA_TLS_DOMAIN already present"
+            return 0
         fi
-        return 0
     fi
     info "Creating a bootstrap self-signed certificate for $RETICORA_TLS_DOMAIN …"
     mkdir -p "$live_dir" || die "Cannot create $live_dir."
@@ -722,6 +779,16 @@ bootstrap_tls_cert() {
     # read-only bind mount; letsencrypt/ stays host-owned.
     chmod 644 "$live_dir/fullchain.pem" "$live_dir/privkey.pem"
     success "Bootstrap certificate created (will be replaced by Let's Encrypt)"
+}
+
+# reload_frontend_after_bootstrap — `compose up -d` leaves an unchanged
+# frontend container running, so a regenerated bootstrap certificate would only
+# be served after an explicit nginx reload.
+reload_frontend_after_bootstrap() {
+    [ "$TLS_BOOTSTRAP_REGENERATED" = "1" ] || return 0
+    compose_cmd exec -T frontend nginx -s reload >/dev/null 2>&1 \
+        || compose_cmd restart frontend >/dev/null 2>&1 \
+        || warn "Could not reload the frontend to activate the regenerated bootstrap certificate."
 }
 
 issue_tls_certificate() {
@@ -1150,6 +1217,7 @@ EOF
     bootstrap_tls_cert
     provide_images
     start_stack
+    reload_frontend_after_bootstrap
     issue_tls_certificate
     verify_stack
     gc_images

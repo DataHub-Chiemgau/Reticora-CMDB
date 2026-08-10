@@ -163,6 +163,12 @@ services:
       RETICORA_OIDC_CLIENT_ID: "${RETICORA_OIDC_CLIENT_ID:-reticora-app}"
       RETICORA_OIDC_CLIENT_SECRET: "${RETICORA_OIDC_CLIENT_SECRET:-}"
       RETICORA_OIDC_REDIRECT_URL: "${RETICORA_OIDC_REDIRECT_URL:-}"
+      # Additional CA bundle for the outbound OIDC calls (token exchange,
+      # discovery, JWKS). install-cloud.sh points this at the certificate that
+      # the frontend serves for RETICORA_TLS_DOMAIN so the login also works
+      # while only the self-signed bootstrap certificate is installed. Empty
+      # (the default) means "system trust store only".
+      RETICORA_OIDC_CA_CERT_FILE: "${RETICORA_OIDC_CA_CERT_FILE:-}"
       RETICORA_ENVIRONMENT: "production"
       # Session-token signature verification is mandatory in production; the
       # RS256 private key is mounted from ./secrets/session-private.pem
@@ -171,6 +177,9 @@ services:
       RETICORA_MASTER_KEY: ${RETICORA_MASTER_KEY:?RETICORA_MASTER_KEY must be set}
     volumes:
       - ./secrets/session-private.pem:/etc/reticora/session/private.pem:ro
+      # Read-only view of the TLS material so RETICORA_OIDC_CA_CERT_FILE can
+      # reference the certificate that this host serves for the issuer domain.
+      - ./letsencrypt:/etc/letsencrypt:ro
     ports:
       - "${RETICORA_SERVER_PORT:-8080}:8080"
     depends_on:
