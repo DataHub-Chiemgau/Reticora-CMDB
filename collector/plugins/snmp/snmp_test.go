@@ -307,3 +307,33 @@ func TestNewDefaults(t *testing.T) {
 		t.Errorf("unexpected sysDescr OID constant %q", oidSysDescr)
 	}
 }
+
+func TestExtractNumericValueParsesCounter(t *testing.T) {
+	// SEQUENCE { INTEGER 1, OCTETSTRING "public", ... varbind with
+	// Counter32 (0x41) value 123456 }.
+	resp := []byte{0x30, 0x30, 0x02, 0x01, 0x01}
+	resp = append(resp, 0x04, 0x06, 'p', 'u', 'b', 'l', 'i', 'c')
+	resp = append(resp, make([]byte, 10)...)
+	resp = append(resp, 0x41, 0x03, 0x01, 0xE2, 0x40) // Counter32 123456
+
+	got, ok := extractNumericValue(resp)
+	if !ok || got != 123456 {
+		t.Errorf("extractNumericValue = %v, %v; want 123456, true", got, ok)
+	}
+}
+
+func TestExtractNumericValueParsesNumericString(t *testing.T) {
+	resp := []byte{0x30, 0x10, 0x02, 0x01, 0x01, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00}
+	resp = append(resp, 0x04, 0x04, '4', '2', '.', '5')
+
+	got, ok := extractNumericValue(resp)
+	if !ok || got != 42.5 {
+		t.Errorf("extractNumericValue = %v, %v; want 42.5, true", got, ok)
+	}
+}
+
+func TestExtractNumericValueRejectsGarbage(t *testing.T) {
+	if _, ok := extractNumericValue([]byte{0x30, 0x03, 0x05, 0x00}); ok {
+		t.Error("expected no numeric value in truncated packet")
+	}
+}

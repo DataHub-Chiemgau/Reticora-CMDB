@@ -149,7 +149,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
 		ipam.NewHandler(repos.IPAM),
-		monitoring.NewHandler(repos.Metrics),
+		monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)),
 		graphqlbff.NewHandler(repos.CI, repos.Relationship),
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
@@ -165,6 +165,16 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 	}
 
 	return mux, nil
+}
+
+// alertStoreFor pairs the alert-rule persistence with the metric store when
+// the store provides one (PostgreSQL); otherwise the in-memory store is used
+// and alert rules live in the default in-memory manager.
+func alertStoreFor(store monitoring.MetricStore) monitoring.AlertStore {
+	if evaluating, ok := store.(monitoring.EvaluatingStore); ok {
+		return evaluating.AlertStore()
+	}
+	return nil
 }
 
 func validate(repos Repositories, opts Options) error {

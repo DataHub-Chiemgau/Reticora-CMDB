@@ -97,6 +97,7 @@ Database schema is managed with [golang-migrate](https://github.com/golang-migra
 | 0034 | webhook_dead_letter | Dead-letter queue for exhausted webhook deliveries |
 | 0035 | export_job_formats | `datev` in the export_job format CHECK; `app.system` worker exception |
 | 0036 | updated_at_triggers | `set_updated_at` trigger on every mutable table that carries `updated_at` |
+| 0037 | alert_rule | Persistent monitoring alert rules incl. pending/fired evaluation state |
 
 **Running migrations:**
 
@@ -468,6 +469,21 @@ during a backend outage is logged and dropped rather than spooled, because a
 delayed alert is usually worse than a lost one. Trap storms are bounded by a
 64-events-in-flight cap. The BER parser is deliberately tolerant: malformed
 varbinds are skipped, never fatal.
+
+**Metric polling (Epic E):** when `RETICORA_METRICS_INTERVAL` is set (e.g.
+`1m`), the collector polls numeric SNMP OIDs on every scan target and uploads
+the samples to the monitoring ingest. The OID list comes from
+`RETICORA_SNMP_POLL_METRICS` (`name=oid,name=oid`, …); when unset, the IF-MIB
+counters of ifIndex 1 (`if_in_octets`, `if_out_octets`, `if_oper_status`)
+are polled. Unreachable targets and non-numeric values are skipped so one
+failing device never stalls a cycle.
+
+**Alert evaluation (Epic E):** the server evaluates enabled alert rules once
+per minute against the metric store (`monitoring.Evaluator`). A rule fires
+only when its condition holds continuously for the configured duration; the
+pending/fired state is persisted on `alert_rule` (migration 0037), so
+restarts neither re-notify nor lose ongoing durations. Fired alerts are
+logged as structured warnings via the default notifier.
 
 **AI/RAG governance:** `/api/v1/ai/conversations` and `/api/v1/ai/ask` are
 gated by the Pro/Enterprise `ai_assistant` entitlement. If no

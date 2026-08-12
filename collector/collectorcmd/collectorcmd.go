@@ -58,6 +58,13 @@ type collectorConfig struct {
 	// Traps are normalized into metric events and sent to the monitoring
 	// ingest so existing alert rules can fire on them (spec §9).
 	TrapListenAddr string
+	// MetricsInterval enables metric polling when > 0: the configured SNMP
+	// poll metrics are collected from the discovered targets every interval
+	// and uploaded to the monitoring ingest (Epic E: Collector-Polling).
+	MetricsInterval time.Duration
+	// PollMetrics lists the numeric OIDs polled on every SNMP target. The
+	// default covers the standard IF-MIB interface counters of ifIndex 1.
+	PollMetrics []snmp.PollMetric
 	// TLS identity material. When CertPEM/KeyPEM are set (directly, via
 	// CertFile/KeyFile, or via the keystore at CredentialsPath) the upload
 	// and heartbeat clients authenticate with mTLS.
@@ -124,6 +131,9 @@ func Main() {
 	go runAgentRelay(ctx)
 	if collectorCfg.TrapListenAddr != "" {
 		go runTrapReceiver(ctx, collectorCfg, uploader)
+	}
+	if collectorCfg.MetricsInterval > 0 && len(collectorCfg.PollMetrics) > 0 {
+		go runMetricsLoop(ctx, collectorCfg, uploader)
 	}
 
 	quit := make(chan os.Signal, 1)
@@ -528,6 +538,101 @@ func runTrapReceiver(ctx context.Context, cfg collectorConfig, up *uploader) {
 	}
 }
 
+// runMetricsLoop polls the configured numeric SNMP metrics on every scan
+// target and uploads the samples to the monitoring ingest (Epic E:
+// Collector-Polling). Polling runs independently of discovery so metric
+// intervals can be much shorter than discovery cycles.
+func runMetricsLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
+	ticker := time.NewTicker(cfg.MetricsInterval)
+	defer ticker.Stop()
+
+	poller, ok := pluginRegistry["snmp"].(*snmp.Plugin)
+	if !ok {
+		slog.Error("snmp plugin unavailable; metric polling disabled")
+		return
+	}
+
+	for {
+		targets := expandSubnets(cfg.ScanSubnets)
+		samples := make([]plugins.MetricSample, 0, len(targets)*len(cfg.PollMetrics))
+		for _, target := range targets {
+			if ctx.Err() != nil {
+				break
+			}
+			polled, err := poller.Poll(ctx, target, cfg.Credentials, cfg.PollMetrics)
+			if err != nil {
+				slog.Debug("metric poll failed", "target", target, "error", err)
+				continue
+			}
+			samples = append(samples, polled...)
+		}
+		if len(samples) > 0 {
+			if err := up.uploadMetricSamples(ctx, samples); err != nil {
+				slog.Warn("metric sample upload failed", "count", len(samples), "error", err)
+			} else {
+				slog.Info("metric samples uploaded", "count", len(samples))
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			slog.Info("metrics loop stopped")
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// uploadMetricSamples converts collector metric samples into monitoring
+// ingest payloads and POSTs them in one batch.
+func (u *uploader) uploadMetricSamples(ctx context.Context, samples []plugins.MetricSample) error {
+	if u.cfg.ServerURL == "" || u.cfg.OrganizationID == "" || u.cfg.CollectorID == "" {
+		return nil
+	}
+	metrics := make([]map[string]any, 0, len(samples))
+	now := time.Now().UTC()
+	for _, sample := range samples {
+		labels := map[string]string{"collector_id": u.cfg.CollectorID, "kind": "snmp_poll"}
+		for k, v := range sample.Labels {
+			labels[k] = v
+		}
+		metrics = append(metrics, map[string]any{
+			"name":      sample.Name,
+			"value":     sample.Value,
+			"labels":    labels,
+			"timestamp": now.Format(time.RFC3339Nano),
+		})
+	}
+	payload, err := json.Marshal(metrics)
+	if err != nil {
+		return fmt.Errorf("marshal metric samples: %w", err)
+	}
+	return u.postMetricsPayload(ctx, payload)
+}
+
+// postMetricsPayload POSTs a monitoring ingest payload (shared by trap
+// events and polled metrics).
+func (u *uploader) postMetricsPayload(ctx context.Context, payload []byte) error {
+	endpoint := strings.TrimRight(u.cfg.ServerURL, "/") + "/api/v1/monitoring/metrics"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("build metrics upload request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Organization-ID", u.cfg.OrganizationID)
+	req.Header.Set("X-Collector-ID", u.cfg.CollectorID)
+
+	resp, err := u.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("metrics upload request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("metrics upload failed with status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // uploadTrapEvent maps a normalized trap onto a monitoring metric sample and
 // POSTs it to the ingest endpoint. The metric name is stable so alert rules
 // can target it; trap-specific context travels in the labels.
@@ -558,25 +663,7 @@ func (u *uploader) uploadTrapEvent(ctx context.Context, ev snmp.TrapEvent) error
 	if err != nil {
 		return fmt.Errorf("marshal trap event: %w", err)
 	}
-
-	endpoint := strings.TrimRight(u.cfg.ServerURL, "/") + "/api/v1/monitoring/metrics"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
-	if err != nil {
-		return fmt.Errorf("build trap upload request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Organization-ID", u.cfg.OrganizationID)
-	req.Header.Set("X-Collector-ID", u.cfg.CollectorID)
-
-	resp, err := u.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("trap upload request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("trap upload failed with status %d", resp.StatusCode)
-	}
-	return nil
+	return u.postMetricsPayload(ctx, payload)
 }
 
 func runAgentRelay(ctx context.Context) {
@@ -664,6 +751,8 @@ func loadCollectorConfig() collectorConfig {
 		SpoolMaxBytes:     int64EnvOrDefault("RETICORA_SPOOL_MAX_BYTES", 1<<30), // 1 GiB default cap
 		SpoolMaxAge:       durationEnvOrDefault("RETICORA_SPOOL_MAX_AGE", 72*time.Hour),
 		TrapListenAddr:    os.Getenv("RETICORA_SNMP_TRAP_LISTEN"),
+		MetricsInterval:   durationEnvOrDefault("RETICORA_METRICS_INTERVAL", 0),
+		PollMetrics:       pollMetricsFromEnv(os.Getenv("RETICORA_SNMP_POLL_METRICS")),
 		TLSCertPEM:        []byte(os.Getenv("RETICORA_TLS_CLIENT_CERT")),
 		TLSKeyPEM:         []byte(os.Getenv("RETICORA_TLS_CLIENT_KEY")),
 		TLSCAPEM:          []byte(os.Getenv("RETICORA_TLS_CA")),
@@ -673,6 +762,38 @@ func loadCollectorConfig() collectorConfig {
 		TLSServerName:     os.Getenv("RETICORA_TLS_SERVER_NAME"),
 		CredentialsPath:   envOrDefault("RETICORA_CREDENTIALS_PATH", "/var/lib/reticora-collector/credentials.json"),
 	}
+}
+
+// defaultPollMetrics polls the IF-MIB interface counters of ifIndex 1 when
+// no explicit list is configured.
+var defaultPollMetrics = []snmp.PollMetric{
+	{Name: "if_in_octets", OID: "1.3.6.1.2.1.2.2.1.10.1"},
+	{Name: "if_out_octets", OID: "1.3.6.1.2.1.2.2.1.16.1"},
+	{Name: "if_oper_status", OID: "1.3.6.1.2.1.2.2.1.8.1"},
+}
+
+// pollMetricsFromEnv parses RETICORA_SNMP_POLL_METRICS entries in the form
+// "name=oid,name=oid" (e.g. "ifInOctets=1.3.6.1.2.1.2.2.1.10.1"). An empty
+// value selects the defaults so metric polling works out of the box once
+// RETICORA_METRICS_INTERVAL is set.
+func pollMetricsFromEnv(value string) []snmp.PollMetric {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return defaultPollMetrics
+	}
+	metrics := make([]snmp.PollMetric, 0)
+	for _, entry := range strings.Split(value, ",") {
+		name, oid, ok := strings.Cut(strings.TrimSpace(entry), "=")
+		if !ok || strings.TrimSpace(name) == "" || strings.TrimSpace(oid) == "" {
+			slog.Warn("ignoring invalid poll metric entry", "entry", entry)
+			continue
+		}
+		metrics = append(metrics, snmp.PollMetric{Name: strings.TrimSpace(name), OID: strings.TrimSpace(oid)})
+	}
+	if len(metrics) == 0 {
+		return defaultPollMetrics
+	}
+	return metrics
 }
 
 func envOrDefault(key, fallback string) string {

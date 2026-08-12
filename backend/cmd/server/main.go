@@ -25,6 +25,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
@@ -239,6 +240,17 @@ func main() {
 		workerCtx, stopWorker := context.WithCancel(context.Background())
 		defer stopWorker()
 		go exportWorker.Run(workerCtx, 2*time.Second)
+	}
+
+	// Evaluate monitoring alert rules against the metric store until shutdown.
+	// Fired alerts are logged via the default notifier; evaluation state is
+	// persisted in the alert store so restarts neither re-notify nor lose
+	// pending durations.
+	if alertStore, ok := repos.Metrics.(monitoring.EvaluatingStore); ok {
+		evaluator := monitoring.NewEvaluator(repos.Metrics, alertStore.AlertStore(), nil)
+		evalCtx, stopEvaluator := context.WithCancel(context.Background())
+		defer stopEvaluator()
+		go evaluator.Run(evalCtx, time.Minute)
 	}
 
 	// Session tokens are always verified cryptographically unless the operator

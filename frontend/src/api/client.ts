@@ -1492,6 +1492,8 @@ export interface AlertRule {
   duration: string;
   severity: 'critical' | 'warning' | 'info';
   enabled: boolean;
+  pending_since?: string;
+  last_fired_at?: string;
 }
 
 export interface AlertRuleCreateRequest {

@@ -89,7 +89,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Rack:              rack.NewPGRepository(pool),
 		Contact:           contact.NewPGRepository(pool),
 		IPAM:              ipam.NewPGRepository(pool),
-		Metrics:           monitoring.NewMemoryMetricStore(),
+		Metrics:           monitoring.NewPGMetricStore(pool),
 		Permission:        permission.NewPGRepository(pool),
 		SLA:               sla.NewPGRepository(pool),
 		Form:              form.NewPGRepository(pool),

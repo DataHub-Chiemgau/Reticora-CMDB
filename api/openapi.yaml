@@ -7446,6 +7446,14 @@ components:
           enum: [critical, warning, info]
         enabled:
           type: boolean
+        pending_since:
+          type: string
+          format: date-time
+          description: Set while the condition holds but the duration has not elapsed yet.
+        last_fired_at:
+          type: string
+          format: date-time
+          description: Timestamp of the last notification for the current firing.
 
     CreateAlertRuleRequest:
       type: object

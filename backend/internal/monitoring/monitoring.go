@@ -61,6 +61,43 @@ type AlertRule struct {
 	Duration   time.Duration `json:"duration"`
 	Severity   string        `json:"severity"`
 	Enabled    bool          `json:"enabled"`
+	// PendingSince and LastFiredAt are evaluation bookkeeping: the rule
+	// fires only when the condition held continuously for Duration, and it
+	// notifies once per firing instead of on every evaluation tick.
+	PendingSince *time.Time `json:"pending_since,omitempty"`
+	LastFiredAt  *time.Time `json:"last_fired_at,omitempty"`
+}
+
+// AlertEvent describes a fired alert.
+type AlertEvent struct {
+	Rule    AlertRule `json:"rule"`
+	Value   float64   `json:"value"`
+	Sample  Metric    `json:"sample"`
+	FiredAt time.Time `json:"fired_at"`
+}
+
+// Notifier receives fired alerts (webhooks, tickets, log lines, ...).
+type Notifier interface {
+	NotifyAlert(ctx context.Context, event AlertEvent)
+}
+
+// NotifierFunc adapts a plain function to the Notifier interface.
+type NotifierFunc func(ctx context.Context, event AlertEvent)
+
+// NotifyAlert implements Notifier.
+func (f NotifierFunc) NotifyAlert(ctx context.Context, event AlertEvent) { f(ctx, event) }
+
+// AlertStore is the persistence port for alert rules and their evaluation
+// state. AlertManager implements it in memory; PGAlertStore persists in
+// PostgreSQL.
+type AlertStore interface {
+	ListRules(ctx context.Context, orgID string) ([]AlertRule, error)
+	CreateRule(ctx context.Context, rule AlertRule) (AlertRule, error)
+	DeleteRule(ctx context.Context, orgID, id string) (bool, error)
+	ListEnabled(ctx context.Context) ([]AlertRule, error)
+	MarkPending(ctx context.Context, rule AlertRule, since time.Time) error
+	MarkFired(ctx context.Context, rule AlertRule, at time.Time) error
+	ClearPending(ctx context.Context, rule AlertRule) error
 }
 
 // MarshalJSON encodes duration values as Go duration strings.
@@ -78,15 +115,17 @@ func (r AlertRule) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON accepts duration values as a string or nanoseconds.
 func (r *AlertRule) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		ID         string      `json:"id"`
-		OrgID      string      `json:"org_id"`
-		Name       string      `json:"name"`
-		MetricName string      `json:"metric_name"`
-		Condition  string      `json:"condition"`
-		Threshold  float64     `json:"threshold"`
-		Duration   interface{} `json:"duration"`
-		Severity   string      `json:"severity"`
-		Enabled    bool        `json:"enabled"`
+		ID           string      `json:"id"`
+		OrgID        string      `json:"org_id"`
+		Name         string      `json:"name"`
+		MetricName   string      `json:"metric_name"`
+		Condition    string      `json:"condition"`
+		Threshold    float64     `json:"threshold"`
+		Duration     interface{} `json:"duration"`
+		Severity     string      `json:"severity"`
+		Enabled      bool        `json:"enabled"`
+		PendingSince *time.Time  `json:"pending_since"`
+		LastFiredAt  *time.Time  `json:"last_fired_at"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -109,20 +148,24 @@ func (r *AlertRule) UnmarshalJSON(data []byte) error {
 	}
 
 	*r = AlertRule{
-		ID:         raw.ID,
-		OrgID:      raw.OrgID,
-		Name:       raw.Name,
-		MetricName: raw.MetricName,
-		Condition:  raw.Condition,
-		Threshold:  raw.Threshold,
-		Duration:   duration,
-		Severity:   raw.Severity,
-		Enabled:    raw.Enabled,
+		ID:           raw.ID,
+		OrgID:        raw.OrgID,
+		Name:         raw.Name,
+		MetricName:   raw.MetricName,
+		Condition:    raw.Condition,
+		Threshold:    raw.Threshold,
+		Duration:     duration,
+		Severity:     raw.Severity,
+		Enabled:      raw.Enabled,
+		PendingSince: raw.PendingSince,
+		LastFiredAt:  raw.LastFiredAt,
 	}
 	return nil
 }
 
-// AlertManager manages in-memory alert rules.
+// AlertManager manages in-memory alert rules. It implements AlertStore and
+// is used for the --no-db development mode and tests; production uses
+// PGAlertStore.
 type AlertManager struct {
 	rules []AlertRule
 	mu    sync.RWMutex
@@ -134,7 +177,7 @@ func NewAlertManager() *AlertManager {
 }
 
 // ListRules returns alert rules visible to the given org.
-func (m *AlertManager) ListRules(orgID string) []AlertRule {
+func (m *AlertManager) ListRules(_ context.Context, orgID string) ([]AlertRule, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -148,11 +191,11 @@ func (m *AlertManager) ListRules(orgID string) []AlertRule {
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Name < result[j].Name
 	})
-	return result
+	return result, nil
 }
 
 // CreateRule stores a new alert rule.
-func (m *AlertManager) CreateRule(rule AlertRule) (AlertRule, error) {
+func (m *AlertManager) CreateRule(_ context.Context, rule AlertRule) (AlertRule, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -169,7 +212,7 @@ func (m *AlertManager) CreateRule(rule AlertRule) (AlertRule, error) {
 }
 
 // DeleteRule removes an alert rule.
-func (m *AlertManager) DeleteRule(orgID, id string) bool {
+func (m *AlertManager) DeleteRule(_ context.Context, orgID, id string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -178,9 +221,60 @@ func (m *AlertManager) DeleteRule(orgID, id string) bool {
 			continue
 		}
 		m.rules = append(m.rules[:i], m.rules[i+1:]...)
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
+}
+
+// ListEnabled returns every enabled rule regardless of tenant.
+func (m *AlertManager) ListEnabled(_ context.Context) ([]AlertRule, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make([]AlertRule, 0, len(m.rules))
+	for _, rule := range m.rules {
+		if rule.Enabled {
+			result = append(result, rule)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].OrgID != result[j].OrgID {
+			return result[i].OrgID < result[j].OrgID
+		}
+		return result[i].Name < result[j].Name
+	})
+	return result, nil
+}
+
+// MarkPending records when the condition started being true.
+func (m *AlertManager) MarkPending(_ context.Context, rule AlertRule, since time.Time) error {
+	return m.updateRuleState(rule, func(r *AlertRule) { r.PendingSince = &since })
+}
+
+// MarkFired records the firing and clears the pending marker.
+func (m *AlertManager) MarkFired(_ context.Context, rule AlertRule, at time.Time) error {
+	return m.updateRuleState(rule, func(r *AlertRule) {
+		r.PendingSince = nil
+		r.LastFiredAt = &at
+	})
+}
+
+// ClearPending resets the duration tracking once the condition no longer
+// holds.
+func (m *AlertManager) ClearPending(_ context.Context, rule AlertRule) error {
+	return m.updateRuleState(rule, func(r *AlertRule) { r.PendingSince = nil })
+}
+
+func (m *AlertManager) updateRuleState(rule AlertRule, update func(*AlertRule)) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.rules {
+		if m.rules[i].ID == rule.ID && m.rules[i].OrgID == rule.OrgID {
+			update(&m.rules[i])
+			return nil
+		}
+	}
+	return fmt.Errorf("alert rule %s not found", rule.ID)
 }
 
 // MemoryMetricStore stores metrics in memory for development and tests.
@@ -283,18 +377,30 @@ func (s *MemoryMetricStore) Query(ctx context.Context, q MetricQuery) ([]MetricP
 	return aggregated, nil
 }
 
+// EvaluatingStore is implemented by stores that can evaluate rules on their
+// own; it is used by the router to attach the evaluator without changing the
+// MetricStore contract.
+type EvaluatingStore interface {
+	AlertStore() AlertStore
+}
+
 // Handler provides HTTP handlers for monitoring endpoints.
 type Handler struct {
 	store  MetricStore
-	alerts *AlertManager
+	alerts AlertStore
 }
 
-// NewHandler creates a new monitoring handler.
-func NewHandler(store MetricStore) *Handler {
+// NewHandler creates a new monitoring handler backed by in-memory stores
+// when no implementations are given.
+func NewHandler(store MetricStore, alerts ...AlertStore) *Handler {
 	if store == nil {
 		store = NewMemoryMetricStore()
 	}
-	return &Handler{store: store, alerts: NewAlertManager()}
+	alertStore := AlertStore(NewAlertManager())
+	if len(alerts) > 0 && alerts[0] != nil {
+		alertStore = alerts[0]
+	}
+	return &Handler{store: store, alerts: alertStore}
 }
 
 // RegisterRoutes registers monitoring routes.
@@ -373,7 +479,12 @@ func (h *Handler) ListAlerts(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, h.alerts.ListRules(orgID))
+	rules, err := h.alerts.ListRules(r.Context(), orgID)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, rules)
 }
 
 // CreateAlert handles POST /api/v1/monitoring/alerts.
@@ -394,7 +505,7 @@ func (h *Handler) CreateAlert(w http.ResponseWriter, r *http.Request) {
 	}
 	rule.OrgID = orgID
 
-	created, err := h.alerts.CreateRule(rule)
+	created, err := h.alerts.CreateRule(r.Context(), rule)
 	if err != nil {
 		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
 		return
@@ -408,7 +519,12 @@ func (h *Handler) DeleteAlert(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if deleted := h.alerts.DeleteRule(orgID, chi.URLParam(r, "id")); !deleted {
+	deleted, err := h.alerts.DeleteRule(r.Context(), orgID, chi.URLParam(r, "id"))
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+	if !deleted {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "alert rule not found")
 		return
 	}
