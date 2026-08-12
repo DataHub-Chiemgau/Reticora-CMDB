@@ -5,6 +5,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
 import { Button } from './components/ui/Button';
+import { ToastViewport } from './components/ui/Toast';
 import { useAuthStore } from './auth/authStore';
 import { fetchAuthConfig, getStoredAuthConfig } from './auth/oidc';
 import { AssetListPage } from './pages/AssetListPage';
@@ -323,6 +324,7 @@ function App() {
         />
       ) : null}
       {isAuthenticated ? <CIFormModal open={isCreateOpen} onOpenChange={setIsCreateOpen} /> : null}
+      <ToastViewport />
     </div>
   );
 }

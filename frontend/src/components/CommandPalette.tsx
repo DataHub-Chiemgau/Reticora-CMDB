@@ -240,6 +240,12 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
         keywords: ['monitoring metrics alerts'],
         action: () => onNavigate('monitoring'),
       },
+      {
+        id: 'nav-audit',
+        label: t('commandPalette.commands.audit', 'Audit-Protokoll öffnen'),
+        keywords: ['audit protokoll hash chain compliance'],
+        action: () => onNavigate('audit'),
+      },
     ],
     [onCreateCI, onNavigate, onToggleDarkMode, t],
   );

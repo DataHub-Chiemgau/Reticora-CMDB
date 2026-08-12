@@ -73,7 +73,8 @@
       "assistant": "Open AI assistant",
       "webhooks": "Open webhooks",
       "export": "Open export",
-      "monitoring": "Open monitoring"
+      "monitoring": "Open monitoring",
+      "audit": "Open audit log"
     }
   },
   "dashboard": {
@@ -81,7 +82,36 @@
     "totalCIs": "Total CIs",
     "activeCIs": "Active CIs",
     "maintenanceCIs": "CIs in Maintenance",
-    "collectorsOnline": "Collectors Online"
+    "collectorsOnline": "Collectors Online",
+    "roleLabel": "Dashboard role",
+    "roleHint": "The widget selection follows the chosen role.",
+    "roles": {
+      "technik": "Engineering",
+      "einkauf": "Procurement",
+      "management": "Management"
+    },
+    "widgets": {
+      "ciSummary": "CI overview",
+      "collectors": "Collector status",
+      "slaBreaches": "SLA breaches",
+      "compliance": "Compliance score",
+      "assets": "Assets",
+      "stocktake": "Stocktake",
+      "tickets": "Tickets",
+      "assetsTotal": "Total assets",
+      "assetsAssigned": "Assets assigned",
+      "stocktakeOpen": "Open stocktakes",
+      "openTickets": "Open tickets",
+      "criticalTickets": "Critical tickets"
+    },
+    "customize": "Show/hide widgets"
+  },
+  "toast": {
+    "undo": "Undo",
+    "dismiss": "Dismiss notification",
+    "deletedPending": "\"{{label}}\" will be deleted",
+    "deleteFailed": "\"{{label}}\" could not be deleted",
+    "restoreFailed": "\"{{label}}\" could not be restored"
   },
   "tenant": {
     "organization": "Organization",
@@ -118,7 +148,18 @@
     "listLoadError": "The configuration items could not be loaded",
     "relationshipsLoadError": "The relationships could not be loaded",
     "emptyTitle": "No configuration items yet",
-    "emptyHint": "Create a CI manually or run a discovery to record devices automatically."
+    "emptyHint": "Create a CI manually or run a discovery to record devices automatically.",
+    "bulk": {
+      "selected": "{{count}} selected",
+      "setStatus": "Set status…",
+      "apply": "Apply",
+      "clearSelection": "Clear selection",
+      "selectAll": "Select all visible CIs",
+      "selectRow": "Select {{name}}",
+      "toolbarLabel": "Bulk edit",
+      "success": "Updated status of {{count}} CIs",
+      "error": "The bulk change could not be fully applied"
+    }
   },
   "form": {
     "createCI": "Create CI",
@@ -193,7 +234,18 @@
     "category": "Category",
     "location": "Location",
     "supplier": "Supplier",
-    "create": "Create Asset"
+    "create": "Create Asset",
+    "bulk": {
+      "selected": "{{count}} selected",
+      "setStatus": "Set status…",
+      "apply": "Apply",
+      "clearSelection": "Clear selection",
+      "selectAll": "Select all visible assets",
+      "selectRow": "Select {{name}}",
+      "toolbarLabel": "Bulk edit",
+      "success": "Updated status of {{count}} assets",
+      "error": "The bulk change could not be fully applied"
+    }
   },
   "assignment": {
     "title": "Assignments",
@@ -273,7 +325,14 @@
     "clearRoot": "Clear focus",
     "showInTopology": "Show in topology",
     "nodeList": "Node list",
-    "nodeListHint": "Keyboard and screen-reader friendly alternative to the graph."
+    "nodeListHint": "Keyboard and screen-reader friendly alternative to the graph.",
+    "simulation": {
+      "simulate": "Simulate outage",
+      "stop": "Stop simulation",
+      "active": "Outage simulation",
+      "impact": "If \"{{name}}\" fails, {{count}} more CIs are impacted (shown greyed out).",
+      "noImpact": "This CI has no dependents — an outage would have no impact on the graph."
+    }
   },
   "rack": {
     "title": "Racks",
@@ -286,7 +345,10 @@
     "empty": "No racks yet",
     "emptyHint": "Create rooms and racks to visualise rack occupancy.",
     "loadError": "The racks could not be loaded",
-    "mountsLoadError": "The mounts could not be loaded"
+    "mountsLoadError": "The mounts could not be loaded",
+    "faceLabel": "Select rack face",
+    "faceFront": "Front",
+    "faceRear": "Rear"
   },
   "permissions": {
     "title": "Permissions",

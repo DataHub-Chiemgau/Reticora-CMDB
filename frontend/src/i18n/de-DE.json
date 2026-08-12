@@ -73,7 +73,8 @@
       "assistant": "KI-Assistent öffnen",
       "webhooks": "Webhooks öffnen",
       "export": "Export öffnen",
-      "monitoring": "Monitoring öffnen"
+      "monitoring": "Monitoring öffnen",
+      "audit": "Audit-Protokoll öffnen"
     }
   },
   "dashboard": {
@@ -81,7 +82,36 @@
     "totalCIs": "Gesamte CIs",
     "activeCIs": "Aktive CIs",
     "maintenanceCIs": "CIs in Wartung",
-    "collectorsOnline": "Collector online"
+    "collectorsOnline": "Collector online",
+    "roleLabel": "Dashboard-Rolle",
+    "roleHint": "Die Widget-Auswahl richtet sich nach der gewählten Rolle.",
+    "roles": {
+      "technik": "Technik",
+      "einkauf": "Einkauf",
+      "management": "Management"
+    },
+    "widgets": {
+      "ciSummary": "CI-Übersicht",
+      "collectors": "Collector-Status",
+      "slaBreaches": "SLA-Verletzungen",
+      "compliance": "Compliance-Score",
+      "assets": "Inventar",
+      "stocktake": "Inventur",
+      "tickets": "Tickets",
+      "assetsTotal": "Assets gesamt",
+      "assetsAssigned": "Assets zugewiesen",
+      "stocktakeOpen": "Laufende Inventuren",
+      "openTickets": "Offene Tickets",
+      "criticalTickets": "Kritische Tickets"
+    },
+    "customize": "Widgets ein-/ausblenden"
+  },
+  "toast": {
+    "undo": "Rückgängig",
+    "dismiss": "Benachrichtigung schließen",
+    "deletedPending": "„{{label}}“ wird gelöscht",
+    "deleteFailed": "„{{label}}“ konnte nicht gelöscht werden",
+    "restoreFailed": "„{{label}}“ konnte nicht wiederhergestellt werden"
   },
   "tenant": {
     "organization": "Organisation",
@@ -118,7 +148,18 @@
     "listLoadError": "Die Configuration Items konnten nicht geladen werden",
     "relationshipsLoadError": "Die Beziehungen konnten nicht geladen werden",
     "emptyTitle": "Noch keine Configuration Items",
-    "emptyHint": "Legen Sie ein CI manuell an oder starten Sie eine Discovery, um Geräte automatisch zu erfassen."
+    "emptyHint": "Legen Sie ein CI manuell an oder starten Sie eine Discovery, um Geräte automatisch zu erfassen.",
+    "bulk": {
+      "selected": "{{count}} ausgewählt",
+      "setStatus": "Status setzen…",
+      "apply": "Anwenden",
+      "clearSelection": "Auswahl aufheben",
+      "selectAll": "Alle sichtbaren CIs auswählen",
+      "selectRow": "{{name}} auswählen",
+      "toolbarLabel": "Massenbearbeitung",
+      "success": "Status von {{count}} CIs aktualisiert",
+      "error": "Die Massenänderung konnte nicht vollständig angewendet werden"
+    }
   },
   "form": {
     "createCI": "CI erstellen",
@@ -193,7 +234,18 @@
     "category": "Kategorie",
     "location": "Standort",
     "supplier": "Lieferant",
-    "create": "Asset erstellen"
+    "create": "Asset erstellen",
+    "bulk": {
+      "selected": "{{count}} ausgewählt",
+      "setStatus": "Status setzen…",
+      "apply": "Anwenden",
+      "clearSelection": "Auswahl aufheben",
+      "selectAll": "Alle sichtbaren Assets auswählen",
+      "selectRow": "{{name}} auswählen",
+      "toolbarLabel": "Massenbearbeitung",
+      "success": "Status von {{count}} Assets aktualisiert",
+      "error": "Die Massenänderung konnte nicht vollständig angewendet werden"
+    }
   },
   "assignment": {
     "title": "Zuweisungen",
@@ -273,7 +325,14 @@
     "clearRoot": "Fokus aufheben",
     "showInTopology": "In Topologie anzeigen",
     "nodeList": "Knotenliste",
-    "nodeListHint": "Tastatur- und screenreaderfreundliche Alternative zur Graphdarstellung."
+    "nodeListHint": "Tastatur- und screenreaderfreundliche Alternative zur Graphdarstellung.",
+    "simulation": {
+      "simulate": "Ausfall simulieren",
+      "stop": "Simulation beenden",
+      "active": "Ausfallsimulation",
+      "impact": "Fällt „{{name}}“ aus, sind {{count}} weitere CIs betroffen (grau dargestellt).",
+      "noImpact": "Dieses CI hat keine abhängigen CIs — ein Ausfall hätte keine Folgen im Graphen."
+    }
   },
   "rack": {
     "title": "Racks",
@@ -286,7 +345,10 @@
     "empty": "Keine Racks vorhanden",
     "emptyHint": "Legen Sie Räume und Racks an, um die Rackbelegung zu visualisieren.",
     "loadError": "Die Racks konnten nicht geladen werden",
-    "mountsLoadError": "Die Einbauten konnten nicht geladen werden"
+    "mountsLoadError": "Die Einbauten konnten nicht geladen werden",
+    "faceLabel": "Rackseite wählen",
+    "faceFront": "Vorderseite",
+    "faceRear": "Rückseite"
   },
   "permissions": {
     "title": "Berechtigungen",

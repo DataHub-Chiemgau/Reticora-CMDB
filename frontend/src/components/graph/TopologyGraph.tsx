@@ -20,14 +20,28 @@ export interface GraphEdge {
 export interface TopologyGraphProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  /** Nodes in the set are dimmed (e.g. predicted outage impact). */
+  dimmedNodes?: ReadonlySet<string>;
+  /** Nodes in the set are emphasized with a red halo (e.g. failed CI). */
+  highlightedNodes?: ReadonlySet<string>;
   className?: string;
 }
+
+const DIMMED_COLOR = '#d1d5db';
+const DIMMED_EDGE_COLOR = '#e5e7eb';
+const HIGHLIGHT_COLOR = '#dc2626';
 
 /**
  * TopologyGraph renders an interactive graph of CI relationships
  * using Sigma.js backed by a graphology instance.
  */
-export const TopologyGraph: FC<TopologyGraphProps> = ({ nodes, edges, className }) => {
+export const TopologyGraph: FC<TopologyGraphProps> = ({
+  nodes,
+  edges,
+  dimmedNodes,
+  highlightedNodes,
+  className,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
 
@@ -56,13 +70,35 @@ export const TopologyGraph: FC<TopologyGraphProps> = ({ nodes, edges, className 
       renderEdgeLabels: true,
     });
 
+    if (dimmedNodes || highlightedNodes) {
+      renderer.setSetting('nodeReducer', (node, data) => {
+        const result = { ...data };
+        if (highlightedNodes?.has(node)) {
+          result.size = (result.size ?? 10) * 1.4;
+          result.color = HIGHLIGHT_COLOR;
+        } else if (dimmedNodes?.has(node)) {
+          result.color = DIMMED_COLOR;
+        }
+        return result;
+      });
+      renderer.setSetting('edgeReducer', (edge, data) => {
+        const result = { ...data };
+        const [source, target] = graph.extremities(edge);
+        if (dimmedNodes?.has(source) || dimmedNodes?.has(target)) {
+          result.color = DIMMED_EDGE_COLOR;
+          result.label = '';
+        }
+        return result;
+      });
+    }
+
     sigmaRef.current = renderer;
 
     return () => {
       renderer.kill();
       sigmaRef.current = null;
     };
-  }, [nodes, edges]);
+  }, [nodes, edges, dimmedNodes, highlightedNodes]);
 
   return <div ref={containerRef} className={className} style={{ width: '100%', height: '100%' }} />;
 };

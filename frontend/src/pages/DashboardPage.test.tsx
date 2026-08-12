@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { DashboardPage } from './DashboardPage';
 import { renderWithProviders, stubFetchRoutes } from '../test/utils';
 
@@ -55,9 +55,34 @@ describe('DashboardPage', () => {
     // After the null payload resolves, the dashboard must render with 0 counts
     // instead of crashing to a blank page.
     expect(
-      await screen.findByText('Schneller Überblick über Ihre Konfigurationsdaten.'),
+      await screen.findByText(/Schneller Überblick über Ihre Konfigurationsdaten\./),
     ).toBeInTheDocument();
-    expect(screen.getByText('Collector online')).toBeInTheDocument();
+    expect(screen.getByText('Collector-Status')).toBeInTheDocument();
     expect(screen.getAllByText('0').length).toBeGreaterThan(0);
+  });
+
+  it('switches the widget set when the role changes', async () => {
+    stubFetchRoutes({
+      '/cis?limit=1&offset=0&status=active': { ...paginated([]), total: 3 },
+      '/cis?limit=1&offset=0&status=maintenance': { ...paginated([]), total: 2 },
+      '/cis?limit=1&offset=0': { ...paginated([]), total: 5 },
+      '/collectors': paginated([]),
+      '/assets?limit=1&offset=0&status=assigned': { ...paginated([]), total: 7 },
+      '/assets?limit=1&offset=0': { ...paginated([]), total: 12 },
+      '/stocktakes?status=in_progress': { ...paginated([]), total: 1 },
+    });
+
+    renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+
+    // Default role "Technik" shows CI overview widgets.
+    expect(await screen.findByText('Gesamte CIs')).toBeInTheDocument();
+
+    const roleSelect = screen.getByRole('combobox', { name: 'Dashboard-Rolle' });
+    fireEvent.change(roleSelect, { target: { value: 'einkauf' } });
+
+    // Procurement role replaces the CI overview with inventory widgets.
+    expect(await screen.findByText('Assets gesamt')).toBeInTheDocument();
+    expect(screen.getByText('Laufende Inventuren')).toBeInTheDocument();
+    expect(screen.queryByText('Gesamte CIs')).not.toBeInTheDocument();
   });
 });

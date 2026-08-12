@@ -11,24 +11,34 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
 
+export type RackFace = 'front' | 'rear';
+
 /**
  * Maps rack mounts onto the units drawn by `RackSVG`. Mounts are labelled with
  * the CI name when the CI is known and fall back to the raw identifier, so a CI
- * that is not part of the loaded page is still visible in its slot.
+ * that is not part of the loaded page is still visible in its slot. Mounts
+ * without an explicit face are treated as front-mounted (the backend default).
  */
-export function buildRackUnits(mounts: RackMount[], cisById: Map<string, CI>): RackUnit[] {
-  return mounts.map((mount) => ({
-    id: mount.id,
-    position: mount.position_u,
-    height: Math.max(1, mount.height_u),
-    label: cisById.get(mount.ci_id)?.name ?? mount.ci_id,
-  }));
+export function buildRackUnits(
+  mounts: RackMount[],
+  cisById: Map<string, CI>,
+  face: RackFace = 'front',
+): RackUnit[] {
+  return mounts
+    .filter((mount) => (mount.face || 'front') === face)
+    .map((mount) => ({
+      id: mount.id,
+      position: mount.position_u,
+      height: Math.max(1, mount.height_u),
+      label: cisById.get(mount.ci_id)?.name ?? mount.ci_id,
+    }));
 }
 
 export function RackPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [selectedRackId, setSelectedRackId] = useState('');
+  const [face, setFace] = useState<RackFace>('front');
 
   const racksQuery = useRackList({ limit: 100 });
   const mountsQuery = useRackMounts(selectedRackId);
@@ -45,8 +55,12 @@ export function RackPage() {
   const selectedRack = racks.find((rack) => rack.id === selectedRackId);
 
   const mounts = useMemo(() => mountsQuery.data?.data ?? [], [mountsQuery.data]);
+  const visibleMounts = useMemo(
+    () => mounts.filter((mount) => (mount.face || 'front') === face),
+    [mounts, face],
+  );
   const cisById = useMountedCIs(mounts.map((mount) => mount.ci_id));
-  const units = useMemo(() => buildRackUnits(mounts, cisById), [mounts, cisById]);
+  const units = useMemo(() => buildRackUnits(mounts, cisById, face), [mounts, cisById, face]);
 
   return (
     <div className="space-y-4">
@@ -87,7 +101,28 @@ export function RackPage() {
 
       {selectedRack ? (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[auto,1fr]">
-          <Card title={selectedRack.name}>
+          <Card
+            title={`${selectedRack.name} · ${t(face === 'front' ? 'rack.faceFront' : 'rack.faceRear')}`}
+            actions={
+              <div className="flex gap-1" role="group" aria-label={t('rack.faceLabel')}>
+                {(['front', 'rear'] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={face === value}
+                    onClick={() => setFace(value)}
+                    className={
+                      face === value
+                        ? 'rounded-lg bg-primary px-3 py-1 text-sm font-medium text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40'
+                        : 'rounded-lg px-3 py-1 text-sm font-medium text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 dark:text-gray-300 dark:hover:bg-gray-800'
+                    }
+                  >
+                    {t(value === 'front' ? 'rack.faceFront' : 'rack.faceRear')}
+                  </button>
+                ))}
+              </div>
+            }
+          >
             {mountsQuery.isLoading ? (
               <SkeletonList rows={4} label={t('app.loading')} />
             ) : mountsQuery.error ? (
@@ -110,12 +145,14 @@ export function RackPage() {
             )}
           </Card>
 
-          <Card title={t('rack.mounts')}>
-            {units.length === 0 && !mountsQuery.isLoading ? (
+          <Card
+            title={`${t('rack.mounts')} (${t(face === 'front' ? 'rack.faceFront' : 'rack.faceRear')})`}
+          >
+            {visibleMounts.length === 0 && !mountsQuery.isLoading ? (
               <EmptyState title={t('rack.noMounts')} description={t('rack.noMountsHint')} />
             ) : (
               <ul className="space-y-2 text-sm">
-                {mounts.map((mount) => (
+                {visibleMounts.map((mount) => (
                   <li
                     key={mount.id}
                     className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
