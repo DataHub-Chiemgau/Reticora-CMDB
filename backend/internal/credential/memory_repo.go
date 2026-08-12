@@ -31,7 +31,8 @@ func (r *MemoryRepository) GetOrgDEK(_ context.Context, orgID string) (*OrgDEK, 
 	if !ok {
 		return nil, ErrNotFound
 	}
-	return dek, nil
+	result := *dek
+	return &result, nil
 }
 
 func (r *MemoryRepository) CreateOrgDEK(_ context.Context, orgID string, encryptedDEK []byte, keyVersion int) (*OrgDEK, error) {
@@ -109,6 +110,35 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	}
 	delete(r.credentials, id)
 	return nil
+}
+
+// ListStored returns every credential of the organization including
+// ciphertext (implements StoredLister for DEK rotation).
+func (r *MemoryRepository) ListStored(_ context.Context, orgID string) ([]StoredCredential, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var results []StoredCredential
+	for _, c := range r.credentials {
+		if c.OrganizationID == orgID {
+			results = append(results, *c)
+		}
+	}
+	return results, nil
+}
+
+// UpdateOrgDEK replaces the wrapped DEK and bumps the key version
+// (implements DEKUpdater for DEK rotation).
+func (r *MemoryRepository) UpdateOrgDEK(_ context.Context, orgID string, encryptedDEK []byte, keyVersion int) (*OrgDEK, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	dek, ok := r.deks[orgID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	dek.EncryptedDEK = encryptedDEK
+	dek.KeyVersion = keyVersion
+	result := *dek
+	return &result, nil
 }
 
 // generateID creates a simple random hex ID for in-memory use.

@@ -32,6 +32,7 @@ import (
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
 
@@ -130,6 +131,7 @@ func main() {
 	var (
 		repos        server.Repositories
 		auditHandler *audit.Handler
+		auditPool    *pgxpool.Pool
 		apiKeyStore  identity.APIKeyStore
 		blobStore    blob.Store
 	)
@@ -159,6 +161,7 @@ func main() {
 		slog.Info("connected to PostgreSQL", "url", maskDSN(cfg.DatabaseURL))
 		repos = server.PostgresRepositories(pool, audit.NewPGRecorder())
 		auditHandler = audit.NewHandler(pool)
+		auditPool = pool
 		apiKeyStore = identity.NewPGAPIKeyStore(pool)
 
 		// Asynchronous exports render into object storage and are served via
@@ -225,6 +228,7 @@ func main() {
 		OIDC:         oidcProvider,
 		Sessions:     sessionIssuer,
 		Audit:        auditHandler,
+		AuditPool:    auditPool,
 		AIProvider:   aiProvider,
 		Blobs:        blobStore,
 	})
@@ -263,12 +267,13 @@ func main() {
 	}
 
 	// Middleware chain per spec:
-	// RequestID/Tracing -> Panic-Recovery -> Auth -> Tenant -> Entitlement ->
-	// Rate-Limit -> POST-Idempotency -> Handler
+	// RequestID/Tracing -> Panic-Recovery -> Security-Headers -> Auth ->
+	// Tenant -> Entitlement -> Rate-Limit -> POST-Idempotency -> Handler
 	handler := middleware.Chain(
 		middleware.RequestID,
 		middleware.Recovery,
 		middleware.Logger,
+		middleware.SecurityHeaders,
 		middleware.OpenAPIValidation,
 		authMiddleware,
 		middleware.TenantMiddleware,

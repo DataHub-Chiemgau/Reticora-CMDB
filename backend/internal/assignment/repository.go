@@ -47,6 +47,9 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 		if filter.AssignedTo != "" && a.AssignedTo != filter.AssignedTo {
 			continue
 		}
+		if filter.AssignedBy != "" && a.AssignedBy != filter.AssignedBy {
+			continue
+		}
 		if filter.AssetID != "" && a.AssetID != filter.AssetID {
 			continue
 		}

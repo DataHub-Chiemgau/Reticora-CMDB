@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
@@ -98,6 +99,18 @@ type Repository interface {
 	List(ctx context.Context, orgID string) ([]Credential, error)
 	Update(ctx context.Context, cred *StoredCredential) error
 	Delete(ctx context.Context, orgID, id string) error
+}
+
+// ListStored returns every credential of the organization including its
+// ciphertext; it is required for DEK rotation, which must re-encrypt every
+// stored secret.
+type StoredLister interface {
+	ListStored(ctx context.Context, orgID string) ([]StoredCredential, error)
+}
+
+// DEKUpdater replaces the organization DEK row (key version bump).
+type DEKUpdater interface {
+	UpdateOrgDEK(ctx context.Context, orgID string, encryptedDEK []byte, keyVersion int) (*OrgDEK, error)
 }
 
 // Service provides credential management with envelope encryption.
@@ -200,6 +213,86 @@ func (s *Service) List(ctx context.Context, orgID string) ([]Credential, error) 
 // Delete removes a credential.
 func (s *Service) Delete(ctx context.Context, orgID, id string) error {
 	return s.repo.Delete(ctx, orgID, id)
+}
+
+// RotationResult reports the outcome of a DEK rotation.
+type RotationResult struct {
+	// KeyVersion is the new DEK version.
+	KeyVersion int `json:"key_version"`
+	// Rotated is the number of credential ciphertexts re-encrypted.
+	Rotated int `json:"rotated"`
+}
+
+// RotateKeys generates a fresh DEK for the organization, re-encrypts every
+// stored credential ciphertext with it and atomically bumps the key version.
+// Existing plaintext secrets never leave the platform — re-encryption happens
+// in-process under the envelope-encryption boundary.
+func (s *Service) RotateKeys(ctx context.Context, orgID string) (*RotationResult, error) {
+	lister, ok := s.repo.(StoredLister)
+	if !ok {
+		return nil, fmt.Errorf("credential store does not support key rotation")
+	}
+	updater, ok := s.repo.(DEKUpdater)
+	if !ok {
+		return nil, fmt.Errorf("credential store does not support key rotation")
+	}
+
+	oldDEK, err := s.getDEK(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	stored, err := lister.ListStored(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	newDEK, err := crypto.GenerateDEK()
+	if err != nil {
+		return nil, err
+	}
+
+	// Re-encrypt every credential with the new DEK before committing the DEK
+	// swap, so a failure mid-rotation leaves the store untouched.
+	reEncrypted := make([]StoredCredential, len(stored))
+	for i := range stored {
+		cred := stored[i]
+		plaintext, err := crypto.Decrypt(oldDEK, cred.Ciphertext)
+		if err != nil {
+			return nil, fmt.Errorf("credential %s: %w", cred.ID, err)
+		}
+		ciphertext, err := crypto.Encrypt(newDEK, plaintext)
+		if err != nil {
+			return nil, fmt.Errorf("credential %s: %w", cred.ID, err)
+		}
+		cred.Ciphertext = ciphertext
+		reEncrypted[i] = cred
+	}
+
+	var version int
+	if current, err := s.repo.GetOrgDEK(ctx, orgID); err == nil {
+		version = current.KeyVersion + 1
+	} else {
+		version = 1
+	}
+
+	for i := range reEncrypted {
+		cred := reEncrypted[i]
+		cred.KeyVersion = version
+		if err := s.repo.Update(ctx, &cred); err != nil {
+			return nil, fmt.Errorf("credential %s: %w", cred.ID, err)
+		}
+	}
+
+	wrapped, err := s.encryptor.WrapDEK(newDEK)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := updater.UpdateOrgDEK(ctx, orgID, wrapped, version); err != nil {
+		return nil, err
+	}
+
+	return &RotationResult{KeyVersion: version, Rotated: len(reEncrypted)}, nil
 }
 
 // getOrCreateDEK retrieves the org's DEK or generates a new one.

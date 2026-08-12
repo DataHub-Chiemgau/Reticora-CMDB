@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -17,10 +19,24 @@ type ContactLister interface {
 	ListByEmail(ctx context.Context, orgID, email string) ([]contact.Contact, error)
 }
 
+// TicketActivityLister gathers the tickets a person reported or is assigned
+// to for the GDPR data export (implemented by ticket.Repository).
+type TicketActivityLister interface {
+	List(ctx context.Context, orgID string, filter ticket.FilterParams, page api.PaginationParams) ([]ticket.Ticket, int, error)
+}
+
+// AssignmentLister gathers the assignments a person received or issued for
+// the GDPR data export (implemented by assignment.Repository).
+type AssignmentLister interface {
+	List(ctx context.Context, orgID string, filter assignment.FilterParams, page api.PaginationParams) ([]assignment.Assignment, int, error)
+}
+
 // Handler provides HTTP handlers for user, team, and role endpoints.
 type Handler struct {
-	repo     Repository
-	contacts ContactLister
+	repo        Repository
+	contacts    ContactLister
+	tickets     TicketActivityLister
+	assignments AssignmentLister
 }
 
 // NewHandler creates a new user/team/role handler. contacts may be nil; the
@@ -30,6 +46,15 @@ func NewHandler(repo Repository, contacts ...ContactLister) *Handler {
 	if len(contacts) > 0 {
 		h.contacts = contacts[0]
 	}
+	return h
+}
+
+// WithPrivacySources attaches the ticket and assignment repositories so the
+// GDPR data export covers the full processing footprint (Art. 15) instead of
+// only the account and contact records.
+func (h *Handler) WithPrivacySources(tickets TicketActivityLister, assignments AssignmentLister) *Handler {
+	h.tickets = tickets
+	h.assignments = assignments
 	return h
 }
 
@@ -188,8 +213,10 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // ExportData handles GET /api/v1/users/{id}/data-export (GDPR Art. 15).
-// Returns the account record plus every contact record that carries the
-// user's e-mail address — the full set of personal data the CMDB stores.
+// Returns the full processing footprint of the user: the account record,
+// every contact record carrying the user's e-mail address, the user's custom
+// role assignments, and the tickets and assignments the user reported,
+// received or issued.
 func (h *Handler) ExportData(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -213,9 +240,49 @@ func (h *Handler) ExportData(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	roles, err := h.repo.ListUserRoles(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+	if roles == nil {
+		roles = []UserRoleAssignment{}
+	}
+
+	all := api.PaginationParams{Limit: 1000}
+
+	reported := []ticket.Ticket{}
+	assignedTickets := []ticket.Ticket{}
+	if h.tickets != nil {
+		if reported, _, err = h.tickets.List(r.Context(), t.OrganizationID, ticket.FilterParams{ReporterID: id}, all); err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			return
+		}
+		if assignedTickets, _, err = h.tickets.List(r.Context(), t.OrganizationID, ticket.FilterParams{AssigneeID: id}, all); err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			return
+		}
+	}
+
+	received := []assignment.Assignment{}
+	issued := []assignment.Assignment{}
+	if h.assignments != nil {
+		if received, _, err = h.assignments.List(r.Context(), t.OrganizationID, assignment.FilterParams{AssignedTo: id}, all); err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			return
+		}
+		if issued, _, err = h.assignments.List(r.Context(), t.OrganizationID, assignment.FilterParams{AssignedBy: id}, all); err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			return
+		}
+	}
+
 	api.WriteJSON(w, http.StatusOK, map[string]any{
 		"user":        u,
 		"contacts":    contacts,
+		"roles":       roles,
+		"tickets":     map[string]any{"reported": reported, "assigned": assignedTickets},
+		"assignments": map[string]any{"received": received, "issued": issued},
 		"exported_at": time.Now().UTC().Format(time.RFC3339),
 	})
 }

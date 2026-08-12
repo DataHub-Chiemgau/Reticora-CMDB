@@ -61,6 +61,9 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 		if filter.AssigneeID != "" && t.AssigneeID != filter.AssigneeID {
 			continue
 		}
+		if filter.ReporterID != "" && t.ReporterID != filter.ReporterID {
+			continue
+		}
 		if filter.TeamID != "" && t.TeamID != filter.TeamID {
 			continue
 		}

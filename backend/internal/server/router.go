@@ -42,6 +42,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -93,7 +94,10 @@ type Options struct {
 	OIDC     *identity.OIDCProvider
 	Sessions *identity.SessionIssuer
 	// Audit is registered only when a database-backed audit trail exists.
-	Audit      *audit.Handler
+	Audit *audit.Handler
+	// AuditPool enables the security report to include audit-chain integrity;
+	// it is the same pool the audit handler serves from.
+	AuditPool *pgxpool.Pool
 	AIProvider ai.Provider
 	// Blobs persists asynchronous export results; nil disables export-job
 	// creation (the streaming export endpoint stays available).
@@ -137,13 +141,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 		document.NewHandler(repos.Document, opts.Blobs),
 		stocktake.NewHandler(repos.Stocktake),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
-		user.NewHandler(repos.User, repos.Contact),
+		user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment),
 		permission.NewHandler(repos.Permission),
 		search.NewHandler(repos.Search, repos.Permission),
 		sla.NewHandler(repos.SLA, repos.Ticket),
 		form.NewHandler(repos.Form),
 		workflow.NewHandler(repos.Workflow, workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher)),
-		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)),
+		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)).
+			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(opts), entitlementLister{svc: opts.Entitlements})),
 		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow),
 		tenantapi.NewHandler(repos.TenantHierarchy),
 		rack.NewHandler(repos.Rack),
@@ -175,6 +180,16 @@ func alertStoreFor(store monitoring.MetricStore) monitoring.AlertStore {
 		return evaluating.AlertStore()
 	}
 	return nil
+}
+
+// reportAuditVerifier returns the audit-chain verifier for the security
+// report when a database pool exists; without a database the report omits the
+// integrity section instead of failing.
+func reportAuditVerifier(opts Options) compliance.AuditVerifier {
+	if opts.AuditPool == nil {
+		return nil
+	}
+	return auditVerifier{pool: opts.AuditPool}
 }
 
 func validate(repos Repositories, opts Options) error {

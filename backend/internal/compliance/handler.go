@@ -11,10 +11,18 @@ import (
 type Handler struct {
 	repo      Repository
 	evaluator *Evaluator
+	reports   *ReportService
 }
 
 func NewHandler(repo Repository, evaluator *Evaluator) *Handler {
 	return &Handler{repo: repo, evaluator: evaluator}
+}
+
+// WithReports attaches the security report service so the handler can serve
+// GET /api/v1/compliance/report.
+func (h *Handler) WithReports(reports *ReportService) *Handler {
+	h.reports = reports
+	return h
 }
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/compliance/rules", h.ListRules)
@@ -25,6 +33,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/compliance/evaluations", h.Evaluate)
 	r.Get("/api/v1/compliance/results", h.ListResults)
 	r.Get("/api/v1/compliance/score", h.Score)
+	r.Get("/api/v1/compliance/report", h.Report)
 }
 func org(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
 	t := tenant.FromContext(r.Context())
@@ -148,4 +157,24 @@ func (h *Handler) Score(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, 200, summarize(items))
+}
+
+// Report handles GET /api/v1/compliance/report and produces the
+// ISO 27001 / NIS2 evidence document for the tenant. The `standard` query
+// parameter selects the framing label (default iso27001).
+func (h *Handler) Report(w http.ResponseWriter, r *http.Request) {
+	t, ok := org(w, r)
+	if !ok {
+		return
+	}
+	if h.reports == nil {
+		api.WriteError(w, 503, "Service Unavailable", "security reporting is not configured")
+		return
+	}
+	report, err := h.reports.Generate(r.Context(), t.OrganizationID, r.URL.Query().Get("standard"))
+	if err != nil {
+		api.WriteError(w, 500, "Internal Error", err.Error())
+		return
+	}
+	api.WriteJSON(w, 200, report)
 }
