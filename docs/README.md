@@ -569,4 +569,26 @@ Continuous Integration runs on **GitHub Actions** (`.github/workflows/ci.yml`), 
 
 ### Getting Started
 
-See the root [README.md](../README.md) for setup instructions.
+See the root [README.md](../README.md) for setup instructions. When an
+installation fails or misbehaves, see
+[troubleshooting-installation.md](troubleshooting-installation.md) for the
+known failure modes (container health, Keycloak/login, TLS, idempotent
+re-runs) and their fixes.
+
+### Installer hardening (Epic A)
+
+The installers validate their own work instead of failing later with opaque
+errors:
+
+- `configure_realm` validates the rendered Keycloak realm file
+  (`validate_realm_json`: no leftover placeholders, parseable JSON, correct
+  realm) before the container ever sees it.
+- After Keycloak starts, `validate_keycloak_bootstrap` probes the realm's
+  OIDC discovery document and warns when a localhost issuer is combined with
+  a non-localhost public URL (the browser resolves the issuer, not the
+  server).
+- `validate_tls_material` checks every generated/issued certificate: parses,
+  carries a subjectAltName, is unexpired, and matches the private key.
+- `tests/install-cloud-helpers.test.sh` unit-tests these helpers without
+  external dependencies; `.github/workflows/install-smoke.yml` runs the full
+  installer in CI and asserts that every container becomes healthy.

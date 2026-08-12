@@ -778,7 +778,46 @@ bootstrap_tls_cert() {
     # The frontend container reads these as the unprivileged nginx user via a
     # read-only bind mount; letsencrypt/ stays host-owned.
     chmod 644 "$live_dir/fullchain.pem" "$live_dir/privkey.pem"
+    # Sanity-check the freshly created material: a broken certificate or key
+    # makes nginx fail to start much later with a less obvious message.
+    validate_tls_material "$RETICORA_TLS_DOMAIN"
     success "Bootstrap certificate created (will be replaced by Let's Encrypt)"
+}
+
+# validate_tls_material <domain> — verifies that the certificate chain and
+# private key under letsencrypt/live/<domain> form a consistent, usable pair:
+# the certificate must parse, carry a SAN for the domain, be unexpired, and
+# match the private key. Called after bootstrap generation and again after
+# certbot issuance so TLS problems surface at install time.
+validate_tls_material() {
+    local domain="$1"
+    local live_dir; live_dir="$(tls_live_dir)"
+    local cert="$live_dir/fullchain.pem" key="$live_dir/privkey.pem"
+
+    [ -f "$cert" ] || die "TLS certificate missing: $cert"
+    [ -f "$key" ]  || die "TLS private key missing: $key"
+
+    openssl x509 -in "$cert" -noout -subject >/dev/null 2>&1 \
+        || die "TLS certificate $cert cannot be parsed by openssl."
+
+    tls_cert_has_san "$cert" \
+        || die "TLS certificate $cert has no subjectAltName — Go clients (and modern browsers) reject CN-only certificates."
+
+    openssl x509 -in "$cert" -noout -checkend 0 >/dev/null 2>&1 \
+        || die "TLS certificate $cert is already expired."
+
+    if ! openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null | grep -q "DNS:$domain\b"; then
+        warn "TLS certificate SAN list does not contain $domain — HTTPS will warn for this hostname."
+    fi
+
+    # The public keys of certificate and private key must be identical,
+    # otherwise nginx refuses to load the pair ("key values mismatch").
+    local cert_pub key_pub
+    cert_pub="$(openssl x509 -in "$cert" -noout -pubkey 2>/dev/null | openssl sha256)"
+    key_pub="$(openssl pkey -in "$key" -pubout 2>/dev/null | openssl sha256)"
+    [ -n "$cert_pub" ] && [ "$cert_pub" = "$key_pub" ] \
+        || die "TLS certificate $cert and private key $key do not match."
+    success "TLS material for $domain is consistent (parses, SAN present, key matches)"
 }
 
 # reload_frontend_after_bootstrap — `compose up -d` leaves an unchanged
@@ -814,6 +853,7 @@ issue_tls_certificate() {
         -d "$RETICORA_TLS_DOMAIN" \
         --non-interactive --agree-tos \
         "${email_args[@]}"; then
+        validate_tls_material "$RETICORA_TLS_DOMAIN"
         compose_cmd exec -T frontend nginx -s reload >/dev/null 2>&1 \
             || warn "Could not reload nginx automatically; restart the frontend to activate the certificate: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE restart frontend"
         success "Let's Encrypt certificate issued for $RETICORA_TLS_DOMAIN"
@@ -833,6 +873,16 @@ configure_realm() {
     local realm_src="$SCRIPT_DIR/deploy/keycloak/realm-reticora.json"
     local out_dir="$COMPOSE_DIR/.generated"
     [ -f "$realm_src" ] || die "Realm template not found: $realm_src"
+    # Docker creates the bind-mount source as a root-owned *directory* when it
+    # did not exist before the first `up`; if a previous run then fails to
+    # write into it, every re-run dies with "permission denied". Recover
+    # instead of forcing the operator to clean up manually.
+    if [ -d "$out_dir" ] && [ ! -w "$out_dir" ]; then
+        warn "$out_dir is not writable (likely created by Docker as root); taking ownership."
+        chown -R "$(id -u):$(id -g)" "$out_dir" 2>/dev/null \
+            || sudo -n chown -R "$(id -u):$(id -g)" "$out_dir" 2>/dev/null \
+            || die "Cannot write to $out_dir. Fix the ownership (sudo chown -R \$USER '$out_dir') and re-run this installer."
+    fi
     mkdir -p "$out_dir"
     # Substitute the configured client secret so the backend and Keycloak agree
     # on it; the .generated copy is git-ignored and never committed. Also
@@ -874,6 +924,96 @@ configure_realm() {
     fi
     chmod o+rx "$out_dir" 2>/dev/null || true
     success "Keycloak realm prepared with the configured OIDC client secret and redirect URL"
+
+    validate_realm_json "$realm_file"
+}
+
+# validate_realm_json <file> — sanity-checks the rendered realm file before
+# it is bind-mounted into Keycloak. A syntactically invalid file (or one that
+# still contains an unsubstituted placeholder) makes the import fail with a
+# cryptic Keycloak stack trace and the container crash-loops; the UI then
+# answers every /realms/ request with 502 Bad Gateway. Catching that here
+# produces a clear error at install time instead.
+validate_realm_json() {
+    local realm_file="$1"
+
+    if grep -q '_PLACEHOLDER' "$realm_file"; then
+        local leftover
+        leftover="$(grep -o '[A-Z_]*_PLACEHOLDER' "$realm_file" | sort -u | tr '\n' ' ')"
+        die "The rendered realm file $realm_file still contains unsubstituted placeholders: $leftover"
+    fi
+
+    if have_cmd python3; then
+        python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$realm_file" 2>/dev/null \
+            || die "The rendered realm file $realm_file is not valid JSON — check the configured URLs for characters that break the template (e.g. unquoted backslashes)."
+    elif have_cmd jq; then
+        jq empty "$realm_file" 2>/dev/null \
+            || die "The rendered realm file $realm_file is not valid JSON — check the configured URLs for characters that break the template (e.g. unquoted backslashes)."
+    else
+        warn "Neither python3 nor jq is available; skipping JSON validation of the realm file."
+    fi
+
+    if ! grep -q '"realm"[[:space:]]*:[[:space:]]*"reticora"' "$realm_file"; then
+        die "The rendered realm file $realm_file does not define the 'reticora' realm — the template $SCRIPT_DIR/deploy/keycloak/realm-reticora.json may be corrupted."
+    fi
+    success "Keycloak realm file validated (JSON, no leftover placeholders)"
+}
+
+# validate_keycloak_bootstrap — post-start checks that go beyond the container
+# healthcheck: the realm must actually be imported and serve its OIDC
+# discovery document at the configured issuer URL, otherwise sign-in fails
+# later in the browser with a hard-to-diagnose error.
+validate_keycloak_bootstrap() {
+    info "Validating the Keycloak bootstrap …"
+
+    # The issuer URL must not point at localhost when the UI is served from a
+    # different host — the browser resolves it, not the server.
+    case "$RETICORA_OIDC_ISSUER_URL" in
+        http://localhost:*|http://localhost/*|https://localhost:*|https://localhost/*|http://127.*|https://127.*)
+            case "$RETICORA_PUBLIC_BASE_URL" in
+                http://localhost*|https://localhost*|http://127.*|https://127.*) : ;;
+                *) warn "RETICORA_OIDC_ISSUER_URL ($RETICORA_OIDC_ISSUER_URL) points at localhost but the public base URL is $RETICORA_PUBLIC_BASE_URL."
+                   warn "Remote browsers cannot reach a localhost issuer — sign-in will fail for every user not on this machine." ;;
+            esac
+            ;;
+    esac
+
+    # Verify the realm's OIDC discovery document is served (proves the realm
+    # import succeeded). The issuer may be a public URL not resolvable from
+    # this host during install, so probe the local Keycloak port first and
+    # fall back to the configured issuer URL.
+    local probe_url="$RETICORA_OIDC_ISSUER_URL"
+    case "$probe_url" in
+        */realms/reticora) probe_url="${probe_url%/}/.well-known/openid-configuration" ;;
+        *) probe_url="${probe_url%/}/realms/reticora/.well-known/openid-configuration" ;;
+    esac
+    local local_probe="http://localhost:${RETICORA_KEYCLOAK_PORT}/realms/reticora/.well-known/openid-configuration"
+
+    local discovered=""
+    for _ in 1 2 3 4 5; do
+        if discovered="$(curl -fsS --max-time 5 "$local_probe" 2>/dev/null)"; then
+            break
+        fi
+        if discovered="$(curl -fsS --max-time 5 "$probe_url" 2>/dev/null)"; then
+            break
+        fi
+        sleep 3
+    done
+
+    if [ -z "$discovered" ]; then
+        show_service_logs keycloak
+        warn "Keycloak is running but the 'reticora' realm does not answer its OIDC"
+        warn "discovery document. The realm import most likely failed — common causes:"
+        warn "  - realm file unreadable inside the container (AccessDeniedException)"
+        warn "  - invalid JSON in the rendered realm file"
+        warn "Check: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs keycloak | grep -i import"
+        die "Keycloak bootstrap validation failed — the realm was not imported."
+    fi
+
+    if ! printf '%s' "$discovered" | grep -q '"issuer"'; then
+        die "Keycloak answered the discovery document without an 'issuer' field — the realm import is incomplete."
+    fi
+    success "Keycloak realm 'reticora' is imported and serving OIDC discovery"
 }
 
 # ─── Images: build / pull ─────────────────────────────────────────────────────
@@ -1056,6 +1196,7 @@ start_stack() {
         warn "permissions."
         die "Keycloak failed to start — see the log output above."
     }
+    validate_keycloak_bootstrap
 
     info "Starting the Reticora server and frontend …"
     compose_cmd up -d server frontend
