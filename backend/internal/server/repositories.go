@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
@@ -35,16 +36,17 @@ import (
 // explicit --no-db development mode and by tests. All state is lost on
 // restart; it is never a fallback for an unreachable database.
 func MemoryRepositories() Repositories {
+	assets := asset.NewMemoryRepository()
 	return Repositories{
 		CI:                ci.NewMemoryRepository(),
 		Relationship:      relationship.NewMemoryRepository(),
 		Webhook:           webhook.NewMemoryRepository(),
 		WebhookDeliveries: webhook.NewMemoryDeliveryStore(),
 		Discovery:         discovery.NewMemoryRepository(),
-		Asset:             asset.NewMemoryRepository(),
+		Asset:             assets,
 		Assignment:        assignment.NewMemoryRepository(),
 		Document:          document.NewMemoryRepository(),
-		Stocktake:         stocktake.NewMemoryRepository(),
+		Stocktake:         stocktake.NewMemoryRepository(assets),
 		Ticket:            ticket.NewMemoryRepository(),
 		User:              user.NewMemoryRepository(),
 		Credential:        credential.NewMemoryRepository(),
@@ -63,6 +65,7 @@ func MemoryRepositories() Repositories {
 		Search:            search.NewMemoryRepository(),
 		AI:                ai.NewMemoryRepository(),
 		ExportJobs:        export.NewMemoryJobRepository(),
+		Privacy:           privacy.NewMemoryRepository(),
 	}
 }
 
@@ -88,7 +91,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Rack:              rack.NewPGRepository(pool),
 		Contact:           contact.NewPGRepository(pool),
 		IPAM:              ipam.NewPGRepository(pool),
-		Metrics:           monitoring.NewMemoryMetricStore(),
+		Metrics:           monitoring.NewPGMetricStore(pool),
 		Permission:        permission.NewPGRepository(pool),
 		SLA:               sla.NewPGRepository(pool),
 		Form:              form.NewPGRepository(pool),
@@ -98,5 +101,6 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Search:            search.NewPGRepository(pool),
 		AI:                ai.NewPGRepository(pool),
 		ExportJobs:        export.NewPGJobRepository(pool),
+		Privacy:           privacy.NewPGRepository(pool),
 	}
 }

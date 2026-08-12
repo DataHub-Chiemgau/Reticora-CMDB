@@ -158,6 +158,30 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateC
 	return c, err
 }
 
+// ListByEmail returns all contacts with the given e-mail address
+// (case-insensitive, surrounding whitespace ignored).
+func (r *PGRepository) ListByEmail(ctx context.Context, orgID, email string) ([]Contact, error) {
+	var out []Contact
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx,
+			"SELECT "+contactCols+" FROM contact WHERE organization_id = $1 AND lower(trim(email)) = lower(trim($2)) AND email <> '' ORDER BY created_at",
+			orgID, email)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			c, err := scanContact(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, *c)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "DELETE FROM contact WHERE organization_id = $1 AND id = $2", orgID, id)

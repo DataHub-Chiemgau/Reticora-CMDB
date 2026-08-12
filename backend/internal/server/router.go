@@ -30,6 +30,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
@@ -42,6 +43,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -76,6 +78,7 @@ type Repositories struct {
 	Search            search.Backend
 	AI                ai.Repository
 	ExportJobs        export.JobRepository
+	Privacy           privacy.Repository
 }
 
 // Options carries everything the router needs beyond the repositories.
@@ -93,7 +96,10 @@ type Options struct {
 	OIDC     *identity.OIDCProvider
 	Sessions *identity.SessionIssuer
 	// Audit is registered only when a database-backed audit trail exists.
-	Audit      *audit.Handler
+	Audit *audit.Handler
+	// AuditPool enables the security report to include audit-chain integrity;
+	// it is the same pool the audit handler serves from.
+	AuditPool  *pgxpool.Pool
 	AIProvider ai.Provider
 	// Blobs persists asynchronous export results; nil disables export-job
 	// creation (the streaming export endpoint stays available).
@@ -134,25 +140,27 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 		export.NewJobHandler(repos.ExportJobs, export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs), opts.Blobs),
 		asset.NewHandler(repos.Asset),
 		assignment.NewHandler(repos.Assignment),
-		document.NewHandler(repos.Document),
+		document.NewHandler(repos.Document, opts.Blobs),
 		stocktake.NewHandler(repos.Stocktake),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
-		user.NewHandler(repos.User),
+		user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment),
 		permission.NewHandler(repos.Permission),
 		search.NewHandler(repos.Search, repos.Permission),
 		sla.NewHandler(repos.SLA, repos.Ticket),
 		form.NewHandler(repos.Form),
 		workflow.NewHandler(repos.Workflow, workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher)),
-		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)),
+		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)).
+			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(opts), entitlementLister{svc: opts.Entitlements})),
 		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow),
 		tenantapi.NewHandler(repos.TenantHierarchy),
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
 		ipam.NewHandler(repos.IPAM),
-		monitoring.NewHandler(repos.Metrics),
+		monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)),
 		graphqlbff.NewHandler(repos.CI, repos.Relationship),
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
+		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),
 	}
 	for _, h := range registrars {
 		h.RegisterRoutes(protected)
@@ -165,6 +173,26 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 	}
 
 	return mux, nil
+}
+
+// alertStoreFor pairs the alert-rule persistence with the metric store when
+// the store provides one (PostgreSQL); otherwise the in-memory store is used
+// and alert rules live in the default in-memory manager.
+func alertStoreFor(store monitoring.MetricStore) monitoring.AlertStore {
+	if evaluating, ok := store.(monitoring.EvaluatingStore); ok {
+		return evaluating.AlertStore()
+	}
+	return nil
+}
+
+// reportAuditVerifier returns the audit-chain verifier for the security
+// report when a database pool exists; without a database the report omits the
+// integrity section instead of failing.
+func reportAuditVerifier(opts Options) compliance.AuditVerifier {
+	if opts.AuditPool == nil {
+		return nil
+	}
+	return auditVerifier{pool: opts.AuditPool}
 }
 
 func validate(repos Repositories, opts Options) error {

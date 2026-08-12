@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { screen } from '@testing-library/react';
 import type { TopologyGraphData } from '../api/client';
-import { TopologyPage, buildGraphModel } from './TopologyPage';
+import { TopologyPage, buildGraphModel, computeOutageImpact } from './TopologyPage';
 import { renderWithProviders, stubFetchRoutes } from '../test/utils';
 
 vi.mock('../components/graph/TopologyGraph', () => ({
@@ -67,6 +67,34 @@ describe('buildGraphModel', () => {
   });
 });
 
+describe('computeOutageImpact', () => {
+  const edges = [
+    { source: 'ups-1', target: 'sw-1' },
+    { source: 'sw-1', target: 'srv-1' },
+    { source: 'sw-1', target: 'srv-2' },
+    { source: 'srv-1', target: 'vm-1' },
+  ];
+
+  it('marks all transitively dependent nodes as impacted', () => {
+    expect(computeOutageImpact('ups-1', edges)).toEqual(
+      new Set(['sw-1', 'srv-1', 'srv-2', 'vm-1']),
+    );
+    expect(computeOutageImpact('sw-1', edges)).toEqual(new Set(['srv-1', 'srv-2', 'vm-1']));
+  });
+
+  it('returns an empty set for leaf nodes', () => {
+    expect(computeOutageImpact('vm-1', edges)).toEqual(new Set());
+  });
+
+  it('terminates on cyclic graphs', () => {
+    const cyclic = [
+      { source: 'a', target: 'b' },
+      { source: 'b', target: 'a' },
+    ];
+    expect(computeOutageImpact('a', cyclic)).toEqual(new Set(['b']));
+  });
+});
+
 describe('TopologyPage', () => {
   it('renders the graph and an accessible node list', async () => {
     stubFetchRoutes({ '/topology': graph });
@@ -97,5 +125,16 @@ describe('TopologyPage', () => {
     const url = String(fetchMock.mock.calls[0]?.[0]);
     expect(url).toContain('root_ci_id=ci-1');
     expect(url).toContain('depth=3');
+  });
+
+  it('shows the outage impact panel when a failure is simulated', async () => {
+    stubFetchRoutes({ '/topology': graph });
+
+    renderWithProviders(<TopologyPage />, { route: '/topology?simulate=ci-1' });
+
+    expect(await screen.findByText('Ausfallsimulation')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Fällt „core-sw-01“ aus, sind 1 weitere CIs betroffen/),
+    ).toBeInTheDocument();
   });
 });

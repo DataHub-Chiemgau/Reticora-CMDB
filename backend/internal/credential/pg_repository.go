@@ -231,6 +231,60 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	})
 }
 
+// ListStored returns every credential of the organization including its
+// ciphertext (implements StoredLister for DEK rotation).
+func (r *PGRepository) ListStored(ctx context.Context, orgID string) ([]StoredCredential, error) {
+	items := make([]StoredCredential, 0)
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		query := fmt.Sprintf("SELECT %s FROM credential WHERE organization_id = $1 ORDER BY created_at ASC", credentialSelectColumns)
+		rows, err := tx.Query(ctx, query, orgID)
+		if err != nil {
+			return fmt.Errorf("list stored credentials: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			item, err := scanStoredCredential(rows)
+			if err != nil {
+				return fmt.Errorf("scan credential: %w", err)
+			}
+			items = append(items, *item)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate credentials: %w", err)
+		}
+		return nil
+	})
+	return items, err
+}
+
+// UpdateOrgDEK replaces the wrapped DEK row and bumps the key version
+// (implements DEKUpdater for DEK rotation).
+func (r *PGRepository) UpdateOrgDEK(ctx context.Context, orgID string, encryptedDEK []byte, keyVersion int) (*OrgDEK, error) {
+	var dek *OrgDEK
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		query := fmt.Sprintf(`
+			UPDATE org_dek
+			SET encrypted_dek = $2, key_version = $3
+			WHERE organization_id = $1
+			RETURNING %s
+		`, orgDEKSelectColumns)
+		var err error
+		dek, err = scanOrgDEK(tx.QueryRow(ctx, query, orgID, encryptedDEK, keyVersion))
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return ErrNotFound
+			}
+			return fmt.Errorf("update org dek: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dek, nil
+}
+
 type credentialScanner interface {
 	Scan(dest ...any) error
 }

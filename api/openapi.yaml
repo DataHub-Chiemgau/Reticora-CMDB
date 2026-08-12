@@ -67,6 +67,8 @@ tags:
     description: Compliance rules, evaluations and scores
   - name: Audit
     description: Hash-chained audit trail
+  - name: Privacy
+    description: DSGVO/GDPR data lifecycle (retention policy, erasure workflow)
   - name: Monitoring
     description: Metrics and alert rules
   - name: GraphQL
@@ -353,6 +355,82 @@ paths:
                 $ref: '#/components/schemas/AuditVerifyResult'
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/privacy/retention:
+    get:
+      operationId: getRetentionPolicy
+      tags: [Privacy]
+      summary: Get the tenant data-retention policy (DSGVO Art. 5)
+      description: >-
+        Returns the configured retention policy for personal data. The policy
+        defines after how many days personal records (contacts, deactivated
+        user accounts) expire and whether the erasure workflow anonymizes or
+        deletes them. Requires user:manage.
+      responses:
+        '200':
+          description: Retention policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetentionPolicy'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      operationId: putRetentionPolicy
+      tags: [Privacy]
+      summary: Configure the tenant data-retention policy
+      description: >-
+        Creates or updates the retention policy. `retention_days = 0` keeps
+        data forever (no erasure). `mode` selects whether expired records are
+        anonymized (default; rows stay for referential integrity) or deleted.
+        Requires user:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                retention_days: { type: integer, minimum: 0 }
+                mode: { type: string, enum: [anonymize, delete] }
+      responses:
+        '200':
+          description: Updated retention policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetentionPolicy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/privacy/erasure:
+    post:
+      operationId: runErasureWorkflow
+      tags: [Privacy]
+      summary: Run the data-erasure workflow (DSGVO Art. 17)
+      description: >-
+        Enforces the configured retention policy: contact records and
+        deactivated user accounts whose last update predates the retention
+        window are anonymized (default) or deleted. Running the workflow
+        requires an explicitly configured policy, so a tenant can never purge
+        data by accident. Requires user:manage.
+      responses:
+        '200':
+          description: Erasure summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErasureSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/relationships:
     get:
@@ -1308,6 +1386,67 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/stocktakes/{id}/difference:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getStocktakeDifference
+      tags: [Stocktake]
+      summary: Difference list of a stocktake
+      description: Returns every scan whose result deviates from the expected inventory (missing, surplus, damaged, wrong_location), enriched with the asset details of the affected assets.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated difference list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StocktakeDifferenceListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/stocktakes/{id}/complete:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: completeStocktake
+      tags: [Stocktake]
+      summary: Complete a stocktake with inventory correction
+      description: >
+        Completes the stocktake and applies the recorded differences to the
+        inventory: assets scanned as missing are marked lost, surplus assets
+        are put back in stock, wrong_location moves the asset to the found
+        location and damaged assets are sent to maintenance. Completion is
+        atomic and only possible once; the request is rejected with 409 when
+        the stocktake is already completed or cancelled.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteStocktakeRequest'
+      responses:
+        '200':
+          description: Stocktake completed, including the applied corrections
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StocktakeCompletion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Stocktake is already completed or cancelled
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/tickets:
     get:
@@ -3305,6 +3444,114 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/credentials/rotate-keys:
+    post:
+      operationId: rotateCredentialKeys
+      tags: [Credentials]
+      summary: Rotate the tenant data-encryption key (DEK)
+      description: >-
+        Generates a fresh per-organization DEK, re-encrypts every stored
+        credential ciphertext with it and atomically bumps the key version.
+        Plaintext secrets never leave the platform. Regular rotation limits
+        the blast radius of a key compromise (ISO 27001 A.10.1.2, NIS2
+        cryptographic-controls requirement). Requires credential:manage.
+      responses:
+        '200':
+          description: Rotation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key_version:
+                    type: integer
+                  rotated:
+                    type: integer
+                    description: Number of credential ciphertexts re-encrypted
+                required: [key_version, rotated]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/documents/{id}/content:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    put:
+      operationId: uploadDocumentContent
+      tags: [Documents]
+      summary: Upload the binary content of a document
+      description: >
+        Stores the request body as the document's object in blob storage.
+        The Content-Type header is validated against a whitelist of common
+        office and image formats; the body is limited to 25 MiB.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Content stored; returns the updated document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: Payload too large
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '415':
+          description: Unsupported media type
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '503':
+          description: Blob storage is not configured
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+    get:
+      operationId: downloadDocumentContent
+      tags: [Documents]
+      summary: Get a time-limited download URL for the document content
+      responses:
+        '200':
+          description: Presigned download URL (15 minute TTL)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  download_url:
+                    type: string
+                    format: uri
+                required: [download_url]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Blob storage is not configured
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
   /api/v1/documents/{id}/links:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -3634,6 +3881,92 @@ paths:
       responses:
         '204':
           description: Role deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/users/{id}/data-export:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: exportUserData
+      tags: [Users, Privacy]
+      summary: Export all personal data of a user (GDPR Art. 15)
+      description: >
+        Returns every piece of personal data the CMDB stores about the user:
+        the account record, all contact records linked to the user's e-mail
+        address, the user's custom role assignments, and the tickets and
+        assignments the user reported, received or issued. Requires
+        user:manage.
+      responses:
+        '200':
+          description: Personal data export
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                  contacts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Contact'
+                  roles:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RoleAssignment'
+                  tickets:
+                    type: object
+                    properties:
+                      reported:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Ticket'
+                      assigned:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Ticket'
+                  assignments:
+                    type: object
+                    properties:
+                      received:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Assignment'
+                      issued:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Assignment'
+                  exported_at:
+                    type: string
+                    format: date-time
+                required: [user, contacts, roles, tickets, assignments, exported_at]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/users/{id}/anonymize:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: anonymizeUser
+      tags: [Users, Privacy]
+      summary: Anonymize a user (GDPR Art. 17, right to erasure)
+      description: >
+        Replaces all personal data (e-mail, display name, avatar, external
+        ID) with non-identifying surrogate values and disables the account.
+        The row itself and audit history are kept so referential integrity
+        and the audit chain survive. Requires user:manage.
+      responses:
+        '200':
+          description: User anonymized; returns the updated record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -4244,6 +4577,31 @@ paths:
         '200': { description: Compliance score, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceEvaluationResponse' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+  /api/v1/compliance/report:
+    get:
+      operationId: getSecurityReport
+      tags: [Compliance]
+      summary: Generate the tenant security & compliance report (ISO 27001 / NIS2)
+      description: >-
+        Aggregates the tenant's security posture into one evidence document:
+        audit hash-chain integrity, the rule-based compliance score, failing
+        checks grouped per rule (with remediation hints and affected CIs) and
+        the enabled security-relevant capabilities. The `standard` query
+        parameter selects the framing label (`iso27001`, `nis2`, …).
+      parameters:
+        - name: standard
+          in: query
+          schema: { type: string, default: iso27001, enum: [iso27001, nis2, kritis] }
+      responses:
+        '200':
+          description: Security report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecurityReport'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { description: Reporting not configured, content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
 
   /api/v1/iga/connectors:
     get:
@@ -6457,6 +6815,70 @@ components:
               items:
                 $ref: '#/components/schemas/StockScan'
 
+    StocktakeDifferenceEntry:
+      type: object
+      required: [scan]
+      properties:
+        scan:
+          $ref: '#/components/schemas/StockScan'
+        asset:
+          $ref: '#/components/schemas/Asset'
+
+    StocktakeDifferenceListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/StocktakeDifferenceEntry'
+
+    CompleteStocktakeRequest:
+      type: object
+      properties:
+        apply_corrections:
+          type: boolean
+          description: Whether the recorded differences are applied to the inventory. Defaults to true.
+          default: true
+
+    StocktakeCorrection:
+      type: object
+      required: [asset_id, scan_result, applied]
+      properties:
+        asset_id:
+          type: string
+        asset_tag:
+          type: string
+        scan_result:
+          type: string
+        previous_status:
+          type: string
+        new_status:
+          type: string
+        previous_location:
+          type: string
+        new_location:
+          type: string
+        applied:
+          type: boolean
+        detail:
+          type: string
+
+    StocktakeCompletion:
+      type: object
+      required: [stocktake, corrections_applied, corrections]
+      properties:
+        stocktake:
+          $ref: '#/components/schemas/Stocktake'
+        corrections_applied:
+          type: integer
+        corrections:
+          type: array
+          items:
+            $ref: '#/components/schemas/StocktakeCorrection'
+
     Ticket:
       type: object
       required: [id, organization_id, ticket_number, title, status, priority, category, reporter_id, tags, created_at, updated_at]
@@ -7049,6 +7471,63 @@ components:
         - type: object
           required: [data]
           properties: { data: { type: array, items: { $ref: '#/components/schemas/ComplianceResult' } } }
+    SecurityFinding:
+      type: object
+      required: [rule_id, rule_name, severity, category, affected_cis]
+      properties:
+        rule_id: { type: string }
+        rule_name: { type: string }
+        severity: { type: string, enum: [critical, high, medium, low] }
+        category: { type: string }
+        remediation_hint: { type: string }
+        affected_cis: { type: array, items: { type: string } }
+    SecurityCapability:
+      type: object
+      required: [feature_key, enabled]
+      properties:
+        feature_key: { type: string }
+        enabled: { type: boolean }
+    AuditIntegrity:
+      type: object
+      required: [intact, checked]
+      properties:
+        intact: { type: boolean }
+        checked: { type: integer }
+        broken_reason: { type: string }
+    SecurityReport:
+      type: object
+      required: [generated_at, standard, audit_integrity, compliance_score, failures_by_severity, findings]
+      properties:
+        generated_at: { type: string, format: date-time }
+        standard: { type: string, description: 'Framing standard label (iso27001, nis2, kritis)' }
+        audit_integrity: { $ref: '#/components/schemas/AuditIntegrity' }
+        compliance_score: { $ref: '#/components/schemas/ComplianceScore' }
+        failures_by_severity:
+          type: object
+          additionalProperties: { type: integer }
+        findings: { type: array, items: { $ref: '#/components/schemas/SecurityFinding' } }
+        capabilities: { type: array, items: { $ref: '#/components/schemas/SecurityCapability' } }
+    RetentionPolicy:
+      type: object
+      required: [id, organization_id, retention_days, mode, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        retention_days:
+          type: integer
+          minimum: 0
+          description: 'Retention window for personal data in days; 0 keeps data forever'
+        mode: { type: string, enum: [anonymize, delete] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ErasureSummary:
+      type: object
+      required: [cutoff, mode, contacts_affected, users_affected]
+      properties:
+        cutoff: { type: string, format: date-time }
+        mode: { type: string, enum: [anonymize, delete] }
+        contacts_affected: { type: integer }
+        users_affected: { type: integer }
 
     User:
       type: object
@@ -7187,6 +7666,14 @@ components:
           enum: [critical, warning, info]
         enabled:
           type: boolean
+        pending_since:
+          type: string
+          format: date-time
+          description: Set while the condition holds but the duration has not elapsed yet.
+        last_fired_at:
+          type: string
+          format: date-time
+          description: Timestamp of the last notification for the current firing.
 
     CreateAlertRuleRequest:
       type: object

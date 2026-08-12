@@ -46,7 +46,7 @@ func listStocktakePage(t *testing.T, mux chi.Router, url string) api.ListRespons
 }
 
 func TestListCursorPaginationWalksEveryRowExactlyOnce(t *testing.T) {
-	repo := NewMemoryRepository()
+	repo := NewMemoryRepository(nil)
 	seedStocktakes(t, repo, 25)
 
 	mux := chi.NewRouter()
@@ -87,7 +87,7 @@ func TestListCursorPaginationWalksEveryRowExactlyOnce(t *testing.T) {
 }
 
 func TestListRejectsMalformedCursor(t *testing.T) {
-	repo := NewMemoryRepository()
+	repo := NewMemoryRepository(nil)
 	mux := chi.NewRouter()
 	NewHandler(repo).RegisterRoutes(mux)
 
@@ -102,7 +102,7 @@ func TestListRejectsMalformedCursor(t *testing.T) {
 }
 
 func TestListRejectsCursorFromDifferentSortOrder(t *testing.T) {
-	repo := NewMemoryRepository()
+	repo := NewMemoryRepository(nil)
 	seedStocktakes(t, repo, 4)
 
 	mux := chi.NewRouter()

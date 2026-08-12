@@ -96,6 +96,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 		addFilter("priority", filter.Priority)
 		addFilter("category", filter.Category)
 		addFilter("assignee_id", filter.AssigneeID)
+		addFilter("reporter_id", filter.ReporterID)
 		addFilter("team_id", filter.TeamID)
 		if filter.Search != "" {
 			whereParts = append(whereParts, fmt.Sprintf("(title ILIKE $%d OR description ILIKE $%d)", argPos, argPos))

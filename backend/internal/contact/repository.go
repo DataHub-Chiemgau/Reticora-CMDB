@@ -18,6 +18,10 @@ type Repository interface {
 	Create(ctx context.Context, c *Contact) error
 	Update(ctx context.Context, orgID, id string, req UpdateContactRequest) (*Contact, error)
 	Delete(ctx context.Context, orgID, id string) error
+	// ListByEmail returns every contact record carrying the given e-mail
+	// address — used by the GDPR data export to gather all personal data
+	// stored about a person.
+	ListByEmail(ctx context.Context, orgID, email string) ([]Contact, error)
 
 	ListForCI(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]CIContact, int, error)
 	Link(ctx context.Context, link *CIContact) error
@@ -30,6 +34,16 @@ type MemoryRepository struct {
 	contacts map[string]*Contact
 	links    map[string]*CIContact
 	seq      int
+}
+
+// AgeForTesting backdates a stored contact's updated_at timestamp. It exists
+// so retention/erasure tests can create "expired" records without waiting.
+func (r *MemoryRepository) AgeForTesting(id string, age time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if c, ok := r.contacts[id]; ok {
+		c.UpdatedAt = time.Now().UTC().Add(-age)
+	}
 }
 
 // NewMemoryRepository creates a new in-memory contact repository.
@@ -136,6 +150,19 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 		}
 	}
 	return nil
+}
+
+func (r *MemoryRepository) ListByEmail(_ context.Context, orgID, email string) ([]Contact, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var out []Contact
+	for _, c := range r.contacts {
+		if c.OrganizationID == orgID && strings.EqualFold(strings.TrimSpace(c.Email), strings.TrimSpace(email)) && c.Email != "" {
+			out = append(out, *c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
 }
 
 func (r *MemoryRepository) ListForCI(_ context.Context, orgID, ciID string, page api.PaginationParams) ([]CIContact, int, error) {

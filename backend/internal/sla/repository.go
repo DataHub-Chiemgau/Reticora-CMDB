@@ -210,7 +210,7 @@ func buildState(id, orgID string, t *ticket.Ticket, p *Policy) *TicketSLA {
 	if created.IsZero() {
 		created = time.Now().UTC()
 	}
-	state := &TicketSLA{ID: id, OrganizationID: orgID, TicketID: t.ID, SLAID: p.ID, ResponseDueAt: created.Add(time.Duration(p.ResponseTargetMinutes) * time.Minute), ResolutionDueAt: created.Add(time.Duration(p.ResolutionTargetMinutes) * time.Minute), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	state := &TicketSLA{ID: id, OrganizationID: orgID, TicketID: t.ID, SLAID: p.ID, ResponseDueAt: addTarget(created, p.ResponseTargetMinutes, p.BusinessCalendar), ResolutionDueAt: addTarget(created, p.ResolutionTargetMinutes, p.BusinessCalendar), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if t.ResolvedAt != "" {
 		if parsed, err := time.Parse(time.RFC3339, t.ResolvedAt); err == nil {
 			state.ResolvedAt = &parsed

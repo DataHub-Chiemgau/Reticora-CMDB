@@ -1,0 +1,46 @@
+-- Remove the updated_at triggers added in 000036. The set_updated_at()
+-- function itself stays in place (it is shared with the 000018 triggers).
+
+DROP TRIGGER IF EXISTS trg_entitlement_updated_at ON entitlement;
+DROP TRIGGER IF EXISTS trg_role_updated_at ON role;
+DROP TRIGGER IF EXISTS trg_ci_relationship_updated_at ON ci_relationship;
+DROP TRIGGER IF EXISTS trg_webhook_subscription_updated_at ON webhook_subscription;
+DROP TRIGGER IF EXISTS trg_webhook_delivery_updated_at ON webhook_delivery;
+DROP TRIGGER IF EXISTS trg_asset_updated_at ON asset;
+DROP TRIGGER IF EXISTS trg_assignment_updated_at ON assignment;
+DROP TRIGGER IF EXISTS trg_document_updated_at ON document;
+DROP TRIGGER IF EXISTS trg_stocktake_updated_at ON stocktake;
+DROP TRIGGER IF EXISTS trg_ticket_updated_at ON ticket;
+DROP TRIGGER IF EXISTS trg_ticket_comment_updated_at ON ticket_comment;
+DROP TRIGGER IF EXISTS trg_team_updated_at ON team;
+DROP TRIGGER IF EXISTS trg_custom_role_updated_at ON custom_role;
+DROP TRIGGER IF EXISTS trg_network_interface_updated_at ON network_interface;
+DROP TRIGGER IF EXISTS trg_subnet_updated_at ON subnet;
+DROP TRIGGER IF EXISTS trg_ip_address_updated_at ON ip_address;
+DROP TRIGGER IF EXISTS trg_cable_updated_at ON cable;
+DROP TRIGGER IF EXISTS trg_contact_updated_at ON contact;
+DROP TRIGGER IF EXISTS trg_export_job_updated_at ON export_job;
+DROP TRIGGER IF EXISTS trg_api_key_updated_at ON api_key;
+DROP TRIGGER IF EXISTS trg_rack_mount_updated_at ON rack_mount;
+DROP TRIGGER IF EXISTS trg_review_item_updated_at ON review_item;
+DROP TRIGGER IF EXISTS trg_credential_updated_at ON credential;
+DROP TRIGGER IF EXISTS trg_permission_updated_at ON permission;
+DROP TRIGGER IF EXISTS trg_sla_updated_at ON sla;
+DROP TRIGGER IF EXISTS trg_ticket_sla_updated_at ON ticket_sla;
+DROP TRIGGER IF EXISTS trg_form_def_updated_at ON form_def;
+DROP TRIGGER IF EXISTS trg_form_submission_updated_at ON form_submission;
+DROP TRIGGER IF EXISTS trg_workflow_def_updated_at ON workflow_def;
+DROP TRIGGER IF EXISTS trg_workflow_run_updated_at ON workflow_run;
+DROP TRIGGER IF EXISTS trg_workflow_step_updated_at ON workflow_step;
+DROP TRIGGER IF EXISTS trg_compliance_rule_updated_at ON compliance_rule;
+DROP TRIGGER IF EXISTS trg_compliance_result_updated_at ON compliance_result;
+DROP TRIGGER IF EXISTS trg_iga_connector_updated_at ON iga_connector;
+DROP TRIGGER IF EXISTS trg_iga_provisioning_task_updated_at ON iga_provisioning_task;
+DROP TRIGGER IF EXISTS trg_iga_lifecycle_policy_updated_at ON iga_lifecycle_policy;
+DROP TRIGGER IF EXISTS trg_iga_access_request_updated_at ON iga_access_request;
+DROP TRIGGER IF EXISTS trg_iga_access_review_updated_at ON iga_access_review;
+DROP TRIGGER IF EXISTS trg_iga_access_review_item_updated_at ON iga_access_review_item;
+DROP TRIGGER IF EXISTS trg_iga_drift_finding_updated_at ON iga_drift_finding;
+DROP TRIGGER IF EXISTS trg_search_document_updated_at ON search_document;
+DROP TRIGGER IF EXISTS trg_ai_conversation_updated_at ON ai_conversation;
+DROP TRIGGER IF EXISTS trg_ai_chunk_updated_at ON ai_chunk;

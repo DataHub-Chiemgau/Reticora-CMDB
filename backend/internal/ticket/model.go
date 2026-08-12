@@ -79,6 +79,7 @@ type FilterParams struct {
 	Priority   string
 	Category   string
 	AssigneeID string
+	ReporterID string
 	TeamID     string
 	Search     string
 	SortBy     string

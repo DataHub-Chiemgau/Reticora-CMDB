@@ -48,6 +48,7 @@ type TransferRequest struct {
 type FilterParams struct {
 	Status     string
 	AssignedTo string
+	AssignedBy string
 	AssetID    string
 	Search     string
 	SortBy     string

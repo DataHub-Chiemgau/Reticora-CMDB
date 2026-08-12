@@ -96,6 +96,8 @@ Database schema is managed with [golang-migrate](https://github.com/golang-migra
 | 0031–0033 | schema corrections, role seeds, client_scope RLS | Batch 1–2 hardening |
 | 0034 | webhook_dead_letter | Dead-letter queue for exhausted webhook deliveries |
 | 0035 | export_job_formats | `datev` in the export_job format CHECK; `app.system` worker exception |
+| 0036 | updated_at_triggers | `set_updated_at` trigger on every mutable table that carries `updated_at` |
+| 0037 | alert_rule | Persistent monitoring alert rules incl. pending/fired evaluation state |
 
 **Running migrations:**
 
@@ -251,10 +253,14 @@ continues to work while new code can validate against the catalogue. SLA policy
 rows define priority-based response and resolution targets, while `ticket_sla`
 stores the applied policy and clock outcomes. Ticket creation, first visible
 response and resolution transitions update that state so breach listings are
-computed from persisted timestamps, not from UI-only heuristics. The first
-implementation treats `business_calendar` as a policy flag and still calculates
-due times in elapsed minutes; that preserves the contract while leaving calendar
-working-hours expansion for a dedicated scheduler.
+computed from persisted timestamps, not from UI-only heuristics.
+`business_calendar = true` on a policy computes due times in business minutes
+(`sla.addTarget` in `internal/sla/calendar.go`): only Monday–Friday,
+08:00–18:00 UTC count, so a 4-hour target set Friday 17:00 is due Monday
+09:00. With the flag off, targets remain plain elapsed minutes. The calendar
+is intentionally fixed in this first iteration; per-tenant time zones and
+holiday tables are a follow-up that extends the calendar without changing
+`addTarget`'s call sites.
 
 
 **Workflow builder and forms:** migration 0027 adds `form_def`,
@@ -350,6 +356,39 @@ development mode). Failed jobs keep their error message; expired jobs no longer
 expose a URL. When no blob store is configured the endpoint answers 503 and the
 streaming export remains available.
 
+**Privacy / GDPR:** `GET /api/v1/users/{id}/data-export` returns the full set
+of personal data stored about a user (account record plus all contact records
+carrying the user's e-mail address) — the Art. 15 access request.
+`POST /api/v1/users/{id}/anonymize` implements the Art. 17 right to erasure:
+e-mail, display name, avatar and external ID are replaced with deterministic,
+non-reversible surrogate values (`deleted-<hash>@anonymized.invalid`) and the
+account is deactivated, while the row itself is kept so foreign keys
+(tickets, assignments, audit hash chain) stay intact. Self-anonymization is
+rejected so an operator cannot lock themselves out mid-request. Both
+endpoints require `user:manage`.
+
+**Document content:** documents carry metadata rows; the binary content lives
+in blob storage. `PUT /api/v1/documents/{id}/content` stores the request body
+(limited to 25 MiB, Content-Type validated against a whitelist of common
+office/image formats — HTML, scripts and SVG are refused because stored
+attacker-controlled markup would be an XSS vector on our own origin) under a
+server-generated key (`documents/<org>/<id>/<version>`), and
+`GET /api/v1/documents/{id}/content` returns a presigned download URL
+(15-minute TTL). Without a configured blob store both endpoints answer 503
+while metadata CRUD keeps working.
+
+**Stocktake completion:** `GET /api/v1/stocktakes/{id}/difference` returns the
+scans that deviate from the expected inventory (`missing`, `surplus`,
+`damaged`, `wrong_location`), each enriched with the affected asset when the
+scan resolved to one. `POST /api/v1/stocktakes/{id}/complete` finalizes the
+count and — unless `apply_corrections` is `false` — applies the recorded
+differences to the inventory in the same transaction: missing assets are
+marked `lost`, surplus assets return to `in_stock`, `wrong_location` moves the
+asset to the found location and damaged assets go to `maintenance`. Scans
+without a resolvable asset or without a found location are reported in the
+response but skipped. Completing an already completed or cancelled stocktake
+is rejected with 409, so corrections can never be applied twice.
+
 **Reconciliation and topology:** discovery runs are recorded as jobs
 (`/api/v1/discovery/jobs`). Findings that cannot be matched to an existing CI
 with sufficient confidence are not applied directly; they land in the review
@@ -385,7 +424,66 @@ local development keeps working. Discovery results are uploaded as
 gzip-compressed batches; when the backend is unreachable the batch is spooled
 to the on-disk buffer (`RETICORA_SPOOL_DIR`, default
 `/var/lib/reticora-collector/spool`, implemented by `edgecore/buffer`) and
-flushed in oldest-first order once connectivity returns.
+flushed in oldest-first order once connectivity returns. The spool is bounded:
+`RETICORA_SPOOL_MAX_BYTES` (default 1 GiB, `0` = unlimited) caps its total
+size — oldest messages are dropped first — and `RETICORA_SPOOL_MAX_AGE`
+(default 72h, `0s` = keep forever) expires stale messages on enqueue. The next
+successful sync re-discovers the current state anyway, so dropping the oldest
+data first is the safe degradation. Spool occupancy (message count, bytes,
+oldest age) is emitted as structured `spool stats` log records on every
+spool/flush so operators can alert on a growing backlog.
+
+**Identity resolution (spec §5.3):** `discovery.Reconcile` matches incoming
+items against existing CIs in the spec's priority order — serial number,
+hardware UUID, MAC address(es), management IP + CI type, hostname/FQDN. Each
+ingest item carries a `source` (snmp/ssh/redfish/ipmi/wmi/…); conflict
+resolution follows source trust plus recency: data from an equal or more
+trusted source (IPMI/Redfish > API > agent > WMI/SSH > SNMP > sweep > manual)
+always wins, while a less trusted source only overwrites values older than
+seven days (`discovery.ShouldApplyAttribute`). A low-trust sighting still
+refreshes `last_seen_at` and merges new fingerprint keys, but cannot clobber
+fresh high-trust identity data. When a matched CI contradicts the incoming
+identity values (e.g. a changed serial number), a `conflicting_values` review
+item with both identity snapshots is queued at
+`/api/v1/discovery/review-items` instead of silently overwriting; ambiguous
+matches keep landing in the queue as `ambiguous_identity`.
+
+**Classification (spec §5.4):** vendor profiles in `collector/profiles/data/`
+are embedded into the collector binary (`profiles.Registry.LoadEmbedded`). The
+SNMP plugin classifies devices by sysObjectID (longest-prefix match via
+`Registry.BySysObjectID`) and fills vendor/model plus profile attributes from
+the matched profile; `Registry.VendorByMAC` resolves vendors from MAC OUI
+prefixes. Adding a new device family is a data-only change — ship a JSON
+profile; `TestEmbeddedProfileData` validates the set in CI. Shipped profiles
+cover Cisco, Juniper, Arista, Fortinet, HPE, Dell, MikroTik, Ubiquiti,
+Synology, NetApp, APC, Supermicro and Lenovo plus generic SNMP/SSH fallbacks.
+
+**SNMP trap reception:** when `RETICORA_SNMP_TRAP_LISTEN` is set (e.g.
+`:162`), the collector runs a tolerant SNMPv1/v2c trap receiver
+(`collector/plugins/snmp/trap.go`). Traps carrying a different community than
+`RETICORA_SNMP_COMMUNITY` are dropped; every accepted trap is normalized into
+a `snmp_trap_received` metric sample (labels: source IP, trap OID, up to 16
+varbinds) and posted to `POST /api/v1/monitoring/metrics`, so the standard
+alert rules can fire on traps. Trap delivery is fire-and-forget — a burst
+during a backend outage is logged and dropped rather than spooled, because a
+delayed alert is usually worse than a lost one. Trap storms are bounded by a
+64-events-in-flight cap. The BER parser is deliberately tolerant: malformed
+varbinds are skipped, never fatal.
+
+**Metric polling (Epic E):** when `RETICORA_METRICS_INTERVAL` is set (e.g.
+`1m`), the collector polls numeric SNMP OIDs on every scan target and uploads
+the samples to the monitoring ingest. The OID list comes from
+`RETICORA_SNMP_POLL_METRICS` (`name=oid,name=oid`, …); when unset, the IF-MIB
+counters of ifIndex 1 (`if_in_octets`, `if_out_octets`, `if_oper_status`)
+are polled. Unreachable targets and non-numeric values are skipped so one
+failing device never stalls a cycle.
+
+**Alert evaluation (Epic E):** the server evaluates enabled alert rules once
+per minute against the metric store (`monitoring.Evaluator`). A rule fires
+only when its condition holds continuously for the configured duration; the
+pending/fired state is persisted on `alert_rule` (migration 0037), so
+restarts neither re-notify nor lose ongoing durations. Fired alerts are
+logged as structured warnings via the default notifier.
 
 **AI/RAG governance:** `/api/v1/ai/conversations` and `/api/v1/ai/ask` are
 gated by the Pro/Enterprise `ai_assistant` entitlement. If no
@@ -569,4 +667,26 @@ Continuous Integration runs on **GitHub Actions** (`.github/workflows/ci.yml`), 
 
 ### Getting Started
 
-See the root [README.md](../README.md) for setup instructions.
+See the root [README.md](../README.md) for setup instructions. When an
+installation fails or misbehaves, see
+[troubleshooting-installation.md](troubleshooting-installation.md) for the
+known failure modes (container health, Keycloak/login, TLS, idempotent
+re-runs) and their fixes.
+
+### Installer hardening (Epic A)
+
+The installers validate their own work instead of failing later with opaque
+errors:
+
+- `configure_realm` validates the rendered Keycloak realm file
+  (`validate_realm_json`: no leftover placeholders, parseable JSON, correct
+  realm) before the container ever sees it.
+- After Keycloak starts, `validate_keycloak_bootstrap` probes the realm's
+  OIDC discovery document and warns when a localhost issuer is combined with
+  a non-localhost public URL (the browser resolves the issuer, not the
+  server).
+- `validate_tls_material` checks every generated/issued certificate: parses,
+  carries a subjectAltName, is unexpired, and matches the private key.
+- `tests/install-cloud-helpers.test.sh` unit-tests these helpers without
+  external dependencies; `.github/workflows/install-smoke.yml` runs the full
+  installer in CI and asserts that every container becomes healthy.

@@ -1,0 +1,107 @@
+name: Install Smoke Test
+
+# Validates that the installer scripts bring the full stack up in a fresh
+# environment and that every container becomes healthy. This prevents
+# regressions like the ones fixed in PR #11–#29 (install failures, unhealthy
+# containers, broken Keycloak realm import, TLS issues).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'install*.sh'
+      - 'deploy/docker-compose/**'
+      - 'deploy/keycloak/**'
+      - 'backend/Dockerfile'
+      - 'frontend/Dockerfile'
+      - '.github/workflows/install-smoke.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'install*.sh'
+      - 'deploy/docker-compose/**'
+      - 'deploy/keycloak/**'
+      - 'backend/Dockerfile'
+      - 'frontend/Dockerfile'
+      - '.github/workflows/install-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  install-cloud-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make installer scripts executable
+        run: chmod +x install.sh install-cloud.sh install-vm.sh
+
+      - name: Run the cloud installer non-interactively
+        run: ./install.sh --cloud --non-interactive
+        env:
+          RETICORA_SOURCE_DIR: ${{ github.workspace }}
+
+      - name: Verify all containers are healthy
+        run: |
+          cd deploy/docker-compose
+          # Give services a final moment to settle.
+          sleep 5
+          unhealthy=$(docker compose --env-file .env ps --format json | \
+            jq -r 'select(.Health != null and .Health != "healthy") | .Name' 2>/dev/null || true)
+          if [ -n "$unhealthy" ]; then
+            echo "Unhealthy containers: $unhealthy"
+            docker compose --env-file .env ps
+            exit 1
+          fi
+          echo "All containers are healthy"
+          docker compose --env-file .env ps
+
+      - name: Verify backend health endpoint
+        run: |
+          port=$(grep -E '^RETICORA_SERVER_PORT=' deploy/docker-compose/.env | cut -d= -f2)
+          port="${port:-8080}"
+          curl -fsS "http://localhost:${port}/healthz" || {
+            echo "Backend health check failed"
+            cd deploy/docker-compose && docker compose --env-file .env logs --tail 50 server
+            exit 1
+          }
+
+      - name: Verify frontend serves the SPA
+        run: |
+          port=$(grep -E '^RETICORA_FRONTEND_PORT=' deploy/docker-compose/.env | cut -d= -f2)
+          port="${port:-3000}"
+          curl -fsS "http://localhost:${port}/" | grep -qi 'reticora\|<div id="root"' || {
+            echo "Frontend did not serve the SPA"
+            exit 1
+          }
+
+      - name: Verify Keycloak is reachable
+        run: |
+          port=$(grep -E '^RETICORA_KEYCLOAK_PORT=' deploy/docker-compose/.env | cut -d= -f2)
+          port="${port:-8180}"
+          curl -fsS "http://localhost:${port}/realms/reticora/.well-known/openid-configuration" | \
+            grep -q '"issuer"' || {
+            echo "Keycloak realm not reachable"
+            exit 1
+          }
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          cd deploy/docker-compose
+          echo "=== docker compose ps ==="
+          docker compose --env-file .env ps || true
+          echo "=== server logs ==="
+          docker compose --env-file .env logs --tail 80 server || true
+          echo "=== keycloak logs ==="
+          docker compose --env-file .env logs --tail 80 keycloak || true
+          echo "=== frontend logs ==="
+          docker compose --env-file .env logs --tail 80 frontend || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          cd deploy/docker-compose
+          docker compose --env-file .env down -v --remove-orphans || true

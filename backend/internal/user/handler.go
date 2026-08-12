@@ -1,21 +1,61 @@
 package user
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/go-chi/chi/v5"
 )
 
-// Handler provides HTTP handlers for user, team, and role endpoints.
-type Handler struct {
-	repo Repository
+// ContactLister gathers every contact record belonging to a person for the
+// GDPR data export (implemented by contact.Repository).
+type ContactLister interface {
+	ListByEmail(ctx context.Context, orgID, email string) ([]contact.Contact, error)
 }
 
-// NewHandler creates a new user/team/role handler.
-func NewHandler(repo Repository) *Handler {
-	return &Handler{repo: repo}
+// TicketActivityLister gathers the tickets a person reported or is assigned
+// to for the GDPR data export (implemented by ticket.Repository).
+type TicketActivityLister interface {
+	List(ctx context.Context, orgID string, filter ticket.FilterParams, page api.PaginationParams) ([]ticket.Ticket, int, error)
+}
+
+// AssignmentLister gathers the assignments a person received or issued for
+// the GDPR data export (implemented by assignment.Repository).
+type AssignmentLister interface {
+	List(ctx context.Context, orgID string, filter assignment.FilterParams, page api.PaginationParams) ([]assignment.Assignment, int, error)
+}
+
+// Handler provides HTTP handlers for user, team, and role endpoints.
+type Handler struct {
+	repo        Repository
+	contacts    ContactLister
+	tickets     TicketActivityLister
+	assignments AssignmentLister
+}
+
+// NewHandler creates a new user/team/role handler. contacts may be nil; the
+// GDPR data export then returns an empty contact list instead of failing.
+func NewHandler(repo Repository, contacts ...ContactLister) *Handler {
+	h := &Handler{repo: repo}
+	if len(contacts) > 0 {
+		h.contacts = contacts[0]
+	}
+	return h
+}
+
+// WithPrivacySources attaches the ticket and assignment repositories so the
+// GDPR data export covers the full processing footprint (Art. 15) instead of
+// only the account and contact records.
+func (h *Handler) WithPrivacySources(tickets TicketActivityLister, assignments AssignmentLister) *Handler {
+	h.tickets = tickets
+	h.assignments = assignments
+	return h
 }
 
 // RegisterRoutes registers user/team/role routes on the given mux.
@@ -27,6 +67,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Patch("/api/v1/users/{id}", h.UpdateUser)
 	r.Delete("/api/v1/users/{id}", h.DeleteUser)
 	r.Get("/api/v1/users/{id}/roles", h.ListUserRoles)
+	// Privacy (GDPR Art. 15 / 17)
+	r.Get("/api/v1/users/{id}/data-export", h.ExportData)
+	r.Post("/api/v1/users/{id}/anonymize", h.Anonymize)
 
 	// Teams
 	r.Get("/api/v1/teams", h.ListTeams)
@@ -167,6 +210,106 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ExportData handles GET /api/v1/users/{id}/data-export (GDPR Art. 15).
+// Returns the full processing footprint of the user: the account record,
+// every contact record carrying the user's e-mail address, the user's custom
+// role assignments, and the tickets and assignments the user reported,
+// received or issued.
+func (h *Handler) ExportData(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+	u, err := h.repo.GetUser(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
+		return
+	}
+
+	contacts := []contact.Contact{}
+	if h.contacts != nil && u.Email != "" {
+		contacts, err = h.contacts.ListByEmail(r.Context(), t.OrganizationID, u.Email)
+		if err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			return
+		}
+	}
+
+	roles, err := h.repo.ListUserRoles(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+	if roles == nil {
+		roles = []UserRoleAssignment{}
+	}
+
+	all := api.PaginationParams{Limit: 1000}
+
+	reported := []ticket.Ticket{}
+	assignedTickets := []ticket.Ticket{}
+	if h.tickets != nil {
+		if reported, _, err = h.tickets.List(r.Context(), t.OrganizationID, ticket.FilterParams{ReporterID: id}, all); err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			return
+		}
+		if assignedTickets, _, err = h.tickets.List(r.Context(), t.OrganizationID, ticket.FilterParams{AssigneeID: id}, all); err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			return
+		}
+	}
+
+	received := []assignment.Assignment{}
+	issued := []assignment.Assignment{}
+	if h.assignments != nil {
+		if received, _, err = h.assignments.List(r.Context(), t.OrganizationID, assignment.FilterParams{AssignedTo: id}, all); err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			return
+		}
+		if issued, _, err = h.assignments.List(r.Context(), t.OrganizationID, assignment.FilterParams{AssignedBy: id}, all); err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			return
+		}
+	}
+
+	api.WriteJSON(w, http.StatusOK, map[string]any{
+		"user":        u,
+		"contacts":    contacts,
+		"roles":       roles,
+		"tickets":     map[string]any{"reported": reported, "assigned": assignedTickets},
+		"assignments": map[string]any{"received": received, "issued": issued},
+		"exported_at": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// Anonymize handles POST /api/v1/users/{id}/anonymize (GDPR Art. 17).
+// Personal data is replaced by surrogate values and the account is
+// deactivated; the row stays so referential integrity and audit survive.
+func (h *Handler) Anonymize(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+	// Self-anonymization would lock the operator out mid-request and orphan
+	// the session; require a second account to do it.
+	if id == t.UserID {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "you cannot anonymize your own account")
+		return
+	}
+	u, err := h.repo.AnonymizeUser(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, u)
 }
 
 func (h *Handler) ListUserRoles(w http.ResponseWriter, r *http.Request) {

@@ -5,6 +5,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
 import { Button } from './components/ui/Button';
+import { ToastViewport } from './components/ui/Toast';
 import { useAuthStore } from './auth/authStore';
 import { fetchAuthConfig, getStoredAuthConfig } from './auth/oidc';
 import { AssetListPage } from './pages/AssetListPage';
@@ -32,6 +33,8 @@ import { StocktakeListPage } from './pages/StocktakeListPage';
 import { TicketListPage } from './pages/TicketListPage';
 import { UserManagementPage } from './pages/UserManagementPage';
 import { WebhooksPage } from './pages/WebhooksPage';
+import { AuditPage } from './pages/AuditPage';
+import { SecurityPage } from './pages/SecurityPage';
 import { useThemeStore } from './stores/theme';
 
 const pathToPage: Record<string, AppPage> = Object.fromEntries(
@@ -225,6 +228,15 @@ function App() {
                 >
                   {t('nav.monitoring')}
                 </NavButton>
+                <NavButton active={currentPage === 'audit'} onClick={() => handleNavigate('audit')}>
+                  {t('nav.audit')}
+                </NavButton>
+                <NavButton
+                  active={currentPage === 'security'}
+                  onClick={() => handleNavigate('security')}
+                >
+                  {t('nav.security')}
+                </NavButton>
               </nav>
             ) : null}
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -305,6 +317,8 @@ function App() {
             <Route path="/webhooks" element={<WebhooksPage />} />
             <Route path="/export" element={<ExportPage />} />
             <Route path="/monitoring" element={<MonitoringPage />} />
+            <Route path="/audit" element={<AuditPage />} />
+            <Route path="/security" element={<SecurityPage />} />
             <Route path="*" element={<CIListPage onCreateCI={openCreateCI} />} />
           </Route>
         </Routes>
@@ -318,6 +332,7 @@ function App() {
         />
       ) : null}
       {isAuthenticated ? <CIFormModal open={isCreateOpen} onOpenChange={setIsCreateOpen} /> : null}
+      <ToastViewport />
     </div>
   );
 }

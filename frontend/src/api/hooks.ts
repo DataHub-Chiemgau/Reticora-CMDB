@@ -23,6 +23,9 @@ import {
   webhookApi,
   exportApi,
   monitoringApi,
+  auditApi,
+  privacyApi,
+  credentialApi,
 } from '../api/client';
 import type {
   CICreateRequest,
@@ -327,6 +330,27 @@ export function useDeleteStocktake() {
     mutationFn: (id: string) => stocktakeApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
+    },
+  });
+}
+
+export function useStocktakeDifference(stocktakeId: string, params: ListParams = {}) {
+  return useQuery({
+    queryKey: ['stocktakes', stocktakeId, 'difference', params],
+    queryFn: () => stocktakeApi.difference(stocktakeId, params),
+    enabled: !!stocktakeId,
+  });
+}
+
+export function useCompleteStocktake() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, applyCorrections = true }: { id: string; applyCorrections?: boolean }) =>
+      stocktakeApi.complete(id, applyCorrections),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
+      queryClient.invalidateQueries({ queryKey: ['stocktakes', id] });
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
     },
   });
 }
@@ -676,5 +700,65 @@ export function useDeleteAlertRule() {
   return useMutation({
     mutationFn: (id: string) => monitoringApi.deleteAlert(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alert-rules'] }),
+  });
+}
+
+// --- Audit ---
+
+export function useAuditLog(params: ListParams = {}) {
+  return useQuery({
+    queryKey: ['audit', params],
+    queryFn: () => auditApi.list(params),
+  });
+}
+
+export function useVerifyAuditChain() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => auditApi.verify(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['audit'] });
+    },
+  });
+}
+
+// --- Security & Privacy (Epic F) ---
+
+export function useSecurityReport(standard = 'iso27001') {
+  return useQuery({
+    queryKey: ['security-report', standard],
+    queryFn: () => complianceApi.report(standard),
+  });
+}
+
+export function useRetentionPolicy() {
+  return useQuery({
+    queryKey: ['privacy-retention'],
+    queryFn: () => privacyApi.retention(),
+    // A missing policy (404) is a normal first-run state, not an error to retry.
+    retry: false,
+  });
+}
+
+export function useSaveRetentionPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { retention_days?: number; mode?: string }) =>
+      privacyApi.saveRetention(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['privacy-retention'] }),
+  });
+}
+
+export function useRunErasure() {
+  return useMutation({
+    mutationFn: () => privacyApi.runErasure(),
+  });
+}
+
+export function useRotateCredentialKeys() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => credentialApi.rotateKeys(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['credentials'] }),
   });
 }

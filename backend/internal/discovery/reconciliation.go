@@ -3,6 +3,7 @@ package discovery
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 )
@@ -22,10 +23,53 @@ type ReconcileResult struct {
 	MatchedCIID    string          `json:"matched_ci_id,omitempty"`
 	CandidateCIIDs []string        `json:"candidate_ci_ids,omitempty"`
 	Criterion      string          `json:"criterion,omitempty"`
+
+	// ValueConflicts lists fields where the incoming item carries a different
+	// non-empty identity value than the matched CI (e.g. a changed serial
+	// number). Callers queue these for operator review instead of silently
+	// overwriting (spec §5.3: Konfliktlösung + Review-Queue).
+	ValueConflicts []string `json:"value_conflicts,omitempty"`
+}
+
+// sourceTrust ranks discovery sources by how much their identity data is
+// trusted (spec §5.3: Konfliktlösung nach Quellenvertrauen + Aktualität).
+// Higher wins. Hardware-level sources (IPMI/Redfish) read identity directly
+// from the BMC and outrank OS-level sources (WMI/SSH), which outrank SNMP;
+// unauthenticated sweeps and manual entries are the least trustworthy.
+var sourceTrust = map[string]int{
+	ci.SourceIPMI:    90,
+	ci.SourceRedfish: 90,
+	ci.SourceAPI:     80,
+	ci.SourceAgent:   70,
+	ci.SourceWMI:     60,
+	ci.SourceSSH:     60,
+	ci.SourceSNMP:    50,
+	ci.SourceSweep:   30,
+	ci.SourceManual:  20,
+	"":               10, // unknown/unset source
+}
+
+// SourceTrust returns the trust rank of a discovery source; unknown sources
+// rank below every known source.
+func SourceTrust(source string) int {
+	if rank, ok := sourceTrust[source]; ok {
+		return rank
+	}
+	return 10
 }
 
 // Reconcile matches an incoming discovery item against existing CIs using the
-// configured identity priority order.
+// configured identity priority order (spec §5.3):
+//
+//  1. Seriennummer
+//  2. Chassis-/Hardware-UUID
+//  3. MAC-Adresse(n)
+//  4. Management-IP + sysObjectID/CI-Typ
+//  5. Hostname/FQDN
+//
+// On a match, FieldConflicts reports identity fields where the incoming item
+// contradicts the stored CI; whether the incoming value should be applied is
+// decided by ShouldApplyAttribute (Quellenvertrauen + Aktualität).
 func Reconcile(existing []ci.Item, incoming IngestItem) ReconcileResult {
 	criteria := []struct {
 		name  string
@@ -40,13 +84,15 @@ func Reconcile(existing []ci.Item, incoming IngestItem) ReconcileResult {
 		{
 			name: "hardware_uuid",
 			match: func(item ci.Item) bool {
-				return normalizedEqual(existingFingerprintValue(item, "hardware_uuid"), fingerprintString(incoming.Fingerprint["hardware_uuid"]))
+				return normalizedEqual(existingFingerprintValue(item, "hardware_uuid"), fingerprintString(incoming.Fingerprint["hardware_uuid"])) ||
+					normalizedEqual(item.HardwareUUID, incoming.HardwareUUID)
 			},
 		},
 		{
 			name: "mac_addresses",
 			match: func(item ci.Item) bool {
-				return macAddressOverlap(existingFingerprintSlice(item, "mac_addresses"), fingerprintSlice(incoming.Fingerprint["mac_addresses"]))
+				return macAddressOverlap(existingFingerprintSlice(item, "mac_addresses"), fingerprintSlice(incoming.Fingerprint["mac_addresses"])) ||
+					normalizedMACEqual(item.PrimaryMAC, incoming.PrimaryMAC)
 			},
 		},
 		{
@@ -56,8 +102,16 @@ func Reconcile(existing []ci.Item, incoming IngestItem) ReconcileResult {
 			},
 		},
 		{
-			name: "name",
+			name: "hostname_fqdn",
 			match: func(item ci.Item) bool {
+				if normalizedEqual(item.FQDN, incoming.FQDN) {
+					return true
+				}
+				if normalizedEqual(item.Hostname, incoming.Hostname) {
+					return true
+				}
+				// Backwards compatibility: the item name carries the hostname
+				// for sweeps and SSH collections.
 				return normalizedEqual(item.Name, incoming.Name)
 			},
 		},
@@ -66,7 +120,9 @@ func Reconcile(existing []ci.Item, incoming IngestItem) ReconcileResult {
 	for _, criterion := range criteria {
 		matches := matchingItems(existing, criterion.match)
 		if len(matches) == 1 {
-			return ReconcileResult{Action: ReconcileMatched, MatchedCIID: matches[0].ID, Criterion: criterion.name}
+			result := ReconcileResult{Action: ReconcileMatched, MatchedCIID: matches[0].ID, Criterion: criterion.name}
+			result.ValueConflicts = identityConflicts(matches[0], incoming)
+			return result
 		}
 		if len(matches) > 1 {
 			return ReconcileResult{Action: ReconcileConflict, CandidateCIIDs: collectIDs(matches), Criterion: criterion.name}
@@ -74,6 +130,46 @@ func Reconcile(existing []ci.Item, incoming IngestItem) ReconcileResult {
 	}
 
 	return ReconcileResult{Action: ReconcileCreated}
+}
+
+// ShouldApplyAttribute decides whether an incoming attribute value discovered
+// from source may overwrite the value the CI currently carries, following the
+// spec rule "Quellenvertrauen + Aktualität" (§5.3): data from an equal or
+// more trusted source is always applied; data from a less trusted source is
+// only applied when the CI has not been seen for longer than
+// stalenessThreshold (the stored value is considered outdated by then).
+func ShouldApplyAttribute(existingSource, incomingSource string, existingLastSeen, incomingSeenAt time.Time, stalenessThreshold time.Duration) bool {
+	if SourceTrust(incomingSource) >= SourceTrust(existingSource) {
+		return true
+	}
+	if stalenessThreshold <= 0 {
+		return false
+	}
+	return incomingSeenAt.Sub(existingLastSeen) > stalenessThreshold
+}
+
+// identityConflicts compares the strong identity fields of a matched CI with
+// the incoming item and lists the fields that carry differing non-empty
+// values. These are candidates for the review queue rather than silent
+// overwrites, because a changed serial number or hardware UUID on an existing
+// identity usually means replaced hardware or a mis-keyed fingerprint.
+func identityConflicts(item ci.Item, incoming IngestItem) []string {
+	var conflicts []string
+	addIfDiffering := func(field, existing, incomingValue string) {
+		if !normalizedEqual(existing, incomingValue) && strings.TrimSpace(existing) != "" && strings.TrimSpace(incomingValue) != "" {
+			conflicts = append(conflicts, field)
+		}
+	}
+	addIfDiffering("serial_number", item.SerialNumber, incoming.SerialNumber)
+	if existingUUID := existingFingerprintValue(item, "hardware_uuid"); existingUUID != "" {
+		addIfDiffering("hardware_uuid", existingUUID, fingerprintString(incoming.Fingerprint["hardware_uuid"]))
+	} else {
+		addIfDiffering("hardware_uuid", item.HardwareUUID, incoming.HardwareUUID)
+	}
+	addIfDiffering("management_ip", item.ManagementIP, incoming.ManagementIP)
+	addIfDiffering("hostname", item.Hostname, incoming.Hostname)
+	addIfDiffering("fqdn", item.FQDN, incoming.FQDN)
+	return conflicts
 }
 
 func matchingItems(existing []ci.Item, match func(ci.Item) bool) []ci.Item {
@@ -98,6 +194,26 @@ func normalizedEqual(left, right string) bool {
 	left = strings.TrimSpace(strings.ToLower(left))
 	right = strings.TrimSpace(strings.ToLower(right))
 	return left != "" && right != "" && left == right
+}
+
+// normalizedMACEqual compares two MAC addresses case-insensitively, ignoring
+// the usual separator variations (":" vs "-" vs raw hex).
+func normalizedMACEqual(left, right string) bool {
+	return normalizeMACValue(left) != "" && normalizeMACValue(left) == normalizeMACValue(right)
+}
+
+func normalizeMACValue(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.NewReplacer(":", "", "-", "", ".", "").Replace(value)
+	if len(value) != 12 {
+		return ""
+	}
+	for _, c := range value {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return ""
+		}
+	}
+	return value
 }
 
 func existingFingerprintValue(item ci.Item, key string) string {

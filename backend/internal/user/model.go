@@ -1,7 +1,25 @@
 // Package user provides the User, Team, and Custom Role management domain.
 package user
 
-import "time"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"time"
+)
+
+// SurrogateEmail builds the non-identifying replacement e-mail used when a
+// user is anonymized: deterministic (so repeated exports stay consistent) but
+// not reversible to the original address.
+func SurrogateEmail(userID string) string {
+	sum := sha256.Sum256([]byte("reticora-anonymized:" + userID))
+	return "deleted-" + hex.EncodeToString(sum[:8]) + "@anonymized.invalid"
+}
+
+// SurrogateDisplayName is the non-identifying replacement display name.
+func SurrogateDisplayName(userID string) string {
+	sum := sha256.Sum256([]byte("reticora-anonymized-name:" + userID))
+	return "Deleted user " + hex.EncodeToString(sum[:4])
+}
 
 // User represents an application user.
 type User struct {

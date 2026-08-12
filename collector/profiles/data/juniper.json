@@ -1,0 +1,43 @@
+[
+  {
+    "name": "juniper-junos-snmp",
+    "vendor": "Juniper",
+    "model": "JunOS",
+    "protocol": "snmp",
+    "sysObjectIds": ["1.3.6.1.4.1.2636.1.1.1.2"],
+    "ouiPrefixes": ["00:05:85", "00:12:1E", "28:C0:DA", "3C:61:04", "54:1E:56", "78:FE:3D", "84:18:88", "B0:C6:9A", "D4:04:FF"],
+    "snmpOids": {
+      "sysDescr": "1.3.6.1.2.1.1.1.0",
+      "sysName": "1.3.6.1.2.1.1.5.0",
+      "sysUpTime": "1.3.6.1.2.1.1.3.0",
+      "jnxBoxSerialNo": "1.3.6.1.4.1.2636.3.1.3.0",
+      "jnxBoxDescr": "1.3.6.1.4.1.2636.3.1.2.0",
+      "jnxBoxRevision": "1.3.6.1.4.1.2636.3.1.4.0",
+      "ifDescr": "1.3.6.1.2.1.2.2.1.2",
+      "ifOperStatus": "1.3.6.1.2.1.2.2.1.8",
+      "ifHighSpeed": "1.3.6.1.2.1.31.1.1.1.15"
+    },
+    "attributes": {
+      "category": "network_device",
+      "device_type": "switch"
+    }
+  },
+  {
+    "name": "juniper-junos-ssh",
+    "vendor": "Juniper",
+    "model": "JunOS",
+    "protocol": "ssh",
+    "sysObjectIds": ["1.3.6.1.4.1.2636.1.1.1.2"],
+    "sshCommands": {
+      "version": "show version",
+      "chassis_hardware": "show chassis hardware",
+      "interfaces": "show interfaces terse",
+      "lldp_neighbors": "show lldp neighbors",
+      "arp": "show arp no-resolve"
+    },
+    "attributes": {
+      "category": "network_device",
+      "device_type": "switch"
+    }
+  }
+]

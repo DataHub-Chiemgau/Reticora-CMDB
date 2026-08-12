@@ -25,6 +25,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
@@ -32,6 +33,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // version is set at build-time via -ldflags.
@@ -129,6 +131,7 @@ func main() {
 	var (
 		repos        server.Repositories
 		auditHandler *audit.Handler
+		auditPool    *pgxpool.Pool
 		apiKeyStore  identity.APIKeyStore
 		blobStore    blob.Store
 	)
@@ -158,6 +161,7 @@ func main() {
 		slog.Info("connected to PostgreSQL", "url", maskDSN(cfg.DatabaseURL))
 		repos = server.PostgresRepositories(pool, audit.NewPGRecorder())
 		auditHandler = audit.NewHandler(pool)
+		auditPool = pool
 		apiKeyStore = identity.NewPGAPIKeyStore(pool)
 
 		// Asynchronous exports render into object storage and are served via
@@ -224,6 +228,7 @@ func main() {
 		OIDC:         oidcProvider,
 		Sessions:     sessionIssuer,
 		Audit:        auditHandler,
+		AuditPool:    auditPool,
 		AIProvider:   aiProvider,
 		Blobs:        blobStore,
 	})
@@ -241,6 +246,17 @@ func main() {
 		go exportWorker.Run(workerCtx, 2*time.Second)
 	}
 
+	// Evaluate monitoring alert rules against the metric store until shutdown.
+	// Fired alerts are logged via the default notifier; evaluation state is
+	// persisted in the alert store so restarts neither re-notify nor lose
+	// pending durations.
+	if alertStore, ok := repos.Metrics.(monitoring.EvaluatingStore); ok {
+		evaluator := monitoring.NewEvaluator(repos.Metrics, alertStore.AlertStore(), nil)
+		evalCtx, stopEvaluator := context.WithCancel(context.Background())
+		defer stopEvaluator()
+		go evaluator.Run(evalCtx, time.Minute)
+	}
+
 	// Session tokens are always verified cryptographically unless the operator
 	// explicitly opted into the insecure development mode. API keys are
 	// verified against the database when available, which gives service
@@ -251,12 +267,13 @@ func main() {
 	}
 
 	// Middleware chain per spec:
-	// RequestID/Tracing -> Panic-Recovery -> Auth -> Tenant -> Entitlement ->
-	// Rate-Limit -> POST-Idempotency -> Handler
+	// RequestID/Tracing -> Panic-Recovery -> Security-Headers -> Auth ->
+	// Tenant -> Entitlement -> Rate-Limit -> POST-Idempotency -> Handler
 	handler := middleware.Chain(
 		middleware.RequestID,
 		middleware.Recovery,
 		middleware.Logger,
+		middleware.SecurityHeaders,
 		middleware.OpenAPIValidation,
 		authMiddleware,
 		middleware.TenantMiddleware,

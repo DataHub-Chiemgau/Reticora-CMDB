@@ -29,6 +29,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Delete("/api/v1/stocktakes/{id}", h.Delete)
 	r.Post("/api/v1/stocktakes/{id}/scans", h.AddScan)
 	r.Get("/api/v1/stocktakes/{id}/scans", h.ListScans)
+	r.Get("/api/v1/stocktakes/{id}/difference", h.Difference)
+	r.Post("/api/v1/stocktakes/{id}/complete", h.Complete)
 }
 
 // List handles GET /api/v1/stocktakes
@@ -87,7 +89,11 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
 
@@ -154,7 +160,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
 
@@ -171,7 +181,11 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	id := chi.URLParam(r, "id")
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
 
@@ -217,7 +231,11 @@ func (h *Handler) AddScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.AddScan(r.Context(), scan); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
 
@@ -248,4 +266,77 @@ func (h *Handler) ListScans(w http.ResponseWriter, r *http.Request) {
 		Offset:  page.Offset,
 		HasMore: page.Offset+page.Limit < total,
 	})
+}
+
+// Difference handles GET /api/v1/stocktakes/{id}/difference and returns the
+// scans that deviate from the expected inventory, enriched with the affected
+// asset where the scan resolved to one.
+func (h *Handler) Difference(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	stocktakeID := chi.URLParam(r, "id")
+	page := api.ParsePagination(r)
+
+	entries, total, err := h.repo.Difference(r.Context(), t.OrganizationID, stocktakeID, page)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[DifferenceEntry]{
+		Data:    entries,
+		Total:   total,
+		Limit:   page.Limit,
+		Offset:  page.Offset,
+		HasMore: page.Offset+page.Limit < total,
+	})
+}
+
+// Complete handles POST /api/v1/stocktakes/{id}/complete. It finalizes the
+// stocktake and, unless apply_corrections is false, applies the recorded
+// differences to the inventory (missing → lost, surplus → in_stock,
+// damaged → maintenance, wrong_location → location update).
+func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	stocktakeID := chi.URLParam(r, "id")
+	applyCorrections := true
+	if r.Body != nil && r.ContentLength != 0 {
+		var req CompleteRequest
+		if err := api.ReadJSON(r, &req); err != nil {
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
+		if req.ApplyCorrections != nil {
+			applyCorrections = *req.ApplyCorrections
+		}
+	}
+
+	completion, err := h.repo.Complete(r.Context(), t.OrganizationID, stocktakeID, applyCorrections)
+	if err != nil {
+		if errors.Is(err, ErrAlreadyCompleted) {
+			api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+			return
+		}
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
+	api.WriteJSON(w, http.StatusOK, completion)
 }

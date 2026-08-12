@@ -1,6 +1,7 @@
 package monitoring
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -99,6 +100,89 @@ func TestHandlerMetricAndAlertRoutes(t *testing.T) {
 	r.ServeHTTP(w, deleteReq)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("expected delete status 204, got %d", w.Code)
+	}
+}
+
+func TestEvaluatorFiresAfterDurationOnce(t *testing.T) {
+	store := NewMemoryMetricStore()
+	base := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
+	if err := store.Ingest(t.Context(), []Metric{
+		{OrgID: "org-1", CIID: "ci-1", Name: "cpu_usage", Value: 95, Timestamp: base},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	alerts := NewAlertManager()
+	if _, err := alerts.CreateRule(t.Context(), AlertRule{
+		OrgID: "org-1", Name: "High CPU", MetricName: "cpu_usage",
+		Condition: "gt", Threshold: 90, Duration: 5 * time.Minute,
+		Severity: "critical", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var fired []AlertEvent
+	ev := NewEvaluator(store, alerts, NotifierFunc(func(_ context.Context, e AlertEvent) {
+		fired = append(fired, e)
+	}))
+	ev.Now = func() time.Time { return base.Add(2 * time.Minute) }
+
+	// Condition holds, but the duration has not elapsed yet.
+	ev.Evaluate(t.Context())
+	if len(fired) != 0 {
+		t.Fatalf("expected no alert before duration elapsed, got %d", len(fired))
+	}
+
+	// After the duration the alert fires exactly once.
+	ev.Now = func() time.Time { return base.Add(6 * time.Minute) }
+	ev.Evaluate(t.Context())
+	if len(fired) != 1 {
+		t.Fatalf("expected exactly one alert after duration, got %d", len(fired))
+	}
+	if fired[0].Value != 95 || fired[0].Rule.Name != "High CPU" {
+		t.Fatalf("unexpected alert event: %+v", fired[0])
+	}
+	ev.Evaluate(t.Context())
+	if len(fired) != 1 {
+		t.Fatalf("expected no duplicate notification, got %d", len(fired))
+	}
+
+	// Recovery clears the pending state; a later breach starts a new window.
+	if err := store.Ingest(t.Context(), []Metric{
+		{OrgID: "org-1", CIID: "ci-1", Name: "cpu_usage", Value: 40, Timestamp: base.Add(7 * time.Minute)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ev.Now = func() time.Time { return base.Add(8 * time.Minute) }
+	ev.Evaluate(t.Context())
+	updated, err := alerts.ListRules(t.Context(), "org-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated) != 1 || updated[0].PendingSince != nil {
+		t.Fatalf("expected pending state cleared, got %+v", updated)
+	}
+}
+
+func TestEvaluatorDisabledRulesAreSkipped(t *testing.T) {
+	store := NewMemoryMetricStore()
+	if err := store.Ingest(t.Context(), []Metric{
+		{OrgID: "org-1", Name: "cpu_usage", Value: 99, Timestamp: time.Now().UTC()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	alerts := NewAlertManager()
+	if _, err := alerts.CreateRule(t.Context(), AlertRule{
+		OrgID: "org-1", Name: "disabled", MetricName: "cpu_usage",
+		Condition: "gt", Threshold: 1, Enabled: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fired := 0
+	ev := NewEvaluator(store, alerts, NotifierFunc(func(context.Context, AlertEvent) { fired++ }))
+	ev.Evaluate(t.Context())
+	if fired != 0 {
+		t.Fatalf("disabled rule must not fire, got %d alerts", fired)
 	}
 }
 

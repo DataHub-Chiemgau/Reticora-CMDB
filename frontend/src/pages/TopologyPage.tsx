@@ -69,6 +69,26 @@ export function buildGraphModel(graph: TopologyGraphData): GraphModel {
   };
 }
 
+/**
+ * Computes the outage-impact set of a failed node: every node reachable from
+ * the failure via outbound edges (things that depend on the failed CI). Nodes
+ * reachable only over an already-impacted path are impacted as well.
+ */
+export function computeOutageImpact(failedId: string, edges: GraphEdge[]): Set<string> {
+  const impacted = new Set<string>();
+  const queue = [failedId];
+  while (queue.length > 0) {
+    const current = queue.pop() as string;
+    edges.forEach((edge) => {
+      if (edge.source === current && edge.target !== failedId && !impacted.has(edge.target)) {
+        impacted.add(edge.target);
+        queue.push(edge.target);
+      }
+    });
+  }
+  return impacted;
+}
+
 const ciTypeValues = ['server', 'switch', 'router', 'firewall', 'pdu', 'ups', 'nas', 'client'];
 const depthValues = ['1', '2', '3', '4', '5'];
 
@@ -80,6 +100,7 @@ export function TopologyPage() {
   const rootCiId = searchParams.get('root') ?? '';
   const ciType = searchParams.get('type') ?? '';
   const depth = searchParams.get('depth') ?? '2';
+  const simulateId = searchParams.get('simulate') ?? '';
 
   const { data, isLoading, error, refetch } = useTopology({
     root_ci_id: rootCiId || undefined,
@@ -88,6 +109,11 @@ export function TopologyPage() {
   });
 
   const model = useMemo(() => (data ? buildGraphModel(data) : { nodes: [], edges: [] }), [data]);
+
+  const outageImpact = useMemo(
+    () => (simulateId ? computeOutageImpact(simulateId, model.edges) : undefined),
+    [simulateId, model.edges],
+  );
 
   function updateParam(key: string, value: string) {
     const next = new URLSearchParams(searchParams);
@@ -108,11 +134,18 @@ export function TopologyPage() {
           </h2>
           <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{t('topology.subtitle')}</p>
         </div>
-        {rootCiId ? (
-          <Button variant="secondary" onClick={() => updateParam('root', '')}>
-            {t('topology.clearRoot')}
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {simulateId ? (
+            <Button variant="danger" onClick={() => updateParam('simulate', '')}>
+              {t('topology.simulation.stop')}
+            </Button>
+          ) : null}
+          {rootCiId ? (
+            <Button variant="secondary" onClick={() => updateParam('root', '')}>
+              {t('topology.clearRoot')}
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       <Card>
@@ -161,9 +194,43 @@ export function TopologyPage() {
 
       {data && model.nodes.length > 0 ? (
         <>
+          {simulateId && outageImpact ? (
+            <Card
+              className="border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950"
+              title={t('topology.simulation.active')}
+            >
+              <p className="text-sm text-red-900 dark:text-red-100">
+                {t('topology.simulation.impact', {
+                  name: data.nodes.find((node) => node.id === simulateId)?.name ?? simulateId,
+                  count: outageImpact.size,
+                })}
+              </p>
+              {outageImpact.size > 0 ? (
+                <ul className="mt-2 flex flex-wrap gap-1 text-xs">
+                  {[...outageImpact].map((id) => (
+                    <li key={id}>
+                      <Badge variant="danger">
+                        {data.nodes.find((node) => node.id === id)?.name ?? id}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                  {t('topology.simulation.noImpact')}
+                </p>
+              )}
+            </Card>
+          ) : null}
+
           <Card className="p-0">
             <div className="h-[28rem] w-full overflow-hidden rounded-2xl">
-              <TopologyGraph nodes={model.nodes} edges={model.edges} />
+              <TopologyGraph
+                nodes={model.nodes}
+                edges={model.edges}
+                dimmedNodes={outageImpact}
+                highlightedNodes={simulateId ? new Set([simulateId]) : undefined}
+              />
             </div>
           </Card>
 
@@ -184,11 +251,24 @@ export function TopologyPage() {
                   >
                     {node.name}
                   </button>
-                  <span className="flex items-center gap-2">
+                  <span className="flex flex-wrap items-center gap-2">
                     <Badge variant="info">{node.ci_type}</Badge>
                     <Badge variant={getStatusBadgeVariant(node.status)}>
                       {t(getStatusTranslationKey(node.status))}
                     </Badge>
+                    {simulateId === node.id ? (
+                      <Button variant="ghost" size="sm" onClick={() => updateParam('simulate', '')}>
+                        {t('topology.simulation.stop')}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => updateParam('simulate', node.id)}
+                      >
+                        {t('topology.simulation.simulate')}
+                      </Button>
+                    )}
                     <Button variant="ghost" size="sm" onClick={() => updateParam('root', node.id)}>
                       {t('topology.focus')}
                     </Button>

@@ -65,10 +65,14 @@ describe('buildRackUnits', () => {
   it('labels mounts with the CI name and falls back to the CI id', () => {
     const units = buildRackUnits(mounts, new Map([[ci.id, ci]]));
 
-    expect(units).toEqual([
-      { id: 'mount-1', position: 10, height: 2, label: 'srv-01' },
-      { id: 'mount-2', position: 1, height: 1, label: 'ci-unknown' },
-    ]);
+    // default face is "front", so the rear-mounted unit is filtered out
+    expect(units).toEqual([{ id: 'mount-1', position: 10, height: 2, label: 'srv-01' }]);
+  });
+
+  it('renders rear mounts when the rear face is selected', () => {
+    const units = buildRackUnits(mounts, new Map([[ci.id, ci]]), 'rear');
+
+    expect(units).toEqual([{ id: 'mount-2', position: 1, height: 1, label: 'ci-unknown' }]);
   });
 });
 
@@ -82,9 +86,27 @@ describe('RackPage', () => {
 
     renderWithProviders(<RackPage />, { route: '/racks' });
 
-    expect(await screen.findByRole('heading', { name: 'Rack A1' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'Rack A1 · Vorderseite' }),
+    ).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'srv-01' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Rack auswählen' })).toHaveValue('rack-1');
+  });
+
+  it('switches to the rear face and shows rear mounts', async () => {
+    stubFetchRoutes({
+      '/racks/rack-1/mounts': paginated(mounts),
+      '/racks': paginated([rack]),
+      '/cis/ci-1': ci,
+    });
+
+    renderWithProviders(<RackPage />, { route: '/racks' });
+
+    const rearButton = await screen.findByRole('button', { name: 'Rückseite' });
+    rearButton.click();
+
+    expect(await screen.findByRole('heading', { name: 'Rack A1 · Rückseite' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'ci-unknown' })).toBeInTheDocument();
   });
 
   it('shows an empty state when no racks exist', async () => {

@@ -58,6 +58,60 @@ type Resolution struct {
 	Status string `json:"-"`
 }
 
+// reviewItemFromValueConflicts maps contradicting identity values on a
+// matched CI into a review item (spec §5.3: Konfliktlösung nach
+// Quellenvertrauen + Aktualität; Unklarheiten in Review-Queue). It returns
+// nil when there is nothing to review.
+func reviewItemFromValueConflicts(orgID string, matched ci.Item, incoming IngestItem, result ReconcileResult) *ReviewItem {
+	if len(result.ValueConflicts) == 0 {
+		return nil
+	}
+	payload := map[string]any{
+		"criterion":          result.Criterion,
+		"matched_ci_id":      result.MatchedCIID,
+		"conflict_fields":    result.ValueConflicts,
+		"ci_type_name":       incoming.CITypeName,
+		"name":               incoming.Name,
+		"manufacturer":       incoming.Manufacturer,
+		"model":              incoming.Model,
+		"serial_number":      incoming.SerialNumber,
+		"management_ip":      incoming.ManagementIP,
+		"hardware_uuid":      incoming.HardwareUUID,
+		"primary_mac":        incoming.PrimaryMAC,
+		"hostname":           incoming.Hostname,
+		"fqdn":               incoming.FQDN,
+		"fingerprint":        incoming.Fingerprint,
+		"raw_data":           incoming.RawData,
+		"existing":           identitySnapshot(matched),
+		"incoming_source":    incoming.Source,
+		"existing_source":    matched.DiscoverySource,
+		"existing_last_seen": matched.LastSeenAt,
+	}
+	return &ReviewItem{
+		OrganizationID: orgID,
+		Kind:           ReviewKindConflictingValues,
+		Status:         ReviewStatusOpen,
+		Payload:        payload,
+		CandidateCIIDs: []string{result.MatchedCIID},
+	}
+}
+
+// identitySnapshot captures the stored identity fields of a matched CI for
+// side-by-side comparison in the review queue.
+func identitySnapshot(item ci.Item) map[string]any {
+	return map[string]any{
+		"name":          item.Name,
+		"manufacturer":  item.Manufacturer,
+		"model":         item.Model,
+		"serial_number": item.SerialNumber,
+		"management_ip": item.ManagementIP,
+		"hardware_uuid": item.HardwareUUID,
+		"primary_mac":   item.PrimaryMAC,
+		"hostname":      item.Hostname,
+		"fqdn":          item.FQDN,
+	}
+}
+
 // reviewItemFromConflict maps a conflicting reconciliation result into a review
 // item capturing the candidate CIs and the matching criterion.
 func reviewItemFromConflict(orgID string, incoming IngestItem, result ReconcileResult) *ReviewItem {

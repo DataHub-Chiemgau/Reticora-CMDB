@@ -1,7 +1,11 @@
 // Package stocktake provides the Inventory/Stocktake domain.
 package stocktake
 
-import "time"
+import (
+	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
+)
 
 // Stocktake represents a planned or active inventory count.
 type Stocktake struct {
@@ -73,4 +77,39 @@ type FilterParams struct {
 	Search  string
 	SortBy  string
 	SortDir string
+}
+
+// DifferenceEntry pairs a deviating scan (missing, surplus, damaged,
+// wrong_location) with the asset it refers to. Asset is nil when the scan
+// did not resolve to a known asset.
+type DifferenceEntry struct {
+	Scan  StockScan    `json:"scan"`
+	Asset *asset.Asset `json:"asset,omitempty"`
+}
+
+// CompleteRequest is the payload for completing a stocktake.
+type CompleteRequest struct {
+	ApplyCorrections *bool `json:"apply_corrections,omitempty"`
+}
+
+// Correction describes the inventory change applied (or skipped) for one
+// deviating scan when a stocktake is completed.
+type Correction struct {
+	AssetID          string `json:"asset_id"`
+	AssetTag         string `json:"asset_tag,omitempty"`
+	ScanResult       string `json:"scan_result"`
+	PreviousStatus   string `json:"previous_status,omitempty"`
+	NewStatus        string `json:"new_status,omitempty"`
+	PreviousLocation string `json:"previous_location,omitempty"`
+	NewLocation      string `json:"new_location,omitempty"`
+	Applied          bool   `json:"applied"`
+	Detail           string `json:"detail,omitempty"`
+}
+
+// Completion is the result of completing a stocktake: the final stocktake
+// state plus every inventory correction that was applied.
+type Completion struct {
+	Stocktake          Stocktake    `json:"stocktake"`
+	CorrectionsApplied int          `json:"corrections_applied"`
+	Corrections        []Correction `json:"corrections"`
 }

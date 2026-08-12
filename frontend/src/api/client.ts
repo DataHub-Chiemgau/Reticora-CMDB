@@ -617,7 +617,42 @@ export const stocktakeApi = {
   listScans(stocktakeId: string, params: ListParams = {}): Promise<PaginatedResponse<StockScan>> {
     return fetchAPI(`/stocktakes/${stocktakeId}/scans${buildQuery(params)}`);
   },
+  difference(
+    stocktakeId: string,
+    params: ListParams = {},
+  ): Promise<PaginatedResponse<StocktakeDifferenceEntry>> {
+    return fetchAPI(`/stocktakes/${stocktakeId}/difference${buildQuery(params)}`);
+  },
+  complete(stocktakeId: string, applyCorrections = true): Promise<StocktakeCompletion> {
+    return fetchAPI(`/stocktakes/${stocktakeId}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({ apply_corrections: applyCorrections }),
+    });
+  },
 };
+
+export interface StocktakeDifferenceEntry {
+  scan: StockScan;
+  asset?: Asset;
+}
+
+export interface StocktakeCorrection {
+  asset_id: string;
+  asset_tag?: string;
+  scan_result: string;
+  previous_status?: string;
+  new_status?: string;
+  previous_location?: string;
+  new_location?: string;
+  applied: boolean;
+  detail?: string;
+}
+
+export interface StocktakeCompletion {
+  stocktake: Stocktake;
+  corrections_applied: number;
+  corrections: StocktakeCorrection[];
+}
 
 // --- Phase 2: Ticket System (Essential) ---
 
@@ -1194,6 +1229,67 @@ export const complianceApi = {
   evaluate() {
     return fetchAPI<ComplianceEvaluationResponse>('/compliance/evaluations', { method: 'POST' });
   },
+  report(standard = 'iso27001') {
+    return fetchAPI<SecurityReport>(`/compliance/report?standard=${encodeURIComponent(standard)}`);
+  },
+};
+
+// --- Security & Privacy (Epic F) ---
+
+export interface SecurityFinding {
+  rule_id: string;
+  rule_name: string;
+  severity: 'critical' | 'high' | 'medium' | 'low' | string;
+  category: string;
+  remediation_hint?: string;
+  affected_cis: string[];
+}
+
+export interface SecurityReport {
+  generated_at: string;
+  standard: string;
+  audit_integrity: { intact: boolean; checked: number; broken_reason?: string };
+  compliance_score: ComplianceScore;
+  failures_by_severity: Record<string, number>;
+  findings: SecurityFinding[];
+  capabilities?: { feature_key: string; enabled: boolean }[];
+}
+
+export interface RetentionPolicy {
+  id: string;
+  organization_id: string;
+  retention_days: number;
+  mode: 'anonymize' | 'delete';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ErasureSummary {
+  cutoff: string;
+  mode: 'anonymize' | 'delete';
+  contacts_affected: number;
+  users_affected: number;
+}
+
+export const privacyApi = {
+  retention(): Promise<RetentionPolicy> {
+    return fetchAPI('/privacy/retention');
+  },
+  saveRetention(data: { retention_days?: number; mode?: string }): Promise<RetentionPolicy> {
+    return fetchAPI('/privacy/retention', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+  runErasure(): Promise<ErasureSummary> {
+    return fetchAPI('/privacy/erasure', { method: 'POST' });
+  },
+};
+
+export const credentialApi = {
+  rotateKeys(): Promise<{ key_version: number; rotated: number }> {
+    return fetchAPI('/credentials/rotate-keys', { method: 'POST' });
+  },
 };
 
 // --- IGA ---
@@ -1457,6 +1553,8 @@ export interface AlertRule {
   duration: string;
   severity: 'critical' | 'warning' | 'info';
   enabled: boolean;
+  pending_since?: string;
+  last_fired_at?: string;
 }
 
 export interface AlertRuleCreateRequest {
@@ -1481,5 +1579,38 @@ export const monitoringApi = {
   },
   deleteAlert(id: string): Promise<void> {
     return fetchAPI(`/monitoring/alerts/${id}`, { method: 'DELETE' });
+  },
+};
+
+// --- Audit (hash chain verification) ---
+
+export interface AuditEntry {
+  id: string;
+  organization_id: string;
+  actor_id?: string;
+  actor_email?: string;
+  action: string;
+  entity_type?: string;
+  entity_id?: string;
+  details?: Record<string, unknown>;
+  hash?: string;
+  previous_hash?: string;
+  created_at: string;
+}
+
+export interface AuditVerifyResult {
+  intact: boolean;
+  checked: number;
+  broken_id?: string;
+  broken_at?: number;
+  broken_reason?: string;
+}
+
+export const auditApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<AuditEntry>> {
+    return fetchAPI(`/audit${buildQuery(params)}`);
+  },
+  verify(): Promise<AuditVerifyResult> {
+    return fetchAPI('/audit/verify', { method: 'POST' });
   },
 };

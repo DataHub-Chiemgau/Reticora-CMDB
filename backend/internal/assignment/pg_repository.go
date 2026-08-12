@@ -82,6 +82,11 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			args = append(args, filter.AssignedTo)
 			argPos++
 		}
+		if filter.AssignedBy != "" {
+			whereParts = append(whereParts, fmt.Sprintf("assigned_by = $%d", argPos))
+			args = append(args, filter.AssignedBy)
+			argPos++
+		}
 		if filter.AssetID != "" {
 			whereParts = append(whereParts, fmt.Sprintf("asset_id = $%d", argPos))
 			args = append(args, filter.AssetID)

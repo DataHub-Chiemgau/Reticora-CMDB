@@ -23,6 +23,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Route("/api/v1/credentials", func(r chi.Router) {
 		r.Post("/", h.create)
 		r.Get("/", h.list)
+		r.Post("/rotate-keys", h.rotateKeys)
 		r.Get("/{id}", h.get)
 		r.Get("/{id}/decrypt", h.decrypt)
 		r.Delete("/{id}", h.delete)
@@ -160,6 +161,30 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// rotateKeys handles POST /api/v1/credentials/rotate-keys: the organization
+// DEK is rotated and every stored credential ciphertext is re-encrypted.
+// Rotating regularly limits the blast radius of a key compromise and is a
+// standard ISO 27001 (A.10.1.2) / NIS2 cryptographic control.
+func (h *Handler) rotateKeys(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := organizationID(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.svc.RotateKeys(r.Context(), orgID)
+	if err == ErrNotFound {
+		writeError(w, http.StatusNotFound, "no encryption key material exists for this tenant yet")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to rotate encryption keys")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 // writeError writes an RFC 7807 problem response.
