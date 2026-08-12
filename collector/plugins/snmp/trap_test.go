@@ -88,8 +88,8 @@ func TestTrapReceiverEndToEnd(t *testing.T) {
 	// Wait for the socket to be up.
 	var addr string
 	for i := 0; i < 50; i++ {
-		if rcv.conn != nil {
-			addr = rcv.conn.LocalAddr().String()
+		if bound := rcv.LocalAddr(); bound != nil {
+			addr = bound.String()
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -145,6 +145,25 @@ func TestTrapReceiverRequiresSink(t *testing.T) {
 	rcv := &TrapReceiver{ListenAddr: "127.0.0.1:0"}
 	if err := rcv.Run(context.Background()); err == nil {
 		t.Fatal("expected an error when no sink is configured")
+	}
+}
+
+func TestBerIntStringSignExtension(t *testing.T) {
+	cases := []struct {
+		value []byte
+		want  string
+	}{
+		{[]byte{0xFF}, "-1"},
+		{[]byte{0x80}, "-128"},
+		{[]byte{0x7F}, "127"},
+		{[]byte{0x00, 0x80}, "128"},
+		{[]byte{0xFF, 0x7F}, "-129"},
+		{[]byte{0x01, 0x00}, "256"},
+	}
+	for _, tc := range cases {
+		if got := berIntString(tc.value); got != tc.want {
+			t.Errorf("berIntString(%x) = %s, want %s", tc.value, got, tc.want)
+		}
 	}
 }
 

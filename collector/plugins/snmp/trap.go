@@ -34,7 +34,7 @@ type TrapReceiver struct {
 	// Sink receives each parsed event. It must be safe for concurrent use.
 	Sink func(ctx context.Context, ev TrapEvent)
 
-	conn     net.PacketConn
+	conn     atomic.Pointer[net.PacketConn]
 	inFlight atomic.Int64
 }
 
@@ -56,7 +56,7 @@ func (r *TrapReceiver) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("snmp trap listen %s: %w", addr, err)
 	}
-	r.conn = conn
+	r.conn.Store(&conn)
 	slog.Info("snmp trap receiver listening", "addr", conn.LocalAddr().String())
 
 	go func() {
@@ -89,8 +89,17 @@ func (r *TrapReceiver) Run(ctx context.Context) error {
 
 // Close stops the receiver.
 func (r *TrapReceiver) Close() error {
-	if r.conn != nil {
-		return r.conn.Close()
+	if conn := r.conn.Load(); conn != nil {
+		return (*conn).Close()
+	}
+	return nil
+}
+
+// LocalAddr returns the bound listen address, or nil before Run has bound the
+// socket. Safe for concurrent use with Run.
+func (r *TrapReceiver) LocalAddr() net.Addr {
+	if conn := r.conn.Load(); conn != nil {
+		return (*conn).LocalAddr()
 	}
 	return nil
 }
@@ -244,7 +253,12 @@ func berValueString(tag byte, value []byte) string {
 }
 
 func berIntString(value []byte) string {
+	// BER INTEGER is signed two's complement: sign-extend the most
+	// significant byte so negative values decode correctly.
 	var n int64
+	if len(value) > 0 && value[0]&0x80 != 0 {
+		n = -1
+	}
 	for _, b := range value {
 		n = n<<8 | int64(b)
 	}
