@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { CIListPage } from './CIListPage';
+import { ToastViewport } from '../components/ui/Toast';
 import { renderWithProviders, stubFetchRoutes } from '../test/utils';
 
 const ci = {
@@ -46,5 +47,42 @@ describe('CIListPage', () => {
     const createButtons = screen.getAllByRole('button', { name: 'CI erstellen' });
     fireEvent.click(createButtons[createButtons.length - 1]!);
     expect(onCreateCI).toHaveBeenCalledTimes(1);
+  });
+
+  it('bulk-updates the status of selected CIs', async () => {
+    const fetchMock = stubFetchRoutes({
+      '/cis': { data: [ci], total: 1, limit: 25, offset: 0, has_more: false },
+    });
+
+    renderWithProviders(
+      <>
+        <CIListPage onCreateCI={() => {}} />
+        <ToastViewport />
+      </>,
+      { route: '/cmdb' },
+    );
+
+    // Select the single visible row; the bulk toolbar appears.
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'core-sw-01 auswählen' }));
+    expect(await screen.findByText('1 ausgewählt')).toBeInTheDocument();
+
+    // Choose a new status and apply it.
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status setzen…' }), {
+      target: { value: 'maintenance' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Anwenden' }));
+
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit | undefined][];
+    const isPatch = (call: [string, RequestInit | undefined]) =>
+      call[0].includes('/cis/ci-1') && call[1]?.method === 'PATCH';
+
+    await waitFor(() => {
+      expect(calls.find(isPatch)).toBeTruthy();
+    });
+    const patchCall = calls.find(isPatch);
+    expect(JSON.parse(patchCall?.[1]?.body as string)).toEqual({ status: 'maintenance' });
+
+    // Success toast is announced in the live region.
+    expect(await screen.findByText('Status von 1 CIs aktualisiert')).toBeInTheDocument();
   });
 });

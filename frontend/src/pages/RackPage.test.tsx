@@ -105,9 +105,7 @@ describe('RackPage', () => {
     const rearButton = await screen.findByRole('button', { name: 'Rückseite' });
     rearButton.click();
 
-    expect(
-      await screen.findByRole('heading', { name: 'Rack A1 · Rückseite' }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Rack A1 · Rückseite' })).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'ci-unknown' })).toBeInTheDocument();
   });
 

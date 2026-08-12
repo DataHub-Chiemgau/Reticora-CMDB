@@ -80,7 +80,7 @@ export function computeOutageImpact(failedId: string, edges: GraphEdge[]): Set<s
   while (queue.length > 0) {
     const current = queue.pop() as string;
     edges.forEach((edge) => {
-      if (edge.source === current && !impacted.has(edge.target)) {
+      if (edge.source === current && edge.target !== failedId && !impacted.has(edge.target)) {
         impacted.add(edge.target);
         queue.push(edge.target);
       }
