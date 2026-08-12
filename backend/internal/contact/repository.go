@@ -36,6 +36,16 @@ type MemoryRepository struct {
 	seq      int
 }
 
+// AgeForTesting backdates a stored contact's updated_at timestamp. It exists
+// so retention/erasure tests can create "expired" records without waiting.
+func (r *MemoryRepository) AgeForTesting(id string, age time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if c, ok := r.contacts[id]; ok {
+		c.UpdatedAt = time.Now().UTC().Add(-age)
+	}
+}
+
 // NewMemoryRepository creates a new in-memory contact repository.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{

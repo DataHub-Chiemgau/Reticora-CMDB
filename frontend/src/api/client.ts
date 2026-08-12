@@ -1229,6 +1229,67 @@ export const complianceApi = {
   evaluate() {
     return fetchAPI<ComplianceEvaluationResponse>('/compliance/evaluations', { method: 'POST' });
   },
+  report(standard = 'iso27001') {
+    return fetchAPI<SecurityReport>(`/compliance/report?standard=${encodeURIComponent(standard)}`);
+  },
+};
+
+// --- Security & Privacy (Epic F) ---
+
+export interface SecurityFinding {
+  rule_id: string;
+  rule_name: string;
+  severity: 'critical' | 'high' | 'medium' | 'low' | string;
+  category: string;
+  remediation_hint?: string;
+  affected_cis: string[];
+}
+
+export interface SecurityReport {
+  generated_at: string;
+  standard: string;
+  audit_integrity: { intact: boolean; checked: number; broken_reason?: string };
+  compliance_score: ComplianceScore;
+  failures_by_severity: Record<string, number>;
+  findings: SecurityFinding[];
+  capabilities?: { feature_key: string; enabled: boolean }[];
+}
+
+export interface RetentionPolicy {
+  id: string;
+  organization_id: string;
+  retention_days: number;
+  mode: 'anonymize' | 'delete';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ErasureSummary {
+  cutoff: string;
+  mode: 'anonymize' | 'delete';
+  contacts_affected: number;
+  users_affected: number;
+}
+
+export const privacyApi = {
+  retention(): Promise<RetentionPolicy> {
+    return fetchAPI('/privacy/retention');
+  },
+  saveRetention(data: { retention_days?: number; mode?: string }): Promise<RetentionPolicy> {
+    return fetchAPI('/privacy/retention', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+  runErasure(): Promise<ErasureSummary> {
+    return fetchAPI('/privacy/erasure', { method: 'POST' });
+  },
+};
+
+export const credentialApi = {
+  rotateKeys(): Promise<{ key_version: number; rotated: number }> {
+    return fetchAPI('/credentials/rotate-keys', { method: 'POST' });
+  },
 };
 
 // --- IGA ---

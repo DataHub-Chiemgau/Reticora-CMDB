@@ -53,11 +53,14 @@ var readPermissionFor = map[string]identity.Permission{
 	"workflow-runs":      identity.PermWorkflowRead,
 	"compliance":         identity.PermComplianceRead,
 	"monitoring":         identity.PermMonitoringRead,
-	"iga":                identity.PermIGARead,
-	"scim":               identity.PermIGARead,
-	"search":             identity.PermSearchRead,
-	"ai":                 identity.PermAIRead,
-	"graphql":            identity.PermCIRead,
+	// Privacy/DSGVO acts on other people's personal data; even the read-side
+	// retention policy requires the manage permission.
+	"privacy": identity.PermUserManage,
+	"iga":     identity.PermIGARead,
+	"scim":    identity.PermIGARead,
+	"search":  identity.PermSearchRead,
+	"ai":      identity.PermAIRead,
+	"graphql": identity.PermCIRead,
 }
 
 // writePermissionOverrides covers resources whose write permission does not
@@ -94,6 +97,9 @@ var writePermissionOverrides = map[string]identity.Permission{
 	// The AI assistant has a read-style permission only; conversations and
 	// questions are protected by ai:read regardless of method.
 	"ai": identity.PermAIRead,
+	// Privacy/DSGVO: retention configuration and the erasure workflow act on
+	// other people's personal data, so every method requires user:manage.
+	"privacy": identity.PermUserManage,
 }
 
 // routeAccess describes how a route participates in authorization.

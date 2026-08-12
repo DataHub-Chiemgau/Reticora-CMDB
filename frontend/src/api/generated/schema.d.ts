@@ -208,6 +208,50 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/privacy/retention': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the tenant data-retention policy (DSGVO Art. 5)
+     * @description Returns the configured retention policy for personal data. The policy defines after how many days personal records (contacts, deactivated user accounts) expire and whether the erasure workflow anonymizes or deletes them. Requires user:manage.
+     */
+    get: operations['getRetentionPolicy'];
+    /**
+     * Configure the tenant data-retention policy
+     * @description Creates or updates the retention policy. `retention_days = 0` keeps data forever (no erasure). `mode` selects whether expired records are anonymized (default; rows stay for referential integrity) or deleted. Requires user:manage.
+     */
+    put: operations['putRetentionPolicy'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/privacy/erasure': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Run the data-erasure workflow (DSGVO Art. 17)
+     * @description Enforces the configured retention policy: contact records and deactivated user accounts whose last update predates the retention window are anonymized (default) or deleted. Running the workflow requires an explicitly configured policy, so a tenant can never purge data by accident. Requires user:manage.
+     */
+    post: operations['runErasureWorkflow'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/relationships': {
     parameters: {
       query?: never;
@@ -1695,6 +1739,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/credentials/rotate-keys': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rotate the tenant data-encryption key (DEK)
+     * @description Generates a fresh per-organization DEK, re-encrypts every stored credential ciphertext with it and atomically bumps the key version. Plaintext secrets never leave the platform. Regular rotation limits the blast radius of a key compromise (ISO 27001 A.10.1.2, NIS2 cryptographic-controls requirement). Requires credential:manage.
+     */
+    post: operations['rotateCredentialKeys'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/documents/{id}/content': {
     parameters: {
       query?: never;
@@ -1892,7 +1956,7 @@ export interface paths {
     };
     /**
      * Export all personal data of a user (GDPR Art. 15)
-     * @description Returns every piece of personal data the CMDB stores about the user: the account record plus all contact records linked to the user's e-mail address. Requires user:manage.
+     * @description Returns every piece of personal data the CMDB stores about the user: the account record, all contact records linked to the user's e-mail address, the user's custom role assignments, and the tickets and assignments the user reported, received or issued. Requires user:manage.
      */
     get: operations['exportUserData'];
     put?: never;
@@ -2377,6 +2441,26 @@ export interface paths {
     };
     /** Get compliance score from stored results */
     get: operations['getComplianceScore'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/compliance/report': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Generate the tenant security & compliance report (ISO 27001 / NIS2)
+     * @description Aggregates the tenant's security posture into one evidence document: audit hash-chain integrity, the rule-based compliance score, failing checks grouped per rule (with remediation hints and affected CIs) and the enabled security-relevant capabilities. The `standard` query parameter selects the framing label (`iso27001`, `nis2`, …).
+     */
+    get: operations['getSecurityReport'];
     put?: never;
     post?: never;
     delete?: never;
@@ -3995,6 +4079,57 @@ export interface components {
     ComplianceResultListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ComplianceResult'][];
     };
+    SecurityFinding: {
+      rule_id: string;
+      rule_name: string;
+      /** @enum {string} */
+      severity: 'critical' | 'high' | 'medium' | 'low';
+      category: string;
+      remediation_hint?: string;
+      affected_cis: string[];
+    };
+    SecurityCapability: {
+      feature_key: string;
+      enabled: boolean;
+    };
+    AuditIntegrity: {
+      intact: boolean;
+      checked: number;
+      broken_reason?: string;
+    };
+    SecurityReport: {
+      /** Format: date-time */
+      generated_at: string;
+      /** @description Framing standard label (iso27001, nis2, kritis) */
+      standard: string;
+      audit_integrity: components['schemas']['AuditIntegrity'];
+      compliance_score: components['schemas']['ComplianceScore'];
+      failures_by_severity: {
+        [key: string]: number;
+      };
+      findings: components['schemas']['SecurityFinding'][];
+      capabilities?: components['schemas']['SecurityCapability'][];
+    };
+    RetentionPolicy: {
+      id: string;
+      organization_id: string;
+      /** @description Retention window for personal data in days; 0 keeps data forever */
+      retention_days: number;
+      /** @enum {string} */
+      mode: 'anonymize' | 'delete';
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    ErasureSummary: {
+      /** Format: date-time */
+      cutoff: string;
+      /** @enum {string} */
+      mode: 'anonymize' | 'delete';
+      contacts_affected: number;
+      users_affected: number;
+    };
     User: {
       id: string;
       organization_id: string;
@@ -5299,6 +5434,81 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+    };
+  };
+  getRetentionPolicy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Retention policy */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RetentionPolicy'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  putRetentionPolicy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          retention_days?: number;
+          /** @enum {string} */
+          mode?: 'anonymize' | 'delete';
+        };
+      };
+    };
+    responses: {
+      /** @description Updated retention policy */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RetentionPolicy'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  runErasureWorkflow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Erasure summary */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErasureSummary'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listRelationships: {
@@ -9161,6 +9371,33 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
+  rotateCredentialKeys: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rotation result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            key_version: number;
+            /** @description Number of credential ciphertexts re-encrypted */
+            rotated: number;
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
   downloadDocumentContent: {
     parameters: {
       query?: never;
@@ -9711,6 +9948,15 @@ export interface operations {
           'application/json': {
             user: components['schemas']['User'];
             contacts: components['schemas']['Contact'][];
+            roles: components['schemas']['RoleAssignment'][];
+            tickets: {
+              reported?: components['schemas']['Ticket'][];
+              assigned?: components['schemas']['Ticket'][];
+            };
+            assignments: {
+              received?: components['schemas']['Assignment'][];
+              issued?: components['schemas']['Assignment'][];
+            };
             /** Format: date-time */
             exported_at: string;
           };
@@ -10827,6 +11073,39 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  getSecurityReport: {
+    parameters: {
+      query?: {
+        standard?: 'iso27001' | 'nis2' | 'kritis';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Security report */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SecurityReport'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+      /** @description Reporting not configured */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listIGAConnectors: {

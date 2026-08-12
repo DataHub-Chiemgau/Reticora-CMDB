@@ -67,6 +67,8 @@ tags:
     description: Compliance rules, evaluations and scores
   - name: Audit
     description: Hash-chained audit trail
+  - name: Privacy
+    description: DSGVO/GDPR data lifecycle (retention policy, erasure workflow)
   - name: Monitoring
     description: Metrics and alert rules
   - name: GraphQL
@@ -353,6 +355,82 @@ paths:
                 $ref: '#/components/schemas/AuditVerifyResult'
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/privacy/retention:
+    get:
+      operationId: getRetentionPolicy
+      tags: [Privacy]
+      summary: Get the tenant data-retention policy (DSGVO Art. 5)
+      description: >-
+        Returns the configured retention policy for personal data. The policy
+        defines after how many days personal records (contacts, deactivated
+        user accounts) expire and whether the erasure workflow anonymizes or
+        deletes them. Requires user:manage.
+      responses:
+        '200':
+          description: Retention policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetentionPolicy'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      operationId: putRetentionPolicy
+      tags: [Privacy]
+      summary: Configure the tenant data-retention policy
+      description: >-
+        Creates or updates the retention policy. `retention_days = 0` keeps
+        data forever (no erasure). `mode` selects whether expired records are
+        anonymized (default; rows stay for referential integrity) or deleted.
+        Requires user:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                retention_days: { type: integer, minimum: 0 }
+                mode: { type: string, enum: [anonymize, delete] }
+      responses:
+        '200':
+          description: Updated retention policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetentionPolicy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/privacy/erasure:
+    post:
+      operationId: runErasureWorkflow
+      tags: [Privacy]
+      summary: Run the data-erasure workflow (DSGVO Art. 17)
+      description: >-
+        Enforces the configured retention policy: contact records and
+        deactivated user accounts whose last update predates the retention
+        window are anonymized (default) or deleted. Running the workflow
+        requires an explicitly configured policy, so a tenant can never purge
+        data by accident. Requires user:manage.
+      responses:
+        '200':
+          description: Erasure summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErasureSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/relationships:
     get:
@@ -7429,6 +7507,27 @@ components:
           additionalProperties: { type: integer }
         findings: { type: array, items: { $ref: '#/components/schemas/SecurityFinding' } }
         capabilities: { type: array, items: { $ref: '#/components/schemas/SecurityCapability' } }
+    RetentionPolicy:
+      type: object
+      required: [id, organization_id, retention_days, mode, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        retention_days:
+          type: integer
+          minimum: 0
+          description: 'Retention window for personal data in days; 0 keeps data forever'
+        mode: { type: string, enum: [anonymize, delete] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ErasureSummary:
+      type: object
+      required: [cutoff, mode, contacts_affected, users_affected]
+      properties:
+        cutoff: { type: string, format: date-time }
+        mode: { type: string, enum: [anonymize, delete] }
+        contacts_affected: { type: integer }
+        users_affected: { type: integer }
 
     User:
       type: object

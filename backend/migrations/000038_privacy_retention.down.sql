@@ -1,0 +1,2 @@
+DROP TRIGGER IF EXISTS set_privacy_retention_policy_updated_at ON privacy_retention_policy;
+DROP TABLE IF EXISTS privacy_retention_policy;

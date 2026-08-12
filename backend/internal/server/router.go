@@ -30,6 +30,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
@@ -77,6 +78,7 @@ type Repositories struct {
 	Search            search.Backend
 	AI                ai.Repository
 	ExportJobs        export.JobRepository
+	Privacy           privacy.Repository
 }
 
 // Options carries everything the router needs beyond the repositories.
@@ -97,7 +99,7 @@ type Options struct {
 	Audit *audit.Handler
 	// AuditPool enables the security report to include audit-chain integrity;
 	// it is the same pool the audit handler serves from.
-	AuditPool *pgxpool.Pool
+	AuditPool  *pgxpool.Pool
 	AIProvider ai.Provider
 	// Blobs persists asynchronous export results; nil disables export-job
 	// creation (the streaming export endpoint stays available).
@@ -158,6 +160,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 		graphqlbff.NewHandler(repos.CI, repos.Relationship),
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
+		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),
 	}
 	for _, h := range registrars {
 		h.RegisterRoutes(protected)

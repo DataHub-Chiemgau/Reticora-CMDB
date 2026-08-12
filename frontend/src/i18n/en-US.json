@@ -27,7 +27,8 @@
     "webhooks": "Webhooks",
     "export": "Export",
     "monitoring": "Monitoring",
-    "audit": "Audit"
+    "audit": "Audit",
+    "security": "Security"
   },
   "common": {
     "save": "Save",
@@ -74,7 +75,8 @@
       "webhooks": "Open webhooks",
       "export": "Open export",
       "monitoring": "Open monitoring",
-      "audit": "Open audit log"
+      "audit": "Open audit log",
+      "security": "Open security & privacy"
     }
   },
   "dashboard": {
@@ -540,5 +542,37 @@
     "columnAction": "Action",
     "columnEntity": "Entity",
     "errorTitle": "Could not load the audit log"
+  },
+  "security": {
+    "title": "Security & Privacy",
+    "subtitle": "Security posture, compliance evidence (ISO 27001 / NIS2) and DSGVO data lifecycle",
+    "standardLabel": "Report standard",
+    "refresh": "Refresh report",
+    "auditIntegrity": "Audit chain integrity",
+    "bySeverity": "Failures by severity",
+    "findings": "Findings",
+    "noFindings": "No open findings",
+    "noFindingsHint": "All evaluated compliance rules pass.",
+    "affectedCIs": "{{count}} CIs affected",
+    "capabilities": "Enabled capabilities",
+    "errorTitle": "Could not load the security report",
+    "retentionTitle": "Data retention (DSGVO)",
+    "retentionDays": "Retention (days, 0 = forever)",
+    "retentionMode": "Erasure mode",
+    "modeAnonymize": "Anonymize (keep referential integrity)",
+    "modeDelete": "Delete permanently",
+    "retentionCurrent": "Current policy: {{days}} days, mode {{mode}}",
+    "retentionNone": "No retention policy configured yet.",
+    "retentionError": "Could not save the retention policy",
+    "runErasure": "Run erasure workflow",
+    "erasureConfirm": "Really run the erasure workflow? Expired personal data will be anonymized or deleted.",
+    "erasureResult": "Erasure completed: {{contacts}} contacts, {{users}} users affected.",
+    "erasureError": "Erasure workflow failed",
+    "keyRotationTitle": "Credential key rotation",
+    "keyRotationHint": "Rotates the tenant data-encryption key and re-encrypts every stored credential. Plaintext secrets never leave the platform.",
+    "keyRotationConfirm": "Rotate the encryption keys now? All credentials stay decryptable afterwards.",
+    "rotateKeys": "Rotate keys now",
+    "keyRotationResult": "Rotation complete: key version {{version}}, {{rotated}} credentials re-encrypted.",
+    "keyRotationError": "Key rotation failed"
   }
 }

@@ -65,6 +65,16 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
+// AgeForTesting backdates a stored user's updated_at timestamp so
+// retention/erasure tests can create "expired" accounts without waiting.
+func (r *MemoryRepository) AgeForTesting(id string, age time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if u, ok := r.users[id]; ok {
+		u.UpdatedAt = time.Now().UTC().Add(-age)
+	}
+}
+
 func (r *MemoryRepository) nextIDStr(prefix string) string {
 	r.nextID++
 	return fmt.Sprintf("%s-%d", prefix, r.nextID)

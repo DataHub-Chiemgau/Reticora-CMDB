@@ -24,6 +24,8 @@ import {
   exportApi,
   monitoringApi,
   auditApi,
+  privacyApi,
+  credentialApi,
 } from '../api/client';
 import type {
   CICreateRequest,
@@ -717,5 +719,46 @@ export function useVerifyAuditChain() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['audit'] });
     },
+  });
+}
+
+// --- Security & Privacy (Epic F) ---
+
+export function useSecurityReport(standard = 'iso27001') {
+  return useQuery({
+    queryKey: ['security-report', standard],
+    queryFn: () => complianceApi.report(standard),
+  });
+}
+
+export function useRetentionPolicy() {
+  return useQuery({
+    queryKey: ['privacy-retention'],
+    queryFn: () => privacyApi.retention(),
+    // A missing policy (404) is a normal first-run state, not an error to retry.
+    retry: false,
+  });
+}
+
+export function useSaveRetentionPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { retention_days?: number; mode?: string }) =>
+      privacyApi.saveRetention(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['privacy-retention'] }),
+  });
+}
+
+export function useRunErasure() {
+  return useMutation({
+    mutationFn: () => privacyApi.runErasure(),
+  });
+}
+
+export function useRotateCredentialKeys() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => credentialApi.rotateKeys(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['credentials'] }),
   });
 }

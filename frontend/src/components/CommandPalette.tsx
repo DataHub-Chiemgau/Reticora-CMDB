@@ -28,7 +28,8 @@ export type AppPage =
   | 'webhooks'
   | 'export'
   | 'monitoring'
-  | 'audit';
+  | 'audit'
+  | 'security';
 
 export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
@@ -53,6 +54,7 @@ export const pageToPath: Record<AppPage, string> = {
   export: '/export',
   monitoring: '/monitoring',
   audit: '/audit',
+  security: '/security',
 };
 
 interface CommandPaletteProps {
@@ -245,6 +247,12 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
         label: t('commandPalette.commands.audit', 'Audit-Protokoll öffnen'),
         keywords: ['audit protokoll hash chain compliance'],
         action: () => onNavigate('audit'),
+      },
+      {
+        id: 'nav-security',
+        label: t('commandPalette.commands.security', 'Sicherheit & DSGVO öffnen'),
+        keywords: ['security sicherheit dsgvo gdpr privacy retention compliance report'],
+        action: () => onNavigate('security'),
       },
     ],
     [onCreateCI, onNavigate, onToggleDarkMode, t],

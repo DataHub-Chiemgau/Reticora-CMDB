@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
@@ -64,6 +65,7 @@ func MemoryRepositories() Repositories {
 		Search:            search.NewMemoryRepository(),
 		AI:                ai.NewMemoryRepository(),
 		ExportJobs:        export.NewMemoryJobRepository(),
+		Privacy:           privacy.NewMemoryRepository(),
 	}
 }
 
@@ -99,5 +101,6 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Search:            search.NewPGRepository(pool),
 		AI:                ai.NewPGRepository(pool),
 		ExportJobs:        export.NewPGJobRepository(pool),
+		Privacy:           privacy.NewPGRepository(pool),
 	}
 }

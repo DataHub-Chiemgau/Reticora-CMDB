@@ -27,7 +27,8 @@
     "webhooks": "Webhooks",
     "export": "Export",
     "monitoring": "Monitoring",
-    "audit": "Audit"
+    "audit": "Audit",
+    "security": "Sicherheit"
   },
   "common": {
     "save": "Speichern",
@@ -74,7 +75,8 @@
       "webhooks": "Webhooks öffnen",
       "export": "Export öffnen",
       "monitoring": "Monitoring öffnen",
-      "audit": "Audit-Protokoll öffnen"
+      "audit": "Audit-Protokoll öffnen",
+      "security": "Sicherheit & Datenschutz öffnen"
     }
   },
   "dashboard": {
@@ -540,5 +542,37 @@
     "columnAction": "Aktion",
     "columnEntity": "Objekt",
     "errorTitle": "Audit-Protokoll konnte nicht geladen werden"
+  },
+  "security": {
+    "title": "Sicherheit & Datenschutz",
+    "subtitle": "Sicherheitslage, Compliance-Nachweis (ISO 27001 / NIS2) und DSGVO-Datenlebenszyklus",
+    "standardLabel": "Berichtsstandard",
+    "refresh": "Bericht aktualisieren",
+    "auditIntegrity": "Integrität der Audit-Kette",
+    "bySeverity": "Verstöße nach Schweregrad",
+    "findings": "Feststellungen",
+    "noFindings": "Keine offenen Feststellungen",
+    "noFindingsHint": "Alle ausgewerteten Compliance-Regeln bestehen.",
+    "affectedCIs": "{{count}} CIs betroffen",
+    "capabilities": "Aktivierte Fähigkeiten",
+    "errorTitle": "Der Sicherheitsbericht konnte nicht geladen werden",
+    "retentionTitle": "Aufbewahrung (DSGVO)",
+    "retentionDays": "Aufbewahrung (Tage, 0 = unbegrenzt)",
+    "retentionMode": "Löschmodus",
+    "modeAnonymize": "Anonymisieren (referenzielle Integrität bleibt)",
+    "modeDelete": "Endgültig löschen",
+    "retentionCurrent": "Aktuelle Richtlinie: {{days}} Tage, Modus {{mode}}",
+    "retentionNone": "Noch keine Aufbewahrungsrichtlinie konfiguriert.",
+    "retentionError": "Die Aufbewahrungsrichtlinie konnte nicht gespeichert werden",
+    "runErasure": "Lösch-Workflow ausführen",
+    "erasureConfirm": "Lösch-Workflow wirklich ausführen? Abgelaufene personenbezogene Daten werden anonymisiert oder gelöscht.",
+    "erasureResult": "Löschung abgeschlossen: {{contacts}} Kontakte, {{users}} Benutzer betroffen.",
+    "erasureError": "Der Lösch-Workflow ist fehlgeschlagen",
+    "keyRotationTitle": "Schlüsselrotation für Credentials",
+    "keyRotationHint": "Rotiert den mandanteneigenen Datenverschlüsselungsschlüssel (DEK) und verschlüsselt alle gespeicherten Credentials neu. Klartext-Secrets verlassen die Plattform nie.",
+    "keyRotationConfirm": "Schlüssel jetzt rotieren? Alle Credentials bleiben anschließend entschlüsselbar.",
+    "rotateKeys": "Schlüssel jetzt rotieren",
+    "keyRotationResult": "Rotation abgeschlossen: Schlüsselversion {{version}}, {{rotated}} Credentials neu verschlüsselt.",
+    "keyRotationError": "Die Schlüsselrotation ist fehlgeschlagen"
   }
 }
