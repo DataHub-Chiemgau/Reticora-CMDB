@@ -47,6 +47,10 @@ type collectorConfig struct {
 	// SpoolDir is the disk buffer location for discovery results collected
 	// while the backend is unreachable (offline operation per spec §5.2).
 	SpoolDir string
+	// TrapListenAddr enables the SNMP trap receiver when set (e.g. ":162").
+	// Traps are normalized into metric events and sent to the monitoring
+	// ingest so existing alert rules can fire on them (spec §9).
+	TrapListenAddr string
 	// TLS identity material. When CertPEM/KeyPEM are set (directly, via
 	// CertFile/KeyFile, or via the keystore at CredentialsPath) the upload
 	// and heartbeat clients authenticate with mTLS.
@@ -111,6 +115,9 @@ func Main() {
 	go runDiscoveryLoop(ctx, collectorCfg, uploader)
 	go runHeartbeatLoop(ctx, collectorCfg, uploader)
 	go runAgentRelay(ctx)
+	if collectorCfg.TrapListenAddr != "" {
+		go runTrapReceiver(ctx, collectorCfg, uploader)
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -469,6 +476,78 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 	slog.Info("heartbeat completed", "status", resp.StatusCode, "duration_ms", time.Since(start).Milliseconds())
 }
 
+// runTrapReceiver receives SNMP traps and forwards them as metric events to
+// the monitoring ingest, so the existing alert rules can fire on traps (e.g.
+// "any linkDown trap → critical alert"). Failed uploads are logged and
+// dropped: traps are fire-and-forget events, spooling them like discovery
+// results would delay alerts past the point where they are useful.
+func runTrapReceiver(ctx context.Context, cfg collectorConfig, up *uploader) {
+	rcv := &snmp.TrapReceiver{
+		ListenAddr: cfg.TrapListenAddr,
+		Community:  cfg.Credentials["community"],
+		Sink: func(ctx context.Context, ev snmp.TrapEvent) {
+			slog.Info("snmp trap received", "source", ev.SourceIP, "trap_oid", ev.TrapOID)
+			if err := up.uploadTrapEvent(ctx, ev); err != nil {
+				slog.Warn("trap event upload failed", "source", ev.SourceIP, "trap_oid", ev.TrapOID, "error", err)
+			}
+		},
+	}
+	if err := rcv.Run(ctx); err != nil {
+		slog.Error("snmp trap receiver stopped", "error", err)
+	}
+}
+
+// uploadTrapEvent maps a normalized trap onto a monitoring metric sample and
+// POSTs it to the ingest endpoint. The metric name is stable so alert rules
+// can target it; trap-specific context travels in the labels.
+func (u *uploader) uploadTrapEvent(ctx context.Context, ev snmp.TrapEvent) error {
+	if u.cfg.ServerURL == "" || u.cfg.OrganizationID == "" || u.cfg.CollectorID == "" {
+		return nil
+	}
+	labels := map[string]string{
+		"source_ip":    ev.SourceIP,
+		"collector_id": u.cfg.CollectorID,
+		"kind":         "snmp_trap",
+	}
+	if ev.TrapOID != "" {
+		labels["trap_oid"] = ev.TrapOID
+	}
+	for k, v := range ev.Variables {
+		if len(labels) >= 16 { // keep the label set bounded
+			break
+		}
+		labels["var_"+strings.ReplaceAll(k, ".", "_")] = v
+	}
+	payload, err := json.Marshal([]map[string]any{{
+		"name":      "snmp_trap_received",
+		"value":     1,
+		"labels":    labels,
+		"timestamp": ev.Received.UTC().Format(time.RFC3339Nano),
+	}})
+	if err != nil {
+		return fmt.Errorf("marshal trap event: %w", err)
+	}
+
+	endpoint := strings.TrimRight(u.cfg.ServerURL, "/") + "/api/v1/monitoring/metrics"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("build trap upload request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Organization-ID", u.cfg.OrganizationID)
+	req.Header.Set("X-Collector-ID", u.cfg.CollectorID)
+
+	resp, err := u.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("trap upload request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("trap upload failed with status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func runAgentRelay(ctx context.Context) {
 	slog.Info("agent relay started")
 
@@ -551,6 +630,7 @@ func loadCollectorConfig() collectorConfig {
 		HeartbeatInterval: durationEnvOrDefault("RETICORA_HEARTBEAT_INTERVAL", time.Minute),
 		Credentials:       creds,
 		SpoolDir:          envOrDefault("RETICORA_SPOOL_DIR", "/var/lib/reticora-collector/spool"),
+		TrapListenAddr:    os.Getenv("RETICORA_SNMP_TRAP_LISTEN"),
 		TLSCertPEM:        []byte(os.Getenv("RETICORA_TLS_CLIENT_CERT")),
 		TLSKeyPEM:         []byte(os.Getenv("RETICORA_TLS_CLIENT_KEY")),
 		TLSCAPEM:          []byte(os.Getenv("RETICORA_TLS_CA")),

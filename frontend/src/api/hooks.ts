@@ -23,6 +23,7 @@ import {
   webhookApi,
   exportApi,
   monitoringApi,
+  auditApi,
 } from '../api/client';
 import type {
   CICreateRequest,
@@ -676,5 +677,24 @@ export function useDeleteAlertRule() {
   return useMutation({
     mutationFn: (id: string) => monitoringApi.deleteAlert(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alert-rules'] }),
+  });
+}
+
+// --- Audit ---
+
+export function useAuditLog(params: ListParams = {}) {
+  return useQuery({
+    queryKey: ['audit', params],
+    queryFn: () => auditApi.list(params),
+  });
+}
+
+export function useVerifyAuditChain() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => auditApi.verify(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['audit'] });
+    },
   });
 }

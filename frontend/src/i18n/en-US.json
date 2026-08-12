@@ -26,7 +26,8 @@
     "assistant": "Assistant",
     "webhooks": "Webhooks",
     "export": "Export",
-    "monitoring": "Monitoring"
+    "monitoring": "Monitoring",
+    "audit": "Audit"
   },
   "common": {
     "save": "Save",
@@ -456,5 +457,26 @@
     "alertRules": "Alert rules",
     "noAlerts": "No alert rules",
     "noAlertsHint": "Create a rule to be notified when thresholds are crossed."
+  },
+  "audit": {
+    "title": "Audit log",
+    "subtitle": "Hash-chained record of all changes within the tenant",
+    "integrityTitle": "Hash chain integrity",
+    "verifyNow": "Verify chain now",
+    "verifying": "Verifying…",
+    "intact": "Intact",
+    "broken": "Broken",
+    "checkedCount": "{{count}} entries checked",
+    "brokenDetail": "Broken at entry {{id}} (position {{position}}): {{reason}}",
+    "verifyHint": "Verify the chain to rule out tampering with the log.",
+    "verifyError": "Verification failed",
+    "entries": "Entries",
+    "empty": "No audit entries",
+    "emptyHint": "Actions within the tenant are recorded here.",
+    "columnTime": "Time",
+    "columnActor": "Actor",
+    "columnAction": "Action",
+    "columnEntity": "Entity",
+    "errorTitle": "Could not load the audit log"
   }
 }

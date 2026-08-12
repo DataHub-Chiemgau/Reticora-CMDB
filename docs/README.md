@@ -416,6 +416,18 @@ and `DiskBuffer.MaxAge` expires stale messages on enqueue — both default to
 unlimited, and the next successful sync re-discovers the current state anyway,
 so dropping the oldest data first is the safe degradation.
 
+**SNMP trap reception:** when `RETICORA_SNMP_TRAP_LISTEN` is set (e.g.
+`:162`), the collector runs a tolerant SNMPv1/v2c trap receiver
+(`collector/plugins/snmp/trap.go`). Traps carrying a different community than
+`RETICORA_SNMP_COMMUNITY` are dropped; every accepted trap is normalized into
+a `snmp_trap_received` metric sample (labels: source IP, trap OID, up to 16
+varbinds) and posted to `POST /api/v1/monitoring/metrics`, so the standard
+alert rules can fire on traps. Trap delivery is fire-and-forget — a burst
+during a backend outage is logged and dropped rather than spooled, because a
+delayed alert is usually worse than a lost one. Trap storms are bounded by a
+64-events-in-flight cap. The BER parser is deliberately tolerant: malformed
+varbinds are skipped, never fatal.
+
 **AI/RAG governance:** `/api/v1/ai/conversations` and `/api/v1/ai/ask` are
 gated by the Pro/Enterprise `ai_assistant` entitlement. If no
 OpenAI-compatible provider is configured, the handler returns HTTP 503 with a

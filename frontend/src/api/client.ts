@@ -1483,3 +1483,36 @@ export const monitoringApi = {
     return fetchAPI(`/monitoring/alerts/${id}`, { method: 'DELETE' });
   },
 };
+
+// --- Audit (hash chain verification) ---
+
+export interface AuditEntry {
+  id: string;
+  organization_id: string;
+  actor_id?: string;
+  actor_email?: string;
+  action: string;
+  entity_type?: string;
+  entity_id?: string;
+  details?: Record<string, unknown>;
+  hash?: string;
+  previous_hash?: string;
+  created_at: string;
+}
+
+export interface AuditVerifyResult {
+  intact: boolean;
+  checked: number;
+  broken_id?: string;
+  broken_at?: number;
+  broken_reason?: string;
+}
+
+export const auditApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<AuditEntry>> {
+    return fetchAPI(`/audit${buildQuery(params)}`);
+  },
+  verify(): Promise<AuditVerifyResult> {
+    return fetchAPI('/audit/verify', { method: 'POST' });
+  },
+};

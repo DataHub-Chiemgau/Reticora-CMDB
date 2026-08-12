@@ -26,7 +26,8 @@
     "assistant": "Assistent",
     "webhooks": "Webhooks",
     "export": "Export",
-    "monitoring": "Monitoring"
+    "monitoring": "Monitoring",
+    "audit": "Audit"
   },
   "common": {
     "save": "Speichern",
@@ -456,5 +457,26 @@
     "alertRules": "Alarmregeln",
     "noAlerts": "Keine Alarmregeln",
     "noAlertsHint": "Erstellen Sie eine Regel, um bei Schwellenwertüberschreitungen benachrichtigt zu werden."
+  },
+  "audit": {
+    "title": "Audit-Protokoll",
+    "subtitle": "Hash-verkettete Aufzeichnung aller Änderungen im Mandanten",
+    "integrityTitle": "Integrität der Hash-Kette",
+    "verifyNow": "Kette jetzt verifizieren",
+    "verifying": "Verifiziere…",
+    "intact": "Intakt",
+    "broken": "Unterbrochen",
+    "checkedCount": "{{count}} Einträge geprüft",
+    "brokenDetail": "Bruch bei Eintrag {{id}} (Position {{position}}): {{reason}}",
+    "verifyHint": "Verifizieren Sie die Kette, um Manipulationen am Protokoll auszuschließen.",
+    "verifyError": "Verifizierung fehlgeschlagen",
+    "entries": "Einträge",
+    "empty": "Keine Audit-Einträge",
+    "emptyHint": "Aktionen im Mandanten werden hier protokolliert.",
+    "columnTime": "Zeitpunkt",
+    "columnActor": "Akteur",
+    "columnAction": "Aktion",
+    "columnEntity": "Objekt",
+    "errorTitle": "Audit-Protokoll konnte nicht geladen werden"
   }
 }

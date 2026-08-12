@@ -27,7 +27,8 @@ export type AppPage =
   | 'assistant'
   | 'webhooks'
   | 'export'
-  | 'monitoring';
+  | 'monitoring'
+  | 'audit';
 
 export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
@@ -51,6 +52,7 @@ export const pageToPath: Record<AppPage, string> = {
   webhooks: '/webhooks',
   export: '/export',
   monitoring: '/monitoring',
+  audit: '/audit',
 };
 
 interface CommandPaletteProps {
