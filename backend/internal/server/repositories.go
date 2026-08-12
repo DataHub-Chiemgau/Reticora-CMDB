@@ -35,16 +35,17 @@ import (
 // explicit --no-db development mode and by tests. All state is lost on
 // restart; it is never a fallback for an unreachable database.
 func MemoryRepositories() Repositories {
+	assets := asset.NewMemoryRepository()
 	return Repositories{
 		CI:                ci.NewMemoryRepository(),
 		Relationship:      relationship.NewMemoryRepository(),
 		Webhook:           webhook.NewMemoryRepository(),
 		WebhookDeliveries: webhook.NewMemoryDeliveryStore(),
 		Discovery:         discovery.NewMemoryRepository(),
-		Asset:             asset.NewMemoryRepository(),
+		Asset:             assets,
 		Assignment:        assignment.NewMemoryRepository(),
 		Document:          document.NewMemoryRepository(),
-		Stocktake:         stocktake.NewMemoryRepository(),
+		Stocktake:         stocktake.NewMemoryRepository(assets),
 		Ticket:            ticket.NewMemoryRepository(),
 		User:              user.NewMemoryRepository(),
 		Credential:        credential.NewMemoryRepository(),

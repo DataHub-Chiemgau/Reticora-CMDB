@@ -1309,6 +1309,67 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/stocktakes/{id}/difference:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getStocktakeDifference
+      tags: [Stocktake]
+      summary: Difference list of a stocktake
+      description: Returns every scan whose result deviates from the expected inventory (missing, surplus, damaged, wrong_location), enriched with the asset details of the affected assets.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated difference list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StocktakeDifferenceListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/stocktakes/{id}/complete:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: completeStocktake
+      tags: [Stocktake]
+      summary: Complete a stocktake with inventory correction
+      description: >
+        Completes the stocktake and applies the recorded differences to the
+        inventory: assets scanned as missing are marked lost, surplus assets
+        are put back in stock, wrong_location moves the asset to the found
+        location and damaged assets are sent to maintenance. Completion is
+        atomic and only possible once; the request is rejected with 409 when
+        the stocktake is already completed or cancelled.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteStocktakeRequest'
+      responses:
+        '200':
+          description: Stocktake completed, including the applied corrections
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StocktakeCompletion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Stocktake is already completed or cancelled
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
   /api/v1/tickets:
     get:
       operationId: listTickets
@@ -6590,6 +6651,70 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/StockScan'
+
+    StocktakeDifferenceEntry:
+      type: object
+      required: [scan]
+      properties:
+        scan:
+          $ref: '#/components/schemas/StockScan'
+        asset:
+          $ref: '#/components/schemas/Asset'
+
+    StocktakeDifferenceListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/StocktakeDifferenceEntry'
+
+    CompleteStocktakeRequest:
+      type: object
+      properties:
+        apply_corrections:
+          type: boolean
+          description: Whether the recorded differences are applied to the inventory. Defaults to true.
+          default: true
+
+    StocktakeCorrection:
+      type: object
+      required: [asset_id, scan_result, applied]
+      properties:
+        asset_id:
+          type: string
+        asset_tag:
+          type: string
+        scan_result:
+          type: string
+        previous_status:
+          type: string
+        new_status:
+          type: string
+        previous_location:
+          type: string
+        new_location:
+          type: string
+        applied:
+          type: boolean
+        detail:
+          type: string
+
+    StocktakeCompletion:
+      type: object
+      required: [stocktake, corrections_applied, corrections]
+      properties:
+        stocktake:
+          $ref: '#/components/schemas/Stocktake'
+        corrections_applied:
+          type: integer
+        corrections:
+          type: array
+          items:
+            $ref: '#/components/schemas/StocktakeCorrection'
 
     Ticket:
       type: object

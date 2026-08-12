@@ -29,6 +29,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Delete("/api/v1/stocktakes/{id}", h.Delete)
 	r.Post("/api/v1/stocktakes/{id}/scans", h.AddScan)
 	r.Get("/api/v1/stocktakes/{id}/scans", h.ListScans)
+	r.Get("/api/v1/stocktakes/{id}/difference", h.Difference)
+	r.Post("/api/v1/stocktakes/{id}/complete", h.Complete)
 }
 
 // List handles GET /api/v1/stocktakes
@@ -248,4 +250,69 @@ func (h *Handler) ListScans(w http.ResponseWriter, r *http.Request) {
 		Offset:  page.Offset,
 		HasMore: page.Offset+page.Limit < total,
 	})
+}
+
+// Difference handles GET /api/v1/stocktakes/{id}/difference and returns the
+// scans that deviate from the expected inventory, enriched with the affected
+// asset where the scan resolved to one.
+func (h *Handler) Difference(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	stocktakeID := chi.URLParam(r, "id")
+	page := api.ParsePagination(r)
+
+	entries, total, err := h.repo.Difference(r.Context(), t.OrganizationID, stocktakeID, page)
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+		return
+	}
+
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[DifferenceEntry]{
+		Data:    entries,
+		Total:   total,
+		Limit:   page.Limit,
+		Offset:  page.Offset,
+		HasMore: page.Offset+page.Limit < total,
+	})
+}
+
+// Complete handles POST /api/v1/stocktakes/{id}/complete. It finalizes the
+// stocktake and, unless apply_corrections is false, applies the recorded
+// differences to the inventory (missing → lost, surplus → in_stock,
+// damaged → maintenance, wrong_location → location update).
+func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	stocktakeID := chi.URLParam(r, "id")
+	applyCorrections := true
+	if r.Body != nil && r.ContentLength != 0 {
+		var req CompleteRequest
+		if err := api.ReadJSON(r, &req); err != nil {
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
+		if req.ApplyCorrections != nil {
+			applyCorrections = *req.ApplyCorrections
+		}
+	}
+
+	completion, err := h.repo.Complete(r.Context(), t.OrganizationID, stocktakeID, applyCorrections)
+	if err != nil {
+		if errors.Is(err, ErrAlreadyCompleted) {
+			api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+			return
+		}
+		api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+		return
+	}
+
+	api.WriteJSON(w, http.StatusOK, completion)
 }

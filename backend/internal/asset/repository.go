@@ -20,6 +20,13 @@ type Repository interface {
 	Delete(ctx context.Context, orgID, id string) error
 }
 
+// Lookup is the narrow asset read/write surface consumed by other domains
+// (e.g. stocktake completion). Both Repository implementations satisfy it.
+type Lookup interface {
+	GetByID(ctx context.Context, orgID, id string) (*Asset, error)
+	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Asset, error)
+}
+
 // MemoryRepository is an in-memory implementation of Repository.
 type MemoryRepository struct {
 	mu     sync.RWMutex

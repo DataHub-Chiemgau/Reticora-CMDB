@@ -332,6 +332,27 @@ export function useDeleteStocktake() {
   });
 }
 
+export function useStocktakeDifference(stocktakeId: string, params: ListParams = {}) {
+  return useQuery({
+    queryKey: ['stocktakes', stocktakeId, 'difference', params],
+    queryFn: () => stocktakeApi.difference(stocktakeId, params),
+    enabled: !!stocktakeId,
+  });
+}
+
+export function useCompleteStocktake() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, applyCorrections = true }: { id: string; applyCorrections?: boolean }) =>
+      stocktakeApi.complete(id, applyCorrections),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
+      queryClient.invalidateQueries({ queryKey: ['stocktakes', id] });
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+    },
+  });
+}
+
 // --- Tickets ---
 
 export function useTicketList(params: TicketListParams) {

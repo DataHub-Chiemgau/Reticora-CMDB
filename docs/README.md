@@ -96,6 +96,7 @@ Database schema is managed with [golang-migrate](https://github.com/golang-migra
 | 0031–0033 | schema corrections, role seeds, client_scope RLS | Batch 1–2 hardening |
 | 0034 | webhook_dead_letter | Dead-letter queue for exhausted webhook deliveries |
 | 0035 | export_job_formats | `datev` in the export_job format CHECK; `app.system` worker exception |
+| 0036 | updated_at_triggers | `set_updated_at` trigger on every mutable table that carries `updated_at` |
 
 **Running migrations:**
 
@@ -374,6 +375,18 @@ server-generated key (`documents/<org>/<id>/<version>`), and
 `GET /api/v1/documents/{id}/content` returns a presigned download URL
 (15-minute TTL). Without a configured blob store both endpoints answer 503
 while metadata CRUD keeps working.
+
+**Stocktake completion:** `GET /api/v1/stocktakes/{id}/difference` returns the
+scans that deviate from the expected inventory (`missing`, `surplus`,
+`damaged`, `wrong_location`), each enriched with the affected asset when the
+scan resolved to one. `POST /api/v1/stocktakes/{id}/complete` finalizes the
+count and — unless `apply_corrections` is `false` — applies the recorded
+differences to the inventory in the same transaction: missing assets are
+marked `lost`, surplus assets return to `in_stock`, `wrong_location` moves the
+asset to the found location and damaged assets go to `maintenance`. Scans
+without a resolvable asset or without a found location are reported in the
+response but skipped. Completing an already completed or cancelled stocktake
+is rejected with 409, so corrections can never be applied twice.
 
 **Reconciliation and topology:** discovery runs are recorded as jobs
 (`/api/v1/discovery/jobs`). Findings that cannot be matched to an existing CI

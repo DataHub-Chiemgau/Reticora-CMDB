@@ -3,14 +3,21 @@ package stocktake
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// errNotFound marks a missing stocktake inside transactions so callers can
+// distinguish it from infrastructure errors.
+var errNotFound = errors.New("not found")
 
 const stocktakeSelectColumns = `
 	id::text,
@@ -382,6 +389,193 @@ func (r *PGRepository) ListScans(ctx context.Context, orgID, stocktakeID string,
 	})
 
 	return scans, total, err
+}
+
+// Difference returns the deviating scans of a stocktake joined with the
+// referenced asset (when present), oldest scan first.
+func (r *PGRepository) Difference(ctx context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]DifferenceEntry, int, error) {
+	entries := []DifferenceEntry{}
+	var total int
+
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM stocktake WHERE id = $1)", stocktakeID).Scan(&exists); err != nil {
+			return fmt.Errorf("check stocktake: %w", err)
+		}
+		if !exists {
+			return errNotFound
+		}
+
+		if err := tx.QueryRow(ctx,
+			`SELECT COUNT(*) FROM stock_scan
+			 WHERE stocktake_id = $1 AND scan_result IN ('missing', 'surplus', 'damaged', 'wrong_location')`,
+			stocktakeID).Scan(&total); err != nil {
+			return fmt.Errorf("count stocktake difference: %w", err)
+		}
+
+		rows, err := tx.Query(ctx, `
+			SELECT s.id::text, s.organization_id::text, s.stocktake_id::text,
+			       COALESCE(s.asset_id::text, ''), COALESCE(s.ci_id::text, ''),
+			       s.scanned_by::text, s.scan_method, s.scan_result,
+			       COALESCE(s.location_found, ''), COALESCE(s.notes, ''), s.scanned_at,
+			       a.id::text, a.asset_tag, a.name, a.status, COALESCE(a.location, '')
+			FROM stock_scan s
+			LEFT JOIN asset a ON a.id = s.asset_id
+			WHERE s.stocktake_id = $1
+			  AND s.scan_result IN ('missing', 'surplus', 'damaged', 'wrong_location')
+			ORDER BY s.scanned_at ASC
+			LIMIT $2 OFFSET $3`, stocktakeID, page.Limit, page.Offset)
+		if err != nil {
+			return fmt.Errorf("list stocktake difference: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var entry DifferenceEntry
+			var assetID, assetTag, assetName, assetStatus, assetLocation sql.NullString
+			if err := rows.Scan(
+				&entry.Scan.ID, &entry.Scan.OrganizationID, &entry.Scan.StocktakeID,
+				&entry.Scan.AssetID, &entry.Scan.CIID, &entry.Scan.ScannedBy,
+				&entry.Scan.ScanMethod, &entry.Scan.ScanResult,
+				&entry.Scan.LocationFound, &entry.Scan.Notes, &entry.Scan.ScannedAt,
+				&assetID, &assetTag, &assetName, &assetStatus, &assetLocation,
+			); err != nil {
+				return fmt.Errorf("scan difference row: %w", err)
+			}
+			if assetID.Valid {
+				entry.Asset = &asset.Asset{
+					ID:       assetID.String,
+					AssetTag: assetTag.String,
+					Name:     assetName.String,
+					Status:   assetStatus.String,
+					Location: assetLocation.String,
+				}
+			}
+			entries = append(entries, entry)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		if errors.Is(err, errNotFound) {
+			return nil, 0, fmt.Errorf("stocktake not found")
+		}
+		return nil, 0, err
+	}
+	return entries, total, nil
+}
+
+// Complete finalizes a stocktake and applies the recorded inventory
+// corrections atomically: the stocktake transition and all asset updates run
+// in a single transaction, so a failure rolls everything back.
+func (r *PGRepository) Complete(ctx context.Context, orgID, id string, applyCorrections bool) (*Completion, error) {
+	completion := &Completion{Corrections: []Correction{}}
+
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var status string
+		err := tx.QueryRow(ctx, "SELECT status FROM stocktake WHERE id = $1 FOR UPDATE", id).Scan(&status)
+		if err == pgx.ErrNoRows {
+			return errNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("lock stocktake: %w", err)
+		}
+		if status == "completed" || status == "cancelled" {
+			return ErrAlreadyCompleted
+		}
+
+		if applyCorrections {
+			rows, err := tx.Query(ctx, `
+				SELECT s.id::text, s.scan_result, COALESCE(s.location_found, ''),
+				       a.id::text, a.asset_tag, a.status, COALESCE(a.location, '')
+				FROM stock_scan s
+				JOIN asset a ON a.id = s.asset_id
+				WHERE s.stocktake_id = $1
+				  AND s.scan_result IN ('missing', 'surplus', 'damaged', 'wrong_location')
+				ORDER BY s.scanned_at ASC`, id)
+			if err != nil {
+				return fmt.Errorf("list deviating scans: %w", err)
+			}
+			type correctionRow struct {
+				scan                       StockScan
+				assetID, tag, status, loc  string
+			}
+			var pending []correctionRow
+			for rows.Next() {
+				var cr correctionRow
+				if err := rows.Scan(&cr.scan.ID, &cr.scan.ScanResult, &cr.scan.LocationFound, &cr.assetID, &cr.tag, &cr.status, &cr.loc); err != nil {
+					rows.Close()
+					return fmt.Errorf("scan deviating row: %w", err)
+				}
+				pending = append(pending, cr)
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterate deviating scans: %w", err)
+			}
+
+			for _, p := range pending {
+				c := Correction{
+					AssetID:          p.assetID,
+					AssetTag:         p.tag,
+					ScanResult:       p.scan.ScanResult,
+					PreviousStatus:   p.status,
+					PreviousLocation: p.loc,
+				}
+				var query string
+				switch p.scan.ScanResult {
+				case "missing":
+					c.NewStatus = "lost"
+					query = "UPDATE asset SET status = 'lost', updated_at = NOW() WHERE id = $1"
+				case "surplus":
+					c.NewStatus = "in_stock"
+					query = "UPDATE asset SET status = 'in_stock', updated_at = NOW() WHERE id = $1"
+				case "damaged":
+					c.NewStatus = "maintenance"
+					query = "UPDATE asset SET status = 'maintenance', updated_at = NOW() WHERE id = $1"
+				case "wrong_location":
+					if p.scan.LocationFound == "" {
+						c.Detail = "scan did not record a found location"
+						completion.Corrections = append(completion.Corrections, c)
+						continue
+					}
+					c.NewLocation = p.scan.LocationFound
+					query = "UPDATE asset SET location = $2, updated_at = NOW() WHERE id = $1"
+				default:
+					continue
+				}
+				var cmdTag pgconn.CommandTag
+				var err error
+				if c.NewLocation != "" {
+					cmdTag, err = tx.Exec(ctx, query, p.assetID, p.scan.LocationFound)
+				} else {
+					cmdTag, err = tx.Exec(ctx, query, p.assetID)
+				}
+				if err != nil {
+					return fmt.Errorf("apply correction for asset %s: %w", p.assetID, err)
+				}
+				c.Applied = cmdTag.RowsAffected() > 0
+				completion.Corrections = append(completion.Corrections, c)
+				if c.Applied {
+					completion.CorrectionsApplied++
+				}
+			}
+		}
+
+		st, err := scanStocktake(tx.QueryRow(ctx,
+			"UPDATE stocktake SET status = 'completed', completed_at = NOW(), updated_at = NOW() WHERE id = $1 RETURNING "+stocktakeSelectColumns, id))
+		if err != nil {
+			return fmt.Errorf("complete stocktake: %w", err)
+		}
+		completion.Stocktake = *st
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errNotFound) {
+			return nil, fmt.Errorf("stocktake not found")
+		}
+		return nil, err
+	}
+	return completion, nil
 }
 
 type stockScanner interface {

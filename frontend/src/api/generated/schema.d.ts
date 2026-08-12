@@ -693,6 +693,52 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/stocktakes/{id}/difference': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Difference list of a stocktake
+     * @description Returns every scan whose result deviates from the expected inventory (missing, surplus, damaged, wrong_location), enriched with the asset details of the affected assets.
+     */
+    get: operations['getStocktakeDifference'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/stocktakes/{id}/complete': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Complete a stocktake with inventory correction
+     * @description Completes the stocktake and applies the recorded differences to the inventory: assets scanned as missing are marked lost, surplus assets are put back in stock, wrong_location moves the asset to the found location and damaged assets are sent to maintenance. Completion is atomic and only possible once; the request is rejected with 409 when the stocktake is already completed or cancelled.
+     */
+    post: operations['completeStocktake'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/tickets': {
     parameters: {
       query?: never;
@@ -3545,6 +3591,36 @@ export interface components {
     };
     StockScanListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['StockScan'][];
+    };
+    StocktakeDifferenceEntry: {
+      scan: components['schemas']['StockScan'];
+      asset?: components['schemas']['Asset'];
+    };
+    StocktakeDifferenceListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['StocktakeDifferenceEntry'][];
+    };
+    CompleteStocktakeRequest: {
+      /**
+       * @description Whether the recorded differences are applied to the inventory. Defaults to true.
+       * @default true
+       */
+      apply_corrections: boolean;
+    };
+    StocktakeCorrection: {
+      asset_id: string;
+      asset_tag?: string;
+      scan_result: string;
+      previous_status?: string;
+      new_status?: string;
+      previous_location?: string;
+      new_location?: string;
+      applied: boolean;
+      detail?: string;
+    };
+    StocktakeCompletion: {
+      stocktake: components['schemas']['Stocktake'];
+      corrections_applied: number;
+      corrections: components['schemas']['StocktakeCorrection'][];
     };
     Ticket: {
       id: string;
@@ -6422,6 +6498,77 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+    };
+  };
+  getStocktakeDifference: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated difference list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StocktakeDifferenceListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  completeStocktake: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['CompleteStocktakeRequest'];
+      };
+    };
+    responses: {
+      /** @description Stocktake completed, including the applied corrections */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StocktakeCompletion'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description Stocktake is already completed or cancelled */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listTickets: {

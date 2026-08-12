@@ -617,7 +617,42 @@ export const stocktakeApi = {
   listScans(stocktakeId: string, params: ListParams = {}): Promise<PaginatedResponse<StockScan>> {
     return fetchAPI(`/stocktakes/${stocktakeId}/scans${buildQuery(params)}`);
   },
+  difference(
+    stocktakeId: string,
+    params: ListParams = {},
+  ): Promise<PaginatedResponse<StocktakeDifferenceEntry>> {
+    return fetchAPI(`/stocktakes/${stocktakeId}/difference${buildQuery(params)}`);
+  },
+  complete(stocktakeId: string, applyCorrections = true): Promise<StocktakeCompletion> {
+    return fetchAPI(`/stocktakes/${stocktakeId}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({ apply_corrections: applyCorrections }),
+    });
+  },
 };
+
+export interface StocktakeDifferenceEntry {
+  scan: StockScan;
+  asset?: Asset;
+}
+
+export interface StocktakeCorrection {
+  asset_id: string;
+  asset_tag?: string;
+  scan_result: string;
+  previous_status?: string;
+  new_status?: string;
+  previous_location?: string;
+  new_location?: string;
+  applied: boolean;
+  detail?: string;
+}
+
+export interface StocktakeCompletion {
+  stocktake: Stocktake;
+  corrections_applied: number;
+  corrections: StocktakeCorrection[];
+}
 
 // --- Phase 2: Ticket System (Essential) ---
 
