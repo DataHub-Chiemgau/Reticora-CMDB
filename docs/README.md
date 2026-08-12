@@ -251,10 +251,14 @@ continues to work while new code can validate against the catalogue. SLA policy
 rows define priority-based response and resolution targets, while `ticket_sla`
 stores the applied policy and clock outcomes. Ticket creation, first visible
 response and resolution transitions update that state so breach listings are
-computed from persisted timestamps, not from UI-only heuristics. The first
-implementation treats `business_calendar` as a policy flag and still calculates
-due times in elapsed minutes; that preserves the contract while leaving calendar
-working-hours expansion for a dedicated scheduler.
+computed from persisted timestamps, not from UI-only heuristics.
+`business_calendar = true` on a policy computes due times in business minutes
+(`sla.addTarget` in `internal/sla/calendar.go`): only Monday–Friday,
+08:00–18:00 UTC count, so a 4-hour target set Friday 17:00 is due Monday
+09:00. With the flag off, targets remain plain elapsed minutes. The calendar
+is intentionally fixed in this first iteration; per-tenant time zones and
+holiday tables are a follow-up that extends the calendar without changing
+`addTarget`'s call sites.
 
 
 **Workflow builder and forms:** migration 0027 adds `form_def`,
@@ -350,6 +354,16 @@ development mode). Failed jobs keep their error message; expired jobs no longer
 expose a URL. When no blob store is configured the endpoint answers 503 and the
 streaming export remains available.
 
+**Document content:** documents carry metadata rows; the binary content lives
+in blob storage. `PUT /api/v1/documents/{id}/content` stores the request body
+(limited to 25 MiB, Content-Type validated against a whitelist of common
+office/image formats — HTML, scripts and SVG are refused because stored
+attacker-controlled markup would be an XSS vector on our own origin) under a
+server-generated key (`documents/<org>/<id>/<version>`), and
+`GET /api/v1/documents/{id}/content` returns a presigned download URL
+(15-minute TTL). Without a configured blob store both endpoints answer 503
+while metadata CRUD keeps working.
+
 **Reconciliation and topology:** discovery runs are recorded as jobs
 (`/api/v1/discovery/jobs`). Findings that cannot be matched to an existing CI
 with sufficient confidence are not applied directly; they land in the review
@@ -385,7 +399,11 @@ local development keeps working. Discovery results are uploaded as
 gzip-compressed batches; when the backend is unreachable the batch is spooled
 to the on-disk buffer (`RETICORA_SPOOL_DIR`, default
 `/var/lib/reticora-collector/spool`, implemented by `edgecore/buffer`) and
-flushed in oldest-first order once connectivity returns.
+flushed in oldest-first order once connectivity returns. The spool is bounded:
+`DiskBuffer.MaxBytes` caps its total size (oldest messages are dropped first)
+and `DiskBuffer.MaxAge` expires stale messages on enqueue — both default to
+unlimited, and the next successful sync re-discovers the current state anyway,
+so dropping the oldest data first is the safe degradation.
 
 **AI/RAG governance:** `/api/v1/ai/conversations` and `/api/v1/ai/ask` are
 gated by the Pro/Enterprise `ai_assistant` entitlement. If no

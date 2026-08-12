@@ -183,7 +183,8 @@ func (r *PGRepository) ApplyForTicket(ctx context.Context, orgID string, t *tick
 			created = time.Now().UTC()
 		}
 		var responseMinutes, resolutionMinutes int
-		if err := tx.QueryRow(ctx, "SELECT response_target_minutes, resolution_target_minutes FROM sla WHERE organization_id = $1 AND id = $2", orgID, policyID).Scan(&responseMinutes, &resolutionMinutes); err != nil {
+		var businessCalendar bool
+		if err := tx.QueryRow(ctx, "SELECT response_target_minutes, resolution_target_minutes, business_calendar FROM sla WHERE organization_id = $1 AND id = $2", orgID, policyID).Scan(&responseMinutes, &resolutionMinutes, &businessCalendar); err != nil {
 			if err == pgx.ErrNoRows {
 				return fmt.Errorf("sla policy not found")
 			}
@@ -197,7 +198,7 @@ func (r *PGRepository) ApplyForTicket(ctx context.Context, orgID string, t *tick
 				response_due_at = EXCLUDED.response_due_at,
 				resolution_due_at = EXCLUDED.resolution_due_at,
 				updated_at = now()
-			RETURNING `+ticketSLAColumns, orgID, t.ID, policyID, created.Add(time.Duration(responseMinutes)*time.Minute), created.Add(time.Duration(resolutionMinutes)*time.Minute))
+			RETURNING `+ticketSLAColumns, orgID, t.ID, policyID, addTarget(created, responseMinutes, businessCalendar), addTarget(created, resolutionMinutes, businessCalendar))
 		var err error
 		state, err = scanTicketSLA(row)
 		if err != nil {

@@ -17,6 +17,9 @@ type Repository interface {
 	GetByID(ctx context.Context, orgID, id string) (*Document, error)
 	Create(ctx context.Context, d *Document) error
 	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Document, error)
+	// SetStorage stores the blob location, size and MIME type after an
+	// upload and returns the updated document.
+	SetStorage(ctx context.Context, orgID, id, storageKey, mimeType string, size int64) (*Document, error)
 	Delete(ctx context.Context, orgID, id string) error
 	LinkDocument(ctx context.Context, link *DocumentLink) error
 	GetLinks(ctx context.Context, orgID, docID string) ([]DocumentLink, error)
@@ -153,6 +156,22 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 	}
 	d.UpdatedAt = time.Now().UTC()
 	return d, nil
+}
+
+func (r *MemoryRepository) SetStorage(_ context.Context, orgID, id, storageKey, mimeType string, size int64) (*Document, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	d, ok := r.docs[id]
+	if !ok || d.OrganizationID != orgID {
+		return nil, fmt.Errorf("document not found")
+	}
+	d.StorageKey = storageKey
+	d.MimeType = mimeType
+	d.FileSize = size
+	d.UpdatedAt = time.Now().UTC()
+	cp := *d
+	return &cp, nil
 }
 
 func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {

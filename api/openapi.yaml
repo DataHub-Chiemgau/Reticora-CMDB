@@ -3305,6 +3305,82 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/documents/{id}/content:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    put:
+      operationId: uploadDocumentContent
+      tags: [Documents]
+      summary: Upload the binary content of a document
+      description: >
+        Stores the request body as the document's object in blob storage.
+        The Content-Type header is validated against a whitelist of common
+        office and image formats; the body is limited to 25 MiB.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Content stored; returns the updated document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: Payload too large
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '415':
+          description: Unsupported media type
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '503':
+          description: Blob storage is not configured
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+    get:
+      operationId: downloadDocumentContent
+      tags: [Documents]
+      summary: Get a time-limited download URL for the document content
+      responses:
+        '200':
+          description: Presigned download URL (15 minute TTL)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  download_url:
+                    type: string
+                    format: uri
+                required: [download_url]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Blob storage is not configured
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
   /api/v1/documents/{id}/links:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
