@@ -92,10 +92,18 @@ export function AuditPage() {
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
-                  <th className="pb-2">{t('audit.columnTime')}</th>
-                  <th className="pb-2">{t('audit.columnActor')}</th>
-                  <th className="pb-2">{t('audit.columnAction')}</th>
-                  <th className="pb-2">{t('audit.columnEntity')}</th>
+                  <th scope="col" className="pb-2">
+                    {t('audit.columnTime')}
+                  </th>
+                  <th scope="col" className="pb-2">
+                    {t('audit.columnActor')}
+                  </th>
+                  <th scope="col" className="pb-2">
+                    {t('audit.columnAction')}
+                  </th>
+                  <th scope="col" className="pb-2">
+                    {t('audit.columnEntity')}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
