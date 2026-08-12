@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -47,6 +48,12 @@ type collectorConfig struct {
 	// SpoolDir is the disk buffer location for discovery results collected
 	// while the backend is unreachable (offline operation per spec §5.2).
 	SpoolDir string
+	// SpoolMaxBytes caps the total spool size (oldest messages dropped
+	// first); 0 = unlimited (Epic D4 hardening).
+	SpoolMaxBytes int64
+	// SpoolMaxAge drops buffered messages older than this on enqueue;
+	// 0 = keep forever (Epic D4 hardening).
+	SpoolMaxAge time.Duration
 	// TrapListenAddr enables the SNMP trap receiver when set (e.g. ":162").
 	// Traps are normalized into metric events and sent to the monitoring
 	// ingest so existing alert rules can fire on them (spec §9).
@@ -148,7 +155,7 @@ type uploader struct {
 func newUploader(ctx context.Context, cfg collectorConfig) (*uploader, error) {
 	u := &uploader{cfg: cfg}
 	if cfg.SpoolDir != "" {
-		u.spool = &buffer.DiskBuffer{Dir: cfg.SpoolDir}
+		u.spool = &buffer.DiskBuffer{Dir: cfg.SpoolDir, MaxBytes: cfg.SpoolMaxBytes, MaxAge: cfg.SpoolMaxAge}
 	}
 
 	certPEM, keyPEM, caPEM, err := loadTLSMaterial(ctx, cfg)
@@ -399,7 +406,28 @@ func (u *uploader) spoolResults(ctx context.Context, payload []byte) error {
 		return err
 	}
 	slog.Info("discovery results spooled for later delivery", "message_id", id)
+	u.logSpoolStats(ctx)
 	return nil
+}
+
+// logSpoolStats emits the current spool occupancy as a structured log record
+// so operators can alert on a growing/ageing spool (Epic D4: Metriken).
+func (u *uploader) logSpoolStats(ctx context.Context) {
+	if u.spool == nil {
+		return
+	}
+	stats, err := u.spool.Stats(ctx)
+	if err != nil {
+		slog.Warn("spool stats unavailable", "error", err)
+		return
+	}
+	slog.Info("spool stats",
+		"spool_messages", stats.Messages,
+		"spool_bytes", stats.Bytes,
+		"spool_oldest_age", stats.OldestAge.String(),
+		"spool_max_bytes", u.cfg.SpoolMaxBytes,
+		"spool_max_age", u.cfg.SpoolMaxAge.String(),
+	)
 }
 
 // flushSpool delivers buffered batches in oldest-first order. Delivery stops
@@ -429,6 +457,9 @@ func (u *uploader) flushSpool(ctx context.Context) {
 			return
 		}
 		slog.Info("spooled discovery results delivered", "message_id", msg.ID)
+	}
+	if len(msgs) > 0 {
+		u.logSpoolStats(ctx)
 	}
 }
 
@@ -630,6 +661,8 @@ func loadCollectorConfig() collectorConfig {
 		HeartbeatInterval: durationEnvOrDefault("RETICORA_HEARTBEAT_INTERVAL", time.Minute),
 		Credentials:       creds,
 		SpoolDir:          envOrDefault("RETICORA_SPOOL_DIR", "/var/lib/reticora-collector/spool"),
+		SpoolMaxBytes:     int64EnvOrDefault("RETICORA_SPOOL_MAX_BYTES", 1<<30), // 1 GiB default cap
+		SpoolMaxAge:       durationEnvOrDefault("RETICORA_SPOOL_MAX_AGE", 72*time.Hour),
 		TrapListenAddr:    os.Getenv("RETICORA_SNMP_TRAP_LISTEN"),
 		TLSCertPEM:        []byte(os.Getenv("RETICORA_TLS_CLIENT_CERT")),
 		TLSKeyPEM:         []byte(os.Getenv("RETICORA_TLS_CLIENT_KEY")),
@@ -679,6 +712,21 @@ func durationEnvOrDefault(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return duration
+}
+
+// int64EnvOrDefault parses an integer byte limit from the environment;
+// 0 disables the limit, negative values fall back to the default.
+func int64EnvOrDefault(key string, fallback int64) int64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
+		slog.Warn("invalid integer configuration", "key", key, "value", value, "fallback", fallback)
+		return fallback
+	}
+	return parsed
 }
 
 func (c collectorConfig) String() string {

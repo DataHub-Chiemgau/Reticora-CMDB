@@ -1,0 +1,25 @@
+[
+  {
+    "name": "fortinet-fortigate-snmp",
+    "vendor": "Fortinet",
+    "model": "FortiGate",
+    "protocol": "snmp",
+    "sysObjectIds": ["1.3.6.1.4.1.12356.101.1"],
+    "ouiPrefixes": ["00:09:0F", "08:5B:0E", "70:4C:A5", "90:6C:AC", "E8:1C:BA"],
+    "snmpOids": {
+      "sysDescr": "1.3.6.1.2.1.1.1.0",
+      "sysName": "1.3.6.1.2.1.1.5.0",
+      "sysUpTime": "1.3.6.1.2.1.1.3.0",
+      "fgSysVersion": "1.3.6.1.4.1.12356.101.4.1.1.0",
+      "fgSerialNumber": "1.3.6.1.4.1.12356.100.1.1.1.0",
+      "fgCpuUsage": "1.3.6.1.4.1.12356.101.4.1.3.0",
+      "fgMemUsage": "1.3.6.1.4.1.12356.101.4.1.4.0",
+      "ifDescr": "1.3.6.1.2.1.2.2.1.2",
+      "ifOperStatus": "1.3.6.1.2.1.2.2.1.8"
+    },
+    "attributes": {
+      "category": "network_device",
+      "device_type": "firewall"
+    }
+  }
+]

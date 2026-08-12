@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/profiles"
 )
 
 const (
@@ -50,6 +51,11 @@ type Plugin struct {
 	Timeout     time.Duration
 	Retries     int
 	Concurrency int
+	// Profiles resolves sysObjectID/MAC to vendor-specific classification.
+	// nil loads the embedded profile set lazily.
+	Profiles *profiles.Registry
+
+	loadOnce sync.Once
 }
 
 var _ plugins.Plugin = (*Plugin)(nil)
@@ -60,6 +66,44 @@ func New() *Plugin {
 		Timeout:     defaultTimeout,
 		Retries:     defaultRetries,
 		Concurrency: defaultConcurrency,
+	}
+}
+
+// profileRegistry returns the configured registry, lazily loading the
+// embedded vendor profiles when none was set.
+func (p *Plugin) profileRegistry() *profiles.Registry {
+	p.loadOnce.Do(func() {
+		if p.Profiles == nil {
+			r := profiles.NewRegistry()
+			if err := r.LoadEmbedded(); err != nil {
+				r = profiles.NewRegistry() // defensive: never return nil
+			}
+			p.Profiles = r
+		}
+	})
+	return p.Profiles
+}
+
+// applyProfile enriches a result with the vendor profile matching the
+// device's sysObjectID (datengetriebenes Mapping, spec §5.4): vendor and
+// model fill empty result fields and profile attributes are merged into the
+// result (result attributes win on conflict).
+func (p *Plugin) applyProfile(result *plugins.Result, sysObjectID string) {
+	profile, ok := p.profileRegistry().BySysObjectID(sysObjectID)
+	if !ok {
+		return
+	}
+	if result.Manufacturer == "" {
+		result.Manufacturer = profile.Vendor
+	}
+	if result.Model == "" {
+		result.Model = profile.Model
+	}
+	result.Attributes["profile"] = profile.Name
+	for key, value := range profile.Attributes {
+		if _, exists := result.Attributes[key]; !exists {
+			result.Attributes[key] = value
+		}
 	}
 }
 
@@ -200,6 +244,8 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 			"snmpVersion":  "v2c",
 		},
 	}
+
+	p.applyProfile(result, sysObjectID)
 
 	return result, nil
 }

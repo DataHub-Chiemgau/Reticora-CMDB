@@ -220,6 +220,46 @@ func (b *DiskBuffer) Len(ctx context.Context) (int, error) {
 	return len(entries), nil
 }
 
+// Stats summarizes the current spool state for operator visibility
+// (Epic D4: Metriken).
+type Stats struct {
+	// Messages is the number of buffered messages.
+	Messages int
+	// Bytes is the total on-disk size of all buffered messages.
+	Bytes int64
+	// OldestAge is the age of the oldest buffered message; zero when empty.
+	OldestAge time.Duration
+}
+
+// Stats returns the current spool statistics.
+func (b *DiskBuffer) Stats(ctx context.Context) (Stats, error) {
+	if err := ctx.Err(); err != nil {
+		return Stats{}, err
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	entries, err := b.listMessageFiles()
+	if err != nil {
+		return Stats{}, err
+	}
+
+	stats := Stats{Messages: len(entries)}
+	now := time.Now().UTC()
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		stats.Bytes += info.Size()
+		if age := now.Sub(info.ModTime()); age > stats.OldestAge {
+			stats.OldestAge = age
+		}
+	}
+	return stats, nil
+}
+
 func (b *DiskBuffer) listMessageFiles() ([]os.DirEntry, error) {
 	if err := os.MkdirAll(b.Dir, 0o700); err != nil {
 		return nil, fmt.Errorf("buffer: create spool: %w", err)

@@ -424,10 +424,38 @@ gzip-compressed batches; when the backend is unreachable the batch is spooled
 to the on-disk buffer (`RETICORA_SPOOL_DIR`, default
 `/var/lib/reticora-collector/spool`, implemented by `edgecore/buffer`) and
 flushed in oldest-first order once connectivity returns. The spool is bounded:
-`DiskBuffer.MaxBytes` caps its total size (oldest messages are dropped first)
-and `DiskBuffer.MaxAge` expires stale messages on enqueue — both default to
-unlimited, and the next successful sync re-discovers the current state anyway,
-so dropping the oldest data first is the safe degradation.
+`RETICORA_SPOOL_MAX_BYTES` (default 1 GiB, `0` = unlimited) caps its total
+size — oldest messages are dropped first — and `RETICORA_SPOOL_MAX_AGE`
+(default 72h, `0s` = keep forever) expires stale messages on enqueue. The next
+successful sync re-discovers the current state anyway, so dropping the oldest
+data first is the safe degradation. Spool occupancy (message count, bytes,
+oldest age) is emitted as structured `spool stats` log records on every
+spool/flush so operators can alert on a growing backlog.
+
+**Identity resolution (spec §5.3):** `discovery.Reconcile` matches incoming
+items against existing CIs in the spec's priority order — serial number,
+hardware UUID, MAC address(es), management IP + CI type, hostname/FQDN. Each
+ingest item carries a `source` (snmp/ssh/redfish/ipmi/wmi/…); conflict
+resolution follows source trust plus recency: data from an equal or more
+trusted source (IPMI/Redfish > API > agent > WMI/SSH > SNMP > sweep > manual)
+always wins, while a less trusted source only overwrites values older than
+seven days (`discovery.ShouldApplyAttribute`). A low-trust sighting still
+refreshes `last_seen_at` and merges new fingerprint keys, but cannot clobber
+fresh high-trust identity data. When a matched CI contradicts the incoming
+identity values (e.g. a changed serial number), a `conflicting_values` review
+item with both identity snapshots is queued at
+`/api/v1/discovery/review-items` instead of silently overwriting; ambiguous
+matches keep landing in the queue as `ambiguous_identity`.
+
+**Classification (spec §5.4):** vendor profiles in `collector/profiles/data/`
+are embedded into the collector binary (`profiles.Registry.LoadEmbedded`). The
+SNMP plugin classifies devices by sysObjectID (longest-prefix match via
+`Registry.BySysObjectID`) and fills vendor/model plus profile attributes from
+the matched profile; `Registry.VendorByMAC` resolves vendors from MAC OUI
+prefixes. Adding a new device family is a data-only change — ship a JSON
+profile; `TestEmbeddedProfileData` validates the set in CI. Shipped profiles
+cover Cisco, Juniper, Arista, Fortinet, HPE, Dell, MikroTik, Ubiquiti,
+Synology, NetApp, APC, Supermicro and Lenovo plus generic SNMP/SSH fallbacks.
 
 **SNMP trap reception:** when `RETICORA_SNMP_TRAP_LISTEN` is set (e.g.
 `:162`), the collector runs a tolerant SNMPv1/v2c trap receiver

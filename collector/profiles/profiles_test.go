@@ -106,6 +106,85 @@ func TestLoadJSONInvalid(t *testing.T) {
 	}
 }
 
+func TestBySysObjectIDLongestPrefixWins(t *testing.T) {
+	r := NewRegistry()
+	if err := r.Register(Profile{Name: "vendor", Vendor: "Cisco", SysObjectIDs: []string{"1.3.6.1.4.1.9"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Register(Profile{Name: "model", Vendor: "Cisco", Model: "Catalyst", SysObjectIDs: []string{"1.3.6.1.4.1.9.1"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := r.BySysObjectID("1.3.6.1.4.1.9.1.275")
+	if !ok || got.Name != "model" {
+		t.Fatalf("BySysObjectID = %q, %v; want model, true", got.Name, ok)
+	}
+
+	got, ok = r.BySysObjectID("1.3.6.1.4.1.9.5.42")
+	if !ok || got.Name != "vendor" {
+		t.Fatalf("BySysObjectID vendor fallback = %q, %v; want vendor, true", got.Name, ok)
+	}
+
+	// Dot-boundary: 1.3.6.1.4.1.9.10 must not match the model prefix
+	// 1.3.6.1.4.1.9.1 (string prefix), only the broader vendor prefix.
+	got, ok = r.BySysObjectID("1.3.6.1.4.1.9.10")
+	if !ok || got.Name != "vendor" {
+		t.Fatalf("1.3.6.1.4.1.9.10 = %q, %v; want vendor via broader prefix", got.Name, ok)
+	}
+
+	if _, ok := r.BySysObjectID(""); ok {
+		t.Error("empty sysObjectID must not match")
+	}
+	if _, ok := r.BySysObjectID("1.3.6.1.4.1.99999.1"); ok {
+		t.Error("unknown enterprise OID must not match")
+	}
+}
+
+func TestVendorByMAC(t *testing.T) {
+	r := NewRegistry()
+	if err := r.Register(Profile{Name: "mikrotik", Vendor: "MikroTik", OUIPrefixes: []string{"48:8F:5A"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, mac := range []string{"48:8F:5A:01:02:03", "48-8F-5A-01-02-03", "488f5a010203", "48:8f:5a:AA:BB:CC"} {
+		vendor, ok := r.VendorByMAC(mac)
+		if !ok || vendor != "MikroTik" {
+			t.Errorf("VendorByMAC(%q) = %q, %v; want MikroTik, true", mac, vendor, ok)
+		}
+	}
+
+	if _, ok := r.VendorByMAC("00:11:22:33:44:55"); ok {
+		t.Error("unknown OUI must not resolve")
+	}
+	if _, ok := r.VendorByMAC("not-a-mac"); ok {
+		t.Error("garbage MAC must not resolve")
+	}
+	if _, ok := r.VendorByMAC(""); ok {
+		t.Error("empty MAC must not resolve")
+	}
+}
+
+func TestLoadEmbeddedRegistersShippedProfiles(t *testing.T) {
+	r := NewRegistry()
+	if err := r.LoadEmbedded(); err != nil {
+		t.Fatalf("LoadEmbedded: %v", err)
+	}
+	list := r.List()
+	if len(list) < 10 {
+		t.Fatalf("LoadEmbedded registered %d profiles, want at least 10", len(list))
+	}
+	// Spot-check the sysObjectID classification path against shipped data.
+	if _, ok := r.BySysObjectID("1.3.6.1.4.1.14988.1"); !ok {
+		t.Error("MikroTik enterprise sysObjectID did not resolve")
+	}
+	if _, ok := r.BySysObjectID("1.3.6.1.4.1.9.1.1208"); !ok {
+		t.Error("Cisco model sysObjectID did not resolve")
+	}
+	if vendor, ok := r.VendorByMAC("48:8F:5A:10:20:30"); !ok || vendor != "MikroTik" {
+		t.Errorf("VendorByMAC MikroTik OUI = %q, %v", vendor, ok)
+	}
+}
+
 // TestEmbeddedProfileData validates every JSON profile shipped in data/ so
 // broken profile files fail in CI instead of at runtime.
 func TestEmbeddedProfileData(t *testing.T) {

@@ -23,6 +23,8 @@
     "vendor": "Dell",
     "model": "OS10",
     "protocol": "snmp",
+    "sysObjectIds": ["1.3.6.1.4.1.674.10895"],
+    "ouiPrefixes": ["00:14:22", "18:66:DA", "34:17:EB", "74:E6:E2", "B0:83:FE", "D0:94:66", "F8:DB:88"],
     "snmpOids": {
       "sysDescr": "1.3.6.1.2.1.1.1.0",
       "sysName": "1.3.6.1.2.1.1.5.0",

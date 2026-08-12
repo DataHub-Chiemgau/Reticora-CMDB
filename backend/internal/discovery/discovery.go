@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,6 +49,12 @@ type IngestItem struct {
 	Model        string         `json:"model,omitempty"`
 	SerialNumber string         `json:"serial_number,omitempty"`
 	ManagementIP string         `json:"management_ip,omitempty"`
+
+	// Source is the discovery protocol the item was collected with
+	// (snmp|ssh|redfish|ipmi|wmi|api|agent|sweep). It drives the source-trust
+	// ranking during conflict resolution (spec §5.3). Empty falls back to
+	// "sweep", preserving the previous behavior.
+	Source string `json:"source,omitempty"`
 
 	// Extended identity fields used for neighbor resolution and topology.
 	HardwareUUID string `json:"hardware_uuid,omitempty"`
@@ -310,7 +317,10 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 	for i, item := range req.Items {
 		result := Reconcile(existing, item)
 		now := time.Now().UTC().Format(time.RFC3339)
-		source := ci.SourceSweep
+		source := item.Source
+		if source == "" {
+			source = ci.SourceSweep
+		}
 		attributes := map[string]any{
 			"fingerprint": item.Fingerprint,
 			"raw_data":    item.RawData,
@@ -345,6 +355,10 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			resolvedCIID[i] = newItem.ID
 			resp.Created++
 		case ReconcileMatched:
+			matched := findCI(existing, result.MatchedCIID)
+			if matched != nil {
+				applySourceTrust(matched, &item, source, attributes)
+			}
 			updated, err := h.ciRepo.Update(r.Context(), t.OrganizationID, result.MatchedCIID, ci.UpdateRequest{
 				Name:            stringPtr(item.Name),
 				Manufacturer:    stringPtr(item.Manufacturer),
@@ -367,6 +381,18 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			}
 			resolvedCIID[i] = updated.ID
 			resp.Updated++
+			// Contradicting identity values on a matched CI (e.g. a changed
+			// serial number) are queued for operator review instead of being
+			// silently applied (spec §5.3: Unklarheiten in Review-Queue).
+			if len(result.ValueConflicts) > 0 && matched != nil {
+				if reviewItem := reviewItemFromValueConflicts(t.OrganizationID, *matched, item, result); reviewItem != nil {
+					if err := h.repo.CreateReviewItem(r.Context(), reviewItem); err != nil {
+						api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+						return
+					}
+					resp.ReviewItems++
+				}
+			}
 		case ReconcileConflict:
 			resp.Conflicts++
 			if reviewItem := reviewItemFromConflict(t.OrganizationID, item, result); reviewItem != nil {
@@ -389,4 +415,79 @@ func stringPtr(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+// defaultStalenessThreshold is the age after which a stored attribute from a
+// more trusted source is considered outdated and may be overwritten by a less
+// trusted one (spec §5.3: Konfliktlösung nach Quellenvertrauen + Aktualität).
+const defaultStalenessThreshold = 7 * 24 * time.Hour
+
+// findCI returns the CI with the given id from the cached list, or nil.
+func findCI(existing []ci.Item, id string) *ci.Item {
+	for j := range existing {
+		if existing[j].ID == id {
+			return &existing[j]
+		}
+	}
+	return nil
+}
+
+// applySourceTrust enforces the source-trust rule of spec §5.3 on a matched
+// CI before the update is persisted: when the incoming item originates from
+// a less trusted source than the one that populated the CI, and the stored
+// values are still fresh, the incoming identity attributes are dropped from
+// the update so a low-trust sweep cannot clobber BMC-grade data. LastSeenAt
+// and the merged attributes are always refreshed so the sighting itself is
+// recorded.
+func applySourceTrust(matched *ci.Item, item *IngestItem, incomingSource string, attributes map[string]any) {
+	nowTime := time.Now().UTC()
+	existingLastSeen := nowTime
+	if matched.LastSeenAt != nil {
+		existingLastSeen = *matched.LastSeenAt
+	}
+	if ShouldApplyAttribute(matched.DiscoverySource, incomingSource, existingLastSeen, nowTime, defaultStalenessThreshold) {
+		return
+	}
+	// Less trusted and still fresh: keep the stored identity values.
+	item.Name = firstNonEmpty(matched.Name, item.Name)
+	item.Manufacturer = firstNonEmpty(matched.Manufacturer, item.Manufacturer)
+	item.Model = firstNonEmpty(matched.Model, item.Model)
+	item.SerialNumber = firstNonEmpty(matched.SerialNumber, item.SerialNumber)
+	item.ManagementIP = firstNonEmpty(matched.ManagementIP, item.ManagementIP)
+	// Keep the stored fingerprint dominant by re-merging it over the incoming
+	// one; new keys from the incoming sighting are still added.
+	merged := map[string]any{}
+	for k, v := range item.Fingerprint {
+		merged[k] = v
+	}
+	for k, v := range existingFingerprintMap(*matched) {
+		if _, known := merged[k]; !known {
+			merged[k] = v
+		} else if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+			merged[k] = v
+		}
+	}
+	attributes["fingerprint"] = merged
+}
+
+// existingFingerprintMap extracts the stored fingerprint map of a CI,
+// accepting both the nested attributes.fingerprint layout and top-level
+// attribute keys written by older ingest versions.
+func existingFingerprintMap(item ci.Item) map[string]any {
+	if item.Attributes == nil {
+		return nil
+	}
+	if nested, ok := item.Attributes["fingerprint"]; ok {
+		if fingerprintMap, ok := nested.(map[string]any); ok {
+			return fingerprintMap
+		}
+	}
+	return nil
+}
+
+func firstNonEmpty(preferred, fallback string) string {
+	if strings.TrimSpace(preferred) != "" {
+		return preferred
+	}
+	return fallback
 }

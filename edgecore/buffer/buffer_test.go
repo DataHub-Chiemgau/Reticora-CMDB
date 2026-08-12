@@ -481,3 +481,69 @@ func TestDiskBufferUnlimitedByDefault(t *testing.T) {
 		t.Fatalf("expected 5 messages, got %d", n)
 	}
 }
+
+func TestStatsEmptySpool(t *testing.T) {
+	b := &DiskBuffer{Dir: t.TempDir()}
+	stats, err := b.Stats(context.Background())
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if stats.Messages != 0 || stats.Bytes != 0 || stats.OldestAge != 0 {
+		t.Fatalf("empty spool stats = %+v, want zero", stats)
+	}
+}
+
+func TestStatsReportsCountsAndOldestAge(t *testing.T) {
+	dir := t.TempDir()
+	b := &DiskBuffer{Dir: dir}
+	payloads := []string{"aa", "bbbb", "cccccc"}
+	var wantBytes int64
+	for _, p := range payloads {
+		if _, err := b.Enqueue(context.Background(), Message{Topic: "t", Payload: []byte(p)}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			t.Fatalf("info: %v", err)
+		}
+		wantBytes += info.Size()
+	}
+
+	stats, err := b.Stats(context.Background())
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if stats.Messages != len(payloads) {
+		t.Errorf("Messages = %d, want %d", stats.Messages, len(payloads))
+	}
+	if stats.Bytes != wantBytes {
+		t.Errorf("Bytes = %d, want %d", stats.Bytes, wantBytes)
+	}
+	if stats.OldestAge <= 0 || stats.OldestAge > time.Minute {
+		t.Errorf("OldestAge = %v, want small positive duration", stats.OldestAge)
+	}
+
+	if err := b.Ack(context.Background(), []string{}); err != nil {
+		t.Fatalf("ack noop: %v", err)
+	}
+	stats, _ = b.Stats(context.Background())
+	if stats.Messages != len(payloads) {
+		t.Errorf("after noop ack Messages = %d, want %d", stats.Messages, len(payloads))
+	}
+}
+
+func TestStatsContextCancelled(t *testing.T) {
+	b := &DiskBuffer{Dir: t.TempDir()}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := b.Stats(ctx); err == nil {
+		t.Error("Stats with cancelled context should fail")
+	}
+}

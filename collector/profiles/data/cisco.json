@@ -1,0 +1,45 @@
+[
+  {
+    "name": "cisco-ios-snmp",
+    "vendor": "Cisco",
+    "model": "IOS",
+    "protocol": "snmp",
+    "sysObjectIds": ["1.3.6.1.4.1.9.1"],
+    "ouiPrefixes": ["00:1B:0D", "00:1E:F6", "28:6F:7F", "4C:4E:35", "70:81:05", "84:78:AC", "A4:4C:11", "CC:EF:48", "F4:CF:E2"],
+    "snmpOids": {
+      "sysDescr": "1.3.6.1.2.1.1.1.0",
+      "sysName": "1.3.6.1.2.1.1.5.0",
+      "sysUpTime": "1.3.6.1.2.1.1.3.0",
+      "entPhysicalSerialNum": "1.3.6.1.2.1.47.1.1.1.1.11.1",
+      "entPhysicalModelName": "1.3.6.1.2.1.47.1.1.1.1.13.1",
+      "entPhysicalSoftwareRev": "1.3.6.1.2.1.47.1.1.1.1.10.1",
+      "ifDescr": "1.3.6.1.2.1.2.2.1.2",
+      "ifOperStatus": "1.3.6.1.2.1.2.2.1.8",
+      "ifHighSpeed": "1.3.6.1.2.1.31.1.1.1.15",
+      "lldpRemSysName": "1.0.8802.1.1.2.1.4.1.1.9",
+      "cdpCacheDeviceId": "1.3.6.1.4.1.9.9.23.1.2.1.1.6"
+    },
+    "attributes": {
+      "category": "network_device",
+      "device_type": "switch"
+    }
+  },
+  {
+    "name": "cisco-ios-ssh",
+    "vendor": "Cisco",
+    "model": "IOS",
+    "protocol": "ssh",
+    "sysObjectIds": ["1.3.6.1.4.1.9.1"],
+    "sshCommands": {
+      "version": "show version",
+      "inventory": "show inventory",
+      "interfaces": "show interfaces status",
+      "neighbors": "show cdp neighbors detail",
+      "mac_table": "show mac address-table"
+    },
+    "attributes": {
+      "category": "network_device",
+      "device_type": "switch"
+    }
+  }
+]
