@@ -282,7 +282,6 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	return doc, err
 }
 
-// Delete deletes a document. The document table has no deleted_at column, so this is a hard delete.
 // SetStorage stores the blob location after an upload and returns the
 // updated document. The storage key is always server-generated
 // (documents/<org>/<id>/<version>) so a client can never point a document at
@@ -305,6 +304,7 @@ func (r *PGRepository) SetStorage(ctx context.Context, orgID, id, storageKey, mi
 	return doc, err
 }
 
+// Delete deletes a document. The document table has no deleted_at column, so this is a hard delete.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM document WHERE id = $1", id)

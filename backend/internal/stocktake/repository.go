@@ -13,9 +13,16 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 )
 
-// ErrAlreadyCompleted is returned when a stocktake that is already in a
-// terminal state (completed or cancelled) is completed again.
-var ErrAlreadyCompleted = errors.New("stocktake already completed or cancelled")
+// Sentinel errors returned by repositories so the handler can select the
+// appropriate HTTP status code instead of guessing from infrastructure
+// failures.
+var (
+	// ErrNotFound is returned when the referenced stocktake does not exist.
+	ErrNotFound = errors.New("stocktake not found")
+	// ErrAlreadyCompleted is returned when a stocktake that is already in a
+	// terminal state (completed or cancelled) is completed again.
+	ErrAlreadyCompleted = errors.New("stocktake already completed or cancelled")
+)
 
 // deviatingResults are the scan results that make up the difference list.
 var deviatingResults = []string{"missing", "surplus", "damaged", "wrong_location"}
@@ -143,7 +150,7 @@ func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Stockt
 
 	s, ok := r.stocktakes[id]
 	if !ok || s.OrganizationID != orgID {
-		return nil, fmt.Errorf("stocktake not found")
+		return nil, ErrNotFound
 	}
 	return s, nil
 }
@@ -167,7 +174,7 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 
 	s, ok := r.stocktakes[id]
 	if !ok || s.OrganizationID != orgID {
-		return nil, fmt.Errorf("stocktake not found")
+		return nil, ErrNotFound
 	}
 
 	if req.Title != nil {
@@ -201,7 +208,7 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 
 	s, ok := r.stocktakes[id]
 	if !ok || s.OrganizationID != orgID {
-		return fmt.Errorf("stocktake not found")
+		return ErrNotFound
 	}
 	delete(r.stocktakes, id)
 	// Remove associated scans
@@ -220,7 +227,7 @@ func (r *MemoryRepository) AddScan(_ context.Context, scan *StockScan) error {
 	// Verify stocktake exists
 	st, ok := r.stocktakes[scan.StocktakeID]
 	if !ok || st.OrganizationID != scan.OrganizationID {
-		return fmt.Errorf("stocktake not found")
+		return ErrNotFound
 	}
 
 	r.nextScan++
@@ -246,7 +253,7 @@ func (r *MemoryRepository) Difference(ctx context.Context, orgID, stocktakeID st
 	st, ok := r.stocktakes[stocktakeID]
 	if !ok || st.OrganizationID != orgID {
 		r.mu.RUnlock()
-		return nil, 0, fmt.Errorf("stocktake not found")
+		return nil, 0, ErrNotFound
 	}
 	var scans []StockScan
 	for _, s := range r.scans {
@@ -285,7 +292,7 @@ func (r *MemoryRepository) Complete(ctx context.Context, orgID, id string, apply
 	s, ok := r.stocktakes[id]
 	if !ok || s.OrganizationID != orgID {
 		r.mu.Unlock()
-		return nil, fmt.Errorf("stocktake not found")
+		return nil, ErrNotFound
 	}
 	if s.Status == "completed" || s.Status == "cancelled" {
 		r.mu.Unlock()

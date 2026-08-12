@@ -89,7 +89,11 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
 
@@ -156,7 +160,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
 
@@ -173,7 +181,11 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	id := chi.URLParam(r, "id")
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
 
@@ -219,7 +231,11 @@ func (h *Handler) AddScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.AddScan(r.Context(), scan); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
 
@@ -267,7 +283,11 @@ func (h *Handler) Difference(w http.ResponseWriter, r *http.Request) {
 
 	entries, total, err := h.repo.Difference(r.Context(), t.OrganizationID, stocktakeID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
 
@@ -310,7 +330,11 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
 			return
 		}
-		api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
 

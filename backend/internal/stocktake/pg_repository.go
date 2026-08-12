@@ -15,10 +15,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// errNotFound marks a missing stocktake inside transactions so callers can
-// distinguish it from infrastructure errors.
-var errNotFound = errors.New("not found")
-
 const stocktakeSelectColumns = `
 	id::text,
 	organization_id::text,
@@ -178,7 +174,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Stocktak
 		stocktake, err = scanStocktake(tx.QueryRow(ctx, query, id))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get stocktake by id: %w", err)
 		}
@@ -272,7 +268,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			stocktake, err = scanStocktake(tx.QueryRow(ctx, query, id))
 			if err != nil {
 				if err == pgx.ErrNoRows {
-					return fmt.Errorf("not found")
+					return ErrNotFound
 				}
 				return fmt.Errorf("get stocktake for update: %w", err)
 			}
@@ -285,7 +281,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		stocktake, err = scanStocktake(tx.QueryRow(ctx, query, args...))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("update stocktake: %w", err)
 		}
@@ -303,7 +299,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 			return fmt.Errorf("delete stocktake: %w", err)
 		}
 		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
+			return ErrNotFound
 		}
 		return nil
 	})
@@ -317,7 +313,7 @@ func (r *PGRepository) AddScan(ctx context.Context, scan *StockScan) error {
 			return fmt.Errorf("check stocktake: %w", err)
 		}
 		if !exists {
-			return fmt.Errorf("not found")
+			return ErrNotFound
 		}
 
 		query := `
@@ -403,7 +399,7 @@ func (r *PGRepository) Difference(ctx context.Context, orgID, stocktakeID string
 			return fmt.Errorf("check stocktake: %w", err)
 		}
 		if !exists {
-			return errNotFound
+			return ErrNotFound
 		}
 
 		if err := tx.QueryRow(ctx,
@@ -456,8 +452,8 @@ func (r *PGRepository) Difference(ctx context.Context, orgID, stocktakeID string
 		return rows.Err()
 	})
 	if err != nil {
-		if errors.Is(err, errNotFound) {
-			return nil, 0, fmt.Errorf("stocktake not found")
+		if errors.Is(err, ErrNotFound) {
+			return nil, 0, ErrNotFound
 		}
 		return nil, 0, err
 	}
@@ -474,7 +470,7 @@ func (r *PGRepository) Complete(ctx context.Context, orgID, id string, applyCorr
 		var status string
 		err := tx.QueryRow(ctx, "SELECT status FROM stocktake WHERE id = $1 FOR UPDATE", id).Scan(&status)
 		if err == pgx.ErrNoRows {
-			return errNotFound
+			return ErrNotFound
 		}
 		if err != nil {
 			return fmt.Errorf("lock stocktake: %w", err)
@@ -496,8 +492,8 @@ func (r *PGRepository) Complete(ctx context.Context, orgID, id string, applyCorr
 				return fmt.Errorf("list deviating scans: %w", err)
 			}
 			type correctionRow struct {
-				scan                       StockScan
-				assetID, tag, status, loc  string
+				scan                      StockScan
+				assetID, tag, status, loc string
 			}
 			var pending []correctionRow
 			for rows.Next() {
@@ -570,8 +566,8 @@ func (r *PGRepository) Complete(ctx context.Context, orgID, id string, applyCorr
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, errNotFound) {
-			return nil, fmt.Errorf("stocktake not found")
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrNotFound
 		}
 		return nil, err
 	}
