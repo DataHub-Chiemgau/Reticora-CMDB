@@ -18,6 +18,10 @@ type Repository interface {
 	CreateUser(ctx context.Context, u *User) error
 	UpdateUser(ctx context.Context, orgID, id string, req UpdateUserRequest) (*User, error)
 	DeleteUser(ctx context.Context, orgID, id string) error
+	// AnonymizeUser replaces all personal data with surrogate values and
+	// deactivates the account, keeping the row for referential integrity and
+	// the audit chain (GDPR right to erasure).
+	AnonymizeUser(ctx context.Context, orgID, id string) (*User, error)
 
 	// Teams
 	ListTeams(ctx context.Context, orgID, search string, page api.PaginationParams) ([]Team, int, error)
@@ -150,6 +154,24 @@ func (r *MemoryRepository) DeleteUser(_ context.Context, orgID, id string) error
 	}
 	delete(r.users, id)
 	return nil
+}
+
+func (r *MemoryRepository) AnonymizeUser(_ context.Context, orgID, id string) (*User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	u, ok := r.users[id]
+	if !ok || u.OrganizationID != orgID {
+		return nil, fmt.Errorf("user not found")
+	}
+	u.Email = SurrogateEmail(id)
+	u.DisplayName = SurrogateDisplayName(id)
+	u.AvatarURL = ""
+	u.ExternalID = ""
+	u.Status = "anonymized"
+	u.UpdatedAt = time.Now().UTC()
+	cp := *u
+	return &cp, nil
 }
 
 // --- Teams ---

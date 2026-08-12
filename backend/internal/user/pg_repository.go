@@ -258,6 +258,34 @@ func (r *PGRepository) DeleteUser(ctx context.Context, orgID, id string) error {
 	})
 }
 
+// AnonymizeUser replaces every personal column with a deterministic,
+// non-identifying surrogate and deactivates the account. The row is kept so
+// foreign keys (tickets, assignments, audit) stay intact — the record simply
+// no longer identifies a person.
+func (r *PGRepository) AnonymizeUser(ctx context.Context, orgID, id string) (*User, error) {
+	var item *User
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, `
+			UPDATE app_user
+			SET email = $3,
+				display_name = $4,
+				avatar_url = NULL,
+				oidc_subject = NULL,
+				is_active = false,
+				updated_at = NOW()
+			WHERE id = $1 AND organization_id = $2
+			RETURNING `+userSelectColumns,
+			id, orgID, SurrogateEmail(id), SurrogateDisplayName(id))
+		var err error
+		item, err = scanUser(row)
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("user not found")
+		}
+		return err
+	})
+	return item, err
+}
+
 func (r *PGRepository) ListTeams(ctx context.Context, orgID, search string, page api.PaginationParams) ([]Team, int, error) {
 	items := make([]Team, 0)
 	var total int

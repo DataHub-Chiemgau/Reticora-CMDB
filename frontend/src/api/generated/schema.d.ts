@@ -1834,6 +1834,52 @@ export interface paths {
     patch: operations['updateRole'];
     trace?: never;
   };
+  '/api/v1/users/{id}/data-export': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Export all personal data of a user (GDPR Art. 15)
+     * @description Returns every piece of personal data the CMDB stores about the user: the account record plus all contact records linked to the user's e-mail address. Requires user:manage.
+     */
+    get: operations['exportUserData'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/users/{id}/anonymize': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Anonymize a user (GDPR Art. 17, right to erasure)
+     * @description Replaces all personal data (e-mail, display name, avatar, external ID) with non-identifying surrogate values and disables the account. The row itself and audit history are kept so referential integrity and the audit chain survive. Requires user:manage.
+     */
+    post: operations['anonymizeUser'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/users/{id}/roles': {
     parameters: {
       query?: never;
@@ -9483,6 +9529,61 @@ export interface operations {
         };
       };
       400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  exportUserData: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Personal data export */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            user: components['schemas']['User'];
+            contacts: components['schemas']['Contact'][];
+            /** Format: date-time */
+            exported_at: string;
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  anonymizeUser: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description User anonymized; returns the updated record */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['User'];
+        };
+      };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
     };

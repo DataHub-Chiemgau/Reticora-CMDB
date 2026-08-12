@@ -137,7 +137,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 		document.NewHandler(repos.Document, opts.Blobs),
 		stocktake.NewHandler(repos.Stocktake),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
-		user.NewHandler(repos.User),
+		user.NewHandler(repos.User, repos.Contact),
 		permission.NewHandler(repos.Permission),
 		search.NewHandler(repos.Search, repos.Permission),
 		sla.NewHandler(repos.SLA, repos.Ticket),

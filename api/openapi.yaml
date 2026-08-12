@@ -3715,6 +3715,64 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/users/{id}/data-export:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: exportUserData
+      tags: [Users, Privacy]
+      summary: Export all personal data of a user (GDPR Art. 15)
+      description: >
+        Returns every piece of personal data the CMDB stores about the user:
+        the account record plus all contact records linked to the user's
+        e-mail address. Requires user:manage.
+      responses:
+        '200':
+          description: Personal data export
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                  contacts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Contact'
+                  exported_at:
+                    type: string
+                    format: date-time
+                required: [user, contacts, exported_at]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/users/{id}/anonymize:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: anonymizeUser
+      tags: [Users, Privacy]
+      summary: Anonymize a user (GDPR Art. 17, right to erasure)
+      description: >
+        Replaces all personal data (e-mail, display name, avatar, external
+        ID) with non-identifying surrogate values and disables the account.
+        The row itself and audit history are kept so referential integrity
+        and the audit chain survive. Requires user:manage.
+      responses:
+        '200':
+          description: User anonymized; returns the updated record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/users/{id}/roles:
     parameters:
       - $ref: '#/components/parameters/ResourceID'

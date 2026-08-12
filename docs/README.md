@@ -354,6 +354,17 @@ development mode). Failed jobs keep their error message; expired jobs no longer
 expose a URL. When no blob store is configured the endpoint answers 503 and the
 streaming export remains available.
 
+**Privacy / GDPR:** `GET /api/v1/users/{id}/data-export` returns the full set
+of personal data stored about a user (account record plus all contact records
+carrying the user's e-mail address) — the Art. 15 access request.
+`POST /api/v1/users/{id}/anonymize` implements the Art. 17 right to erasure:
+e-mail, display name, avatar and external ID are replaced with deterministic,
+non-reversible surrogate values (`deleted-<hash>@anonymized.invalid`) and the
+account is deactivated, while the row itself is kept so foreign keys
+(tickets, assignments, audit hash chain) stay intact. Self-anonymization is
+rejected so an operator cannot lock themselves out mid-request. Both
+endpoints require `user:manage`.
+
 **Document content:** documents carry metadata rows; the binary content lives
 in blob storage. `PUT /api/v1/documents/{id}/content` stores the request body
 (limited to 25 MiB, Content-Type validated against a whitelist of common

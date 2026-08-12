@@ -1,21 +1,36 @@
 package user
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
-// Handler provides HTTP handlers for user, team, and role endpoints.
-type Handler struct {
-	repo Repository
+// ContactLister gathers every contact record belonging to a person for the
+// GDPR data export (implemented by contact.Repository).
+type ContactLister interface {
+	ListByEmail(ctx context.Context, orgID, email string) ([]contact.Contact, error)
 }
 
-// NewHandler creates a new user/team/role handler.
-func NewHandler(repo Repository) *Handler {
-	return &Handler{repo: repo}
+// Handler provides HTTP handlers for user, team, and role endpoints.
+type Handler struct {
+	repo     Repository
+	contacts ContactLister
+}
+
+// NewHandler creates a new user/team/role handler. contacts may be nil; the
+// GDPR data export then returns an empty contact list instead of failing.
+func NewHandler(repo Repository, contacts ...ContactLister) *Handler {
+	h := &Handler{repo: repo}
+	if len(contacts) > 0 {
+		h.contacts = contacts[0]
+	}
+	return h
 }
 
 // RegisterRoutes registers user/team/role routes on the given mux.
@@ -27,6 +42,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Patch("/api/v1/users/{id}", h.UpdateUser)
 	r.Delete("/api/v1/users/{id}", h.DeleteUser)
 	r.Get("/api/v1/users/{id}/roles", h.ListUserRoles)
+	// Privacy (GDPR Art. 15 / 17)
+	r.Get("/api/v1/users/{id}/data-export", h.ExportData)
+	r.Post("/api/v1/users/{id}/anonymize", h.Anonymize)
 
 	// Teams
 	r.Get("/api/v1/teams", h.ListTeams)
@@ -167,6 +185,64 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ExportData handles GET /api/v1/users/{id}/data-export (GDPR Art. 15).
+// Returns the account record plus every contact record that carries the
+// user's e-mail address — the full set of personal data the CMDB stores.
+func (h *Handler) ExportData(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+	u, err := h.repo.GetUser(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
+		return
+	}
+
+	contacts := []contact.Contact{}
+	if h.contacts != nil && u.Email != "" {
+		contacts, err = h.contacts.ListByEmail(r.Context(), t.OrganizationID, u.Email)
+		if err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			return
+		}
+	}
+
+	api.WriteJSON(w, http.StatusOK, map[string]any{
+		"user":        u,
+		"contacts":    contacts,
+		"exported_at": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// Anonymize handles POST /api/v1/users/{id}/anonymize (GDPR Art. 17).
+// Personal data is replaced by surrogate values and the account is
+// deactivated; the row stays so referential integrity and audit survive.
+func (h *Handler) Anonymize(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+	// Self-anonymization would lock the operator out mid-request and orphan
+	// the session; require a second account to do it.
+	if id == t.UserID {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "you cannot anonymize your own account")
+		return
+	}
+	u, err := h.repo.AnonymizeUser(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, u)
 }
 
 func (h *Handler) ListUserRoles(w http.ResponseWriter, r *http.Request) {
