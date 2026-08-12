@@ -4063,6 +4063,16 @@ export interface components {
       /** @enum {string} */
       severity: 'critical' | 'warning' | 'info';
       enabled: boolean;
+      /**
+       * Format: date-time
+       * @description Set while the condition holds but the duration has not elapsed yet.
+       */
+      pending_since?: string;
+      /**
+       * Format: date-time
+       * @description Timestamp of the last notification for the current firing.
+       */
+      last_fired_at?: string;
     };
     CreateAlertRuleRequest: {
       id?: string;
