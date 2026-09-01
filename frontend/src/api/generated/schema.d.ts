@@ -676,6 +676,817 @@ export interface paths {
     patch: operations['updateDocument'];
     trace?: never;
   };
+  '/api/v1/orders': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List internal orders */
+    get: operations['listOrders'];
+    put?: never;
+    /** Create an internal order */
+    post: operations['createOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/orders/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get an internal order */
+    get: operations['getOrder'];
+    put?: never;
+    post?: never;
+    /** Delete an internal order */
+    delete: operations['deleteOrder'];
+    options?: never;
+    head?: never;
+    /** Update an internal order */
+    patch: operations['updateOrder'];
+    trace?: never;
+  };
+  '/api/v1/orders/{id}/submit': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Submit an order for approval (draft → submitted) */
+    post: operations['submitOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/orders/{id}/approve': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Approve an order (records the approving user) */
+    post: operations['approveOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/orders/{id}/reject': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Reject an order (records the rejecting user) */
+    post: operations['rejectOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/orders/{id}/items': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Add a position to an order */
+    post: operations['addOrderItem'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/maintenance-windows': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List maintenance windows */
+    get: operations['listMaintenanceWindows'];
+    put?: never;
+    /** Create a maintenance window */
+    post: operations['createMaintenanceWindow'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/maintenance-windows/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a maintenance window */
+    get: operations['getMaintenanceWindow'];
+    put?: never;
+    post?: never;
+    /** Delete a maintenance window */
+    delete: operations['deleteMaintenanceWindow'];
+    options?: never;
+    head?: never;
+    /** Update a maintenance window (incl. status transitions) */
+    patch: operations['updateMaintenanceWindow'];
+    trace?: never;
+  };
+  '/api/v1/maintenance-windows/{id}/notify': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Notify affected customers (clients derived from the window's CIs) */
+    post: operations['notifyMaintenanceWindow'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/maintenance-windows/{id}/notifications': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List notifications of a maintenance window */
+    get: operations['listMaintenanceNotifications'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/disposal-records': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List revision-safe disposal records (append-only) */
+    get: operations['listDisposalRecords'];
+    put?: never;
+    /** Record a disposal (revision-safe; records cannot be edited or deleted) */
+    post: operations['createDisposalRecord'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/disposal-records/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a disposal record */
+    get: operations['getDisposalRecord'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/keys': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List key items */
+    get: operations['listKeys'];
+    put?: never;
+    /** Create key items entry */
+    post: operations['createKey'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/keys/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get key items entry */
+    get: operations['getKey'];
+    put?: never;
+    post?: never;
+    /** Delete key items entry */
+    delete: operations['deleteKey'];
+    options?: never;
+    head?: never;
+    /** Update key items entry */
+    patch: operations['updateKey'];
+    trace?: never;
+  };
+  '/api/v1/keys/{id}/issue': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Issue a key to a user (marks it issued) */
+    post: operations['issueKeyItem'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/keys/{id}/return': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Return an issued key (marks it available) */
+    post: operations['returnKeyItem'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/keys/{id}/assignments': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List key assignments */
+    get: operations['listKeyAssignments'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/trainings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List training courses */
+    get: operations['listTrainings'];
+    put?: never;
+    /** Create training courses entry */
+    post: operations['createTraining'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/trainings/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get training courses entry */
+    get: operations['getTraining'];
+    put?: never;
+    post?: never;
+    /** Delete training courses entry */
+    delete: operations['deleteTraining'];
+    options?: never;
+    head?: never;
+    /** Update training courses entry */
+    patch: operations['updateTraining'];
+    trace?: never;
+  };
+  '/api/v1/trainings/{id}/assignments': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List training assignments */
+    get: operations['listTrainingAssignments'];
+    put?: never;
+    /** Enroll a user in a course */
+    post: operations['assignTraining'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/training-assignments/{id}/complete': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Mark a training assignment completed (with optional proof) */
+    post: operations['completeTrainingAssignment'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/desks': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List desks */
+    get: operations['listDesks'];
+    put?: never;
+    /** Create desks entry */
+    post: operations['createDesk'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/desks/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get desks entry */
+    get: operations['getDesk'];
+    put?: never;
+    post?: never;
+    /** Delete desks entry */
+    delete: operations['deleteDesk'];
+    options?: never;
+    head?: never;
+    /** Update desks entry */
+    patch: operations['updateDesk'];
+    trace?: never;
+  };
+  '/api/v1/desks/{id}/bookings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List desk bookings */
+    get: operations['listDeskBookings'];
+    put?: never;
+    /** Book a desk for a time window (rejects overlap) */
+    post: operations['bookDesk'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/desk-bookings/{id}/cancel': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Cancel a desk booking */
+    post: operations['cancelDeskBooking'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assets/{id}/label.svg': {
+    parameters: {
+      query?: {
+        /** @description CMDB base URL for the deep link on the label. */
+        base_url?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Render the printable direct-access label (SVG) for an asset */
+    get: operations['getAssetLabel'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/asset-locations': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Record an asset GPS position (scan, agent, or manual) */
+    post: operations['recordAssetLocation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assets/{id}/locations': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Asset GPS location history */
+    get: operations['listAssetLocations'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/agents': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List registered endpoint agents */
+    get: operations['listAgents'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/agents/enroll': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Register an endpoint agent (after edge enrollment authenticated it) */
+    post: operations['enrollAgent'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/agents/telemetry': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Ingest endpoint telemetry (health metrics + software inventory)
+     * @description Reconciles the endpoint into a CI (source "agent") and writes health metrics into the time-series store. The software inventory lands in the CI attributes for patch posture (spec §9.4). Disabled agents (kill-switch) are rejected.
+     */
+    post: operations['ingestAgentTelemetry'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/agents/{id}/heartbeat': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Record an agent heartbeat */
+    post: operations['agentHeartbeat'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/agents/{id}/policy': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Replace an agent's central config policy */
+    patch: operations['updateAgentPolicy'];
+    trace?: never;
+  };
+  '/api/v1/agents/{id}/disable': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Kill-switch — disable an agent (telemetry rejected until re-enabled) */
+    post: operations['disableAgent'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/agents/{id}/enable': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Re-enable a disabled agent */
+    post: operations['enableAgent'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/security/findings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List security findings (patch posture / vulnerabilities per CI) */
+    get: operations['listSecurityFindings'];
+    put?: never;
+    /** Record a security finding (feed-derived) */
+    post: operations['createSecurityFinding'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/security/findings/summary': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Open findings aggregated by severity (security cockpit) */
+    get: operations['securityFindingsSummary'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/security/findings/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a security finding */
+    get: operations['getSecurityFinding'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Transition a finding's status (acknowledge/resolve/false positive) */
+    patch: operations['updateSecurityFinding'];
+    trace?: never;
+  };
+  '/api/v1/consumables': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List consumable stock items */
+    get: operations['listConsumables'];
+    put?: never;
+    /** Create a consumable stock item */
+    post: operations['createConsumable'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/consumables/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a consumable */
+    get: operations['getConsumable'];
+    put?: never;
+    post?: never;
+    /** Delete a consumable */
+    delete: operations['deleteConsumable'];
+    options?: never;
+    head?: never;
+    /** Update a consumable */
+    patch: operations['updateConsumable'];
+    trace?: never;
+  };
+  '/api/v1/consumables/{id}/movements': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List stock movements of a consumable */
+    get: operations['listConsumableMovements'];
+    put?: never;
+    /** Record a stock in/out movement and adjust the level atomically */
+    post: operations['addConsumableMovement'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/stocktakes': {
     parameters: {
       query?: never;
@@ -937,7 +1748,8 @@ export interface paths {
     delete: operations['deleteAlert'];
     options?: never;
     head?: never;
-    patch?: never;
+    /** Partially update an alert rule (e.g. toggle enabled) */
+    patch: operations['updateAlert'];
     trace?: never;
   };
   '/api/v1/graphql': {
@@ -1023,6 +1835,34 @@ export interface paths {
     };
     /** Get the immediate topology neighbors of a CI */
     get: operations['getCINeighbors'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/topology/cis/{id}/impact': {
+    parameters: {
+      query?: {
+        /** @description Traversal depth; defaults to the maximum for impact analysis. */
+        depth?: number;
+        /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
+        rel_type?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
+     * @description Follows directed edges (source supports/powers/connects target) from the failed CI and returns the transitively impacted CI set. Powers the Ausfallsimulation in the topology view (spec §4).
+     */
+    get: operations['getCIImpact'];
     put?: never;
     post?: never;
     delete?: never;
@@ -1619,6 +2459,46 @@ export interface paths {
     put?: never;
     /** Register a discovery collector */
     post: operations['registerCollector'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/collectors/enrollment-codes': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Mint a single-use collector enrollment code
+     * @description Zero-config onboarding: returns the plaintext code exactly once. Only its SHA-256 hash is stored. The collector redeems the code via /api/v1/collectors/enroll.
+     */
+    post: operations['createCollectorEnrollmentCode'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/collectors/enroll': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Enroll a collector with an enrollment code
+     * @description Unauthenticated by bearer design — the single-use enrollment code is the credential. On success the collector identity is registered under the code's organization and returned with its id.
+     */
+    post: operations['enrollCollector'];
     delete?: never;
     options?: never;
     head?: never;
@@ -3100,6 +3980,10 @@ export interface components {
       manufacturer?: string;
       model?: string;
       serial_number?: string;
+      /** @description RFID tag for direct-access labels and scan flows. */
+      rfid_tag?: string;
+      /** @description Barcode for scan flows. */
+      barcode?: string;
       hardware_uuid?: string;
       management_ip?: string;
       primary_mac?: string;
@@ -3152,6 +4036,9 @@ export interface components {
     UpdateCIRequest: {
       name?: string;
       status?: components['schemas']['CIStatus'];
+      client_id?: string;
+      site_id?: string;
+      room_id?: string;
       manufacturer?: string;
       model?: string;
       serial_number?: string;
@@ -3509,6 +4396,8 @@ export interface components {
       supplier?: string;
       invoice_number?: string;
       serial_number?: string;
+      rfid_tag?: string;
+      barcode?: string;
       location?: string;
       notes?: string;
       custom_fields?: {
@@ -3528,6 +4417,8 @@ export interface components {
       supplier?: string;
       invoice_number?: string;
       serial_number?: string;
+      rfid_tag?: string;
+      barcode?: string;
       location?: string;
       notes?: string;
       ci_id?: string;
@@ -3560,7 +4451,21 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description Digital signature captured at handover/return. */
+    Signature: {
+      /** @description Inline base64 image. */
+      image_base64?: string;
+      /** @description S3 object key of the stored signature image. */
+      object_key?: string;
+      signer_name?: string;
+      /** Format: date-time */
+      signed_at?: string;
+      /** @enum {string} */
+      method?: 'touchscreen' | 'drawn' | 'typed';
+    };
     CreateAssignmentRequest: {
+      /** @description Digital handover signature (optional). */
+      signature?: components['schemas']['Signature'];
       asset_id?: string;
       ci_id?: string;
       assigned_to: string;
@@ -3809,6 +4714,10 @@ export interface components {
       name: string;
       /** @enum {string} */
       priority: 'low' | 'medium' | 'high' | 'critical';
+      /** @description Alias for response_target_minutes. */
+      response_time_minutes?: number;
+      /** @description Alias for resolution_target_minutes. */
+      resolution_time_minutes?: number;
       response_target_minutes: number;
       resolution_target_minutes: number;
       business_calendar: boolean;
@@ -3816,6 +4725,439 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    Consumable: {
+      id: string;
+      organization_id: string;
+      client_id?: string;
+      name: string;
+      sku?: string;
+      category: string;
+      unit: string;
+      stock_level: number;
+      min_level: number;
+      location?: string;
+      notes?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateConsumableRequest: {
+      client_id?: string;
+      name: string;
+      sku?: string;
+      category?: string;
+      unit?: string;
+      stock_level?: number;
+      min_level?: number;
+      location?: string;
+      notes?: string;
+    };
+    UpdateConsumableRequest: {
+      client_id?: string;
+      name?: string;
+      sku?: string;
+      category?: string;
+      unit?: string;
+      min_level?: number;
+      location?: string;
+      notes?: string;
+    };
+    StockMovement: {
+      id: string;
+      organization_id: string;
+      consumable_id: string;
+      /** @enum {string} */
+      direction: 'in' | 'out';
+      quantity: number;
+      reason?: string;
+      reference?: string;
+      actor_id?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    CreateStockMovementRequest: {
+      /** @enum {string} */
+      direction: 'in' | 'out';
+      quantity: number;
+      reason?: string;
+      reference?: string;
+    };
+    ConsumableListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Consumable'][];
+    };
+    StockMovementListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['StockMovement'][];
+    };
+    Order: {
+      id: string;
+      organization_id: string;
+      client_id?: string;
+      order_number: string;
+      title: string;
+      /** @enum {string} */
+      status:
+        'draft' | 'submitted' | 'approved' | 'rejected' | 'ordered' | 'received' | 'cancelled';
+      requested_by?: string;
+      approved_by?: string;
+      supplier?: string;
+      total_cost?: number;
+      currency?: string;
+      notes?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+      items?: components['schemas']['OrderItem'][];
+    };
+    OrderItem: {
+      id: string;
+      organization_id: string;
+      order_id: string;
+      description: string;
+      quantity: number;
+      unit_price?: number;
+      consumable_id?: string;
+      asset_id?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    CreateOrderRequest: {
+      client_id?: string;
+      order_number?: string;
+      title: string;
+      supplier?: string;
+      total_cost?: number;
+      currency?: string;
+      notes?: string;
+    };
+    UpdateOrderRequest: {
+      client_id?: string;
+      title?: string;
+      supplier?: string;
+      total_cost?: number;
+      currency?: string;
+      notes?: string;
+    };
+    CreateOrderItemRequest: {
+      description: string;
+      quantity: number;
+      unit_price?: number;
+      consumable_id?: string;
+      asset_id?: string;
+    };
+    OrderListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Order'][];
+    };
+    MaintenanceWindow: {
+      id: string;
+      organization_id: string;
+      title: string;
+      description?: string;
+      /** Format: date-time */
+      starts_at: string;
+      /** Format: date-time */
+      ends_at: string;
+      /** @enum {string} */
+      status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+      created_by?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+      ci_ids?: string[];
+    };
+    CreateMaintenanceWindowRequest: {
+      title: string;
+      description?: string;
+      /** Format: date-time */
+      starts_at: string;
+      /** Format: date-time */
+      ends_at: string;
+      /** @description Affected CIs; clients are derived via the CIs' client assignment at notify time. */
+      ci_ids?: string[];
+    };
+    UpdateMaintenanceWindowRequest: {
+      title?: string;
+      description?: string;
+      /** @enum {string} */
+      status?: 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+    };
+    MaintenanceWindowListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['MaintenanceWindow'][];
+    };
+    DisposalRecord: {
+      id: string;
+      organization_id: string;
+      asset_id?: string;
+      ci_id?: string;
+      /** @enum {string} */
+      method:
+        | 'reuse'
+        | 'recycling'
+        | 'destruction'
+        | 'secure_erasure'
+        | 'physical_destruction'
+        | 'return_to_vendor';
+      /** @description Reference to the revision-safe disposal certificate. */
+      certificate_ref?: string;
+      /** @description Data carrier destruction note (BSI/ISO). */
+      data_carrier?: string;
+      performed_by?: string;
+      /** Format: date-time */
+      performed_at: string;
+      notes?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    CreateDisposalRecordRequest: {
+      asset_id?: string;
+      ci_id?: string;
+      /** @enum {string} */
+      method:
+        | 'reuse'
+        | 'recycling'
+        | 'destruction'
+        | 'secure_erasure'
+        | 'physical_destruction'
+        | 'return_to_vendor';
+      certificate_ref?: string;
+      data_carrier?: string;
+      performed_by?: string;
+      /** Format: date-time */
+      performed_at?: string;
+      notes?: string;
+    };
+    DisposalRecordListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['DisposalRecord'][];
+    };
+    KeyItem: {
+      id: string;
+      organization_id: string;
+      client_id?: string;
+      name: string;
+      /** @enum {string} */
+      key_type: 'physical' | 'digital';
+      identifier?: string;
+      /** @enum {string} */
+      status: 'available' | 'issued' | 'lost' | 'retired';
+      location?: string;
+      notes?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateKeyItemRequest: {
+      client_id?: string;
+      name: string;
+      /** @enum {string} */
+      key_type?: 'physical' | 'digital';
+      identifier?: string;
+      location?: string;
+      notes?: string;
+    };
+    UpdateKeyItemRequest: {
+      client_id?: string;
+      name?: string;
+      /** @enum {string} */
+      key_type?: 'physical' | 'digital';
+      identifier?: string;
+      /** @enum {string} */
+      status?: 'available' | 'issued' | 'lost' | 'retired';
+      location?: string;
+      notes?: string;
+    };
+    KeyItemListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['KeyItem'][];
+    };
+    TrainingCourse: {
+      id: string;
+      organization_id: string;
+      title: string;
+      description?: string;
+      category?: string;
+      validity_months?: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateTrainingCourseRequest: {
+      title: string;
+      description?: string;
+      category?: string;
+      validity_months?: number;
+    };
+    UpdateTrainingCourseRequest: {
+      title?: string;
+      description?: string;
+      category?: string;
+      validity_months?: number;
+    };
+    TrainingCourseListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['TrainingCourse'][];
+    };
+    Desk: {
+      id: string;
+      organization_id: string;
+      room_id?: string;
+      name: string;
+      /** @enum {string} */
+      status: 'available' | 'occupied' | 'maintenance';
+      attributes?: Record<string, never>;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateDeskRequest: {
+      room_id?: string;
+      name: string;
+      attributes?: Record<string, never>;
+    };
+    UpdateDeskRequest: {
+      room_id?: string;
+      name?: string;
+      /** @enum {string} */
+      status?: 'available' | 'occupied' | 'maintenance';
+      attributes?: Record<string, never>;
+    };
+    DeskListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Desk'][];
+    };
+    AssetLocation: {
+      id: string;
+      organization_id: string;
+      asset_id: string;
+      lat: number;
+      lon: number;
+      accuracy_m?: number;
+      /** @enum {string} */
+      source: 'scan' | 'agent' | 'manual';
+      /** Format: date-time */
+      recorded_at: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    CreateAssetLocationRequest: {
+      asset_id: string;
+      lat: number;
+      lon: number;
+      accuracy_m?: number;
+      /** @enum {string} */
+      source?: 'scan' | 'agent' | 'manual';
+      /** Format: date-time */
+      recorded_at?: string;
+    };
+    AssetLocationListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['AssetLocation'][];
+    };
+    AgentPolicy: {
+      interval_seconds?: number;
+      metrics_enabled?: boolean;
+      inventory_enabled?: boolean;
+    };
+    Agent: {
+      id: string;
+      organization_id: string;
+      agent_id: string;
+      hostname: string;
+      version?: string;
+      os?: string;
+      arch?: string;
+      ci_id?: string;
+      /** @enum {string} */
+      status: 'online' | 'offline' | 'disabled';
+      /** Format: date-time */
+      last_heartbeat?: string;
+      policy?: components['schemas']['AgentPolicy'];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    AgentEnrollRequest: {
+      agent_id: string;
+      hostname: string;
+      version?: string;
+      os?: string;
+      arch?: string;
+    };
+    AgentTelemetryPayload: {
+      agent_id: string;
+      hostname?: string;
+      version?: string;
+      os?: string;
+      arch?: string;
+      metrics?: {
+        [key: string]: number;
+      };
+      system_info?: {
+        [key: string]: string;
+      };
+      software?: {
+        name?: string;
+        version?: string;
+        vendor?: string;
+      }[];
+      /** Format: date-time */
+      collected_at?: string;
+    };
+    UpdateAgentPolicyRequest: {
+      interval_seconds?: number;
+      metrics_enabled?: boolean;
+      inventory_enabled?: boolean;
+    };
+    AgentListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Agent'][];
+    };
+    PatchFinding: {
+      id: string;
+      organization_id: string;
+      ci_id?: string;
+      /** @enum {string} */
+      kind: 'vulnerability' | 'outdated_software' | 'outdated_firmware' | 'missing_patch';
+      /** @enum {string} */
+      severity: 'low' | 'medium' | 'high' | 'critical';
+      title: string;
+      detail?: string;
+      package_name?: string;
+      installed_version?: string;
+      fixed_version?: string;
+      /** @description CVE id or advisory URL. */
+      reference?: string;
+      /** @enum {string} */
+      status: 'open' | 'acknowledged' | 'resolved' | 'false_positive';
+      /** Format: date-time */
+      detected_at: string;
+      /** Format: date-time */
+      resolved_at?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreatePatchFindingRequest: {
+      ci_id?: string;
+      /** @enum {string} */
+      kind: 'vulnerability' | 'outdated_software' | 'outdated_firmware' | 'missing_patch';
+      /** @enum {string} */
+      severity?: 'low' | 'medium' | 'high' | 'critical';
+      title: string;
+      detail?: string;
+      package_name?: string;
+      installed_version?: string;
+      fixed_version?: string;
+      reference?: string;
+    };
+    UpdatePatchFindingRequest: {
+      /** @enum {string} */
+      status?: 'open' | 'acknowledged' | 'resolved' | 'false_positive';
+    };
+    PatchFindingListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['PatchFinding'][];
     };
     CreateSLAPolicyRequest: {
       client_id?: string;
@@ -4107,7 +5449,7 @@ export interface components {
       failures_by_severity: {
         [key: string]: number;
       };
-      findings: components['schemas']['SecurityFinding'][];
+      findings: components['schemas']['PatchFinding'][];
       capabilities?: components['schemas']['SecurityCapability'][];
     };
     RetentionPolicy: {
@@ -4184,6 +5526,18 @@ export interface components {
       /** Format: date-time */
       timestamp: string;
       value: number;
+    };
+    /** @description Partial alert rule update; every field is optional and only set fields are applied. */
+    UpdateAlertRuleRequest: {
+      name?: string;
+      /** @enum {string} */
+      condition?: 'gt' | 'lt' | 'eq';
+      threshold?: number;
+      /** @description Go duration string. */
+      duration?: string;
+      /** @enum {string} */
+      severity?: 'critical' | 'warning' | 'info';
+      enabled?: boolean;
     };
     AlertRule: {
       id: string;
@@ -4352,7 +5706,10 @@ export interface components {
     };
     CreateClientRequest: {
       name: string;
-      slug: string;
+      /** @description URL-safe identifier; falls back to `code` when omitted. */
+      slug?: string;
+      /** @description Alias for slug (accepted for integrations sending {name, code}). */
+      code?: string;
       settings?: {
         [key: string]: unknown;
       };
@@ -4432,6 +5789,13 @@ export interface components {
       name: string;
       floor?: number;
       room_type?: string;
+      /** @description Floor-plan object positions, object_id → {x, y} normalized 0..1. */
+      layout?: {
+        [key: string]: {
+          x?: number;
+          y?: number;
+        };
+      };
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -4447,6 +5811,13 @@ export interface components {
       name?: string;
       floor?: number;
       room_type?: string;
+      /** @description Replaces the room's floor-plan object positions. Map of object_id → {x, y} in normalized 0..1 coordinates; an empty object clears the layout. */
+      layout?: {
+        [key: string]: {
+          x?: number;
+          y?: number;
+        };
+      };
     };
     RoomListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Room'][];
@@ -4576,9 +5947,13 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description A contact needs a display name; the server also accepts the `name` alias when `display_name` is omitted (server-side fallback, not expressible as a single required field without dropping the alias). */
     CreateContactRequest: {
       client_id?: string;
-      display_name: string;
+      /** @description Display name; required unless `name` is given. */
+      display_name?: string;
+      /** @description Server-accepted alias for display_name. */
+      name?: string;
       email?: string;
       phone?: string;
       role?: string;
@@ -4744,6 +6119,8 @@ export interface components {
     };
     /** @description Payload for returning an assigned asset or CI. */
     ReturnAssignmentRequest: {
+      /** @description Digital return signature (optional). */
+      signature?: components['schemas']['Signature'];
       return_condition?: string;
       notes?: string;
     };
@@ -4879,13 +6256,15 @@ export interface components {
       /** @description Defaults to "member" when omitted. */
       role_in_team?: string;
     };
-    /** @description A custom permission role. */
+    /** @description A permission role. The list endpoint returns the union of the seeded standard roles (org_admin, engineer, viewer, client_technician; is_builtin=true, assign via role_id) and tenant-defined custom roles (is_builtin=false, assign via custom_role_id). */
     Role: {
       id: string;
       organization_id: string;
       name: string;
       description?: string;
       is_system: boolean;
+      /** @description True for the seeded standard roles stored in `role`. */
+      is_builtin?: boolean;
       permissions: string[];
       /** Format: date-time */
       created_at: string;
@@ -4908,16 +6287,20 @@ export interface components {
     RoleAssignment: {
       id: string;
       user_id: string;
-      custom_role_id: string;
+      custom_role_id?: string;
+      role_id?: string;
       scope_type: string;
       scope_id?: string;
       /** Format: date-time */
       granted_at: string;
       granted_by?: string;
     };
+    /** @description Assigns a role to a user. Exactly one of `custom_role_id` (tenant-defined role) or `role_id` (seeded standard role) must be set. */
     AssignRoleRequest: {
       user_id: string;
-      custom_role_id: string;
+      custom_role_id?: string;
+      /** @description ID of a standard (builtin) role; mutually exclusive with custom_role_id. */
+      role_id?: string;
       /** @description Defaults to "organization" when omitted. */
       scope_type?: string;
       scope_id?: string;
@@ -5077,6 +6460,8 @@ export interface components {
     CIStatus: components['schemas']['CIStatus'];
     CITypeID: string;
     ClientID: string;
+    SiteID: string;
+    RoomID: string;
   };
   requestBodies: never;
   headers: never;
@@ -5227,6 +6612,8 @@ export interface operations {
         status?: components['parameters']['CIStatus'];
         ci_type_id?: components['parameters']['CITypeID'];
         client_id?: components['parameters']['ClientID'];
+        site_id?: components['parameters']['SiteID'];
+        room_id?: components['parameters']['RoomID'];
       };
       header?: never;
       path?: never;
@@ -6507,6 +7894,1776 @@ export interface operations {
       404: components['responses']['NotFound'];
     };
   };
+  listOrders: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Free-text search term. */
+        search?: components['parameters']['Search'];
+        status?: string;
+        client_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated orders */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OrderListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateOrderRequest'];
+      };
+    };
+    responses: {
+      /** @description Order created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Order'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  getOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Order */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Order'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Order deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateOrderRequest'];
+      };
+    };
+    responses: {
+      /** @description Order updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Order'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  submitOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Order submitted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Order'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  approveOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Order approved */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Order'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  rejectOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Order rejected */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Order'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  addOrderItem: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateOrderItemRequest'];
+      };
+    };
+    responses: {
+      /** @description Item added; returns the order with positions */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Order'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listMaintenanceWindows: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        status?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated maintenance windows */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MaintenanceWindowListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createMaintenanceWindow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateMaintenanceWindowRequest'];
+      };
+    };
+    responses: {
+      /** @description Maintenance window created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MaintenanceWindow'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  getMaintenanceWindow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Maintenance window */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MaintenanceWindow'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteMaintenanceWindow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Maintenance window deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateMaintenanceWindow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateMaintenanceWindowRequest'];
+      };
+    };
+    responses: {
+      /** @description Maintenance window updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MaintenanceWindow'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  notifyMaintenanceWindow: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Notifications recorded */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listMaintenanceNotifications: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Notifications */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  listDisposalRecords: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        method?: string;
+        asset_id?: string;
+        ci_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated disposal records */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DisposalRecordListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createDisposalRecord: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateDisposalRecordRequest'];
+      };
+    };
+    responses: {
+      /** @description Disposal record created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DisposalRecord'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  getDisposalRecord: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Disposal record */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DisposalRecord'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listKeys: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Free-text search term. */
+        search?: components['parameters']['Search'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated key items */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['KeyItemListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateKeyItemRequest'];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['KeyItem'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  getKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Entry */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['KeyItem'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateKeyItemRequest'];
+      };
+    };
+    responses: {
+      /** @description Updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['KeyItem'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  issueKeyItem: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Done */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  returnKeyItem: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Done */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  listKeyAssignments: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Entries */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  listTrainings: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Free-text search term. */
+        search?: components['parameters']['Search'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated training courses */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TrainingCourseListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createTraining: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateTrainingCourseRequest'];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TrainingCourse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  getTraining: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Entry */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TrainingCourse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteTraining: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateTraining: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateTrainingCourseRequest'];
+      };
+    };
+    responses: {
+      /** @description Updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TrainingCourse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listTrainingAssignments: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Entries */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  assignTraining: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Done */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  completeTrainingAssignment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Done */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  listDesks: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Free-text search term. */
+        search?: components['parameters']['Search'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated desks */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeskListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createDesk: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateDeskRequest'];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Desk'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  getDesk: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Entry */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Desk'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteDesk: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateDesk: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateDeskRequest'];
+      };
+    };
+    responses: {
+      /** @description Updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Desk'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listDeskBookings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Entries */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  bookDesk: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Done */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  cancelDeskBooking: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Done */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  getAssetLabel: {
+    parameters: {
+      query?: {
+        /** @description CMDB base URL for the deep link on the label. */
+        base_url?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description SVG label */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'image/svg+xml': unknown;
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  recordAssetLocation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateAssetLocationRequest'];
+      };
+    };
+    responses: {
+      /** @description Location recorded */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AssetLocation'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  listAssetLocations: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated location history (newest first) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AssetLocationListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  listAgents: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated endpoint agents */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AgentListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  enrollAgent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AgentEnrollRequest'];
+      };
+    };
+    responses: {
+      /** @description Agent registered; returns the agent with its central policy */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Agent'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  ingestAgentTelemetry: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AgentTelemetryPayload'];
+      };
+    };
+    responses: {
+      /** @description Telemetry accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  agentHeartbeat: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Heartbeat recorded */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateAgentPolicy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateAgentPolicyRequest'];
+      };
+    };
+    responses: {
+      /** @description Updated agent */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Agent'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  disableAgent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Agent disabled */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Agent'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  enableAgent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Agent enabled */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Agent'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listSecurityFindings: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        ci_id?: string;
+        kind?: string;
+        severity?: string;
+        status?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated findings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PatchFindingListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createSecurityFinding: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreatePatchFindingRequest'];
+      };
+    };
+    responses: {
+      /** @description Finding created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PatchFinding'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  securityFindingsSummary: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Severity summary */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  getSecurityFinding: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Finding */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PatchFinding'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateSecurityFinding: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdatePatchFindingRequest'];
+      };
+    };
+    responses: {
+      /** @description Finding updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PatchFinding'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listConsumables: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Free-text search term. */
+        search?: components['parameters']['Search'];
+        category?: string;
+        client_id?: string;
+        /** @description When true, only items at or below their minimum level. */
+        low_stock?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated consumables */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ConsumableListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createConsumable: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateConsumableRequest'];
+      };
+    };
+    responses: {
+      /** @description Consumable created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Consumable'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  getConsumable: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Consumable */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Consumable'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteConsumable: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Consumable deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateConsumable: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateConsumableRequest'];
+      };
+    };
+    responses: {
+      /** @description Consumable updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Consumable'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listConsumableMovements: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated movements */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StockMovementListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  addConsumableMovement: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateStockMovementRequest'];
+      };
+    };
+    responses: {
+      /** @description Movement recorded; returns movement and updated consumable */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+    };
+  };
   listStocktakes: {
     parameters: {
       query?: {
@@ -7274,6 +10431,36 @@ export interface operations {
       404: components['responses']['NotFound'];
     };
   };
+  updateAlert: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateAlertRuleRequest'];
+      };
+    };
+    responses: {
+      /** @description Updated alert rule */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AlertRule'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
   executeGraphQL: {
     parameters: {
       query?: never;
@@ -7413,6 +10600,44 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['TopologyGraph'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getCIImpact: {
+    parameters: {
+      query?: {
+        /** @description Traversal depth; defaults to the maximum for impact analysis. */
+        depth?: number;
+        /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
+        rel_type?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Impact analysis result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            failed_ci_id?: string;
+            failed_ci?: components['schemas']['TopologyNode'];
+            rel_type?: string;
+            depth?: number;
+            impacted?: components['schemas']['TopologyNode'][];
+            count?: number;
+          };
         };
       };
       401: components['responses']['Unauthorized'];
@@ -9194,6 +12419,73 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  createCollectorEnrollmentCode: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          label?: string;
+          /** @description Defaults to 30, capped at 1440 (24h). */
+          ttl_minutes?: number;
+        };
+      };
+    };
+    responses: {
+      /** @description Enrollment code created; plaintext returned once */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            id?: string;
+            code?: string;
+            label?: string;
+            /** Format: date-time */
+            expires_at?: string;
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  enrollCollector: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          code: string;
+          name: string;
+          version?: string;
+          client_id?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Collector enrolled */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Collector'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
     };
   };
   collectorHeartbeat: {

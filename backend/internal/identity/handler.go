@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -20,11 +21,34 @@ const (
 type Handler struct {
 	oidc     *OIDCProvider
 	sessions *SessionIssuer
+	// provisioner auto-creates the app_user on first login so downstream
+	// foreign keys (ticket reporter, assignment, ...) resolve without manual
+	// user setup. Nil disables provisioning (tests, --no-db without users).
+	provisioner UserProvisioner
+	// defaultRole is the standard role assigned on auto-provisioning
+	// (e.g. "viewer"); empty assigns no role.
+	defaultRole string
+}
+
+// UserProvisioner upserts the authenticated OIDC subject into app_user.
+type UserProvisioner interface {
+	// EnsureUser returns the app_user id for the OIDC subject, creating the
+	// record with the given display data when it does not exist yet.
+	EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName string) (string, error)
+	// EnsureRole assigns the named standard role when the user has none yet.
+	EnsureRole(ctx context.Context, orgID, userID, roleName string) error
 }
 
 // NewHandler constructs a new identity handler.
 func NewHandler(oidc *OIDCProvider, sessions *SessionIssuer) *Handler {
 	return &Handler{oidc: oidc, sessions: sessions}
+}
+
+// WithProvisioning enables first-login app_user provisioning.
+func (h *Handler) WithProvisioning(p UserProvisioner, defaultRole string) *Handler {
+	h.provisioner = p
+	h.defaultRole = defaultRole
+	return h
 }
 
 // RegisterRoutes registers authentication routes on the provided router.
@@ -226,9 +250,26 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 		return "", time.Time{}, authResult{}, errors.New("identity: no organization group found in ID token")
 	}
 
+	// Provision the app_user for the OIDC subject on first login so FK-bound
+	// resources (tickets, assignments) accept the acting user. The session
+	// subject is the app_user id once provisioning ran, keeping token and
+	// database identity aligned.
+	subject := idToken.Subject
+	if h.provisioner != nil {
+		userID, err := h.provisioner.EnsureUser(ctx, orgID, idToken.Subject, idToken.Email, idToken.Name)
+		if err != nil {
+			return "", time.Time{}, authResult{}, fmt.Errorf("identity: provision user: %w", err)
+		}
+		if h.defaultRole != "" {
+			// Best effort: role assignment must not block login.
+			_ = h.provisioner.EnsureRole(ctx, orgID, userID, h.defaultRole)
+		}
+		subject = userID
+	}
+
 	now := time.Now().UTC()
 	claims := SessionClaims{
-		Subject:        idToken.Subject,
+		Subject:        subject,
 		OrganizationID: orgID,
 		Permissions:    permissionsFromGroups(idToken.Groups),
 		IssuedAt:       now,

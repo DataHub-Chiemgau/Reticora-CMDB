@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { TopologyGraphData } from '../api/client';
-import { useTopology } from '../api/hooks';
+import { useTopology, useCIImpact } from '../api/hooks';
 import { TopologyGraph } from '../components/graph/TopologyGraph';
 import type { GraphEdge, GraphNode } from '../components/graph/TopologyGraph';
 import { Badge } from '../components/ui/Badge';
@@ -91,6 +91,8 @@ export function computeOutageImpact(failedId: string, edges: GraphEdge[]): Set<s
 
 const ciTypeValues = ['server', 'switch', 'router', 'firewall', 'pdu', 'ups', 'nas', 'client'];
 const depthValues = ['1', '2', '3', '4', '5'];
+// Dependency classes for the failure-simulation facet filter (spec §5.5).
+const relTypeValues = ['connected_to', 'powered_by', 'hosted_on', 'depends_on', 'member_of'];
 
 export function TopologyPage() {
   const { t } = useTranslation();
@@ -101,6 +103,7 @@ export function TopologyPage() {
   const ciType = searchParams.get('type') ?? '';
   const depth = searchParams.get('depth') ?? '2';
   const simulateId = searchParams.get('simulate') ?? '';
+  const relTypeFacet = searchParams.get('rel_type') ?? '';
 
   const { data, isLoading, error, refetch } = useTopology({
     root_ci_id: rootCiId || undefined,
@@ -110,9 +113,24 @@ export function TopologyPage() {
 
   const model = useMemo(() => (data ? buildGraphModel(data) : { nodes: [], edges: [] }), [data]);
 
-  const outageImpact = useMemo(
-    () => (simulateId ? computeOutageImpact(simulateId, model.edges) : undefined),
-    [simulateId, model.edges],
+  // Server-side impact analysis (spec §4): the backend computes the impacted
+  // set authoritatively, faceted by the selected relationship class. The
+  // client-side BFS below remains as the instant feedback while it loads.
+  const { data: impact } = useCIImpact(simulateId, relTypeFacet);
+
+  const outageImpact = useMemo(() => {
+    if (!simulateId) return undefined;
+    if (impact && Array.isArray(impact.impacted)) {
+      return new Set(impact.impacted.map((n) => n.id));
+    }
+    return computeOutageImpact(simulateId, model.edges);
+  }, [simulateId, impact, model.edges]);
+
+  // The facet filter also narrows the rendered edges to the selected
+  // relationship class so the simulated dependency path is visible.
+  const visibleEdges = useMemo(
+    () => (relTypeFacet ? model.edges.filter((e) => e.label?.split(', ').includes(relTypeFacet)) : model.edges),
+    [model.edges, relTypeFacet],
   );
 
   function updateParam(key: string, value: string) {
@@ -174,6 +192,19 @@ export function TopologyPage() {
               label: `${t('topology.depth')} ${value}`,
             }))}
           />
+          <Select
+            value={relTypeFacet}
+            onChange={(event) => updateParam('rel_type', event.target.value)}
+            aria-label={t('topology.filterRelType', 'Beziehungstyp')}
+            className="max-w-xs"
+            options={[
+              { value: '', label: t('topology.allRelTypes', 'Alle Beziehungen') },
+              ...relTypeValues.map((value) => ({
+                value,
+                label: t(`topology.relTypes.${value}`, value.replace(/_/g, ' ')),
+              })),
+            ]}
+          />
         </div>
       </Card>
 
@@ -227,7 +258,7 @@ export function TopologyPage() {
             <div className="h-[28rem] w-full overflow-hidden rounded-2xl">
               <TopologyGraph
                 nodes={model.nodes}
-                edges={model.edges}
+                edges={visibleEdges}
                 dimmedNodes={outageImpact}
                 highlightedNodes={simulateId ? new Set([simulateId]) : undefined}
               />

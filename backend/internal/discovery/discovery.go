@@ -3,6 +3,10 @@ package discovery
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -87,6 +91,13 @@ type Repository interface {
 	RegisterCollector(ctx context.Context, c *Collector) error
 	Heartbeat(ctx context.Context, orgID, collectorID string) error
 
+	// Enrollment codes (zero-config onboarding).
+	CreateEnrollmentCode(ctx context.Context, code *EnrollmentCode) error
+	// RedeemEnrollmentCode validates the raw code, marks it used and returns
+	// the owning organization. It must fail for unknown, expired or already
+	// used codes.
+	RedeemEnrollmentCode(ctx context.Context, rawCode, collectorID string) (orgID string, err error)
+
 	// Discovery jobs.
 	ListJobs(ctx context.Context, orgID string, filter JobFilter, page api.PaginationParams) ([]Job, int, error)
 	CreateJob(ctx context.Context, j *Job) error
@@ -101,11 +112,14 @@ type Repository interface {
 
 // MemoryRepository is an in-memory collector store.
 type MemoryRepository struct {
-	mu          sync.RWMutex
-	collectors  map[string]*Collector
-	jobs        map[string]*Job
-	reviewItems map[string]*ReviewItem
-	seq         int
+	mu           sync.RWMutex
+	collectors   map[string]*Collector
+	jobs         map[string]*Job
+	reviewItems  map[string]*ReviewItem
+	ciTypes      map[string]string
+	enrollCodes  map[string]*EnrollmentCode
+	enrollHashes map[string]string
+	seq          int
 }
 
 // NewMemoryRepository creates a new in-memory discovery repository.
@@ -114,7 +128,26 @@ func NewMemoryRepository() *MemoryRepository {
 		collectors:  make(map[string]*Collector),
 		jobs:        make(map[string]*Job),
 		reviewItems: make(map[string]*ReviewItem),
+		ciTypes:     make(map[string]string),
 	}
+}
+
+// SeedCIType registers a ci_type name→id mapping for tests and the --no-db
+// development mode, so ingest items can reference types by name.
+func (r *MemoryRepository) SeedCIType(name, id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ciTypes[name] = id
+}
+
+// LookupCITypeID resolves a seeded CI type name to its id.
+func (r *MemoryRepository) LookupCITypeID(_ context.Context, _ string, nameOrID string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if id, ok := r.ciTypes[nameOrID]; ok {
+		return id, nil
+	}
+	return "", fmt.Errorf("ci type %q not found", nameOrID)
 }
 
 func (r *MemoryRepository) ListCollectors(_ context.Context, orgID string, page api.PaginationParams) ([]Collector, int, error) {
@@ -156,6 +189,43 @@ func (r *MemoryRepository) RegisterCollector(_ context.Context, c *Collector) er
 	return nil
 }
 
+func (r *MemoryRepository) CreateEnrollmentCode(_ context.Context, code *EnrollmentCode) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.enrollCodes == nil {
+		r.enrollCodes = map[string]*EnrollmentCode{}
+	}
+	r.seq++
+	code.ID = fmt.Sprintf("enc-%06d", r.seq)
+	code.CreatedAt = time.Now().UTC()
+	r.enrollCodes[code.ID] = code
+	// rawHash is stored alongside for redemption lookup.
+	if r.enrollHashes == nil {
+		r.enrollHashes = map[string]string{}
+	}
+	r.enrollHashes[enrollmentCodeHash(code.rawCode)] = code.ID
+	return nil
+}
+
+func (r *MemoryRepository) RedeemEnrollmentCode(_ context.Context, rawCode, collectorID string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id, ok := r.enrollHashes[enrollmentCodeHash(rawCode)]
+	if !ok {
+		return "", fmt.Errorf("invalid enrollment code")
+	}
+	code := r.enrollCodes[id]
+	if code == nil || code.UsedAt != nil {
+		return "", fmt.Errorf("enrollment code already used")
+	}
+	if time.Now().UTC().After(code.ExpiresAt) {
+		return "", fmt.Errorf("enrollment code expired")
+	}
+	now := time.Now().UTC()
+	code.UsedAt = &now
+	return code.OrganizationID, nil
+}
+
 func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -169,11 +239,46 @@ func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID strin
 	return nil
 }
 
+// EnrollmentCode is a short-lived, single-use secret a collector presents to
+// enroll. Only the SHA-256 hash is persisted; the raw code is carried on the
+// struct only transiently between creation and hashing.
+type EnrollmentCode struct {
+	ID             string     `json:"id"`
+	OrganizationID string     `json:"organization_id"`
+	Label          string     `json:"label,omitempty"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	UsedAt         *time.Time `json:"used_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+
+	// rawCode is never serialized; it exists only so the handler can return
+	// the code once at creation time.
+	rawCode string
+}
+
+// SetRawCode assigns the transient plaintext code (creation only).
+func (c *EnrollmentCode) SetRawCode(raw string) { c.rawCode = raw }
+
+// RawCode exposes the transient plaintext code for hashing at persistence.
+func (c *EnrollmentCode) RawCode() string { return c.rawCode }
+
+// enrollmentCodeHash derives the stored lookup key from the raw code.
+func enrollmentCodeHash(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
+}
+
 // Handler provides HTTP handlers for discovery endpoints.
 type Handler struct {
-	repo    Repository
-	ciRepo  ci.Repository
-	relRepo relationship.Repository
+	repo       Repository
+	ciRepo     ci.Repository
+	relRepo    relationship.Repository
+	typeLookup CITypeLookup
+}
+
+// CITypeLookup resolves a CI type name or UUID to the canonical ci_type id.
+// Implemented by the discovery PG repository; tests may stub it.
+type CITypeLookup interface {
+	LookupCITypeID(ctx context.Context, orgID, nameOrID string) (string, error)
 }
 
 // NewHandler creates a new discovery handler. ciRepo enables reconciliation and
@@ -182,10 +287,68 @@ type Handler struct {
 // those features are skipped gracefully.
 func NewHandler(repo Repository, ciRepo ci.Repository, relRepo ...relationship.Repository) *Handler {
 	h := &Handler{repo: repo, ciRepo: ciRepo}
+	if lookup, ok := repo.(CITypeLookup); ok {
+		h.typeLookup = lookup
+	}
 	if len(relRepo) > 0 {
 		h.relRepo = relRepo[0]
 	}
 	return h
+}
+
+// isUUID reports whether value looks like a canonical UUID.
+func isUUID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for i, c := range value {
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// resolveCITypeIDs maps each item's ci_type_name to the canonical ci_type UUID.
+// Entries that are already UUIDs pass through. Items whose type cannot be
+// resolved get an empty string so the caller can queue them for review.
+func (h *Handler) resolveCITypeIDs(r *http.Request, items []IngestItem) []string {
+	ids := make([]string, len(items))
+	missing := map[string]struct{}{}
+	for i, item := range items {
+		name := strings.TrimSpace(item.CITypeName)
+		if isUUID(name) {
+			ids[i] = name
+		} else if name != "" {
+			missing[name] = struct{}{}
+		}
+	}
+	if len(missing) == 0 {
+		return ids
+	}
+	t := tenant.FromContext(r.Context())
+	for name := range missing {
+		if h.typeLookup == nil {
+			continue
+		}
+		id, err := h.typeLookup.LookupCITypeID(r.Context(), t.OrganizationID, name)
+		if err != nil {
+			continue
+		}
+		for i, item := range items {
+			if strings.TrimSpace(item.CITypeName) == name {
+				ids[i] = id
+			}
+		}
+	}
+	return ids
 }
 
 // RegisterRoutes registers discovery routes.
@@ -193,6 +356,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/collectors", h.ListCollectors)
 	r.Post("/api/v1/collectors", h.RegisterCollector)
 	r.Post("/api/v1/collectors/{id}/heartbeat", h.Heartbeat)
+	// Zero-config onboarding: an operator mints a short-lived enrollment code;
+	// the collector redeems it (unauthenticated, code = the credential) for its
+	// identity.
+	r.Post("/api/v1/collectors/enrollment-codes", h.CreateEnrollmentCode)
+	r.Post("/api/v1/collectors/enroll", h.EnrollCollector)
 	r.Post("/api/v1/ingest/bulk", h.BulkIngest)
 	// Spec-named alias for the bulk ingest endpoint.
 	r.Post("/api/v1/discovery/ingest", h.BulkIngest)
@@ -263,6 +431,106 @@ func (h *Handler) RegisterCollector(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusCreated, c)
 }
 
+// CreateEnrollmentCode handles POST /api/v1/collectors/enrollment-codes. It
+// mints a single-use code and returns the plaintext exactly once; only the
+// hash is stored.
+func (h *Handler) CreateEnrollmentCode(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	var req struct {
+		Label     string `json:"label"`
+		TTLMinutes int   `json:"ttl_minutes,omitempty"`
+	}
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	ttl := time.Duration(req.TTLMinutes) * time.Minute
+	if ttl <= 0 || ttl > 24*time.Hour {
+		ttl = 30 * time.Minute
+	}
+
+	raw, err := generateEnrollmentCode()
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "failed to generate enrollment code")
+		return
+	}
+	code := &EnrollmentCode{
+		OrganizationID: t.OrganizationID,
+		Label:          req.Label,
+		ExpiresAt:      time.Now().UTC().Add(ttl),
+	}
+	code.SetRawCode(raw)
+	if err := h.repo.CreateEnrollmentCode(r.Context(), code); err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
+	api.WriteJSON(w, http.StatusCreated, map[string]any{
+		"id":         code.ID,
+		"code":       raw,
+		"label":      code.Label,
+		"expires_at": code.ExpiresAt.UTC().Format(time.RFC3339),
+	})
+}
+
+// EnrollCollector handles POST /api/v1/collectors/enroll. The enrollment code
+// is the credential; no bearer token is required because the collector is not
+// enrolled yet. On success a collector identity is registered under the code's
+// organization.
+func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Code     string `json:"code"`
+		Name     string `json:"name"`
+		Version  string `json:"version,omitempty"`
+		ClientID string `json:"client_id,omitempty"`
+	}
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Code) == "" || strings.TrimSpace(req.Name) == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "code and name are required")
+		return
+	}
+
+	// Redeem the code first: it yields the owning organization and fails fast
+	// for invalid/expired/used codes. Only then is the collector registered
+	// under that tenant.
+	orgID, err := h.repo.RedeemEnrollmentCode(r.Context(), req.Code, "")
+	if err != nil {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
+		return
+	}
+
+	c := &Collector{
+		OrganizationID: orgID,
+		Name:           req.Name,
+		Version:        req.Version,
+		ClientID:       req.ClientID,
+		Config:         map[string]any{},
+	}
+	if err := h.repo.RegisterCollector(r.Context(), c); err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
+	api.WriteJSON(w, http.StatusCreated, c)
+}
+
+// generateEnrollmentCode returns a URL-safe, high-entropy single-use code.
+func generateEnrollmentCode() (string, error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
 // Heartbeat handles POST /api/v1/collectors/{id}/heartbeat
 func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
@@ -304,10 +572,52 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve ci_type_name to the canonical ci_type UUID before
+	// reconciliation. Collectors send the type name (e.g. "switch"); the CI
+	// column stores the UUID. Names are matched against global system types
+	// (organization_id IS NULL) and org-specific types. Items whose type can
+	// be resolved neither as UUID nor by name are queued for review instead of
+	// failing the whole batch with a 500.
+	typeIDs := h.resolveCITypeIDs(r, req.Items)
+	for i, item := range req.Items {
+		if typeIDs[i] != "" {
+			continue
+		}
+		reviewItem := &ReviewItem{
+			OrganizationID: t.OrganizationID,
+			Kind:           ReviewKindUnclassifiedDevice,
+			Status:         ReviewStatusOpen,
+			Payload: map[string]any{
+				"reason":        "unknown_ci_type",
+				"ci_type_name":  item.CITypeName,
+				"name":          item.Name,
+				"manufacturer":  item.Manufacturer,
+				"model":         item.Model,
+				"serial_number": item.SerialNumber,
+				"management_ip": item.ManagementIP,
+				"fingerprint":   item.Fingerprint,
+				"raw_data":      item.RawData,
+			},
+		}
+		if err := h.repo.CreateReviewItem(r.Context(), reviewItem); err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			return
+		}
+		resp.ReviewItems++
+	}
+
 	existing, _, err := h.ciRepo.List(r.Context(), t.OrganizationID, ci.FilterParams{}, api.PaginationParams{Limit: 10000, Offset: 0})
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
+	}
+
+	// Reconciliation compares stored CIs (UUID type) against the incoming
+	// item, so the item must carry the resolved UUID as well.
+	for i := range req.Items {
+		if typeIDs[i] != "" {
+			req.Items[i].CITypeName = typeIDs[i]
+		}
 	}
 
 	// resolvedCIID[i] holds the CI id that item i resolved to (matched or
@@ -315,6 +625,10 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 	resolvedCIID := make([]string, len(req.Items))
 
 	for i, item := range req.Items {
+		if typeIDs[i] == "" {
+			// Unresolvable CI type: already queued for review above.
+			continue
+		}
 		result := Reconcile(existing, item)
 		now := time.Now().UTC().Format(time.RFC3339)
 		source := item.Source
@@ -331,7 +645,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			nowTime := time.Now().UTC()
 			newItem := ci.Item{
 				OrganizationID:  t.OrganizationID,
-				CITypeID:        item.CITypeName,
+				CITypeID:        typeIDs[i],
 				Name:            item.Name,
 				Status:          "active",
 				Manufacturer:    item.Manufacturer,

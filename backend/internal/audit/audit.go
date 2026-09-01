@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -57,37 +58,64 @@ func NewPGRecorder() *PGRecorder {
 	return &PGRecorder{}
 }
 
-// ComputeHash computes the SHA-256 hash for an audit entry, chaining from the previous hash.
+// ComputeHash computes the SHA-256 hash for an audit entry, chaining from the
+// previous hash. The input is the canonical serialization of the persisted
+// row, identical to the database function audit_entry_hash (migration
+// 000039): microsecond-precision RFC3339 UTC timestamp, plain ids, and the
+// stored JSONB changes payload. Because the BEFORE INSERT trigger recomputes
+// the hash from the stored columns, verification over the stored row always
+// reproduces the stored hash.
 func ComputeHash(entry *Entry) string {
-	data := struct {
-		Timestamp    string                 `json:"timestamp"`
-		ActorID      string                 `json:"actor_id"`
-		ActorType    string                 `json:"actor_type"`
-		Action       string                 `json:"action"`
-		ResourceType string                 `json:"resource_type"`
-		ResourceID   string                 `json:"resource_id"`
-		Changes      map[string]interface{} `json:"changes,omitempty"`
-		PreviousHash string                 `json:"previous_hash"`
-	}{
-		Timestamp:    entry.Timestamp.UTC().Format(time.RFC3339Nano),
-		ActorID:      entry.ActorID,
-		ActorType:    entry.ActorType,
-		Action:       entry.Action,
-		ResourceType: entry.ResourceType,
-		ResourceID:   entry.ResourceID,
-		Changes:      entry.Changes,
-		PreviousHash: entry.PreviousHash,
-	}
-
-	// The struct above contains only JSON-marshalable fields, so an error here
-	// is impossible in practice; fall back to the type-quoted value if the
-	// representation ever changes.
-	b, err := json.Marshal(data)
-	if err != nil {
-		b = []byte(fmt.Sprintf("%#v", data))
-	}
-	h := sha256.Sum256(b)
+	payload := canonicalHashPayload(
+		entry.Timestamp.UTC().Truncate(time.Microsecond).Format("2006-01-02T15:04:05.000000Z"),
+		entry.ActorID,
+		entry.ActorType,
+		entry.Action,
+		entry.ResourceType,
+		entry.ResourceID,
+		entry.Changes,
+		entry.PreviousHash,
+	)
+	h := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(h[:])
+}
+
+// canonicalHashPayload builds the exact byte sequence hashed both here and in
+// audit_entry_hash: a JSON object with fixed key order where `changes` is the
+// compact JSON serialization of the payload (jsonb-normalized on write).
+func canonicalHashPayload(timestamp, actorID, actorType, action, resourceType, resourceID string, changes map[string]interface{}, previousHash string) string {
+	changesJSON := "{}"
+	if changes != nil {
+		if b, err := json.Marshal(changes); err == nil {
+			changesJSON = string(b)
+		}
+	}
+	q := func(s string) string {
+		b, err := json.Marshal(s)
+		if err != nil {
+			return `""`
+		}
+		return string(b)
+	}
+	var sb strings.Builder
+	sb.WriteString(`{"timestamp":`)
+	sb.WriteString(q(timestamp))
+	sb.WriteString(`,"actor_id":`)
+	sb.WriteString(q(actorID))
+	sb.WriteString(`,"actor_type":`)
+	sb.WriteString(q(actorType))
+	sb.WriteString(`,"action":`)
+	sb.WriteString(q(action))
+	sb.WriteString(`,"resource_type":`)
+	sb.WriteString(q(resourceType))
+	sb.WriteString(`,"resource_id":`)
+	sb.WriteString(q(resourceID))
+	sb.WriteString(`,"changes":`)
+	sb.WriteString(changesJSON)
+	sb.WriteString(`,"previous_hash":`)
+	sb.WriteString(q(previousHash))
+	sb.WriteString(`}`)
+	return sb.String()
 }
 
 // AcquireAdvisoryLock acquires a transaction-scoped advisory lock for audit log serialisation.
@@ -160,6 +188,13 @@ func (r *PGRecorder) Record(ctx context.Context, tx pgx.Tx, entry Entry) (*Entry
 		return nil, fmt.Errorf("audit: insert entry: %w", err)
 	}
 
+	// The timestamptz column stores microsecond precision while the hash input
+	// uses nanoseconds; re-reading the persisted timestamp can therefore yield a
+	// value that differs from the hashed one. Truncating after the read keeps
+	// the caller-visible timestamp consistent with the stored value and does
+	// not alter the hash chain.
+	entry.Timestamp = entry.Timestamp.UTC().Truncate(time.Microsecond)
+
 	return &entry, nil
 }
 
@@ -187,7 +222,8 @@ func Verify(ctx context.Context, pool *pgxpool.Pool, orgID string) (VerifyResult
 			COALESCE(resource_id::text, ''),
 			COALESCE(changes, '{}'::jsonb),
 			COALESCE(previous_hash, ''),
-			hash
+			hash,
+			audit_entry_hash(timestamp, actor_id, actor_type, action, resource_type, resource_id, changes, previous_hash)
 		FROM audit_log
 		WHERE organization_id = $1
 		ORDER BY timestamp ASC, id ASC
@@ -197,22 +233,35 @@ func Verify(ctx context.Context, pool *pgxpool.Pool, orgID string) (VerifyResult
 	}
 	defer rows.Close()
 
-	entries, err := scanEntries(rows)
+	entries, expected, err := scanEntriesWithExpected(rows)
 	if err != nil {
 		return VerifyResult{}, err
 	}
-	return VerifyEntries(entries), nil
+	return verifyEntries(entries, expected), nil
 }
 
-// VerifyEntries verifies an in-memory sequence of audit entries in chain order.
+// VerifyEntries verifies an in-memory sequence of audit entries in chain
+// order. It is used for entries that never touched the database (in-memory
+// log, export/import) where the canonical hash input is exactly what
+// ComputeHash produces from the entry values.
 func VerifyEntries(entries []Entry) VerifyResult {
+	expected := make([]string, len(entries))
+	for i := range entries {
+		expected[i] = ComputeHash(&entries[i])
+	}
+	return verifyEntries(entries, expected)
+}
+
+// verifyEntries checks chain linkage and per-entry hashes. expected[i] is the
+// hash that the entry's stored column values must produce; for database rows
+// it comes from audit_entry_hash so the JSONB serialization cannot diverge.
+func verifyEntries(entries []Entry, expected []string) VerifyResult {
 	prevHash := ""
 	for i := range entries {
 		if entries[i].PreviousHash != prevHash {
 			return VerifyResult{Intact: false, Checked: i, BrokenID: entries[i].ID, BrokenAt: i + 1, BrokenReason: "previous_hash mismatch"}
 		}
-		computed := ComputeHash(&entries[i])
-		if computed != entries[i].Hash {
+		if expected[i] != entries[i].Hash {
 			return VerifyResult{Intact: false, Checked: i, BrokenID: entries[i].ID, BrokenAt: i + 1, BrokenReason: "hash mismatch"}
 		}
 		prevHash = entries[i].Hash
@@ -322,11 +371,22 @@ func (h *Handler) list(ctx context.Context, orgID string, page api.PaginationPar
 }
 
 func scanEntries(rows pgx.Rows) ([]Entry, error) {
+	entries, _, err := scanEntriesWithExpected(rows)
+	return entries, err
+}
+
+// scanEntriesWithExpected scans audit rows; when the query projects the
+// trailing audit_entry_hash(...) column, the database-computed expected hash
+// is returned per row. Callers reading rows without that column (List) get nil.
+func scanEntriesWithExpected(rows pgx.Rows) ([]Entry, []string, error) {
 	entries := []Entry{}
+	expected := []string{}
+	hasExpected := len(rows.FieldDescriptions()) == 12
 	for rows.Next() {
 		var entry Entry
 		var changes []byte
-		if err := rows.Scan(
+		var exp *string
+		dest := []any{
 			&entry.ID,
 			&entry.OrganizationID,
 			&entry.Timestamp,
@@ -338,20 +398,29 @@ func scanEntries(rows pgx.Rows) ([]Entry, error) {
 			&changes,
 			&entry.PreviousHash,
 			&entry.Hash,
-		); err != nil {
-			return nil, fmt.Errorf("audit: scan entry: %w", err)
+		}
+		if hasExpected {
+			dest = append(dest, &exp)
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return nil, nil, fmt.Errorf("audit: scan entry: %w", err)
 		}
 		if len(changes) > 0 {
 			if err := json.Unmarshal(changes, &entry.Changes); err != nil {
-				return nil, fmt.Errorf("audit: decode changes: %w", err)
+				return nil, nil, fmt.Errorf("audit: decode changes: %w", err)
 			}
 		}
 		entries = append(entries, entry)
+		if exp != nil {
+			expected = append(expected, *exp)
+		} else {
+			expected = append(expected, "")
+		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("audit: iterate entries: %w", err)
+		return nil, nil, fmt.Errorf("audit: iterate entries: %w", err)
 	}
-	return entries, nil
+	return entries, expected, nil
 }
 
 // Log is an in-memory audit log.

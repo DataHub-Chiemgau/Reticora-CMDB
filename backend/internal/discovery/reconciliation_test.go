@@ -33,6 +33,7 @@ func TestReconcileConflict(t *testing.T) {
 
 func TestBulkIngestUsesReconciliation(t *testing.T) {
 	discoveryRepo := NewMemoryRepository()
+	discoveryRepo.SeedCIType("server", "server")
 	ciRepo := ci.NewMemoryRepository()
 	if err := ciRepo.Create(context.Background(), &ci.Item{OrganizationID: "org-1", CITypeID: "server", Name: "srv-01", SerialNumber: "SN-1", Attributes: map[string]any{}}); err != nil {
 		t.Fatal(err)
@@ -182,6 +183,7 @@ func TestShouldApplyAttribute(t *testing.T) {
 
 func TestBulkIngestQueuesValueConflictsForReview(t *testing.T) {
 	discoveryRepo := NewMemoryRepository()
+	discoveryRepo.SeedCIType("server", "server")
 	ciRepo := ci.NewMemoryRepository()
 	if err := ciRepo.Create(context.Background(), &ci.Item{OrganizationID: "org-1", CITypeID: "server", Name: "srv-01", SerialNumber: "SN-1", ManagementIP: "10.0.0.1", DiscoverySource: ci.SourceRedfish, Attributes: map[string]any{}}); err != nil {
 		t.Fatal(err)

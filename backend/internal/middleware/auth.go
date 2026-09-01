@@ -205,11 +205,21 @@ func ClaimsFromContext(ctx context.Context) (Claims, bool) {
 }
 
 func requiresAuth(r *http.Request) bool {
+	// SCIM is the inbound provisioning surface (spec §11.1) and must be
+	// authenticated just like the REST API; the IdP authenticates with a
+	// bearer token whose claims carry the tenant context.
+	if strings.HasPrefix(r.URL.Path, "/scim/") {
+		return true
+	}
 	if !strings.HasPrefix(r.URL.Path, "/api/") {
 		return false
 	}
 	switch r.URL.Path {
 	case "/api/v1/auth/config", "/api/v1/auth/callback", "/api/v1/auth/refresh":
+		return false
+	case "/api/v1/collectors/enroll":
+		// The enrollment code is the credential; the collector has no session
+		// or API key before it enrolls.
 		return false
 	default:
 		return true

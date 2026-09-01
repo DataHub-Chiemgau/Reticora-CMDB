@@ -28,7 +28,18 @@
     "export": "Export",
     "monitoring": "Monitoring",
     "audit": "Audit",
-    "security": "Security"
+    "security": "Security",
+    "map": "Map",
+    "roomplan": "Room plan",
+    "consumables": "Inventory stock",
+    "orders": "Orders",
+    "maintenance": "Maintenance",
+    "disposal": "Disposal",
+    "keys": "Keys",
+    "trainings": "Trainings",
+    "desks": "Desks",
+    "agents": "Agents",
+    "findings": "Findings"
   },
   "common": {
     "save": "Save",
@@ -36,7 +47,7 @@
     "delete": "Delete",
     "edit": "Edit",
     "create": "Create",
-    "search": "Search…",
+    "search": "Search",
     "noResults": "No results",
     "noData": "No data available",
     "back": "Back",
@@ -46,7 +57,14 @@
     "actions": "Actions",
     "description": "Description",
     "notes": "Notes",
-    "retry": "Try again"
+    "retry": "Retry",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "done": "Done",
+    "name": "Name",
+    "title": "Title",
+    "location": "Location",
+    "all": "All"
   },
   "commandPalette": {
     "title": "Command Menu",
@@ -76,7 +94,9 @@
       "export": "Open export",
       "monitoring": "Open monitoring",
       "audit": "Open audit log",
-      "security": "Open security & privacy"
+      "security": "Open security & privacy",
+      "map": "Open map",
+      "roomplan": "Open room plan"
     }
   },
   "dashboard": {
@@ -190,7 +210,16 @@
     "summary": "Status and heartbeats of your Discovery Collectors.",
     "version": "Version",
     "lastHeartbeat": "Last Heartbeat",
-    "createdAt": "Created"
+    "createdAt": "Created",
+    "enroll": {
+      "button": "Connect collector",
+      "title": "Connect collector",
+      "intro": "Connect a collector: generate a single-use enrollment code and enter it in the collector. Your infrastructure appears automatically.",
+      "label": "Label (e.g. site)",
+      "generate": "Generate code",
+      "once": "This code is shown only once and expires. Run in the customer network:",
+      "expires": "Valid until"
+    }
   },
   "webhook": {
     "title": "Webhooks",
@@ -334,6 +363,15 @@
       "active": "Outage simulation",
       "impact": "If \"{{name}}\" fails, {{count}} more CIs are impacted (shown greyed out).",
       "noImpact": "This CI has no dependents — an outage would have no impact on the graph."
+    },
+    "filterRelType": "Relationship type",
+    "allRelTypes": "All relationships",
+    "relTypes": {
+      "connected_to": "connected",
+      "powered_by": "powered by",
+      "hosted_on": "hosted on",
+      "depends_on": "depends on",
+      "member_of": "member of"
     }
   },
   "rack": {
@@ -574,5 +612,116 @@
     "rotateKeys": "Rotate keys now",
     "keyRotationResult": "Rotation complete: key version {{version}}, {{rotated}} credentials re-encrypted.",
     "keyRotationError": "Key rotation failed"
+  },
+  "map": {
+    "summary": "Sites on the map. Markers open the site.",
+    "located": "located",
+    "unlocated": "without coordinates",
+    "worldAria": "World map with site markers",
+    "hint": "Select a marker to see details.",
+    "openSite": "Show site CIs",
+    "noCoords": "Without coordinates"
+  },
+  "roomplan": {
+    "summary": "Position objects on the floor plan via drag & drop.",
+    "building": "Building",
+    "room": "Room",
+    "selectBuilding": "Select building",
+    "selectRoom": "Select room",
+    "empty": "No room selected",
+    "emptyHint": "Select a building and a room.",
+    "objects": "Objects",
+    "noCIs": "No CIs assigned to this room.",
+    "dragHint": "drag to position, double-click opens"
+  },
+  "consumables": {
+    "summary": "Consumable stock with level and minimum level.",
+    "create": "Create item",
+    "lowStockOnly": "Only below minimum level",
+    "low": "low",
+    "ok": "OK",
+    "minLevel": "Minimum level"
+  },
+  "orders": {
+    "summary": "Internal orders with approval workflow.",
+    "create": "Create order",
+    "positions": "items",
+    "submit": "Submit",
+    "approve": "Approve",
+    "reject": "Reject",
+    "supplier": "Supplier"
+  },
+  "maintenance": {
+    "summary": "Schedule maintenance and notify affected customers.",
+    "create": "Schedule maintenance",
+    "start": "Start",
+    "complete": "Complete",
+    "notify": "Notify customers",
+    "notified": "{{count}} customers notified",
+    "affectedCIs": "affected CIs",
+    "startsAt": "Starts",
+    "endsAt": "Ends"
+  },
+  "disposal": {
+    "summary": "Revision-safe disposal documentation (append-only, BSI/ISO).",
+    "create": "Record disposal",
+    "method": "Method",
+    "asset": "Asset",
+    "selectAsset": "Select asset",
+    "certificate": "Certificate reference",
+    "dataCarrier": "Data carrier destruction",
+    "performedAt": "Performed"
+  },
+  "keys": {
+    "summary": "Physical and digital keys with issue/return.",
+    "create": "Create key",
+    "issue": "Issue",
+    "return": "Return",
+    "type": "Type",
+    "physical": "Physical",
+    "digital": "Digital",
+    "identifier": "Identifier",
+    "issueTitle": "Issue key",
+    "assignTo": "Issue to",
+    "selectUser": "Select user"
+  },
+  "trainings": {
+    "summary": "Courses with assignment, due date and proof.",
+    "create": "Create course",
+    "category": "Category",
+    "validity": "Validity",
+    "months": "months",
+    "validityMonths": "Validity (months)",
+    "general": "General"
+  },
+  "desks": {
+    "summary": "Book shared desks.",
+    "create": "Create desk",
+    "book": "Book",
+    "bookTitle": "Book desk",
+    "startsAt": "From",
+    "endsAt": "To"
+  },
+  "agents": {
+    "summary": "Registered endpoint agents with policy and kill-switch.",
+    "lastHeartbeat": "Last heartbeat",
+    "interval": "Interval",
+    "metricsOff": "Metrics off",
+    "policy": "Policy",
+    "enable": "Enable",
+    "killSwitch": "Kill switch",
+    "policyTitle": "Agent policy",
+    "intervalSeconds": "Interval (seconds)"
+  },
+  "findings": {
+    "summary": "Patch posture and vulnerabilities per CI.",
+    "statusFilter": "Status",
+    "open": "Open",
+    "acknowledged": "Acknowledged",
+    "resolved": "Resolved",
+    "falsePositive": "False positive",
+    "acknowledge": "Acknowledge",
+    "resolve": "Resolve",
+    "markFalsePositive": "False positive"
   }
 }

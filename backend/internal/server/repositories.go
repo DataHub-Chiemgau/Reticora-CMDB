@@ -1,27 +1,37 @@
 package server
 
 import (
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/training"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/order"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
@@ -37,16 +47,36 @@ import (
 // restart; it is never a fallback for an unreachable database.
 func MemoryRepositories() Repositories {
 	assets := asset.NewMemoryRepository()
+	discoveryRepo := discovery.NewMemoryRepository()
+	// Seed the system CI types so name-based ingest works in --no-db mode just
+	// like against the migrated database (migration 000021 seeds them there).
+	for _, typ := range []string{
+		"switch", "router", "firewall", "access_point", "server", "hypervisor",
+		"vm", "client", "pdu", "ups", "nas", "storage_array", "printer",
+		"ip_phone", "camera", "generic_device", "patch_panel",
+	} {
+		discoveryRepo.SeedCIType(typ, typ)
+	}
 	return Repositories{
 		CI:                ci.NewMemoryRepository(),
 		Relationship:      relationship.NewMemoryRepository(),
 		Webhook:           webhook.NewMemoryRepository(),
 		WebhookDeliveries: webhook.NewMemoryDeliveryStore(),
-		Discovery:         discovery.NewMemoryRepository(),
+		Discovery:         discoveryRepo,
 		Asset:             assets,
 		Assignment:        assignment.NewMemoryRepository(),
 		Document:          document.NewMemoryRepository(),
 		Stocktake:         stocktake.NewMemoryRepository(assets),
+		Consumable:        consumable.NewMemoryRepository(),
+		Order:             order.NewMemoryRepository(),
+		Maintenance:       maintenance.NewMemoryRepository(),
+		Disposal:          disposal.NewMemoryRepository(),
+		Key:               keymgmt.NewMemoryRepository(),
+		Training:          training.NewMemoryRepository(),
+		Desk:              desk.NewMemoryRepository(),
+		Location:          location.NewMemoryRepository(),
+		Agent:             agent.NewMemoryRepository(),
+		Security:          security.NewMemoryRepository(),
 		Ticket:            ticket.NewMemoryRepository(),
 		User:              user.NewMemoryRepository(),
 		Credential:        credential.NewMemoryRepository(),
@@ -83,6 +113,16 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Assignment:        assignment.NewPGRepository(pool),
 		Document:          document.NewPGRepository(pool),
 		Stocktake:         stocktake.NewPGRepository(pool),
+		Consumable:        consumable.NewPGRepository(pool),
+		Order:             order.NewPGRepository(pool),
+		Maintenance:       maintenance.NewPGRepository(pool),
+		Disposal:          disposal.NewPGRepository(pool),
+		Key:               keymgmt.NewPGRepository(pool),
+		Training:          training.NewPGRepository(pool),
+		Desk:              desk.NewPGRepository(pool),
+		Location:          location.NewPGRepository(pool),
+		Agent:             agent.NewPGRepository(pool),
+		Security:          security.NewPGRepository(pool),
 		Ticket:            ticket.NewPGRepository(pool),
 		User:              user.NewPGRepository(pool),
 		Credential:        credential.NewPGRepository(pool),

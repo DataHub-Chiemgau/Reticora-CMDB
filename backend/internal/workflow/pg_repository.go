@@ -175,16 +175,31 @@ func (r *PGRepository) ListRuns(ctx context.Context, orgID, wid, status string, 
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		// Collect run ids and close the rows BEFORE issuing the per-run step
+		// queries: a nested query on the same connection while rows are open
+		// fails with "conn busy".
+		runIDs := make([]string, 0, page.Limit)
 		for rows.Next() {
 			run, err := scanRun(rows)
 			if err != nil {
+				rows.Close()
 				return err
 			}
-			run.Steps, _ = r.listStepsTx(ctx, tx, orgID, run.ID)
 			out = append(out, *run)
+			runIDs = append(runIDs, run.ID)
 		}
-		return rows.Err()
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for i, id := range runIDs {
+			steps, err := r.listStepsTx(ctx, tx, orgID, id)
+			if err != nil {
+				return fmt.Errorf("list steps for run %s: %w", id, err)
+			}
+			out[i].Steps = steps
+		}
+		return nil
 	})
 	return out, total, err
 }
@@ -241,6 +256,12 @@ func (r *PGRepository) AppendStep(ctx context.Context, s *Step) error {
 }
 func (r *PGRepository) UpdateStep(ctx context.Context, orgID, id, status string, output JSONMap, errText string) (*Step, error) {
 	var s *Step
+	// The output column is NOT NULL; a nil map (e.g. from a failed action that
+	// produced no output) would violate the constraint and leave the step
+	// stuck in "running". Persist an empty object instead.
+	if output == nil {
+		output = JSONMap{}
+	}
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		s, err = scanStep(tx.QueryRow(ctx, "UPDATE workflow_step SET status=$3, output=$4, error=$5, updated_at=now() WHERE organization_id=$1 AND id=$2 RETURNING "+stepCols, orgID, id, status, output, errText))

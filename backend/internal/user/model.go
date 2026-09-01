@@ -63,16 +63,22 @@ type CustomRole struct {
 	Name           string    `json:"name"`
 	Description    string    `json:"description,omitempty"`
 	IsSystem       bool      `json:"is_system"`
-	Permissions    []string  `json:"permissions"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	// IsBuiltin marks the four seeded standard roles (org_admin, engineer,
+	// viewer, client_technician). Builtin roles live in the `role` table and
+	// are assigned via role_id; custom roles live in `custom_role`.
+	IsBuiltin    bool      `json:"is_builtin"`
+	Permissions  []string  `json:"permissions"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-// UserRoleAssignment represents a user's custom role assignment.
+// UserRoleAssignment represents a user's role assignment. Exactly one of
+// CustomRoleID (custom role) or RoleID (standard/builtin role) is set.
 type UserRoleAssignment struct {
 	ID           string    `json:"id"`
 	UserID       string    `json:"user_id"`
-	CustomRoleID string    `json:"custom_role_id"`
+	CustomRoleID string    `json:"custom_role_id,omitempty"`
+	RoleID       string    `json:"role_id,omitempty"`
 	ScopeType    string    `json:"scope_type"`
 	ScopeID      string    `json:"scope_id,omitempty"`
 	GrantedAt    time.Time `json:"granted_at"`
@@ -130,8 +136,12 @@ type UpdateRoleRequest struct {
 
 // AssignRoleRequest is the payload for assigning a role to a user.
 type AssignRoleRequest struct {
-	UserID       string `json:"user_id"`
-	CustomRoleID string `json:"custom_role_id"`
-	ScopeType    string `json:"scope_type,omitempty"`
-	ScopeID      string `json:"scope_id,omitempty"`
+	UserID string `json:"user_id"`
+	// CustomRoleID targets a tenant-defined custom role (user_custom_role).
+	CustomRoleID string `json:"custom_role_id,omitempty"`
+	// RoleID targets a seeded standard role (role_assignment). Exactly one of
+	// custom_role_id or role_id must be set.
+	RoleID    string `json:"role_id,omitempty"`
+	ScopeType string `json:"scope_type,omitempty"`
+	ScopeID   string `json:"scope_id,omitempty"`
 }

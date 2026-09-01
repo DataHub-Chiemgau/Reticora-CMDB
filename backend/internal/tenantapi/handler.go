@@ -92,6 +92,10 @@ func (h *Handler) CreateClient(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	// Accept `code` as a slug alias when no explicit slug is given.
+	if req.Slug == "" && req.Code != "" {
+		req.Slug = req.Code
+	}
 	if req.Name == "" || req.Slug == "" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name and slug are required")
 		return

@@ -22,11 +22,14 @@ type Contact struct {
 type CreateContactRequest struct {
 	ClientID    string `json:"client_id,omitempty"`
 	DisplayName string `json:"display_name"`
-	Email       string `json:"email,omitempty"`
-	Phone       string `json:"phone,omitempty"`
-	Role        string `json:"role,omitempty"`
-	Department  string `json:"department,omitempty"`
-	Notes       string `json:"notes,omitempty"`
+	// Name is accepted as a display_name alias for integrations that send the
+	// generic contact field instead of the canonical one.
+	Name       string `json:"name,omitempty"`
+	Email      string `json:"email,omitempty"`
+	Phone      string `json:"phone,omitempty"`
+	Role       string `json:"role,omitempty"`
+	Department string `json:"department,omitempty"`
+	Notes      string `json:"notes,omitempty"`
 }
 
 // UpdateContactRequest is the payload for updating a contact.

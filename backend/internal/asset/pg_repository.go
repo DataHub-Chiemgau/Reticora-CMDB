@@ -27,6 +27,8 @@ const assetSelectColumns = `
 	COALESCE(supplier, ''),
 	COALESCE(invoice_number, ''),
 	COALESCE(serial_number, ''),
+	COALESCE(rfid_tag, ''),
+	COALESCE(barcode, ''),
 	COALESCE(location, ''),
 	COALESCE(notes, ''),
 	custom_fields,
@@ -188,11 +190,11 @@ func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
 			INSERT INTO asset (
 				organization_id, client_id, ci_id, asset_tag, name, category, status,
 				purchase_date, purchase_cost, currency, warranty_end, supplier, invoice_number,
-				serial_number, location, notes, custom_fields
+				serial_number, location, notes, custom_fields, rfid_tag, barcode
 			) VALUES (
 				$1, $2, $3, $4, $5, $6, $7,
 				$8, $9, $10, $11, $12, $13,
-				$14, $15, $16, $17
+				$14, $15, $16, $17, $18, $19
 			)
 			RETURNING id::text, created_at, updated_at
 		`
@@ -214,6 +216,8 @@ func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
 			nilIfEmpty(a.Location),
 			nilIfEmpty(a.Notes),
 			a.CustomFields,
+			nilIfEmpty(a.RFIDTag),
+			nilIfEmpty(a.Barcode),
 		).Scan(&a.ID, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return fmt.Errorf("create asset: %w", err)
 		}
@@ -263,6 +267,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		addStringField("supplier", req.Supplier)
 		addStringField("invoice_number", req.InvoiceNumber)
 		addStringField("serial_number", req.SerialNumber)
+		addStringField("rfid_tag", req.RFIDTag)
+		addStringField("barcode", req.Barcode)
 		addStringField("location", req.Location)
 		addStringField("notes", req.Notes)
 		addStringField("ci_id", req.CIID)
@@ -339,6 +345,8 @@ func scanAsset(scanner assetScanner) (*Asset, error) {
 		&item.Supplier,
 		&item.InvoiceNumber,
 		&item.SerialNumber,
+		&item.RFIDTag,
+		&item.Barcode,
 		&item.Location,
 		&item.Notes,
 		&item.CustomFields,

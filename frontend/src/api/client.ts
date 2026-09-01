@@ -21,6 +21,8 @@ export interface CI {
   id: string;
   organization_id: string;
   client_id?: string;
+  site_id?: string;
+  room_id?: string;
   ci_type_id: string;
   name: string;
   status: string;
@@ -96,6 +98,8 @@ export interface CIListParams {
   status?: string;
   ci_type_id?: string;
   client_id?: string;
+  site_id?: string;
+  room_id?: string;
   search?: string;
   sort_by?: string;
   sort_dir?: string;
@@ -105,6 +109,7 @@ export interface ListParams {
   limit?: number;
   offset?: number;
   cursor?: string;
+  search?: string;
 }
 
 function mergeHeaders(options?: RequestInit) {
@@ -241,12 +246,24 @@ export interface TopologyParams {
   depth?: number;
 }
 
+export interface ImpactResult {
+  failed_ci_id: string;
+  failed_ci: TopologyNode;
+  rel_type: string;
+  depth: number;
+  impacted: TopologyNode[];
+  count: number;
+}
+
 export const topologyApi = {
   get(params: TopologyParams = {}): Promise<TopologyGraphData> {
     return fetchAPI(`/topology${buildQuery(params)}`);
   },
   neighbors(ciId: string): Promise<TopologyGraphData> {
     return fetchAPI(`/topology/cis/${ciId}/neighbors`);
+  },
+  impact(ciId: string, params: { depth?: number; rel_type?: string } = {}): Promise<ImpactResult> {
+    return fetchAPI(`/topology/cis/${ciId}/impact${buildQuery(params)}`);
   },
 };
 
@@ -1612,5 +1629,382 @@ export const auditApi = {
   },
   verify(): Promise<AuditVerifyResult> {
     return fetchAPI('/audit/verify', { method: 'POST' });
+  },
+};
+
+// ─── Entitlements (feature availability per plan) ───────────────────────────
+
+export interface Entitlement {
+  organization_id: string;
+  feature_key: string;
+  plan: string;
+  enabled: boolean;
+  updated_at: string;
+}
+
+export const entitlementApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<Entitlement>> {
+    return fetchAPI(`/entitlements${buildQuery(params)}`);
+  },
+};
+
+// ─── Sites / GIS ────────────────────────────────────────────────────────────
+
+export interface Site {
+  id: string;
+  organization_id: string;
+  client_id?: string;
+  name: string;
+  address?: string;
+  geo_lat?: number | null;
+  geo_lon?: number | null;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export const siteApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<Site>> {
+    return fetchAPI(`/sites${buildQuery(params)}`);
+  },
+  get(id: string): Promise<Site> {
+    return fetchAPI(`/sites/${id}`);
+  },
+};
+
+// ─── Buildings / Rooms (floor-plan view) ────────────────────────────────────
+
+export interface Building {
+  id: string;
+  organization_id: string;
+  site_id: string;
+  name: string;
+  floors?: number | null;
+  floorplan_object_key?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoomLayoutPosition {
+  x: number;
+  y: number;
+}
+
+export interface Room {
+  id: string;
+  organization_id: string;
+  building_id: string;
+  name: string;
+  floor?: number | null;
+  room_type?: string;
+  layout?: Record<string, RoomLayoutPosition>;
+  created_at: string;
+  updated_at: string;
+}
+
+export const buildingApi = {
+  list(params: ListParams & { site_id?: string } = {}): Promise<PaginatedResponse<Building>> {
+    return fetchAPI(`/buildings${buildQuery(params)}`);
+  },
+  get(id: string): Promise<Building> {
+    return fetchAPI(`/buildings/${id}`);
+  },
+};
+
+export const roomApi = {
+  list(params: ListParams & { building_id?: string } = {}): Promise<PaginatedResponse<Room>> {
+    return fetchAPI(`/rooms${buildQuery(params)}`);
+  },
+  get(id: string): Promise<Room> {
+    return fetchAPI(`/rooms/${id}`);
+  },
+  updateLayout(id: string, layout: Record<string, RoomLayoutPosition>): Promise<Room> {
+    return fetchAPI(`/rooms/${id}`, { method: 'PATCH', body: JSON.stringify({ layout }) });
+  },
+};
+
+// ─── Block D modules: consumables, orders, maintenance, disposal, keys, trainings, desks ───
+
+export interface Consumable {
+  id: string;
+  organization_id: string;
+  client_id?: string;
+  name: string;
+  sku?: string;
+  category: string;
+  unit: string;
+  stock_level: number;
+  min_level: number;
+  location?: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export const consumableApi = {
+  list(params: ListParams & { low_stock?: boolean } = {}): Promise<PaginatedResponse<Consumable>> {
+    return fetchAPI(`/consumables${buildQuery(params)}`);
+  },
+  create(data: Partial<Consumable> & { name: string }): Promise<Consumable> {
+    return fetchAPI('/consumables', { method: 'POST', body: JSON.stringify(data) });
+  },
+  update(id: string, data: Partial<Consumable>): Promise<Consumable> {
+    return fetchAPI(`/consumables/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/consumables/${id}`, { method: 'DELETE' });
+  },
+  addMovement(id: string, data: { direction: 'in' | 'out'; quantity: number; reason?: string }): Promise<unknown> {
+    return fetchAPI(`/consumables/${id}/movements`, { method: 'POST', body: JSON.stringify(data) });
+  },
+};
+
+export interface Order {
+  id: string;
+  organization_id: string;
+  order_number: string;
+  title: string;
+  status: string;
+  supplier?: string;
+  total_cost?: number;
+  currency?: string;
+  items?: { id: string; description: string; quantity: number; unit_price?: number }[];
+  created_at: string;
+}
+
+export const orderApi = {
+  list(params: ListParams & { status?: string } = {}): Promise<PaginatedResponse<Order>> {
+    return fetchAPI(`/orders${buildQuery(params)}`);
+  },
+  create(data: { title: string; supplier?: string; notes?: string }): Promise<Order> {
+    return fetchAPI('/orders', { method: 'POST', body: JSON.stringify(data) });
+  },
+  addItem(id: string, data: { description: string; quantity: number; unit_price?: number }): Promise<Order> {
+    return fetchAPI(`/orders/${id}/items`, { method: 'POST', body: JSON.stringify(data) });
+  },
+  submit(id: string): Promise<Order> {
+    return fetchAPI(`/orders/${id}/submit`, { method: 'POST', body: '{}' });
+  },
+  approve(id: string): Promise<Order> {
+    return fetchAPI(`/orders/${id}/approve`, { method: 'POST', body: '{}' });
+  },
+  reject(id: string): Promise<Order> {
+    return fetchAPI(`/orders/${id}/reject`, { method: 'POST', body: '{}' });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/orders/${id}`, { method: 'DELETE' });
+  },
+};
+
+export interface MaintenanceWindow {
+  id: string;
+  organization_id: string;
+  title: string;
+  description?: string;
+  starts_at: string;
+  ends_at: string;
+  status: string;
+  ci_ids?: string[];
+  created_at: string;
+}
+
+export const maintenanceApi = {
+  list(params: ListParams & { status?: string } = {}): Promise<PaginatedResponse<MaintenanceWindow>> {
+    return fetchAPI(`/maintenance-windows${buildQuery(params)}`);
+  },
+  create(data: { title: string; starts_at: string; ends_at: string; description?: string; ci_ids?: string[] }): Promise<MaintenanceWindow> {
+    return fetchAPI('/maintenance-windows', { method: 'POST', body: JSON.stringify(data) });
+  },
+  update(id: string, data: { status?: string }): Promise<MaintenanceWindow> {
+    return fetchAPI(`/maintenance-windows/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  notify(id: string): Promise<{ notified: number }> {
+    return fetchAPI(`/maintenance-windows/${id}/notify`, { method: 'POST', body: '{}' });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/maintenance-windows/${id}`, { method: 'DELETE' });
+  },
+};
+
+export interface DisposalRecord {
+  id: string;
+  organization_id: string;
+  asset_id?: string;
+  ci_id?: string;
+  method: string;
+  certificate_ref?: string;
+  data_carrier?: string;
+  performed_by?: string;
+  performed_at: string;
+  created_at: string;
+}
+
+export const disposalApi = {
+  list(params: ListParams & { method?: string } = {}): Promise<PaginatedResponse<DisposalRecord>> {
+    return fetchAPI(`/disposal-records${buildQuery(params)}`);
+  },
+  create(data: { method: string; asset_id?: string; ci_id?: string; certificate_ref?: string; data_carrier?: string; notes?: string }): Promise<DisposalRecord> {
+    return fetchAPI('/disposal-records', { method: 'POST', body: JSON.stringify(data) });
+  },
+};
+
+export interface KeyItem {
+  id: string;
+  organization_id: string;
+  name: string;
+  key_type: string;
+  identifier?: string;
+  status: string;
+  location?: string;
+  created_at: string;
+}
+
+export const keyApi = {
+  list(params: ListParams & { status?: string; key_type?: string } = {}): Promise<PaginatedResponse<KeyItem>> {
+    return fetchAPI(`/keys${buildQuery(params)}`);
+  },
+  create(data: { name: string; key_type?: string; identifier?: string; location?: string }): Promise<KeyItem> {
+    return fetchAPI('/keys', { method: 'POST', body: JSON.stringify(data) });
+  },
+  issue(id: string, assignedTo: string): Promise<unknown> {
+    return fetchAPI(`/keys/${id}/issue`, { method: 'POST', body: JSON.stringify({ assigned_to: assignedTo }) });
+  },
+  returnKey(id: string): Promise<KeyItem> {
+    return fetchAPI(`/keys/${id}/return`, { method: 'POST', body: '{}' });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/keys/${id}`, { method: 'DELETE' });
+  },
+};
+
+export interface TrainingCourse {
+  id: string;
+  organization_id: string;
+  title: string;
+  category?: string;
+  validity_months?: number;
+  created_at: string;
+}
+
+export const trainingApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<TrainingCourse>> {
+    return fetchAPI(`/trainings${buildQuery(params)}`);
+  },
+  create(data: { title: string; description?: string; category?: string; validity_months?: number }): Promise<TrainingCourse> {
+    return fetchAPI('/trainings', { method: 'POST', body: JSON.stringify(data) });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/trainings/${id}`, { method: 'DELETE' });
+  },
+};
+
+export interface Desk {
+  id: string;
+  organization_id: string;
+  room_id?: string;
+  name: string;
+  status: string;
+  created_at: string;
+}
+
+export interface DeskBooking {
+  id: string;
+  desk_id: string;
+  user_id: string;
+  starts_at: string;
+  ends_at: string;
+  status: string;
+}
+
+export const deskApi = {
+  list(params: ListParams & { status?: string } = {}): Promise<PaginatedResponse<Desk>> {
+    return fetchAPI(`/desks${buildQuery(params)}`);
+  },
+  create(data: { name: string; room_id?: string }): Promise<Desk> {
+    return fetchAPI('/desks', { method: 'POST', body: JSON.stringify(data) });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/desks/${id}`, { method: 'DELETE' });
+  },
+  book(id: string, data: { starts_at: string; ends_at: string }): Promise<DeskBooking> {
+    return fetchAPI(`/desks/${id}/bookings`, { method: 'POST', body: JSON.stringify(data) });
+  },
+  listBookings(id: string): Promise<{ data: DeskBooking[] }> {
+    return fetchAPI(`/desks/${id}/bookings`);
+  },
+  cancelBooking(id: string): Promise<DeskBooking> {
+    return fetchAPI(`/desk-bookings/${id}/cancel`, { method: 'POST', body: '{}' });
+  },
+};
+
+export function assetLabelURL(assetId: string): string {
+  return `${API_BASE}/assets/${assetId}/label.svg`;
+}
+
+// ─── Endpoint agents + security findings (Block E) ──────────────────────────
+
+export interface AgentPolicy {
+  interval_seconds: number;
+  metrics_enabled: boolean;
+  inventory_enabled: boolean;
+}
+
+export interface EndpointAgent {
+  id: string;
+  organization_id: string;
+  agent_id: string;
+  hostname: string;
+  version?: string;
+  os?: string;
+  arch?: string;
+  ci_id?: string;
+  status: string;
+  last_heartbeat?: string;
+  policy: AgentPolicy;
+  created_at: string;
+}
+
+export const agentApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<EndpointAgent>> {
+    return fetchAPI(`/agents${buildQuery(params)}`);
+  },
+  enroll(data: { agent_id: string; hostname: string; version?: string; os?: string; arch?: string }): Promise<EndpointAgent> {
+    return fetchAPI('/agents/enroll', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updatePolicy(id: string, data: Partial<AgentPolicy>): Promise<EndpointAgent> {
+    return fetchAPI(`/agents/${id}/policy`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  disable(id: string): Promise<EndpointAgent> {
+    return fetchAPI(`/agents/${id}/disable`, { method: 'POST', body: '{}' });
+  },
+  enable(id: string): Promise<EndpointAgent> {
+    return fetchAPI(`/agents/${id}/enable`, { method: 'POST', body: '{}' });
+  },
+};
+
+export interface SecurityFinding {
+  id: string;
+  organization_id: string;
+  ci_id?: string;
+  kind: string;
+  severity: string;
+  title: string;
+  package_name?: string;
+  installed_version?: string;
+  fixed_version?: string;
+  reference?: string;
+  status: string;
+  detected_at: string;
+}
+
+export const securityFindingApi = {
+  list(params: ListParams & { status?: string; severity?: string; kind?: string } = {}): Promise<PaginatedResponse<SecurityFinding>> {
+    return fetchAPI(`/security/findings${buildQuery(params)}`);
+  },
+  summary(): Promise<{ by_severity: Record<string, number>; open_total: number }> {
+    return fetchAPI('/security/findings/summary');
+  },
+  update(id: string, status: string): Promise<SecurityFinding> {
+    return fetchAPI(`/security/findings/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
   },
 };

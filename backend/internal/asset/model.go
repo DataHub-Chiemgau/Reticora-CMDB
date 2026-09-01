@@ -20,6 +20,8 @@ type Asset struct {
 	Supplier       string         `json:"supplier,omitempty"`
 	InvoiceNumber  string         `json:"invoice_number,omitempty"`
 	SerialNumber   string         `json:"serial_number,omitempty"`
+	RFIDTag        string         `json:"rfid_tag,omitempty"`
+	Barcode        string         `json:"barcode,omitempty"`
 	Location       string         `json:"location,omitempty"`
 	Notes          string         `json:"notes,omitempty"`
 	CustomFields   map[string]any `json:"custom_fields"`
@@ -29,6 +31,8 @@ type Asset struct {
 
 // CreateRequest is the payload for creating an asset.
 type CreateRequest struct {
+	RFIDTag  string `json:"rfid_tag,omitempty"`
+	Barcode  string `json:"barcode,omitempty"`
 	ClientID      string         `json:"client_id,omitempty"`
 	CIID          string         `json:"ci_id,omitempty"`
 	AssetTag      string         `json:"asset_tag"`
@@ -59,6 +63,8 @@ type UpdateRequest struct {
 	Supplier      *string        `json:"supplier,omitempty"`
 	InvoiceNumber *string        `json:"invoice_number,omitempty"`
 	SerialNumber  *string        `json:"serial_number,omitempty"`
+	RFIDTag       *string        `json:"rfid_tag,omitempty"`
+	Barcode       *string        `json:"barcode,omitempty"`
 	Location      *string        `json:"location,omitempty"`
 	Notes         *string        `json:"notes,omitempty"`
 	CustomFields  map[string]any `json:"custom_fields,omitempty"`

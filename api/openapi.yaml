@@ -205,6 +205,8 @@ paths:
         - $ref: '#/components/parameters/CIStatus'
         - $ref: '#/components/parameters/CITypeID'
         - $ref: '#/components/parameters/ClientID'
+        - $ref: '#/components/parameters/SiteID'
+        - $ref: '#/components/parameters/RoomID'
       responses:
         '200':
           description: Paginated list of configuration items
@@ -1232,6 +1234,1276 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/orders:
+    get:
+      operationId: listOrders
+      tags: [Orders]
+      summary: List internal orders
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: client_id
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated orders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createOrder
+      tags: [Orders]
+      summary: Create an internal order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Order created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/orders/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getOrder
+      tags: [Orders]
+      summary: Get an internal order
+      responses:
+        '200':
+          description: Order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateOrder
+      tags: [Orders]
+      summary: Update an internal order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrderRequest'
+      responses:
+        '200':
+          description: Order updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteOrder
+      tags: [Orders]
+      summary: Delete an internal order
+      responses:
+        '204':
+          description: Order deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/orders/{id}/submit:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: submitOrder
+      tags: [Orders]
+      summary: Submit an order for approval (draft → submitted)
+      responses:
+        '200':
+          description: Order submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/orders/{id}/approve:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: approveOrder
+      tags: [Orders]
+      summary: Approve an order (records the approving user)
+      responses:
+        '200':
+          description: Order approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/orders/{id}/reject:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: rejectOrder
+      tags: [Orders]
+      summary: Reject an order (records the rejecting user)
+      responses:
+        '200':
+          description: Order rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/orders/{id}/items:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: addOrderItem
+      tags: [Orders]
+      summary: Add a position to an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderItemRequest'
+      responses:
+        '201':
+          description: Item added; returns the order with positions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/maintenance-windows:
+    get:
+      operationId: listMaintenanceWindows
+      tags: [Maintenance]
+      summary: List maintenance windows
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated maintenance windows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceWindowListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createMaintenanceWindow
+      tags: [Maintenance]
+      summary: Create a maintenance window
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMaintenanceWindowRequest'
+      responses:
+        '201':
+          description: Maintenance window created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceWindow'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/maintenance-windows/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getMaintenanceWindow
+      tags: [Maintenance]
+      summary: Get a maintenance window
+      responses:
+        '200':
+          description: Maintenance window
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceWindow'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateMaintenanceWindow
+      tags: [Maintenance]
+      summary: Update a maintenance window (incl. status transitions)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMaintenanceWindowRequest'
+      responses:
+        '200':
+          description: Maintenance window updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceWindow'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteMaintenanceWindow
+      tags: [Maintenance]
+      summary: Delete a maintenance window
+      responses:
+        '204':
+          description: Maintenance window deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/maintenance-windows/{id}/notify:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: notifyMaintenanceWindow
+      tags: [Maintenance]
+      summary: Notify affected customers (clients derived from the window's CIs)
+      responses:
+        '200':
+          description: Notifications recorded
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/maintenance-windows/{id}/notifications:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listMaintenanceNotifications
+      tags: [Maintenance]
+      summary: List notifications of a maintenance window
+      responses:
+        '200':
+          description: Notifications
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/disposal-records:
+    get:
+      operationId: listDisposalRecords
+      tags: [Disposal]
+      summary: List revision-safe disposal records (append-only)
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: method
+          in: query
+          schema: { type: string }
+        - name: asset_id
+          in: query
+          schema: { type: string }
+        - name: ci_id
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated disposal records
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisposalRecordListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createDisposalRecord
+      tags: [Disposal]
+      summary: Record a disposal (revision-safe; records cannot be edited or deleted)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDisposalRecordRequest'
+      responses:
+        '201':
+          description: Disposal record created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisposalRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/disposal-records/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getDisposalRecord
+      tags: [Disposal]
+      summary: Get a disposal record
+      responses:
+        '200':
+          description: Disposal record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisposalRecord'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/keys:
+    get:
+      operationId: listKeys
+      tags: [Keys]
+      summary: List key items
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: Paginated key items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeyItemListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createKey
+      tags: [Keys]
+      summary: Create key items entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateKeyItemRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeyItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/keys/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getKey
+      tags: [Keys]
+      summary: Get key items entry
+      responses:
+        '200':
+          description: Entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeyItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateKey
+      tags: [Keys]
+      summary: Update key items entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateKeyItemRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeyItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteKey
+      tags: [Keys]
+      summary: Delete key items entry
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/keys/{id}/issue:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: issueKeyItem
+      tags: [Keys]
+      summary: Issue a key to a user (marks it issued)
+      responses:
+        '200':
+          description: Done
+        '201':
+          description: Done
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/keys/{id}/return:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: returnKeyItem
+      tags: [Keys]
+      summary: Return an issued key (marks it available)
+      responses:
+        '200':
+          description: Done
+        '201':
+          description: Done
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/keys/{id}/assignments:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listKeyAssignments
+      tags: [Keys]
+      summary: List key assignments
+      responses:
+        '200':
+          description: Entries
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/trainings:
+    get:
+      operationId: listTrainings
+      tags: [Trainings]
+      summary: List training courses
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: Paginated training courses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingCourseListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createTraining
+      tags: [Trainings]
+      summary: Create training courses entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTrainingCourseRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingCourse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/trainings/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getTraining
+      tags: [Trainings]
+      summary: Get training courses entry
+      responses:
+        '200':
+          description: Entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingCourse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateTraining
+      tags: [Trainings]
+      summary: Update training courses entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTrainingCourseRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingCourse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteTraining
+      tags: [Trainings]
+      summary: Delete training courses entry
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/trainings/{id}/assignments:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listTrainingAssignments
+      tags: [Trainings]
+      summary: List training assignments
+      responses:
+        '200':
+          description: Entries
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: assignTraining
+      tags: [Trainings]
+      summary: Enroll a user in a course
+      responses:
+        '200':
+          description: Done
+        '201':
+          description: Done
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/training-assignments/{id}/complete:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: completeTrainingAssignment
+      tags: [Trainings]
+      summary: Mark a training assignment completed (with optional proof)
+      responses:
+        '200':
+          description: Done
+        '201':
+          description: Done
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/desks:
+    get:
+      operationId: listDesks
+      tags: [Desks]
+      summary: List desks
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: Paginated desks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeskListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createDesk
+      tags: [Desks]
+      summary: Create desks entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeskRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Desk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/desks/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getDesk
+      tags: [Desks]
+      summary: Get desks entry
+      responses:
+        '200':
+          description: Entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Desk'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateDesk
+      tags: [Desks]
+      summary: Update desks entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeskRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Desk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteDesk
+      tags: [Desks]
+      summary: Delete desks entry
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/desks/{id}/bookings:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listDeskBookings
+      tags: [Desks]
+      summary: List desk bookings
+      responses:
+        '200':
+          description: Entries
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: bookDesk
+      tags: [Desks]
+      summary: Book a desk for a time window (rejects overlap)
+      responses:
+        '200':
+          description: Done
+        '201':
+          description: Done
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/desk-bookings/{id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: cancelDeskBooking
+      tags: [Desks]
+      summary: Cancel a desk booking
+      responses:
+        '200':
+          description: Done
+        '201':
+          description: Done
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/assets/{id}/label.svg:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: base_url
+        in: query
+        schema: { type: string }
+        description: CMDB base URL for the deep link on the label.
+    get:
+      operationId: getAssetLabel
+      tags: [Assets]
+      summary: Render the printable direct-access label (SVG) for an asset
+      responses:
+        '200':
+          description: SVG label
+          content:
+            image/svg+xml: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/asset-locations:
+    post:
+      operationId: recordAssetLocation
+      tags: [Assets]
+      summary: Record an asset GPS position (scan, agent, or manual)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAssetLocationRequest'
+      responses:
+        '201':
+          description: Location recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetLocation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/assets/{id}/locations:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listAssetLocations
+      tags: [Assets]
+      summary: Asset GPS location history
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated location history (newest first)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetLocationListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/agents:
+    get:
+      operationId: listAgents
+      tags: [Agents]
+      summary: List registered endpoint agents
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated endpoint agents
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/agents/enroll:
+    post:
+      operationId: enrollAgent
+      tags: [Agents]
+      summary: Register an endpoint agent (after edge enrollment authenticated it)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentEnrollRequest'
+      responses:
+        '201':
+          description: Agent registered; returns the agent with its central policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/agents/telemetry:
+    post:
+      operationId: ingestAgentTelemetry
+      tags: [Agents]
+      summary: Ingest endpoint telemetry (health metrics + software inventory)
+      description: >-
+        Reconciles the endpoint into a CI (source "agent") and writes health
+        metrics into the time-series store. The software inventory lands in the
+        CI attributes for patch posture (spec §9.4). Disabled agents (kill-switch)
+        are rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentTelemetryPayload'
+      responses:
+        '202':
+          description: Telemetry accepted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/agents/{id}/heartbeat:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: agentHeartbeat
+      tags: [Agents]
+      summary: Record an agent heartbeat
+      responses:
+        '204':
+          description: Heartbeat recorded
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/agents/{id}/policy:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: updateAgentPolicy
+      tags: [Agents]
+      summary: Replace an agent's central config policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentPolicyRequest'
+      responses:
+        '200':
+          description: Updated agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/agents/{id}/disable:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: disableAgent
+      tags: [Agents]
+      summary: Kill-switch — disable an agent (telemetry rejected until re-enabled)
+      responses:
+        '200':
+          description: Agent disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/agents/{id}/enable:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: enableAgent
+      tags: [Agents]
+      summary: Re-enable a disabled agent
+      responses:
+        '200':
+          description: Agent enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/security/findings:
+    get:
+      operationId: listSecurityFindings
+      tags: [Security]
+      summary: List security findings (patch posture / vulnerabilities per CI)
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: ci_id
+          in: query
+          schema: { type: string }
+        - name: kind
+          in: query
+          schema: { type: string }
+        - name: severity
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated findings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatchFindingListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createSecurityFinding
+      tags: [Security]
+      summary: Record a security finding (feed-derived)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePatchFindingRequest'
+      responses:
+        '201':
+          description: Finding created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatchFinding'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/security/findings/summary:
+    get:
+      operationId: securityFindingsSummary
+      tags: [Security]
+      summary: Open findings aggregated by severity (security cockpit)
+      responses:
+        '200':
+          description: Severity summary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/security/findings/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getSecurityFinding
+      tags: [Security]
+      summary: Get a security finding
+      responses:
+        '200':
+          description: Finding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatchFinding'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateSecurityFinding
+      tags: [Security]
+      summary: Transition a finding's status (acknowledge/resolve/false positive)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePatchFindingRequest'
+      responses:
+        '200':
+          description: Finding updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatchFinding'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/consumables:
+    get:
+      operationId: listConsumables
+      tags: [Consumables]
+      summary: List consumable stock items
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: client_id
+          in: query
+          schema: { type: string }
+        - name: low_stock
+          in: query
+          description: When true, only items at or below their minimum level.
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Paginated consumables
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsumableListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createConsumable
+      tags: [Consumables]
+      summary: Create a consumable stock item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConsumableRequest'
+      responses:
+        '201':
+          description: Consumable created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Consumable'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/consumables/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getConsumable
+      tags: [Consumables]
+      summary: Get a consumable
+      responses:
+        '200':
+          description: Consumable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Consumable'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateConsumable
+      tags: [Consumables]
+      summary: Update a consumable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConsumableRequest'
+      responses:
+        '200':
+          description: Consumable updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Consumable'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteConsumable
+      tags: [Consumables]
+      summary: Delete a consumable
+      responses:
+        '204':
+          description: Consumable deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/consumables/{id}/movements:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listConsumableMovements
+      tags: [Consumables]
+      summary: List stock movements of a consumable
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated movements
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockMovementListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: addConsumableMovement
+      tags: [Consumables]
+      summary: Record a stock in/out movement and adjust the level atomically
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStockMovementRequest'
+      responses:
+        '201':
+          description: Movement recorded; returns movement and updated consumable
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
   /api/v1/stocktakes:
     get:
       operationId: listStocktakes
@@ -1826,6 +3098,29 @@ paths:
   /api/v1/monitoring/alerts/{id}:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: updateAlert
+      tags: [Monitoring]
+      summary: Partially update an alert rule (e.g. toggle enabled)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAlertRuleRequest'
+      responses:
+        '200':
+          description: Updated alert rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       operationId: deleteAlert
       tags: [Monitoring]
@@ -1978,6 +3273,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TopologyGraph'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/topology/cis/{id}/impact:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: depth
+        in: query
+        schema: { type: integer, default: 10, maximum: 10 }
+        description: Traversal depth; defaults to the maximum for impact analysis.
+      - name: rel_type
+        in: query
+        schema: { type: string }
+        description: Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on).
+    get:
+      operationId: getCIImpact
+      tags: [Topology]
+      summary: Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
+      description: >-
+        Follows directed edges (source supports/powers/connects target) from the
+        failed CI and returns the transitively impacted CI set. Powers the
+        Ausfallsimulation in the topology view (spec §4).
+      responses:
+        '200':
+          description: Impact analysis result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  failed_ci_id: { type: string }
+                  failed_ci: { $ref: '#/components/schemas/TopologyNode' }
+                  rel_type: { type: string }
+                  depth: { type: integer }
+                  impacted:
+                    type: array
+                    items: { $ref: '#/components/schemas/TopologyNode' }
+                  count: { type: integer }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -3282,6 +4619,77 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/collectors/enrollment-codes:
+    post:
+      operationId: createCollectorEnrollmentCode
+      tags: [Collectors]
+      summary: Mint a single-use collector enrollment code
+      description: >-
+        Zero-config onboarding: returns the plaintext code exactly once. Only
+        its SHA-256 hash is stored. The collector redeems the code via
+        /api/v1/collectors/enroll.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type: string
+                ttl_minutes:
+                  type: integer
+                  description: Defaults to 30, capped at 1440 (24h).
+      responses:
+        '201':
+          description: Enrollment code created; plaintext returned once
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  code: { type: string }
+                  label: { type: string }
+                  expires_at: { type: string, format: date-time }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/collectors/enroll:
+    post:
+      operationId: enrollCollector
+      tags: [Collectors]
+      summary: Enroll a collector with an enrollment code
+      description: >-
+        Unauthenticated by bearer design — the single-use enrollment code is
+        the credential. On success the collector identity is registered under
+        the code's organization and returned with its id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name]
+              properties:
+                code: { type: string }
+                name: { type: string }
+                version: { type: string }
+                client_id: { type: string }
+      responses:
+        '201':
+          description: Collector enrolled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collector'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /api/v1/collectors/{id}/heartbeat:
     parameters:
@@ -5429,6 +6837,16 @@ components:
       in: query
       schema:
         type: string
+    SiteID:
+      name: site_id
+      in: query
+      schema:
+        type: string
+    RoomID:
+      name: room_id
+      in: query
+      schema:
+        type: string
 
   responses:
     BadRequest:
@@ -5697,6 +7115,12 @@ components:
           type: string
         serial_number:
           type: string
+        rfid_tag:
+          type: string
+          description: RFID tag for direct-access labels and scan flows.
+        barcode:
+          type: string
+          description: Barcode for scan flows.
         hardware_uuid:
           type: string
         management_ip:
@@ -5791,6 +7215,12 @@ components:
           type: string
         status:
           $ref: '#/components/schemas/CIStatus'
+        client_id:
+          type: string
+        site_id:
+          type: string
+        room_id:
+          type: string
         manufacturer:
           type: string
         model:
@@ -6467,6 +7897,10 @@ components:
           type: string
         serial_number:
           type: string
+        rfid_tag:
+          type: string
+        barcode:
+          type: string
         location:
           type: string
         notes:
@@ -6499,6 +7933,10 @@ components:
         invoice_number:
           type: string
         serial_number:
+          type: string
+        rfid_tag:
+          type: string
+        barcode:
           type: string
         location:
           type: string
@@ -6561,10 +7999,23 @@ components:
           type: string
           format: date-time
 
+    Signature:
+      type: object
+      description: Digital signature captured at handover/return.
+      properties:
+        image_base64: { type: string, description: Inline base64 image. }
+        object_key: { type: string, description: S3 object key of the stored signature image. }
+        signer_name: { type: string }
+        signed_at: { type: string, format: date-time }
+        method: { type: string, enum: [touchscreen, drawn, typed] }
+
     CreateAssignmentRequest:
       type: object
       required: [assigned_to]
       properties:
+        signature:
+          $ref: '#/components/schemas/Signature'
+          description: Digital handover signature (optional).
         asset_id:
           type: string
         ci_id:
@@ -7105,6 +8556,12 @@ components:
         priority:
           type: string
           enum: [low, medium, high, critical]
+        response_time_minutes:
+          type: integer
+          description: Alias for response_target_minutes.
+        resolution_time_minutes:
+          type: integer
+          description: Alias for resolution_target_minutes.
         response_target_minutes:
           type: integer
         resolution_target_minutes:
@@ -7117,6 +8574,510 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    Consumable:
+      type: object
+      required: [id, organization_id, name, category, unit, stock_level, min_level, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        client_id: { type: string }
+        name: { type: string }
+        sku: { type: string }
+        category: { type: string }
+        unit: { type: string }
+        stock_level: { type: number }
+        min_level: { type: number }
+        location: { type: string }
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateConsumableRequest:
+      type: object
+      required: [name]
+      properties:
+        client_id: { type: string }
+        name: { type: string }
+        sku: { type: string }
+        category: { type: string }
+        unit: { type: string }
+        stock_level: { type: number }
+        min_level: { type: number }
+        location: { type: string }
+        notes: { type: string }
+    UpdateConsumableRequest:
+      type: object
+      properties:
+        client_id: { type: string }
+        name: { type: string }
+        sku: { type: string }
+        category: { type: string }
+        unit: { type: string }
+        min_level: { type: number }
+        location: { type: string }
+        notes: { type: string }
+    StockMovement:
+      type: object
+      required: [id, organization_id, consumable_id, direction, quantity, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        consumable_id: { type: string }
+        direction: { type: string, enum: [in, out] }
+        quantity: { type: number }
+        reason: { type: string }
+        reference: { type: string }
+        actor_id: { type: string }
+        created_at: { type: string, format: date-time }
+    CreateStockMovementRequest:
+      type: object
+      required: [direction, quantity]
+      properties:
+        direction: { type: string, enum: [in, out] }
+        quantity: { type: number }
+        reason: { type: string }
+        reference: { type: string }
+    ConsumableListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Consumable' }
+    StockMovementListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/StockMovement' }
+
+    Order:
+      type: object
+      required: [id, organization_id, order_number, title, status, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        client_id: { type: string }
+        order_number: { type: string }
+        title: { type: string }
+        status: { type: string, enum: [draft, submitted, approved, rejected, ordered, received, cancelled] }
+        requested_by: { type: string }
+        approved_by: { type: string }
+        supplier: { type: string }
+        total_cost: { type: number }
+        currency: { type: string }
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/OrderItem' }
+    OrderItem:
+      type: object
+      required: [id, organization_id, order_id, description, quantity, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        order_id: { type: string }
+        description: { type: string }
+        quantity: { type: number }
+        unit_price: { type: number }
+        consumable_id: { type: string }
+        asset_id: { type: string }
+        created_at: { type: string, format: date-time }
+    CreateOrderRequest:
+      type: object
+      required: [title]
+      properties:
+        client_id: { type: string }
+        order_number: { type: string }
+        title: { type: string }
+        supplier: { type: string }
+        total_cost: { type: number }
+        currency: { type: string }
+        notes: { type: string }
+    UpdateOrderRequest:
+      type: object
+      properties:
+        client_id: { type: string }
+        title: { type: string }
+        supplier: { type: string }
+        total_cost: { type: number }
+        currency: { type: string }
+        notes: { type: string }
+    CreateOrderItemRequest:
+      type: object
+      required: [description, quantity]
+      properties:
+        description: { type: string }
+        quantity: { type: number }
+        unit_price: { type: number }
+        consumable_id: { type: string }
+        asset_id: { type: string }
+    OrderListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Order' }
+
+    MaintenanceWindow:
+      type: object
+      required: [id, organization_id, title, starts_at, ends_at, status, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        title: { type: string }
+        description: { type: string }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        status: { type: string, enum: [scheduled, in_progress, completed, cancelled] }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        ci_ids:
+          type: array
+          items: { type: string }
+    CreateMaintenanceWindowRequest:
+      type: object
+      required: [title, starts_at, ends_at]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        ci_ids:
+          type: array
+          items: { type: string }
+          description: Affected CIs; clients are derived via the CIs' client assignment at notify time.
+    UpdateMaintenanceWindowRequest:
+      type: object
+      properties:
+        title: { type: string }
+        description: { type: string }
+        status: { type: string, enum: [scheduled, in_progress, completed, cancelled] }
+    MaintenanceWindowListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/MaintenanceWindow' }
+
+    DisposalRecord:
+      type: object
+      required: [id, organization_id, method, performed_at, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        asset_id: { type: string }
+        ci_id: { type: string }
+        method: { type: string, enum: [reuse, recycling, destruction, secure_erasure, physical_destruction, return_to_vendor] }
+        certificate_ref: { type: string, description: Reference to the revision-safe disposal certificate. }
+        data_carrier: { type: string, description: Data carrier destruction note (BSI/ISO). }
+        performed_by: { type: string }
+        performed_at: { type: string, format: date-time }
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+    CreateDisposalRecordRequest:
+      type: object
+      required: [method]
+      properties:
+        asset_id: { type: string }
+        ci_id: { type: string }
+        method: { type: string, enum: [reuse, recycling, destruction, secure_erasure, physical_destruction, return_to_vendor] }
+        certificate_ref: { type: string }
+        data_carrier: { type: string }
+        performed_by: { type: string }
+        performed_at: { type: string, format: date-time }
+        notes: { type: string }
+    DisposalRecordListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/DisposalRecord' }
+
+    KeyItem:
+      type: object
+      required: [id, organization_id, name, key_type, status, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        client_id: { type: string }
+        name: { type: string }
+        key_type: { type: string, enum: [physical, digital] }
+        identifier: { type: string }
+        status: { type: string, enum: [available, issued, lost, retired] }
+        location: { type: string }
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateKeyItemRequest:
+      type: object
+      required: [name]
+      properties:
+        client_id: { type: string }
+        name: { type: string }
+        key_type: { type: string, enum: [physical, digital] }
+        identifier: { type: string }
+        location: { type: string }
+        notes: { type: string }
+    UpdateKeyItemRequest:
+      type: object
+      properties:
+        client_id: { type: string }
+        name: { type: string }
+        key_type: { type: string, enum: [physical, digital] }
+        identifier: { type: string }
+        status: { type: string, enum: [available, issued, lost, retired] }
+        location: { type: string }
+        notes: { type: string }
+    KeyItemListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/KeyItem' }
+    TrainingCourse:
+      type: object
+      required: [id, organization_id, title, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        title: { type: string }
+        description: { type: string }
+        category: { type: string }
+        validity_months: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateTrainingCourseRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        category: { type: string }
+        validity_months: { type: integer }
+    UpdateTrainingCourseRequest:
+      type: object
+      properties:
+        title: { type: string }
+        description: { type: string }
+        category: { type: string }
+        validity_months: { type: integer }
+    TrainingCourseListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/TrainingCourse' }
+    Desk:
+      type: object
+      required: [id, organization_id, name, status, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        room_id: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [available, occupied, maintenance] }
+        attributes: { type: object }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateDeskRequest:
+      type: object
+      required: [name]
+      properties:
+        room_id: { type: string }
+        name: { type: string }
+        attributes: { type: object }
+    UpdateDeskRequest:
+      type: object
+      properties:
+        room_id: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [available, occupied, maintenance] }
+        attributes: { type: object }
+    DeskListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Desk' }
+
+    AssetLocation:
+      type: object
+      required: [id, organization_id, asset_id, lat, lon, source, recorded_at, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        asset_id: { type: string }
+        lat: { type: number }
+        lon: { type: number }
+        accuracy_m: { type: number }
+        source: { type: string, enum: [scan, agent, manual] }
+        recorded_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    CreateAssetLocationRequest:
+      type: object
+      required: [asset_id, lat, lon]
+      properties:
+        asset_id: { type: string }
+        lat: { type: number }
+        lon: { type: number }
+        accuracy_m: { type: number }
+        source: { type: string, enum: [scan, agent, manual] }
+        recorded_at: { type: string, format: date-time }
+    AssetLocationListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/AssetLocation' }
+
+    AgentPolicy:
+      type: object
+      properties:
+        interval_seconds: { type: integer }
+        metrics_enabled: { type: boolean }
+        inventory_enabled: { type: boolean }
+    Agent:
+      type: object
+      required: [id, organization_id, agent_id, hostname, status, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        agent_id: { type: string }
+        hostname: { type: string }
+        version: { type: string }
+        os: { type: string }
+        arch: { type: string }
+        ci_id: { type: string }
+        status: { type: string, enum: [online, offline, disabled] }
+        last_heartbeat: { type: string, format: date-time }
+        policy: { $ref: '#/components/schemas/AgentPolicy' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AgentEnrollRequest:
+      type: object
+      required: [agent_id, hostname]
+      properties:
+        agent_id: { type: string }
+        hostname: { type: string }
+        version: { type: string }
+        os: { type: string }
+        arch: { type: string }
+    AgentTelemetryPayload:
+      type: object
+      required: [agent_id]
+      properties:
+        agent_id: { type: string }
+        hostname: { type: string }
+        version: { type: string }
+        os: { type: string }
+        arch: { type: string }
+        metrics:
+          type: object
+          additionalProperties: { type: number }
+        system_info:
+          type: object
+          additionalProperties: { type: string }
+        software:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              version: { type: string }
+              vendor: { type: string }
+        collected_at: { type: string, format: date-time }
+    UpdateAgentPolicyRequest:
+      type: object
+      properties:
+        interval_seconds: { type: integer }
+        metrics_enabled: { type: boolean }
+        inventory_enabled: { type: boolean }
+    AgentListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Agent' }
+
+    PatchFinding:
+      type: object
+      required: [id, organization_id, kind, severity, title, status, detected_at, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        ci_id: { type: string }
+        kind: { type: string, enum: [vulnerability, outdated_software, outdated_firmware, missing_patch] }
+        severity: { type: string, enum: [low, medium, high, critical] }
+        title: { type: string }
+        detail: { type: string }
+        package_name: { type: string }
+        installed_version: { type: string }
+        fixed_version: { type: string }
+        reference: { type: string, description: CVE id or advisory URL. }
+        status: { type: string, enum: [open, acknowledged, resolved, false_positive] }
+        detected_at: { type: string, format: date-time }
+        resolved_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreatePatchFindingRequest:
+      type: object
+      required: [kind, title]
+      properties:
+        ci_id: { type: string }
+        kind: { type: string, enum: [vulnerability, outdated_software, outdated_firmware, missing_patch] }
+        severity: { type: string, enum: [low, medium, high, critical] }
+        title: { type: string }
+        detail: { type: string }
+        package_name: { type: string }
+        installed_version: { type: string }
+        fixed_version: { type: string }
+        reference: { type: string }
+    UpdatePatchFindingRequest:
+      type: object
+      properties:
+        status: { type: string, enum: [open, acknowledged, resolved, false_positive] }
+    PatchFindingListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/PatchFinding' }
 
     CreateSLAPolicyRequest:
       type: object
@@ -7505,7 +9466,7 @@ components:
         failures_by_severity:
           type: object
           additionalProperties: { type: integer }
-        findings: { type: array, items: { $ref: '#/components/schemas/SecurityFinding' } }
+        findings: { type: array, items: { $ref: '#/components/schemas/PatchFinding' } }
         capabilities: { type: array, items: { $ref: '#/components/schemas/SecurityCapability' } }
     RetentionPolicy:
       type: object
@@ -7640,6 +9601,26 @@ components:
           format: date-time
         value:
           type: number
+
+    UpdateAlertRuleRequest:
+      type: object
+      description: Partial alert rule update; every field is optional and only set fields are applied.
+      properties:
+        name:
+          type: string
+        condition:
+          type: string
+          enum: [gt, lt, eq]
+        threshold:
+          type: number
+        duration:
+          type: string
+          description: Go duration string.
+        severity:
+          type: string
+          enum: [critical, warning, info]
+        enabled:
+          type: boolean
 
     AlertRule:
       type: object
@@ -7915,12 +9896,16 @@ components:
 
     CreateClientRequest:
       type: object
-      required: [name, slug]
+      required: [name]
       properties:
         name:
           type: string
         slug:
           type: string
+          description: URL-safe identifier; falls back to `code` when omitted.
+        code:
+          type: string
+          description: Alias for slug (accepted for integrations sending {name, code}).
         settings:
           type: object
           additionalProperties: true
@@ -8089,6 +10074,14 @@ components:
           type: integer
         room_type:
           type: string
+        layout:
+          type: object
+          description: Floor-plan object positions, object_id → {x, y} normalized 0..1.
+          additionalProperties:
+            type: object
+            properties:
+              x: { type: number }
+              y: { type: number }
         created_at:
           type: string
           format: date-time
@@ -8118,6 +10111,17 @@ components:
           type: integer
         room_type:
           type: string
+        layout:
+          type: object
+          description: >-
+            Replaces the room's floor-plan object positions. Map of
+            object_id → {x, y} in normalized 0..1 coordinates; an empty object
+            clears the layout.
+          additionalProperties:
+            type: object
+            properties:
+              x: { type: number }
+              y: { type: number }
 
     RoomListResponse:
       allOf:
@@ -8395,12 +10399,18 @@ components:
 
     CreateContactRequest:
       type: object
-      required: [display_name]
+      description: A contact needs a display name; the server also accepts the
+        `name` alias when `display_name` is omitted (server-side fallback, not
+        expressible as a single required field without dropping the alias).
       properties:
         client_id:
           type: string
         display_name:
           type: string
+          description: Display name; required unless `name` is given.
+        name:
+          type: string
+          description: Server-accepted alias for display_name.
         email:
           type: string
         phone:
@@ -8747,6 +10757,9 @@ components:
       type: object
       description: Payload for returning an assigned asset or CI.
       properties:
+        signature:
+          $ref: '#/components/schemas/Signature'
+          description: Digital return signature (optional).
         return_condition:
           type: string
         notes:
@@ -8979,7 +10992,11 @@ components:
 
     Role:
       type: object
-      description: A custom permission role.
+      description: >-
+        A permission role. The list endpoint returns the union of the seeded
+        standard roles (org_admin, engineer, viewer, client_technician;
+        is_builtin=true, assign via role_id) and tenant-defined custom roles
+        (is_builtin=false, assign via custom_role_id).
       required: [id, organization_id, name, is_system, permissions, created_at, updated_at]
       properties:
         id:
@@ -8992,6 +11009,9 @@ components:
           type: string
         is_system:
           type: boolean
+        is_builtin:
+          type: boolean
+          description: True for the seeded standard roles stored in `role`.
         permissions:
           type: array
           items:
@@ -9041,13 +11061,15 @@ components:
 
     RoleAssignment:
       type: object
-      required: [id, user_id, custom_role_id, scope_type, granted_at]
+      required: [id, user_id, scope_type, granted_at]
       properties:
         id:
           type: string
         user_id:
           type: string
         custom_role_id:
+          type: string
+        role_id:
           type: string
         scope_type:
           type: string
@@ -9061,12 +11083,17 @@ components:
 
     AssignRoleRequest:
       type: object
-      required: [user_id, custom_role_id]
+      required: [user_id]
+      description: Assigns a role to a user. Exactly one of `custom_role_id`
+        (tenant-defined role) or `role_id` (seeded standard role) must be set.
       properties:
         user_id:
           type: string
         custom_role_id:
           type: string
+        role_id:
+          type: string
+          description: ID of a standard (builtin) role; mutually exclusive with custom_role_id.
         scope_type:
           type: string
           description: Defaults to "organization" when omitted.

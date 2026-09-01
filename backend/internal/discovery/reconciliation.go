@@ -248,6 +248,11 @@ func existingFingerprintSlice(item ci.Item, key string) []string {
 
 func fingerprintString(value any) string {
 	switch typed := value.(type) {
+	case nil:
+		// A missing fingerprint key must not become the string "<nil>" —
+		// otherwise two items that both lack hardware_uuid compare equal and
+		// the identity resolution collapses them into one CI.
+		return ""
 	case string:
 		return strings.TrimSpace(typed)
 	case fmt.Stringer:

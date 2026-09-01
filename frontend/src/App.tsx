@@ -1,41 +1,81 @@
-import { useMemo, useState } from 'react';
+import { Suspense, lazy, useMemo, useState } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
 import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
 import { Button } from './components/ui/Button';
+import { Skeleton } from './components/ui/Skeleton';
 import { ToastViewport } from './components/ui/Toast';
 import { useAuthStore } from './auth/authStore';
 import { fetchAuthConfig, getStoredAuthConfig } from './auth/oidc';
-import { AssetListPage } from './pages/AssetListPage';
-import { AssignmentListPage } from './pages/AssignmentListPage';
-import { AssistantPage } from './pages/AssistantPage';
 import { LoginPage } from './pages/auth/LoginPage';
 import { CallbackPage } from './pages/auth/CallbackPage';
-import { CIFormModal } from './pages/CIFormModal';
-import { CIDetailPage } from './pages/CIDetailPage';
-import { CIListPage } from './pages/CIListPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { DiscoveryPage } from './pages/DiscoveryPage';
-import { DocumentListPage } from './pages/DocumentListPage';
-import { ExportPage } from './pages/ExportPage';
-import { MonitoringPage } from './pages/MonitoringPage';
-import { PermissionsPage } from './pages/PermissionsPage';
-import { RackPage } from './pages/RackPage';
-import { TopologyPage } from './pages/TopologyPage';
-import { SLAPage } from './pages/SLAPage';
-import { FormsPage } from './pages/FormsPage';
-import { WorkflowPage } from './pages/WorkflowPage';
-import { CompliancePage } from './pages/CompliancePage';
-import { IGAPage } from './pages/IGAPage';
-import { StocktakeListPage } from './pages/StocktakeListPage';
-import { TicketListPage } from './pages/TicketListPage';
-import { UserManagementPage } from './pages/UserManagementPage';
-import { WebhooksPage } from './pages/WebhooksPage';
-import { AuditPage } from './pages/AuditPage';
-import { SecurityPage } from './pages/SecurityPage';
+import { useEntitlements, navFeatureFor } from './hooks/useEntitlements';
 import { useThemeStore } from './stores/theme';
+
+// Route-level code splitting: every feature page is a separate chunk so the
+// initial bundle stays small (perceived speed, spec §8.1). Pages use named
+// exports; they are remapped to a default export for React.lazy. The loader
+// is intentionally typed loosely — the module shape is fixed by convention.
+function lazyPage(loader: () => Promise<Record<string, unknown>>, name: string) {
+  return lazy(async () => {
+    const mod = (await loader()) as Record<string, React.ComponentType<Record<string, unknown>>>;
+    const component = mod[name];
+    if (!component) {
+      throw new Error(`page chunk does not export ${name}`);
+    }
+    return { default: component };
+  });
+}
+
+const AssetListPage = lazyPage(() => import('./pages/AssetListPage'), 'AssetListPage');
+const AssignmentListPage = lazyPage(() => import('./pages/AssignmentListPage'), 'AssignmentListPage');
+const AssistantPage = lazyPage(() => import('./pages/AssistantPage'), 'AssistantPage');
+const CIFormModal = lazyPage(() => import('./pages/CIFormModal'), 'CIFormModal');
+const CIDetailPage = lazyPage(() => import('./pages/CIDetailPage'), 'CIDetailPage');
+const CIListPage = lazyPage(() => import('./pages/CIListPage'), 'CIListPage');
+const DashboardPage = lazyPage(() => import('./pages/DashboardPage'), 'DashboardPage');
+const DiscoveryPage = lazyPage(() => import('./pages/DiscoveryPage'), 'DiscoveryPage');
+const DocumentListPage = lazyPage(() => import('./pages/DocumentListPage'), 'DocumentListPage');
+const ExportPage = lazyPage(() => import('./pages/ExportPage'), 'ExportPage');
+const MonitoringPage = lazyPage(() => import('./pages/MonitoringPage'), 'MonitoringPage');
+const PermissionsPage = lazyPage(() => import('./pages/PermissionsPage'), 'PermissionsPage');
+const RackPage = lazyPage(() => import('./pages/RackPage'), 'RackPage');
+const TopologyPage = lazyPage(() => import('./pages/TopologyPage'), 'TopologyPage');
+const SLAPage = lazyPage(() => import('./pages/SLAPage'), 'SLAPage');
+const FormsPage = lazyPage(() => import('./pages/FormsPage'), 'FormsPage');
+const WorkflowPage = lazyPage(() => import('./pages/WorkflowPage'), 'WorkflowPage');
+const CompliancePage = lazyPage(() => import('./pages/CompliancePage'), 'CompliancePage');
+const IGAPage = lazyPage(() => import('./pages/IGAPage'), 'IGAPage');
+const StocktakeListPage = lazyPage(() => import('./pages/StocktakeListPage'), 'StocktakeListPage');
+const TicketListPage = lazyPage(() => import('./pages/TicketListPage'), 'TicketListPage');
+const UserManagementPage = lazyPage(() => import('./pages/UserManagementPage'), 'UserManagementPage');
+const WebhooksPage = lazyPage(() => import('./pages/WebhooksPage'), 'WebhooksPage');
+const AuditPage = lazyPage(() => import('./pages/AuditPage'), 'AuditPage');
+const SecurityPage = lazyPage(() => import('./pages/SecurityPage'), 'SecurityPage');
+const ConsumableListPage = lazyPage(() => import('./pages/ConsumableListPage'), 'ConsumableListPage');
+const OrderListPage = lazyPage(() => import('./pages/OrderListPage'), 'OrderListPage');
+const MaintenancePage = lazyPage(() => import('./pages/MaintenancePage'), 'MaintenancePage');
+const DisposalListPage = lazyPage(() => import('./pages/DisposalListPage'), 'DisposalListPage');
+const KeyListPage = lazyPage(() => import('./pages/KeyListPage'), 'KeyListPage');
+const TrainingListPage = lazyPage(() => import('./pages/TrainingListPage'), 'TrainingListPage');
+const DeskListPage = lazyPage(() => import('./pages/DeskListPage'), 'DeskListPage');
+const AgentListPage = lazyPage(() => import('./pages/AgentListPage'), 'AgentListPage');
+const FindingsPage = lazyPage(() => import('./pages/FindingsPage'), 'FindingsPage');
+const MapPage = lazyPage(() => import('./pages/MapPage'), 'MapPage');
+const RoomPlanPage = lazyPage(() => import('./pages/RoomPlanPage'), 'RoomPlanPage');
+
+// Full-screen fallback while a page chunk loads.
+function PageFallback() {
+  return (
+    <div className="space-y-3 p-6" aria-busy="true">
+      <Skeleton className="h-8 w-1/3" />
+      <Skeleton className="h-4 w-full" />
+      <Skeleton className="h-4 w-2/3" />
+    </div>
+  );
+}
 
 const pathToPage: Record<string, AppPage> = Object.fromEntries(
   Object.entries(pageToPath).map(([k, v]) => [v, k as AppPage]),
@@ -80,6 +120,50 @@ function App() {
     navigate(pageToPath[page] || '/cmdb');
   }
 
+  // Entitlement-gated navigation: modules the tenant's plan does not include
+  // are hidden instead of producing a 403 on click (progressive disclosure).
+  const { isEnabled } = useEntitlements();
+  const navItems: { page: AppPage; label: string }[] = (
+    [
+      'dashboard',
+      'cmdb',
+      'topology',
+      'map',
+      'roomplan',
+      'racks',
+      'assets',
+      'tickets',
+      'assignments',
+      'documents',
+      'stocktake',
+      'consumables',
+      'orders',
+      'maintenance',
+      'disposal',
+      'keys',
+      'trainings',
+      'desks',
+      'agents',
+      'findings',
+      'discovery',
+      'users',
+      'permissions',
+      'slas',
+      'forms',
+      'workflows',
+      'compliance',
+      'iga',
+      'assistant',
+      'webhooks',
+      'export',
+      'monitoring',
+      'audit',
+      'security',
+    ] as AppPage[]
+  )
+    .filter((page) => isEnabled(navFeatureFor[page]))
+    .map((page) => ({ page, label: t(`nav.${page}`, page) }));
+
   function openCreateCI() {
     navigate('/cmdb');
     setIsCreateOpen(true);
@@ -120,123 +204,15 @@ function App() {
                 className="flex flex-wrap gap-2"
                 aria-label={t('accessibility.primaryNavigation')}
               >
-                <NavButton
-                  active={currentPage === 'dashboard'}
-                  onClick={() => handleNavigate('dashboard')}
-                >
-                  {t('nav.dashboard')}
-                </NavButton>
-                <NavButton active={currentPage === 'cmdb'} onClick={() => handleNavigate('cmdb')}>
-                  {t('nav.cmdb')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'topology'}
-                  onClick={() => handleNavigate('topology')}
-                >
-                  {t('nav.topology')}
-                </NavButton>
-                <NavButton active={currentPage === 'racks'} onClick={() => handleNavigate('racks')}>
-                  {t('nav.racks', 'Racks')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'assets'}
-                  onClick={() => handleNavigate('assets')}
-                >
-                  {t('nav.assets', 'Inventar')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'tickets'}
-                  onClick={() => handleNavigate('tickets')}
-                >
-                  {t('nav.tickets', 'Tickets')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'assignments'}
-                  onClick={() => handleNavigate('assignments')}
-                >
-                  {t('nav.assignments', 'Zuweisungen')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'documents'}
-                  onClick={() => handleNavigate('documents')}
-                >
-                  {t('nav.documents', 'Dokumente')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'stocktake'}
-                  onClick={() => handleNavigate('stocktake')}
-                >
-                  {t('nav.stocktake', 'Inventur')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'discovery'}
-                  onClick={() => handleNavigate('discovery')}
-                >
-                  {t('nav.discovery')}
-                </NavButton>
-                <NavButton active={currentPage === 'users'} onClick={() => handleNavigate('users')}>
-                  {t('nav.users', 'Benutzer')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'permissions'}
-                  onClick={() => handleNavigate('permissions')}
-                >
-                  {t('nav.permissions')}
-                </NavButton>
-                <NavButton active={currentPage === 'slas'} onClick={() => handleNavigate('slas')}>
-                  {t('nav.slas')}
-                </NavButton>
-                <NavButton active={currentPage === 'forms'} onClick={() => handleNavigate('forms')}>
-                  {t('nav.forms')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'workflows'}
-                  onClick={() => handleNavigate('workflows')}
-                >
-                  {t('nav.workflows')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'compliance'}
-                  onClick={() => handleNavigate('compliance')}
-                >
-                  {t('nav.compliance')}
-                </NavButton>
-                <NavButton active={currentPage === 'iga'} onClick={() => handleNavigate('iga')}>
-                  {t('nav.iga')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'assistant'}
-                  onClick={() => handleNavigate('assistant')}
-                >
-                  {t('nav.assistant')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'webhooks'}
-                  onClick={() => handleNavigate('webhooks')}
-                >
-                  {t('nav.webhooks')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'export'}
-                  onClick={() => handleNavigate('export')}
-                >
-                  {t('nav.export')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'monitoring'}
-                  onClick={() => handleNavigate('monitoring')}
-                >
-                  {t('nav.monitoring')}
-                </NavButton>
-                <NavButton active={currentPage === 'audit'} onClick={() => handleNavigate('audit')}>
-                  {t('nav.audit')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'security'}
-                  onClick={() => handleNavigate('security')}
-                >
-                  {t('nav.security')}
-                </NavButton>
+                {navItems.map(({ page, label }) => (
+                  <NavButton
+                    key={page}
+                    active={currentPage === page}
+                    onClick={() => handleNavigate(page)}
+                  >
+                    {label}
+                  </NavButton>
+                ))}
               </nav>
             ) : null}
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -294,17 +270,35 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/auth/callback" element={<CallbackPage />} />
           <Route element={<RequireAuth />}>
+            <Route
+              element={
+                <Suspense fallback={<PageFallback />}>
+                  <Outlet />
+                </Suspense>
+              }
+            >
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/cmdb" element={<CIListPage onCreateCI={openCreateCI} />} />
             <Route path="/cmdb/:id" element={<CIDetailPage />} />
             <Route path="/topology" element={<TopologyPage />} />
+            <Route path="/map" element={<MapPage />} />
+            <Route path="/roomplan" element={<RoomPlanPage />} />
             <Route path="/racks" element={<RackPage />} />
             <Route path="/discovery" element={<DiscoveryPage />} />
             <Route path="/assets" element={<AssetListPage />} />
             <Route path="/assignments" element={<AssignmentListPage />} />
             <Route path="/documents" element={<DocumentListPage />} />
             <Route path="/stocktake" element={<StocktakeListPage />} />
+            <Route path="/consumables" element={<ConsumableListPage />} />
+            <Route path="/orders" element={<OrderListPage />} />
+            <Route path="/maintenance" element={<MaintenancePage />} />
+            <Route path="/disposal" element={<DisposalListPage />} />
+            <Route path="/keys" element={<KeyListPage />} />
+            <Route path="/trainings" element={<TrainingListPage />} />
+            <Route path="/desks" element={<DeskListPage />} />
+            <Route path="/agents" element={<AgentListPage />} />
+            <Route path="/findings" element={<FindingsPage />} />
             <Route path="/tickets" element={<TicketListPage />} />
             <Route path="/users" element={<UserManagementPage />} />
             <Route path="/permissions" element={<PermissionsPage />} />
@@ -320,6 +314,7 @@ function App() {
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/security" element={<SecurityPage />} />
             <Route path="*" element={<CIListPage onCreateCI={openCreateCI} />} />
+            </Route>
           </Route>
         </Routes>
       </main>
@@ -329,9 +324,14 @@ function App() {
           onNavigate={handleNavigate}
           onCreateCI={openCreateCI}
           onToggleDarkMode={toggleDarkMode}
+          isFeatureEnabled={isEnabled}
         />
       ) : null}
-      {isAuthenticated ? <CIFormModal open={isCreateOpen} onOpenChange={setIsCreateOpen} /> : null}
+      {isAuthenticated ? (
+        <Suspense fallback={null}>
+          <CIFormModal open={isCreateOpen} onOpenChange={setIsCreateOpen} />
+        </Suspense>
+      ) : null}
       <ToastViewport />
     </div>
   );

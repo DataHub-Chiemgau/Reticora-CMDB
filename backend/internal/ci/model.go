@@ -63,6 +63,9 @@ type CreateRequest struct {
 type UpdateRequest struct {
 	Name            *string        `json:"name,omitempty"`
 	Status          *string        `json:"status,omitempty"`
+	ClientID        *string        `json:"client_id,omitempty"`
+	SiteID          *string        `json:"site_id,omitempty"`
+	RoomID          *string        `json:"room_id,omitempty"`
 	Manufacturer    *string        `json:"manufacturer,omitempty"`
 	Model           *string        `json:"model,omitempty"`
 	SerialNumber    *string        `json:"serial_number,omitempty"`
@@ -86,6 +89,7 @@ type FilterParams struct {
 	TypeID   string
 	ClientID string
 	SiteID   string
+	RoomID   string
 	Search   string
 	SortBy   string
 	SortDir  string

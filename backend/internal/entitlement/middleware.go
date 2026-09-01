@@ -23,6 +23,18 @@ var gatedRoutes = []struct {
 	{"/api/v1/documents", FeatureDocuments},
 	{"/api/v1/stocktakes", FeatureStocktake},
 	{"/api/v1/stocktake", FeatureStocktake},
+	{"/api/v1/consumables", FeatureStocktake},
+	{"/api/v1/orders", FeatureWorkflowForms},
+	{"/api/v1/maintenance-windows", FeatureMonitoring},
+	{"/api/v1/disposal-records", FeatureCompliance},
+	{"/api/v1/keys", FeatureCompliance},
+	{"/api/v1/trainings", FeatureWorkflowForms},
+	{"/api/v1/training-assignments", FeatureWorkflowForms},
+	{"/api/v1/desks", FeatureInventory},
+	{"/api/v1/asset-locations", FeatureInventory},
+	{"/api/v1/agents", FeatureEndpointAgent},
+	{"/api/v1/security", FeatureCompliance},
+	{"/api/v1/desk-bookings", FeatureInventory},
 	{"/api/v1/tickets", FeatureTicketing},
 	{"/api/v1/webhooks", FeatureWebhooks},
 	{"/api/v1/exports", FeatureExport},
@@ -40,6 +52,12 @@ var gatedRoutes = []struct {
 
 // RequiredFeature returns the feature key gating the given request path.
 func RequiredFeature(path string) (string, bool) {
+	// The enrollment endpoint is the pre-entitlement onboarding entry point:
+	// the collector has no tenant context yet, the single-use code is the
+	// credential, and enrollment must work before any plan check can pass.
+	if path == "/api/v1/collectors/enroll" {
+		return "", false
+	}
 	for _, route := range gatedRoutes {
 		if path == route.prefix || strings.HasPrefix(path, route.prefix+"/") || strings.HasPrefix(path, route.prefix+"?") {
 			return route.feature, true

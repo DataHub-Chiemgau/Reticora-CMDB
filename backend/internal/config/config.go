@@ -50,6 +50,9 @@ type Config struct {
 
 	// Entitlements
 	DefaultPlan            string // plan applied to tenants without entitlement rows
+	// DefaultProvisionRole names the standard role assigned to a user on first
+	// OIDC login; empty assigns no role (admins assign explicitly).
+	DefaultProvisionRole string
 	EntitlementEnforcement bool   // when false, feature gating is reported but not enforced
 
 	// Encryption
@@ -108,6 +111,7 @@ func Load() *Config {
 		AllowInsecureDevAuth: envOrDefault("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false") == "true",
 
 		DefaultPlan:            envOrDefault("RETICORA_DEFAULT_PLAN", "essential"),
+		DefaultProvisionRole:   envOrDefault("RETICORA_DEFAULT_PROVISION_ROLE", "viewer"),
 		EntitlementEnforcement: envOrDefault("RETICORA_ENTITLEMENT_ENFORCEMENT", "true") != "false",
 
 		MasterKey: envOrDefault("RETICORA_MASTER_KEY", ""),

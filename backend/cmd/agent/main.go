@@ -7,7 +7,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/transport"
 	"log/slog"
 	"net"
 	"net/http"
@@ -28,6 +31,14 @@ type agentConfig struct {
 	AgentID        string
 	Hostname       string
 	Interval       time.Duration
+	// mTLS material loaded from the enrollment keystore; when present the
+	// agent authenticates with its client certificate instead of headers.
+	CertPEM []byte
+	KeyPEM  []byte
+	CAPEM   []byte
+	// CredentialsPath is the keystore written by edge enrollment.
+	CredentialsPath string
+	TLSServerName   string
 }
 
 // TelemetryPayload is the data the agent reports on each cycle.
@@ -71,14 +82,49 @@ func main() {
 
 func loadAgentConfig() agentConfig {
 	hostname, _ := os.Hostname()
-	return agentConfig{
-		CollectorRelay: envOrDefault("RETICORA_COLLECTOR_RELAY", "localhost:9443"),
-		ServerURL:      envOrDefault("RETICORA_SERVER_URL", "http://localhost:8080"),
-		OrganizationID: os.Getenv("RETICORA_ORGANIZATION_ID"),
-		AgentID:        envOrDefault("RETICORA_AGENT_ID", hostname),
-		Hostname:       hostname,
-		Interval:       durationEnvOrDefault("RETICORA_AGENT_INTERVAL", 60*time.Second),
+	cfg := agentConfig{
+		CollectorRelay:  envOrDefault("RETICORA_COLLECTOR_RELAY", "localhost:9443"),
+		ServerURL:       envOrDefault("RETICORA_SERVER_URL", "http://localhost:8080"),
+		OrganizationID:  os.Getenv("RETICORA_ORGANIZATION_ID"),
+		AgentID:         envOrDefault("RETICORA_AGENT_ID", hostname),
+		Hostname:        hostname,
+		Interval:        durationEnvOrDefault("RETICORA_AGENT_INTERVAL", 60*time.Second),
+		CredentialsPath: os.Getenv("RETICORA_CREDENTIALS_PATH"),
+		TLSServerName:   os.Getenv("RETICORA_TLS_SERVER_NAME"),
 	}
+
+	// Load the enrolled client identity from the keystore (edge enrollment
+	// wrote it); mTLS replaces the insecure org/agent headers.
+	if cfg.CredentialsPath != "" {
+		creds, err := (&keystore.FileStore{Path: cfg.CredentialsPath}).Load(context.Background())
+		if err == nil {
+			cfg.CertPEM = []byte(creds.ClientCertificatePEM)
+			cfg.KeyPEM = []byte(creds.ClientPrivateKeyPEM)
+			cfg.CAPEM = []byte(creds.CertificateAuthority)
+		} else if !errors.Is(err, keystore.ErrNotFound) {
+			slog.Warn("failed to load agent credentials", "path", cfg.CredentialsPath, "error", err)
+		}
+	}
+	return cfg
+}
+
+// httpClientFor returns an mTLS client when enrolled material is available,
+// otherwise a plain client (pre-enrollment / relay-only deployments).
+func httpClientFor(cfg agentConfig) *http.Client {
+	if len(cfg.CertPEM) > 0 && len(cfg.KeyPEM) > 0 {
+		mtlsTransport, err := transport.NewMTLS(transport.Config{
+			ServerName:    cfg.TLSServerName,
+			RootCAsPEM:    cfg.CAPEM,
+			ClientCertPEM: cfg.CertPEM,
+			ClientKeyPEM:  cfg.KeyPEM,
+			Timeout:       15 * time.Second,
+		})
+		if err == nil {
+			return mtlsTransport.HTTPClient()
+		}
+		slog.Warn("mTLS setup failed, falling back to plain client", "error", err)
+	}
+	return &http.Client{Timeout: 15 * time.Second}
 }
 
 // runTelemetryLoop collects and sends system telemetry at configured intervals.
@@ -173,12 +219,10 @@ func sendDirect(ctx context.Context, cfg agentConfig, data []byte) error {
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if cfg.OrganizationID != "" {
-		req.Header.Set("X-Organization-ID", cfg.OrganizationID)
-	}
-	req.Header.Set("X-Agent-ID", cfg.AgentID)
-
-	client := &http.Client{Timeout: 15 * time.Second}
+	// Identity comes from the mTLS client certificate (enrolled). No spoofable
+	// X-Organization-ID/X-Agent-ID headers are set; the agent_id inside the
+	// payload links the telemetry to the enrolled agent record.
+	client := httpClientFor(cfg)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("send telemetry: %w", err)

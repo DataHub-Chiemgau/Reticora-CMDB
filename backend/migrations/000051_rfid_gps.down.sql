@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS asset_location;
+ALTER TABLE asset DROP COLUMN IF EXISTS rfid_tag;
+ALTER TABLE asset DROP COLUMN IF EXISTS barcode;

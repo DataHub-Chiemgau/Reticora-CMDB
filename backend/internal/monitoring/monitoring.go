@@ -93,11 +93,24 @@ func (f NotifierFunc) NotifyAlert(ctx context.Context, event AlertEvent) { f(ctx
 type AlertStore interface {
 	ListRules(ctx context.Context, orgID string) ([]AlertRule, error)
 	CreateRule(ctx context.Context, rule AlertRule) (AlertRule, error)
+	UpdateRule(ctx context.Context, orgID, id string, req UpdateAlertRuleRequest) (AlertRule, error)
 	DeleteRule(ctx context.Context, orgID, id string) (bool, error)
 	ListEnabled(ctx context.Context) ([]AlertRule, error)
 	MarkPending(ctx context.Context, rule AlertRule, since time.Time) error
 	MarkFired(ctx context.Context, rule AlertRule, at time.Time) error
 	ClearPending(ctx context.Context, rule AlertRule) error
+}
+
+// UpdateAlertRuleRequest carries the mutable fields of an alert rule. Nil
+// pointers leave the stored value untouched, so a PATCH can toggle a single
+// field (typically enabled) without resending the whole rule.
+type UpdateAlertRuleRequest struct {
+	Name       *string  `json:"name"`
+	Condition  *string  `json:"condition"`
+	Threshold  *float64 `json:"threshold"`
+	Duration   *string  `json:"duration"`
+	Severity   *string  `json:"severity"`
+	Enabled    *bool    `json:"enabled"`
 }
 
 // MarshalJSON encodes duration values as Go duration strings.
@@ -209,6 +222,43 @@ func (m *AlertManager) CreateRule(_ context.Context, rule AlertRule) (AlertRule,
 	}
 	m.rules = append(m.rules, rule)
 	return rule, nil
+}
+
+// UpdateRule applies a partial update to an in-memory rule.
+func (m *AlertManager) UpdateRule(_ context.Context, orgID, id string, req UpdateAlertRuleRequest) (AlertRule, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for i, rule := range m.rules {
+		if rule.ID != id || rule.OrgID != orgID {
+			continue
+		}
+		if req.Name != nil {
+			rule.Name = *req.Name
+		}
+		if req.Condition != nil {
+			rule.Condition = *req.Condition
+		}
+		if req.Threshold != nil {
+			rule.Threshold = *req.Threshold
+		}
+		if req.Duration != nil {
+			d, err := time.ParseDuration(*req.Duration)
+			if err != nil {
+				return AlertRule{}, fmt.Errorf("invalid duration %q: %w", *req.Duration, err)
+			}
+			rule.Duration = d
+		}
+		if req.Severity != nil {
+			rule.Severity = *req.Severity
+		}
+		if req.Enabled != nil {
+			rule.Enabled = *req.Enabled
+		}
+		m.rules[i] = rule
+		return rule, nil
+	}
+	return AlertRule{}, fmt.Errorf("alert rule not found")
 }
 
 // DeleteRule removes an alert rule.
@@ -409,6 +459,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/monitoring/metrics", h.IngestMetrics)
 	r.Get("/api/v1/monitoring/alerts", h.ListAlerts)
 	r.Post("/api/v1/monitoring/alerts", h.CreateAlert)
+	r.Patch("/api/v1/monitoring/alerts/{id}", h.UpdateAlert)
 	r.Delete("/api/v1/monitoring/alerts/{id}", h.DeleteAlert)
 }
 
@@ -511,6 +562,54 @@ func (h *Handler) CreateAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, created)
+}
+
+// UpdateAlert handles PATCH /api/v1/monitoring/alerts/{id}. It exists so a
+// rule can be toggled or tuned after creation without delete/recreate.
+func (h *Handler) UpdateAlert(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := requireOrgID(w, r)
+	if !ok {
+		return
+	}
+
+	var req UpdateAlertRuleRequest
+	if err := decodeJSON(r.Body, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if req.Condition != nil {
+		switch *req.Condition {
+		case "gt", "lt", "eq":
+		default:
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", "condition must be one of gt, lt or eq")
+			return
+		}
+	}
+	if req.Severity != nil {
+		switch *req.Severity {
+		case "critical", "warning", "info":
+		default:
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", "severity must be one of critical, warning or info")
+			return
+		}
+	}
+	if req.Duration != nil {
+		if _, err := time.ParseDuration(*req.Duration); err != nil {
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid duration: "+err.Error())
+			return
+		}
+	}
+
+	rule, err := h.alerts.UpdateRule(r.Context(), orgID, chi.URLParam(r, "id"), req)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "alert rule not found")
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, rule)
 }
 
 // DeleteAlert handles DELETE /api/v1/monitoring/alerts/{id}.

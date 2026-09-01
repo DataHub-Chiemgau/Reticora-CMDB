@@ -10,15 +10,22 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/training"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
@@ -27,14 +34,18 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/order"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
@@ -61,6 +72,16 @@ type Repositories struct {
 	Assignment        assignment.Repository
 	Document          document.Repository
 	Stocktake         stocktake.Repository
+	Consumable        consumable.Repository
+	Order             order.Repository
+	Maintenance       maintenance.Repository
+	Disposal          disposal.Repository
+	Key               keymgmt.Repository
+	Training          training.Repository
+	Desk              desk.Repository
+	Location          location.Repository
+	Agent             agent.Repository
+	Security          security.Repository
 	Ticket            ticket.Repository
 	User              user.Repository
 	Credential        credential.Repository
@@ -100,6 +121,11 @@ type Options struct {
 	// OIDC and Sessions power the authentication endpoints.
 	OIDC     *identity.OIDCProvider
 	Sessions *identity.SessionIssuer
+	// UserProvisioner auto-creates the app_user on first OIDC login (nil
+	// disables). DefaultProvisionRole names the standard role assigned on
+	// first login (empty assigns none).
+	UserProvisioner      identity.UserProvisioner
+	DefaultProvisionRole string
 	// Audit is registered only when a database-backed audit trail exists.
 	Audit *audit.Handler
 	// AuditPool enables the security report to include audit-chain integrity;
@@ -121,12 +147,31 @@ type registrar interface {
 // tenant-aware HTTP metrics middleware, which the caller mounts on the outer
 // middleware chain so requests are recorded into the same registry that serves
 // /metrics.
+// agentTypeResolver adapts the discovery repository's CI type lookup for the
+// agent handler's endpoint reconciliation.
+func agentTypeResolver(repos Repositories) agent.CITypeResolver {
+	r, ok := repos.Discovery.(agent.CITypeResolver)
+	if !ok {
+		return nil
+	}
+	return r
+}
+
 func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) http.Handler, error) {
 	if err := validate(repos, opts); err != nil {
 		return nil, nil, err
 	}
 
 	mux := chi.NewRouter()
+
+	// Unknown and method-mismatched routes must answer with RFC 7807
+	// problem+json like every other API error, not chi's plain-text default.
+	mux.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "the requested resource does not exist")
+	})
+	mux.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		api.WriteError(w, http.StatusMethodNotAllowed, "Method Not Allowed", "the method is not allowed for this resource")
+	})
 
 	httpMetrics := registerOperational(mux, opts.Version, opts.MetricsTenantLabel)
 
@@ -137,7 +182,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	protected := authorizingRouter{Router: mux}
 
 	registrars := []registrar{
-		identity.NewHandler(opts.OIDC, opts.Sessions),
+		identity.NewHandler(opts.OIDC, opts.Sessions).WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole),
 		entitlement.NewHandler(opts.Entitlements),
 		ci.NewHandler(opts.CIService, opts.Dispatcher),
 		relationship.NewHandler(repos.Relationship),
@@ -150,6 +195,16 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		assignment.NewHandler(repos.Assignment),
 		document.NewHandler(repos.Document, opts.Blobs),
 		stocktake.NewHandler(repos.Stocktake),
+		consumable.NewHandler(repos.Consumable),
+		order.NewHandler(repos.Order),
+		maintenance.NewHandler(repos.Maintenance),
+		disposal.NewHandler(repos.Disposal),
+		keymgmt.NewHandler(repos.Key),
+		training.NewHandler(repos.Training),
+		desk.NewHandler(repos.Desk),
+		location.NewHandler(repos.Location),
+		agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(repos)).WithFindings(repos.Security),
+		security.NewHandler(repos.Security),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
 		user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment),
 		permission.NewHandler(repos.Permission),

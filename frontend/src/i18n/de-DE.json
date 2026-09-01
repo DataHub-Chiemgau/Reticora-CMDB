@@ -28,15 +28,26 @@
     "export": "Export",
     "monitoring": "Monitoring",
     "audit": "Audit",
-    "security": "Sicherheit"
+    "security": "Sicherheit",
+    "map": "Karte",
+    "roomplan": "Raumplan",
+    "consumables": "Lager",
+    "orders": "Bestellungen",
+    "maintenance": "Wartung",
+    "disposal": "Entsorgung",
+    "keys": "Schlüssel",
+    "trainings": "Schulungen",
+    "desks": "Arbeitsplätze",
+    "agents": "Agents",
+    "findings": "Befunde"
   },
   "common": {
     "save": "Speichern",
     "cancel": "Abbrechen",
     "delete": "Löschen",
     "edit": "Bearbeiten",
-    "create": "Erstellen",
-    "search": "Suchen…",
+    "create": "Anlegen",
+    "search": "Suchen",
     "noResults": "Keine Ergebnisse",
     "noData": "Keine Daten vorhanden",
     "back": "Zurück",
@@ -46,7 +57,14 @@
     "actions": "Aktionen",
     "description": "Beschreibung",
     "notes": "Notizen",
-    "retry": "Erneut versuchen"
+    "retry": "Erneut versuchen",
+    "copy": "Kopieren",
+    "copied": "Kopiert!",
+    "done": "Fertig",
+    "name": "Name",
+    "title": "Titel",
+    "location": "Standort",
+    "all": "Alle"
   },
   "commandPalette": {
     "title": "Befehlsmenü",
@@ -76,7 +94,9 @@
       "export": "Export öffnen",
       "monitoring": "Monitoring öffnen",
       "audit": "Audit-Protokoll öffnen",
-      "security": "Sicherheit & Datenschutz öffnen"
+      "security": "Sicherheit & Datenschutz öffnen",
+      "map": "Karte öffnen",
+      "roomplan": "Raumplan öffnen"
     }
   },
   "dashboard": {
@@ -190,7 +210,16 @@
     "summary": "Status und Heartbeats Ihrer Discovery-Collector.",
     "version": "Version",
     "lastHeartbeat": "Letzter Heartbeat",
-    "createdAt": "Erstellt"
+    "createdAt": "Erstellt",
+    "enroll": {
+      "button": "Collector verbinden",
+      "title": "Collector verbinden",
+      "intro": "Schließen Sie einen Collector an: erzeugen Sie einen einmaligen Enrollment-Code und geben Sie ihn im Collector ein. Die Infrastruktur erscheint automatisch.",
+      "label": "Bezeichnung (z. B. Standort)",
+      "generate": "Code erzeugen",
+      "once": "Dieser Code wird nur einmal angezeigt und läuft ab. Führen Sie im Kundennetz aus:",
+      "expires": "Gültig bis"
+    }
   },
   "webhook": {
     "title": "Webhooks",
@@ -334,6 +363,15 @@
       "active": "Ausfallsimulation",
       "impact": "Fällt „{{name}}“ aus, sind {{count}} weitere CIs betroffen (grau dargestellt).",
       "noImpact": "Dieses CI hat keine abhängigen CIs — ein Ausfall hätte keine Folgen im Graphen."
+    },
+    "filterRelType": "Beziehungstyp",
+    "allRelTypes": "Alle Beziehungen",
+    "relTypes": {
+      "connected_to": "verbunden",
+      "powered_by": "versorgt von",
+      "hosted_on": "gehostet auf",
+      "depends_on": "abhängig von",
+      "member_of": "Mitglied von"
     }
   },
   "rack": {
@@ -574,5 +612,116 @@
     "rotateKeys": "Schlüssel jetzt rotieren",
     "keyRotationResult": "Rotation abgeschlossen: Schlüsselversion {{version}}, {{rotated}} Credentials neu verschlüsselt.",
     "keyRotationError": "Die Schlüsselrotation ist fehlgeschlagen"
+  },
+  "map": {
+    "summary": "Standorte auf der Karte. Marker öffnen den Standort.",
+    "located": "lokalisiert",
+    "unlocated": "ohne Koordinaten",
+    "worldAria": "Weltkarte mit Standortmarkern",
+    "hint": "Wählen Sie einen Marker, um Details zu sehen.",
+    "openSite": "Standort-CIs anzeigen",
+    "noCoords": "Ohne Koordinaten"
+  },
+  "roomplan": {
+    "summary": "Objekte auf dem Raumplan per Drag & Drop positionieren.",
+    "building": "Gebäude",
+    "room": "Raum",
+    "selectBuilding": "Gebäude wählen",
+    "selectRoom": "Raum wählen",
+    "empty": "Kein Raum gewählt",
+    "emptyHint": "Wählen Sie ein Gebäude und einen Raum.",
+    "objects": "Objekte",
+    "noCIs": "Keine CIs in diesem Raum zugeordnet.",
+    "dragHint": "ziehen zum Positionieren, Doppelklick öffnet"
+  },
+  "consumables": {
+    "summary": "Verbrauchsmaterial mit Bestand und Mindestbestand.",
+    "create": "Artikel anlegen",
+    "lowStockOnly": "Nur Mindestbestand unterschritten",
+    "low": "niedrig",
+    "ok": "OK",
+    "minLevel": "Mindestbestand"
+  },
+  "orders": {
+    "summary": "Interne Bestellungen mit Genehmigungs-Workflow.",
+    "create": "Bestellung anlegen",
+    "positions": "Positionen",
+    "submit": "Einreichen",
+    "approve": "Genehmigen",
+    "reject": "Ablehnen",
+    "supplier": "Lieferant"
+  },
+  "maintenance": {
+    "summary": "Wartungen planen und betroffene Kunden benachrichtigen.",
+    "create": "Wartung planen",
+    "start": "Starten",
+    "complete": "Abschließen",
+    "notify": "Kunden benachrichtigen",
+    "notified": "{{count}} Kunden benachrichtigt",
+    "affectedCIs": "betroffene CIs",
+    "startsAt": "Beginn",
+    "endsAt": "Ende"
+  },
+  "disposal": {
+    "summary": "Revisionssichere Entsorgungsdokumentation (append-only, BSI/ISO).",
+    "create": "Entsorgung dokumentieren",
+    "method": "Methode",
+    "asset": "Asset",
+    "selectAsset": "Asset wählen",
+    "certificate": "Zertifikats-Referenz",
+    "dataCarrier": "Datenträger-Vernichtung",
+    "performedAt": "Durchgeführt"
+  },
+  "keys": {
+    "summary": "Physische und digitale Schlüssel mit Ausgabe/Rückgabe.",
+    "create": "Schlüssel anlegen",
+    "issue": "Ausgeben",
+    "return": "Zurücknehmen",
+    "type": "Typ",
+    "physical": "Physisch",
+    "digital": "Digital",
+    "identifier": "Kennung",
+    "issueTitle": "Schlüssel ausgeben",
+    "assignTo": "Ausgeben an",
+    "selectUser": "Nutzer wählen"
+  },
+  "trainings": {
+    "summary": "Kurse mit Zuweisung, Fälligkeit und Nachweis.",
+    "create": "Kurs anlegen",
+    "category": "Kategorie",
+    "validity": "Gültigkeit",
+    "months": "Monate",
+    "validityMonths": "Gültigkeit (Monate)",
+    "general": "Allgemein"
+  },
+  "desks": {
+    "summary": "Wechselnde Arbeitsplätze buchen.",
+    "create": "Arbeitsplatz anlegen",
+    "book": "Buchen",
+    "bookTitle": "Arbeitsplatz buchen",
+    "startsAt": "Von",
+    "endsAt": "Bis"
+  },
+  "agents": {
+    "summary": "Registrierte Endpoint-Agents mit Policy und Kill-Switch.",
+    "lastHeartbeat": "Letzter Heartbeat",
+    "interval": "Intervall",
+    "metricsOff": "Metriken aus",
+    "policy": "Policy",
+    "enable": "Aktivieren",
+    "killSwitch": "Kill-Switch",
+    "policyTitle": "Agent-Policy",
+    "intervalSeconds": "Intervall (Sekunden)"
+  },
+  "findings": {
+    "summary": "Patch-Posture und Schwachstellen je CI.",
+    "statusFilter": "Status",
+    "open": "Offen",
+    "acknowledged": "Bestätigt",
+    "resolved": "Gelöst",
+    "falsePositive": "Fehlalarm",
+    "acknowledge": "Bestätigen",
+    "resolve": "Lösen",
+    "markFalsePositive": "Fehlalarm"
   }
 }

@@ -28,9 +28,19 @@ var readPermissionFor = map[string]identity.Permission{
 	"collectors":         identity.PermDiscoveryRead,
 	"discovery":          identity.PermDiscoveryRead,
 	"assets":             identity.PermAssetRead,
+	"asset-locations":    identity.PermAssetWrite,
 	"assignments":        identity.PermAssignmentRead,
 	"documents":          identity.PermDocumentRead,
 	"stocktakes":         identity.PermStocktakeRead,
+	"consumables":        identity.PermConsumableRead,
+	"orders":             identity.PermOrderRead,
+	"maintenance-windows": identity.PermMaintenanceRead,
+	"disposal-records":   identity.PermDisposalRead,
+	"keys":               identity.PermKeyRead,
+	"trainings":          identity.PermTrainingRead,
+	"training-assignments": identity.PermTrainingWrite,
+	"desks":              identity.PermDeskRead,
+	"desk-bookings":      identity.PermDeskRead,
 	"tickets":            identity.PermTicketRead,
 	"slas":               identity.PermSLARead,
 	"users":              identity.PermUserRead,
@@ -52,6 +62,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"workflows":          identity.PermWorkflowRead,
 	"workflow-runs":      identity.PermWorkflowRead,
 	"compliance":         identity.PermComplianceRead,
+	"security":           identity.PermSecurityRead,
 	"monitoring":         identity.PermMonitoringRead,
 	// Privacy/DSGVO acts on other people's personal data; even the read-side
 	// retention policy requires the manage permission.
@@ -91,7 +102,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"scim":     identity.PermIGAWrite,
 	"graphql":  identity.PermCIWrite,
 	"me":       identity.PermPermissionRead,
-	"ci-types": identity.PermCITypeManage,
+	"ci-types":  identity.PermCITypeManage,
 	"api-keys": identity.PermAPIKeyManage,
 	"ingest":   identity.PermDiscoveryIngest,
 	// The AI assistant has a read-style permission only; conversations and
@@ -123,6 +134,14 @@ const (
 // routeProtected with the required permission for every mapped route; and
 // routeUnmapped otherwise.
 func PermissionForRoute(method, path string) (identity.Permission, routeAccess) {
+	// SCIM is authenticated provisioning surface, not public.
+	if strings.HasPrefix(path, "/scim/") {
+		if method == http.MethodGet || method == http.MethodHead {
+			return identity.PermIGARead, routeProtected
+		}
+		return identity.PermIGAWrite, routeProtected
+	}
+
 	if !strings.HasPrefix(path, "/api/") {
 		return "", routePublic
 	}
@@ -130,6 +149,10 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 	// Public authentication endpoints are unauthenticated by design.
 	switch path {
 	case "/api/v1/auth/config", "/api/v1/auth/callback", "/api/v1/auth/refresh":
+		return "", routePublic
+	case "/api/v1/collectors/enroll":
+		// Zero-config onboarding: the single-use enrollment code is the
+		// credential; the collector has no bearer token before enrolling.
 		return "", routePublic
 	}
 
@@ -145,6 +168,16 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 		// Collector/agent ingest requires the ingest permission regardless
 		// of method.
 		return identity.PermDiscoveryIngest, routeProtected
+	case "agents":
+		// Agent telemetry ingest has its own permission; management routes
+		// (policy, kill-switch) use agent:manage.
+		if len(segments) > 1 && segments[1] == "telemetry" {
+			return identity.PermAgentIngest, routeProtected
+		}
+		if method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions {
+			return identity.PermAgentRead, routeProtected
+		}
+		return identity.PermAgentManage, routeProtected
 	case "me":
 		// /me/permissions is read-only self-service for any authenticated
 		// principal.

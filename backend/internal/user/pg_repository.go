@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -519,17 +520,36 @@ func (r *PGRepository) ListRoles(ctx context.Context, orgID string, page api.Pag
 	items := make([]CustomRole, 0)
 	var total int
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM custom_role WHERE organization_id = $1", orgID).Scan(&total); err != nil {
+		// Union the seeded standard roles (table `role`) with tenant-defined
+		// custom roles so the API exposes one assignable catalogue.
+		const unionQuery = `
+			SELECT id::text, organization_id::text, name, COALESCE(description,''),
+				   is_system, is_builtin, permissions, created_at, updated_at
+			FROM (
+				SELECT id, organization_id, name, description,
+					   false AS is_system, is_builtin, permissions, created_at, updated_at
+				FROM role WHERE organization_id = $1
+				UNION ALL
+				SELECT id, organization_id, name, description,
+					   is_system, false AS is_builtin, permissions, created_at, updated_at
+				FROM custom_role WHERE organization_id = $1
+			) roles
+			ORDER BY name ASC`
+		if err := tx.QueryRow(ctx, `
+			SELECT COUNT(*) FROM (
+				SELECT id FROM role WHERE organization_id = $1
+				UNION ALL
+				SELECT id FROM custom_role WHERE organization_id = $1
+			) all_roles`, orgID).Scan(&total); err != nil {
 			return fmt.Errorf("count roles: %w", err)
 		}
-		query := fmt.Sprintf("SELECT %s FROM custom_role WHERE organization_id = $1 ORDER BY name ASC LIMIT $2 OFFSET $3", customRoleSelectColumns)
-		rows, err := tx.Query(ctx, query, orgID, page.Limit, page.Offset)
+		rows, err := tx.Query(ctx, unionQuery+" LIMIT $2 OFFSET $3", orgID, page.Limit, page.Offset)
 		if err != nil {
 			return fmt.Errorf("list roles: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
-			item, err := scanCustomRole(rows)
+			item, err := scanUnifiedRole(rows)
 			if err != nil {
 				return fmt.Errorf("scan role: %w", err)
 			}
@@ -541,6 +561,32 @@ func (r *PGRepository) ListRoles(ctx context.Context, orgID string, page api.Pag
 		return nil
 	})
 	return items, total, err
+}
+
+// scanUnifiedRole scans a row of the standard∪custom role union.
+func scanUnifiedRole(scanner userScanner) (*CustomRole, error) {
+	var item CustomRole
+	var permissions []byte
+	err := scanner.Scan(
+		&item.ID,
+		&item.OrganizationID,
+		&item.Name,
+		&item.Description,
+		&item.IsSystem,
+		&item.IsBuiltin,
+		&permissions,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if len(permissions) > 0 {
+		if err := json.Unmarshal(permissions, &item.Permissions); err != nil {
+			return nil, fmt.Errorf("decode role permissions: %w", err)
+		}
+	}
+	return &item, nil
 }
 
 func (r *PGRepository) GetRole(ctx context.Context, orgID, id string) (*CustomRole, error) {
@@ -677,6 +723,11 @@ func (r *PGRepository) DeleteRole(ctx context.Context, orgID, id string) error {
 }
 
 func (r *PGRepository) AssignRole(ctx context.Context, orgID string, a *UserRoleAssignment) error {
+	// Standard roles (role_id) are stored in role_assignment; custom roles
+	// (custom_role_id) in user_custom_role. Both feed EffectivePermissions.
+	if a.RoleID != "" {
+		return r.assignStandardRole(ctx, orgID, a)
+	}
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM custom_role WHERE id = $1 AND organization_id = $2)", a.CustomRoleID, orgID).Scan(&exists); err != nil {
@@ -711,27 +762,94 @@ func (r *PGRepository) AssignRole(ctx context.Context, orgID string, a *UserRole
 	})
 }
 
+// assignStandardRole assigns a seeded standard role (table `role`) to a user,
+// mapping scope_type onto the role_assignment scope columns. The organization
+// scope maps to NULL client/site; client/site scopes validate the reference.
+func (r *PGRepository) assignStandardRole(ctx context.Context, orgID string, a *UserRoleAssignment) error {
+	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM role WHERE id = $1 AND organization_id = $2)", a.RoleID, orgID).Scan(&exists); err != nil {
+			return fmt.Errorf("check standard role for assignment: %w", err)
+		}
+		if !exists {
+			return fmt.Errorf("role not found")
+		}
+		var scopeClient, scopeSite any
+		switch a.ScopeType {
+		case "", "organization":
+		case "client":
+			scopeClient = nilIfEmpty(a.ScopeID)
+		case "site":
+			scopeSite = nilIfEmpty(a.ScopeID)
+		default:
+			return fmt.Errorf("unsupported scope_type %q", a.ScopeType)
+		}
+		err := tx.QueryRow(ctx, `
+			INSERT INTO role_assignment (organization_id, user_id, role_id, scope_client_id, scope_site_id)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (user_id, role_id, scope_client_id, scope_site_id) DO NOTHING
+			RETURNING id::text, created_at
+		`, orgID, a.UserID, a.RoleID, scopeClient, scopeSite).Scan(&a.ID, &a.GrantedAt)
+		if err == pgx.ErrNoRows {
+			// Already assigned: load the existing assignment id.
+			err = tx.QueryRow(ctx, `
+				SELECT id::text, created_at FROM role_assignment
+				WHERE organization_id = $1 AND user_id = $2 AND role_id = $3
+				  AND scope_client_id IS NOT DISTINCT FROM $4 AND scope_site_id IS NOT DISTINCT FROM $5
+			`, orgID, a.UserID, a.RoleID, scopeClient, scopeSite).Scan(&a.ID, &a.GrantedAt)
+		}
+		if err != nil {
+			return fmt.Errorf("assign standard role: %w", err)
+		}
+		return nil
+	})
+}
+
 func (r *PGRepository) ListUserRoles(ctx context.Context, orgID, userID string) ([]UserRoleAssignment, error) {
 	items := make([]UserRoleAssignment, 0)
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf(`
-			SELECT %s
-			FROM user_custom_role
-			JOIN custom_role ON custom_role.id = user_custom_role.custom_role_id
-			WHERE custom_role.organization_id = $1 AND user_custom_role.user_id = $2
+		// Union custom-role and standard-role assignments so callers see every
+		// effective role of the user regardless of which backing table holds it.
+		// user_custom_role has no organization_id column; the tenant filter is
+		// applied via the joined custom_role. role_assignment carries it.
+		rows, err := tx.Query(ctx, `
+			SELECT ucr.id::text, ucr.user_id::text, ucr.custom_role_id::text, '' AS role_id,
+				   ucr.scope_type, COALESCE(ucr.scope_id::text, ''), ucr.granted_at, COALESCE(ucr.granted_by::text, '')
+			FROM user_custom_role ucr
+			JOIN custom_role cr ON cr.id = ucr.custom_role_id
+			WHERE cr.organization_id = $1 AND ucr.user_id = $2
+			UNION ALL
+			SELECT id::text, user_id::text, '' AS custom_role_id, role_id::text,
+				   CASE
+					   WHEN scope_site_id IS NOT NULL THEN 'site'
+					   WHEN scope_client_id IS NOT NULL THEN 'client'
+					   ELSE 'organization'
+				   END,
+				   COALESCE(COALESCE(scope_site_id, scope_client_id)::text, ''),
+				   created_at, ''
+			FROM role_assignment
+			WHERE organization_id = $1 AND user_id = $2
 			ORDER BY granted_at DESC
-		`, userRoleAssignmentSelectColumns)
-		rows, err := tx.Query(ctx, query, orgID, userID)
+		`, orgID, userID)
 		if err != nil {
 			return fmt.Errorf("list user roles: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
-			item, err := scanUserRoleAssignment(rows)
-			if err != nil {
+			var item UserRoleAssignment
+			if err := rows.Scan(
+				&item.ID,
+				&item.UserID,
+				&item.CustomRoleID,
+				&item.RoleID,
+				&item.ScopeType,
+				&item.ScopeID,
+				&item.GrantedAt,
+				&item.GrantedBy,
+			); err != nil {
 				return fmt.Errorf("scan user role assignment: %w", err)
 			}
-			items = append(items, *item)
+			items = append(items, item)
 		}
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("iterate user role assignments: %w", err)
@@ -844,4 +962,61 @@ func nilIfEmpty(value string) any {
 
 func statusIsActive(status string) bool {
 	return status == "" || strings.EqualFold(status, "active")
+}
+
+// ─── OIDC first-login provisioning (identity.UserProvisioner) ────────────────
+
+// EnsureUser returns the app_user id for the given OIDC subject, creating the
+// record on first login. The oidc_subject unique constraint makes the
+// read-then-create race safe: on conflict the existing row is returned.
+func (r *PGRepository) EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName string) (string, error) {
+	if email == "" {
+		email = oidcSubject + "@oidc.local"
+	}
+	if displayName == "" {
+		displayName = email
+	}
+	var id string
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// On conflict (returning user) refresh profile fields so an email/name
+		// change in the IdP propagates; the subject itself never changes.
+		return tx.QueryRow(ctx, `
+			INSERT INTO app_user (organization_id, oidc_subject, email, display_name, is_active)
+			VALUES ($1, $2, $3, $4, true)
+			ON CONFLICT (oidc_subject) DO UPDATE SET
+				email = EXCLUDED.email,
+				display_name = EXCLUDED.display_name,
+				is_active = true,
+				updated_at = now()
+			RETURNING id::text
+		`, orgID, oidcSubject, email, displayName).Scan(&id)
+	})
+	if err != nil {
+		return "", fmt.Errorf("ensure oidc user: %w", err)
+	}
+	return id, nil
+}
+
+// EnsureRole assigns the named standard role to the user when they hold no
+// standard role yet, so first login lands on a sensible least-privilege
+// baseline instead of an empty permission set.
+func (r *PGRepository) EnsureRole(ctx context.Context, orgID, userID, roleName string) error {
+	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var existing int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM role_assignment WHERE organization_id = $1 AND user_id = $2`, orgID, userID).Scan(&existing); err != nil {
+			return fmt.Errorf("check role assignments: %w", err)
+		}
+		if existing > 0 {
+			return nil
+		}
+		_, err := tx.Exec(ctx, `
+			INSERT INTO role_assignment (organization_id, user_id, role_id)
+			SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = $3
+			ON CONFLICT DO NOTHING
+		`, orgID, userID, roleName)
+		if err != nil {
+			return fmt.Errorf("assign default role: %w", err)
+		}
+		return nil
+	})
 }

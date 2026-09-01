@@ -52,6 +52,26 @@ const (
 	PermDocumentWrite     Permission = "document:write"
 	PermStocktakeRead     Permission = "stocktake:read"
 	PermStocktakeWrite    Permission = "stocktake:write"
+	PermConsumableRead    Permission = "consumable:read"
+	PermConsumableWrite   Permission = "consumable:write"
+	PermOrderRead         Permission = "order:read"
+	PermOrderWrite        Permission = "order:write"
+	PermOrderApprove      Permission = "order:approve"
+	PermMaintenanceRead   Permission = "maintenance:read"
+	PermMaintenanceWrite  Permission = "maintenance:write"
+	PermDisposalRead      Permission = "disposal:read"
+	PermDisposalWrite     Permission = "disposal:write"
+	PermKeyRead           Permission = "key:read"
+	PermKeyWrite          Permission = "key:write"
+	PermTrainingRead      Permission = "training:read"
+	PermTrainingWrite     Permission = "training:write"
+	PermDeskRead          Permission = "desk:read"
+	PermDeskWrite         Permission = "desk:write"
+	PermAgentRead         Permission = "agent:read"
+	PermAgentManage       Permission = "agent:manage"
+	PermAgentIngest       Permission = "agent:ingest"
+	PermSecurityRead      Permission = "security:read"
+	PermSecurityWrite     Permission = "security:write"
 	PermTicketRead        Permission = "ticket:read"
 	PermTicketWrite       Permission = "ticket:write"
 	PermSLARead           Permission = "sla:read"
@@ -121,6 +141,26 @@ func allPermissions() []Permission {
 		PermDocumentWrite,
 		PermStocktakeRead,
 		PermStocktakeWrite,
+		PermConsumableRead,
+		PermConsumableWrite,
+		PermOrderRead,
+		PermOrderWrite,
+		PermOrderApprove,
+		PermMaintenanceRead,
+		PermMaintenanceWrite,
+		PermDisposalRead,
+		PermDisposalWrite,
+		PermKeyRead,
+		PermKeyWrite,
+		PermTrainingRead,
+		PermTrainingWrite,
+		PermDeskRead,
+		PermDeskWrite,
+		PermAgentRead,
+		PermAgentManage,
+		PermAgentIngest,
+		PermSecurityRead,
+		PermSecurityWrite,
 		PermTicketRead,
 		PermTicketWrite,
 		PermSLARead,
