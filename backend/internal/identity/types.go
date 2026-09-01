@@ -57,6 +57,8 @@ const (
 	PermOrderRead         Permission = "order:read"
 	PermOrderWrite        Permission = "order:write"
 	PermOrderApprove      Permission = "order:approve"
+	PermMaintenanceRead   Permission = "maintenance:read"
+	PermMaintenanceWrite  Permission = "maintenance:write"
 	PermTicketRead        Permission = "ticket:read"
 	PermTicketWrite       Permission = "ticket:write"
 	PermSLARead           Permission = "sla:read"
@@ -131,6 +133,8 @@ func allPermissions() []Permission {
 		PermOrderRead,
 		PermOrderWrite,
 		PermOrderApprove,
+		PermMaintenanceRead,
+		PermMaintenanceWrite,
 		PermTicketRead,
 		PermTicketWrite,
 		PermSLARead,

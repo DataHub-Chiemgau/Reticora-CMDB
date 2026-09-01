@@ -123,15 +123,16 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a := &Assignment{
-		OrganizationID: t.OrganizationID,
-		AssetID:        req.AssetID,
-		CIID:           req.CIID,
-		AssignedTo:     req.AssignedTo,
-		AssignedBy:     t.UserID,
-		AssignmentType: assignmentType,
-		Status:         "active",
-		DueDate:        req.DueDate,
-		Notes:          req.Notes,
+		OrganizationID:    t.OrganizationID,
+		AssetID:           req.AssetID,
+		CIID:              req.CIID,
+		AssignedTo:        req.AssignedTo,
+		AssignedBy:        t.UserID,
+		AssignmentType:    assignmentType,
+		Status:            "active",
+		DueDate:           req.DueDate,
+		Notes:             req.Notes,
+		CheckoutSignature: req.Signature,
 	}
 
 	if err := h.repo.Create(r.Context(), a); err != nil {
@@ -169,6 +170,9 @@ func (h *Handler) Return(w http.ResponseWriter, r *http.Request) {
 	updated.ReturnCondition = req.ReturnCondition
 	if req.Notes != "" {
 		updated.Notes = req.Notes
+	}
+	if req.Signature != nil {
+		updated.ReturnSignature = req.Signature
 	}
 
 	if err := h.repo.Update(r.Context(), t.OrganizationID, id, &updated); err != nil {

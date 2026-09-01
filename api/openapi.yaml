@@ -1417,6 +1417,129 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/maintenance-windows:
+    get:
+      operationId: listMaintenanceWindows
+      tags: [Maintenance]
+      summary: List maintenance windows
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated maintenance windows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceWindowListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createMaintenanceWindow
+      tags: [Maintenance]
+      summary: Create a maintenance window
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMaintenanceWindowRequest'
+      responses:
+        '201':
+          description: Maintenance window created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceWindow'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/maintenance-windows/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getMaintenanceWindow
+      tags: [Maintenance]
+      summary: Get a maintenance window
+      responses:
+        '200':
+          description: Maintenance window
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceWindow'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateMaintenanceWindow
+      tags: [Maintenance]
+      summary: Update a maintenance window (incl. status transitions)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMaintenanceWindowRequest'
+      responses:
+        '200':
+          description: Maintenance window updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceWindow'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteMaintenanceWindow
+      tags: [Maintenance]
+      summary: Delete a maintenance window
+      responses:
+        '204':
+          description: Maintenance window deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/maintenance-windows/{id}/notify:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: notifyMaintenanceWindow
+      tags: [Maintenance]
+      summary: Notify affected customers (clients derived from the window's CIs)
+      responses:
+        '200':
+          description: Notifications recorded
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/maintenance-windows/{id}/notifications:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listMaintenanceNotifications
+      tags: [Maintenance]
+      summary: List notifications of a maintenance window
+      responses:
+        '200':
+          description: Notifications
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /api/v1/consumables:
     get:
       operationId: listConsumables
@@ -7036,10 +7159,23 @@ components:
           type: string
           format: date-time
 
+    Signature:
+      type: object
+      description: Digital signature captured at handover/return.
+      properties:
+        image_base64: { type: string, description: Inline base64 image. }
+        object_key: { type: string, description: S3 object key of the stored signature image. }
+        signer_name: { type: string }
+        signed_at: { type: string, format: date-time }
+        method: { type: string, enum: [touchscreen, drawn, typed] }
+
     CreateAssignmentRequest:
       type: object
       required: [assigned_to]
       properties:
+        signature:
+          $ref: '#/components/schemas/Signature'
+          description: Digital handover signature (optional).
         asset_id:
           type: string
         ci_id:
@@ -7752,6 +7888,51 @@ components:
             data:
               type: array
               items: { $ref: '#/components/schemas/Order' }
+
+    MaintenanceWindow:
+      type: object
+      required: [id, organization_id, title, starts_at, ends_at, status, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        title: { type: string }
+        description: { type: string }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        status: { type: string, enum: [scheduled, in_progress, completed, cancelled] }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        ci_ids:
+          type: array
+          items: { type: string }
+    CreateMaintenanceWindowRequest:
+      type: object
+      required: [title, starts_at, ends_at]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        ci_ids:
+          type: array
+          items: { type: string }
+          description: Affected CIs; clients are derived via the CIs' client assignment at notify time.
+    UpdateMaintenanceWindowRequest:
+      type: object
+      properties:
+        title: { type: string }
+        description: { type: string }
+        status: { type: string, enum: [scheduled, in_progress, completed, cancelled] }
+    MaintenanceWindowListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/MaintenanceWindow' }
 
     CreateSLAPolicyRequest:
       type: object
@@ -9431,6 +9612,9 @@ components:
       type: object
       description: Payload for returning an assigned asset or CI.
       properties:
+        signature:
+          $ref: '#/components/schemas/Signature'
+          description: Digital return signature (optional).
         return_condition:
           type: string
         notes:

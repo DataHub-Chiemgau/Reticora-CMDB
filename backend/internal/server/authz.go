@@ -33,6 +33,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"stocktakes":         identity.PermStocktakeRead,
 	"consumables":        identity.PermConsumableRead,
 	"orders":             identity.PermOrderRead,
+	"maintenance-windows": identity.PermMaintenanceRead,
 	"tickets":            identity.PermTicketRead,
 	"slas":               identity.PermSLARead,
 	"users":              identity.PermUserRead,

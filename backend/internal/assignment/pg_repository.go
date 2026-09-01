@@ -3,6 +3,7 @@ package assignment
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -26,6 +27,8 @@ const assignmentSelectColumns = `
 	returned_at,
 	COALESCE(return_condition, ''),
 	COALESCE(notes, ''),
+	checkout_signature,
+	return_signature,
 	created_at,
 	updated_at
 `
@@ -181,13 +184,19 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Assignme
 // Create inserts a new assignment.
 func (r *PGRepository) Create(ctx context.Context, a *Assignment) error {
 	return r.withTenant(ctx, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		var checkoutSig any
+		if a.CheckoutSignature != nil {
+			if b, err := json.Marshal(a.CheckoutSignature); err == nil {
+				checkoutSig = string(b)
+			}
+		}
 		query := `
 			INSERT INTO assignment (
 				organization_id, asset_id, ci_id, assigned_to, assigned_by, assignment_type,
-				status, assigned_at, due_date, returned_at, return_condition, notes
+				status, assigned_at, due_date, returned_at, return_condition, notes, checkout_signature
 			) VALUES (
 				$1, $2, $3, $4, $5, $6,
-				$7, COALESCE($8::timestamptz, NOW()), $9, $10, $11, $12
+				$7, COALESCE($8::timestamptz, NOW()), $9, $10, $11, $12, $13::jsonb
 			)
 			RETURNING id::text, assigned_at, created_at, updated_at
 		`
@@ -204,6 +213,7 @@ func (r *PGRepository) Create(ctx context.Context, a *Assignment) error {
 			nilIfEmpty(a.ReturnedAt),
 			nilIfEmpty(a.ReturnCondition),
 			nilIfEmpty(a.Notes),
+			checkoutSig,
 		).Scan(&a.ID, &a.AssignedAt, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return fmt.Errorf("create assignment: %w", err)
 		}
@@ -217,6 +227,12 @@ func (r *PGRepository) Create(ctx context.Context, a *Assignment) error {
 // Update replaces mutable fields on an existing assignment.
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, a *Assignment) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var returnSig any
+		if a.ReturnSignature != nil {
+			if b, err := json.Marshal(a.ReturnSignature); err == nil {
+				returnSig = string(b)
+			}
+		}
 		query := `
 			UPDATE assignment SET
 				asset_id = $2,
@@ -230,6 +246,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, a *Assignme
 				returned_at = $10,
 				return_condition = $11,
 				notes = $12,
+				return_signature = COALESCE($13::jsonb, return_signature),
 				updated_at = NOW()
 			WHERE id = $1
 			RETURNING ` + assignmentSelectColumns
@@ -246,6 +263,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, a *Assignme
 			nilIfEmpty(a.ReturnedAt),
 			nilIfEmpty(a.ReturnCondition),
 			nilIfEmpty(a.Notes),
+			returnSig,
 		))
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -280,6 +298,7 @@ func scanAssignment(scanner assignmentScanner) (*Assignment, error) {
 	item := &Assignment{}
 	var dueDate sql.NullTime
 	var returnedAt sql.NullTime
+	var checkoutSig, returnSig []byte
 	if err := scanner.Scan(
 		&item.ID,
 		&item.OrganizationID,
@@ -294,6 +313,8 @@ func scanAssignment(scanner assignmentScanner) (*Assignment, error) {
 		&returnedAt,
 		&item.ReturnCondition,
 		&item.Notes,
+		&checkoutSig,
+		&returnSig,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	); err != nil {
@@ -304,6 +325,18 @@ func scanAssignment(scanner assignmentScanner) (*Assignment, error) {
 	}
 	if returnedAt.Valid {
 		item.ReturnedAt = returnedAt.Time.UTC().Format(time.RFC3339)
+	}
+	if len(checkoutSig) > 0 {
+		var sig Signature
+		if err := json.Unmarshal(checkoutSig, &sig); err == nil {
+			item.CheckoutSignature = &sig
+		}
+	}
+	if len(returnSig) > 0 {
+		var sig Signature
+		if err := json.Unmarshal(returnSig, &sig); err == nil {
+			item.ReturnSignature = &sig
+		}
 	}
 	item.AssignedAt = item.AssignedAt.UTC()
 	item.CreatedAt = item.CreatedAt.UTC()
