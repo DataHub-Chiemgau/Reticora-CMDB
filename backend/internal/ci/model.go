@@ -86,6 +86,7 @@ type FilterParams struct {
 	TypeID   string
 	ClientID string
 	SiteID   string
+	RoomID   string
 	Search   string
 	SortBy   string
 	SortDir  string

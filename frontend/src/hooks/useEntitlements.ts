@@ -52,6 +52,7 @@ export const navFeatureFor: Record<string, string | undefined> = {
   cmdb: undefined,
   topology: undefined,
   map: undefined,
+  roomplan: undefined,
   racks: undefined,
   discovery: 'discovery',
   assets: 'inventory',

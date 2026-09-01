@@ -2,6 +2,7 @@ package tenantapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -399,12 +400,18 @@ func (r *PGRepository) DeleteBuilding(ctx context.Context, orgID, id string) err
 
 // --- Rooms ---
 
-const roomCols = `id::text, organization_id::text, building_id::text, name, floor, COALESCE(room_type,'general'), created_at, updated_at`
+const roomCols = `id::text, organization_id::text, building_id::text, name, floor, COALESCE(room_type,'general'), COALESCE(layout,'{}'::jsonb), created_at, updated_at`
 
 func scanRoom(s scanner) (*Room, error) {
 	rm := &Room{}
-	if err := s.Scan(&rm.ID, &rm.OrganizationID, &rm.BuildingID, &rm.Name, &rm.Floor, &rm.RoomType, &rm.CreatedAt, &rm.UpdatedAt); err != nil {
+	var layout []byte
+	if err := s.Scan(&rm.ID, &rm.OrganizationID, &rm.BuildingID, &rm.Name, &rm.Floor, &rm.RoomType, &layout, &rm.CreatedAt, &rm.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if len(layout) > 0 {
+		if err := json.Unmarshal(layout, &rm.Layout); err != nil {
+			return nil, fmt.Errorf("decode room layout: %w", err)
+		}
 	}
 	rm.CreatedAt = rm.CreatedAt.UTC()
 	rm.UpdatedAt = rm.UpdatedAt.UTC()
@@ -488,6 +495,15 @@ func (r *PGRepository) UpdateRoom(ctx context.Context, orgID, id string, req Upd
 		if req.RoomType != nil {
 			sets = append(sets, fmt.Sprintf("room_type = $%d", pos))
 			args = append(args, *req.RoomType)
+			pos++
+		}
+		if req.Layout != nil {
+			layoutJSON, err := json.Marshal(req.Layout)
+			if err != nil {
+				return fmt.Errorf("marshal room layout: %w", err)
+			}
+			sets = append(sets, fmt.Sprintf("layout = $%d::jsonb", pos))
+			args = append(args, string(layoutJSON))
 			pos++
 		}
 		var err error

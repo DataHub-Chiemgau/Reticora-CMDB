@@ -118,6 +118,11 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			args = append(args, filter.SiteID)
 			argPos++
 		}
+		if filter.RoomID != "" {
+			whereParts = append(whereParts, fmt.Sprintf("room_id = $%d", argPos))
+			args = append(args, filter.RoomID)
+			argPos++
+		}
 		if filter.Search != "" {
 			whereParts = append(whereParts, fmt.Sprintf("name ILIKE $%d", argPos))
 			args = append(args, "%"+filter.Search+"%")

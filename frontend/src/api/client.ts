@@ -21,6 +21,8 @@ export interface CI {
   id: string;
   organization_id: string;
   client_id?: string;
+  site_id?: string;
+  room_id?: string;
   ci_type_id: string;
   name: string;
   status: string;
@@ -96,6 +98,8 @@ export interface CIListParams {
   status?: string;
   ci_type_id?: string;
   client_id?: string;
+  site_id?: string;
+  room_id?: string;
   search?: string;
   sort_by?: string;
   sort_dir?: string;
@@ -1664,5 +1668,56 @@ export const siteApi = {
   },
   get(id: string): Promise<Site> {
     return fetchAPI(`/sites/${id}`);
+  },
+};
+
+// ─── Buildings / Rooms (floor-plan view) ────────────────────────────────────
+
+export interface Building {
+  id: string;
+  organization_id: string;
+  site_id: string;
+  name: string;
+  floors?: number | null;
+  floorplan_object_key?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoomLayoutPosition {
+  x: number;
+  y: number;
+}
+
+export interface Room {
+  id: string;
+  organization_id: string;
+  building_id: string;
+  name: string;
+  floor?: number | null;
+  room_type?: string;
+  layout?: Record<string, RoomLayoutPosition>;
+  created_at: string;
+  updated_at: string;
+}
+
+export const buildingApi = {
+  list(params: ListParams & { site_id?: string } = {}): Promise<PaginatedResponse<Building>> {
+    return fetchAPI(`/buildings${buildQuery(params)}`);
+  },
+  get(id: string): Promise<Building> {
+    return fetchAPI(`/buildings/${id}`);
+  },
+};
+
+export const roomApi = {
+  list(params: ListParams & { building_id?: string } = {}): Promise<PaginatedResponse<Room>> {
+    return fetchAPI(`/rooms${buildQuery(params)}`);
+  },
+  get(id: string): Promise<Room> {
+    return fetchAPI(`/rooms/${id}`);
+  },
+  updateLayout(id: string, layout: Record<string, RoomLayoutPosition>): Promise<Room> {
+    return fetchAPI(`/rooms/${id}`, { method: 'PATCH', body: JSON.stringify({ layout }) });
   },
 };

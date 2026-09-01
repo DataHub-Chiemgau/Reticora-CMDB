@@ -55,6 +55,7 @@ const WebhooksPage = lazyPage(() => import('./pages/WebhooksPage'), 'WebhooksPag
 const AuditPage = lazyPage(() => import('./pages/AuditPage'), 'AuditPage');
 const SecurityPage = lazyPage(() => import('./pages/SecurityPage'), 'SecurityPage');
 const MapPage = lazyPage(() => import('./pages/MapPage'), 'MapPage');
+const RoomPlanPage = lazyPage(() => import('./pages/RoomPlanPage'), 'RoomPlanPage');
 
 // Full-screen fallback while a page chunk loads.
 function PageFallback() {
@@ -119,6 +120,7 @@ function App() {
       'cmdb',
       'topology',
       'map',
+      'roomplan',
       'racks',
       'assets',
       'tickets',
@@ -263,6 +265,7 @@ function App() {
             <Route path="/cmdb/:id" element={<CIDetailPage />} />
             <Route path="/topology" element={<TopologyPage />} />
             <Route path="/map" element={<MapPage />} />
+            <Route path="/roomplan" element={<RoomPlanPage />} />
             <Route path="/racks" element={<RackPage />} />
             <Route path="/discovery" element={<DiscoveryPage />} />
             <Route path="/assets" element={<AssetListPage />} />

@@ -94,14 +94,15 @@ type UpdateBuildingRequest struct {
 
 // Room represents a room within a building.
 type Room struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	BuildingID     string    `json:"building_id"`
-	Name           string    `json:"name"`
-	Floor          *int      `json:"floor,omitempty"`
-	RoomType       string    `json:"room_type,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string                     `json:"id"`
+	OrganizationID string                     `json:"organization_id"`
+	BuildingID     string                     `json:"building_id"`
+	Name           string                     `json:"name"`
+	Floor          *int                       `json:"floor,omitempty"`
+	RoomType       string                     `json:"room_type,omitempty"`
+	Layout         map[string]LayoutPosition  `json:"layout,omitempty"`
+	CreatedAt      time.Time                  `json:"created_at"`
+	UpdatedAt      time.Time                  `json:"updated_at"`
 }
 
 // CreateRoomRequest is the payload for creating a room.
@@ -117,4 +118,14 @@ type UpdateRoomRequest struct {
 	Name     *string `json:"name,omitempty"`
 	Floor    *int    `json:"floor,omitempty"`
 	RoomType *string `json:"room_type,omitempty"`
+	// Layout replaces the room's floor-plan object positions
+	// (object_id → {x, y} normalized 0..1). Nil leaves the layout untouched;
+	// an empty object clears it.
+	Layout map[string]LayoutPosition `json:"layout,omitempty"`
+}
+
+// LayoutPosition is one object's normalized position on the room floor plan.
+type LayoutPosition struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }

@@ -29,7 +29,8 @@
     "monitoring": "Monitoring",
     "audit": "Audit",
     "security": "Security",
-    "map": "Map"
+    "map": "Map",
+    "roomplan": "Room plan"
   },
   "common": {
     "save": "Save",
@@ -605,5 +606,17 @@
     "hint": "Select a marker to see details.",
     "openSite": "Show site CIs",
     "noCoords": "Without coordinates"
+  },
+  "roomplan": {
+    "summary": "Position objects on the floor plan via drag & drop.",
+    "building": "Building",
+    "room": "Room",
+    "selectBuilding": "Select building",
+    "selectRoom": "Select room",
+    "empty": "No room selected",
+    "emptyHint": "Select a building and a room.",
+    "objects": "Objects",
+    "noCIs": "No CIs assigned to this room.",
+    "dragHint": "drag to position, double-click opens"
   }
 }

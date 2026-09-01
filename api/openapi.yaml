@@ -205,6 +205,8 @@ paths:
         - $ref: '#/components/parameters/CIStatus'
         - $ref: '#/components/parameters/CITypeID'
         - $ref: '#/components/parameters/ClientID'
+        - $ref: '#/components/parameters/SiteID'
+        - $ref: '#/components/parameters/RoomID'
       responses:
         '200':
           description: Paginated list of configuration items
@@ -5565,6 +5567,16 @@ components:
       in: query
       schema:
         type: string
+    SiteID:
+      name: site_id
+      in: query
+      schema:
+        type: string
+    RoomID:
+      name: room_id
+      in: query
+      schema:
+        type: string
 
   responses:
     BadRequest:
@@ -8255,6 +8267,14 @@ components:
           type: integer
         room_type:
           type: string
+        layout:
+          type: object
+          description: Floor-plan object positions, object_id → {x, y} normalized 0..1.
+          additionalProperties:
+            type: object
+            properties:
+              x: { type: number }
+              y: { type: number }
         created_at:
           type: string
           format: date-time
@@ -8284,6 +8304,17 @@ components:
           type: integer
         room_type:
           type: string
+        layout:
+          type: object
+          description: >-
+            Replaces the room's floor-plan object positions. Map of
+            object_id → {x, y} in normalized 0..1 coordinates; an empty object
+            clears the layout.
+          additionalProperties:
+            type: object
+            properties:
+              x: { type: number }
+              y: { type: number }
 
     RoomListResponse:
       allOf:

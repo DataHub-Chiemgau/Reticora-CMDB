@@ -29,7 +29,8 @@
     "monitoring": "Monitoring",
     "audit": "Audit",
     "security": "Sicherheit",
-    "map": "Karte"
+    "map": "Karte",
+    "roomplan": "Raumplan"
   },
   "common": {
     "save": "Speichern",
@@ -605,5 +606,17 @@
     "hint": "Wählen Sie einen Marker, um Details zu sehen.",
     "openSite": "Standort-CIs anzeigen",
     "noCoords": "Ohne Koordinaten"
+  },
+  "roomplan": {
+    "summary": "Objekte auf dem Raumplan per Drag & Drop positionieren.",
+    "building": "Gebäude",
+    "room": "Raum",
+    "selectBuilding": "Gebäude wählen",
+    "selectRoom": "Raum wählen",
+    "empty": "Kein Raum gewählt",
+    "emptyHint": "Wählen Sie ein Gebäude und einen Raum.",
+    "objects": "Objekte",
+    "noCIs": "Keine CIs in diesem Raum zugeordnet.",
+    "dragHint": "ziehen zum Positionieren, Doppelklick öffnet"
   }
 }

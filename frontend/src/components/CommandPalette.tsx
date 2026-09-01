@@ -31,7 +31,8 @@ export type AppPage =
   | 'monitoring'
   | 'audit'
   | 'security'
-  | 'map';
+  | 'map'
+  | 'roomplan';
 
 export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
@@ -58,6 +59,7 @@ export const pageToPath: Record<AppPage, string> = {
   audit: '/audit',
   security: '/security',
   map: '/map',
+  roomplan: '/roomplan',
 };
 
 interface CommandPaletteProps {

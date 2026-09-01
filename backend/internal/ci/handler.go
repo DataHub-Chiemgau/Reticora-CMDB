@@ -64,6 +64,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Status:   r.URL.Query().Get("status"),
 		TypeID:   r.URL.Query().Get("ci_type_id"),
 		ClientID: r.URL.Query().Get("client_id"),
+		SiteID:   r.URL.Query().Get("site_id"),
+		RoomID:   r.URL.Query().Get("room_id"),
 		Search:   r.URL.Query().Get("search"),
 		SortBy:   r.URL.Query().Get("sort_by"),
 		SortDir:  r.URL.Query().Get("sort_dir"),
