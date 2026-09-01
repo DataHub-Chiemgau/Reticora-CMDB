@@ -1607,6 +1607,450 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/keys:
+    get:
+      operationId: listKeys
+      tags: [Keys]
+      summary: List key items
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: Paginated key items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeyItemListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createKey
+      tags: [Keys]
+      summary: Create key items entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateKeyItemRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeyItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/keys/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getKey
+      tags: [Keys]
+      summary: Get key items entry
+      responses:
+        '200':
+          description: Entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeyItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateKey
+      tags: [Keys]
+      summary: Update key items entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateKeyItemRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeyItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteKey
+      tags: [Keys]
+      summary: Delete key items entry
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/keys/{id}/issue:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: issueKeyItem
+      tags: [Keys]
+      summary: Issue a key to a user (marks it issued)
+      responses:
+        '200':
+          description: Done
+        '201':
+          description: Done
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/keys/{id}/return:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: returnKeyItem
+      tags: [Keys]
+      summary: Return an issued key (marks it available)
+      responses:
+        '200':
+          description: Done
+        '201':
+          description: Done
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/keys/{id}/assignments:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listKeyAssignments
+      tags: [Keys]
+      summary: List key assignments
+      responses:
+        '200':
+          description: Entries
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/trainings:
+    get:
+      operationId: listTrainings
+      tags: [Trainings]
+      summary: List training courses
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: Paginated training courses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingCourseListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createTraining
+      tags: [Trainings]
+      summary: Create training courses entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTrainingCourseRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingCourse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/trainings/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getTraining
+      tags: [Trainings]
+      summary: Get training courses entry
+      responses:
+        '200':
+          description: Entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingCourse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateTraining
+      tags: [Trainings]
+      summary: Update training courses entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTrainingCourseRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingCourse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteTraining
+      tags: [Trainings]
+      summary: Delete training courses entry
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/trainings/{id}/assignments:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listTrainingAssignments
+      tags: [Trainings]
+      summary: List training assignments
+      responses:
+        '200':
+          description: Entries
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/trainings/{id}/assignments:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: assignTraining
+      tags: [Trainings]
+      summary: Enroll a user in a course
+      responses:
+        '200':
+          description: Done
+        '201':
+          description: Done
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/training-assignments/{id}/complete:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: completeTrainingAssignment
+      tags: [Trainings]
+      summary: Mark a training assignment completed (with optional proof)
+      responses:
+        '200':
+          description: Done
+        '201':
+          description: Done
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/desks:
+    get:
+      operationId: listDesks
+      tags: [Desks]
+      summary: List desks
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: Paginated desks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeskListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createDesk
+      tags: [Desks]
+      summary: Create desks entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeskRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Desk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/desks/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getDesk
+      tags: [Desks]
+      summary: Get desks entry
+      responses:
+        '200':
+          description: Entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Desk'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateDesk
+      tags: [Desks]
+      summary: Update desks entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeskRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Desk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteDesk
+      tags: [Desks]
+      summary: Delete desks entry
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/desks/{id}/bookings:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listDeskBookings
+      tags: [Desks]
+      summary: List desk bookings
+      responses:
+        '200':
+          description: Entries
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/desks/{id}/bookings:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: bookDesk
+      tags: [Desks]
+      summary: Book a desk for a time window (rejects overlap)
+      responses:
+        '200':
+          description: Done
+        '201':
+          description: Done
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/desk-bookings/{id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: cancelDeskBooking
+      tags: [Desks]
+      summary: Cancel a desk booking
+      responses:
+        '200':
+          description: Done
+        '201':
+          description: Done
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
   /api/v1/consumables:
     get:
       operationId: listConsumables
@@ -8037,6 +8481,122 @@ components:
             data:
               type: array
               items: { $ref: '#/components/schemas/DisposalRecord' }
+
+    KeyItem:
+      type: object
+      required: [id, organization_id, name, key_type, status, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        client_id: { type: string }
+        name: { type: string }
+        key_type: { type: string, enum: [physical, digital] }
+        identifier: { type: string }
+        status: { type: string, enum: [available, issued, lost, retired] }
+        location: { type: string }
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateKeyItemRequest:
+      type: object
+      required: [name]
+      properties:
+        client_id: { type: string }
+        name: { type: string }
+        key_type: { type: string, enum: [physical, digital] }
+        identifier: { type: string }
+        location: { type: string }
+        notes: { type: string }
+    UpdateKeyItemRequest:
+      type: object
+      properties:
+        client_id: { type: string }
+        name: { type: string }
+        key_type: { type: string, enum: [physical, digital] }
+        identifier: { type: string }
+        status: { type: string, enum: [available, issued, lost, retired] }
+        location: { type: string }
+        notes: { type: string }
+    KeyItemListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/KeyItem' }
+    TrainingCourse:
+      type: object
+      required: [id, organization_id, title, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        title: { type: string }
+        description: { type: string }
+        category: { type: string }
+        validity_months: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateTrainingCourseRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        category: { type: string }
+        validity_months: { type: integer }
+    UpdateTrainingCourseRequest:
+      type: object
+      properties:
+        title: { type: string }
+        description: { type: string }
+        category: { type: string }
+        validity_months: { type: integer }
+    TrainingCourseListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/TrainingCourse' }
+    Desk:
+      type: object
+      required: [id, organization_id, name, status, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        room_id: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [available, occupied, maintenance] }
+        attributes: { type: object }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateDeskRequest:
+      type: object
+      required: [name]
+      properties:
+        room_id: { type: string }
+        name: { type: string }
+        attributes: { type: object }
+    UpdateDeskRequest:
+      type: object
+      properties:
+        room_id: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [available, occupied, maintenance] }
+        attributes: { type: object }
+    DeskListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Desk' }
 
     CreateSLAPolicyRequest:
       type: object

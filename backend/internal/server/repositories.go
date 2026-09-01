@@ -12,6 +12,9 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/training"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
@@ -65,6 +68,9 @@ func MemoryRepositories() Repositories {
 		Order:             order.NewMemoryRepository(),
 		Maintenance:       maintenance.NewMemoryRepository(),
 		Disposal:          disposal.NewMemoryRepository(),
+		Key:               keymgmt.NewMemoryRepository(),
+		Training:          training.NewMemoryRepository(),
+		Desk:              desk.NewMemoryRepository(),
 		Ticket:            ticket.NewMemoryRepository(),
 		User:              user.NewMemoryRepository(),
 		Credential:        credential.NewMemoryRepository(),
@@ -105,6 +111,9 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Order:             order.NewPGRepository(pool),
 		Maintenance:       maintenance.NewPGRepository(pool),
 		Disposal:          disposal.NewPGRepository(pool),
+		Key:               keymgmt.NewPGRepository(pool),
+		Training:          training.NewPGRepository(pool),
+		Desk:              desk.NewPGRepository(pool),
 		Ticket:            ticket.NewPGRepository(pool),
 		User:              user.NewPGRepository(pool),
 		Credential:        credential.NewPGRepository(pool),

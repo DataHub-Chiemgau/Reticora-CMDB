@@ -22,6 +22,9 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/training"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
@@ -70,6 +73,9 @@ type Repositories struct {
 	Order             order.Repository
 	Maintenance       maintenance.Repository
 	Disposal          disposal.Repository
+	Key               keymgmt.Repository
+	Training          training.Repository
+	Desk              desk.Repository
 	Ticket            ticket.Repository
 	User              user.Repository
 	Credential        credential.Repository
@@ -177,6 +183,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		order.NewHandler(repos.Order),
 		maintenance.NewHandler(repos.Maintenance),
 		disposal.NewHandler(repos.Disposal),
+		keymgmt.NewHandler(repos.Key),
+		training.NewHandler(repos.Training),
+		desk.NewHandler(repos.Desk),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
 		user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment),
 		permission.NewHandler(repos.Permission),
