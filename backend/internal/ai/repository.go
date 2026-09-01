@@ -68,6 +68,20 @@ func (r *MemoryRepository) UpsertChunk(_ context.Context, ch Chunk) error {
 	r.chunks[ch.OrganizationID+":"+ch.ID] = ch
 	return nil
 }
+func (r *MemoryRepository) DeleteChunk(_ context.Context, orgID, entityType, entityID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// The map key is orgID + ":" + ch.ID, and UpsertChunk defaults ch.ID to
+	// entityType + ":" + entityID when unset. Match by identity fields rather
+	// than relying on a single key format so explicitly-ID'd chunks are found
+	// too.
+	for k, ch := range r.chunks {
+		if ch.OrganizationID == orgID && ch.EntityType == entityType && ch.EntityID == entityID {
+			delete(r.chunks, k)
+		}
+	}
+	return nil
+}
 func (r *MemoryRepository) CandidateChunks(_ context.Context, orgID string, entityTypes []string, entityIDs []string, limit int) ([]Chunk, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

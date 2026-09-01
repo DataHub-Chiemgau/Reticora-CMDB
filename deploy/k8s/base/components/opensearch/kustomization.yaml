@@ -1,0 +1,42 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - statefulset.yaml
+
+# Point the server at OpenSearch when this component is included. The
+# credentials come from the optional reticora-opensearch secret (only needed
+# when the security plugin is enabled).
+patches:
+  - target:
+      kind: Deployment
+      name: reticora-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: RETICORA_SEARCH_BACKEND
+          value: "opensearch"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: RETICORA_OPENSEARCH_URL
+          value: "http://opensearch:9200"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: RETICORA_OPENSEARCH_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: reticora-opensearch
+              key: username
+              optional: true
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: RETICORA_OPENSEARCH_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: reticora-opensearch
+              key: password
+              optional: true

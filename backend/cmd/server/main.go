@@ -186,6 +186,12 @@ func main() {
 			slog.Error("failed to connect to OpenSearch", "error", err)
 			os.Exit(1)
 		}
+		// Apply the index template on every startup so the mapping is explicit
+		// and reproducible instead of relying on dynamic mapping guesses.
+		if err := osBackend.EnsureIndexTemplate(context.Background()); err != nil {
+			slog.Error("failed to apply OpenSearch index template", "error", err)
+			os.Exit(1)
+		}
 		if pgSearch, ok := repos.Search.(*search.PGRepository); ok {
 			repos.Search = &search.HybridBackend{Remote: osBackend, Source: pgSearch}
 		} else {
@@ -200,6 +206,11 @@ func main() {
 	aiProvider := ai.NewOpenAIProvider(ai.ProviderConfig{
 		BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, ChatModel: cfg.LLMChatModel, EmbeddingModel: cfg.LLMEmbeddingModel,
 	}, nil)
+	// Mirror CI mutations into the retrieval chunk store so the governed RAG
+	// assistant has tenant-owned content to ground its answers. Chunks are
+	// embedded when an embedding model is configured and fall back to lexical
+	// scoring otherwise.
+	repos.CI = ci.NewIndexingRepository(repos.CI, ai.NewCIChunkIndexer(repos.AI, aiProvider))
 
 	entitlementSvc := entitlement.NewService(repos.Entitlement, entitlement.Options{
 		DefaultPlan: entitlement.Plan(cfg.DefaultPlan),
@@ -219,18 +230,19 @@ func main() {
 		}
 	}()
 
-	mux, err := server.NewRouter(repos, server.Options{
-		Version:      version,
-		Entitlements: entitlementSvc,
-		Dispatcher:   webhookDispatcher,
-		CIService:    ci.NewServiceWithLimits(repos.CI, entitlementSvc),
-		Credentials:  credential.NewService(repos.Credential, encryptor),
-		OIDC:         oidcProvider,
-		Sessions:     sessionIssuer,
-		Audit:        auditHandler,
-		AuditPool:    auditPool,
-		AIProvider:   aiProvider,
-		Blobs:        blobStore,
+	mux, httpMetrics, err := server.NewRouter(repos, server.Options{
+		Version:            version,
+		MetricsTenantLabel: cfg.MetricsTenantLabel,
+		Entitlements:       entitlementSvc,
+		Dispatcher:         webhookDispatcher,
+		CIService:          ci.NewServiceWithLimits(repos.CI, entitlementSvc),
+		Credentials:        credential.NewService(repos.Credential, encryptor),
+		OIDC:               oidcProvider,
+		Sessions:           sessionIssuer,
+		Audit:              auditHandler,
+		AuditPool:          auditPool,
+		AIProvider:         aiProvider,
+		Blobs:              blobStore,
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -269,6 +281,8 @@ func main() {
 	// Middleware chain per spec:
 	// RequestID/Tracing -> Panic-Recovery -> Security-Headers -> Auth ->
 	// Tenant -> Entitlement -> Rate-Limit -> POST-Idempotency -> Handler
+	// The HTTP metrics middleware sits just inside the tenant middleware so the
+	// organization_id label is populated from the request context.
 	handler := middleware.Chain(
 		middleware.RequestID,
 		middleware.Recovery,
@@ -277,6 +291,7 @@ func main() {
 		middleware.OpenAPIValidation,
 		authMiddleware,
 		middleware.TenantMiddleware,
+		httpMetrics,
 		entitlementSvc.Middleware,
 		middleware.RateLimiterWithStore(cfg.RateLimitRPM, cacheStore),
 		middleware.IdempotencyWithStore(cacheStore),

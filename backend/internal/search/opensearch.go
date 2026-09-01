@@ -53,6 +53,62 @@ func (b *OpenSearchBackend) Ping(ctx context.Context) error {
 	}
 	return nil
 }
+
+// indexTemplateBody returns the idempotent index-template payload for the
+// tenant search index. The explicit mapping keeps dynamic mapping guesses
+// (e.g. entity_id indexed as text+keyword, or metadata values analyzed) from
+// drifting between environments, and makes the schema reproducible.
+func indexTemplateBody(index string) map[string]any {
+	return map[string]any{
+		"index_patterns": []string{index},
+		"template": map[string]any{
+			"settings": map[string]any{
+				"number_of_shards":   1,
+				"number_of_replicas": 0,
+			},
+			"mappings": map[string]any{
+				"properties": map[string]any{
+					"organization_id": map[string]any{"type": "keyword"},
+					"entity_type":     map[string]any{"type": "keyword"},
+					"entity_id":       map[string]any{"type": "keyword"},
+					"title": map[string]any{
+						"type":   "text",
+						"fields": map[string]any{"keyword": map[string]any{"type": "keyword", "ignore_above": 512}},
+					},
+					"summary":    map[string]any{"type": "text"},
+					"url":        map[string]any{"type": "keyword"},
+					"metadata":   map[string]any{"type": "object", "dynamic": true},
+					"updated_at": map[string]any{"type": "date"},
+				},
+			},
+		},
+	}
+}
+
+// EnsureIndexTemplate idempotently applies the search index template. It is
+// safe to call on every startup: OpenSearch treats PUT _index_template as an
+// upsert.
+func (b *OpenSearchBackend) EnsureIndexTemplate(ctx context.Context) error {
+	body, err := json.Marshal(indexTemplateBody(b.cfg.Index))
+	if err != nil {
+		return fmt.Errorf("opensearch index template: marshal: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, fmt.Sprintf("%s/_index_template/%s", b.cfg.URL, b.cfg.Index), bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("opensearch index template: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	b.auth(req)
+	res, err := b.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("opensearch index template: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode >= 300 {
+		return fmt.Errorf("opensearch index template failed: %s", res.Status)
+	}
+	return nil
+}
 func (b *OpenSearchBackend) IndexDocument(ctx context.Context, doc Document) error {
 	body, err := json.Marshal(doc)
 	if err != nil {

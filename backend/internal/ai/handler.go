@@ -95,15 +95,31 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prompt := buildPrompt(req.Question, chunks)
-	answer, pt, ct, err := h.provider.Chat([]Message{{Role: "system", Content: "Du bist der Reticora CMDB Assistent. Antworte nur anhand des bereitgestellten tenant-eigenen Kontextes und nenne Unsicherheit."}, {Role: "user", Content: prompt}})
+	answer, pt, ct, err := h.provider.Chat([]Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: prompt}})
 	if err != nil {
 		api.WriteError(w, http.StatusBadGateway, "AI provider error", err.Error())
 		return
+	}
+	// Citation obligation: an answer may only be served with the citations that
+	// back it. When no tenant-owned chunks were retrieved, the answer is not
+	// grounded in CMDB data; return it with an explicit notice and no
+	// citations so callers can surface the limitation instead of hallucinated
+	// sources.
+	if len(chunks) == 0 {
+		answer = "Hinweis: Es wurden keine passenden tenant-eigenen Daten gefunden. Die folgende Antwort ist daher nicht durch die CMDB belegt.\n\n" + answer
+		cites = nil
 	}
 	_ = h.repo.AddMessage(r.Context(), t.OrganizationID, convID, "user", req.Question, 0, 0, nil)
 	_ = h.repo.AddMessage(r.Context(), t.OrganizationID, convID, "assistant", answer, pt, ct, cites)
 	api.WriteJSON(w, http.StatusOK, AskResponse{ConversationID: convID, Answer: answer, Citations: cites, PromptTokens: pt, CompletionTokens: ct})
 }
+
+// systemPrompt enforces the RAG governance rules: answer only from the
+// supplied tenant-owned context, name uncertainty, and cite the sources.
+const systemPrompt = "Du bist der Reticora CMDB Assistent. Antworte ausschließlich anhand des bereitgestellten tenant-eigenen Kontextes. " +
+	"Wenn der Kontext die Frage nicht beantwortet, sage das ausdrücklich und erfinde keine Fakten. " +
+	"Nenne Unsicherheit und verweise bei jeder Aussage auf die Quelle (die Nummer des Kontext-Eintrags, z. B. [1])."
+
 func buildPrompt(q string, chunks []Chunk) string {
 	var b strings.Builder
 	b.WriteString("Kontext:\n")

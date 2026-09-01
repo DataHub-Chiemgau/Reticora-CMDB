@@ -59,5 +59,6 @@ type Repository interface {
 	ListConversations(ctx context.Context, orgID, userID string) ([]Conversation, error)
 	AddMessage(ctx context.Context, orgID, conversationID, role, content string, promptTokens, completionTokens int, citations []Citation) error
 	UpsertChunk(ctx context.Context, chunk Chunk) error
+	DeleteChunk(ctx context.Context, orgID, entityType, entityID string) error
 	CandidateChunks(ctx context.Context, orgID string, entityTypes []string, entityIDs []string, limit int) ([]Chunk, error)
 }

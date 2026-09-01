@@ -1,0 +1,58 @@
+# SLOs and alert rules for the Reticora CMDB API (Epic H3).
+# Loaded as a PrometheusRule (Prometheus Operator) or a plain Prometheus
+# `rule_files` entry. Alerts carry the organization_id label when the server
+# is run with RETICORA_METRICS_TENANT_LABEL=true so a single misbehaving
+# tenant can be isolated; without it the label is empty and alerts aggregate.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: reticora-slo
+  labels:
+    app.kubernetes.io/name: reticora-cmdb
+spec:
+  groups:
+    - name: reticora.availability
+      # SLO: 99.9% of requests succeed (non-5xx) over 30 days.
+      rules:
+        - record: reticora:http_requests:rate5m
+          expr: sum by (organization_id) (rate(reticora_http_requests_total[5m]))
+        - record: reticora:http_errors:rate5m
+          expr: sum by (organization_id) (rate(reticora_http_requests_total{status=~"5.."}[5m]))
+        - alert: ReticoraHighErrorRate
+          # Fast burn: >2% 5xx over 1h threatens the 99.9% SLO.
+          expr: |
+            sum by (organization_id) (rate(reticora_http_requests_total{status=~"5.."}[1h]))
+              /
+            sum by (organization_id) (rate(reticora_http_requests_total[1h]))
+              > 0.02
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "High 5xx error rate (tenant {{ $labels.organization_id }})"
+            description: "More than 2% of requests returned 5xx over the last hour, threatening the 99.9% availability SLO."
+    - name: reticora.latency
+      # SLO: p95 of read (GET) requests < 500ms over 30 days.
+      rules:
+        - alert: ReticoraHighReadLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum by (organization_id, le) (
+                rate(reticora_http_request_duration_seconds_bucket{method="GET"}[15m])
+              )
+            ) > 0.5
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High p95 read latency (tenant {{ $labels.organization_id }})"
+            description: "p95 GET latency above 500ms for 30 minutes, threatening the read-latency SLO."
+    - name: reticora.up
+      rules:
+        - alert: ReticoraDown
+          expr: up{job="reticora-server"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Reticora server is down"

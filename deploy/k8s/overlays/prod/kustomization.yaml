@@ -1,0 +1,42 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# Production adds the optional OpenSearch search backend component (Epic G2),
+# which also appends the RETICORA_OPENSEARCH_* / RETICORA_SEARCH_BACKEND env
+# vars to the server deployment, and the nightly backup CronJob (Epic H2),
+# which requires the reticora-backup secret.
+components:
+  - ../../base/components/opensearch
+  - ../../base/components/backup
+
+namespace: reticora
+
+commonLabels:
+  app.kubernetes.io/environment: production
+
+images:
+  - name: reticora-cmdb/server
+    newTag: "1.0.0"
+
+patches:
+  # Scale out for production and raise the resource envelope. The base already
+  # sets RETICORA_ENVIRONMENT=production and the observability env vars.
+  - target:
+      kind: Deployment
+      name: reticora-server
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi

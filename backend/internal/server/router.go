@@ -27,6 +27,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
@@ -84,6 +85,10 @@ type Repositories struct {
 // Options carries everything the router needs beyond the repositories.
 type Options struct {
 	Version string
+	// MetricsTenantLabel controls whether the organization_id label is
+	// populated on the HTTP request metrics. It multiplies the series count by
+	// the number of tenants, so it is opt-in for bounded-tenant deployments.
+	MetricsTenantLabel bool
 	// Entitlements resolves plans and gates add-on routes.
 	Entitlements *entitlement.Service
 	// Dispatcher publishes CI lifecycle events to webhook subscribers.
@@ -112,15 +117,18 @@ type registrar interface {
 }
 
 // NewRouter builds the complete API router. Every route the server exposes is
-// registered here; there is no other registration site.
-func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
+// registered here; there is no other registration site. It also returns the
+// tenant-aware HTTP metrics middleware, which the caller mounts on the outer
+// middleware chain so requests are recorded into the same registry that serves
+// /metrics.
+func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) http.Handler, error) {
 	if err := validate(repos, opts); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	mux := chi.NewRouter()
 
-	registerOperational(mux, opts.Version)
+	httpMetrics := registerOperational(mux, opts.Version, opts.MetricsTenantLabel)
 
 	// Every domain route is registered through the authorizing router, which
 	// attaches the permission middleware resolved from the route table.
@@ -172,7 +180,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, error) {
 		opts.Audit.RegisterRoutes(protected)
 	}
 
-	return mux, nil
+	return mux, httpMetrics, nil
 }
 
 // alertStoreFor pairs the alert-rule persistence with the metric store when
@@ -228,20 +236,26 @@ func validate(repos Repositories, opts Options) error {
 }
 
 // registerOperational adds the unauthenticated health and metrics endpoints.
-func registerOperational(mux *chi.Mux, version string) {
+// It returns the HTTP metrics middleware so main can mount it on the outer
+// middleware chain; the middleware records into the same registry that serves
+// /metrics.
+func registerOperational(mux *chi.Mux, version string, includeTenantLabel bool) func(http.Handler) http.Handler {
 	mux.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
-	mux.Handle("/metrics", metricsHandler(version))
+	handler, httpMetrics := metricsHandler(version, includeTenantLabel)
+	mux.Handle("/metrics", handler)
+	return httpMetrics
 }
 
 // metricsHandler serves application and Go runtime metrics in the Prometheus
 // exposition format. The reticora_up/reticora_info series are registered on a
 // dedicated registry so the endpoint stays stable regardless of what else is
-// instrumented.
-func metricsHandler(version string) http.Handler {
+// instrumented. It also registers the tenant-aware HTTP request metrics and
+// returns the middleware that records them.
+func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func(http.Handler) http.Handler) {
 	registry := prometheus.NewRegistry()
 
 	up := prometheus.NewGauge(prometheus.GaugeOpts{
@@ -262,5 +276,7 @@ func metricsHandler(version string) http.Handler {
 
 	registry.MustRegister(collectors.NewGoCollector())
 
-	return promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
+	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
+
+	return promhttp.HandlerFor(registry, promhttp.HandlerOpts{}), httpMetrics
 }

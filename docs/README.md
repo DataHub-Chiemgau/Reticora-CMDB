@@ -403,15 +403,30 @@ from being re-derived on the next run. `/api/v1/topology` and
 contacts within the current tenant and filters hits through the caller's
 effective read permissions. PostgreSQL full-text search over `search_document`
 is the default backend. Set `RETICORA_SEARCH_BACKEND=opensearch` together with
-`RETICORA_OPENSEARCH_URL` to use OpenSearch; startup pings OpenSearch and fails
-loudly if it is unreachable. User input is passed as structured parameters (SQL
-bind variables or OpenSearch JSON DSL), never interpolated into query strings.
+`RETICORA_OPENSEARCH_URL` to use OpenSearch; startup pings OpenSearch, applies
+the index template idempotently (`_index_template/<index>`, explicit mapping
+for `organization_id`/`entity_type`/`entity_id`/`title`/`summary`/`metadata`/
+`updated_at`) and fails loudly if either step fails. User input is passed as
+structured parameters (SQL bind variables or OpenSearch JSON DSL), never
+interpolated into query strings.
 `POST /api/v1/search/reindex` rebuilds the tenant index. The index is kept
 fresh between rebuilds: the CI repository is wrapped by an indexing decorator
 (`ci.NewIndexingRepository`) that mirrors every successful create, update and
 delete into the search backend — on every write path, including collector bulk
 ingest. Indexing is best-effort: a failing search backend is logged and never
 fails the CI mutation, because the index can always be rebuilt via reindex.
+
+**OpenSearch operations (Epic G2):** OpenSearch is an optional backend. With
+Docker Compose enable the `opensearch` profile (`docker compose --profile
+opensearch up -d`) and set `RETICORA_SEARCH_BACKEND=opensearch` for the
+server; with Kubernetes include the `deploy/k8s/components/opensearch`
+Kustomize component from an overlay to add the StatefulSet, headless Service
+and the server env patch. On every startup the server applies the index
+template and re-checks connectivity. PostgreSQL remains the source of truth:
+the hybrid backend rebuilds OpenSearch from `search_document` on
+`POST /api/v1/search/reindex`, so a lost or rebuilt index is recovered online
+and tenant-scoped. See `docs/opensearch.md` for the reindex runbook and
+troubleshooting (yellow status, disk watermark, unreachable backend).
 
 **Collector connectivity:** the collector authenticates uploads with mTLS when
 client-certificate material is available — from `RETICORA_TLS_CLIENT_CERT`/
@@ -491,9 +506,28 @@ OpenAI-compatible provider is configured, the handler returns HTTP 503 with a
 problem document. Retrieval first asks the search backend for tenant-owned
 candidates, applies the same permission checks, then ranks matching `ai_chunk`
 rows with cosine similarity when embeddings are configured or lexical scoring
-otherwise. The prompt contains only those retrieved chunks. Every exchange is
+otherwise. Governance is enforced fail-closed and covered by tests
+(`backend/internal/ai`): chunks from a foreign tenant are dropped even if a
+misconfigured search backend returns them (defense in depth on top of RLS),
+unknown entity types are denied, a failing permission check yields no chunks,
+and `contact` chunks require `contact:read` like the search index. The system
+prompt instructs the model to answer only from the supplied tenant context,
+to state uncertainty and to cite the source of every statement. When no
+tenant-owned chunks were retrieved, the answer is prefixed with an explicit
+"no tenant data found" notice and returned without citations, so callers
+surface the limitation instead of hallucinated sources. Every exchange is
 recorded in `ai_conversation`/`ai_message` with token counts and citations so
 answers remain auditable.
+
+**Retrieval chunk pipeline:** `ai_chunk` is kept in sync with CI mutations by
+`ai.NewCIChunkIndexer`, a second decorator on the CI repository next to the
+search indexer, so every write path (REST, collector ingest, workflow) feeds
+the assistant. Chunks store the CI title and summary as lexical content and
+an embedding vector when `RETICORA_LLM_EMBEDDING_MODEL` is configured;
+embedding failures degrade gracefully to lexical scoring and never block the
+CI write. Chunks for CIs created before the pipeline existed are backfilled
+by `POST /api/v1/search/reindex`, which rebuilds the tenant's search index
+(and thereby its chunks) from PostgreSQL as the source of truth.
 
 **Binaries (`backend/cmd/`):**
 
@@ -595,9 +629,29 @@ Reticora is deployed on **Kubernetes** in an EU region with infrastructure manag
 
 Manifests in `deploy/k8s/`:
 
-- `deployment.yaml` — Server deployment (2 replicas, health probes, resource limits).
-- `service.yaml` — ClusterIP service.
-- `kustomization.yaml` — Namespace `reticora`, common labels.
+- `base/` — the shared manifests: `deployment.yaml` (server with health probes
+  and resource limits), `service.yaml`, `serviceaccount.yaml` (ServiceAccount +
+  PodDisruptionBudget + secret-creation notes), `hpa.yaml` (autoscaling/v2,
+  2–10 replicas on CPU) and the optional `components/opensearch` component.
+- `overlays/staging` — single replica, no HPA, smaller resources,
+  `RETICORA_ENVIRONMENT=staging`, namespace `reticora-staging`.
+- `overlays/prod` — 3 replicas, HPA, higher resource envelope, includes the
+  OpenSearch component and points telemetry at the OTLP collector.
+
+`kustomize build` is run for the base and both overlays in CI
+(`.github/workflows/ci.yml`, job `k8s-manifests`).
+
+**Backup & disaster recovery:**
+
+See `docs/backup-dr.md`. PostgreSQL PITR (base backup + WAL archive) is the
+primary mechanism; `deploy/k8s/base/components/backup/cronjob.yaml` adds a nightly
+logical `pg_dump` to S3 as a portable safety net (optional component
+`deploy/k8s/base/components/backup`, included by the prod overlay; requires
+the `reticora-backup` secret). The OpenSearch index is not backed up — it is
+rebuilt online from PostgreSQL via
+`POST /api/v1/search/reindex`. `.github/workflows/restore-test.yml` runs a
+nightly restore test that dumps, restores into a fresh database, checks row
+counts and verifies the audit hash chain with the `audit-verify` binary.
 
 **Infrastructure services (docker-compose for local dev):**
 
@@ -615,7 +669,24 @@ Manifests in `deploy/k8s/`:
 
 **Grafana/Monitoring:**
 
-Dashboards and alerting configuration in `deploy/grafana/`.
+Dashboards in `deploy/grafana/` (`dashboard-overview.json`, plus
+`dashboard-tenant.json` for per-tenant rate/error/latency with an
+`organization_id` template variable). SLO definitions and alert rules live in
+`deploy/monitoring/slo-rules.yaml` (99.9 % availability, p95 read latency
+< 500 ms), carrying the `organization_id` label when tenant metrics are
+enabled.
+
+**Tenant-aware observability (Epic H3):** the server exports
+`reticora_http_requests_total` and `reticora_http_request_duration_seconds`
+with `method`, routed `path`, `status` and `organization_id` labels on
+`/metrics`. The `organization_id` label multiplies the series count by the
+number of tenants, so it is opt-in via `RETICORA_METRICS_TENANT_LABEL=true`
+(default off, all tenants aggregate into one series per method/path/status).
+The routed path (e.g. `/api/v1/cis/{id}`) is used instead of the raw URL so
+entity IDs never become label values. OpenTelemetry tracing/metrics export to
+an OTLP HTTP collector when `RETICORA_OTEL_ENDPOINT` is set (with
+`service.name` and `deployment.environment` resource attributes); with an
+empty endpoint the providers stay no-op.
 
 **Environment configuration:**
 
@@ -632,6 +703,8 @@ The server is configured via environment variables:
 - `RETICORA_LLM_BASE_URL`, `RETICORA_LLM_API_KEY`, `RETICORA_LLM_CHAT_MODEL`, `RETICORA_LLM_EMBEDDING_MODEL` — OpenAI-compatible chat and embedding provider settings.
 - `RETICORA_S3_ENDPOINT`, `RETICORA_S3_BUCKET`, `RETICORA_S3_ACCESS_KEY`, `RETICORA_S3_SECRET_KEY`, `RETICORA_S3_USE_SSL` — object storage for asynchronous export jobs (MinIO/S3).
 - `RETICORA_BLOB_DIR` — filesystem blob storage used by export jobs in `--no-db` development mode (defaults to a temp directory).
+- `RETICORA_OTEL_ENDPOINT` — OTLP HTTP collector endpoint for traces/metrics; empty (default) keeps no-op telemetry.
+- `RETICORA_METRICS_TENANT_LABEL` — set to `true` to add the `organization_id` label to HTTP request metrics (default `false`; multiplies series by tenant count).
 
 ### CI/CD
 

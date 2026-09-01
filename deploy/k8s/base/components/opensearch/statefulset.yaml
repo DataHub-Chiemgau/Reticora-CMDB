@@ -1,0 +1,80 @@
+# Optional OpenSearch component (Epic G2). Include from an overlay with:
+#   components:
+#     - ../../components/opensearch
+# The default deployment keeps using PostgreSQL full-text search.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: opensearch
+spec:
+  serviceName: opensearch
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: opensearch
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: opensearch
+    spec:
+      containers:
+        - name: opensearch
+          image: opensearchproject/opensearch:2.13.0
+          ports:
+            - containerPort: 9200
+              name: http
+          env:
+            - name: discovery.type
+              value: single-node
+            # Single-node default; the security plugin is disabled so the
+            # cluster network is the trust boundary. Enable it for production
+            # and provide RETICORA_OPENSEARCH_USERNAME/PASSWORD via the
+            # reticora-opensearch secret.
+            - name: plugins.security.disabled
+              value: "true"
+            - name: ES_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
+          readinessProbe:
+            httpGet:
+              path: /_cluster/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /_cluster/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/opensearch/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch
+spec:
+  clusterIP: None
+  ports:
+    - port: 9200
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/component: opensearch

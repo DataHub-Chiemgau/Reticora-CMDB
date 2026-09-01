@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Optional nightly logical-backup CronJob (Epic H2). Include from an overlay
+# with:
+#   components:
+#     - ../../base/components/backup
+# Requires the reticora-backup secret (database-url, aws-access-key-id,
+# aws-secret-access-key) to exist in the namespace; without it the job pods
+# fail on startup. PITR (WAL archiving) remains the primary backup mechanism.
+resources:
+  - cronjob.yaml

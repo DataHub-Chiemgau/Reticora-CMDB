@@ -1,0 +1,88 @@
+name: Restore Test
+
+# Nightly proof that a PostgreSQL backup restores cleanly and that the restored
+# audit hash chain still verifies. Runs on a schedule (and on demand); it is
+# intentionally not part of the per-PR CI because it is slow and uses no real
+# data — only generated fixtures.
+on:
+  schedule:
+    - cron: "0 3 * * *" # nightly at 03:00 UTC
+  workflow_dispatch:
+
+# The job only reads the checked-out repository and runs against a throwaway
+# database; it needs no write access to the repo.
+permissions:
+  contents: read
+
+jobs:
+  restore-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Same image family as the production database (TimescaleDB on PG16).
+        image: timescale/timescaledb:2.17.2-pg16
+        env:
+          POSTGRES_USER: reticora
+          POSTGRES_PASSWORD: reticora
+          POSTGRES_DB: reticora_restore
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U reticora"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: reticora
+      DATABASE_URL: "******localhost:5432/reticora_restore?sslmode=disable"
+      RESTORE_DATABASE_URL: "******localhost:5432/reticora_restored?sslmode=disable"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install golang-migrate
+        run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
+
+      - name: Apply all migrations
+        run: migrate -path backend/migrations -database "$DATABASE_URL" up
+
+      - name: Build audit tooling
+        working-directory: backend
+        run: |
+          go build -o /tmp/audit-seed ./cmd/audit-seed
+          go build -o /tmp/audit-verify ./cmd/audit-verify
+
+      - name: Seed fixture data (tenant + audit chain)
+        run: |
+          echo "ORG_ID=$(/tmp/audit-seed -database-url "$DATABASE_URL" -entries 5)" >> "$GITHUB_ENV"
+
+      - name: Verify the source chain before backup
+        run: /tmp/audit-verify -database-url "$DATABASE_URL" -org "$ORG_ID"
+
+      - name: Dump the database (logical backup)
+        run: pg_dump --format=custom --file=/tmp/reticora.dump "$DATABASE_URL"
+
+      - name: Create the restore target database
+        # PGPASSWORD authenticates; the DSN carries user + host.
+        run: psql "host=localhost port=5432 user=reticora dbname=postgres" -c "CREATE DATABASE reticora_restored"
+
+      - name: Restore into the fresh database
+        run: pg_restore --dbname="$RESTORE_DATABASE_URL" /tmp/reticora.dump
+
+      - name: "Integrity check: row counts match"
+        run: |
+          for table in organization audit_log; do
+            src=$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM $table")
+            dst=$(psql "$RESTORE_DATABASE_URL" -tAc "SELECT count(*) FROM $table")
+            echo "$table: source=$src restored=$dst"
+            if [ "$src" != "$dst" ]; then
+              echo "row count mismatch on $table"
+              exit 1
+            fi
+          done
+
+      - name: "Integrity check: audit hash chain verifies after restore"
+        run: /tmp/audit-verify -database-url "$RESTORE_DATABASE_URL" -org "$ORG_ID"
