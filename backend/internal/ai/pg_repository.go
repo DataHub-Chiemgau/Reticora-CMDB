@@ -82,6 +82,12 @@ func (r *PGRepository) UpsertChunk(ctx context.Context, ch Chunk) error {
 		return err
 	})
 }
+func (r *PGRepository) DeleteChunk(ctx context.Context, orgID, entityType, entityID string) error {
+	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `DELETE FROM ai_chunk WHERE organization_id=$1 AND entity_type=$2 AND entity_id=$3`, orgID, entityType, entityID)
+		return err
+	})
+}
 func (r *PGRepository) CandidateChunks(ctx context.Context, orgID string, entityTypes []string, entityIDs []string, limit int) ([]Chunk, error) {
 	if limit <= 0 {
 		limit = 50

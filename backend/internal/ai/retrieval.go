@@ -46,6 +46,11 @@ func (r *Retriever) Retrieve(ctx context.Context, orgID, userID, question string
 	var ids, types []string
 	seen := map[string]bool{}
 	for _, h := range sr.Data {
+		// Defense in depth: never trust a search backend hit that belongs to a
+		// different tenant, even if the backend is misconfigured.
+		if h.OrganizationID != "" && h.OrganizationID != orgID {
+			continue
+		}
 		if !r.allowed(ctx, orgID, userID, h.EntityType) {
 			continue
 		}
@@ -73,6 +78,10 @@ func (r *Retriever) Retrieve(ctx context.Context, orgID, userID, question string
 	var scoredChunks []scored
 	qlower := strings.ToLower(question)
 	for _, ch := range chunks {
+		// Defense in depth: only rank chunks owned by the requesting tenant.
+		if ch.OrganizationID != "" && ch.OrganizationID != orgID {
+			continue
+		}
 		s := float64(strings.Count(strings.ToLower(ch.Title+" "+ch.Content), qlower))
 		if len(qvec) > 0 && len(ch.Embedding) > 0 {
 			s = Cosine(qvec, ch.Embedding)
@@ -112,6 +121,8 @@ func searchPermission(entity string) string {
 		return "document:read"
 	case "ticket":
 		return "ticket:read"
+	case "contact":
+		return "contact:read"
 	case "compliance":
 		return "compliance:read"
 	default:

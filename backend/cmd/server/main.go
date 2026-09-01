@@ -200,6 +200,11 @@ func main() {
 	aiProvider := ai.NewOpenAIProvider(ai.ProviderConfig{
 		BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, ChatModel: cfg.LLMChatModel, EmbeddingModel: cfg.LLMEmbeddingModel,
 	}, nil)
+	// Mirror CI mutations into the retrieval chunk store so the governed RAG
+	// assistant has tenant-owned content to ground its answers. Chunks are
+	// embedded when an embedding model is configured and fall back to lexical
+	// scoring otherwise.
+	repos.CI = ci.NewIndexingRepository(repos.CI, ai.NewCIChunkIndexer(repos.AI, aiProvider))
 
 	entitlementSvc := entitlement.NewService(repos.Entitlement, entitlement.Options{
 		DefaultPlan: entitlement.Plan(cfg.DefaultPlan),
