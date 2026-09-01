@@ -9,6 +9,11 @@ on:
     - cron: "0 3 * * *" # nightly at 03:00 UTC
   workflow_dispatch:
 
+# The job only reads the checked-out repository and runs against a throwaway
+# database; it needs no write access to the repo.
+permissions:
+  contents: read
+
 jobs:
   restore-test:
     runs-on: ubuntu-latest
