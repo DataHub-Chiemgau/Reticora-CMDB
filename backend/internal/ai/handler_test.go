@@ -42,7 +42,7 @@ func setupAsk(t *testing.T, indexSeed func(sr *search.MemoryRepository, repo *Me
 
 func ask(t *testing.T, mux chi.Router, question string) AskResponse {
 	t.Helper()
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/ai/ask", bytes.NewBufferString(`{"question":`+strconv(question)+`}`))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/ai/ask", bytes.NewBufferString(`{"question":`+jsonQuote(question)+`}`))
 	r = r.WithContext(tenant.WithTenant(r.Context(), tenant.TenantInfo{OrganizationID: "org", UserID: "user"}))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
@@ -56,7 +56,7 @@ func ask(t *testing.T, mux chi.Router, question string) AskResponse {
 	return out
 }
 
-func strconv(s string) string { b, _ := json.Marshal(s); return string(b) }
+func jsonQuote(s string) string { b, _ := json.Marshal(s); return string(b) }
 
 func TestAskWithoutChunksReturnsUngroundedNoticeAndNoCitations(t *testing.T) {
 	mux := setupAsk(t, nil)

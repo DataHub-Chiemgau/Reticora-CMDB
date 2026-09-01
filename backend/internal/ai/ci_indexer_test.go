@@ -58,11 +58,18 @@ func TestCIChunkIndexerDelete(t *testing.T) {
 	if err := idx.IndexDocument(context.Background(), doc); err != nil {
 		t.Fatal(err)
 	}
+	// A chunk with an explicitly set ID must be found by DeleteChunk too.
+	if err := repo.UpsertChunk(context.Background(), Chunk{ID: "custom-id", OrganizationID: "org", EntityType: "ci", EntityID: "c4", Title: "X", Content: "x"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := idx.DeleteDocument(context.Background(), "org", "ci", "c3"); err != nil {
 		t.Fatal(err)
 	}
-	chunks, _ := repo.CandidateChunks(context.Background(), "org", []string{"ci"}, []string{"c3"}, 1)
+	if err := idx.DeleteDocument(context.Background(), "org", "ci", "c4"); err != nil {
+		t.Fatal(err)
+	}
+	chunks, _ := repo.CandidateChunks(context.Background(), "org", []string{"ci"}, []string{"c3", "c4"}, 10)
 	if len(chunks) != 0 {
-		t.Fatalf("expected chunk to be deleted, got %d", len(chunks))
+		t.Fatalf("expected chunks to be deleted, got %d", len(chunks))
 	}
 }
