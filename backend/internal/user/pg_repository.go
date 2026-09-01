@@ -543,7 +543,7 @@ func (r *PGRepository) ListRoles(ctx context.Context, orgID string, page api.Pag
 			) all_roles`, orgID).Scan(&total); err != nil {
 			return fmt.Errorf("count roles: %w", err)
 		}
-		rows, err := tx.Query(ctx, unionQuery+fmt.Sprintf(" LIMIT %d OFFSET %d", page.Limit, page.Offset), orgID)
+		rows, err := tx.Query(ctx, unionQuery+" LIMIT $2 OFFSET $3", orgID, page.Limit, page.Offset)
 		if err != nil {
 			return fmt.Errorf("list roles: %w", err)
 		}
@@ -978,10 +978,16 @@ func (r *PGRepository) EnsureUser(ctx context.Context, orgID, oidcSubject, email
 	}
 	var id string
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// On conflict (returning user) refresh profile fields so an email/name
+		// change in the IdP propagates; the subject itself never changes.
 		return tx.QueryRow(ctx, `
 			INSERT INTO app_user (organization_id, oidc_subject, email, display_name, is_active)
 			VALUES ($1, $2, $3, $4, true)
-			ON CONFLICT (oidc_subject) DO UPDATE SET oidc_subject = EXCLUDED.oidc_subject
+			ON CONFLICT (oidc_subject) DO UPDATE SET
+				email = EXCLUDED.email,
+				display_name = EXCLUDED.display_name,
+				is_active = true,
+				updated_at = now()
 			RETURNING id::text
 		`, orgID, oidcSubject, email, displayName).Scan(&id)
 	})

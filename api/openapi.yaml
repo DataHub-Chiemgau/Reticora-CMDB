@@ -8448,16 +8448,18 @@ components:
 
     CreateContactRequest:
       type: object
-      required: []
+      description: A contact needs a display name; the server also accepts the
+        `name` alias when `display_name` is omitted (server-side fallback, not
+        expressible as a single required field without dropping the alias).
       properties:
         client_id:
           type: string
         display_name:
           type: string
-          description: Required; `name` is accepted as an alias when omitted.
+          description: Display name; required unless `name` is given.
         name:
           type: string
-          description: Alias for display_name.
+          description: Server-accepted alias for display_name.
         email:
           type: string
         phone:

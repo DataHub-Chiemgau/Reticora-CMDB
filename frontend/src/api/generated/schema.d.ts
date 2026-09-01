@@ -4596,11 +4596,12 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description A contact needs a display name; the server also accepts the `name` alias when `display_name` is omitted (server-side fallback, not expressible as a single required field without dropping the alias). */
     CreateContactRequest: {
       client_id?: string;
-      /** @description Required; `name` is accepted as an alias when omitted. */
+      /** @description Display name; required unless `name` is given. */
       display_name?: string;
-      /** @description Alias for display_name. */
+      /** @description Server-accepted alias for display_name. */
       name?: string;
       email?: string;
       phone?: string;

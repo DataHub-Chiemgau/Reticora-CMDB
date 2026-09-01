@@ -138,13 +138,16 @@ var errRuleNotFound = errors.New("alert rule not found")
 
 // durationPtrLiteral converts an optional Go duration string to the interval
 // literal Postgres understands; nil stays NULL so COALESCE keeps the old value.
+// An unparsable string also maps to NULL (keeping the old value) rather than
+// surfacing a confusing Postgres interval error to a caller that bypassed
+// handler-side validation.
 func durationPtrLiteral(d *string) any {
 	if d == nil {
 		return nil
 	}
 	parsed, err := time.ParseDuration(*d)
 	if err != nil {
-		return *d
+		return nil
 	}
 	return intervalLiteral(parsed)
 }
