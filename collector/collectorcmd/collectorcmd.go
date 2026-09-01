@@ -128,7 +128,7 @@ func Main() {
 
 	go runDiscoveryLoop(ctx, collectorCfg, uploader)
 	go runHeartbeatLoop(ctx, collectorCfg, uploader)
-	go runAgentRelay(ctx)
+	go runAgentRelay(ctx, uploader)
 	if collectorCfg.TrapListenAddr != "" {
 		go runTrapReceiver(ctx, collectorCfg, uploader)
 	}
@@ -406,6 +406,38 @@ func (u *uploader) postPayload(ctx context.Context, payload []byte) error {
 	return nil
 }
 
+// postAgentTelemetry forwards an endpoint-agent telemetry payload to the
+// backend's agent surface (not the discovery ingest used for device results).
+func (u *uploader) postAgentTelemetry(ctx context.Context, payload []byte) error {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write(payload); err != nil {
+		return fmt.Errorf("compress telemetry: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return fmt.Errorf("finalize compression: %w", err)
+	}
+
+	endpoint := strings.TrimRight(u.cfg.ServerURL, "/") + "/api/v1/agents/telemetry"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &buf)
+	if err != nil {
+		return fmt.Errorf("build telemetry request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+
+	resp, err := u.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("telemetry upload request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("telemetry upload failed with status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // spoolResults persists an undeliverable batch to the disk buffer.
 func (u *uploader) spoolResults(ctx context.Context, payload []byte) error {
 	if u.spool == nil {
@@ -666,7 +698,7 @@ func (u *uploader) uploadTrapEvent(ctx context.Context, ev snmp.TrapEvent) error
 	return u.postMetricsPayload(ctx, payload)
 }
 
-func runAgentRelay(ctx context.Context) {
+func runAgentRelay(ctx context.Context, up *uploader) {
 	slog.Info("agent relay started")
 
 	// The agent relay accepts incoming connections from endpoint agents
@@ -695,12 +727,13 @@ func runAgentRelay(ctx context.Context) {
 			slog.Error("agent relay accept error", "error", err)
 			continue
 		}
-		go handleAgentConnection(ctx, conn)
+		go handleAgentConnection(ctx, up, conn)
 	}
 }
 
-// handleAgentConnection processes a single agent connection, reading telemetry data.
-func handleAgentConnection(ctx context.Context, conn net.Conn) {
+// handleAgentConnection processes a single agent connection, reading telemetry data
+// and forwarding it to the backend through the collector's (mTLS) upload path.
+func handleAgentConnection(ctx context.Context, up *uploader, conn net.Conn) {
 	defer conn.Close()
 
 	remoteAddr := conn.RemoteAddr().String()
@@ -721,6 +754,22 @@ func handleAgentConnection(ctx context.Context, conn net.Conn) {
 	}
 
 	slog.Debug("agent data received", "remote", remoteAddr, "bytes", n)
+
+	// Forward the telemetry payload to the backend's agent-telemetry endpoint
+	// via the collector's (mTLS-authenticated) upload path, falling back to the
+	// disk spool when the cloud is unreachable. The agent gets an ack only once
+	// the payload is durably accepted (uploaded or spooled).
+	payload := buf[:n]
+	if up != nil {
+		if err := up.postAgentTelemetry(ctx, payload); err != nil {
+			slog.Warn("agent telemetry upload failed, spooling", "remote", remoteAddr, "error", err)
+			if serr := up.spoolResults(ctx, payload); serr != nil {
+				slog.Error("agent telemetry spool failed", "remote", remoteAddr, "error", serr)
+				_, _ = conn.Write([]byte(`{"status":"error"}` + "\n"))
+				return
+			}
+		}
+	}
 
 	// Acknowledge receipt
 	_, _ = conn.Write([]byte(`{"status":"ok"}` + "\n"))
