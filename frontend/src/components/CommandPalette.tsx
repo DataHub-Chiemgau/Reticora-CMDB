@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearch } from '../api/hooks';
+import { navFeatureFor } from '../hooks/useEntitlements';
 import { Badge } from './ui/Badge';
 import { cn } from './ui/utils';
 
@@ -61,6 +62,11 @@ interface CommandPaletteProps {
   onNavigate: (page: AppPage) => void;
   onCreateCI: () => void;
   onToggleDarkMode: () => void;
+  /**
+   * isFeatureEnabled reports whether an entitlement-gated module is available.
+   * Defaults to always-true so tests and ungated contexts keep full commands.
+   */
+  isFeatureEnabled?: (feature: string | undefined) => boolean;
 }
 
 interface CommandItem {
@@ -95,7 +101,12 @@ function fuzzyMatch(value: string, query: string) {
   return false;
 }
 
-export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: CommandPaletteProps) {
+export function CommandPalette({
+  onNavigate,
+  onCreateCI,
+  onToggleDarkMode,
+  isFeatureEnabled = () => true,
+}: CommandPaletteProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -254,8 +265,20 @@ export function CommandPalette({ onNavigate, onCreateCI, onToggleDarkMode }: Com
         keywords: ['security sicherheit dsgvo gdpr privacy retention compliance report'],
         action: () => onNavigate('security'),
       },
-    ],
-    [onCreateCI, onNavigate, onToggleDarkMode, t],
+      {
+        id: 'nav-security',
+        label: t('commandPalette.commands.security', 'Sicherheit & DSGVO öffnen'),
+        keywords: ['security sicherheit dsgvo gdpr privacy retention compliance report'],
+        action: () => onNavigate('security'),
+      },
+    ].filter((cmd) => {
+      // Hide navigation commands for modules the tenant's plan does not
+      // include, mirroring the gated main navigation.
+      if (!cmd.id.startsWith('nav-')) return true;
+      const page = cmd.id.slice(4) as AppPage;
+      return isFeatureEnabled(navFeatureFor[page]);
+    }),
+    [onCreateCI, onNavigate, onToggleDarkMode, t, isFeatureEnabled],
   );
 
   const filteredCommands = useMemo(() => {

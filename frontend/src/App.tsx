@@ -11,6 +11,7 @@ import { useAuthStore } from './auth/authStore';
 import { fetchAuthConfig, getStoredAuthConfig } from './auth/oidc';
 import { LoginPage } from './pages/auth/LoginPage';
 import { CallbackPage } from './pages/auth/CallbackPage';
+import { useEntitlements, navFeatureFor } from './hooks/useEntitlements';
 import { useThemeStore } from './stores/theme';
 
 // Route-level code splitting: every feature page is a separate chunk so the
@@ -108,6 +109,39 @@ function App() {
     navigate(pageToPath[page] || '/cmdb');
   }
 
+  // Entitlement-gated navigation: modules the tenant's plan does not include
+  // are hidden instead of producing a 403 on click (progressive disclosure).
+  const { isEnabled } = useEntitlements();
+  const navItems: { page: AppPage; label: string }[] = (
+    [
+      'dashboard',
+      'cmdb',
+      'topology',
+      'racks',
+      'assets',
+      'tickets',
+      'assignments',
+      'documents',
+      'stocktake',
+      'discovery',
+      'users',
+      'permissions',
+      'slas',
+      'forms',
+      'workflows',
+      'compliance',
+      'iga',
+      'assistant',
+      'webhooks',
+      'export',
+      'monitoring',
+      'audit',
+      'security',
+    ] as AppPage[]
+  )
+    .filter((page) => isEnabled(navFeatureFor[page]))
+    .map((page) => ({ page, label: t(`nav.${page}`, page) }));
+
   function openCreateCI() {
     navigate('/cmdb');
     setIsCreateOpen(true);
@@ -148,123 +182,15 @@ function App() {
                 className="flex flex-wrap gap-2"
                 aria-label={t('accessibility.primaryNavigation')}
               >
-                <NavButton
-                  active={currentPage === 'dashboard'}
-                  onClick={() => handleNavigate('dashboard')}
-                >
-                  {t('nav.dashboard')}
-                </NavButton>
-                <NavButton active={currentPage === 'cmdb'} onClick={() => handleNavigate('cmdb')}>
-                  {t('nav.cmdb')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'topology'}
-                  onClick={() => handleNavigate('topology')}
-                >
-                  {t('nav.topology')}
-                </NavButton>
-                <NavButton active={currentPage === 'racks'} onClick={() => handleNavigate('racks')}>
-                  {t('nav.racks', 'Racks')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'assets'}
-                  onClick={() => handleNavigate('assets')}
-                >
-                  {t('nav.assets', 'Inventar')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'tickets'}
-                  onClick={() => handleNavigate('tickets')}
-                >
-                  {t('nav.tickets', 'Tickets')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'assignments'}
-                  onClick={() => handleNavigate('assignments')}
-                >
-                  {t('nav.assignments', 'Zuweisungen')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'documents'}
-                  onClick={() => handleNavigate('documents')}
-                >
-                  {t('nav.documents', 'Dokumente')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'stocktake'}
-                  onClick={() => handleNavigate('stocktake')}
-                >
-                  {t('nav.stocktake', 'Inventur')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'discovery'}
-                  onClick={() => handleNavigate('discovery')}
-                >
-                  {t('nav.discovery')}
-                </NavButton>
-                <NavButton active={currentPage === 'users'} onClick={() => handleNavigate('users')}>
-                  {t('nav.users', 'Benutzer')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'permissions'}
-                  onClick={() => handleNavigate('permissions')}
-                >
-                  {t('nav.permissions')}
-                </NavButton>
-                <NavButton active={currentPage === 'slas'} onClick={() => handleNavigate('slas')}>
-                  {t('nav.slas')}
-                </NavButton>
-                <NavButton active={currentPage === 'forms'} onClick={() => handleNavigate('forms')}>
-                  {t('nav.forms')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'workflows'}
-                  onClick={() => handleNavigate('workflows')}
-                >
-                  {t('nav.workflows')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'compliance'}
-                  onClick={() => handleNavigate('compliance')}
-                >
-                  {t('nav.compliance')}
-                </NavButton>
-                <NavButton active={currentPage === 'iga'} onClick={() => handleNavigate('iga')}>
-                  {t('nav.iga')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'assistant'}
-                  onClick={() => handleNavigate('assistant')}
-                >
-                  {t('nav.assistant')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'webhooks'}
-                  onClick={() => handleNavigate('webhooks')}
-                >
-                  {t('nav.webhooks')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'export'}
-                  onClick={() => handleNavigate('export')}
-                >
-                  {t('nav.export')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'monitoring'}
-                  onClick={() => handleNavigate('monitoring')}
-                >
-                  {t('nav.monitoring')}
-                </NavButton>
-                <NavButton active={currentPage === 'audit'} onClick={() => handleNavigate('audit')}>
-                  {t('nav.audit')}
-                </NavButton>
-                <NavButton
-                  active={currentPage === 'security'}
-                  onClick={() => handleNavigate('security')}
-                >
-                  {t('nav.security')}
-                </NavButton>
+                {navItems.map(({ page, label }) => (
+                  <NavButton
+                    key={page}
+                    active={currentPage === page}
+                    onClick={() => handleNavigate(page)}
+                  >
+                    {label}
+                  </NavButton>
+                ))}
               </nav>
             ) : null}
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -365,6 +291,7 @@ function App() {
           onNavigate={handleNavigate}
           onCreateCI={openCreateCI}
           onToggleDarkMode={toggleDarkMode}
+          isFeatureEnabled={isEnabled}
         />
       ) : null}
       {isAuthenticated ? (

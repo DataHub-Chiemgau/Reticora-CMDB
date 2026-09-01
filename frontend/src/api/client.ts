@@ -1614,3 +1614,19 @@ export const auditApi = {
     return fetchAPI('/audit/verify', { method: 'POST' });
   },
 };
+
+// ─── Entitlements (feature availability per plan) ───────────────────────────
+
+export interface Entitlement {
+  organization_id: string;
+  feature_key: string;
+  plan: string;
+  enabled: boolean;
+  updated_at: string;
+}
+
+export const entitlementApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<Entitlement>> {
+    return fetchAPI(`/entitlements${buildQuery(params)}`);
+  },
+};
