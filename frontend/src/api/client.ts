@@ -1630,3 +1630,27 @@ export const entitlementApi = {
     return fetchAPI(`/entitlements${buildQuery(params)}`);
   },
 };
+
+// ─── Sites / GIS ────────────────────────────────────────────────────────────
+
+export interface Site {
+  id: string;
+  organization_id: string;
+  client_id?: string;
+  name: string;
+  address?: string;
+  geo_lat?: number | null;
+  geo_lon?: number | null;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export const siteApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<Site>> {
+    return fetchAPI(`/sites${buildQuery(params)}`);
+  },
+  get(id: string): Promise<Site> {
+    return fetchAPI(`/sites/${id}`);
+  },
+};

@@ -54,6 +54,7 @@ const UserManagementPage = lazyPage(() => import('./pages/UserManagementPage'), 
 const WebhooksPage = lazyPage(() => import('./pages/WebhooksPage'), 'WebhooksPage');
 const AuditPage = lazyPage(() => import('./pages/AuditPage'), 'AuditPage');
 const SecurityPage = lazyPage(() => import('./pages/SecurityPage'), 'SecurityPage');
+const MapPage = lazyPage(() => import('./pages/MapPage'), 'MapPage');
 
 // Full-screen fallback while a page chunk loads.
 function PageFallback() {
@@ -117,6 +118,7 @@ function App() {
       'dashboard',
       'cmdb',
       'topology',
+      'map',
       'racks',
       'assets',
       'tickets',
@@ -260,6 +262,7 @@ function App() {
             <Route path="/cmdb" element={<CIListPage onCreateCI={openCreateCI} />} />
             <Route path="/cmdb/:id" element={<CIDetailPage />} />
             <Route path="/topology" element={<TopologyPage />} />
+            <Route path="/map" element={<MapPage />} />
             <Route path="/racks" element={<RackPage />} />
             <Route path="/discovery" element={<DiscoveryPage />} />
             <Route path="/assets" element={<AssetListPage />} />

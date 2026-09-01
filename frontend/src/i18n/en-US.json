@@ -28,7 +28,8 @@
     "export": "Export",
     "monitoring": "Monitoring",
     "audit": "Audit",
-    "security": "Security"
+    "security": "Security",
+    "map": "Map"
   },
   "common": {
     "save": "Save",
@@ -586,5 +587,14 @@
     "rotateKeys": "Rotate keys now",
     "keyRotationResult": "Rotation complete: key version {{version}}, {{rotated}} credentials re-encrypted.",
     "keyRotationError": "Key rotation failed"
+  },
+  "map": {
+    "summary": "Sites on the map. Markers open the site.",
+    "located": "located",
+    "unlocated": "without coordinates",
+    "worldAria": "World map with site markers",
+    "hint": "Select a marker to see details.",
+    "openSite": "Show site CIs",
+    "noCoords": "Without coordinates"
   }
 }

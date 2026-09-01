@@ -28,7 +28,8 @@
     "export": "Export",
     "monitoring": "Monitoring",
     "audit": "Audit",
-    "security": "Sicherheit"
+    "security": "Sicherheit",
+    "map": "Karte"
   },
   "common": {
     "save": "Speichern",
@@ -586,5 +587,14 @@
     "rotateKeys": "Schlüssel jetzt rotieren",
     "keyRotationResult": "Rotation abgeschlossen: Schlüsselversion {{version}}, {{rotated}} Credentials neu verschlüsselt.",
     "keyRotationError": "Die Schlüsselrotation ist fehlgeschlagen"
+  },
+  "map": {
+    "summary": "Standorte auf der Karte. Marker öffnen den Standort.",
+    "located": "lokalisiert",
+    "unlocated": "ohne Koordinaten",
+    "worldAria": "Weltkarte mit Standortmarkern",
+    "hint": "Wählen Sie einen Marker, um Details zu sehen.",
+    "openSite": "Standort-CIs anzeigen",
+    "noCoords": "Ohne Koordinaten"
   }
 }
