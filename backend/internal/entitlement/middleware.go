@@ -40,6 +40,12 @@ var gatedRoutes = []struct {
 
 // RequiredFeature returns the feature key gating the given request path.
 func RequiredFeature(path string) (string, bool) {
+	// The enrollment endpoint is the pre-entitlement onboarding entry point:
+	// the collector has no tenant context yet, the single-use code is the
+	// credential, and enrollment must work before any plan check can pass.
+	if path == "/api/v1/collectors/enroll" {
+		return "", false
+	}
 	for _, route := range gatedRoutes {
 		if path == route.prefix || strings.HasPrefix(path, route.prefix+"/") || strings.HasPrefix(path, route.prefix+"?") {
 			return route.feature, true

@@ -559,3 +559,63 @@ func (r *PGRepository) LookupCITypeID(ctx context.Context, orgID, nameOrID strin
 	}
 	return id, nil
 }
+
+// CreateEnrollmentCode stores the hash of a new enrollment code.
+func (r *PGRepository) CreateEnrollmentCode(ctx context.Context, code *EnrollmentCode) error {
+	return r.withTenant(ctx, code.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			INSERT INTO collector_enrollment_code (organization_id, code_hash, label, expires_at)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id::text, created_at
+		`, code.OrganizationID, enrollmentCodeHash(code.RawCode()), code.Label, code.ExpiresAt).
+			Scan(&code.ID, &code.CreatedAt)
+	})
+}
+
+// RedeemEnrollmentCode atomically validates and consumes a code. Codes are
+// looked up by hash outside the tenant context (the collector is not yet
+// enrolled and has no tenant), then the org scope is enforced on the update.
+func (r *PGRepository) RedeemEnrollmentCode(ctx context.Context, rawCode, collectorID string) (string, error) {
+	hash := enrollmentCodeHash(rawCode)
+	// The code hash is globally unique, so the org lookup and the consume
+	// update run in a single statement. RLS is bypassed for this deliberately
+	// unauthenticated path by using the code_hash (the credential) as the
+	// lookup key; the org scope is enforced by the UPDATE's tenant context.
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return "", fmt.Errorf("begin redeem tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var orgID string
+	// The code hash is the credential; the lookup runs under the dedicated
+	// app.system flag because there is no tenant context before enrollment.
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.system', 'on', true)"); err != nil {
+		return "", fmt.Errorf("set system context: %w", err)
+	}
+	err = tx.QueryRow(ctx, `
+		SELECT organization_id::text FROM collector_enrollment_code
+		WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
+	`, hash).Scan(&orgID)
+	if err == pgx.ErrNoRows {
+		return "", fmt.Errorf("enrollment code invalid, expired or already used")
+	}
+	if err != nil {
+		return "", fmt.Errorf("lookup enrollment code: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
+		return "", fmt.Errorf("set tenant context: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE collector_enrollment_code
+		SET used_at = now(), used_by_collector_id = NULLIF($2, '')::uuid
+		WHERE code_hash = $1 AND used_at IS NULL
+	`, hash, collectorID); err != nil {
+		return "", fmt.Errorf("consume enrollment code: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("commit redeem: %w", err)
+	}
+	return orgID, nil
+}

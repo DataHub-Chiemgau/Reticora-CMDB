@@ -139,6 +139,10 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 	switch path {
 	case "/api/v1/auth/config", "/api/v1/auth/callback", "/api/v1/auth/refresh":
 		return "", routePublic
+	case "/api/v1/collectors/enroll":
+		// Zero-config onboarding: the single-use enrollment code is the
+		// credential; the collector has no bearer token before enrolling.
+		return "", routePublic
 	}
 
 	rest := strings.TrimPrefix(path, "/api/v1/")

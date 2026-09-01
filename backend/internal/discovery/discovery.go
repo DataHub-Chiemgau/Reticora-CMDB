@@ -3,6 +3,10 @@ package discovery
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -87,6 +91,13 @@ type Repository interface {
 	RegisterCollector(ctx context.Context, c *Collector) error
 	Heartbeat(ctx context.Context, orgID, collectorID string) error
 
+	// Enrollment codes (zero-config onboarding).
+	CreateEnrollmentCode(ctx context.Context, code *EnrollmentCode) error
+	// RedeemEnrollmentCode validates the raw code, marks it used and returns
+	// the owning organization. It must fail for unknown, expired or already
+	// used codes.
+	RedeemEnrollmentCode(ctx context.Context, rawCode, collectorID string) (orgID string, err error)
+
 	// Discovery jobs.
 	ListJobs(ctx context.Context, orgID string, filter JobFilter, page api.PaginationParams) ([]Job, int, error)
 	CreateJob(ctx context.Context, j *Job) error
@@ -101,12 +112,14 @@ type Repository interface {
 
 // MemoryRepository is an in-memory collector store.
 type MemoryRepository struct {
-	mu          sync.RWMutex
-	collectors  map[string]*Collector
-	jobs        map[string]*Job
-	reviewItems map[string]*ReviewItem
-	ciTypes     map[string]string
-	seq         int
+	mu           sync.RWMutex
+	collectors   map[string]*Collector
+	jobs         map[string]*Job
+	reviewItems  map[string]*ReviewItem
+	ciTypes      map[string]string
+	enrollCodes  map[string]*EnrollmentCode
+	enrollHashes map[string]string
+	seq          int
 }
 
 // NewMemoryRepository creates a new in-memory discovery repository.
@@ -176,6 +189,43 @@ func (r *MemoryRepository) RegisterCollector(_ context.Context, c *Collector) er
 	return nil
 }
 
+func (r *MemoryRepository) CreateEnrollmentCode(_ context.Context, code *EnrollmentCode) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.enrollCodes == nil {
+		r.enrollCodes = map[string]*EnrollmentCode{}
+	}
+	r.seq++
+	code.ID = fmt.Sprintf("enc-%06d", r.seq)
+	code.CreatedAt = time.Now().UTC()
+	r.enrollCodes[code.ID] = code
+	// rawHash is stored alongside for redemption lookup.
+	if r.enrollHashes == nil {
+		r.enrollHashes = map[string]string{}
+	}
+	r.enrollHashes[enrollmentCodeHash(code.rawCode)] = code.ID
+	return nil
+}
+
+func (r *MemoryRepository) RedeemEnrollmentCode(_ context.Context, rawCode, collectorID string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id, ok := r.enrollHashes[enrollmentCodeHash(rawCode)]
+	if !ok {
+		return "", fmt.Errorf("invalid enrollment code")
+	}
+	code := r.enrollCodes[id]
+	if code == nil || code.UsedAt != nil {
+		return "", fmt.Errorf("enrollment code already used")
+	}
+	if time.Now().UTC().After(code.ExpiresAt) {
+		return "", fmt.Errorf("enrollment code expired")
+	}
+	now := time.Now().UTC()
+	code.UsedAt = &now
+	return code.OrganizationID, nil
+}
+
 func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -187,6 +237,34 @@ func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID strin
 	c.LastHeartbeat = time.Now().UTC().Format(time.RFC3339)
 	c.Status = "online"
 	return nil
+}
+
+// EnrollmentCode is a short-lived, single-use secret a collector presents to
+// enroll. Only the SHA-256 hash is persisted; the raw code is carried on the
+// struct only transiently between creation and hashing.
+type EnrollmentCode struct {
+	ID             string     `json:"id"`
+	OrganizationID string     `json:"organization_id"`
+	Label          string     `json:"label,omitempty"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	UsedAt         *time.Time `json:"used_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+
+	// rawCode is never serialized; it exists only so the handler can return
+	// the code once at creation time.
+	rawCode string
+}
+
+// SetRawCode assigns the transient plaintext code (creation only).
+func (c *EnrollmentCode) SetRawCode(raw string) { c.rawCode = raw }
+
+// RawCode exposes the transient plaintext code for hashing at persistence.
+func (c *EnrollmentCode) RawCode() string { return c.rawCode }
+
+// enrollmentCodeHash derives the stored lookup key from the raw code.
+func enrollmentCodeHash(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
 }
 
 // Handler provides HTTP handlers for discovery endpoints.
@@ -278,6 +356,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/collectors", h.ListCollectors)
 	r.Post("/api/v1/collectors", h.RegisterCollector)
 	r.Post("/api/v1/collectors/{id}/heartbeat", h.Heartbeat)
+	// Zero-config onboarding: an operator mints a short-lived enrollment code;
+	// the collector redeems it (unauthenticated, code = the credential) for its
+	// identity.
+	r.Post("/api/v1/collectors/enrollment-codes", h.CreateEnrollmentCode)
+	r.Post("/api/v1/collectors/enroll", h.EnrollCollector)
 	r.Post("/api/v1/ingest/bulk", h.BulkIngest)
 	// Spec-named alias for the bulk ingest endpoint.
 	r.Post("/api/v1/discovery/ingest", h.BulkIngest)
@@ -346,6 +429,106 @@ func (h *Handler) RegisterCollector(w http.ResponseWriter, r *http.Request) {
 	}
 
 	api.WriteJSON(w, http.StatusCreated, c)
+}
+
+// CreateEnrollmentCode handles POST /api/v1/collectors/enrollment-codes. It
+// mints a single-use code and returns the plaintext exactly once; only the
+// hash is stored.
+func (h *Handler) CreateEnrollmentCode(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	var req struct {
+		Label     string `json:"label"`
+		TTLMinutes int   `json:"ttl_minutes,omitempty"`
+	}
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	ttl := time.Duration(req.TTLMinutes) * time.Minute
+	if ttl <= 0 || ttl > 24*time.Hour {
+		ttl = 30 * time.Minute
+	}
+
+	raw, err := generateEnrollmentCode()
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "failed to generate enrollment code")
+		return
+	}
+	code := &EnrollmentCode{
+		OrganizationID: t.OrganizationID,
+		Label:          req.Label,
+		ExpiresAt:      time.Now().UTC().Add(ttl),
+	}
+	code.SetRawCode(raw)
+	if err := h.repo.CreateEnrollmentCode(r.Context(), code); err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
+	api.WriteJSON(w, http.StatusCreated, map[string]any{
+		"id":         code.ID,
+		"code":       raw,
+		"label":      code.Label,
+		"expires_at": code.ExpiresAt.UTC().Format(time.RFC3339),
+	})
+}
+
+// EnrollCollector handles POST /api/v1/collectors/enroll. The enrollment code
+// is the credential; no bearer token is required because the collector is not
+// enrolled yet. On success a collector identity is registered under the code's
+// organization.
+func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Code     string `json:"code"`
+		Name     string `json:"name"`
+		Version  string `json:"version,omitempty"`
+		ClientID string `json:"client_id,omitempty"`
+	}
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Code) == "" || strings.TrimSpace(req.Name) == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "code and name are required")
+		return
+	}
+
+	// Redeem the code first: it yields the owning organization and fails fast
+	// for invalid/expired/used codes. Only then is the collector registered
+	// under that tenant.
+	orgID, err := h.repo.RedeemEnrollmentCode(r.Context(), req.Code, "")
+	if err != nil {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
+		return
+	}
+
+	c := &Collector{
+		OrganizationID: orgID,
+		Name:           req.Name,
+		Version:        req.Version,
+		ClientID:       req.ClientID,
+		Config:         map[string]any{},
+	}
+	if err := h.repo.RegisterCollector(r.Context(), c); err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
+	api.WriteJSON(w, http.StatusCreated, c)
+}
+
+// generateEnrollmentCode returns a URL-safe, high-entropy single-use code.
+func generateEnrollmentCode() (string, error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // Heartbeat handles POST /api/v1/collectors/{id}/heartbeat

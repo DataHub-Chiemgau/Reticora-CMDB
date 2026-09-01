@@ -3306,6 +3306,77 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/collectors/enrollment-codes:
+    post:
+      operationId: createCollectorEnrollmentCode
+      tags: [Collectors]
+      summary: Mint a single-use collector enrollment code
+      description: >-
+        Zero-config onboarding: returns the plaintext code exactly once. Only
+        its SHA-256 hash is stored. The collector redeems the code via
+        /api/v1/collectors/enroll.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type: string
+                ttl_minutes:
+                  type: integer
+                  description: Defaults to 30, capped at 1440 (24h).
+      responses:
+        '201':
+          description: Enrollment code created; plaintext returned once
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  code: { type: string }
+                  label: { type: string }
+                  expires_at: { type: string, format: date-time }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/collectors/enroll:
+    post:
+      operationId: enrollCollector
+      tags: [Collectors]
+      summary: Enroll a collector with an enrollment code
+      description: >-
+        Unauthenticated by bearer design — the single-use enrollment code is
+        the credential. On success the collector identity is registered under
+        the code's organization and returned with its id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name]
+              properties:
+                code: { type: string }
+                name: { type: string }
+                version: { type: string }
+                client_id: { type: string }
+      responses:
+        '201':
+          description: Collector enrolled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collector'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /api/v1/collectors/{id}/heartbeat:
     parameters:
       - $ref: '#/components/parameters/ResourceID'

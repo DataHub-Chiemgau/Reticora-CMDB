@@ -46,7 +46,10 @@
     "actions": "Aktionen",
     "description": "Beschreibung",
     "notes": "Notizen",
-    "retry": "Erneut versuchen"
+    "retry": "Erneut versuchen",
+    "copy": "Kopieren",
+    "copied": "Kopiert!",
+    "done": "Fertig"
   },
   "commandPalette": {
     "title": "Befehlsmenü",
@@ -190,7 +193,16 @@
     "summary": "Status und Heartbeats Ihrer Discovery-Collector.",
     "version": "Version",
     "lastHeartbeat": "Letzter Heartbeat",
-    "createdAt": "Erstellt"
+    "createdAt": "Erstellt",
+    "enroll": {
+      "button": "Collector verbinden",
+      "title": "Collector verbinden",
+      "intro": "Schließen Sie einen Collector an: erzeugen Sie einen einmaligen Enrollment-Code und geben Sie ihn im Collector ein. Die Infrastruktur erscheint automatisch.",
+      "label": "Bezeichnung (z. B. Standort)",
+      "generate": "Code erzeugen",
+      "once": "Dieser Code wird nur einmal angezeigt und läuft ab. Führen Sie im Kundennetz aus:",
+      "expires": "Gültig bis"
+    }
   },
   "webhook": {
     "title": "Webhooks",

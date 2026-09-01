@@ -217,6 +217,10 @@ func requiresAuth(r *http.Request) bool {
 	switch r.URL.Path {
 	case "/api/v1/auth/config", "/api/v1/auth/callback", "/api/v1/auth/refresh":
 		return false
+	case "/api/v1/collectors/enroll":
+		// The enrollment code is the credential; the collector has no session
+		// or API key before it enrolls.
+		return false
 	default:
 		return true
 	}

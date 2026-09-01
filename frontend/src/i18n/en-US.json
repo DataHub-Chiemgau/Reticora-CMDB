@@ -46,7 +46,10 @@
     "actions": "Actions",
     "description": "Description",
     "notes": "Notes",
-    "retry": "Try again"
+    "retry": "Try again",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "done": "Done"
   },
   "commandPalette": {
     "title": "Command Menu",
@@ -190,7 +193,16 @@
     "summary": "Status and heartbeats of your Discovery Collectors.",
     "version": "Version",
     "lastHeartbeat": "Last Heartbeat",
-    "createdAt": "Created"
+    "createdAt": "Created",
+    "enroll": {
+      "button": "Connect collector",
+      "title": "Connect collector",
+      "intro": "Connect a collector: generate a single-use enrollment code and enter it in the collector. Your infrastructure appears automatically.",
+      "label": "Label (e.g. site)",
+      "generate": "Generate code",
+      "once": "This code is shown only once and expires. Run in the customer network:",
+      "expires": "Valid until"
+    }
   },
   "webhook": {
     "title": "Webhooks",
