@@ -206,7 +206,12 @@ func computeImpact(failedID string, edges []Edge, relType string) map[string]str
 			if relType != "" && edge.RelType != relType {
 				continue
 			}
-			if edge.SourceCIID != current || edge.TargetCIID == failedID {
+			// Only follow edges that originate from the current node.
+			if edge.SourceCIID != current {
+				continue
+			}
+			// Never follow a back-edge into the failed node itself.
+			if edge.TargetCIID == failedID {
 				continue
 			}
 			if _, seen := impacted[edge.TargetCIID]; seen {

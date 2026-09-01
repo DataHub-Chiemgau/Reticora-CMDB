@@ -81,7 +81,9 @@
       "export": "Export öffnen",
       "monitoring": "Monitoring öffnen",
       "audit": "Audit-Protokoll öffnen",
-      "security": "Sicherheit & Datenschutz öffnen"
+      "security": "Sicherheit & Datenschutz öffnen",
+      "map": "Karte öffnen",
+      "roomplan": "Raumplan öffnen"
     }
   },
   "dashboard": {

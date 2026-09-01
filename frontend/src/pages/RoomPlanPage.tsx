@@ -183,7 +183,7 @@ export function RoomPlanPage() {
                   >
                     {ci.name}
                   </span>
-                  <Badge variant="info">{ci.ci_type_id.slice(0, 8)}</Badge>
+                  <Badge variant="info">{ci.status}</Badge>
                 </li>
               ))}
             </ul>

@@ -270,10 +270,16 @@ export function CommandPalette({
         action: () => onNavigate('security'),
       },
       {
-        id: 'nav-security',
-        label: t('commandPalette.commands.security', 'Sicherheit & DSGVO öffnen'),
-        keywords: ['security sicherheit dsgvo gdpr privacy retention compliance report'],
-        action: () => onNavigate('security'),
+        id: 'nav-map',
+        label: t('commandPalette.commands.map', 'Karte öffnen'),
+        keywords: ['map karte gis standorte sites'],
+        action: () => onNavigate('map'),
+      },
+      {
+        id: 'nav-roomplan',
+        label: t('commandPalette.commands.roomplan', 'Raumplan öffnen'),
+        keywords: ['roomplan raumplan floorplan raum position'],
+        action: () => onNavigate('roomplan'),
       },
     ].filter((cmd) => {
       // Hide navigation commands for modules the tenant's plan does not

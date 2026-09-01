@@ -81,7 +81,9 @@
       "export": "Open export",
       "monitoring": "Open monitoring",
       "audit": "Open audit log",
-      "security": "Open security & privacy"
+      "security": "Open security & privacy",
+      "map": "Open map",
+      "roomplan": "Open room plan"
     }
   },
   "dashboard": {

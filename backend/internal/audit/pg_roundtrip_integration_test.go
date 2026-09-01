@@ -86,24 +86,15 @@ func TestPGRecorderChainRoundtripPG(t *testing.T) {
 	}
 
 	// Tamper with the second entry: the chain must now verify as broken at
-	// exactly that entry.
+	// exactly that entry. PostgreSQL does not support ORDER BY/OFFSET in an
+	// UPDATE, so the target row is selected first, then updated.
 	var tamperedID string
-	err = pool.QueryRow(ctx, `
-		UPDATE audit_log SET action = 'ci.tampered'
-		WHERE organization_id = $1
-		ORDER BY timestamp ASC, id ASC
-		OFFSET 1 LIMIT 1
-		RETURNING id::text
-	`, orgID).Scan(&tamperedID)
+	err = pool.QueryRow(ctx, `SELECT id::text FROM audit_log WHERE organization_id = $1 ORDER BY timestamp ASC, id ASC OFFSET 1 LIMIT 1`, orgID).Scan(&tamperedID)
 	if err != nil {
-		// OFFSET ... LIMIT in UPDATE is not supported; do it in two steps.
-		err = pool.QueryRow(ctx, `SELECT id::text FROM audit_log WHERE organization_id = $1 ORDER BY timestamp ASC, id ASC OFFSET 1 LIMIT 1`, orgID).Scan(&tamperedID)
-		if err != nil {
-			t.Fatalf("pick tamper target: %v", err)
-		}
-		if _, err := pool.Exec(ctx, `UPDATE audit_log SET action = 'ci.tampered' WHERE id = $1`, tamperedID); err != nil {
-			t.Fatalf("tamper: %v", err)
-		}
+		t.Fatalf("pick tamper target: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE audit_log SET action = 'ci.tampered' WHERE id = $1`, tamperedID); err != nil {
+		t.Fatalf("tamper: %v", err)
 	}
 
 	result, err = audit.Verify(ctx, pool, orgID)
