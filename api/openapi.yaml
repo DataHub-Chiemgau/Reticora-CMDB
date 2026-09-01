@@ -1540,6 +1540,73 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /api/v1/disposal-records:
+    get:
+      operationId: listDisposalRecords
+      tags: [Disposal]
+      summary: List revision-safe disposal records (append-only)
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: method
+          in: query
+          schema: { type: string }
+        - name: asset_id
+          in: query
+          schema: { type: string }
+        - name: ci_id
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated disposal records
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisposalRecordListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createDisposalRecord
+      tags: [Disposal]
+      summary: Record a disposal (revision-safe; records cannot be edited or deleted)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDisposalRecordRequest'
+      responses:
+        '201':
+          description: Disposal record created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisposalRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/disposal-records/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getDisposalRecord
+      tags: [Disposal]
+      summary: Get a disposal record
+      responses:
+        '200':
+          description: Disposal record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisposalRecord'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/consumables:
     get:
       operationId: listConsumables
@@ -7933,6 +8000,43 @@ components:
             data:
               type: array
               items: { $ref: '#/components/schemas/MaintenanceWindow' }
+
+    DisposalRecord:
+      type: object
+      required: [id, organization_id, method, performed_at, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        asset_id: { type: string }
+        ci_id: { type: string }
+        method: { type: string, enum: [reuse, recycling, destruction, secure_erasure, physical_destruction, return_to_vendor] }
+        certificate_ref: { type: string, description: Reference to the revision-safe disposal certificate. }
+        data_carrier: { type: string, description: Data carrier destruction note (BSI/ISO). }
+        performed_by: { type: string }
+        performed_at: { type: string, format: date-time }
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+    CreateDisposalRecordRequest:
+      type: object
+      required: [method]
+      properties:
+        asset_id: { type: string }
+        ci_id: { type: string }
+        method: { type: string, enum: [reuse, recycling, destruction, secure_erasure, physical_destruction, return_to_vendor] }
+        certificate_ref: { type: string }
+        data_carrier: { type: string }
+        performed_by: { type: string }
+        performed_at: { type: string, format: date-time }
+        notes: { type: string }
+    DisposalRecordListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/DisposalRecord' }
 
     CreateSLAPolicyRequest:
       type: object

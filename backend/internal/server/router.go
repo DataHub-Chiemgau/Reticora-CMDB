@@ -21,6 +21,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
@@ -68,6 +69,7 @@ type Repositories struct {
 	Consumable        consumable.Repository
 	Order             order.Repository
 	Maintenance       maintenance.Repository
+	Disposal          disposal.Repository
 	Ticket            ticket.Repository
 	User              user.Repository
 	Credential        credential.Repository
@@ -174,6 +176,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		consumable.NewHandler(repos.Consumable),
 		order.NewHandler(repos.Order),
 		maintenance.NewHandler(repos.Maintenance),
+		disposal.NewHandler(repos.Disposal),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
 		user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment),
 		permission.NewHandler(repos.Permission),
