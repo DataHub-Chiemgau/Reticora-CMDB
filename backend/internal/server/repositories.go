@@ -21,6 +21,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/order"
@@ -71,6 +72,7 @@ func MemoryRepositories() Repositories {
 		Key:               keymgmt.NewMemoryRepository(),
 		Training:          training.NewMemoryRepository(),
 		Desk:              desk.NewMemoryRepository(),
+		Location:          location.NewMemoryRepository(),
 		Ticket:            ticket.NewMemoryRepository(),
 		User:              user.NewMemoryRepository(),
 		Credential:        credential.NewMemoryRepository(),
@@ -114,6 +116,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Key:               keymgmt.NewPGRepository(pool),
 		Training:          training.NewPGRepository(pool),
 		Desk:              desk.NewPGRepository(pool),
+		Location:          location.NewPGRepository(pool),
 		Ticket:            ticket.NewPGRepository(pool),
 		User:              user.NewPGRepository(pool),
 		Credential:        credential.NewPGRepository(pool),

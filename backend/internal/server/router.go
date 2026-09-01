@@ -33,6 +33,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
@@ -76,6 +77,7 @@ type Repositories struct {
 	Key               keymgmt.Repository
 	Training          training.Repository
 	Desk              desk.Repository
+	Location          location.Repository
 	Ticket            ticket.Repository
 	User              user.Repository
 	Credential        credential.Repository
@@ -186,6 +188,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		keymgmt.NewHandler(repos.Key),
 		training.NewHandler(repos.Training),
 		desk.NewHandler(repos.Desk),
+		location.NewHandler(repos.Location),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
 		user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment),
 		permission.NewHandler(repos.Permission),

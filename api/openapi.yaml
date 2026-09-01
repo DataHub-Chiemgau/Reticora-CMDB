@@ -2051,6 +2051,70 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
+  /api/v1/assets/{id}/label.svg:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: base_url
+        in: query
+        schema: { type: string }
+        description: CMDB base URL for the deep link on the label.
+    get:
+      operationId: getAssetLabel
+      tags: [Assets]
+      summary: Render the printable direct-access label (SVG) for an asset
+      responses:
+        '200':
+          description: SVG label
+          content:
+            image/svg+xml: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/asset-locations:
+    post:
+      operationId: recordAssetLocation
+      tags: [Assets]
+      summary: Record an asset GPS position (scan, agent, or manual)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAssetLocationRequest'
+      responses:
+        '201':
+          description: Location recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetLocation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/assets/{id}/locations:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listAssetLocations
+      tags: [Assets]
+      summary: Asset GPS location history
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated location history (newest first)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetLocationListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /api/v1/consumables:
     get:
       operationId: listConsumables
@@ -8611,6 +8675,39 @@ components:
             data:
               type: array
               items: { $ref: '#/components/schemas/Desk' }
+
+    AssetLocation:
+      type: object
+      required: [id, organization_id, asset_id, lat, lon, source, recorded_at, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        asset_id: { type: string }
+        lat: { type: number }
+        lon: { type: number }
+        accuracy_m: { type: number }
+        source: { type: string, enum: [scan, agent, manual] }
+        recorded_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    CreateAssetLocationRequest:
+      type: object
+      required: [asset_id, lat, lon]
+      properties:
+        asset_id: { type: string }
+        lat: { type: number }
+        lon: { type: number }
+        accuracy_m: { type: number }
+        source: { type: string, enum: [scan, agent, manual] }
+        recorded_at: { type: string, format: date-time }
+    AssetLocationListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/AssetLocation' }
 
     CreateSLAPolicyRequest:
       type: object

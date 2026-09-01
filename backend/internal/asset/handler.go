@@ -26,6 +26,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/assets/{id}", h.Get)
 	r.Patch("/api/v1/assets/{id}", h.Update)
 	r.Delete("/api/v1/assets/{id}", h.Delete)
+	// Direct-access label (spec §13): printable SVG label with asset tag,
+	// barcode/RFID marker and CMDB deep link.
+	r.Get("/api/v1/assets/{id}/label.svg", h.Label)
 }
 
 // List handles GET /api/v1/assets
@@ -179,6 +182,28 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// Label handles GET /api/v1/assets/{id}/label.svg — renders the printable
+// direct-access label for the asset.
+func (h *Handler) Label(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "asset not found")
+		return
+	}
+	baseURL := r.URL.Query().Get("base_url")
+	if baseURL == "" {
+		baseURL = "https://" + r.Host
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(RenderLabelSVG(item, baseURL)))
 }
 
 // Delete handles DELETE /api/v1/assets/{id}

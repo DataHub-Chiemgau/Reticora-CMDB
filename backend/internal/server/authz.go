@@ -28,6 +28,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"collectors":         identity.PermDiscoveryRead,
 	"discovery":          identity.PermDiscoveryRead,
 	"assets":             identity.PermAssetRead,
+	"asset-locations":    identity.PermAssetWrite,
 	"assignments":        identity.PermAssignmentRead,
 	"documents":          identity.PermDocumentRead,
 	"stocktakes":         identity.PermStocktakeRead,
