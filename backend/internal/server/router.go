@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
@@ -78,6 +79,7 @@ type Repositories struct {
 	Training          training.Repository
 	Desk              desk.Repository
 	Location          location.Repository
+	Agent             agent.Repository
 	Ticket            ticket.Repository
 	User              user.Repository
 	Credential        credential.Repository
@@ -189,6 +191,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		training.NewHandler(repos.Training),
 		desk.NewHandler(repos.Desk),
 		location.NewHandler(repos.Location),
+		agent.NewHandler(repos.Agent, repos.Metrics, repos.CI),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
 		user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment),
 		permission.NewHandler(repos.Permission),

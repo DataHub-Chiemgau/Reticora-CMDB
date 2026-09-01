@@ -79,4 +79,7 @@ var Catalogue = []Permission{
 	{Key: "training:write", Resource: "training", Action: "write", Description: "Manage trainings and assignments"},
 	{Key: "desk:read", Resource: "desk", Action: "read", Description: "Read desks and bookings"},
 	{Key: "desk:write", Resource: "desk", Action: "write", Description: "Manage desks and bookings"},
+	{Key: "agent:read", Resource: "agent", Action: "read", Description: "Read endpoint agents"},
+	{Key: "agent:manage", Resource: "agent", Action: "manage", Description: "Manage endpoint agents, policies and kill-switch"},
+	{Key: "agent:ingest", Resource: "agent", Action: "ingest", Description: "Ingest endpoint agent telemetry"},
 }

@@ -101,7 +101,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"scim":     identity.PermIGAWrite,
 	"graphql":  identity.PermCIWrite,
 	"me":       identity.PermPermissionRead,
-	"ci-types": identity.PermCITypeManage,
+	"ci-types":  identity.PermCITypeManage,
 	"api-keys": identity.PermAPIKeyManage,
 	"ingest":   identity.PermDiscoveryIngest,
 	// The AI assistant has a read-style permission only; conversations and
@@ -167,6 +167,16 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 		// Collector/agent ingest requires the ingest permission regardless
 		// of method.
 		return identity.PermDiscoveryIngest, routeProtected
+	case "agents":
+		// Agent telemetry ingest has its own permission; management routes
+		// (policy, kill-switch) use agent:manage.
+		if len(segments) > 1 && segments[1] == "telemetry" {
+			return identity.PermAgentIngest, routeProtected
+		}
+		if method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions {
+			return identity.PermAgentRead, routeProtected
+		}
+		return identity.PermAgentManage, routeProtected
 	case "me":
 		// /me/permissions is read-only self-service for any authenticated
 		// principal.

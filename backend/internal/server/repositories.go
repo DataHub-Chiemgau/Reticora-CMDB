@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
@@ -73,6 +74,7 @@ func MemoryRepositories() Repositories {
 		Training:          training.NewMemoryRepository(),
 		Desk:              desk.NewMemoryRepository(),
 		Location:          location.NewMemoryRepository(),
+		Agent:             agent.NewMemoryRepository(),
 		Ticket:            ticket.NewMemoryRepository(),
 		User:              user.NewMemoryRepository(),
 		Credential:        credential.NewMemoryRepository(),
@@ -117,6 +119,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Training:          training.NewPGRepository(pool),
 		Desk:              desk.NewPGRepository(pool),
 		Location:          location.NewPGRepository(pool),
+		Agent:             agent.NewPGRepository(pool),
 		Ticket:            ticket.NewPGRepository(pool),
 		User:              user.NewPGRepository(pool),
 		Credential:        credential.NewPGRepository(pool),

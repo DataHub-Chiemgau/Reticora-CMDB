@@ -2107,6 +2107,155 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /api/v1/agents:
+    get:
+      operationId: listAgents
+      tags: [Agents]
+      summary: List registered endpoint agents
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated endpoint agents
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/agents/enroll:
+    post:
+      operationId: enrollAgent
+      tags: [Agents]
+      summary: Register an endpoint agent (after edge enrollment authenticated it)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentEnrollRequest'
+      responses:
+        '201':
+          description: Agent registered; returns the agent with its central policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/agents/telemetry:
+    post:
+      operationId: ingestAgentTelemetry
+      tags: [Agents]
+      summary: Ingest endpoint telemetry (health metrics + software inventory)
+      description: >-
+        Reconciles the endpoint into a CI (source "agent") and writes health
+        metrics into the time-series store. The software inventory lands in the
+        CI attributes for patch posture (spec §9.4). Disabled agents (kill-switch)
+        are rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentTelemetryPayload'
+      responses:
+        '202':
+          description: Telemetry accepted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/agents/{id}/heartbeat:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: agentHeartbeat
+      tags: [Agents]
+      summary: Record an agent heartbeat
+      responses:
+        '204':
+          description: Heartbeat recorded
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/agents/{id}/policy:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: updateAgentPolicy
+      tags: [Agents]
+      summary: Replace an agent's central config policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentPolicyRequest'
+      responses:
+        '200':
+          description: Updated agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/agents/{id}/disable:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: disableAgent
+      tags: [Agents]
+      summary: Kill-switch — disable an agent (telemetry rejected until re-enabled)
+      responses:
+        '200':
+          description: Agent disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/agents/{id}/enable:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: enableAgent
+      tags: [Agents]
+      summary: Re-enable a disabled agent
+      responses:
+        '200':
+          description: Agent enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/consumables:
     get:
       operationId: listConsumables
@@ -8706,6 +8855,78 @@ components:
             data:
               type: array
               items: { $ref: '#/components/schemas/AssetLocation' }
+
+    AgentPolicy:
+      type: object
+      properties:
+        interval_seconds: { type: integer }
+        metrics_enabled: { type: boolean }
+        inventory_enabled: { type: boolean }
+    Agent:
+      type: object
+      required: [id, organization_id, agent_id, hostname, status, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        agent_id: { type: string }
+        hostname: { type: string }
+        version: { type: string }
+        os: { type: string }
+        arch: { type: string }
+        ci_id: { type: string }
+        status: { type: string, enum: [online, offline, disabled] }
+        last_heartbeat: { type: string, format: date-time }
+        policy: { $ref: '#/components/schemas/AgentPolicy' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AgentEnrollRequest:
+      type: object
+      required: [agent_id, hostname]
+      properties:
+        agent_id: { type: string }
+        hostname: { type: string }
+        version: { type: string }
+        os: { type: string }
+        arch: { type: string }
+    AgentTelemetryPayload:
+      type: object
+      required: [agent_id]
+      properties:
+        agent_id: { type: string }
+        hostname: { type: string }
+        version: { type: string }
+        os: { type: string }
+        arch: { type: string }
+        metrics:
+          type: object
+          additionalProperties: { type: number }
+        system_info:
+          type: object
+          additionalProperties: { type: string }
+        software:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              version: { type: string }
+              vendor: { type: string }
+        collected_at: { type: string, format: date-time }
+    UpdateAgentPolicyRequest:
+      type: object
+      properties:
+        interval_seconds: { type: integer }
+        metrics_enabled: { type: boolean }
+        inventory_enabled: { type: boolean }
+    AgentListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Agent' }
 
     CreateSLAPolicyRequest:
       type: object
