@@ -1,0 +1,69 @@
+# Nightly logical backup of PostgreSQL to S3 (Epic H2). This is the portable
+# safety net alongside PITR; the WAL archive remains the primary mechanism.
+# Provide the database DSN and S3 credentials via the reticora-backup secret:
+#   kubectl create secret generic reticora-backup \
+#     --from-literal=database-url='postgres://...' \
+#     --from-literal=aws-access-key-id=... \
+#     --from-literal=aws-secret-access-key=...
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: reticora-backup
+spec:
+  schedule: "0 2 * * *" # nightly at 02:00
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: backup
+              image: timescale/timescaledb:2.17.2-pg16
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: reticora-backup
+                      key: database-url
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: reticora-backup
+                      key: aws-access-key-id
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: reticora-backup
+                      key: aws-secret-access-key
+                - name: S3_PREFIX
+                  value: "s3://reticora-backup/logical"
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  ts="$(date +%F)"
+                  file="/tmp/reticora-${ts}.dump"
+                  pg_dump --format=custom --compress=9 --file="$file" "$DATABASE_URL"
+                  # Upload via the S3 CLI when available; operators may swap in
+                  # wal-g / aws-cli / mc depending on the object store.
+                  if command -v aws >/dev/null 2>&1; then
+                    aws s3 cp "$file" "${S3_PREFIX}/reticora-${ts}.dump"
+                  elif command -v mc >/dev/null 2>&1; then
+                    mc cp "$file" "${S3_PREFIX}/reticora-${ts}.dump"
+                  else
+                    echo "no S3 client available in image; dump left at $file" >&2
+                    exit 1
+                  fi
+                  echo "backup uploaded: ${S3_PREFIX}/reticora-${ts}.dump"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi

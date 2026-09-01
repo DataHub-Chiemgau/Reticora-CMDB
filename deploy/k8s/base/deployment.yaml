@@ -12,6 +12,7 @@ spec:
       labels:
         app.kubernetes.io/component: server
     spec:
+      serviceAccountName: reticora-server
       containers:
         - name: server
           image: reticora-cmdb/server:latest
@@ -32,6 +33,14 @@ spec:
               value: "redis://redis:6379"
             - name: RETICORA_ENVIRONMENT
               value: "production"
+            # OTLP exporter endpoint (Epic H3). Empty disables export and the
+            # server runs with no-op telemetry providers.
+            - name: RETICORA_OTEL_ENDPOINT
+              value: ""
+            # Opt-in tenant label on HTTP metrics; multiplies series by the
+            # tenant count. Enable only for bounded-tenant deployments.
+            - name: RETICORA_METRICS_TENANT_LABEL
+              value: "false"
             # Session-token signature verification is mandatory in
             # production; the pod refuses to start without the key.
             - name: RETICORA_SESSION_KEY_PATH

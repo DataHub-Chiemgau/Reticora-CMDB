@@ -629,9 +629,27 @@ Reticora is deployed on **Kubernetes** in an EU region with infrastructure manag
 
 Manifests in `deploy/k8s/`:
 
-- `deployment.yaml` — Server deployment (2 replicas, health probes, resource limits).
-- `service.yaml` — ClusterIP service.
-- `kustomization.yaml` — Namespace `reticora`, common labels.
+- `base/` — the shared manifests: `deployment.yaml` (server with health probes
+  and resource limits), `service.yaml`, `serviceaccount.yaml` (ServiceAccount +
+  PodDisruptionBudget + secret-creation notes), `hpa.yaml` (autoscaling/v2,
+  2–10 replicas on CPU) and the optional `components/opensearch` component.
+- `overlays/staging` — single replica, no HPA, smaller resources,
+  `RETICORA_ENVIRONMENT=staging`, namespace `reticora-staging`.
+- `overlays/prod` — 3 replicas, HPA, higher resource envelope, includes the
+  OpenSearch component and points telemetry at the OTLP collector.
+
+`kustomize build` is run for the base and both overlays in CI
+(`.github/workflows/ci.yml`, job `k8s-manifests`).
+
+**Backup & disaster recovery:**
+
+See `docs/backup-dr.md`. PostgreSQL PITR (base backup + WAL archive) is the
+primary mechanism; `deploy/k8s/base/backup-cronjob.yaml` adds a nightly
+logical `pg_dump` to S3 as a portable safety net. The OpenSearch index is not
+backed up — it is rebuilt online from PostgreSQL via
+`POST /api/v1/search/reindex`. `.github/workflows/restore-test.yml` runs a
+nightly restore test that dumps, restores into a fresh database, checks row
+counts and verifies the audit hash chain with the `audit-verify` binary.
 
 **Infrastructure services (docker-compose for local dev):**
 
@@ -649,7 +667,24 @@ Manifests in `deploy/k8s/`:
 
 **Grafana/Monitoring:**
 
-Dashboards and alerting configuration in `deploy/grafana/`.
+Dashboards in `deploy/grafana/` (`dashboard-overview.json`, plus
+`dashboard-tenant.json` for per-tenant rate/error/latency with an
+`organization_id` template variable). SLO definitions and alert rules live in
+`deploy/monitoring/slo-rules.yaml` (99.9 % availability, p95 read latency
+< 500 ms), carrying the `organization_id` label when tenant metrics are
+enabled.
+
+**Tenant-aware observability (Epic H3):** the server exports
+`reticora_http_requests_total` and `reticora_http_request_duration_seconds`
+with `method`, routed `path`, `status` and `organization_id` labels on
+`/metrics`. The `organization_id` label multiplies the series count by the
+number of tenants, so it is opt-in via `RETICORA_METRICS_TENANT_LABEL=true`
+(default off, all tenants aggregate into one series per method/path/status).
+The routed path (e.g. `/api/v1/cis/{id}`) is used instead of the raw URL so
+entity IDs never become label values. OpenTelemetry tracing/metrics export to
+an OTLP HTTP collector when `RETICORA_OTEL_ENDPOINT` is set (with
+`service.name` and `deployment.environment` resource attributes); with an
+empty endpoint the providers stay no-op.
 
 **Environment configuration:**
 
@@ -666,6 +701,8 @@ The server is configured via environment variables:
 - `RETICORA_LLM_BASE_URL`, `RETICORA_LLM_API_KEY`, `RETICORA_LLM_CHAT_MODEL`, `RETICORA_LLM_EMBEDDING_MODEL` — OpenAI-compatible chat and embedding provider settings.
 - `RETICORA_S3_ENDPOINT`, `RETICORA_S3_BUCKET`, `RETICORA_S3_ACCESS_KEY`, `RETICORA_S3_SECRET_KEY`, `RETICORA_S3_USE_SSL` — object storage for asynchronous export jobs (MinIO/S3).
 - `RETICORA_BLOB_DIR` — filesystem blob storage used by export jobs in `--no-db` development mode (defaults to a temp directory).
+- `RETICORA_OTEL_ENDPOINT` — OTLP HTTP collector endpoint for traces/metrics; empty (default) keeps no-op telemetry.
+- `RETICORA_METRICS_TENANT_LABEL` — set to `true` to add the `organization_id` label to HTTP request metrics (default `false`; multiplies series by tenant count).
 
 ### CI/CD
 

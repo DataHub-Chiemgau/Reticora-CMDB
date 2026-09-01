@@ -4,6 +4,8 @@ kind: Kustomization
 resources:
   - deployment.yaml
   - service.yaml
+  - serviceaccount.yaml
+  - hpa.yaml
 
 namespace: reticora
 
