@@ -39,7 +39,9 @@ export type AppPage =
   | 'disposal'
   | 'keys'
   | 'trainings'
-  | 'desks';
+  | 'desks'
+  | 'agents'
+  | 'findings';
 
 export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
@@ -74,6 +76,8 @@ export const pageToPath: Record<AppPage, string> = {
   keys: '/keys',
   trainings: '/trainings',
   desks: '/desks',
+  agents: '/agents',
+  findings: '/findings',
 };
 
 interface CommandPaletteProps {

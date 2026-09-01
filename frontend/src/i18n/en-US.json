@@ -37,7 +37,9 @@
     "disposal": "Disposal",
     "keys": "Keys",
     "trainings": "Trainings",
-    "desks": "Desks"
+    "desks": "Desks",
+    "agents": "Agents",
+    "findings": "Findings"
   },
   "common": {
     "save": "Save",
@@ -61,7 +63,8 @@
     "done": "Done",
     "name": "Name",
     "title": "Title",
-    "location": "Location"
+    "location": "Location",
+    "all": "All"
   },
   "commandPalette": {
     "title": "Command Menu",
@@ -698,5 +701,27 @@
     "bookTitle": "Book desk",
     "startsAt": "From",
     "endsAt": "To"
+  },
+  "agents": {
+    "summary": "Registered endpoint agents with policy and kill-switch.",
+    "lastHeartbeat": "Last heartbeat",
+    "interval": "Interval",
+    "metricsOff": "Metrics off",
+    "policy": "Policy",
+    "enable": "Enable",
+    "killSwitch": "Kill switch",
+    "policyTitle": "Agent policy",
+    "intervalSeconds": "Interval (seconds)"
+  },
+  "findings": {
+    "summary": "Patch posture and vulnerabilities per CI.",
+    "statusFilter": "Status",
+    "open": "Open",
+    "acknowledged": "Acknowledged",
+    "resolved": "Resolved",
+    "falsePositive": "False positive",
+    "acknowledge": "Acknowledge",
+    "resolve": "Resolve",
+    "markFalsePositive": "False positive"
   }
 }

@@ -2282,7 +2282,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SecurityFindingListResponse'
+                $ref: '#/components/schemas/PatchFindingListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
     post:
@@ -2294,14 +2294,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateSecurityFindingRequest'
+              $ref: '#/components/schemas/CreatePatchFindingRequest'
       responses:
         '201':
           description: Finding created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SecurityFinding'
+                $ref: '#/components/schemas/PatchFinding'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2331,7 +2331,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SecurityFinding'
+                $ref: '#/components/schemas/PatchFinding'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -2345,14 +2345,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpdateSecurityFindingRequest'
+              $ref: '#/components/schemas/UpdatePatchFindingRequest'
       responses:
         '200':
           description: Finding updated
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SecurityFinding'
+                $ref: '#/components/schemas/PatchFinding'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -9032,7 +9032,7 @@ components:
               type: array
               items: { $ref: '#/components/schemas/Agent' }
 
-    SecurityFinding:
+    PatchFinding:
       type: object
       required: [id, organization_id, kind, severity, title, status, detected_at, created_at, updated_at]
       properties:
@@ -9052,7 +9052,7 @@ components:
         resolved_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-    CreateSecurityFindingRequest:
+    CreatePatchFindingRequest:
       type: object
       required: [kind, title]
       properties:
@@ -9065,11 +9065,11 @@ components:
         installed_version: { type: string }
         fixed_version: { type: string }
         reference: { type: string }
-    UpdateSecurityFindingRequest:
+    UpdatePatchFindingRequest:
       type: object
       properties:
         status: { type: string, enum: [open, acknowledged, resolved, false_positive] }
-    SecurityFindingListResponse:
+    PatchFindingListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'
         - type: object
@@ -9077,7 +9077,7 @@ components:
           properties:
             data:
               type: array
-              items: { $ref: '#/components/schemas/SecurityFinding' }
+              items: { $ref: '#/components/schemas/PatchFinding' }
 
     CreateSLAPolicyRequest:
       type: object
@@ -9466,7 +9466,7 @@ components:
         failures_by_severity:
           type: object
           additionalProperties: { type: integer }
-        findings: { type: array, items: { $ref: '#/components/schemas/SecurityFinding' } }
+        findings: { type: array, items: { $ref: '#/components/schemas/PatchFinding' } }
         capabilities: { type: array, items: { $ref: '#/components/schemas/SecurityCapability' } }
     RetentionPolicy:
       type: object

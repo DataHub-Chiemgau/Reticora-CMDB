@@ -1236,6 +1236,196 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/agents': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List registered endpoint agents */
+    get: operations['listAgents'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/agents/enroll': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Register an endpoint agent (after edge enrollment authenticated it) */
+    post: operations['enrollAgent'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/agents/telemetry': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Ingest endpoint telemetry (health metrics + software inventory)
+     * @description Reconciles the endpoint into a CI (source "agent") and writes health metrics into the time-series store. The software inventory lands in the CI attributes for patch posture (spec §9.4). Disabled agents (kill-switch) are rejected.
+     */
+    post: operations['ingestAgentTelemetry'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/agents/{id}/heartbeat': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Record an agent heartbeat */
+    post: operations['agentHeartbeat'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/agents/{id}/policy': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Replace an agent's central config policy */
+    patch: operations['updateAgentPolicy'];
+    trace?: never;
+  };
+  '/api/v1/agents/{id}/disable': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Kill-switch — disable an agent (telemetry rejected until re-enabled) */
+    post: operations['disableAgent'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/agents/{id}/enable': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Re-enable a disabled agent */
+    post: operations['enableAgent'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/security/findings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List security findings (patch posture / vulnerabilities per CI) */
+    get: operations['listSecurityFindings'];
+    put?: never;
+    /** Record a security finding (feed-derived) */
+    post: operations['createSecurityFinding'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/security/findings/summary': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Open findings aggregated by severity (security cockpit) */
+    get: operations['securityFindingsSummary'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/security/findings/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a security finding */
+    get: operations['getSecurityFinding'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Transition a finding's status (acknowledge/resolve/false positive) */
+    patch: operations['updateSecurityFinding'];
+    trace?: never;
+  };
   '/api/v1/consumables': {
     parameters: {
       query?: never;
@@ -4864,6 +5054,111 @@ export interface components {
     AssetLocationListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['AssetLocation'][];
     };
+    AgentPolicy: {
+      interval_seconds?: number;
+      metrics_enabled?: boolean;
+      inventory_enabled?: boolean;
+    };
+    Agent: {
+      id: string;
+      organization_id: string;
+      agent_id: string;
+      hostname: string;
+      version?: string;
+      os?: string;
+      arch?: string;
+      ci_id?: string;
+      /** @enum {string} */
+      status: 'online' | 'offline' | 'disabled';
+      /** Format: date-time */
+      last_heartbeat?: string;
+      policy?: components['schemas']['AgentPolicy'];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    AgentEnrollRequest: {
+      agent_id: string;
+      hostname: string;
+      version?: string;
+      os?: string;
+      arch?: string;
+    };
+    AgentTelemetryPayload: {
+      agent_id: string;
+      hostname?: string;
+      version?: string;
+      os?: string;
+      arch?: string;
+      metrics?: {
+        [key: string]: number;
+      };
+      system_info?: {
+        [key: string]: string;
+      };
+      software?: {
+        name?: string;
+        version?: string;
+        vendor?: string;
+      }[];
+      /** Format: date-time */
+      collected_at?: string;
+    };
+    UpdateAgentPolicyRequest: {
+      interval_seconds?: number;
+      metrics_enabled?: boolean;
+      inventory_enabled?: boolean;
+    };
+    AgentListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Agent'][];
+    };
+    PatchFinding: {
+      id: string;
+      organization_id: string;
+      ci_id?: string;
+      /** @enum {string} */
+      kind: 'vulnerability' | 'outdated_software' | 'outdated_firmware' | 'missing_patch';
+      /** @enum {string} */
+      severity: 'low' | 'medium' | 'high' | 'critical';
+      title: string;
+      detail?: string;
+      package_name?: string;
+      installed_version?: string;
+      fixed_version?: string;
+      /** @description CVE id or advisory URL. */
+      reference?: string;
+      /** @enum {string} */
+      status: 'open' | 'acknowledged' | 'resolved' | 'false_positive';
+      /** Format: date-time */
+      detected_at: string;
+      /** Format: date-time */
+      resolved_at?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreatePatchFindingRequest: {
+      ci_id?: string;
+      /** @enum {string} */
+      kind: 'vulnerability' | 'outdated_software' | 'outdated_firmware' | 'missing_patch';
+      /** @enum {string} */
+      severity?: 'low' | 'medium' | 'high' | 'critical';
+      title: string;
+      detail?: string;
+      package_name?: string;
+      installed_version?: string;
+      fixed_version?: string;
+      reference?: string;
+    };
+    UpdatePatchFindingRequest: {
+      /** @enum {string} */
+      status?: 'open' | 'acknowledged' | 'resolved' | 'false_positive';
+    };
+    PatchFindingListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['PatchFinding'][];
+    };
     CreateSLAPolicyRequest: {
       client_id?: string;
       name: string;
@@ -5154,7 +5449,7 @@ export interface components {
       failures_by_severity: {
         [key: string]: number;
       };
-      findings: components['schemas']['SecurityFinding'][];
+      findings: components['schemas']['PatchFinding'][];
       capabilities?: components['schemas']['SecurityCapability'][];
     };
     RetentionPolicy: {
@@ -8850,6 +9145,323 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+    };
+  };
+  listAgents: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated endpoint agents */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AgentListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  enrollAgent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AgentEnrollRequest'];
+      };
+    };
+    responses: {
+      /** @description Agent registered; returns the agent with its central policy */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Agent'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  ingestAgentTelemetry: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AgentTelemetryPayload'];
+      };
+    };
+    responses: {
+      /** @description Telemetry accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  agentHeartbeat: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Heartbeat recorded */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateAgentPolicy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateAgentPolicyRequest'];
+      };
+    };
+    responses: {
+      /** @description Updated agent */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Agent'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  disableAgent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Agent disabled */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Agent'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  enableAgent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Agent enabled */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Agent'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listSecurityFindings: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        ci_id?: string;
+        kind?: string;
+        severity?: string;
+        status?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated findings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PatchFindingListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createSecurityFinding: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreatePatchFindingRequest'];
+      };
+    };
+    responses: {
+      /** @description Finding created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PatchFinding'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  securityFindingsSummary: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Severity summary */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  getSecurityFinding: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Finding */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PatchFinding'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateSecurityFinding: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdatePatchFindingRequest'];
+      };
+    };
+    responses: {
+      /** @description Finding updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PatchFinding'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listConsumables: {

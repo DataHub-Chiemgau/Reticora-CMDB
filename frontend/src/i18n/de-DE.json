@@ -37,7 +37,9 @@
     "disposal": "Entsorgung",
     "keys": "Schlüssel",
     "trainings": "Schulungen",
-    "desks": "Arbeitsplätze"
+    "desks": "Arbeitsplätze",
+    "agents": "Agents",
+    "findings": "Befunde"
   },
   "common": {
     "save": "Speichern",
@@ -61,7 +63,8 @@
     "done": "Fertig",
     "name": "Name",
     "title": "Titel",
-    "location": "Standort"
+    "location": "Standort",
+    "all": "Alle"
   },
   "commandPalette": {
     "title": "Befehlsmenü",
@@ -698,5 +701,27 @@
     "bookTitle": "Arbeitsplatz buchen",
     "startsAt": "Von",
     "endsAt": "Bis"
+  },
+  "agents": {
+    "summary": "Registrierte Endpoint-Agents mit Policy und Kill-Switch.",
+    "lastHeartbeat": "Letzter Heartbeat",
+    "interval": "Intervall",
+    "metricsOff": "Metriken aus",
+    "policy": "Policy",
+    "enable": "Aktivieren",
+    "killSwitch": "Kill-Switch",
+    "policyTitle": "Agent-Policy",
+    "intervalSeconds": "Intervall (Sekunden)"
+  },
+  "findings": {
+    "summary": "Patch-Posture und Schwachstellen je CI.",
+    "statusFilter": "Status",
+    "open": "Offen",
+    "acknowledged": "Bestätigt",
+    "resolved": "Gelöst",
+    "falsePositive": "Fehlalarm",
+    "acknowledge": "Bestätigen",
+    "resolve": "Lösen",
+    "markFalsePositive": "Fehlalarm"
   }
 }

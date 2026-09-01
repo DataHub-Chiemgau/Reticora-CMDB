@@ -61,6 +61,8 @@ const DisposalListPage = lazyPage(() => import('./pages/DisposalListPage'), 'Dis
 const KeyListPage = lazyPage(() => import('./pages/KeyListPage'), 'KeyListPage');
 const TrainingListPage = lazyPage(() => import('./pages/TrainingListPage'), 'TrainingListPage');
 const DeskListPage = lazyPage(() => import('./pages/DeskListPage'), 'DeskListPage');
+const AgentListPage = lazyPage(() => import('./pages/AgentListPage'), 'AgentListPage');
+const FindingsPage = lazyPage(() => import('./pages/FindingsPage'), 'FindingsPage');
 const MapPage = lazyPage(() => import('./pages/MapPage'), 'MapPage');
 const RoomPlanPage = lazyPage(() => import('./pages/RoomPlanPage'), 'RoomPlanPage');
 
@@ -141,6 +143,8 @@ function App() {
       'keys',
       'trainings',
       'desks',
+      'agents',
+      'findings',
       'discovery',
       'users',
       'permissions',
@@ -293,6 +297,8 @@ function App() {
             <Route path="/keys" element={<KeyListPage />} />
             <Route path="/trainings" element={<TrainingListPage />} />
             <Route path="/desks" element={<DeskListPage />} />
+            <Route path="/agents" element={<AgentListPage />} />
+            <Route path="/findings" element={<FindingsPage />} />
             <Route path="/tickets" element={<TicketListPage />} />
             <Route path="/users" element={<UserManagementPage />} />
             <Route path="/permissions" element={<PermissionsPage />} />

@@ -66,6 +66,8 @@ export const navFeatureFor: Record<string, string | undefined> = {
   keys: 'compliance',
   trainings: 'workflow_forms',
   desks: 'inventory',
+  agents: 'endpoint_agent',
+  findings: 'compliance',
   tickets: 'ticketing',
   users: undefined,
   permissions: undefined,

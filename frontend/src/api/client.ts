@@ -1940,3 +1940,71 @@ export const deskApi = {
 export function assetLabelURL(assetId: string): string {
   return `${API_BASE}/assets/${assetId}/label.svg`;
 }
+
+// ─── Endpoint agents + security findings (Block E) ──────────────────────────
+
+export interface AgentPolicy {
+  interval_seconds: number;
+  metrics_enabled: boolean;
+  inventory_enabled: boolean;
+}
+
+export interface EndpointAgent {
+  id: string;
+  organization_id: string;
+  agent_id: string;
+  hostname: string;
+  version?: string;
+  os?: string;
+  arch?: string;
+  ci_id?: string;
+  status: string;
+  last_heartbeat?: string;
+  policy: AgentPolicy;
+  created_at: string;
+}
+
+export const agentApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<EndpointAgent>> {
+    return fetchAPI(`/agents${buildQuery(params)}`);
+  },
+  enroll(data: { agent_id: string; hostname: string; version?: string; os?: string; arch?: string }): Promise<EndpointAgent> {
+    return fetchAPI('/agents/enroll', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updatePolicy(id: string, data: Partial<AgentPolicy>): Promise<EndpointAgent> {
+    return fetchAPI(`/agents/${id}/policy`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  disable(id: string): Promise<EndpointAgent> {
+    return fetchAPI(`/agents/${id}/disable`, { method: 'POST', body: '{}' });
+  },
+  enable(id: string): Promise<EndpointAgent> {
+    return fetchAPI(`/agents/${id}/enable`, { method: 'POST', body: '{}' });
+  },
+};
+
+export interface SecurityFinding {
+  id: string;
+  organization_id: string;
+  ci_id?: string;
+  kind: string;
+  severity: string;
+  title: string;
+  package_name?: string;
+  installed_version?: string;
+  fixed_version?: string;
+  reference?: string;
+  status: string;
+  detected_at: string;
+}
+
+export const securityFindingApi = {
+  list(params: ListParams & { status?: string; severity?: string; kind?: string } = {}): Promise<PaginatedResponse<SecurityFinding>> {
+    return fetchAPI(`/security/findings${buildQuery(params)}`);
+  },
+  summary(): Promise<{ by_severity: Record<string, number>; open_total: number }> {
+    return fetchAPI('/security/findings/summary');
+  },
+  update(id: string, status: string): Promise<SecurityFinding> {
+    return fetchAPI(`/security/findings/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+  },
+};
