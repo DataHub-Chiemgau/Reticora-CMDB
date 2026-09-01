@@ -186,6 +186,12 @@ func main() {
 			slog.Error("failed to connect to OpenSearch", "error", err)
 			os.Exit(1)
 		}
+		// Apply the index template on every startup so the mapping is explicit
+		// and reproducible instead of relying on dynamic mapping guesses.
+		if err := osBackend.EnsureIndexTemplate(context.Background()); err != nil {
+			slog.Error("failed to apply OpenSearch index template", "error", err)
+			os.Exit(1)
+		}
 		if pgSearch, ok := repos.Search.(*search.PGRepository); ok {
 			repos.Search = &search.HybridBackend{Remote: osBackend, Source: pgSearch}
 		} else {

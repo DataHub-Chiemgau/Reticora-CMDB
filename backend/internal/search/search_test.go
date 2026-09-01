@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -105,3 +106,49 @@ func TestOpenSearchQueryRoundTrip(t *testing.T) {
 }
 
 var errTest = errors.New("transport failure")
+
+func TestIndexTemplateBodyStructure(t *testing.T) {
+	body := indexTemplateBody("reticora-search")
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	for _, want := range []string{"reticora-search", "organization_id", "entity_type", "entity_id", "title", "summary", "metadata", "updated_at", "keyword", "date"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("index template missing %q: %s", want, s)
+		}
+	}
+}
+
+func TestEnsureIndexTemplateIdempotent(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && r.URL.Path == "/_index_template/idx" {
+			calls++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"acknowledged":true}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	b := NewOpenSearchBackend(OpenSearchConfig{URL: srv.URL, Index: "idx"}, srv.Client())
+	if err := b.EnsureIndexTemplate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Second call must succeed too (upsert semantics, safe on every startup).
+	if err := b.EnsureIndexTemplate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 PUT calls, got %d", calls)
+	}
+}
+
+func TestEnsureIndexTemplateError(t *testing.T) {
+	b := NewOpenSearchBackend(OpenSearchConfig{URL: "http://opensearch.local", Index: "idx"}, &http.Client{Transport: failingRoundTripper{err: errTest}})
+	if err := b.EnsureIndexTemplate(context.Background()); err == nil {
+		t.Fatal("expected error for unreachable backend")
+	}
+}

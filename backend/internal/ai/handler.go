@@ -119,6 +119,7 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 const systemPrompt = "Du bist der Reticora CMDB Assistent. Antworte ausschließlich anhand des bereitgestellten tenant-eigenen Kontextes. " +
 	"Wenn der Kontext die Frage nicht beantwortet, sage das ausdrücklich und erfinde keine Fakten. " +
 	"Nenne Unsicherheit und verweise bei jeder Aussage auf die Quelle (die Nummer des Kontext-Eintrags, z. B. [1])."
+
 func buildPrompt(q string, chunks []Chunk) string {
 	var b strings.Builder
 	b.WriteString("Kontext:\n")
