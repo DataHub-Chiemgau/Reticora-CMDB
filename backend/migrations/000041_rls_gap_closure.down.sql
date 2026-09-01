@@ -1,0 +1,12 @@
+DROP POLICY IF EXISTS org_dek_isolation ON org_dek;
+DROP POLICY IF EXISTS ci_type_attribute_isolation ON ci_type_attribute;
+DROP POLICY IF EXISTS team_member_isolation ON team_member;
+DROP POLICY IF EXISTS user_custom_role_isolation ON user_custom_role;
+ALTER TABLE org_dek NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE ci_type_attribute NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE team_member NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE user_custom_role NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE org_dek DISABLE ROW LEVEL SECURITY;
+ALTER TABLE ci_type_attribute DISABLE ROW LEVEL SECURITY;
+ALTER TABLE team_member DISABLE ROW LEVEL SECURITY;
+ALTER TABLE user_custom_role DISABLE ROW LEVEL SECURITY;

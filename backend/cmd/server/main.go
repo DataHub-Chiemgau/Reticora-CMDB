@@ -171,6 +171,16 @@ func main() {
 		if s3Err != nil {
 			slog.Warn("S3 blob storage unavailable; asynchronous export jobs are disabled", "error", s3Err)
 		} else {
+			// Bootstrap the buckets the platform writes to so exports and
+			// documents work out of the box instead of failing on first use.
+			for _, bucket := range []string{export.ExportBucket, "reticora-documents", cfg.S3Bucket} {
+				if bucket == "" {
+					continue
+				}
+				if err := s3Store.EnsureBucket(context.Background(), bucket); err != nil {
+					slog.Warn("failed to ensure S3 bucket", "bucket", bucket, "error", err)
+				}
+			}
 			blobStore = s3Store
 		}
 	}
@@ -239,6 +249,8 @@ func main() {
 		Credentials:        credential.NewService(repos.Credential, encryptor),
 		OIDC:               oidcProvider,
 		Sessions:           sessionIssuer,
+		UserProvisioner:    userProvisioner(repos),
+		DefaultProvisionRole: cfg.DefaultProvisionRole,
 		Audit:              auditHandler,
 		AuditPool:          auditPool,
 		AIProvider:         aiProvider,
@@ -323,6 +335,18 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("server shutdown error", "error", err)
 	}
+}
+
+// userProvisioner adapts the user repository to the identity provisioning
+// port. Only the PostgreSQL-backed repository supports durable first-login
+// provisioning; the in-memory variant returns nil so --no-db smoke tests keep
+// their previous behavior.
+func userProvisioner(repos server.Repositories) identity.UserProvisioner {
+	p, ok := repos.User.(*user.PGRepository)
+	if !ok {
+		return nil
+	}
+	return p
 }
 
 // loadSessionIssuer reads and parses the RS256 session signing key. A nil

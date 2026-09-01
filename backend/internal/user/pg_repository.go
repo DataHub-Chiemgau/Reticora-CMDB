@@ -963,3 +963,54 @@ func nilIfEmpty(value string) any {
 func statusIsActive(status string) bool {
 	return status == "" || strings.EqualFold(status, "active")
 }
+
+// ─── OIDC first-login provisioning (identity.UserProvisioner) ────────────────
+
+// EnsureUser returns the app_user id for the given OIDC subject, creating the
+// record on first login. The oidc_subject unique constraint makes the
+// read-then-create race safe: on conflict the existing row is returned.
+func (r *PGRepository) EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName string) (string, error) {
+	if email == "" {
+		email = oidcSubject + "@oidc.local"
+	}
+	if displayName == "" {
+		displayName = email
+	}
+	var id string
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			INSERT INTO app_user (organization_id, oidc_subject, email, display_name, is_active)
+			VALUES ($1, $2, $3, $4, true)
+			ON CONFLICT (oidc_subject) DO UPDATE SET oidc_subject = EXCLUDED.oidc_subject
+			RETURNING id::text
+		`, orgID, oidcSubject, email, displayName).Scan(&id)
+	})
+	if err != nil {
+		return "", fmt.Errorf("ensure oidc user: %w", err)
+	}
+	return id, nil
+}
+
+// EnsureRole assigns the named standard role to the user when they hold no
+// standard role yet, so first login lands on a sensible least-privilege
+// baseline instead of an empty permission set.
+func (r *PGRepository) EnsureRole(ctx context.Context, orgID, userID, roleName string) error {
+	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var existing int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM role_assignment WHERE organization_id = $1 AND user_id = $2`, orgID, userID).Scan(&existing); err != nil {
+			return fmt.Errorf("check role assignments: %w", err)
+		}
+		if existing > 0 {
+			return nil
+		}
+		_, err := tx.Exec(ctx, `
+			INSERT INTO role_assignment (organization_id, user_id, role_id)
+			SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = $3
+			ON CONFLICT DO NOTHING
+		`, orgID, userID, roleName)
+		if err != nil {
+			return fmt.Errorf("assign default role: %w", err)
+		}
+		return nil
+	})
+}

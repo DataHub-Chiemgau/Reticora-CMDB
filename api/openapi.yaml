@@ -1826,6 +1826,29 @@ paths:
   /api/v1/monitoring/alerts/{id}:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: updateAlert
+      tags: [Monitoring]
+      summary: Partially update an alert rule (e.g. toggle enabled)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAlertRuleRequest'
+      responses:
+        '200':
+          description: Updated alert rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       operationId: deleteAlert
       tags: [Monitoring]
@@ -7105,6 +7128,12 @@ components:
         priority:
           type: string
           enum: [low, medium, high, critical]
+        response_time_minutes:
+          type: integer
+          description: Alias for response_target_minutes.
+        resolution_time_minutes:
+          type: integer
+          description: Alias for resolution_target_minutes.
         response_target_minutes:
           type: integer
         resolution_target_minutes:
@@ -7641,6 +7670,26 @@ components:
         value:
           type: number
 
+    UpdateAlertRuleRequest:
+      type: object
+      description: Partial alert rule update; every field is optional and only set fields are applied.
+      properties:
+        name:
+          type: string
+        condition:
+          type: string
+          enum: [gt, lt, eq]
+        threshold:
+          type: number
+        duration:
+          type: string
+          description: Go duration string.
+        severity:
+          type: string
+          enum: [critical, warning, info]
+        enabled:
+          type: boolean
+
     AlertRule:
       type: object
       required: [id, org_id, name, metric_name, condition, threshold, duration, severity, enabled]
@@ -7915,12 +7964,16 @@ components:
 
     CreateClientRequest:
       type: object
-      required: [name, slug]
+      required: [name]
       properties:
         name:
           type: string
         slug:
           type: string
+          description: URL-safe identifier; falls back to `code` when omitted.
+        code:
+          type: string
+          description: Alias for slug (accepted for integrations sending {name, code}).
         settings:
           type: object
           additionalProperties: true
@@ -8395,12 +8448,16 @@ components:
 
     CreateContactRequest:
       type: object
-      required: [display_name]
+      required: []
       properties:
         client_id:
           type: string
         display_name:
           type: string
+          description: Required; `name` is accepted as an alias when omitted.
+        name:
+          type: string
+          description: Alias for display_name.
         email:
           type: string
         phone:

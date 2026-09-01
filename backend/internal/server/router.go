@@ -11,6 +11,7 @@ import (
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
@@ -100,6 +101,11 @@ type Options struct {
 	// OIDC and Sessions power the authentication endpoints.
 	OIDC     *identity.OIDCProvider
 	Sessions *identity.SessionIssuer
+	// UserProvisioner auto-creates the app_user on first OIDC login (nil
+	// disables). DefaultProvisionRole names the standard role assigned on
+	// first login (empty assigns none).
+	UserProvisioner      identity.UserProvisioner
+	DefaultProvisionRole string
 	// Audit is registered only when a database-backed audit trail exists.
 	Audit *audit.Handler
 	// AuditPool enables the security report to include audit-chain integrity;
@@ -128,6 +134,15 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 
 	mux := chi.NewRouter()
 
+	// Unknown and method-mismatched routes must answer with RFC 7807
+	// problem+json like every other API error, not chi's plain-text default.
+	mux.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "the requested resource does not exist")
+	})
+	mux.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		api.WriteError(w, http.StatusMethodNotAllowed, "Method Not Allowed", "the method is not allowed for this resource")
+	})
+
 	httpMetrics := registerOperational(mux, opts.Version, opts.MetricsTenantLabel)
 
 	// Every domain route is registered through the authorizing router, which
@@ -137,7 +152,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	protected := authorizingRouter{Router: mux}
 
 	registrars := []registrar{
-		identity.NewHandler(opts.OIDC, opts.Sessions),
+		identity.NewHandler(opts.OIDC, opts.Sessions).WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole),
 		entitlement.NewHandler(opts.Entitlements),
 		ci.NewHandler(opts.CIService, opts.Dispatcher),
 		relationship.NewHandler(repos.Relationship),

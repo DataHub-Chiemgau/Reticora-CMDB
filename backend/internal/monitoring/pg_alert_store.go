@@ -101,6 +101,52 @@ func (s *PGAlertStore) CreateRule(ctx context.Context, rule AlertRule) (AlertRul
 	return rule, nil
 }
 
+// UpdateRule applies a partial update to the tenant's rule. Only the fields
+// set in the request are changed; the returned rule reflects the stored state.
+func (s *PGAlertStore) UpdateRule(ctx context.Context, orgID, id string, req UpdateAlertRuleRequest) (AlertRule, error) {
+	var rule AlertRule
+	err := s.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		row := tx.QueryRow(ctx,
+			`UPDATE alert_rule SET
+				name = COALESCE($3, name),
+				condition = COALESCE($4, condition),
+				threshold = COALESCE($5, threshold),
+				duration = COALESCE($6::interval, duration),
+				severity = COALESCE($7, severity),
+				enabled = COALESCE($8, enabled),
+				updated_at = now()
+			 WHERE id = $2::uuid
+			 RETURNING `+ruleColumns,
+			orgID, id, req.Name, req.Condition, req.Threshold, durationPtrLiteral(req.Duration), req.Severity, req.Enabled)
+		var err error
+		rule, err = scanRule(row)
+		if err == pgx.ErrNoRows {
+			return errRuleNotFound
+		}
+		return err
+	})
+	if err != nil {
+		return AlertRule{}, err
+	}
+	return rule, nil
+}
+
+// errRuleNotFound signals an update against a missing or foreign rule id.
+var errRuleNotFound = errors.New("alert rule not found")
+
+// durationPtrLiteral converts an optional Go duration string to the interval
+// literal Postgres understands; nil stays NULL so COALESCE keeps the old value.
+func durationPtrLiteral(d *string) any {
+	if d == nil {
+		return nil
+	}
+	parsed, err := time.ParseDuration(*d)
+	if err != nil {
+		return *d
+	}
+	return intervalLiteral(parsed)
+}
+
 // DeleteRule removes the tenant's rule and reports whether it existed.
 func (s *PGAlertStore) DeleteRule(ctx context.Context, orgID, id string) (bool, error) {
 	deleted := false

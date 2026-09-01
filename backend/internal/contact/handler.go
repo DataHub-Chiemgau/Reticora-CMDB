@@ -69,6 +69,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	// Accept `name` as a display_name alias.
+	if req.DisplayName == "" && req.Name != "" {
+		req.DisplayName = req.Name
+	}
 	if req.DisplayName == "" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "display_name is required")
 		return

@@ -35,12 +35,27 @@ type TicketSLA struct {
 
 // CreatePolicyRequest is the payload for creating an SLA policy.
 type CreatePolicyRequest struct {
-	ClientID                string `json:"client_id,omitempty"`
-	Name                    string `json:"name"`
-	Priority                string `json:"priority"`
-	ResponseTargetMinutes   int    `json:"response_target_minutes"`
-	ResolutionTargetMinutes int    `json:"resolution_target_minutes"`
-	BusinessCalendar        bool   `json:"business_calendar"`
+	ClientID string `json:"client_id,omitempty"`
+	Name     string `json:"name"`
+	Priority string `json:"priority"`
+	// ResponseTimeMinutes/ResolutionTimeMinutes are accepted as aliases for
+	// the canonical response_target_minutes/resolution_target_minutes fields.
+	ResponseTimeMinutes     *int `json:"response_time_minutes,omitempty"`
+	ResolutionTimeMinutes   *int `json:"resolution_time_minutes,omitempty"`
+	ResponseTargetMinutes   int  `json:"response_target_minutes"`
+	ResolutionTargetMinutes int  `json:"resolution_target_minutes"`
+	BusinessCalendar        bool `json:"business_calendar"`
+}
+
+// Normalize applies the response/resolution time aliases onto the canonical
+// target fields.
+func (r *CreatePolicyRequest) Normalize() {
+	if r.ResponseTargetMinutes == 0 && r.ResponseTimeMinutes != nil {
+		r.ResponseTargetMinutes = *r.ResponseTimeMinutes
+	}
+	if r.ResolutionTargetMinutes == 0 && r.ResolutionTimeMinutes != nil {
+		r.ResolutionTargetMinutes = *r.ResolutionTimeMinutes
+	}
 }
 
 // UpdatePolicyRequest is the payload for updating an SLA policy.

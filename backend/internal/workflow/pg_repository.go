@@ -175,16 +175,31 @@ func (r *PGRepository) ListRuns(ctx context.Context, orgID, wid, status string, 
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		// Collect run ids and close the rows BEFORE issuing the per-run step
+		// queries: a nested query on the same connection while rows are open
+		// fails with "conn busy".
+		runIDs := make([]string, 0, page.Limit)
 		for rows.Next() {
 			run, err := scanRun(rows)
 			if err != nil {
+				rows.Close()
 				return err
 			}
-			run.Steps, _ = r.listStepsTx(ctx, tx, orgID, run.ID)
 			out = append(out, *run)
+			runIDs = append(runIDs, run.ID)
 		}
-		return rows.Err()
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for i, id := range runIDs {
+			steps, err := r.listStepsTx(ctx, tx, orgID, id)
+			if err != nil {
+				return fmt.Errorf("list steps for run %s: %w", id, err)
+			}
+			out[i].Steps = steps
+		}
+		return nil
 	})
 	return out, total, err
 }

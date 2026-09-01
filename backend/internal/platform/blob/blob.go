@@ -188,6 +188,24 @@ func (s *S3Store) Put(ctx context.Context, bucket, key string, reader io.Reader,
 	return nil
 }
 
+// EnsureBucket creates the bucket when it does not exist yet. A pre-existing
+// bucket (or an owning-but-foreign 409) is treated as success so startup is
+// idempotent; genuine failures are returned so the caller can decide whether
+// the feature depending on the bucket stays disabled.
+func (s *S3Store) EnsureBucket(ctx context.Context, bucket string) error {
+	resp, err := s.doRequest(ctx, http.MethodPut, bucket, "", nil, "", emptyPayloadSHA256, nil)
+	if err != nil {
+		// BucketAlreadyOwnedByYou / BucketAlreadyExists surface as 409; MinIO
+		// returns 200 for an existing own bucket. Treat both as satisfied.
+		if strings.Contains(err.Error(), "409") || strings.Contains(err.Error(), "BucketAlready") {
+			return nil
+		}
+		return fmt.Errorf("blob: ensure bucket %s: %w", bucket, err)
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
 // Get downloads an object from the S3-compatible backend.
 func (s *S3Store) Get(ctx context.Context, bucket, key string) (io.ReadCloser, error) {
 	resp, err := s.doRequest(ctx, http.MethodGet, bucket, key, nil, "", emptyPayloadSHA256, nil)

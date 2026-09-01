@@ -20,6 +20,9 @@ type CreateClientRequest struct {
 	Name     string         `json:"name"`
 	Slug     string         `json:"slug"`
 	Settings map[string]any `json:"settings,omitempty"`
+	// Code is a human-facing short identifier accepted as a slug alias so
+	// integrations that send {name, code} instead of {name, slug} keep working.
+	Code string `json:"code,omitempty"`
 }
 
 // UpdateClientRequest is the payload for updating a client.

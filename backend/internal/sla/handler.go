@@ -80,6 +80,7 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	req.Normalize()
 	if req.Name == "" || req.Priority == "" || req.ResponseTargetMinutes <= 0 || req.ResolutionTargetMinutes <= 0 {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name, priority and positive targets are required")
 		return
