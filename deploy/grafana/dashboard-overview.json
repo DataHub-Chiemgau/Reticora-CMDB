@@ -19,7 +19,7 @@
       "title": "HTTP Request Rate",
       "type": "timeseries",
       "targets": [
-        { "expr": "rate(http_requests_total{job=\"reticora-server\"}[5m])", "legendFormat": "{{method}} {{path}}" }
+        { "expr": "rate(reticora_http_requests_total{job=\"reticora-server\"}[5m])", "legendFormat": "{{method}} {{path}}" }
       ]
     },
     {
@@ -32,7 +32,7 @@
       "title": "HTTP Request Latency (p95)",
       "type": "timeseries",
       "targets": [
-        { "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=\"reticora-server\"}[5m]))*1000", "legendFormat": "p95" }
+        { "expr": "histogram_quantile(0.95, rate(reticora_http_request_duration_seconds_bucket{job=\"reticora-server\"}[5m]))*1000", "legendFormat": "p95" }
       ]
     },
     {

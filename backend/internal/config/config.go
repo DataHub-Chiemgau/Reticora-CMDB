@@ -57,6 +57,10 @@ type Config struct {
 
 	// Observability
 	OTelEndpoint string
+	// MetricsTenantLabel enables the organization_id label on HTTP request
+	// metrics. It multiplies the series count by the number of tenants, so it
+	// is opt-in for bounded-tenant deployments.
+	MetricsTenantLabel bool
 
 	// Rate Limiting
 	RateLimitRPM int // requests per minute per key/user (default 600)
@@ -109,7 +113,10 @@ func Load() *Config {
 		MasterKey: envOrDefault("RETICORA_MASTER_KEY", ""),
 
 		OTelEndpoint: envOrDefault("RETICORA_OTEL_ENDPOINT", ""),
-		RateLimitRPM: envOrDefaultInt("RETICORA_RATE_LIMIT_RPM", 600),
+		// Opt-in: the organization_id label multiplies the HTTP metric series
+		// by the tenant count. Default off; enable for bounded-tenant setups.
+		MetricsTenantLabel: envOrDefaultBool("RETICORA_METRICS_TENANT_LABEL", false),
+		RateLimitRPM:       envOrDefaultInt("RETICORA_RATE_LIMIT_RPM", 600),
 
 		SearchBackend:      envOrDefault("RETICORA_SEARCH_BACKEND", "postgres"),
 		OpenSearchURL:      envOrDefault("RETICORA_OPENSEARCH_URL", ""),
@@ -143,6 +150,15 @@ func envOrDefaultInt(key string, defaultValue int) int {
 	if v := os.Getenv(key); v != "" {
 		if i, err := strconv.Atoi(v); err == nil {
 			return i
+		}
+	}
+	return defaultValue
+}
+
+func envOrDefaultBool(key string, defaultValue bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return defaultValue

@@ -230,18 +230,19 @@ func main() {
 		}
 	}()
 
-	mux, err := server.NewRouter(repos, server.Options{
-		Version:      version,
-		Entitlements: entitlementSvc,
-		Dispatcher:   webhookDispatcher,
-		CIService:    ci.NewServiceWithLimits(repos.CI, entitlementSvc),
-		Credentials:  credential.NewService(repos.Credential, encryptor),
-		OIDC:         oidcProvider,
-		Sessions:     sessionIssuer,
-		Audit:        auditHandler,
-		AuditPool:    auditPool,
-		AIProvider:   aiProvider,
-		Blobs:        blobStore,
+	mux, httpMetrics, err := server.NewRouter(repos, server.Options{
+		Version:            version,
+		MetricsTenantLabel: cfg.MetricsTenantLabel,
+		Entitlements:       entitlementSvc,
+		Dispatcher:         webhookDispatcher,
+		CIService:          ci.NewServiceWithLimits(repos.CI, entitlementSvc),
+		Credentials:        credential.NewService(repos.Credential, encryptor),
+		OIDC:               oidcProvider,
+		Sessions:           sessionIssuer,
+		Audit:              auditHandler,
+		AuditPool:          auditPool,
+		AIProvider:         aiProvider,
+		Blobs:              blobStore,
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -280,6 +281,8 @@ func main() {
 	// Middleware chain per spec:
 	// RequestID/Tracing -> Panic-Recovery -> Security-Headers -> Auth ->
 	// Tenant -> Entitlement -> Rate-Limit -> POST-Idempotency -> Handler
+	// The HTTP metrics middleware sits just inside the tenant middleware so the
+	// organization_id label is populated from the request context.
 	handler := middleware.Chain(
 		middleware.RequestID,
 		middleware.Recovery,
@@ -288,6 +291,7 @@ func main() {
 		middleware.OpenAPIValidation,
 		authMiddleware,
 		middleware.TenantMiddleware,
+		httpMetrics,
 		entitlementSvc.Middleware,
 		middleware.RateLimiterWithStore(cfg.RateLimitRPM, cacheStore),
 		middleware.IdempotencyWithStore(cacheStore),

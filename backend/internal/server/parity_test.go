@@ -38,7 +38,7 @@ func testRouter(t *testing.T) *chi.Mux {
 		Enforce:     false,
 	})
 
-	mux, err := NewRouter(repos, Options{
+	mux, _, err := NewRouter(repos, Options{
 		Version:      "test",
 		Entitlements: entitlements,
 		Dispatcher:   webhook.NewDispatcher(repos.Webhook, nil, webhook.DispatcherOptions{Deliveries: repos.WebhookDeliveries}),
@@ -113,7 +113,7 @@ func format(ops []speccheck.Operation) string {
 }
 
 func TestNewRouterRequiresCoreDependencies(t *testing.T) {
-	if _, err := NewRouter(Repositories{}, Options{}); err == nil {
+	if _, _, err := NewRouter(Repositories{}, Options{}); err == nil {
 		t.Fatal("expected an error when required dependencies are missing")
 	}
 }
