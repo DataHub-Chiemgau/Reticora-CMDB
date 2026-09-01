@@ -30,15 +30,22 @@
     "audit": "Audit",
     "security": "Sicherheit",
     "map": "Karte",
-    "roomplan": "Raumplan"
+    "roomplan": "Raumplan",
+    "consumables": "Lager",
+    "orders": "Bestellungen",
+    "maintenance": "Wartung",
+    "disposal": "Entsorgung",
+    "keys": "Schlüssel",
+    "trainings": "Schulungen",
+    "desks": "Arbeitsplätze"
   },
   "common": {
     "save": "Speichern",
     "cancel": "Abbrechen",
     "delete": "Löschen",
     "edit": "Bearbeiten",
-    "create": "Erstellen",
-    "search": "Suchen…",
+    "create": "Anlegen",
+    "search": "Suchen",
     "noResults": "Keine Ergebnisse",
     "noData": "Keine Daten vorhanden",
     "back": "Zurück",
@@ -51,7 +58,10 @@
     "retry": "Erneut versuchen",
     "copy": "Kopieren",
     "copied": "Kopiert!",
-    "done": "Fertig"
+    "done": "Fertig",
+    "name": "Name",
+    "title": "Titel",
+    "location": "Standort"
   },
   "commandPalette": {
     "title": "Befehlsmenü",
@@ -620,5 +630,73 @@
     "objects": "Objekte",
     "noCIs": "Keine CIs in diesem Raum zugeordnet.",
     "dragHint": "ziehen zum Positionieren, Doppelklick öffnet"
+  },
+  "consumables": {
+    "summary": "Verbrauchsmaterial mit Bestand und Mindestbestand.",
+    "create": "Artikel anlegen",
+    "lowStockOnly": "Nur Mindestbestand unterschritten",
+    "low": "niedrig",
+    "ok": "OK",
+    "minLevel": "Mindestbestand"
+  },
+  "orders": {
+    "summary": "Interne Bestellungen mit Genehmigungs-Workflow.",
+    "create": "Bestellung anlegen",
+    "positions": "Positionen",
+    "submit": "Einreichen",
+    "approve": "Genehmigen",
+    "reject": "Ablehnen",
+    "supplier": "Lieferant"
+  },
+  "maintenance": {
+    "summary": "Wartungen planen und betroffene Kunden benachrichtigen.",
+    "create": "Wartung planen",
+    "start": "Starten",
+    "complete": "Abschließen",
+    "notify": "Kunden benachrichtigen",
+    "notified": "{{count}} Kunden benachrichtigt",
+    "affectedCIs": "betroffene CIs",
+    "startsAt": "Beginn",
+    "endsAt": "Ende"
+  },
+  "disposal": {
+    "summary": "Revisionssichere Entsorgungsdokumentation (append-only, BSI/ISO).",
+    "create": "Entsorgung dokumentieren",
+    "method": "Methode",
+    "asset": "Asset",
+    "selectAsset": "Asset wählen",
+    "certificate": "Zertifikats-Referenz",
+    "dataCarrier": "Datenträger-Vernichtung",
+    "performedAt": "Durchgeführt"
+  },
+  "keys": {
+    "summary": "Physische und digitale Schlüssel mit Ausgabe/Rückgabe.",
+    "create": "Schlüssel anlegen",
+    "issue": "Ausgeben",
+    "return": "Zurücknehmen",
+    "type": "Typ",
+    "physical": "Physisch",
+    "digital": "Digital",
+    "identifier": "Kennung",
+    "issueTitle": "Schlüssel ausgeben",
+    "assignTo": "Ausgeben an",
+    "selectUser": "Nutzer wählen"
+  },
+  "trainings": {
+    "summary": "Kurse mit Zuweisung, Fälligkeit und Nachweis.",
+    "create": "Kurs anlegen",
+    "category": "Kategorie",
+    "validity": "Gültigkeit",
+    "months": "Monate",
+    "validityMonths": "Gültigkeit (Monate)",
+    "general": "Allgemein"
+  },
+  "desks": {
+    "summary": "Wechselnde Arbeitsplätze buchen.",
+    "create": "Arbeitsplatz anlegen",
+    "book": "Buchen",
+    "bookTitle": "Arbeitsplatz buchen",
+    "startsAt": "Von",
+    "endsAt": "Bis"
   }
 }

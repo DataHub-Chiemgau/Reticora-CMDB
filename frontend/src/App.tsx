@@ -54,6 +54,13 @@ const UserManagementPage = lazyPage(() => import('./pages/UserManagementPage'), 
 const WebhooksPage = lazyPage(() => import('./pages/WebhooksPage'), 'WebhooksPage');
 const AuditPage = lazyPage(() => import('./pages/AuditPage'), 'AuditPage');
 const SecurityPage = lazyPage(() => import('./pages/SecurityPage'), 'SecurityPage');
+const ConsumableListPage = lazyPage(() => import('./pages/ConsumableListPage'), 'ConsumableListPage');
+const OrderListPage = lazyPage(() => import('./pages/OrderListPage'), 'OrderListPage');
+const MaintenancePage = lazyPage(() => import('./pages/MaintenancePage'), 'MaintenancePage');
+const DisposalListPage = lazyPage(() => import('./pages/DisposalListPage'), 'DisposalListPage');
+const KeyListPage = lazyPage(() => import('./pages/KeyListPage'), 'KeyListPage');
+const TrainingListPage = lazyPage(() => import('./pages/TrainingListPage'), 'TrainingListPage');
+const DeskListPage = lazyPage(() => import('./pages/DeskListPage'), 'DeskListPage');
 const MapPage = lazyPage(() => import('./pages/MapPage'), 'MapPage');
 const RoomPlanPage = lazyPage(() => import('./pages/RoomPlanPage'), 'RoomPlanPage');
 
@@ -127,6 +134,13 @@ function App() {
       'assignments',
       'documents',
       'stocktake',
+      'consumables',
+      'orders',
+      'maintenance',
+      'disposal',
+      'keys',
+      'trainings',
+      'desks',
       'discovery',
       'users',
       'permissions',
@@ -272,6 +286,13 @@ function App() {
             <Route path="/assignments" element={<AssignmentListPage />} />
             <Route path="/documents" element={<DocumentListPage />} />
             <Route path="/stocktake" element={<StocktakeListPage />} />
+            <Route path="/consumables" element={<ConsumableListPage />} />
+            <Route path="/orders" element={<OrderListPage />} />
+            <Route path="/maintenance" element={<MaintenancePage />} />
+            <Route path="/disposal" element={<DisposalListPage />} />
+            <Route path="/keys" element={<KeyListPage />} />
+            <Route path="/trainings" element={<TrainingListPage />} />
+            <Route path="/desks" element={<DeskListPage />} />
             <Route path="/tickets" element={<TicketListPage />} />
             <Route path="/users" element={<UserManagementPage />} />
             <Route path="/permissions" element={<PermissionsPage />} />

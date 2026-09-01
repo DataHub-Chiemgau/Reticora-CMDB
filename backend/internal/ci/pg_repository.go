@@ -329,6 +329,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 
 		addStringField("name", req.Name)
 		addStringField("status", req.Status)
+		addStringField("client_id", req.ClientID)
+		addStringField("site_id", req.SiteID)
+		addStringField("room_id", req.RoomID)
 		addStringField("manufacturer", req.Manufacturer)
 		addStringField("model", req.Model)
 		addStringField("serial_number", req.SerialNumber)

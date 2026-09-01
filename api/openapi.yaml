@@ -6970,6 +6970,12 @@ components:
           type: string
         status:
           $ref: '#/components/schemas/CIStatus'
+        client_id:
+          type: string
+        site_id:
+          type: string
+        room_id:
+          type: string
         manufacturer:
           type: string
         model:
