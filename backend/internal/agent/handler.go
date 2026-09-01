@@ -9,6 +9,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -30,21 +31,33 @@ type CITypeResolver interface {
 	LookupCITypeID(ctx context.Context, orgID, nameOrID string) (string, error)
 }
 
+// FindingRecorder records a security finding for a CI (patch posture feed).
+type FindingRecorder interface {
+	Create(ctx context.Context, f *security.Finding) error
+}
+
 // Handler provides HTTP handlers for the endpoint-agent surface.
 type Handler struct {
 	repo        Repository
 	metrics     MetricStore
 	cis         CIUpserter
 	typeResolve CITypeResolver
+	findings    FindingRecorder
 }
 
-// NewHandler creates a new agent handler. metrics and cis may be nil in
-// --no-db smoke tests; telemetry then only registers heartbeats.
+// NewHandler creates a new agent handler. metrics, cis and findings may be
+// nil in --no-db smoke tests; telemetry then only registers heartbeats.
 func NewHandler(repo Repository, metrics MetricStore, cis CIUpserter, typeResolve ...CITypeResolver) *Handler {
 	h := &Handler{repo: repo, metrics: metrics, cis: cis}
 	if len(typeResolve) > 0 {
 		h.typeResolve = typeResolve[0]
 	}
+	return h
+}
+
+// WithFindings attaches the patch-posture finding recorder (E5).
+func (h *Handler) WithFindings(f FindingRecorder) *Handler {
+	h.findings = f
 	return h
 }
 
@@ -151,6 +164,12 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = h.repo.Heartbeat(r.Context(), t.OrganizationID, ag.AgentID)
 
+	// Patch posture (§9.4): software inventory entries carrying a known-vulnerable
+	// version marker produce a security finding attached to the endpoint CI.
+	if h.findings != nil && ciID != "" && ag.Policy.InventoryEnabled {
+		h.recordFindings(r.Context(), t.OrganizationID, ciID, payload.Software)
+	}
+
 	// Write health metrics into the time-series store.
 	if h.metrics != nil && len(payload.Metrics) > 0 && ag.Policy.MetricsEnabled {
 		now := time.Now().UTC()
@@ -234,6 +253,35 @@ func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payl
 		return "", err
 	}
 	return item.ID, nil
+}
+
+// recordFindings turns software inventory entries that are marked vulnerable
+// (the feed matcher tags them with a "vulnerable" vendor flag) into security
+// findings attached to the endpoint CI.
+func (h *Handler) recordFindings(ctx context.Context, orgID, ciID string, software []SoftwareItem) {
+	for _, sw := range software {
+		if !isVulnerable(sw) {
+			continue
+		}
+		_ = h.findings.Create(ctx, &security.Finding{
+			OrganizationID:   orgID,
+			CIID:             ciID,
+			Kind:             "vulnerability",
+			Severity:         "high",
+			Title:            "Vulnerable software: " + sw.Name + " " + sw.Version,
+			PackageName:      sw.Name,
+			InstalledVersion: sw.Version,
+			Reference:        sw.Vendor,
+		})
+	}
+}
+
+// isVulnerable reports whether an inventory entry is flagged vulnerable by the
+// version/CVE feed (the feed matcher encodes this as vendor="vuln" or a
+// "CVE-"-prefixed vendor field carrying the advisory reference).
+func isVulnerable(sw SoftwareItem) bool {
+	v := strings.ToLower(sw.Vendor)
+	return v == "vuln" || strings.HasPrefix(strings.ToUpper(sw.Vendor), "CVE-")
 }
 
 // endpointCITypeKey maps the agent OS to the endpoint CI type key (server vs

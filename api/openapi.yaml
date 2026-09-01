@@ -2256,6 +2256,110 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/security/findings:
+    get:
+      operationId: listSecurityFindings
+      tags: [Security]
+      summary: List security findings (patch posture / vulnerabilities per CI)
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: ci_id
+          in: query
+          schema: { type: string }
+        - name: kind
+          in: query
+          schema: { type: string }
+        - name: severity
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated findings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecurityFindingListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createSecurityFinding
+      tags: [Security]
+      summary: Record a security finding (feed-derived)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSecurityFindingRequest'
+      responses:
+        '201':
+          description: Finding created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecurityFinding'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/security/findings/summary:
+    get:
+      operationId: securityFindingsSummary
+      tags: [Security]
+      summary: Open findings aggregated by severity (security cockpit)
+      responses:
+        '200':
+          description: Severity summary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/security/findings/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getSecurityFinding
+      tags: [Security]
+      summary: Get a security finding
+      responses:
+        '200':
+          description: Finding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecurityFinding'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateSecurityFinding
+      tags: [Security]
+      summary: Transition a finding's status (acknowledge/resolve/false positive)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSecurityFindingRequest'
+      responses:
+        '200':
+          description: Finding updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecurityFinding'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/consumables:
     get:
       operationId: listConsumables
@@ -8927,6 +9031,53 @@ components:
             data:
               type: array
               items: { $ref: '#/components/schemas/Agent' }
+
+    SecurityFinding:
+      type: object
+      required: [id, organization_id, kind, severity, title, status, detected_at, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        ci_id: { type: string }
+        kind: { type: string, enum: [vulnerability, outdated_software, outdated_firmware, missing_patch] }
+        severity: { type: string, enum: [low, medium, high, critical] }
+        title: { type: string }
+        detail: { type: string }
+        package_name: { type: string }
+        installed_version: { type: string }
+        fixed_version: { type: string }
+        reference: { type: string, description: CVE id or advisory URL. }
+        status: { type: string, enum: [open, acknowledged, resolved, false_positive] }
+        detected_at: { type: string, format: date-time }
+        resolved_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateSecurityFindingRequest:
+      type: object
+      required: [kind, title]
+      properties:
+        ci_id: { type: string }
+        kind: { type: string, enum: [vulnerability, outdated_software, outdated_firmware, missing_patch] }
+        severity: { type: string, enum: [low, medium, high, critical] }
+        title: { type: string }
+        detail: { type: string }
+        package_name: { type: string }
+        installed_version: { type: string }
+        fixed_version: { type: string }
+        reference: { type: string }
+    UpdateSecurityFindingRequest:
+      type: object
+      properties:
+        status: { type: string, enum: [open, acknowledged, resolved, false_positive] }
+    SecurityFindingListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/SecurityFinding' }
 
     CreateSLAPolicyRequest:
       type: object

@@ -62,6 +62,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"workflows":          identity.PermWorkflowRead,
 	"workflow-runs":      identity.PermWorkflowRead,
 	"compliance":         identity.PermComplianceRead,
+	"security":           identity.PermSecurityRead,
 	"monitoring":         identity.PermMonitoringRead,
 	// Privacy/DSGVO acts on other people's personal data; even the read-side
 	// retention policy requires the manage permission.

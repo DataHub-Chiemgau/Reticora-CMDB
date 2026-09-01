@@ -82,4 +82,6 @@ var Catalogue = []Permission{
 	{Key: "agent:read", Resource: "agent", Action: "read", Description: "Read endpoint agents"},
 	{Key: "agent:manage", Resource: "agent", Action: "manage", Description: "Manage endpoint agents, policies and kill-switch"},
 	{Key: "agent:ingest", Resource: "agent", Action: "ingest", Description: "Ingest endpoint agent telemetry"},
+	{Key: "security:read", Resource: "security", Action: "read", Description: "Read security findings"},
+	{Key: "security:write", Resource: "security", Action: "write", Description: "Manage security findings"},
 }
