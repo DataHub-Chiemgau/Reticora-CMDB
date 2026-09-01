@@ -63,6 +63,7 @@ func TestBulkIngestPersistsReviewItems(t *testing.T) {
 	ciRepo.Create(context.Background(), &ci.Item{OrganizationID: "org-1", Name: "b", SerialNumber: "DUP", CITypeID: "server"})
 
 	repo := NewMemoryRepository()
+	repo.SeedCIType("server", "server")
 	h := NewHandler(repo, ciRepo)
 	mux := newTestRouter(h)
 
@@ -100,6 +101,7 @@ func TestResolveReviewItemMerge(t *testing.T) {
 	ciRepo.Create(context.Background(), b)
 
 	repo := NewMemoryRepository()
+	repo.SeedCIType("server", "server")
 	h := NewHandler(repo, ciRepo)
 	mux := newTestRouter(h)
 
@@ -139,6 +141,7 @@ func TestResolveReviewItemMerge(t *testing.T) {
 func TestResolveReviewItemCreate(t *testing.T) {
 	ciRepo := ci.NewMemoryRepository()
 	repo := NewMemoryRepository()
+	repo.SeedCIType("server", "server")
 	h := NewHandler(repo, ciRepo)
 	mux := newTestRouter(h)
 
@@ -169,6 +172,7 @@ func TestBulkIngestDerivesTopology(t *testing.T) {
 
 	relRepo := relationship.NewMemoryRepository()
 	repo := NewMemoryRepository()
+	repo.SeedCIType("server", "server")
 	h := NewHandler(repo, ciRepo, relRepo)
 	mux := newTestRouter(h)
 

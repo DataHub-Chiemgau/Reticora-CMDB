@@ -538,3 +538,24 @@ func (r *PGRepository) SuppressedPairs(ctx context.Context, orgID string) (map[s
 	}
 	return pairs, nil
 }
+
+// LookupCITypeID resolves a CI type name or key to its canonical UUID inside
+// the requesting tenant's RLS context. Global system types (organization_id
+// IS NULL) are readable by every tenant since migration 000040; org-specific
+// types are scoped to the requesting tenant by both the query and RLS.
+func (r *PGRepository) LookupCITypeID(ctx context.Context, orgID, nameOrID string) (string, error) {
+	var id string
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			SELECT id::text FROM ci_type
+			WHERE (key = $1 OR name = $1)
+			  AND (organization_id IS NULL OR organization_id = $2)
+			ORDER BY organization_id NULLS LAST
+			LIMIT 1
+		`, nameOrID, orgID).Scan(&id)
+	})
+	if err != nil {
+		return "", fmt.Errorf("lookup ci type %q: %w", nameOrID, err)
+	}
+	return id, nil
+}

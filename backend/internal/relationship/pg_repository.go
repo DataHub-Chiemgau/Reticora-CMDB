@@ -178,6 +178,8 @@ func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string,
 					r.id,
 					r.source_ci_id,
 					r.target_ci_id,
+					r.rel_type,
+					r.source,
 					-- The endpoint the walk entered through; expansion
 					-- continues from the other endpoint.
 					CASE WHEN r.source_ci_id = $2 THEN r.target_ci_id ELSE r.source_ci_id END AS frontier_ci_id,
@@ -193,6 +195,8 @@ func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string,
 					r.id,
 					r.source_ci_id,
 					r.target_ci_id,
+					r.rel_type,
+					r.source,
 					CASE WHEN r.source_ci_id = w.frontier_ci_id THEN r.target_ci_id ELSE r.source_ci_id END,
 					w.depth + 1,
 					w.visited || r.source_ci_id || r.target_ci_id

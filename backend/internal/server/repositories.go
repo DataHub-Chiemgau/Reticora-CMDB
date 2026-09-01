@@ -37,12 +37,22 @@ import (
 // restart; it is never a fallback for an unreachable database.
 func MemoryRepositories() Repositories {
 	assets := asset.NewMemoryRepository()
+	discoveryRepo := discovery.NewMemoryRepository()
+	// Seed the system CI types so name-based ingest works in --no-db mode just
+	// like against the migrated database (migration 000021 seeds them there).
+	for _, typ := range []string{
+		"switch", "router", "firewall", "access_point", "server", "hypervisor",
+		"vm", "client", "pdu", "ups", "nas", "storage_array", "printer",
+		"ip_phone", "camera", "generic_device", "patch_panel",
+	} {
+		discoveryRepo.SeedCIType(typ, typ)
+	}
 	return Repositories{
 		CI:                ci.NewMemoryRepository(),
 		Relationship:      relationship.NewMemoryRepository(),
 		Webhook:           webhook.NewMemoryRepository(),
 		WebhookDeliveries: webhook.NewMemoryDeliveryStore(),
-		Discovery:         discovery.NewMemoryRepository(),
+		Discovery:         discoveryRepo,
 		Asset:             assets,
 		Assignment:        assignment.NewMemoryRepository(),
 		Document:          document.NewMemoryRepository(),

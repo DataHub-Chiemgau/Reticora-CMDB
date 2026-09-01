@@ -105,6 +105,7 @@ type MemoryRepository struct {
 	collectors  map[string]*Collector
 	jobs        map[string]*Job
 	reviewItems map[string]*ReviewItem
+	ciTypes     map[string]string
 	seq         int
 }
 
@@ -114,7 +115,26 @@ func NewMemoryRepository() *MemoryRepository {
 		collectors:  make(map[string]*Collector),
 		jobs:        make(map[string]*Job),
 		reviewItems: make(map[string]*ReviewItem),
+		ciTypes:     make(map[string]string),
 	}
+}
+
+// SeedCIType registers a ci_type name→id mapping for tests and the --no-db
+// development mode, so ingest items can reference types by name.
+func (r *MemoryRepository) SeedCIType(name, id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ciTypes[name] = id
+}
+
+// LookupCITypeID resolves a seeded CI type name to its id.
+func (r *MemoryRepository) LookupCITypeID(_ context.Context, _ string, nameOrID string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if id, ok := r.ciTypes[nameOrID]; ok {
+		return id, nil
+	}
+	return "", fmt.Errorf("ci type %q not found", nameOrID)
 }
 
 func (r *MemoryRepository) ListCollectors(_ context.Context, orgID string, page api.PaginationParams) ([]Collector, int, error) {
@@ -171,9 +191,16 @@ func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID strin
 
 // Handler provides HTTP handlers for discovery endpoints.
 type Handler struct {
-	repo    Repository
-	ciRepo  ci.Repository
-	relRepo relationship.Repository
+	repo       Repository
+	ciRepo     ci.Repository
+	relRepo    relationship.Repository
+	typeLookup CITypeLookup
+}
+
+// CITypeLookup resolves a CI type name or UUID to the canonical ci_type id.
+// Implemented by the discovery PG repository; tests may stub it.
+type CITypeLookup interface {
+	LookupCITypeID(ctx context.Context, orgID, nameOrID string) (string, error)
 }
 
 // NewHandler creates a new discovery handler. ciRepo enables reconciliation and
@@ -182,10 +209,68 @@ type Handler struct {
 // those features are skipped gracefully.
 func NewHandler(repo Repository, ciRepo ci.Repository, relRepo ...relationship.Repository) *Handler {
 	h := &Handler{repo: repo, ciRepo: ciRepo}
+	if lookup, ok := repo.(CITypeLookup); ok {
+		h.typeLookup = lookup
+	}
 	if len(relRepo) > 0 {
 		h.relRepo = relRepo[0]
 	}
 	return h
+}
+
+// isUUID reports whether value looks like a canonical UUID.
+func isUUID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for i, c := range value {
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// resolveCITypeIDs maps each item's ci_type_name to the canonical ci_type UUID.
+// Entries that are already UUIDs pass through. Items whose type cannot be
+// resolved get an empty string so the caller can queue them for review.
+func (h *Handler) resolveCITypeIDs(r *http.Request, items []IngestItem) []string {
+	ids := make([]string, len(items))
+	missing := map[string]struct{}{}
+	for i, item := range items {
+		name := strings.TrimSpace(item.CITypeName)
+		if isUUID(name) {
+			ids[i] = name
+		} else if name != "" {
+			missing[name] = struct{}{}
+		}
+	}
+	if len(missing) == 0 {
+		return ids
+	}
+	t := tenant.FromContext(r.Context())
+	for name := range missing {
+		if h.typeLookup == nil {
+			continue
+		}
+		id, err := h.typeLookup.LookupCITypeID(r.Context(), t.OrganizationID, name)
+		if err != nil {
+			continue
+		}
+		for i, item := range items {
+			if strings.TrimSpace(item.CITypeName) == name {
+				ids[i] = id
+			}
+		}
+	}
+	return ids
 }
 
 // RegisterRoutes registers discovery routes.
@@ -304,10 +389,52 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve ci_type_name to the canonical ci_type UUID before
+	// reconciliation. Collectors send the type name (e.g. "switch"); the CI
+	// column stores the UUID. Names are matched against global system types
+	// (organization_id IS NULL) and org-specific types. Items whose type can
+	// be resolved neither as UUID nor by name are queued for review instead of
+	// failing the whole batch with a 500.
+	typeIDs := h.resolveCITypeIDs(r, req.Items)
+	for i, item := range req.Items {
+		if typeIDs[i] != "" {
+			continue
+		}
+		reviewItem := &ReviewItem{
+			OrganizationID: t.OrganizationID,
+			Kind:           ReviewKindUnclassifiedDevice,
+			Status:         ReviewStatusOpen,
+			Payload: map[string]any{
+				"reason":        "unknown_ci_type",
+				"ci_type_name":  item.CITypeName,
+				"name":          item.Name,
+				"manufacturer":  item.Manufacturer,
+				"model":         item.Model,
+				"serial_number": item.SerialNumber,
+				"management_ip": item.ManagementIP,
+				"fingerprint":   item.Fingerprint,
+				"raw_data":      item.RawData,
+			},
+		}
+		if err := h.repo.CreateReviewItem(r.Context(), reviewItem); err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			return
+		}
+		resp.ReviewItems++
+	}
+
 	existing, _, err := h.ciRepo.List(r.Context(), t.OrganizationID, ci.FilterParams{}, api.PaginationParams{Limit: 10000, Offset: 0})
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
+	}
+
+	// Reconciliation compares stored CIs (UUID type) against the incoming
+	// item, so the item must carry the resolved UUID as well.
+	for i := range req.Items {
+		if typeIDs[i] != "" {
+			req.Items[i].CITypeName = typeIDs[i]
+		}
 	}
 
 	// resolvedCIID[i] holds the CI id that item i resolved to (matched or
@@ -315,6 +442,10 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 	resolvedCIID := make([]string, len(req.Items))
 
 	for i, item := range req.Items {
+		if typeIDs[i] == "" {
+			// Unresolvable CI type: already queued for review above.
+			continue
+		}
 		result := Reconcile(existing, item)
 		now := time.Now().UTC().Format(time.RFC3339)
 		source := item.Source
@@ -331,7 +462,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			nowTime := time.Now().UTC()
 			newItem := ci.Item{
 				OrganizationID:  t.OrganizationID,
-				CITypeID:        item.CITypeName,
+				CITypeID:        typeIDs[i],
 				Name:            item.Name,
 				Status:          "active",
 				Manufacturer:    item.Manufacturer,
