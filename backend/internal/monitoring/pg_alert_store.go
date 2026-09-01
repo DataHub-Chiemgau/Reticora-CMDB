@@ -106,18 +106,20 @@ func (s *PGAlertStore) CreateRule(ctx context.Context, rule AlertRule) (AlertRul
 func (s *PGAlertStore) UpdateRule(ctx context.Context, orgID, id string, req UpdateAlertRuleRequest) (AlertRule, error) {
 	var rule AlertRule
 	err := s.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// orgID scopes via RLS (set by withTenant); the WHERE clause filters the
+		// row by id only, so the nullable COALESCE parameters start at $1.
 		row := tx.QueryRow(ctx,
 			`UPDATE alert_rule SET
-				name = COALESCE($3, name),
-				condition = COALESCE($4, condition),
-				threshold = COALESCE($5, threshold),
-				duration = COALESCE($6::interval, duration),
-				severity = COALESCE($7, severity),
-				enabled = COALESCE($8, enabled),
+				name = COALESCE($2, name),
+				condition = COALESCE($3, condition),
+				threshold = COALESCE($4, threshold),
+				duration = COALESCE($5::interval, duration),
+				severity = COALESCE($6, severity),
+				enabled = COALESCE($7, enabled),
 				updated_at = now()
-			 WHERE id = $2::uuid
+			 WHERE id = $1::uuid
 			 RETURNING `+ruleColumns,
-			orgID, id, req.Name, req.Condition, req.Threshold, durationPtrLiteral(req.Duration), req.Severity, req.Enabled)
+			id, req.Name, req.Condition, req.Threshold, durationPtrLiteral(req.Duration), req.Severity, req.Enabled)
 		var err error
 		rule, err = scanRule(row)
 		if err == pgx.ErrNoRows {

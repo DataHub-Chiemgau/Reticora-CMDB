@@ -937,7 +937,8 @@ export interface paths {
     delete: operations['deleteAlert'];
     options?: never;
     head?: never;
-    patch?: never;
+    /** Partially update an alert rule (e.g. toggle enabled) */
+    patch: operations['updateAlert'];
     trace?: never;
   };
   '/api/v1/graphql': {
@@ -3809,6 +3810,10 @@ export interface components {
       name: string;
       /** @enum {string} */
       priority: 'low' | 'medium' | 'high' | 'critical';
+      /** @description Alias for response_target_minutes. */
+      response_time_minutes?: number;
+      /** @description Alias for resolution_target_minutes. */
+      resolution_time_minutes?: number;
       response_target_minutes: number;
       resolution_target_minutes: number;
       business_calendar: boolean;
@@ -4185,6 +4190,18 @@ export interface components {
       timestamp: string;
       value: number;
     };
+    /** @description Partial alert rule update; every field is optional and only set fields are applied. */
+    UpdateAlertRuleRequest: {
+      name?: string;
+      /** @enum {string} */
+      condition?: 'gt' | 'lt' | 'eq';
+      threshold?: number;
+      /** @description Go duration string. */
+      duration?: string;
+      /** @enum {string} */
+      severity?: 'critical' | 'warning' | 'info';
+      enabled?: boolean;
+    };
     AlertRule: {
       id: string;
       org_id: string;
@@ -4352,7 +4369,10 @@ export interface components {
     };
     CreateClientRequest: {
       name: string;
-      slug: string;
+      /** @description URL-safe identifier; falls back to `code` when omitted. */
+      slug?: string;
+      /** @description Alias for slug (accepted for integrations sending {name, code}). */
+      code?: string;
       settings?: {
         [key: string]: unknown;
       };
@@ -4578,7 +4598,10 @@ export interface components {
     };
     CreateContactRequest: {
       client_id?: string;
-      display_name: string;
+      /** @description Required; `name` is accepted as an alias when omitted. */
+      display_name?: string;
+      /** @description Alias for display_name. */
+      name?: string;
       email?: string;
       phone?: string;
       role?: string;
@@ -4879,13 +4902,15 @@ export interface components {
       /** @description Defaults to "member" when omitted. */
       role_in_team?: string;
     };
-    /** @description A custom permission role. */
+    /** @description A permission role. The list endpoint returns the union of the seeded standard roles (org_admin, engineer, viewer, client_technician; is_builtin=true, assign via role_id) and tenant-defined custom roles (is_builtin=false, assign via custom_role_id). */
     Role: {
       id: string;
       organization_id: string;
       name: string;
       description?: string;
       is_system: boolean;
+      /** @description True for the seeded standard roles stored in `role`. */
+      is_builtin?: boolean;
       permissions: string[];
       /** Format: date-time */
       created_at: string;
@@ -4908,16 +4933,20 @@ export interface components {
     RoleAssignment: {
       id: string;
       user_id: string;
-      custom_role_id: string;
+      custom_role_id?: string;
+      role_id?: string;
       scope_type: string;
       scope_id?: string;
       /** Format: date-time */
       granted_at: string;
       granted_by?: string;
     };
+    /** @description Assigns a role to a user. Exactly one of `custom_role_id` (tenant-defined role) or `role_id` (seeded standard role) must be set. */
     AssignRoleRequest: {
       user_id: string;
-      custom_role_id: string;
+      custom_role_id?: string;
+      /** @description ID of a standard (builtin) role; mutually exclusive with custom_role_id. */
+      role_id?: string;
       /** @description Defaults to "organization" when omitted. */
       scope_type?: string;
       scope_id?: string;
@@ -7270,6 +7299,36 @@ export interface operations {
         };
         content?: never;
       };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateAlert: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateAlertRuleRequest'];
+      };
+    };
+    responses: {
+      /** @description Updated alert rule */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AlertRule'];
+        };
+      };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
     };

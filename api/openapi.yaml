@@ -9036,10 +9036,11 @@ components:
 
     Role:
       type: object
-      description: A permission role. The list endpoint returns the union of the
-        seeded standard roles (org_admin, engineer, viewer, client_technician;
-        `is_builtin: true`, assign via `role_id`) and tenant-defined custom roles
-        (`is_builtin: false`, assign via `custom_role_id`).
+      description: >-
+        A permission role. The list endpoint returns the union of the seeded
+        standard roles (org_admin, engineer, viewer, client_technician;
+        is_builtin=true, assign via role_id) and tenant-defined custom roles
+        (is_builtin=false, assign via custom_role_id).
       required: [id, organization_id, name, is_system, permissions, created_at, updated_at]
       properties:
         id:

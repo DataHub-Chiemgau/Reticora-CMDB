@@ -193,17 +193,39 @@ func (s *S3Store) Put(ctx context.Context, bucket, key string, reader io.Reader,
 // idempotent; genuine failures are returned so the caller can decide whether
 // the feature depending on the bucket stays disabled.
 func (s *S3Store) EnsureBucket(ctx context.Context, bucket string) error {
-	resp, err := s.doRequest(ctx, http.MethodPut, bucket, "", nil, "", emptyPayloadSHA256, nil)
+	if strings.TrimSpace(bucket) == "" {
+		return fmt.Errorf("blob: bucket is required")
+	}
+	scheme := "http"
+	if s.useSSL {
+		scheme = "https"
+	}
+	bucketURL := (&url.URL{Scheme: scheme, Host: s.endpoint, Path: "/" + bucket}).String()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, bucketURL, nil)
 	if err != nil {
-		// BucketAlreadyOwnedByYou / BucketAlreadyExists surface as 409; MinIO
-		// returns 200 for an existing own bucket. Treat both as satisfied.
-		if strings.Contains(err.Error(), "409") || strings.Contains(err.Error(), "BucketAlready") {
-			return nil
-		}
+		return fmt.Errorf("blob: create bucket request: %w", err)
+	}
+	if err := s.signRequest(req, emptyPayloadSHA256); err != nil {
+		return fmt.Errorf("blob: sign bucket request: %w", err)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
 		return fmt.Errorf("blob: ensure bucket %s: %w", bucket, err)
 	}
 	defer resp.Body.Close()
-	return nil
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	// BucketAlreadyOwnedByYou / BucketAlreadyExists surface as 409; MinIO
+	// returns 200 for an existing own bucket. Treat both as satisfied.
+	if resp.StatusCode == http.StatusConflict {
+		return nil
+	}
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	return fmt.Errorf("blob: ensure bucket %s returned %s: %s", bucket, resp.Status, strings.TrimSpace(string(bodyBytes)))
 }
 
 // Get downloads an object from the S3-compatible backend.

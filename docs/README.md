@@ -50,6 +50,26 @@ Reticora CMDB is a multi-tenant Configuration Management Database designed for M
 All data is isolated per organization using PostgreSQL Row-Level Security (RLS).
 The hierarchy is: Organization → Client → Site → Building → Room → Rack.
 
+> **Deployment requirement — non-privileged database role.** RLS is bypassed for
+> superusers and roles with `BYPASSRLS`. The server must therefore connect with a
+> dedicated role created with `NOSUPERUSER NOBYPASSRLS`, e.g.:
+>
+> ```sql
+> CREATE ROLE reticora_app LOGIN PASSWORD '…' NOSUPERUSER NOBYPASSRLS;
+> GRANT CONNECT ON DATABASE reticora TO reticora_app;
+> GRANT USAGE ON SCHEMA public TO reticora_app;
+> GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO reticora_app;
+> GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO reticora_app;
+> ALTER DEFAULT PRIVILEGES IN SCHEMA public
+>   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO reticora_app;
+> ```
+>
+> The `docker-compose.yml` development database uses the superuser for
+> convenience; never point a real deployment at a superuser DSN. The
+> `metric_sample` hypertable is the documented exception: TimescaleDB does not
+> support RLS on hypertables with columnstore, so metrics isolation is enforced
+> at the repository layer (every query carries `organization_id`).
+
 ### Migrations/Schema
 
 Database schema is managed with [golang-migrate](https://github.com/golang-migrate/migrate). Migration files live in `backend/migrations/` using sequential numbering (`000001_`, `000002_`, …).
