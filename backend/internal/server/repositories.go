@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/order"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
@@ -59,6 +60,7 @@ func MemoryRepositories() Repositories {
 		Document:          document.NewMemoryRepository(),
 		Stocktake:         stocktake.NewMemoryRepository(assets),
 		Consumable:        consumable.NewMemoryRepository(),
+		Order:             order.NewMemoryRepository(),
 		Ticket:            ticket.NewMemoryRepository(),
 		User:              user.NewMemoryRepository(),
 		Credential:        credential.NewMemoryRepository(),
@@ -96,6 +98,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Document:          document.NewPGRepository(pool),
 		Stocktake:         stocktake.NewPGRepository(pool),
 		Consumable:        consumable.NewPGRepository(pool),
+		Order:             order.NewPGRepository(pool),
 		Ticket:            ticket.NewPGRepository(pool),
 		User:              user.NewPGRepository(pool),
 		Credential:        credential.NewPGRepository(pool),

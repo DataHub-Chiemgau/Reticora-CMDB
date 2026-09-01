@@ -1234,6 +1234,189 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/orders:
+    get:
+      operationId: listOrders
+      tags: [Orders]
+      summary: List internal orders
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: client_id
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated orders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createOrder
+      tags: [Orders]
+      summary: Create an internal order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Order created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/orders/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getOrder
+      tags: [Orders]
+      summary: Get an internal order
+      responses:
+        '200':
+          description: Order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateOrder
+      tags: [Orders]
+      summary: Update an internal order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrderRequest'
+      responses:
+        '200':
+          description: Order updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteOrder
+      tags: [Orders]
+      summary: Delete an internal order
+      responses:
+        '204':
+          description: Order deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/orders/{id}/submit:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: submitOrder
+      tags: [Orders]
+      summary: Submit an order for approval (draft → submitted)
+      responses:
+        '200':
+          description: Order submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/orders/{id}/approve:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: approveOrder
+      tags: [Orders]
+      summary: Approve an order (records the approving user)
+      responses:
+        '200':
+          description: Order approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/orders/{id}/reject:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: rejectOrder
+      tags: [Orders]
+      summary: Reject an order (records the rejecting user)
+      responses:
+        '200':
+          description: Order rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/orders/{id}/items:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: addOrderItem
+      tags: [Orders]
+      summary: Add a position to an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderItemRequest'
+      responses:
+        '201':
+          description: Item added; returns the order with positions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/consumables:
     get:
       operationId: listConsumables
@@ -7496,6 +7679,79 @@ components:
             data:
               type: array
               items: { $ref: '#/components/schemas/StockMovement' }
+
+    Order:
+      type: object
+      required: [id, organization_id, order_number, title, status, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        client_id: { type: string }
+        order_number: { type: string }
+        title: { type: string }
+        status: { type: string, enum: [draft, submitted, approved, rejected, ordered, received, cancelled] }
+        requested_by: { type: string }
+        approved_by: { type: string }
+        supplier: { type: string }
+        total_cost: { type: number }
+        currency: { type: string }
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/OrderItem' }
+    OrderItem:
+      type: object
+      required: [id, organization_id, order_id, description, quantity, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        order_id: { type: string }
+        description: { type: string }
+        quantity: { type: number }
+        unit_price: { type: number }
+        consumable_id: { type: string }
+        asset_id: { type: string }
+        created_at: { type: string, format: date-time }
+    CreateOrderRequest:
+      type: object
+      required: [title]
+      properties:
+        client_id: { type: string }
+        order_number: { type: string }
+        title: { type: string }
+        supplier: { type: string }
+        total_cost: { type: number }
+        currency: { type: string }
+        notes: { type: string }
+    UpdateOrderRequest:
+      type: object
+      properties:
+        client_id: { type: string }
+        title: { type: string }
+        supplier: { type: string }
+        total_cost: { type: number }
+        currency: { type: string }
+        notes: { type: string }
+    CreateOrderItemRequest:
+      type: object
+      required: [description, quantity]
+      properties:
+        description: { type: string }
+        quantity: { type: number }
+        unit_price: { type: number }
+        consumable_id: { type: string }
+        asset_id: { type: string }
+    OrderListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Order' }
 
     CreateSLAPolicyRequest:
       type: object
