@@ -10,6 +10,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
@@ -163,7 +164,20 @@ func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, ac
 	}
 	switch typ {
 	case "create_ticket":
-		t := &ticket.Ticket{OrganizationID: orgID, Title: str(action, "title", "Workflow task"), Description: str(action, "description", ""), Status: "open", Priority: str(action, "priority", "medium"), Category: str(action, "category", "workflow"), ReporterID: str(action, "reporter_id", "workflow"), RelatedCIID: str(action, "ci_id", "")}
+		// reporter_id references app_user and defaults to the acting user (the
+		// tenant context carries the requester); the literal "workflow" is not a
+		// valid app_user id and would violate the FK. As a last resort (purely
+		// synthetic/system triggers without user context) the memory/test
+		// repository accepts the "workflow" marker; the PG repository requires a
+		// real user and will surface the FK violation as a step failure.
+		reporter := str(action, "reporter_id", "")
+		if reporter == "" {
+			reporter = tenant.FromContext(ctx).UserID
+		}
+		if reporter == "" {
+			reporter = "workflow"
+		}
+		t := &ticket.Ticket{OrganizationID: orgID, Title: str(action, "title", "Workflow task"), Description: str(action, "description", ""), Status: "open", Priority: str(action, "priority", "medium"), Category: str(action, "category", "task"), ReporterID: reporter, RelatedCIID: str(action, "ci_id", "")}
 		if e.tickets == nil {
 			return nil, false, fmt.Errorf("ticket repository unavailable")
 		}

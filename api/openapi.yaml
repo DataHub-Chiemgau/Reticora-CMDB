@@ -8979,7 +8979,10 @@ components:
 
     Role:
       type: object
-      description: A custom permission role.
+      description: A permission role. The list endpoint returns the union of the
+        seeded standard roles (org_admin, engineer, viewer, client_technician;
+        `is_builtin: true`, assign via `role_id`) and tenant-defined custom roles
+        (`is_builtin: false`, assign via `custom_role_id`).
       required: [id, organization_id, name, is_system, permissions, created_at, updated_at]
       properties:
         id:
@@ -8992,6 +8995,9 @@ components:
           type: string
         is_system:
           type: boolean
+        is_builtin:
+          type: boolean
+          description: True for the seeded standard roles stored in `role`.
         permissions:
           type: array
           items:
@@ -9041,13 +9047,15 @@ components:
 
     RoleAssignment:
       type: object
-      required: [id, user_id, custom_role_id, scope_type, granted_at]
+      required: [id, user_id, scope_type, granted_at]
       properties:
         id:
           type: string
         user_id:
           type: string
         custom_role_id:
+          type: string
+        role_id:
           type: string
         scope_type:
           type: string
@@ -9061,12 +9069,17 @@ components:
 
     AssignRoleRequest:
       type: object
-      required: [user_id, custom_role_id]
+      required: [user_id]
+      description: Assigns a role to a user. Exactly one of `custom_role_id`
+        (tenant-defined role) or `role_id` (seeded standard role) must be set.
       properties:
         user_id:
           type: string
         custom_role_id:
           type: string
+        role_id:
+          type: string
+          description: ID of a standard (builtin) role; mutually exclusive with custom_role_id.
         scope_type:
           type: string
           description: Defaults to "organization" when omitted.

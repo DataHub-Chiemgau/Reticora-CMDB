@@ -419,6 +419,16 @@ func (r *MemoryRepository) DeleteRole(_ context.Context, orgID, id string) error
 func (r *MemoryRepository) AssignRole(_ context.Context, orgID string, a *UserRoleAssignment) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if a.RoleID != "" {
+		role, ok := r.roles[a.RoleID]
+		if !ok || role.OrganizationID != orgID {
+			return fmt.Errorf("role not found")
+		}
+		a.ID = r.nextIDStr("assign")
+		a.GrantedAt = time.Now().UTC()
+		r.assignments[a.ID] = a
+		return nil
+	}
 
 	// Verify role exists
 	role, ok := r.roles[a.CustomRoleID]

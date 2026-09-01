@@ -648,8 +648,12 @@ func (h *Handler) AssignRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.UserID == "" || req.CustomRoleID == "" {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "user_id and custom_role_id are required")
+	if req.UserID == "" || (req.CustomRoleID == "" && req.RoleID == "") {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "user_id and one of custom_role_id or role_id are required")
+		return
+	}
+	if req.CustomRoleID != "" && req.RoleID != "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "custom_role_id and role_id are mutually exclusive")
 		return
 	}
 
@@ -661,6 +665,7 @@ func (h *Handler) AssignRole(w http.ResponseWriter, r *http.Request) {
 	assignment := &UserRoleAssignment{
 		UserID:       req.UserID,
 		CustomRoleID: req.CustomRoleID,
+		RoleID:       req.RoleID,
 		ScopeType:    scopeType,
 		ScopeID:      req.ScopeID,
 		GrantedBy:    t.UserID,

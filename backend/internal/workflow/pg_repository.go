@@ -241,6 +241,12 @@ func (r *PGRepository) AppendStep(ctx context.Context, s *Step) error {
 }
 func (r *PGRepository) UpdateStep(ctx context.Context, orgID, id, status string, output JSONMap, errText string) (*Step, error) {
 	var s *Step
+	// The output column is NOT NULL; a nil map (e.g. from a failed action that
+	// produced no output) would violate the constraint and leave the step
+	// stuck in "running". Persist an empty object instead.
+	if output == nil {
+		output = JSONMap{}
+	}
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		s, err = scanStep(tx.QueryRow(ctx, "UPDATE workflow_step SET status=$3, output=$4, error=$5, updated_at=now() WHERE organization_id=$1 AND id=$2 RETURNING "+stepCols, orgID, id, status, output, errText))

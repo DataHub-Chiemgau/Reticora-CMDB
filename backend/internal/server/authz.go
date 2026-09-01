@@ -123,6 +123,14 @@ const (
 // routeProtected with the required permission for every mapped route; and
 // routeUnmapped otherwise.
 func PermissionForRoute(method, path string) (identity.Permission, routeAccess) {
+	// SCIM is authenticated provisioning surface, not public.
+	if strings.HasPrefix(path, "/scim/") {
+		if method == http.MethodGet || method == http.MethodHead {
+			return identity.PermIGARead, routeProtected
+		}
+		return identity.PermIGAWrite, routeProtected
+	}
+
 	if !strings.HasPrefix(path, "/api/") {
 		return "", routePublic
 	}
