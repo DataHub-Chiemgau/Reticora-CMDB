@@ -347,6 +347,15 @@
       "active": "Outage simulation",
       "impact": "If \"{{name}}\" fails, {{count}} more CIs are impacted (shown greyed out).",
       "noImpact": "This CI has no dependents — an outage would have no impact on the graph."
+    },
+    "filterRelType": "Relationship type",
+    "allRelTypes": "All relationships",
+    "relTypes": {
+      "connected_to": "connected",
+      "powered_by": "powered by",
+      "hosted_on": "hosted on",
+      "depends_on": "depends on",
+      "member_of": "member of"
     }
   },
   "rack": {

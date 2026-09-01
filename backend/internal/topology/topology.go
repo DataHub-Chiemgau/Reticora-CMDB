@@ -70,6 +70,7 @@ func NewHandler(ciRepo ci.Repository, relRepo relationship.Repository) *Handler 
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/topology", h.GetTopology)
 	r.Get("/api/v1/topology/cis/{id}/neighbors", h.GetNeighbors)
+	r.Get("/api/v1/topology/cis/{id}/impact", h.GetImpact)
 }
 
 func nodeFromItem(item ci.Item) Node {
@@ -136,6 +137,86 @@ func (h *Handler) GetNeighbors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, graph)
+}
+
+// GetImpact handles GET /api/v1/topology/cis/{id}/impact
+//
+// It answers the failure-simulation question (spec §4): which CIs lose
+// connectivity/power/hosting when this CI fails. The impact set is every CI
+// reachable from the failed node by following edges in their directed
+// (source→target) direction, because a relationship reads "source supports/
+// powers/connects target". The rel_type facet (powered_by, connected_to,
+// hosted_on, …) narrows the simulation to one dependency class.
+func (h *Handler) GetImpact(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+	root, err := h.ciRepo.GetByID(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
+		return
+	}
+
+	// Impact analysis walks deeper than the default 2-hop neighborhood view so
+	// transitive dependencies surface; the caller can narrow with depth and
+	// rel_type.
+	depth := parseDepth(r.URL.Query().Get("depth"))
+	if r.URL.Query().Get("depth") == "" {
+		depth = maxDepth
+	}
+	relType := r.URL.Query().Get("rel_type")
+
+	graph, err := h.buildFromRoot(r.Context(), t.OrganizationID, id, depth, "")
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+
+	impacted := computeImpact(id, graph.Edges, relType)
+	impactedNodes := make([]Node, 0, len(impacted))
+	for _, node := range graph.Nodes {
+		if _, ok := impacted[node.ID]; ok {
+			impactedNodes = append(impactedNodes, node)
+		}
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]any{
+		"failed_ci_id": id,
+		"failed_ci":    nodeFromItem(*root),
+		"rel_type":     relType,
+		"depth":        depth,
+		"impacted":     impactedNodes,
+		"count":        len(impactedNodes),
+	})
+}
+
+// computeImpact walks directed edges source→target from the failed CI and
+// returns the set of dependent CI ids. An empty relType follows every edge;
+// otherwise only edges of that relationship type are followed.
+func computeImpact(failedID string, edges []Edge, relType string) map[string]struct{} {
+	impacted := map[string]struct{}{}
+	queue := []string{failedID}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, edge := range edges {
+			if relType != "" && edge.RelType != relType {
+				continue
+			}
+			if edge.SourceCIID != current || edge.TargetCIID == failedID {
+				continue
+			}
+			if _, seen := impacted[edge.TargetCIID]; seen {
+				continue
+			}
+			impacted[edge.TargetCIID] = struct{}{}
+			queue = append(queue, edge.TargetCIID)
+		}
+	}
+	return impacted
 }
 
 // buildFull lists all CIs matching the filter and every edge whose endpoints are

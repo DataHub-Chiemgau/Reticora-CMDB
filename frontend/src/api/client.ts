@@ -241,12 +241,24 @@ export interface TopologyParams {
   depth?: number;
 }
 
+export interface ImpactResult {
+  failed_ci_id: string;
+  failed_ci: TopologyNode;
+  rel_type: string;
+  depth: number;
+  impacted: TopologyNode[];
+  count: number;
+}
+
 export const topologyApi = {
   get(params: TopologyParams = {}): Promise<TopologyGraphData> {
     return fetchAPI(`/topology${buildQuery(params)}`);
   },
   neighbors(ciId: string): Promise<TopologyGraphData> {
     return fetchAPI(`/topology/cis/${ciId}/neighbors`);
+  },
+  impact(ciId: string, params: { depth?: number; rel_type?: string } = {}): Promise<ImpactResult> {
+    return fetchAPI(`/topology/cis/${ciId}/impact${buildQuery(params)}`);
   },
 };
 

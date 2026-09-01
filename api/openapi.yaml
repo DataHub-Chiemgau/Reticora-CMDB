@@ -2008,6 +2008,48 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/topology/cis/{id}/impact:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: depth
+        in: query
+        schema: { type: integer, default: 10, maximum: 10 }
+        description: Traversal depth; defaults to the maximum for impact analysis.
+      - name: rel_type
+        in: query
+        schema: { type: string }
+        description: Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on).
+    get:
+      operationId: getCIImpact
+      tags: [Topology]
+      summary: Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
+      description: >-
+        Follows directed edges (source supports/powers/connects target) from the
+        failed CI and returns the transitively impacted CI set. Powers the
+        Ausfallsimulation in the topology view (spec §4).
+      responses:
+        '200':
+          description: Impact analysis result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  failed_ci_id: { type: string }
+                  failed_ci: { $ref: '#/components/schemas/TopologyNode' }
+                  rel_type: { type: string }
+                  depth: { type: integer }
+                  impacted:
+                    type: array
+                    items: { $ref: '#/components/schemas/TopologyNode' }
+                  count: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/v1/clients:
     get:
       operationId: listClients

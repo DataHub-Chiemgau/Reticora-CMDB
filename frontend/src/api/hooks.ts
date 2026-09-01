@@ -103,6 +103,14 @@ export function useCINeighbors(id: string) {
   });
 }
 
+export function useCIImpact(id: string, relType?: string) {
+  return useQuery({
+    queryKey: ['topology-impact', id, relType],
+    queryFn: () => topologyApi.impact(id, { rel_type: relType || undefined }),
+    enabled: !!id,
+  });
+}
+
 export function useRackList(params: RackListParams = {}) {
   return useQuery({
     queryKey: ['racks', params],
