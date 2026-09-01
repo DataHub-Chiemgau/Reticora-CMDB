@@ -139,6 +139,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Supplier:       req.Supplier,
 		InvoiceNumber:  req.InvoiceNumber,
 		SerialNumber:   req.SerialNumber,
+		RFIDTag:        req.RFIDTag,
+		Barcode:        req.Barcode,
 		Location:       req.Location,
 		Notes:          req.Notes,
 		CustomFields:   req.CustomFields,

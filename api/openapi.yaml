@@ -6806,6 +6806,12 @@ components:
           type: string
         serial_number:
           type: string
+        rfid_tag:
+          type: string
+          description: RFID tag for direct-access labels and scan flows.
+        barcode:
+          type: string
+          description: Barcode for scan flows.
         hardware_uuid:
           type: string
         management_ip:
@@ -7576,6 +7582,10 @@ components:
           type: string
         serial_number:
           type: string
+        rfid_tag:
+          type: string
+        barcode:
+          type: string
         location:
           type: string
         notes:
@@ -7608,6 +7618,10 @@ components:
         invoice_number:
           type: string
         serial_number:
+          type: string
+        rfid_tag:
+          type: string
+        barcode:
           type: string
         location:
           type: string
