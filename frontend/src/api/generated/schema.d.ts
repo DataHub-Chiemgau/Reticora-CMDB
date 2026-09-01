@@ -1032,6 +1032,34 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/topology/cis/{id}/impact': {
+    parameters: {
+      query?: {
+        /** @description Traversal depth; defaults to the maximum for impact analysis. */
+        depth?: number;
+        /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
+        rel_type?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
+     * @description Follows directed edges (source supports/powers/connects target) from the failed CI and returns the transitively impacted CI set. Powers the Ausfallsimulation in the topology view (spec §4).
+     */
+    get: operations['getCIImpact'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/clients': {
     parameters: {
       query?: never;
@@ -1620,6 +1648,46 @@ export interface paths {
     put?: never;
     /** Register a discovery collector */
     post: operations['registerCollector'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/collectors/enrollment-codes': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Mint a single-use collector enrollment code
+     * @description Zero-config onboarding: returns the plaintext code exactly once. Only its SHA-256 hash is stored. The collector redeems the code via /api/v1/collectors/enroll.
+     */
+    post: operations['createCollectorEnrollmentCode'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/collectors/enroll': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Enroll a collector with an enrollment code
+     * @description Unauthenticated by bearer design — the single-use enrollment code is the credential. On success the collector identity is registered under the code's organization and returned with its id.
+     */
+    post: operations['enrollCollector'];
     delete?: never;
     options?: never;
     head?: never;
@@ -4452,6 +4520,13 @@ export interface components {
       name: string;
       floor?: number;
       room_type?: string;
+      /** @description Floor-plan object positions, object_id → {x, y} normalized 0..1. */
+      layout?: {
+        [key: string]: {
+          x?: number;
+          y?: number;
+        };
+      };
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -4467,6 +4542,13 @@ export interface components {
       name?: string;
       floor?: number;
       room_type?: string;
+      /** @description Replaces the room's floor-plan object positions. Map of object_id → {x, y} in normalized 0..1 coordinates; an empty object clears the layout. */
+      layout?: {
+        [key: string]: {
+          x?: number;
+          y?: number;
+        };
+      };
     };
     RoomListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Room'][];
@@ -5107,6 +5189,8 @@ export interface components {
     CIStatus: components['schemas']['CIStatus'];
     CITypeID: string;
     ClientID: string;
+    SiteID: string;
+    RoomID: string;
   };
   requestBodies: never;
   headers: never;
@@ -5257,6 +5341,8 @@ export interface operations {
         status?: components['parameters']['CIStatus'];
         ci_type_id?: components['parameters']['CITypeID'];
         client_id?: components['parameters']['ClientID'];
+        site_id?: components['parameters']['SiteID'];
+        room_id?: components['parameters']['RoomID'];
       };
       header?: never;
       path?: never;
@@ -7480,6 +7566,44 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
+  getCIImpact: {
+    parameters: {
+      query?: {
+        /** @description Traversal depth; defaults to the maximum for impact analysis. */
+        depth?: number;
+        /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
+        rel_type?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Impact analysis result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            failed_ci_id?: string;
+            failed_ci?: components['schemas']['TopologyNode'];
+            rel_type?: string;
+            depth?: number;
+            impacted?: components['schemas']['TopologyNode'][];
+            count?: number;
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
   listClients: {
     parameters: {
       query?: {
@@ -9254,6 +9378,73 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  createCollectorEnrollmentCode: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          label?: string;
+          /** @description Defaults to 30, capped at 1440 (24h). */
+          ttl_minutes?: number;
+        };
+      };
+    };
+    responses: {
+      /** @description Enrollment code created; plaintext returned once */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            id?: string;
+            code?: string;
+            label?: string;
+            /** Format: date-time */
+            expires_at?: string;
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  enrollCollector: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          code: string;
+          name: string;
+          version?: string;
+          client_id?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Collector enrolled */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Collector'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
     };
   };
   collectorHeartbeat: {
