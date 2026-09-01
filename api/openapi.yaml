@@ -1234,6 +1234,150 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/consumables:
+    get:
+      operationId: listConsumables
+      tags: [Consumables]
+      summary: List consumable stock items
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: client_id
+          in: query
+          schema: { type: string }
+        - name: low_stock
+          in: query
+          description: When true, only items at or below their minimum level.
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Paginated consumables
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsumableListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createConsumable
+      tags: [Consumables]
+      summary: Create a consumable stock item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConsumableRequest'
+      responses:
+        '201':
+          description: Consumable created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Consumable'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/consumables/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getConsumable
+      tags: [Consumables]
+      summary: Get a consumable
+      responses:
+        '200':
+          description: Consumable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Consumable'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateConsumable
+      tags: [Consumables]
+      summary: Update a consumable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConsumableRequest'
+      responses:
+        '200':
+          description: Consumable updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Consumable'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteConsumable
+      tags: [Consumables]
+      summary: Delete a consumable
+      responses:
+        '204':
+          description: Consumable deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/consumables/{id}/movements:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listConsumableMovements
+      tags: [Consumables]
+      summary: List stock movements of a consumable
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated movements
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockMovementListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: addConsumableMovement
+      tags: [Consumables]
+      summary: Record a stock in/out movement and adjust the level atomically
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStockMovementRequest'
+      responses:
+        '201':
+          description: Movement recorded; returns movement and updated consumable
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
   /api/v1/stocktakes:
     get:
       operationId: listStocktakes
@@ -7271,6 +7415,87 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    Consumable:
+      type: object
+      required: [id, organization_id, name, category, unit, stock_level, min_level, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        client_id: { type: string }
+        name: { type: string }
+        sku: { type: string }
+        category: { type: string }
+        unit: { type: string }
+        stock_level: { type: number }
+        min_level: { type: number }
+        location: { type: string }
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateConsumableRequest:
+      type: object
+      required: [name]
+      properties:
+        client_id: { type: string }
+        name: { type: string }
+        sku: { type: string }
+        category: { type: string }
+        unit: { type: string }
+        stock_level: { type: number }
+        min_level: { type: number }
+        location: { type: string }
+        notes: { type: string }
+    UpdateConsumableRequest:
+      type: object
+      properties:
+        client_id: { type: string }
+        name: { type: string }
+        sku: { type: string }
+        category: { type: string }
+        unit: { type: string }
+        min_level: { type: number }
+        location: { type: string }
+        notes: { type: string }
+    StockMovement:
+      type: object
+      required: [id, organization_id, consumable_id, direction, quantity, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        consumable_id: { type: string }
+        direction: { type: string, enum: [in, out] }
+        quantity: { type: number }
+        reason: { type: string }
+        reference: { type: string }
+        actor_id: { type: string }
+        created_at: { type: string, format: date-time }
+    CreateStockMovementRequest:
+      type: object
+      required: [direction, quantity]
+      properties:
+        direction: { type: string, enum: [in, out] }
+        quantity: { type: number }
+        reason: { type: string }
+        reference: { type: string }
+    ConsumableListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Consumable' }
+    StockMovementListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/StockMovement' }
 
     CreateSLAPolicyRequest:
       type: object
