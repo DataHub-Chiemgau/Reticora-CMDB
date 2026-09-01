@@ -6,9 +6,11 @@ resources:
 
 # Production adds the optional OpenSearch search backend component (Epic G2),
 # which also appends the RETICORA_OPENSEARCH_* / RETICORA_SEARCH_BACKEND env
-# vars to the server deployment.
+# vars to the server deployment, and the nightly backup CronJob (Epic H2),
+# which requires the reticora-backup secret.
 components:
   - ../../base/components/opensearch
+  - ../../base/components/backup
 
 namespace: reticora
 

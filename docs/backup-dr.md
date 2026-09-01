@@ -49,7 +49,7 @@ Use WAL archiving with a base backup. Two supported approaches:
 
 ## Logical backup (portable safety net)
 
-`deploy/k8s/backup-cronjob.yaml` runs a nightly `pg_dump` (custom format,
+`deploy/k8s/base/components/backup/cronjob.yaml` runs a nightly `pg_dump` (custom format,
 compressed) and uploads it to S3. It is version-independent and can be restored
 into any compatible PostgreSQL:
 

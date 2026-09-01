@@ -644,9 +644,11 @@ Manifests in `deploy/k8s/`:
 **Backup & disaster recovery:**
 
 See `docs/backup-dr.md`. PostgreSQL PITR (base backup + WAL archive) is the
-primary mechanism; `deploy/k8s/base/backup-cronjob.yaml` adds a nightly
-logical `pg_dump` to S3 as a portable safety net. The OpenSearch index is not
-backed up — it is rebuilt online from PostgreSQL via
+primary mechanism; `deploy/k8s/base/components/backup/cronjob.yaml` adds a nightly
+logical `pg_dump` to S3 as a portable safety net (optional component
+`deploy/k8s/base/components/backup`, included by the prod overlay; requires
+the `reticora-backup` secret). The OpenSearch index is not backed up — it is
+rebuilt online from PostgreSQL via
 `POST /api/v1/search/reindex`. `.github/workflows/restore-test.yml` runs a
 nightly restore test that dumps, restores into a fresh database, checks row
 counts and verifies the audit hash chain with the `audit-verify` binary.
