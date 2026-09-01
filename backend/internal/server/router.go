@@ -145,6 +145,16 @@ type registrar interface {
 // tenant-aware HTTP metrics middleware, which the caller mounts on the outer
 // middleware chain so requests are recorded into the same registry that serves
 // /metrics.
+// agentTypeResolver adapts the discovery repository's CI type lookup for the
+// agent handler's endpoint reconciliation.
+func agentTypeResolver(repos Repositories) agent.CITypeResolver {
+	r, ok := repos.Discovery.(agent.CITypeResolver)
+	if !ok {
+		return nil
+	}
+	return r
+}
+
 func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) http.Handler, error) {
 	if err := validate(repos, opts); err != nil {
 		return nil, nil, err
@@ -191,7 +201,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		training.NewHandler(repos.Training),
 		desk.NewHandler(repos.Desk),
 		location.NewHandler(repos.Location),
-		agent.NewHandler(repos.Agent, repos.Metrics, repos.CI),
+		agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(repos)),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
 		user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment),
 		permission.NewHandler(repos.Permission),

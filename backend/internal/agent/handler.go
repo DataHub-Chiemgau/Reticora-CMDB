@@ -25,17 +25,27 @@ type CIUpserter interface {
 	Update(ctx context.Context, orgID, id string, req ci.UpdateRequest) (*ci.Item, error)
 }
 
+// CITypeResolver resolves a CI type key (server/client) to its UUID.
+type CITypeResolver interface {
+	LookupCITypeID(ctx context.Context, orgID, nameOrID string) (string, error)
+}
+
 // Handler provides HTTP handlers for the endpoint-agent surface.
 type Handler struct {
-	repo    Repository
-	metrics MetricStore
-	cis     CIUpserter
+	repo        Repository
+	metrics     MetricStore
+	cis         CIUpserter
+	typeResolve CITypeResolver
 }
 
 // NewHandler creates a new agent handler. metrics and cis may be nil in
 // --no-db smoke tests; telemetry then only registers heartbeats.
-func NewHandler(repo Repository, metrics MetricStore, cis CIUpserter) *Handler {
-	return &Handler{repo: repo, metrics: metrics, cis: cis}
+func NewHandler(repo Repository, metrics MetricStore, cis CIUpserter, typeResolve ...CITypeResolver) *Handler {
+	h := &Handler{repo: repo, metrics: metrics, cis: cis}
+	if len(typeResolve) > 0 {
+		h.typeResolve = typeResolve[0]
+	}
+	return h
 }
 
 // RegisterRoutes registers agent routes.
@@ -199,11 +209,19 @@ func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payl
 			return updated.ID, nil
 		}
 	}
-	// No match: create the endpoint CI.
+	// No match: create the endpoint CI. The ci_type key resolves to the UUID
+	// via the tenant-aware type lookup (global system types included).
+	typeID := ""
+	if h.typeResolve != nil {
+		id, err := h.typeResolve.LookupCITypeID(ctx, orgID, endpointCITypeKey(payload.OS))
+		if err == nil {
+			typeID = id
+		}
+	}
 	now := time.Now().UTC()
 	item := &ci.Item{
 		OrganizationID:  orgID,
-		CITypeID:        endpointCITypeID(payload.OS),
+		CITypeID:        typeID,
 		Name:            ag.Hostname,
 		Hostname:        ag.Hostname,
 		Status:          "active",
@@ -218,9 +236,9 @@ func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payl
 	return item.ID, nil
 }
 
-// endpointCITypeID maps the agent OS to the endpoint CI type (server vs client).
-// The resolver in discovery stores names; here we rely on the type key.
-func endpointCITypeID(os string) string {
+// endpointCITypeKey maps the agent OS to the endpoint CI type key (server vs
+// client); the resolver turns it into the canonical UUID.
+func endpointCITypeKey(os string) string {
 	if strings.Contains(strings.ToLower(os), "server") {
 		return "server"
 	}
