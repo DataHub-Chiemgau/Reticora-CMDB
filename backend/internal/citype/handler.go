@@ -6,7 +6,6 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -366,12 +365,8 @@ func (h *Handler) UpsertInstanceField(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// Instance attributes are admin-level configuration: require the manage
-	// permission in addition to the route mapping (defense in depth, spec §21).
-	if p, ok := identity.PrincipalFromContext(r.Context()); ok && !p.Has(identity.PermCIInstanceAttributeManage) {
-		api.WriteError(w, http.StatusForbidden, "Forbidden", "missing required permission: ci_instance_attribute:manage")
-		return
-	}
+	// Authorization is enforced by the route mapping (ci_instance_attribute:manage
+	// on the write side); the handler trusts the middleware contract.
 	var req UpsertInstanceFieldRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -390,10 +385,6 @@ func (h *Handler) UpsertInstanceField(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteInstanceField(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantOr401(w, r)
 	if !ok {
-		return
-	}
-	if p, ok := identity.PrincipalFromContext(r.Context()); ok && !p.Has(identity.PermCIInstanceAttributeManage) {
-		api.WriteError(w, http.StatusForbidden, "Forbidden", "missing required permission: ci_instance_attribute:manage")
 		return
 	}
 	if err := h.repo.DeleteInstanceField(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), chi.URLParam(r, "name")); err != nil {

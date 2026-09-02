@@ -145,6 +145,11 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"override":             identity.PermOverrideWrite,
 	"source-policy":        identity.PermReconciliationResolve,
 	"saved-views":          identity.PermSavedViewWrite,
+	// Read-only surfaces: writes (if any) stay on the read permission so no
+	// non-existent derived write permission is required.
+	"history":      identity.PermAuditRead,
+	"dependencies": identity.PermTopologyRead,
+	"blast-radius": identity.PermTopologyRead,
 	// The AI assistant has a read-style permission only; conversations and
 	// questions are protected by ai:read regardless of method.
 	"ai": identity.PermAIRead,
