@@ -3,6 +3,7 @@ package composition
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -121,7 +122,16 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		IndependentlyLifecycleManaged: req.IndependentlyLifecycleManaged,
 	}
 	if err := h.repo.Create(r.Context(), c); err != nil {
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		msg := err.Error()
+		if strings.HasPrefix(msg, "composition cycle") || strings.Contains(msg, "child already has a parent asset") ||
+			strings.Contains(msg, "exactly one of") {
+			api.WriteError(w, http.StatusConflict, "Conflict", msg)
+			return
+		}
+		if api.WriteDBError(w, err) {
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "could not create composition")
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "composition.created", c)
