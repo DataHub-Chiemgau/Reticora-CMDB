@@ -27,7 +27,10 @@ func testPool(t *testing.T) string {
 func TestTraverseFromProjectsRelTypePG(t *testing.T) {
 	dsn := testPool(t)
 	ctx := context.Background()
-	pool, err := database.NewPool(ctx, dsn)
+	// The fixture creates its own organization, which the tenant-scoped
+	// application role cannot do before app.org_id exists; the repository under
+	// test sets the tenant itself on every call.
+	pool, err := database.NewMaintenancePool(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}

@@ -1,3 +1,18 @@
+DROP INDEX IF EXISTS ci_type_system_key_uniq;
+DROP INDEX IF EXISTS ci_type_org_key_uniq;
+
+ALTER TABLE composition DROP CONSTRAINT IF EXISTS composition_child_asset_tenant_fkey;
+ALTER TABLE composition DROP CONSTRAINT IF EXISTS composition_child_ci_tenant_fkey;
+ALTER TABLE composition DROP CONSTRAINT IF EXISTS composition_parent_tenant_fkey;
+ALTER TABLE ci_relationship DROP CONSTRAINT IF EXISTS ci_relationship_target_tenant_fkey;
+ALTER TABLE ci_relationship DROP CONSTRAINT IF EXISTS ci_relationship_source_tenant_fkey;
+ALTER TABLE asset DROP CONSTRAINT IF EXISTS asset_id_organization_key;
+ALTER TABLE ci DROP CONSTRAINT IF EXISTS ci_id_organization_key;
+
+DROP TRIGGER IF EXISTS trg_audit_log_no_update ON audit_log;
+DROP TRIGGER IF EXISTS trg_audit_log_no_delete ON audit_log;
+DROP FUNCTION IF EXISTS reject_audit_log_mutation();
+
 -- Migration 000056 down: revert database-level tenant isolation enforcement
 -- and the system lifecycle repair.
 

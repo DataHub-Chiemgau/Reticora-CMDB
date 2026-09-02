@@ -146,7 +146,7 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 				lifecycle_definition_id, capabilities, allowed_relationship_types,
 				ui_schema, compliance_rules, discovery_mappings
 			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,1,$9,$10,$11,$12,$13,$14,$15)
-			RETURNING id::text, created_at, updated_at`,
+			RETURNING id::text, is_active, version, created_at, updated_at`,
 			nilIfEmpty(typ.OrganizationID), typ.Key, typ.Name, nilIfEmpty(typ.DisplayName),
 			nilIfEmpty(typ.Icon), nilIfEmpty(typ.Description), nilIfEmpty(typ.Category),
 			typ.IsLogical, nilIfEmpty(typ.TemplateKey), nilIfEmpty(typ.LifecycleDefinitionID),
@@ -154,7 +154,7 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 			jsonOrDefault(typ.UISchema, emptyObject), jsonOrDefault(typ.ComplianceRules, emptyArray),
 			jsonOrDefault(typ.DiscoveryMappings, emptyArray),
 		)
-		if err := row.Scan(&typ.ID, &typ.CreatedAt, &typ.UpdatedAt); err != nil {
+		if err := row.Scan(&typ.ID, &typ.IsActive, &typ.Version, &typ.CreatedAt, &typ.UpdatedAt); err != nil {
 			return fmt.Errorf("create ci type: %w", err)
 		}
 		for _, f := range typ.Fields {

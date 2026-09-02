@@ -79,6 +79,32 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
+// NewMaintenancePool creates a pool that keeps the privileges of the configured
+// login role: it neither switches into the restricted application role nor
+// requires that row level security is enforced. It exists for schema
+// maintenance (migrations, fixtures, supervised corrections) and must never be
+// used to serve API traffic, because RLS would not apply to it.
+func NewMaintenancePool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	if strings.TrimSpace(databaseURL) == "" {
+		return nil, fmt.Errorf("database URL is required")
+	}
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse pool config: %w", err)
+	}
+	config.MaxConns = 5
+	config.MinConns = 1
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return nil, fmt.Errorf("create pool: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
+	return pool, nil
+}
+
 // VerifyRLSEnforced fails when the effective database role can bypass Row Level
 // Security. Tenant isolation in Reticora is enforced by RLS policies keyed on
 // app.org_id; a superuser or BYPASSRLS role turns every policy into a no-op and
