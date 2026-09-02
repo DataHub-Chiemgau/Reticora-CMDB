@@ -71,6 +71,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/topology", h.GetTopology)
 	r.Get("/api/v1/topology/cis/{id}/neighbors", h.GetNeighbors)
 	r.Get("/api/v1/topology/cis/{id}/impact", h.GetImpact)
+	// Directed dependency/impact analysis (spec §15).
+	r.Get("/api/v1/cis/{id}/dependencies", h.GetDependencies)
+	r.Get("/api/v1/cis/{id}/blast-radius", h.GetBlastRadius)
 }
 
 func nodeFromItem(item ci.Item) Node {

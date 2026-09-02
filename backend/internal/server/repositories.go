@@ -30,6 +30,16 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/composition"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locationnode"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
@@ -57,12 +67,25 @@ func MemoryRepositories() Repositories {
 	} {
 		discoveryRepo.SeedCIType(typ, typ)
 	}
+	lifecycleStates := lifecycle.NewMemoryStateStore()
 	return Repositories{
 		CI:                ci.NewMemoryRepository(),
 		Relationship:      relationship.NewMemoryRepository(),
 		Webhook:           webhook.NewMemoryRepository(),
 		WebhookDeliveries: webhook.NewMemoryDeliveryStore(),
 		Discovery:         discoveryRepo,
+		CIType:            citype.NewMemoryRepository(),
+		RelationshipType:  relationshiptype.NewMemoryRepository(),
+		Lifecycle:         lifecycle.NewMemoryRepository(),
+		LocationNode:      locationnode.NewMemoryRepository(),
+		Movement:          movement.NewMemoryRepository(),
+		Reservation:       reservation.NewMemoryRepository(),
+		Composition:       composition.NewMemoryRepository(),
+		Override:          override.NewMemoryRepository(),
+		History:           history.NewMemoryRepository(),
+		SavedView:         savedview.NewMemoryRepository(),
+		LifecycleStates:   lifecycleStates,
+		LifecycleResolver: lifecycleStates,
 		Asset:             assets,
 		Assignment:        assignment.NewMemoryRepository(),
 		Document:          document.NewMemoryRepository(),
@@ -142,5 +165,18 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		AI:                ai.NewPGRepository(pool),
 		ExportJobs:        export.NewPGJobRepository(pool),
 		Privacy:           privacy.NewPGRepository(pool),
+		CIType:            citype.NewPGRepository(pool),
+		RelationshipType:  relationshiptype.NewPGRepository(pool),
+		Lifecycle:         lifecycle.NewPGRepository(pool),
+		LocationNode:      locationnode.NewPGRepository(pool),
+		Movement:          movement.NewPGRepository(pool),
+		Reservation:       reservation.NewPGRepository(pool),
+		Composition:       composition.NewPGRepository(pool),
+		Override:          override.NewPGRepository(pool),
+		History:           history.NewPGRepository(pool),
+		SavedView:         savedview.NewPGRepository(pool),
+		LifecycleStates:   lifecycle.NewPGStateStore(pool),
+		LifecycleResolver: lifecycle.NewResolver(pool),
+		Availability:      reservation.NewPGAvailability(pool),
 	}
 }

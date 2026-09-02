@@ -6756,6 +6756,665 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
+  /api/v1/assets/{id}/children:
+    get:
+      operationId: listAssetsIdChildren
+      summary: List child composition entries of a parent asset
+      responses:
+        '200':
+          description: List child composition entries of a parent asset
+        '401':
+          description: Unauthorized
+
+  /api/v1/assets/{id}/lifecycle-transitions:
+    post:
+      operationId: createAssetsIdLifecycleTransitions
+      summary: Execute a lifecycle transition on an asset
+      responses:
+        '200':
+          description: Execute a lifecycle transition on an asset
+        '401':
+          description: Unauthorized
+
+  /api/v1/assets/{id}/movements:
+    get:
+      operationId: listAssetsIdMovements
+      summary: List the movement ledger of an asset
+      responses:
+        '200':
+          description: List the movement ledger of an asset
+        '401':
+          description: Unauthorized
+
+  /api/v1/assets/{id}/state:
+    get:
+      operationId: listAssetsIdState
+      summary: Reconstruct asset state at a point in time
+      responses:
+        '200':
+          description: Reconstruct asset state at a point in time
+        '401':
+          description: Unauthorized
+
+  /api/v1/ci-fields/global:
+    get:
+      operationId: listCiFieldsGlobal
+      summary: Manage global CI field definitions
+      responses:
+        '200':
+          description: Manage global CI field definitions
+        '401':
+          description: Unauthorized
+    put:
+      operationId: putCiFieldsGlobal
+      summary: Manage global CI field definitions
+      responses:
+        '200':
+          description: Manage global CI field definitions
+        '401':
+          description: Unauthorized
+
+  /api/v1/ci-fields/global/{name}:
+    delete:
+      operationId: deleteCiFieldsGlobalName
+      summary: Delete a global CI field definition
+      responses:
+        '204':
+          description: Delete a global CI field definition
+        '401':
+          description: Unauthorized
+
+  /api/v1/ci-types:
+    get:
+      operationId: listCiTypes
+      summary: List and create CI types
+      responses:
+        '200':
+          description: List and create CI types
+        '401':
+          description: Unauthorized
+    post:
+      operationId: createCiTypes
+      summary: List and create CI types
+      responses:
+        '201':
+          description: List and create CI types
+        '401':
+          description: Unauthorized
+
+  /api/v1/ci-types/templates:
+    get:
+      operationId: listCiTypesTemplates
+      summary: List built-in CI type templates
+      responses:
+        '200':
+          description: List built-in CI type templates
+        '401':
+          description: Unauthorized
+
+  /api/v1/ci-types/{id}:
+    get:
+      operationId: getCiTypesId
+      summary: Read and update a CI type
+      responses:
+        '200':
+          description: Read and update a CI type
+        '401':
+          description: Unauthorized
+    patch:
+      operationId: updateCiTypesId
+      summary: Read and update a CI type
+      responses:
+        '200':
+          description: Read and update a CI type
+        '401':
+          description: Unauthorized
+
+  /api/v1/ci-types/{id}/activate:
+    post:
+      operationId: createCiTypesIdActivate
+      summary: Reactivate a CI type
+      responses:
+        '200':
+          description: Reactivate a CI type
+        '401':
+          description: Unauthorized
+
+  /api/v1/ci-types/{id}/clone:
+    post:
+      operationId: createCiTypesIdClone
+      summary: Clone a CI type into a new version lineage
+      responses:
+        '200':
+          description: Clone a CI type into a new version lineage
+        '401':
+          description: Unauthorized
+
+  /api/v1/ci-types/{id}/deactivate:
+    post:
+      operationId: createCiTypesIdDeactivate
+      summary: Deactivate a CI type
+      responses:
+        '200':
+          description: Deactivate a CI type
+        '401':
+          description: Unauthorized
+
+  /api/v1/ci-types/{id}/fields:
+    get:
+      operationId: listCiTypesIdFields
+      summary: Manage CI type field definitions
+      responses:
+        '200':
+          description: Manage CI type field definitions
+        '401':
+          description: Unauthorized
+    put:
+      operationId: putCiTypesIdFields
+      summary: Manage CI type field definitions
+      responses:
+        '200':
+          description: Manage CI type field definitions
+        '401':
+          description: Unauthorized
+
+  /api/v1/ci-types/{id}/fields/{name}:
+    delete:
+      operationId: deleteCiTypesIdFieldsName
+      summary: Delete a CI type field definition
+      responses:
+        '204':
+          description: Delete a CI type field definition
+        '401':
+          description: Unauthorized
+
+  /api/v1/ci-types/{id}/versions:
+    get:
+      operationId: listCiTypesIdVersions
+      summary: List the version lineage of a CI type
+      responses:
+        '200':
+          description: List the version lineage of a CI type
+        '401':
+          description: Unauthorized
+
+  /api/v1/cis/{id}/blast-radius:
+    get:
+      operationId: listCisIdBlastRadius
+      summary: Compute the blast radius of a CI failure
+      responses:
+        '200':
+          description: Compute the blast radius of a CI failure
+        '401':
+          description: Unauthorized
+
+  /api/v1/cis/{id}/dependencies:
+    get:
+      operationId: listCisIdDependencies
+      summary: List upstream/downstream dependencies of a CI
+      responses:
+        '200':
+          description: List upstream/downstream dependencies of a CI
+        '401':
+          description: Unauthorized
+
+  /api/v1/cis/{id}/field-definitions:
+    get:
+      operationId: listCisIdFieldDefinitions
+      summary: Manage CI-instance field definitions
+      responses:
+        '200':
+          description: Manage CI-instance field definitions
+        '401':
+          description: Unauthorized
+    put:
+      operationId: putCisIdFieldDefinitions
+      summary: Manage CI-instance field definitions
+      responses:
+        '200':
+          description: Manage CI-instance field definitions
+        '401':
+          description: Unauthorized
+
+  /api/v1/cis/{id}/field-definitions/{name}:
+    delete:
+      operationId: deleteCisIdFieldDefinitionsName
+      summary: Delete a CI-instance field definition
+      responses:
+        '204':
+          description: Delete a CI-instance field definition
+        '401':
+          description: Unauthorized
+
+  /api/v1/cis/{id}/fields:
+    get:
+      operationId: listCisIdFields
+      summary: List field provenance (discovered/override/effective) of a CI
+      responses:
+        '200':
+          description: List field provenance (discovered/override/effective) of a CI
+        '401':
+          description: Unauthorized
+
+  /api/v1/cis/{id}/fields/{name}/override:
+    put:
+      operationId: putCisIdFieldsNameOverride
+      summary: Set or clear a manual field override
+      responses:
+        '200':
+          description: Set or clear a manual field override
+        '401':
+          description: Unauthorized
+    delete:
+      operationId: deleteCisIdFieldsNameOverride
+      summary: Set or clear a manual field override
+      responses:
+        '204':
+          description: Set or clear a manual field override
+        '401':
+          description: Unauthorized
+
+  /api/v1/cis/{id}/lifecycle-transitions:
+    post:
+      operationId: createCisIdLifecycleTransitions
+      summary: Execute a lifecycle transition on a CI
+      responses:
+        '200':
+          description: Execute a lifecycle transition on a CI
+        '401':
+          description: Unauthorized
+
+  /api/v1/cis/{id}/state:
+    get:
+      operationId: listCisIdState
+      summary: Reconstruct CI state at a point in time
+      responses:
+        '200':
+          description: Reconstruct CI state at a point in time
+        '401':
+          description: Unauthorized
+
+  /api/v1/compositions:
+    get:
+      operationId: listCompositions
+      summary: Manage parent-asset/child composition links
+      responses:
+        '200':
+          description: Manage parent-asset/child composition links
+        '401':
+          description: Unauthorized
+    post:
+      operationId: createCompositions
+      summary: Manage parent-asset/child composition links
+      responses:
+        '201':
+          description: Manage parent-asset/child composition links
+        '401':
+          description: Unauthorized
+
+  /api/v1/compositions/{id}:
+    get:
+      operationId: getCompositionsId
+      summary: Read, update or delete a composition link
+      responses:
+        '200':
+          description: Read, update or delete a composition link
+        '401':
+          description: Unauthorized
+    patch:
+      operationId: updateCompositionsId
+      summary: Read, update or delete a composition link
+      responses:
+        '200':
+          description: Read, update or delete a composition link
+        '401':
+          description: Unauthorized
+    delete:
+      operationId: deleteCompositionsId
+      summary: Read, update or delete a composition link
+      responses:
+        '204':
+          description: Read, update or delete a composition link
+        '401':
+          description: Unauthorized
+
+  /api/v1/history/{entityType}/{id}:
+    get:
+      operationId: getHistoryEntitytypeId
+      summary: List the unified change history of an entity
+      responses:
+        '200':
+          description: List the unified change history of an entity
+        '401':
+          description: Unauthorized
+
+  /api/v1/inventory/availability:
+    get:
+      operationId: listInventoryAvailability
+      summary: Query inventory availability projections
+      responses:
+        '200':
+          description: Query inventory availability projections
+        '401':
+          description: Unauthorized
+
+  /api/v1/inventory/items:
+    get:
+      operationId: listInventoryItems
+      summary: Manage quantity-based inventory items
+      responses:
+        '200':
+          description: Manage quantity-based inventory items
+        '401':
+          description: Unauthorized
+    post:
+      operationId: createInventoryItems
+      summary: Manage quantity-based inventory items
+      responses:
+        '201':
+          description: Manage quantity-based inventory items
+        '401':
+          description: Unauthorized
+
+  /api/v1/inventory/items/{id}:
+    get:
+      operationId: getInventoryItemsId
+      summary: Read, update or delete a quantity inventory item
+      responses:
+        '200':
+          description: Read, update or delete a quantity inventory item
+        '401':
+          description: Unauthorized
+    patch:
+      operationId: updateInventoryItemsId
+      summary: Read, update or delete a quantity inventory item
+      responses:
+        '200':
+          description: Read, update or delete a quantity inventory item
+        '401':
+          description: Unauthorized
+    delete:
+      operationId: deleteInventoryItemsId
+      summary: Read, update or delete a quantity inventory item
+      responses:
+        '204':
+          description: Read, update or delete a quantity inventory item
+        '401':
+          description: Unauthorized
+
+  /api/v1/lifecycle-definitions:
+    get:
+      operationId: listLifecycleDefinitions
+      summary: Manage lifecycle definitions
+      responses:
+        '200':
+          description: Manage lifecycle definitions
+        '401':
+          description: Unauthorized
+    post:
+      operationId: createLifecycleDefinitions
+      summary: Manage lifecycle definitions
+      responses:
+        '201':
+          description: Manage lifecycle definitions
+        '401':
+          description: Unauthorized
+
+  /api/v1/lifecycle-definitions/{id}:
+    get:
+      operationId: getLifecycleDefinitionsId
+      summary: Read or delete a lifecycle definition
+      responses:
+        '200':
+          description: Read or delete a lifecycle definition
+        '401':
+          description: Unauthorized
+    delete:
+      operationId: deleteLifecycleDefinitionsId
+      summary: Read or delete a lifecycle definition
+      responses:
+        '204':
+          description: Read or delete a lifecycle definition
+        '401':
+          description: Unauthorized
+
+  /api/v1/locations:
+    get:
+      operationId: listLocations
+      summary: Manage the generalized location hierarchy
+      responses:
+        '200':
+          description: Manage the generalized location hierarchy
+        '401':
+          description: Unauthorized
+    post:
+      operationId: createLocations
+      summary: Manage the generalized location hierarchy
+      responses:
+        '201':
+          description: Manage the generalized location hierarchy
+        '401':
+          description: Unauthorized
+
+  /api/v1/locations/tree:
+    get:
+      operationId: listLocationsTree
+      summary: Read the location hierarchy as a tree
+      responses:
+        '200':
+          description: Read the location hierarchy as a tree
+        '401':
+          description: Unauthorized
+
+  /api/v1/locations/{id}:
+    get:
+      operationId: getLocationsId
+      summary: Read, update or delete a location node
+      responses:
+        '200':
+          description: Read, update or delete a location node
+        '401':
+          description: Unauthorized
+    patch:
+      operationId: updateLocationsId
+      summary: Read, update or delete a location node
+      responses:
+        '200':
+          description: Read, update or delete a location node
+        '401':
+          description: Unauthorized
+    delete:
+      operationId: deleteLocationsId
+      summary: Read, update or delete a location node
+      responses:
+        '204':
+          description: Read, update or delete a location node
+        '401':
+          description: Unauthorized
+
+  /api/v1/reconciliation/conflicts:
+    get:
+      operationId: listReconciliationConflicts
+      summary: List field values where discovered and effective diverge
+      responses:
+        '200':
+          description: List field values where discovered and effective diverge
+        '401':
+          description: Unauthorized
+
+  /api/v1/reconciliation/source-policy:
+    get:
+      operationId: listReconciliationSourcePolicy
+      summary: Read or update the source-priority policy
+      responses:
+        '200':
+          description: Read or update the source-priority policy
+        '401':
+          description: Unauthorized
+    put:
+      operationId: putReconciliationSourcePolicy
+      summary: Read or update the source-priority policy
+      responses:
+        '200':
+          description: Read or update the source-priority policy
+        '401':
+          description: Unauthorized
+
+  /api/v1/relationship-types:
+    get:
+      operationId: listRelationshipTypes
+      summary: Manage relationship type metadata
+      responses:
+        '200':
+          description: Manage relationship type metadata
+        '401':
+          description: Unauthorized
+    post:
+      operationId: createRelationshipTypes
+      summary: Manage relationship type metadata
+      responses:
+        '201':
+          description: Manage relationship type metadata
+        '401':
+          description: Unauthorized
+
+  /api/v1/relationship-types/{key}:
+    get:
+      operationId: getRelationshipTypesKey
+      summary: Read, update or delete a relationship type
+      responses:
+        '200':
+          description: Read, update or delete a relationship type
+        '401':
+          description: Unauthorized
+    patch:
+      operationId: updateRelationshipTypesKey
+      summary: Read, update or delete a relationship type
+      responses:
+        '200':
+          description: Read, update or delete a relationship type
+        '401':
+          description: Unauthorized
+    delete:
+      operationId: deleteRelationshipTypesKey
+      summary: Read, update or delete a relationship type
+      responses:
+        '204':
+          description: Read, update or delete a relationship type
+        '401':
+          description: Unauthorized
+
+  /api/v1/reservations:
+    get:
+      operationId: listReservations
+      summary: Manage inventory reservations
+      responses:
+        '200':
+          description: Manage inventory reservations
+        '401':
+          description: Unauthorized
+    post:
+      operationId: createReservations
+      summary: Manage inventory reservations
+      responses:
+        '201':
+          description: Manage inventory reservations
+        '401':
+          description: Unauthorized
+
+  /api/v1/reservations/{id}:
+    get:
+      operationId: getReservationsId
+      summary: Read a reservation
+      responses:
+        '200':
+          description: Read a reservation
+        '401':
+          description: Unauthorized
+
+  /api/v1/reservations/{id}/release:
+    post:
+      operationId: createReservationsIdRelease
+      summary: Release a reservation
+      responses:
+        '200':
+          description: Release a reservation
+        '401':
+          description: Unauthorized
+
+  /api/v1/saved-views:
+    get:
+      operationId: listSavedViews
+      summary: Manage saved views
+      responses:
+        '200':
+          description: Manage saved views
+        '401':
+          description: Unauthorized
+    post:
+      operationId: createSavedViews
+      summary: Manage saved views
+      responses:
+        '201':
+          description: Manage saved views
+        '401':
+          description: Unauthorized
+
+  /api/v1/saved-views/presets:
+    get:
+      operationId: listSavedViewsPresets
+      summary: List the standard saved view presets
+      responses:
+        '200':
+          description: List the standard saved view presets
+        '401':
+          description: Unauthorized
+
+  /api/v1/saved-views/{id}:
+    get:
+      operationId: getSavedViewsId
+      summary: Read, update or delete a saved view
+      responses:
+        '200':
+          description: Read, update or delete a saved view
+        '401':
+          description: Unauthorized
+    patch:
+      operationId: updateSavedViewsId
+      summary: Read, update or delete a saved view
+      responses:
+        '200':
+          description: Read, update or delete a saved view
+        '401':
+          description: Unauthorized
+    delete:
+      operationId: deleteSavedViewsId
+      summary: Read, update or delete a saved view
+      responses:
+        '204':
+          description: Read, update or delete a saved view
+        '401':
+          description: Unauthorized
+
+  /api/v1/stock-movements:
+    get:
+      operationId: listStockMovements
+      summary: List and record inventory movements (append-only ledger)
+      responses:
+        '200':
+          description: List and record inventory movements (append-only ledger)
+        '401':
+          description: Unauthorized
+    post:
+      operationId: createStockMovements
+      summary: List and record inventory movements (append-only ledger)
+      responses:
+        '201':
+          description: List and record inventory movements (append-only ledger)
+        '401':
+          description: Unauthorized
+
+
 components:
   securitySchemes:
     BearerAuth:

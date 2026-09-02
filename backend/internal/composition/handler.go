@@ -32,10 +32,30 @@ func NewHandler(repo Repository, dispatcher ...EventDispatcher) *Handler {
 // RegisterRoutes registers composition routes on the given mux.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/assets/{id}/children", h.ListChildren)
+	r.Get("/api/v1/compositions", h.List)
 	r.Post("/api/v1/compositions", h.Create)
 	r.Get("/api/v1/compositions/{id}", h.Get)
 	r.Patch("/api/v1/compositions/{id}", h.Update)
 	r.Delete("/api/v1/compositions/{id}", h.Delete)
+}
+
+// List handles GET /api/v1/compositions
+func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	page := api.ParsePagination(r)
+	items, total, err := h.repo.List(r.Context(), t.OrganizationID, r.URL.Query().Get("parent_asset_id"), page)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[Composition]{
+		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset,
+		HasMore: page.Offset+page.Limit < total,
+	})
 }
 
 func (h *Handler) dispatch(r *http.Request, orgID, event string, payload any) {
