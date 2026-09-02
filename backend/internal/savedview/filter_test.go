@@ -1,6 +1,8 @@
 package savedview
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -107,5 +109,57 @@ func TestCompileSQLReconciliationConflict(t *testing.T) {
 	}
 	if !strings.Contains(where, "ci_field_value") || !strings.Contains(where, "IS DISTINCT FROM") {
 		t.Fatalf("expected reconciliation conflict predicate, got %s", where)
+	}
+}
+
+// The shipped "Available laptops in Berlin" preset filters by location name,
+// but FilterSpec only understood location IDs, so the preset was rejected with
+// "unknown field location_search" every time a user ran it.
+func TestPresetsCompile(t *testing.T) {
+	for _, p := range Presets() {
+		raw, err := json.Marshal(p.FilterSpec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Decode exactly as the Query handler does: unknown fields are
+		// rejected, which is how the broken preset produced a 400.
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		var spec FilterSpec
+		if err := dec.Decode(&spec); err != nil {
+			t.Fatalf("preset %q has a filter_spec the DSL cannot decode: %v", p.Name, err)
+		}
+		table := "ci"
+		if spec.EntityKind == "asset" || p.EntityKind == "asset" {
+			table = "asset"
+		}
+		if _, _, err := spec.CompileSQL(table, []any{"org"}, 2); err != nil {
+			t.Fatalf("preset %q does not compile: %v", p.Name, err)
+		}
+	}
+}
+
+func TestCompileSQLLocationSearchMatchesSubtree(t *testing.T) {
+	spec := FilterSpec{LocationSearch: "Berlin'; DROP TABLE asset; --"}
+	where, args, err := spec.CompileSQL("asset", []any{"org"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The value must be parameterized, never inlined.
+	if strings.Contains(where, "Berlin") || strings.Contains(where, "DROP") {
+		t.Fatalf("location value leaked into SQL text: %s", where)
+	}
+	if !strings.Contains(where, "name ILIKE $2") {
+		t.Fatalf("expected a name match predicate, got %s", where)
+	}
+	// Descendants must be included, so "Berlin" also finds racks inside it.
+	if !strings.Contains(where, "RECURSIVE") || !strings.Contains(where, "n.parent_id = s.id") {
+		t.Fatalf("expected a recursive subtree walk, got %s", where)
+	}
+	if len(args) != 2 {
+		t.Fatalf("expected org + location args, got %v", args)
+	}
+	if got, ok := args[1].(string); !ok || !strings.HasPrefix(got, "%") {
+		t.Fatalf("expected a wrapped ILIKE pattern, got %v", args[1])
 	}
 }

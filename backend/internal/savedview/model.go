@@ -30,14 +30,18 @@ type UpsertRequest struct {
 // optional; set fields are AND-ed.
 type FilterSpec struct {
 	// EntityKind selects the queried table: "ci" (default) or "asset".
-	EntityKind         string `json:"entity_kind,omitempty"`
-	CIType             string `json:"ci_type,omitempty"`
-	AssetCategory      string `json:"asset_category,omitempty"`
-	Lifecycle          string `json:"lifecycle,omitempty"`
-	Status             string `json:"status,omitempty"`
-	ClientID           string `json:"client_id,omitempty"`
-	LocationID         string `json:"location_id,omitempty"`
-	LocationSubtree    string `json:"location_subtree,omitempty"`
+	EntityKind      string `json:"entity_kind,omitempty"`
+	CIType          string `json:"ci_type,omitempty"`
+	AssetCategory   string `json:"asset_category,omitempty"`
+	Lifecycle       string `json:"lifecycle,omitempty"`
+	Status          string `json:"status,omitempty"`
+	ClientID        string `json:"client_id,omitempty"`
+	LocationID      string `json:"location_id,omitempty"`
+	LocationSubtree string `json:"location_subtree,omitempty"`
+	// LocationSearch matches locations by name and includes everything below
+	// them, so "Berlin" selects the Berlin site and every rack inside it. It
+	// is the name-based counterpart to LocationSubtree, which needs an ID.
+	LocationSearch     string `json:"location_search,omitempty"`
 	WarehouseOnly      bool   `json:"warehouse_only,omitempty"`
 	AvailableOnly      bool   `json:"available_only,omitempty"`
 	Reserved           *bool  `json:"reserved,omitempty"`

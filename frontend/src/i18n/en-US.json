@@ -842,7 +842,9 @@
     "none": "No custom views yet.",
     "results": "Results",
     "shared": "shared",
-    "mine": "My views"
+    "mine": "My views",
+    "save": "Save as view",
+    "namePrompt": "View name"
   },
   "lifecycle": {
     "transitionTo": "Transition to",

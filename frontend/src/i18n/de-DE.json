@@ -842,7 +842,9 @@
     "none": "Noch keine eigenen Ansichten.",
     "results": "Ergebnisse",
     "shared": "geteilt",
-    "mine": "Meine Ansichten"
+    "mine": "Meine Ansichten",
+    "save": "Als Ansicht speichern",
+    "namePrompt": "Name der Ansicht"
   },
   "lifecycle": {
     "transitionTo": "Übergang nach",

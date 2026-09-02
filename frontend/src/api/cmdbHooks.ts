@@ -306,6 +306,14 @@ export function useSaveView() {
   });
 }
 
+export function useDeleteSavedView() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => savedViewApi.delete(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-views'] }),
+  });
+}
+
 export function useFilterQuery() {
   return useMutation({
     mutationFn: (spec: Record<string, unknown> & { entity_kind?: string }) =>
