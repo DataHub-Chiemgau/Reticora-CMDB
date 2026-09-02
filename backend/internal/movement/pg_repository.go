@@ -87,16 +87,16 @@ func (r *PGRepository) Record(ctx context.Context, m *Movement) error {
 				delta = -delta
 			}
 			if _, err := tx.Exec(ctx,
-				"UPDATE quantity_item SET stock_level = stock_level + $2 WHERE id = $1",
-				m.QuantityItemID, delta); err != nil {
+				"UPDATE quantity_item SET stock_level = stock_level + $2 WHERE id = $1 AND organization_id = $3",
+				m.QuantityItemID, delta, m.OrganizationID); err != nil {
 				return fmt.Errorf("adjust stock level: %w", err)
 			}
 		}
 		// Track the current location of a moved asset.
 		if m.AssetID != "" && m.ToLocationID != "" {
 			if _, err := tx.Exec(ctx,
-				"UPDATE asset SET location_id = $2 WHERE id = $1",
-				m.AssetID, m.ToLocationID); err != nil {
+				"UPDATE asset SET location_id = $2 WHERE id = $1 AND organization_id = $3",
+				m.AssetID, m.ToLocationID, m.OrganizationID); err != nil {
 				return fmt.Errorf("update asset location: %w", err)
 			}
 		}

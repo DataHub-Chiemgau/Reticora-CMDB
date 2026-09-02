@@ -135,3 +135,78 @@ func TestBulkIngestUnprotectedFieldUpdates(t *testing.T) {
 		t.Fatalf("unprotected field should follow discovery, got name %q", updated.Name)
 	}
 }
+
+// TestBulkIngestPersistsDiscoveredAttributes guards the defect where discovery
+// recorded custom attributes as provenance but never wrote them onto the CI,
+// making them invisible to CI detail, search and attribute filtering.
+func TestBulkIngestPersistsDiscoveredAttributes(t *testing.T) {
+	discoveryRepo := NewMemoryRepository()
+	discoveryRepo.SeedCIType("server", "server")
+	ciRepo := ci.NewMemoryRepository()
+	prov := &stubProvenance{protected: map[string]bool{}}
+	h := NewHandler(discoveryRepo, ciRepo).WithProvenance(prov)
+
+	// Created path.
+	ingest(t, h, `{"collector_id":"col-1","items":[{"ci_type_name":"server","name":"srv","serial_number":"SN-1","attributes":{"ram_gb":32,"cpu_model":"Xeon"}}]}`)
+	items, _, err := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 CI, got %d", len(items))
+	}
+	if got := items[0].Attributes["ram_gb"]; got != float64(32) {
+		t.Fatalf("discovered attribute must be persisted on create, got %#v", got)
+	}
+	if got := items[0].Attributes["cpu_model"]; got != "Xeon" {
+		t.Fatalf("discovered attribute must be persisted on create, got %#v", got)
+	}
+
+	// Matched path: a later run updates the value.
+	ingest(t, h, `{"collector_id":"col-1","items":[{"ci_type_name":"server","name":"srv","serial_number":"SN-1","attributes":{"ram_gb":64}}]}`)
+	updated, err := ciRepo.GetByID(context.Background(), "org-1", items[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := updated.Attributes["ram_gb"]; got != float64(64) {
+		t.Fatalf("unprotected attribute should follow discovery, got %#v", got)
+	}
+	if got := updated.Attributes["cpu_model"]; got != "Xeon" {
+		t.Fatalf("attributes must merge, not replace; cpu_model was lost: %#v", updated.Attributes)
+	}
+}
+
+// TestBulkIngestProtectedAttributeOverrideWins is the canonical spec §17 case:
+// discovery reports RAM = 32, an operator sets a protected override of 64, and
+// a subsequent discovery run must not silently destroy the manual value.
+func TestBulkIngestProtectedAttributeOverrideWins(t *testing.T) {
+	discoveryRepo := NewMemoryRepository()
+	discoveryRepo.SeedCIType("server", "server")
+	ciRepo := ci.NewMemoryRepository()
+	existing := &ci.Item{
+		OrganizationID: "org-1", CITypeID: "server", Name: "srv", SerialNumber: "SN-1",
+		Attributes: map[string]any{"ram_gb": float64(64), "cpu_model": "Xeon"},
+	}
+	if err := ciRepo.Create(context.Background(), existing); err != nil {
+		t.Fatal(err)
+	}
+	prov := &stubProvenance{protected: map[string]bool{existing.ID + "/ram_gb": true}}
+	h := NewHandler(discoveryRepo, ciRepo).WithProvenance(prov)
+
+	ingest(t, h, `{"collector_id":"col-1","items":[{"ci_type_name":"server","name":"srv","serial_number":"SN-1","attributes":{"ram_gb":32,"cpu_model":"Xeon Gold"}}]}`)
+
+	updated, err := ciRepo.GetByID(context.Background(), "org-1", existing.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := updated.Attributes["ram_gb"]; got != float64(64) {
+		t.Fatalf("protected attribute override must survive discovery, got %#v", got)
+	}
+	if got := updated.Attributes["cpu_model"]; got != "Xeon Gold" {
+		t.Fatalf("unprotected attribute should still follow discovery, got %#v", got)
+	}
+	// The discovered value stays visible as provenance so the drift is reviewable.
+	if got := prov.recorded[existing.ID+"/ram_gb"]; got != float64(32) {
+		t.Fatalf("expected discovered value recorded as provenance, got %#v", got)
+	}
+}

@@ -171,6 +171,60 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 	})
 }
 
+// Update edits the provenance and verification metadata of a relationship.
+// The edge endpoints and rel_type are intentionally immutable.
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Relationship, error) {
+	var out *Relationship
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		sets := []string{"updated_at = now()"}
+		args := []any{id, orgID}
+		pos := 3
+		if req.Attributes != nil {
+			sets = append(sets, fmt.Sprintf("attributes = COALESCE(attributes, '{}'::jsonb) || $%d", pos))
+			args = append(args, req.Attributes)
+			pos++
+		}
+		if req.Confidence != nil {
+			sets = append(sets, fmt.Sprintf("confidence = $%d", pos))
+			args = append(args, *req.Confidence)
+			pos++
+		}
+		if req.VerificationState != nil {
+			sets = append(sets, fmt.Sprintf("verification_state = $%d", pos))
+			args = append(args, *req.VerificationState)
+			pos++
+		}
+		if req.SourceSystem != nil {
+			sets = append(sets, fmt.Sprintf("source_system = $%d", pos))
+			args = append(args, *req.SourceSystem)
+			pos++
+		}
+		if req.Notes != nil {
+			sets = append(sets, fmt.Sprintf("notes = $%d", pos))
+			args = append(args, *req.Notes)
+			pos++
+		}
+
+		row := tx.QueryRow(ctx, fmt.Sprintf(`
+			UPDATE ci_relationship SET %s
+			WHERE id = $1 AND organization_id = $2
+			RETURNING %s`, strings.Join(sets, ", "), relationshipSelectColumns), args...)
+		scanned, err := scanRelationship(row)
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return fmt.Errorf("not found")
+			}
+			return fmt.Errorf("update relationship: %w", err)
+		}
+		out = scanned
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2", id, orgID)

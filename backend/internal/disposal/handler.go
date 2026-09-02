@@ -63,7 +63,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Record]{
@@ -126,7 +126,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Notes:          req.Notes,
 	}
 	if err := h.repo.Create(r.Context(), rec); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	if h.movements != nil && rec.AssetID != "" {

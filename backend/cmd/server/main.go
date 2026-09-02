@@ -247,7 +247,7 @@ func main() {
 		MetricsTenantLabel:   cfg.MetricsTenantLabel,
 		Entitlements:         entitlementSvc,
 		Dispatcher:           webhookDispatcher,
-		CIService:            ci.NewServiceWithLimits(repos.CI, entitlementSvc),
+		CIService:            ci.NewServiceWithLimits(repos.CI, entitlementSvc).WithFieldResolver(repos.CIType),
 		Credentials:          credential.NewService(repos.Credential, encryptor),
 		OIDC:                 oidcProvider,
 		Sessions:             sessionIssuer,

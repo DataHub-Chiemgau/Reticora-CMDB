@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { TopologyGraphData } from '../api/client';
-import { useCI, useCINeighbors, useCIRelationships, useUpdateCI } from '../api/hooks';
+import { useCI, useCINeighbors, useUpdateCI } from '../api/hooks';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -17,6 +17,8 @@ import {
   LifecycleSection,
   ImpactSection,
 } from '../components/cmdb/CIDetailSections';
+import { CIRelationshipsCard } from '../components/cmdb/CIRelationshipsCard';
+import { CIParentAssetCard } from '../components/cmdb/CIParentAssetCard';
 
 export interface NeighborEntry {
   id: string;
@@ -68,7 +70,6 @@ export function CIDetailPage() {
   const [isEditOpen, setIsEditOpen] = useState(false);
 
   const ciQuery = useCI(id);
-  const relationshipsQuery = useCIRelationships(id);
   const neighborsQuery = useCINeighbors(id);
   const updateCI = useUpdateCI();
 
@@ -148,46 +149,9 @@ export function CIDetailPage() {
           )}
         </Card>
 
-        <Card title={t('ci.relationships')}>
-          {relationshipsQuery.isLoading ? (
-            <SkeletonList rows={3} label={t('app.loading')} />
-          ) : relationshipsQuery.error ? (
-            <ErrorState
-              title={t('ci.relationshipsLoadError')}
-              retryLabel={t('common.retry')}
-              onRetry={() => void relationshipsQuery.refetch()}
-            />
-          ) : (relationshipsQuery.data?.data.length ?? 0) === 0 ? (
-            <EmptyState title={t('ci.noRelationships')} />
-          ) : (
-            <ul className="space-y-2 text-sm">
-              {relationshipsQuery.data?.data.map((relationship) => {
-                const isOutgoing = relationship.source_ci_id === ci.id;
-                const otherId = isOutgoing ? relationship.target_ci_id : relationship.source_ci_id;
-                return (
-                  <li
-                    key={relationship.id}
-                    className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Badge variant="neutral">{relationship.rel_type}</Badge>
-                      <span aria-hidden="true">{isOutgoing ? '→' : '←'}</span>
-                      <Link
-                        to={`/cmdb/${otherId}`}
-                        className="font-mono text-xs text-primary underline-offset-2 hover:underline"
-                      >
-                        {otherId}
-                      </Link>
-                    </span>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                      {relationship.source}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Card>
+        <CIParentAssetCard ciId={ci.id} />
+
+        <CIRelationshipsCard ciId={ci.id} />
 
         <Card title={t('topology.neighbors')}>
           {neighborsQuery.isLoading ? (
@@ -234,6 +198,7 @@ export function CIDetailPage() {
           ciId={ci.id}
           attributes={ci.attributes ?? {}}
           onChanged={(attrs) => updateCI.mutate({ id: ci.id, data: { attributes: attrs } })}
+          serverError={updateCI.error as Error | null}
         />
         <ProvenanceSection ciId={ci.id} />
         <LifecycleSection

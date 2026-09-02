@@ -2,11 +2,13 @@ package composition
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -119,6 +121,9 @@ func (r *PGRepository) Create(ctx context.Context, c *Composition) error {
 		if err != nil {
 			if strings.Contains(err.Error(), "idx_composition_unique") {
 				return fmt.Errorf("child already has a parent asset")
+			}
+			if msg, ok := cycleMessage(err); ok {
+				return fmt.Errorf("%s", msg)
 			}
 			return fmt.Errorf("create composition: %w", err)
 		}
@@ -263,4 +268,21 @@ func nilIfEmpty(value string) any {
 		return nil
 	}
 	return value
+}
+
+// cycleMessage extracts the guard message raised by the trg_composition_no_cycle
+// trigger so the API can report a precise, non-leaking conflict instead of a
+// generic internal error.
+func cycleMessage(err error) (string, bool) {
+	if err == nil {
+		return "", false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && strings.HasPrefix(pgErr.Message, "composition cycle") {
+		return pgErr.Message, true
+	}
+	if strings.Contains(err.Error(), "composition cycle") {
+		return "composition cycle: the requested link would make an asset its own ancestor", true
+	}
+	return "", false
 }

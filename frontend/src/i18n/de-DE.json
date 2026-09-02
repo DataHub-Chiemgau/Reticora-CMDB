@@ -220,7 +220,8 @@
     },
     "validation": {
       "nameRequired": "Name ist erforderlich.",
-      "ciTypeRequired": "CI-Typ ist erforderlich."
+      "ciTypeRequired": "CI-Typ ist erforderlich.",
+      "serverRejected": "Bitte korrigieren Sie die markierten Felder."
     }
   },
   "discovery": {
@@ -296,7 +297,14 @@
       "toolbarLabel": "Massenbearbeitung",
       "success": "Status von {{count}} Assets aktualisiert",
       "error": "Die Massenänderung konnte nicht vollständig angewendet werden"
-    }
+    },
+    "barcode": "Barcode",
+    "rfidTag": "RFID-Tag",
+    "purchaseDate": "Kaufdatum",
+    "purchaseCost": "Kaufpreis",
+    "invoiceNumber": "Rechnungsnummer",
+    "warrantyEnd": "Garantie bis",
+    "status": "Status"
   },
   "assignment": {
     "title": "Zuweisungen",
@@ -810,7 +818,9 @@
     "serialized": "eigen serialisiert",
     "none": "Keine Komponenten. Dieses Asset ist eigenständig.",
     "locatable": "eigen lokalisierbar",
-    "configOnly": "nur Konfiguration"
+    "configOnly": "nur Konfiguration",
+    "parentTitle": "Übergeordnetes Asset",
+    "readOnly": "schreibgeschützt"
   },
   "locations": {
     "createChild": "Unterpunkt in",
@@ -832,7 +842,9 @@
     "none": "Noch keine eigenen Ansichten.",
     "results": "Ergebnisse",
     "shared": "geteilt",
-    "mine": "Meine Ansichten"
+    "mine": "Meine Ansichten",
+    "save": "Als Ansicht speichern",
+    "namePrompt": "Name der Ansicht"
   },
   "lifecycle": {
     "transitionTo": "Übergang nach",
@@ -840,5 +852,24 @@
     "title": "Lebenszyklus",
     "current": "Aktuell",
     "apply": "Anwenden"
+  },
+  "relationship": {
+    "add": "Beziehung hinzufügen",
+    "edit": "Beziehung bearbeiten",
+    "editHint": "Endpunkte und Typ sind unveränderlich — zum Umhängen die Beziehung löschen und neu anlegen.",
+    "verify": "Bestätigen",
+    "direction": "Richtung",
+    "outgoing": "Dieses CI → Ziel",
+    "incoming": "Quelle → dieses CI",
+    "type": "Beziehungstyp",
+    "targetCi": "CI-ID der Gegenstelle",
+    "notes": "Notiz",
+    "verificationState": "Prüfstatus",
+    "state": {
+      "unverified": "Ungeprüft",
+      "verified": "Bestätigt",
+      "disputed": "Widersprochen",
+      "stale": "Veraltet"
+    }
   }
 }

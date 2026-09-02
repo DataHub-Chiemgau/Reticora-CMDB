@@ -60,7 +60,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -93,7 +93,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -136,7 +136,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Create(r.Context(), s); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -164,7 +164,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -185,7 +185,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -235,7 +235,7 @@ func (h *Handler) AddScan(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -255,7 +255,7 @@ func (h *Handler) ListScans(w http.ResponseWriter, r *http.Request) {
 
 	scans, total, err := h.repo.ListScans(r.Context(), t.OrganizationID, stocktakeID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -287,7 +287,7 @@ func (h *Handler) Difference(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -334,7 +334,7 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 

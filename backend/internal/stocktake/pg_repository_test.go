@@ -32,7 +32,9 @@ func testPool(t *testing.T) string {
 func TestCompleteAppliesCorrections(t *testing.T) {
 	dsn := testPool(t)
 	ctx := context.Background()
-	pool, err := database.NewPool(ctx, dsn)
+	// The fixture creates its own organization; see the relationship
+	// integration test for why a maintenance pool is used.
+	pool, err := database.NewMaintenancePool(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}

@@ -497,6 +497,34 @@ paths:
   /api/v1/relationships/{id}:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: updateRelationship
+      tags: [Relationships]
+      summary: Edit or verify a relationship
+      description: >-
+        Updates the provenance and verification metadata of an existing
+        relationship. The edge endpoints and rel_type are immutable; rewiring is
+        expressed by deleting and recreating the relationship so the graph
+        history stays truthful.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRelationshipRequest'
+      responses:
+        '200':
+          description: Updated relationship
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Relationship'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       operationId: deleteRelationship
       tags: [Relationships]
@@ -7024,6 +7052,18 @@ paths:
         '401':
           description: Unauthorized
 
+  /api/v1/cis/{id}/parent:
+    get:
+      operationId: getCisIdParent
+      summary: Get the parent asset owning this CI and the inventory fields it contributes
+      responses:
+        '200':
+          description: Parent composition link and the parent asset's read-only inventory identity
+        '401':
+          description: Unauthorized
+        '404':
+          description: CI has no parent asset
+
   /api/v1/cis/{id}/state:
     get:
       operationId: listCisIdState
@@ -8087,6 +8127,28 @@ components:
         source:
           type: string
           default: manual
+
+    UpdateRelationshipRequest:
+      type: object
+      description: >-
+        All properties are optional; only the supplied ones are changed.
+      properties:
+        attributes:
+          type: object
+          additionalProperties: true
+          description: Merged into the existing attributes.
+        confidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        verification_state:
+          type: string
+          enum: [unverified, verified, disputed, stale]
+        source_system:
+          type: string
+        notes:
+          type: string
 
     RelationshipListResponse:
       allOf:

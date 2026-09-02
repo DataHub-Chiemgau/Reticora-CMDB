@@ -256,7 +256,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		locationnode.NewHandler(repos.LocationNode),
 		movement.NewHandler(repos.Movement, opts.Dispatcher).WithAssets(assetCreator{repo: repos.Asset}),
 		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
-		composition.NewHandler(repos.Composition, opts.Dispatcher),
+		composition.NewHandler(repos.Composition, opts.Dispatcher).
+			WithAssets(parentAssetLookup{repo: repos.Asset}),
 		override.NewHandler(repos.Override, opts.Dispatcher),
 		history.NewHandler(repos.History),
 		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery),

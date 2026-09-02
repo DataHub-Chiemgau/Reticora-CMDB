@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { useLocation } from 'react-router-dom';
 import { CIListPage } from './CIListPage';
 import { ToastViewport } from '../components/ui/Toast';
 import { renderWithProviders, stubFetchRoutes } from '../test/utils';
@@ -84,5 +85,98 @@ describe('CIListPage', () => {
 
     // Success toast is announced in the live region.
     expect(await screen.findByText('Status von 1 CIs aktualisiert')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Filter state used to live only in an in-memory store, so reloading the page
+ * or sharing its URL silently dropped every active filter and showed an
+ * unfiltered list instead. These tests pin the filters to the query string.
+ */
+/** Renders the router's current query string so it can be asserted on. */
+function LocationProbe() {
+  const location = useLocation();
+  return <span data-testid="location-search">{location.search}</span>;
+}
+
+describe('CIListPage filter persistence', () => {
+  function emptyList() {
+    return vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({ data: [], total: 0, limit: 25, offset: 0, has_more: false }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    );
+  }
+
+  /** The CI list request URLs the page issued, oldest first. */
+  function listUrls(fetchMock: ReturnType<typeof emptyList>) {
+    return fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes('/cis'));
+  }
+
+  it('applies filters taken from the URL on first render', async () => {
+    const fetchMock = emptyList();
+    vi.stubGlobal('fetch', fetchMock);
+
+    // This is what a reload or a shared link looks like.
+    renderWithProviders(<CIListPage onCreateCI={() => {}} />, {
+      route: '/cmdb?q=srv-app&status=active',
+    });
+
+    await waitFor(() => expect(listUrls(fetchMock).length).toBeGreaterThan(0));
+    const url = listUrls(fetchMock)[0];
+    expect(url).toContain('search=srv-app');
+    expect(url).toContain('status=active');
+
+    // The controls reflect the shared state rather than appearing empty.
+    expect(screen.getByDisplayValue('srv-app')).toBeInTheDocument();
+  });
+
+  it('writes typed filters into the URL so they survive a reload', async () => {
+    const fetchMock = emptyList();
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(
+      <>
+        <CIListPage onCreateCI={() => {}} />
+        <LocationProbe />
+      </>,
+      { route: '/cmdb' },
+    );
+
+    const searchBox = await screen.findByRole('textbox');
+    fireEvent.change(searchBox, { target: { value: 'db-01' } });
+
+    await waitFor(() => {
+      expect(listUrls(fetchMock).some((u) => u.includes('search=db-01'))).toBe(true);
+    });
+    // The filter must land in the address bar; that is what makes the view
+    // reload-safe and shareable rather than merely held in memory.
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search').textContent).toContain('q=db-01');
+    });
+  });
+
+  it('drops cleared filters from the query string', async () => {
+    const fetchMock = emptyList();
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<CIListPage onCreateCI={() => {}} />, { route: '/cmdb?q=stale' });
+
+    const searchBox = await screen.findByRole('textbox');
+    expect(searchBox).toHaveValue('stale');
+
+    fireEvent.change(searchBox, { target: { value: '' } });
+
+    await waitFor(() => expect(searchBox).toHaveValue(''));
+    // An empty filter must not linger as stale criteria in a shared link.
+    await waitFor(() => {
+      const urls = listUrls(fetchMock);
+      expect(urls[urls.length - 1]).not.toContain('search=stale');
+    });
   });
 });

@@ -135,3 +135,114 @@ func TestListAllRelationships(t *testing.T) {
 		t.Errorf("expected the 2 relationships of org-1, got %d", resp.Total)
 	}
 }
+
+// createRel posts a relationship and returns it.
+func createRel(t *testing.T, mux http.Handler, body string) Relationship {
+	t.Helper()
+	req := httptest.NewRequest("POST", "/api/v1/relationships", bytes.NewBufferString(body))
+	req = tenantCtx(req)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var rel Relationship
+	if err := json.Unmarshal(w.Body.Bytes(), &rel); err != nil {
+		t.Fatal(err)
+	}
+	return rel
+}
+
+func patchRel(t *testing.T, mux http.Handler, id, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest("PATCH", "/api/v1/relationships/"+id, bytes.NewBufferString(body))
+	req = tenantCtx(req)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	return w
+}
+
+// TestHandler_UpdateVerifiesAndEdits covers spec §13, which requires manual
+// relationships to be editable and verifiable, not just creatable and
+// deletable.
+func TestHandler_UpdateVerifiesAndEdits(t *testing.T) {
+	repo := NewMemoryRepository()
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+
+	rel := createRel(t, mux, `{"source_ci_id":"ci-1","target_ci_id":"ci-2","rel_type":"depends_on","source":"discovery"}`)
+	if rel.VerificationState != "unverified" {
+		t.Fatalf("discovered relationship should start unverified, got %q", rel.VerificationState)
+	}
+
+	conf := 0.9
+	body, _ := json.Marshal(UpdateRequest{
+		VerificationState: strPtr("verified"),
+		Notes:             strPtr("checked on site"),
+		Confidence:        &conf,
+		SourceSystem:      strPtr("netbox"),
+		Attributes:        map[string]any{"port": "eth0"},
+	})
+	w := patchRel(t, mux, rel.ID, string(body))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated Relationship
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.VerificationState != "verified" {
+		t.Fatalf("expected verified, got %q", updated.VerificationState)
+	}
+	if updated.Notes != "checked on site" {
+		t.Fatalf("expected notes persisted, got %q", updated.Notes)
+	}
+	if updated.Confidence == nil || *updated.Confidence != 0.9 {
+		t.Fatalf("expected confidence 0.9, got %v", updated.Confidence)
+	}
+	if updated.SourceSystem != "netbox" {
+		t.Fatalf("expected source_system persisted, got %q", updated.SourceSystem)
+	}
+	if updated.Attributes["port"] != "eth0" {
+		t.Fatalf("expected attributes merged, got %#v", updated.Attributes)
+	}
+	// The edge itself must not have moved.
+	if updated.SourceCIID != "ci-1" || updated.TargetCIID != "ci-2" || updated.RelType != "depends_on" {
+		t.Fatalf("edge endpoints/type must be immutable, got %+v", updated)
+	}
+}
+
+func TestHandler_UpdateRejectsInvalidInput(t *testing.T) {
+	repo := NewMemoryRepository()
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+	rel := createRel(t, mux, `{"source_ci_id":"ci-1","target_ci_id":"ci-2","rel_type":"depends_on"}`)
+
+	if w := patchRel(t, mux, rel.ID, `{"verification_state":"bogus"}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid verification_state, got %d", w.Code)
+	}
+	if w := patchRel(t, mux, rel.ID, `{"confidence":1.5}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for out-of-range confidence, got %d", w.Code)
+	}
+}
+
+// TestHandler_UpdateIsTenantScoped ensures a relationship belonging to another
+// organization cannot be edited through a guessed identifier.
+func TestHandler_UpdateIsTenantScoped(t *testing.T) {
+	repo := NewMemoryRepository()
+	other := &Relationship{OrganizationID: "org-2", SourceCIID: "x", TargetCIID: "y", RelType: "depends_on"}
+	if err := repo.Create(context.Background(), other); err != nil {
+		t.Fatal(err)
+	}
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+
+	if w := patchRel(t, mux, other.ID, `{"verification_state":"verified"}`); w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for cross-tenant update, got %d", w.Code)
+	}
+	if other.VerificationState == "verified" {
+		t.Fatal("cross-tenant update must not mutate the row")
+	}
+}
+
+func strPtr(s string) *string { return &s }

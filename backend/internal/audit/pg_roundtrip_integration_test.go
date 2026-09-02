@@ -30,21 +30,43 @@ func testDatabaseURL(t *testing.T) string {
 func TestPGRecorderChainRoundtripPG(t *testing.T) {
 	dsn := testDatabaseURL(t)
 	ctx := context.Background()
-	pool, err := database.NewPool(ctx, dsn)
+	// The audit chain fixture rewrites and deletes audit rows, which the
+	// restricted application role is not permitted to do (migration 000056).
+	pool, err := database.NewMaintenancePool(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer pool.Close()
+	// Registered first so it runs last (t.Cleanup is LIFO) and the trigger
+	// guards are re-enabled before the pool goes away.
+	t.Cleanup(pool.Close)
 
 	orgID := "33333333-3333-3333-3333-333333333333"
 	if _, err := pool.Exec(ctx, `INSERT INTO organization (id, name, slug) VALUES ($1, 'audit-roundtrip', 'audit-roundtrip') ON CONFLICT (id) DO NOTHING`, orgID); err != nil {
 		t.Fatalf("insert org: %v", err)
 	}
+	// audit_log is append-only (migration 000056). This fixture needs to reset
+	// and later tamper with the chain, which it does under
+	// session_replication_role = replica: that skips triggers for this session
+	// only, so it cannot race with other packages sharing the database.
+	unguarded := func(sql string, args ...any) error {
+		conn, err := pool.Acquire(ctx)
+		if err != nil {
+			return err
+		}
+		defer conn.Release()
+		if _, err := conn.Exec(ctx, `SET session_replication_role = replica`); err != nil {
+			return err
+		}
+		defer conn.Exec(ctx, `SET session_replication_role = origin`)
+		_, err = conn.Exec(ctx, sql, args...)
+		return err
+	}
 	// Repeat runs of this test share the org; start from an empty chain.
-	if _, err := pool.Exec(ctx, `DELETE FROM audit_log WHERE organization_id = $1`, orgID); err != nil {
+	if err := unguarded(`DELETE FROM audit_log WHERE organization_id = $1`, orgID); err != nil {
 		t.Fatalf("reset audit log: %v", err)
 	}
 	t.Cleanup(func() {
+		unguarded(`DELETE FROM audit_log WHERE organization_id = $1`, orgID)
 		pool.Exec(ctx, `DELETE FROM organization WHERE id = $1`, orgID)
 	})
 
@@ -93,7 +115,7 @@ func TestPGRecorderChainRoundtripPG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pick tamper target: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE audit_log SET action = 'ci.tampered' WHERE id = $1`, tamperedID); err != nil {
+	if err := unguarded(`UPDATE audit_log SET action = 'ci.tampered' WHERE id = $1`, tamperedID); err != nil {
 		t.Fatalf("tamper: %v", err)
 	}
 

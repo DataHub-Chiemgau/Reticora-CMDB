@@ -45,7 +45,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Consumable]{
@@ -96,7 +96,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Notes:          req.Notes,
 	}
 	if err := h.repo.Create(r.Context(), c); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, c)
@@ -143,7 +143,7 @@ func (h *Handler) ListMovements(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListMovements(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Movement]{
@@ -190,7 +190,7 @@ func (h *Handler) AddMovement(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "consumable not found")
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, map[string]any{"movement": m, "consumable": c})

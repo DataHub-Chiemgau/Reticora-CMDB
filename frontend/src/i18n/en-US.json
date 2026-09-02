@@ -220,7 +220,8 @@
     },
     "validation": {
       "nameRequired": "Name is required.",
-      "ciTypeRequired": "CI type is required."
+      "ciTypeRequired": "CI type is required.",
+      "serverRejected": "Please correct the highlighted fields."
     }
   },
   "discovery": {
@@ -296,7 +297,14 @@
       "toolbarLabel": "Bulk edit",
       "success": "Updated status of {{count}} assets",
       "error": "The bulk change could not be fully applied"
-    }
+    },
+    "barcode": "Barcode",
+    "rfidTag": "RFID tag",
+    "purchaseDate": "Purchase date",
+    "purchaseCost": "Purchase cost",
+    "invoiceNumber": "Invoice number",
+    "warrantyEnd": "Warranty end",
+    "status": "Status"
   },
   "assignment": {
     "title": "Assignments",
@@ -810,7 +818,9 @@
     "serialized": "independently serialized",
     "none": "No components. This asset is standalone.",
     "locatable": "independently locatable",
-    "configOnly": "configuration only"
+    "configOnly": "configuration only",
+    "parentTitle": "Parent asset",
+    "readOnly": "read-only"
   },
   "locations": {
     "createChild": "Create child in",
@@ -832,7 +842,9 @@
     "none": "No custom views yet.",
     "results": "Results",
     "shared": "shared",
-    "mine": "My views"
+    "mine": "My views",
+    "save": "Save as view",
+    "namePrompt": "View name"
   },
   "lifecycle": {
     "transitionTo": "Transition to",
@@ -840,5 +852,24 @@
     "title": "Lifecycle",
     "current": "Current",
     "apply": "Apply"
+  },
+  "relationship": {
+    "add": "Add relationship",
+    "edit": "Edit relationship",
+    "editHint": "Endpoints and type are immutable — to rewire, delete the relationship and create it again.",
+    "verify": "Verify",
+    "direction": "Direction",
+    "outgoing": "This CI → target",
+    "incoming": "Source → this CI",
+    "type": "Relationship type",
+    "targetCi": "CI ID of the other end",
+    "notes": "Note",
+    "verificationState": "Verification state",
+    "state": {
+      "unverified": "Unverified",
+      "verified": "Verified",
+      "disputed": "Disputed",
+      "stale": "Stale"
+    }
   }
 }

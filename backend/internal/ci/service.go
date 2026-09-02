@@ -86,8 +86,9 @@ func ciSummary(item *Item) string {
 // ci_change rows are written by the repository inside the same transaction as
 // the mutation, so history can never diverge from the stored data.
 type Service struct {
-	repo  Repository
-	limit LimitGuard
+	repo   Repository
+	limit  LimitGuard
+	fields FieldResolver
 }
 
 // NewService creates a CI service.
@@ -99,6 +100,27 @@ func NewService(repo Repository) *Service {
 // CI limit on every create.
 func NewServiceWithLimits(repo Repository, limit LimitGuard) *Service {
 	return &Service{repo: repo, limit: limit}
+}
+
+// WithFieldResolver enables server-side validation of CI attributes against the
+// global, CI-type and instance field metadata. Without a resolver the service
+// keeps its previous pass-through behaviour, which keeps the constructor
+// signatures stable for callers that do not manage field metadata.
+func (s *Service) WithFieldResolver(fields FieldResolver) *Service {
+	s.fields = fields
+	return s
+}
+
+// validate checks the effective attributes of a CI against its field metadata.
+func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, existing, patch map[string]any) error {
+	if s.fields == nil {
+		return nil
+	}
+	defs, err := s.fields.ResolveFields(ctx, orgID, ciTypeID, ciID)
+	if err != nil {
+		return err
+	}
+	return validateAttributes(defs, mergeAttributes(existing, patch), patch, existing)
 }
 
 // List returns paginated CIs filtered by the given parameters.
@@ -122,6 +144,9 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 			return err
 		}
 	}
+	if err := s.validate(ctx, item.OrganizationID, item.CITypeID, "", nil, item.Attributes); err != nil {
+		return err
+	}
 	return s.repo.Create(ctx, item)
 }
 
@@ -129,6 +154,15 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 // the mutation transaction so the recorded diff cannot race with concurrent
 // writers.
 func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
+	if s.fields != nil {
+		before, err := s.repo.GetByID(ctx, orgID, id)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.validate(ctx, orgID, before.CITypeID, id, before.Attributes, req.Attributes); err != nil {
+			return nil, err
+		}
+	}
 	return s.repo.Update(ctx, orgID, id, req)
 }
 

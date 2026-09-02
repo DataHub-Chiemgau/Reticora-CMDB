@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -145,15 +146,15 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 				lifecycle_definition_id, capabilities, allowed_relationship_types,
 				ui_schema, compliance_rules, discovery_mappings
 			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,1,$9,$10,$11,$12,$13,$14,$15)
-			RETURNING id::text, created_at, updated_at`,
+			RETURNING id::text, is_active, version, created_at, updated_at`,
 			nilIfEmpty(typ.OrganizationID), typ.Key, typ.Name, nilIfEmpty(typ.DisplayName),
 			nilIfEmpty(typ.Icon), nilIfEmpty(typ.Description), nilIfEmpty(typ.Category),
 			typ.IsLogical, nilIfEmpty(typ.TemplateKey), nilIfEmpty(typ.LifecycleDefinitionID),
-			jsonOrDefault(typ.Capabilities), jsonOrDefault(typ.AllowedRelationshipTypes),
-			jsonOrDefault(typ.UISchema), jsonOrDefault(typ.ComplianceRules),
-			jsonOrDefault(typ.DiscoveryMappings),
+			jsonOrDefault(typ.Capabilities, emptyObject), jsonOrDefault(typ.AllowedRelationshipTypes, emptyArray),
+			jsonOrDefault(typ.UISchema, emptyObject), jsonOrDefault(typ.ComplianceRules, emptyArray),
+			jsonOrDefault(typ.DiscoveryMappings, emptyArray),
 		)
-		if err := row.Scan(&typ.ID, &typ.CreatedAt, &typ.UpdatedAt); err != nil {
+		if err := row.Scan(&typ.ID, &typ.IsActive, &typ.Version, &typ.CreatedAt, &typ.UpdatedAt); err != nil {
 			return fmt.Errorf("create ci type: %w", err)
 		}
 		for _, f := range typ.Fields {
@@ -466,10 +467,11 @@ func upsertFieldTx(ctx context.Context, tx pgx.Tx, typeID string, req UpsertFiel
 		}
 		enumJSON = string(raw)
 	}
-	var validation, conditional any
+	validation := any(emptyObject)
 	if req.Validation != nil {
 		validation = req.Validation
 	}
+	var conditional any
 	if req.Conditional != nil {
 		conditional = req.Conditional
 	}
@@ -630,8 +632,8 @@ func (r *PGRepository) ListInstanceFields(ctx context.Context, orgID, ciID strin
 	var out []InstanceField
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM ci_instance_field_definition WHERE ci_id = $1 ORDER BY sort_order ASC, name ASC",
-			instanceFieldSelectColumns), ciID)
+			"SELECT %s FROM ci_instance_field_definition WHERE ci_id = $1 AND organization_id = $2 ORDER BY sort_order ASC, name ASC",
+			instanceFieldSelectColumns), ciID, orgID)
 		if err != nil {
 			return fmt.Errorf("list instance fields: %w", err)
 		}
@@ -661,10 +663,11 @@ func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID stri
 		}
 		enumJSON = string(raw)
 	}
-	var validation, conditional any
+	validation := any(emptyObject)
 	if req.Validation != nil {
 		validation = req.Validation
 	}
+	var conditional any
 	if req.Conditional != nil {
 		conditional = req.Conditional
 	}
@@ -808,9 +811,21 @@ func nilIfEmpty(value string) any {
 	return value
 }
 
-func jsonOrDefault(v any) any {
-	if v == nil {
-		return nil
+// Empty JSON documents used when a metadata column has no value. The columns
+// are NOT NULL with a DEFAULT, and an explicit NULL parameter suppresses the
+// default, so the empty document must be sent instead.
+const (
+	emptyObject = "{}"
+	emptyArray  = "[]"
+)
+
+// jsonOrDefault substitutes an explicit empty JSON document for a nil value.
+// Passing SQL NULL for these columns violates their NOT NULL constraint even
+// though they declare a DEFAULT, because an explicit parameter suppresses the
+// column default.
+func jsonOrDefault(v any, fallback string) any {
+	if v == nil || reflect.ValueOf(v).IsZero() {
+		return fallback
 	}
 	return v
 }

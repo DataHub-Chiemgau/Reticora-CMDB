@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ApiError } from '../api/client';
 import type { CI, CICreateRequest, CIUpdateRequest } from '../api/client';
 import { useCreateCI, useUpdateCI } from '../api/hooks';
 import { Button } from '../components/ui/Button';
@@ -85,6 +86,33 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
   const serverError = (createMutation.error || updateMutation.error) as Error | null;
   const isSubmitting = createMutation.isPending || updateMutation.isPending;
 
+  // Server-side field validation (RFC 7807 + `violations`) is authoritative:
+  // the CI type's field metadata is only fully known to the backend, so a
+  // rejection can name fields the client never validated. Violations that map
+  // onto a known input are rendered inline; anything else stays in the banner
+  // so no server complaint is silently swallowed.
+  const serverViolations =
+    serverError instanceof ApiError ? serverError.violationsByField() : ({} as Record<string, string>);
+
+  const fieldErrors: Partial<Record<keyof CIFormValues, string>> = { ...errors };
+  const unmappedViolations: string[] = [];
+  for (const [field, detail] of Object.entries(serverViolations)) {
+    if (field in values) {
+      const key = field as keyof CIFormValues;
+      if (!fieldErrors[key]) fieldErrors[key] = detail;
+    } else {
+      unmappedViolations.push(`${field}: ${detail}`);
+    }
+  }
+
+  const bannerMessage = serverError
+    ? unmappedViolations.length > 0
+      ? unmappedViolations.join('; ')
+      : Object.keys(serverViolations).length > 0
+        ? t('form.validation.serverRejected', 'Bitte korrigieren Sie die markierten Felder.')
+        : serverError.message
+    : null;
+
   function setValue<Key extends keyof CIFormValues>(key: Key, value: CIFormValues[Key]) {
     setValues((current) => ({ ...current, [key]: value }));
     setErrors((current) => ({ ...current, [key]: undefined }));
@@ -157,7 +185,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
           label={t('form.fields.name')}
           value={values.name}
           onChange={(event) => setValue('name', event.target.value)}
-          error={errors.name}
+          error={fieldErrors.name}
           required
         />
         <Select
@@ -165,7 +193,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
           value={values.ci_type_id}
           onChange={(event) => setValue('ci_type_id', event.target.value)}
           options={typeOptions}
-          error={errors.ci_type_id}
+          error={fieldErrors.ci_type_id}
           disabled={isEditMode}
           required
         />
@@ -174,38 +202,46 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
           value={values.status}
           onChange={(event) => setValue('status', event.target.value)}
           options={statusOptions}
+          error={fieldErrors.status}
         />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input
             label={t('form.fields.manufacturer')}
             value={values.manufacturer}
             onChange={(event) => setValue('manufacturer', event.target.value)}
+            error={fieldErrors.manufacturer}
           />
           <Input
             label={t('form.fields.model')}
             value={values.model}
             onChange={(event) => setValue('model', event.target.value)}
+            error={fieldErrors.model}
           />
           <Input
             label={t('form.fields.serialNumber')}
             value={values.serial_number}
             onChange={(event) => setValue('serial_number', event.target.value)}
+            error={fieldErrors.serial_number}
           />
           <Input
             label={t('form.fields.managementIp')}
             value={values.management_ip}
             onChange={(event) => setValue('management_ip', event.target.value)}
+            error={fieldErrors.management_ip}
           />
           <Input
             label={t('form.fields.firmwareVersion')}
             value={values.firmware_version}
             onChange={(event) => setValue('firmware_version', event.target.value)}
+            error={fieldErrors.firmware_version}
             className="sm:col-span-2"
           />
         </div>
 
-        {serverError ? (
-          <p className="text-sm text-red-600 dark:text-red-400">{serverError.message}</p>
+        {bannerMessage ? (
+          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            {bannerMessage}
+          </p>
         ) : null}
 
         <div className="flex justify-end gap-3 pt-2">

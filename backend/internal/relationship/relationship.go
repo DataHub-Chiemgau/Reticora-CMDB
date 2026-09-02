@@ -3,8 +3,10 @@ package relationship
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,15 +37,33 @@ type Relationship struct {
 
 // CreateRequest is the payload for creating a relationship.
 type CreateRequest struct {
-	SourceCIID string         `json:"source_ci_id"`
-	TargetCIID string         `json:"target_ci_id"`
-	RelType    string         `json:"rel_type"`
-	Attributes map[string]any `json:"attributes,omitempty"`
-	Source     string         `json:"source,omitempty"`
-	Confidence        *float64 `json:"confidence,omitempty"`
-	VerificationState string   `json:"verification_state,omitempty"`
-	SourceSystem      string   `json:"source_system,omitempty"`
-	Notes             string   `json:"notes,omitempty"`
+	SourceCIID        string         `json:"source_ci_id"`
+	TargetCIID        string         `json:"target_ci_id"`
+	RelType           string         `json:"rel_type"`
+	Attributes        map[string]any `json:"attributes,omitempty"`
+	Source            string         `json:"source,omitempty"`
+	Confidence        *float64       `json:"confidence,omitempty"`
+	VerificationState string         `json:"verification_state,omitempty"`
+	SourceSystem      string         `json:"source_system,omitempty"`
+	Notes             string         `json:"notes,omitempty"`
+}
+
+// UpdateRequest is the payload for editing a relationship's provenance and
+// verification metadata (spec §13: manual relationships can be created,
+// edited, verified and removed). The endpoints of the edge and its type are
+// immutable — rewiring is expressed by deleting and recreating the edge so the
+// graph history stays truthful.
+type UpdateRequest struct {
+	Attributes        map[string]any `json:"attributes,omitempty"`
+	Confidence        *float64       `json:"confidence,omitempty"`
+	VerificationState *string        `json:"verification_state,omitempty"`
+	SourceSystem      *string        `json:"source_system,omitempty"`
+	Notes             *string        `json:"notes,omitempty"`
+}
+
+// ValidVerificationStates lists the verification vocabulary for relationships.
+var ValidVerificationStates = map[string]bool{
+	"unverified": true, "verified": true, "disputed": true, "stale": true,
 }
 
 // ValidRelTypes lists the built-in relationship types. The relationship_type
@@ -65,17 +85,17 @@ var ValidRelTypes = map[string]bool{
 	"monitors":          true,
 	"backs_up":          true,
 	// Extended standard catalogue (spec §11).
-	"backed_up_by":  true,
-	"managed_by":    true,
-	"manages":       true,
-	"assigned_to":   true,
-	"contains":      true,
-	"contained_by":  true,
-	"parent_of":     true,
-	"child_of":      true,
-	"located_in":    true,
-	"uses":          true,
-	"used_by":       true,
+	"backed_up_by": true,
+	"managed_by":   true,
+	"manages":      true,
+	"assigned_to":  true,
+	"contains":     true,
+	"contained_by": true,
+	"parent_of":    true,
+	"child_of":     true,
+	"located_in":   true,
+	"uses":         true,
+	"used_by":      true,
 }
 
 // ValidSources lists the origin vocabulary for relationships (spec §12).
@@ -88,6 +108,7 @@ var ValidSources = map[string]bool{
 type Repository interface {
 	List(ctx context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error)
 	Create(ctx context.Context, rel *Relationship) error
+	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Relationship, error)
 	Delete(ctx context.Context, orgID, id string) error
 }
 
@@ -148,6 +169,39 @@ func (r *MemoryRepository) Create(_ context.Context, rel *Relationship) error {
 	rel.UpdatedAt = now
 	r.items[rel.ID] = rel
 	return nil
+}
+
+func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req UpdateRequest) (*Relationship, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	rel, ok := r.items[id]
+	if !ok || rel.OrganizationID != orgID {
+		return nil, fmt.Errorf("not found")
+	}
+	if req.Attributes != nil {
+		if rel.Attributes == nil {
+			rel.Attributes = make(map[string]any)
+		}
+		for k, v := range req.Attributes {
+			rel.Attributes[k] = v
+		}
+	}
+	if req.Confidence != nil {
+		rel.Confidence = req.Confidence
+	}
+	if req.VerificationState != nil {
+		rel.VerificationState = *req.VerificationState
+	}
+	if req.SourceSystem != nil {
+		rel.SourceSystem = *req.SourceSystem
+	}
+	if req.Notes != nil {
+		rel.Notes = *req.Notes
+	}
+	rel.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	out := *rel
+	return &out, nil
 }
 
 func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
@@ -241,6 +295,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/relationships", h.List)
 	r.Get("/api/v1/cis/{id}/relationships", h.List)
 	r.Post("/api/v1/relationships", h.Create)
+	r.Patch("/api/v1/relationships/{id}", h.Update)
 	r.Delete("/api/v1/relationships/{id}", h.Delete)
 }
 
@@ -325,6 +380,15 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	} else {
 		rel.VerificationState = req.VerificationState
 	}
+	if rel.VerificationState == "" {
+		// Mirror the column default so the response reports the state that is
+		// actually persisted rather than an empty string.
+		rel.VerificationState = "unverified"
+	}
+	if !ValidVerificationStates[rel.VerificationState] {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid verification_state")
+		return
+	}
 
 	if err := h.repo.Create(r.Context(), rel); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
@@ -344,6 +408,45 @@ func (h *Handler) validRelType(r *http.Request, orgID, relType string) bool {
 		}
 	}
 	return ValidRelTypes[relType]
+}
+
+// Update handles PATCH /api/v1/relationships/{id}. It lets an authorized user
+// edit and verify an existing relationship (spec §13) without recreating it.
+func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	var req UpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid JSON body")
+		return
+	}
+	if req.Confidence != nil && (*req.Confidence < 0 || *req.Confidence > 1) {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "confidence must be between 0 and 1")
+		return
+	}
+	if req.VerificationState != nil && !ValidVerificationStates[*req.VerificationState] {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid verification_state")
+		return
+	}
+
+	rel, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "relationship not found")
+			return
+		}
+		if api.WriteDBError(w, err) {
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "could not update relationship")
+		return
+	}
+
+	api.WriteJSON(w, http.StatusOK, rel)
 }
 
 // Delete handles DELETE /api/v1/relationships/{id}

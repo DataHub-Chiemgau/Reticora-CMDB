@@ -1,6 +1,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ciApi,
+  relationshipApi,
   collectorApi,
   topologyApi,
   rackApi,
@@ -31,6 +32,8 @@ import type {
   CICreateRequest,
   CIListParams,
   CIUpdateRequest,
+  RelationshipCreateRequest,
+  RelationshipUpdateRequest,
   ListParams,
   AssetCreateRequest,
   AssetUpdateRequest,
@@ -78,6 +81,45 @@ export function useCIRelationships(id: string) {
     queryKey: ['ci-relationships', id],
     queryFn: () => ciApi.relationships(id),
     enabled: !!id,
+  });
+}
+
+/**
+ * Relationship mutations invalidate every view that renders the graph: the
+ * CI's own relationship list, the neighbor subgraph and the topology view,
+ * so a verify/create/delete is reflected everywhere without a manual reload.
+ */
+function useRelationshipInvalidation(ciId: string) {
+  const queryClient = useQueryClient();
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: ['ci-relationships', ciId] });
+    void queryClient.invalidateQueries({ queryKey: ['topology-neighbors', ciId] });
+    void queryClient.invalidateQueries({ queryKey: ['topology'] });
+  };
+}
+
+export function useCreateRelationship(ciId: string) {
+  const invalidate = useRelationshipInvalidation(ciId);
+  return useMutation({
+    mutationFn: (data: RelationshipCreateRequest) => relationshipApi.create(data),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateRelationship(ciId: string) {
+  const invalidate = useRelationshipInvalidation(ciId);
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: RelationshipUpdateRequest }) =>
+      relationshipApi.update(id, data),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteRelationship(ciId: string) {
+  const invalidate = useRelationshipInvalidation(ciId);
+  return useMutation({
+    mutationFn: (id: string) => relationshipApi.delete(id),
+    onSuccess: invalidate,
   });
 }
 

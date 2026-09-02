@@ -82,6 +82,17 @@ func (f FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (stri
 				SELECT n.id FROM location_node n JOIN subtree s ON n.parent_id = s.id
 			) SELECT id FROM subtree)`, table, p), f.LocationSubtree)
 	}
+	if f.LocationSearch != "" {
+		// Name-based subtree: seed the recursion with every location whose
+		// name matches, then walk down. Only the value is parameterized.
+		p := next()
+		add(fmt.Sprintf(`%s.location_id IN (
+			WITH RECURSIVE subtree AS (
+				SELECT id FROM location_node WHERE name ILIKE %s
+				UNION ALL
+				SELECT n.id FROM location_node n JOIN subtree s ON n.parent_id = s.id
+			) SELECT id FROM subtree)`, table, p), "%"+f.LocationSearch+"%")
+	}
 	if f.WarrantyWithinDays > 0 && table == "asset" {
 		p := next()
 		add(fmt.Sprintf("%s.warranty_end IS NOT NULL AND %s.warranty_end <= CURRENT_DATE + (%s || ' days')::interval", table, table, p), fmt.Sprintf("%d", f.WarrantyWithinDays))
