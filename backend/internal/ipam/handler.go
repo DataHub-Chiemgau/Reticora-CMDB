@@ -57,7 +57,7 @@ func writeRepoError(w http.ResponseWriter, err error, notFoundMsg string) {
 	case errors.Is(err, ErrValidation):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 	default:
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 	}
 }
 
@@ -76,7 +76,7 @@ func (h *Handler) ListSubnets(w http.ResponseWriter, r *http.Request) {
 	}
 	items, total, err := h.repo.ListSubnets(r.Context(), orgID, f, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Subnet]{
@@ -208,7 +208,7 @@ func (h *Handler) ListSubnetAddresses(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, subnetID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[IPAddress]{
@@ -228,7 +228,7 @@ func (h *Handler) ListIPAddresses(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, r.URL.Query().Get("subnet_id"), page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[IPAddress]{
@@ -380,7 +380,7 @@ func (h *Handler) ListInterfaces(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListInterfacesForCI(r.Context(), orgID, chi.URLParam(r, "id"), page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[NetworkInterface]{
@@ -434,7 +434,7 @@ func (h *Handler) CreateInterface(w http.ResponseWriter, r *http.Request) {
 		Description:    req.Description,
 	}
 	if err := h.repo.CreateInterface(r.Context(), ni); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, ni)

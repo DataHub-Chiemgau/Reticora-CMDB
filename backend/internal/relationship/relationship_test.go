@@ -171,7 +171,7 @@ func TestHandler_UpdateVerifiesAndEdits(t *testing.T) {
 	NewHandler(repo).RegisterRoutes(mux)
 
 	rel := createRel(t, mux, `{"source_ci_id":"ci-1","target_ci_id":"ci-2","rel_type":"depends_on","source":"discovery"}`)
-	if rel.VerificationState != "" && rel.VerificationState != "unverified" {
+	if rel.VerificationState != "unverified" {
 		t.Fatalf("discovered relationship should start unverified, got %q", rel.VerificationState)
 	}
 

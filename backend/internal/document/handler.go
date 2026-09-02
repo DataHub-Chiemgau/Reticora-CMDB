@@ -100,7 +100,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -181,7 +181,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Create(r.Context(), d); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -286,7 +286,7 @@ func (h *Handler) UploadContent(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := h.repo.SetStorage(r.Context(), t.OrganizationID, id, storageKey, mimeType, int64(len(payload)))
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, updated)
@@ -358,7 +358,7 @@ func (h *Handler) Link(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.LinkDocument(r.Context(), link); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -376,7 +376,7 @@ func (h *Handler) GetLinks(w http.ResponseWriter, r *http.Request) {
 	docID := chi.URLParam(r, "id")
 	links, err := h.repo.GetLinks(r.Context(), t.OrganizationID, docID)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 

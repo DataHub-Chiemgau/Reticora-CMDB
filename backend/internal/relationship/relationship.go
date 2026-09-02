@@ -380,6 +380,15 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	} else {
 		rel.VerificationState = req.VerificationState
 	}
+	if rel.VerificationState == "" {
+		// Mirror the column default so the response reports the state that is
+		// actually persisted rather than an empty string.
+		rel.VerificationState = "unverified"
+	}
+	if !ValidVerificationStates[rel.VerificationState] {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid verification_state")
+		return
+	}
 
 	if err := h.repo.Create(r.Context(), rel); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())

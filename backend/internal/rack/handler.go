@@ -57,7 +57,7 @@ func writeRepoError(w http.ResponseWriter, err error, notFoundMsg string) {
 	case errors.Is(err, ErrValidation):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 	default:
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 	}
 }
 
@@ -72,7 +72,7 @@ func (h *Handler) ListRacks(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListRacks(r.Context(), orgID, r.URL.Query().Get("room_id"), page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Rack]{
@@ -297,7 +297,7 @@ func (h *Handler) ListCables(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListCables(r.Context(), orgID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Cable]{
@@ -345,7 +345,7 @@ func (h *Handler) CreateCable(w http.ResponseWriter, r *http.Request) {
 		InstalledAt:       req.InstalledAt,
 	}
 	if err := h.repo.CreateCable(r.Context(), c); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, c)

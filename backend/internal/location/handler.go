@@ -64,7 +64,7 @@ func (h *Handler) Record(w http.ResponseWriter, r *http.Request) {
 		e.RecordedAt = parsed
 	}
 	if err := h.repo.Record(r.Context(), e); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, e)
@@ -80,7 +80,7 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.History(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Entry]{

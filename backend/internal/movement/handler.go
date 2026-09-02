@@ -75,7 +75,7 @@ func (h *Handler) ListMovements(w http.ResponseWriter, r *http.Request) {
 	}
 	items, total, err := h.repo.ListMovements(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Movement]{
@@ -95,7 +95,7 @@ func (h *Handler) ListAssetMovements(w http.ResponseWriter, r *http.Request) {
 	items, total, err := h.repo.ListMovements(r.Context(), t.OrganizationID,
 		MovementFilter{AssetID: chi.URLParam(r, "id")}, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Movement]{
@@ -165,7 +165,7 @@ func (h *Handler) ListItems(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListItems(r.Context(), t.OrganizationID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[QuantityItem]{
@@ -314,7 +314,7 @@ func (h *Handler) ConvertToAsset(w http.ResponseWriter, r *http.Request) {
 		SerialNumber:   req.SerialNumber,
 	})
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	// Decrement the quantity stock via an out-movement of one unit.

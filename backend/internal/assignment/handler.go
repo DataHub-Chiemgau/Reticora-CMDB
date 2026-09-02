@@ -96,7 +96,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -174,7 +174,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Create(r.Context(), a); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	h.recordMovement(r, t.OrganizationID, a.AssetID, "assignment", "assigned to "+a.AssignedTo)
@@ -215,7 +215,7 @@ func (h *Handler) Return(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Update(r.Context(), t.OrganizationID, id, &updated); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	h.recordMovement(r, t.OrganizationID, existing.AssetID, "return", "assignment returned")
@@ -253,7 +253,7 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 	transferred := *existing
 	transferred.Status = "transferred"
 	if err := h.repo.Update(r.Context(), t.OrganizationID, id, &transferred); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -270,7 +270,7 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Create(r.Context(), newAssignment); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	h.recordMovement(r, t.OrganizationID, newAssignment.AssetID, "assignment", "transferred to "+req.NewAssignee)

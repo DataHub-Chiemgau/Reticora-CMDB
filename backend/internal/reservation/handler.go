@@ -67,7 +67,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, r.URL.Query().Get("state"), page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Reservation]{
@@ -198,7 +198,7 @@ func (h *Handler) Availability(w http.ResponseWriter, r *http.Request) {
 		ItemID:   r.URL.Query().Get("item_id"),
 	})
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
