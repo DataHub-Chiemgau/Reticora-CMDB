@@ -130,7 +130,9 @@ SELECT organization_id,'ci',id,name,concat_ws(' ',hostname,manufacturer,model,se
 UNION ALL SELECT organization_id,'asset',id,name,concat_ws(' ',asset_tag,category,status,supplier,serial_number,location,notes),'/assets','{}'::jsonb FROM asset WHERE organization_id=$1
 UNION ALL SELECT organization_id,'document',id,title,concat_ws(' ',description,file_name,category,array_to_string(tags,' ')),'/documents','{}'::jsonb FROM document WHERE organization_id=$1
 UNION ALL SELECT organization_id,'ticket',id,title,concat_ws(' ',description,status,priority,category,array_to_string(tags,' ')),'/tickets','{}'::jsonb FROM ticket WHERE organization_id=$1
-UNION ALL SELECT organization_id,'contact',id,display_name,concat_ws(' ',email,phone,role,department,notes),'/contacts','{}'::jsonb FROM contact WHERE organization_id=$1`, orgID)
+UNION ALL SELECT organization_id,'contact',id,display_name,concat_ws(' ',email,phone,role,department,notes),'/contacts','{}'::jsonb FROM contact WHERE organization_id=$1
+UNION ALL SELECT organization_id,'location',id,name,concat_ws(' ',node_type,barcode),'/locations','{}'::jsonb FROM location_node WHERE organization_id=$1
+UNION ALL SELECT organization_id,'reservation',id,COALESCE(project_ref, reason, 'reservation'),concat_ws(' ',state, reason, project_ref),'/reservations','{}'::jsonb FROM reservation WHERE organization_id=$1`, orgID)
 		count = cmd.RowsAffected()
 		return err
 	})

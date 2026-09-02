@@ -84,6 +84,7 @@ func MemoryRepositories() Repositories {
 		Override:          override.NewMemoryRepository(),
 		History:           history.NewMemoryRepository(),
 		SavedView:         savedview.NewMemoryRepository(),
+		FilterQuery:       nil, // memory mode: query engine requires SQL; endpoint reports 501
 		LifecycleStates:   lifecycleStates,
 		LifecycleResolver: lifecycleStates,
 		Asset:             assets,
@@ -175,6 +176,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Override:          override.NewPGRepository(pool),
 		History:           history.NewPGRepository(pool),
 		SavedView:         savedview.NewPGRepository(pool),
+		FilterQuery:       savedview.NewPGQueryEngine(pool),
 		LifecycleStates:   lifecycle.NewPGStateStore(pool),
 		LifecycleResolver: lifecycle.NewResolver(pool),
 		Availability:      reservation.NewPGAvailability(pool),

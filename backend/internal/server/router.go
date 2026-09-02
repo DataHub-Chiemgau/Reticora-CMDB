@@ -122,6 +122,7 @@ type Repositories struct {
 	Override          override.Repository
 	History           history.Repository
 	SavedView         savedview.Repository
+	FilterQuery       savedview.QueryEngine
 	LifecycleStates   lifecycle.StateStore
 	LifecycleResolver lifecycle.EntityResolver
 	Availability      reservation.AvailabilityProvider
@@ -258,7 +259,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		composition.NewHandler(repos.Composition, opts.Dispatcher),
 		override.NewHandler(repos.Override, opts.Dispatcher),
 		history.NewHandler(repos.History),
-		savedview.NewHandler(repos.SavedView),
+		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery),
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
 		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),

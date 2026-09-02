@@ -29,6 +29,8 @@ type UpsertRequest struct {
 // FilterSpec is the structured filter DSL (spec §17). Every field is
 // optional; set fields are AND-ed.
 type FilterSpec struct {
+	// EntityKind selects the queried table: "ci" (default) or "asset".
+	EntityKind         string `json:"entity_kind,omitempty"`
 	CIType             string `json:"ci_type,omitempty"`
 	AssetCategory      string `json:"asset_category,omitempty"`
 	Lifecycle          string `json:"lifecycle,omitempty"`

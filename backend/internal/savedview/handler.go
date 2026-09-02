@@ -11,12 +11,20 @@ import (
 
 // Handler provides HTTP handlers for saved views.
 type Handler struct {
-	repo Repository
+	repo  Repository
+	query QueryEngine
 }
 
 // NewHandler creates a new saved view handler.
 func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
+}
+
+// WithQueryEngine attaches the filter-DSL query engine (spec §17). Without
+// one, the query endpoint returns 501.
+func (h *Handler) WithQueryEngine(engine QueryEngine) *Handler {
+	h.query = engine
+	return h
 }
 
 // RegisterRoutes registers saved view routes on the given mux.
@@ -27,6 +35,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/saved-views/{id}", h.Get)
 	r.Patch("/api/v1/saved-views/{id}", h.Update)
 	r.Delete("/api/v1/saved-views/{id}", h.Delete)
+	r.Post("/api/v1/search/query", h.Query)
 }
 
 func ownerID(r *http.Request) string {
@@ -138,4 +147,34 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Query handles POST /api/v1/search/query — executes a structured filter spec
+// (the saved-view DSL, spec §17) against CIs or assets. The body is the
+// filter spec itself; entity_kind selects the entity ("ci" default, "asset").
+func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	if h.query == nil {
+		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", "filter query engine is not configured")
+		return
+	}
+	var spec FilterSpec
+	if err := api.ReadJSON(r, &spec); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	page := api.ParsePagination(r)
+	items, total, err := h.query.Query(r.Context(), t.OrganizationID, spec, page)
+	if err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[QueryResult]{
+		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset,
+		HasMore: page.Offset+page.Limit < total,
+	})
 }

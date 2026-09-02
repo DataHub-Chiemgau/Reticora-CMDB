@@ -7427,6 +7427,18 @@ paths:
         '409':
           description: No stock available to convert
 
+  /api/v1/search/query:
+    post:
+      operationId: queryByFilterSpec
+      summary: Execute a structured filter spec (saved-view DSL) against CIs or assets
+      responses:
+        '200':
+          description: Filtered query results
+        '400':
+          description: Invalid filter spec
+        '401':
+          description: Unauthorized
+
 components:
   securitySchemes:
     BearerAuth:
