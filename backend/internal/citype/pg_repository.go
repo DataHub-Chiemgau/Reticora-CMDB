@@ -632,8 +632,8 @@ func (r *PGRepository) ListInstanceFields(ctx context.Context, orgID, ciID strin
 	var out []InstanceField
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM ci_instance_field_definition WHERE ci_id = $1 ORDER BY sort_order ASC, name ASC",
-			instanceFieldSelectColumns), ciID)
+			"SELECT %s FROM ci_instance_field_definition WHERE ci_id = $1 AND organization_id = $2 ORDER BY sort_order ASC, name ASC",
+			instanceFieldSelectColumns), ciID, orgID)
 		if err != nil {
 			return fmt.Errorf("list instance fields: %w", err)
 		}

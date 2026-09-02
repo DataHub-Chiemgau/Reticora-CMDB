@@ -163,6 +163,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
 			return
 		}
+		if writeValidationError(w, err) {
+			return
+		}
+		if api.WriteDBError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -190,6 +196,12 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.svc.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
+		if writeValidationError(w, err) {
+			return
+		}
+		if api.WriteDBError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
 		return
 	}
@@ -244,4 +256,28 @@ func (h *Handler) ListChanges(w http.ResponseWriter, r *http.Request) {
 		Offset:  page.Offset,
 		HasMore: page.Offset+page.Limit < total,
 	})
+}
+
+// writeValidationError renders a field-metadata validation failure as an
+// RFC 7807 problem with status 422 and the per-field violations, so clients can
+// map the response back onto their form fields. It reports whether err was a
+// validation error.
+func writeValidationError(w http.ResponseWriter, err error) bool {
+	ve, ok := AsValidationError(err)
+	if !ok {
+		return false
+	}
+	api.WriteJSON(w, http.StatusUnprocessableEntity, struct {
+		api.ProblemDetail
+		Violations []Violation `json:"violations"`
+	}{
+		ProblemDetail: api.ProblemDetail{
+			Type:   "https://reticora.io/problems/422",
+			Title:  "Unprocessable Entity",
+			Status: http.StatusUnprocessableEntity,
+			Detail: ve.Error(),
+		},
+		Violations: ve.Violations,
+	})
+	return true
 }

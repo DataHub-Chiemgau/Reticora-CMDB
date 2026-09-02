@@ -35,6 +35,10 @@ type Repository interface {
 	ListInstanceFields(ctx context.Context, orgID, ciID string) ([]InstanceField, error)
 	UpsertInstanceField(ctx context.Context, orgID, ciID string, req UpsertInstanceFieldRequest) (*InstanceField, error)
 	DeleteInstanceField(ctx context.Context, orgID, ciID, name string) error
+
+	// ResolveFields merges the global, type and instance attribute scopes into
+	// the effective field definitions of a CI, used for server-side validation.
+	ResolveFields(ctx context.Context, orgID, ciTypeID, ciID string) ([]fieldmeta.FieldDefinition, error)
 }
 
 // MemoryRepository is an in-memory implementation (tests, --no-db).
