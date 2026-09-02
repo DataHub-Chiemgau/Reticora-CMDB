@@ -11,7 +11,7 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
-import { useCIFilterStore } from '../stores/ciFilter';
+import { useCIFilters } from '../stores/ciFilter';
 import { useToastStore } from '../stores/toast';
 import { getStatusBadgeVariant, getStatusTranslationKey } from './ciStatus';
 
@@ -23,7 +23,7 @@ const bulkStatusValues = ['active', 'inactive', 'maintenance', 'decommissioned']
 
 export function CIListPage({ onCreateCI }: CIListPageProps) {
   const { t } = useTranslation();
-  const { search, status, ciTypeId, setSearch, setStatus } = useCIFilterStore();
+  const { search, status, ciTypeId, setSearch, setStatus } = useCIFilters();
   const navigate = useNavigate();
   const [offset, setOffset] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
