@@ -52,14 +52,14 @@ type CreateRequest struct {
 
 // Availability is the stock projection for an item (spec §10).
 type Availability struct {
-	ItemKind       string  `json:"item_kind"`
-	ItemID         string  `json:"item_id"`
-	Total          float64 `json:"total"`
-	Available      float64 `json:"available"`
-	Reserved       float64 `json:"reserved"`
-	Assigned       float64 `json:"assigned"`
-	Repair         float64 `json:"repair"`
-	Unavailable    float64 `json:"unavailable"`
+	ItemKind    string  `json:"item_kind"`
+	ItemID      string  `json:"item_id"`
+	Total       float64 `json:"total"`
+	Available   float64 `json:"available"`
+	Reserved    float64 `json:"reserved"`
+	Assigned    float64 `json:"assigned"`
+	Repair      float64 `json:"repair"`
+	Unavailable float64 `json:"unavailable"`
 }
 
 // AvailabilityFilter scopes the availability query.

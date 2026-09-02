@@ -9,36 +9,36 @@ import "time"
 
 // Composition links a parent asset to one child CI or child asset.
 type Composition struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	ParentAssetID  string    `json:"parent_asset_id"`
-	ChildCIID      string    `json:"child_ci_id,omitempty"`
-	ChildAssetID   string    `json:"child_asset_id,omitempty"`
-	Role           string    `json:"role,omitempty"`
-	Position       string    `json:"position,omitempty"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	ParentAssetID  string `json:"parent_asset_id"`
+	ChildCIID      string `json:"child_ci_id,omitempty"`
+	ChildAssetID   string `json:"child_asset_id,omitempty"`
+	Role           string `json:"role,omitempty"`
+	Position       string `json:"position,omitempty"`
 	// Independence flags (spec §14): children default to configuration-only,
 	// i.e. not independently tracked by inventory.
-	ConfigurationOnly             bool `json:"configuration_only"`
-	IndependentlySerialized       bool `json:"independently_serialized"`
-	IndependentlyAssignable       bool `json:"independently_assignable"`
-	IndependentlyLocatable        bool `json:"independently_locatable"`
-	IndependentlyLifecycleManaged bool `json:"independently_lifecycle_managed"`
+	ConfigurationOnly             bool      `json:"configuration_only"`
+	IndependentlySerialized       bool      `json:"independently_serialized"`
+	IndependentlyAssignable       bool      `json:"independently_assignable"`
+	IndependentlyLocatable        bool      `json:"independently_locatable"`
+	IndependentlyLifecycleManaged bool      `json:"independently_lifecycle_managed"`
 	CreatedAt                     time.Time `json:"created_at"`
 	UpdatedAt                     time.Time `json:"updated_at"`
 }
 
 // CreateRequest is the payload for creating a composition link.
 type CreateRequest struct {
-	ParentAssetID string `json:"parent_asset_id"`
-	ChildCIID     string `json:"child_ci_id,omitempty"`
-	ChildAssetID  string `json:"child_asset_id,omitempty"`
-	Role          string `json:"role,omitempty"`
-	Position      string `json:"position,omitempty"`
-	ConfigurationOnly             *bool `json:"configuration_only,omitempty"`
-	IndependentlySerialized       bool  `json:"independently_serialized,omitempty"`
-	IndependentlyAssignable       bool  `json:"independently_assignable,omitempty"`
-	IndependentlyLocatable        bool  `json:"independently_locatable,omitempty"`
-	IndependentlyLifecycleManaged bool  `json:"independently_lifecycle_managed,omitempty"`
+	ParentAssetID                 string `json:"parent_asset_id"`
+	ChildCIID                     string `json:"child_ci_id,omitempty"`
+	ChildAssetID                  string `json:"child_asset_id,omitempty"`
+	Role                          string `json:"role,omitempty"`
+	Position                      string `json:"position,omitempty"`
+	ConfigurationOnly             *bool  `json:"configuration_only,omitempty"`
+	IndependentlySerialized       bool   `json:"independently_serialized,omitempty"`
+	IndependentlyAssignable       bool   `json:"independently_assignable,omitempty"`
+	IndependentlyLocatable        bool   `json:"independently_locatable,omitempty"`
+	IndependentlyLifecycleManaged bool   `json:"independently_lifecycle_managed,omitempty"`
 }
 
 // UpdateRequest is the payload for updating a composition link.

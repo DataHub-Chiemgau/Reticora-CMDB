@@ -1,22 +1,39 @@
 package order
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
+// MovementRecorder records order receipts into the inventory movement ledger
+// (spec §9: receipt is an auditable movement). Satisfied by the movement
+// repository.
+type MovementRecorder interface {
+	Record(ctx context.Context, m *movement.Movement) error
+}
+
 // Handler provides HTTP handlers for the internal ordering module.
 type Handler struct {
-	repo Repository
+	repo      Repository
+	movements MovementRecorder
 }
 
 // NewHandler creates a new order handler.
 func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
+}
+
+// WithMovements attaches the movement ledger so order items received into
+// inventory emit receipt movements. Movement failures never fail the order.
+func (h *Handler) WithMovements(recorder MovementRecorder) *Handler {
+	h.movements = recorder
+	return h
 }
 
 // RegisterRoutes registers order routes on the given mux.
@@ -187,6 +204,28 @@ func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "order not found")
 		return
+	}
+	// Receiving an ordered item into inventory is an auditable receipt
+	// movement (spec §9). Assets move as serialized units; consumable-linked
+	// positions move as quantities.
+	if h.movements != nil {
+		m := &movement.Movement{
+			OrganizationID: t.OrganizationID,
+			MovementType:   "receipt",
+			OrderID:        item.OrderID,
+			Notes:          item.Description,
+		}
+		if item.AssetID != "" {
+			m.ItemKind = "asset"
+			m.AssetID = item.AssetID
+			_ = h.movements.Record(r.Context(), m)
+		} else if item.ConsumableID != "" {
+			m.ItemKind = "quantity_item"
+			m.QuantityItemID = item.ConsumableID
+			qty := item.Quantity
+			m.Quantity = &qty
+			_ = h.movements.Record(r.Context(), m)
+		}
 	}
 	api.WriteJSON(w, http.StatusCreated, o)
 }

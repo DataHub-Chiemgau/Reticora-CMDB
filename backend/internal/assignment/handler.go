@@ -1,23 +1,61 @@
 package assignment
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
 // Handler provides HTTP handlers for assignment endpoints.
 type Handler struct {
-	repo Repository
+	repo      Repository
+	movements MovementRecorder
+}
+
+// MovementRecorder records inventory movements emitted by assignment
+// operations (spec §9: assignments and returns are auditable movements). It
+// is satisfied by the movement ledger repository.
+type MovementRecorder interface {
+	Record(ctx context.Context, m *movement.Movement) error
 }
 
 // NewHandler creates a new assignment handler.
 func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
+}
+
+// WithMovements attaches the movement ledger so assignment operations emit
+// auditable movement transactions. Movement failures never fail the
+// assignment itself — the ledger is best-effort on top of the audited
+// assignment record.
+func (h *Handler) WithMovements(recorder MovementRecorder) *Handler {
+	h.movements = recorder
+	return h
+}
+
+// recordMovement emits a movement for an asset-scoped assignment action.
+func (h *Handler) recordMovement(r *http.Request, orgID, assetID, movementType, notes string) {
+	if h.movements == nil || assetID == "" {
+		return
+	}
+	m := &movement.Movement{
+		OrganizationID: orgID,
+		ItemKind:       "asset",
+		AssetID:        assetID,
+		MovementType:   movementType,
+		Notes:          notes,
+	}
+	if p, ok := identity.PrincipalFromContext(r.Context()); ok {
+		m.ActorID = p.Subject
+	}
+	_ = h.movements.Record(r.Context(), m)
 }
 
 // RegisterRoutes registers assignment routes on the given mux.
@@ -139,6 +177,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
+	h.recordMovement(r, t.OrganizationID, a.AssetID, "assignment", "assigned to "+a.AssignedTo)
 
 	api.WriteJSON(w, http.StatusCreated, a)
 }
@@ -179,6 +218,7 @@ func (h *Handler) Return(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
+	h.recordMovement(r, t.OrganizationID, existing.AssetID, "return", "assignment returned")
 
 	api.WriteJSON(w, http.StatusOK, &updated)
 }
@@ -233,6 +273,7 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
+	h.recordMovement(r, t.OrganizationID, newAssignment.AssetID, "assignment", "transferred to "+req.NewAssignee)
 
 	api.WriteJSON(w, http.StatusCreated, newAssignment)
 }

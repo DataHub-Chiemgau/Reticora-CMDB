@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -43,4 +45,30 @@ func (l entitlementLister) List(ctx context.Context, orgID string) ([]compliance
 		out[i] = compliance.EntitlementStatus{FeatureKey: ent.FeatureKey, Enabled: ent.Enabled}
 	}
 	return out, nil
+}
+
+// assetCreator adapts asset.Repository to the movement.AssetCreator port used
+// by the quantity→serialized conversion endpoint (spec §6).
+type assetCreator struct {
+	repo asset.Repository
+}
+
+func (c assetCreator) Create(ctx context.Context, ref *movement.AssetRef) (string, error) {
+	a := &asset.Asset{
+		OrganizationID: ref.OrganizationID,
+		ClientID:       ref.ClientID,
+		AssetTag:       ref.AssetTag,
+		Name:           ref.Name,
+		Category:       ref.Category,
+		Status:         "in_stock",
+		SerialNumber:   ref.SerialNumber,
+		CustomFields:   map[string]any{},
+	}
+	if ref.LocationID != "" {
+		a.CustomFields["location_id"] = ref.LocationID
+	}
+	if err := c.repo.Create(ctx, a); err != nil {
+		return "", err
+	}
+	return a.ID, nil
 }

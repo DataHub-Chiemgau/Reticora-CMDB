@@ -41,42 +41,42 @@ type Type struct {
 
 // Field is a field definition on a CI type (scope type) or globally.
 type Field struct {
-	ID              string                    `json:"id,omitempty"`
-	CITypeID        string                    `json:"ci_type_id,omitempty"`
-	Scope           string                    `json:"scope"` // global | type
-	Name            string                    `json:"name"`
-	Label           string                    `json:"label,omitempty"`
-	Description     string                    `json:"description,omitempty"`
-	DataType        string                    `json:"data_type"`
-	Required        bool                      `json:"required"`
-	DefaultValue    string                    `json:"default_value,omitempty"`
-	EnumValues      []string                  `json:"enum_values,omitempty"`
-	UIGroup         string                    `json:"ui_group,omitempty"`
-	SortOrder       int                       `json:"sort_order"`
+	ID              string                      `json:"id,omitempty"`
+	CITypeID        string                      `json:"ci_type_id,omitempty"`
+	Scope           string                      `json:"scope"` // global | type
+	Name            string                      `json:"name"`
+	Label           string                      `json:"label,omitempty"`
+	Description     string                      `json:"description,omitempty"`
+	DataType        string                      `json:"data_type"`
+	Required        bool                        `json:"required"`
+	DefaultValue    string                      `json:"default_value,omitempty"`
+	EnumValues      []string                    `json:"enum_values,omitempty"`
+	UIGroup         string                      `json:"ui_group,omitempty"`
+	SortOrder       int                         `json:"sort_order"`
 	Validation      *fieldmeta.ValidationRules  `json:"validation,omitempty"`
 	Conditional     *fieldmeta.ConditionalRules `json:"conditional,omitempty"`
-	ReferenceTarget string                    `json:"reference_target,omitempty"`
+	ReferenceTarget string                      `json:"reference_target,omitempty"`
 }
 
 // InstanceField is a field definition scoped to a single CI instance (spec §2).
 type InstanceField struct {
-	ID              string                    `json:"id,omitempty"`
-	OrganizationID  string                    `json:"organization_id,omitempty"`
-	CIID            string                    `json:"ci_id"`
-	Name            string                    `json:"name"`
-	Label           string                    `json:"label,omitempty"`
-	Description     string                    `json:"description,omitempty"`
-	DataType        string                    `json:"data_type"`
-	Required        bool                      `json:"required"`
-	DefaultValue    string                    `json:"default_value,omitempty"`
-	EnumValues      []string                  `json:"enum_values,omitempty"`
-	UIGroup         string                    `json:"ui_group,omitempty"`
-	SortOrder       int                       `json:"sort_order"`
+	ID              string                      `json:"id,omitempty"`
+	OrganizationID  string                      `json:"organization_id,omitempty"`
+	CIID            string                      `json:"ci_id"`
+	Name            string                      `json:"name"`
+	Label           string                      `json:"label,omitempty"`
+	Description     string                      `json:"description,omitempty"`
+	DataType        string                      `json:"data_type"`
+	Required        bool                        `json:"required"`
+	DefaultValue    string                      `json:"default_value,omitempty"`
+	EnumValues      []string                    `json:"enum_values,omitempty"`
+	UIGroup         string                      `json:"ui_group,omitempty"`
+	SortOrder       int                         `json:"sort_order"`
 	Validation      *fieldmeta.ValidationRules  `json:"validation,omitempty"`
 	Conditional     *fieldmeta.ConditionalRules `json:"conditional,omitempty"`
-	ReferenceTarget string                    `json:"reference_target,omitempty"`
-	CreatedAt       time.Time                 `json:"created_at"`
-	UpdatedAt       time.Time                 `json:"updated_at"`
+	ReferenceTarget string                      `json:"reference_target,omitempty"`
+	CreatedAt       time.Time                   `json:"created_at"`
+	UpdatedAt       time.Time                   `json:"updated_at"`
 }
 
 // Definition converts a type/global field into the shared fieldmeta shape.
@@ -161,36 +161,36 @@ type CloneRequest struct {
 // UpsertFieldRequest is the payload for creating or updating a field
 // definition on a type (or globally when Scope is "global").
 type UpsertFieldRequest struct {
-	Scope           string                    `json:"scope,omitempty"`
-	Name            string                    `json:"name"`
-	Label           string                    `json:"label,omitempty"`
-	Description     string                    `json:"description,omitempty"`
-	DataType        string                    `json:"data_type"`
-	Required        bool                      `json:"required,omitempty"`
-	DefaultValue    string                    `json:"default_value,omitempty"`
-	EnumValues      []string                  `json:"enum_values,omitempty"`
-	UIGroup         string                    `json:"ui_group,omitempty"`
-	SortOrder       int                       `json:"sort_order,omitempty"`
+	Scope           string                      `json:"scope,omitempty"`
+	Name            string                      `json:"name"`
+	Label           string                      `json:"label,omitempty"`
+	Description     string                      `json:"description,omitempty"`
+	DataType        string                      `json:"data_type"`
+	Required        bool                        `json:"required,omitempty"`
+	DefaultValue    string                      `json:"default_value,omitempty"`
+	EnumValues      []string                    `json:"enum_values,omitempty"`
+	UIGroup         string                      `json:"ui_group,omitempty"`
+	SortOrder       int                         `json:"sort_order,omitempty"`
 	Validation      *fieldmeta.ValidationRules  `json:"validation,omitempty"`
 	Conditional     *fieldmeta.ConditionalRules `json:"conditional,omitempty"`
-	ReferenceTarget string                    `json:"reference_target,omitempty"`
+	ReferenceTarget string                      `json:"reference_target,omitempty"`
 }
 
 // UpsertInstanceFieldRequest is the payload for creating or updating a field
 // definition on a single CI instance.
 type UpsertInstanceFieldRequest struct {
-	Name            string                    `json:"name"`
-	Label           string                    `json:"label,omitempty"`
-	Description     string                    `json:"description,omitempty"`
-	DataType        string                    `json:"data_type"`
-	Required        bool                      `json:"required,omitempty"`
-	DefaultValue    string                    `json:"default_value,omitempty"`
-	EnumValues      []string                  `json:"enum_values,omitempty"`
-	UIGroup         string                    `json:"ui_group,omitempty"`
-	SortOrder       int                       `json:"sort_order,omitempty"`
+	Name            string                      `json:"name"`
+	Label           string                      `json:"label,omitempty"`
+	Description     string                      `json:"description,omitempty"`
+	DataType        string                      `json:"data_type"`
+	Required        bool                        `json:"required,omitempty"`
+	DefaultValue    string                      `json:"default_value,omitempty"`
+	EnumValues      []string                    `json:"enum_values,omitempty"`
+	UIGroup         string                      `json:"ui_group,omitempty"`
+	SortOrder       int                         `json:"sort_order,omitempty"`
 	Validation      *fieldmeta.ValidationRules  `json:"validation,omitempty"`
 	Conditional     *fieldmeta.ConditionalRules `json:"conditional,omitempty"`
-	ReferenceTarget string                    `json:"reference_target,omitempty"`
+	ReferenceTarget string                      `json:"reference_target,omitempty"`
 }
 
 // FilterParams holds query filter parameters for listing CI types.

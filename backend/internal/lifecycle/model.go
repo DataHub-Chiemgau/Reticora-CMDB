@@ -9,17 +9,17 @@ import "time"
 // Definition is a named lifecycle model assignable to CI types / asset
 // categories.
 type Definition struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id,omitempty"`
-	Key            string    `json:"key"`
-	Name           string    `json:"name"`
-	AppliesTo      string    `json:"applies_to"` // asset | ci | both
-	IsSystem       bool      `json:"is_system"`
-	Description    string    `json:"description,omitempty"`
-	States         []State   `json:"states,omitempty"`
+	ID             string       `json:"id"`
+	OrganizationID string       `json:"organization_id,omitempty"`
+	Key            string       `json:"key"`
+	Name           string       `json:"name"`
+	AppliesTo      string       `json:"applies_to"` // asset | ci | both
+	IsSystem       bool         `json:"is_system"`
+	Description    string       `json:"description,omitempty"`
+	States         []State      `json:"states,omitempty"`
 	Transitions    []Transition `json:"transitions,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	CreatedAt      time.Time    `json:"created_at"`
+	UpdatedAt      time.Time    `json:"updated_at"`
 }
 
 // State is one lifecycle state within a definition.
@@ -50,11 +50,11 @@ type Transition struct {
 
 // CreateDefinitionRequest is the payload for creating a lifecycle definition.
 type CreateDefinitionRequest struct {
-	Key         string       `json:"key"`
-	Name        string       `json:"name"`
-	AppliesTo   string       `json:"applies_to,omitempty"`
-	Description string       `json:"description,omitempty"`
-	States      []StateSpec  `json:"states"`
+	Key         string           `json:"key"`
+	Name        string           `json:"name"`
+	AppliesTo   string           `json:"applies_to,omitempty"`
+	Description string           `json:"description,omitempty"`
+	States      []StateSpec      `json:"states"`
 	Transitions []TransitionSpec `json:"transitions,omitempty"`
 }
 

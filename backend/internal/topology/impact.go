@@ -13,11 +13,11 @@ import (
 // out of the node); downstream = what depends on it (source→target into the
 // node's dependents).
 type DependencyResult struct {
-	CIID       string `json:"ci_id"`
-	Direction  string `json:"direction"`
-	Depth      int    `json:"depth"`
-	Nodes      []Node `json:"nodes"`
-	Count      int    `json:"count"`
+	CIID      string `json:"ci_id"`
+	Direction string `json:"direction"`
+	Depth     int    `json:"depth"`
+	Nodes     []Node `json:"nodes"`
+	Count     int    `json:"count"`
 }
 
 // BlastRadius summarizes the blast radius of a CI failure (spec §15):

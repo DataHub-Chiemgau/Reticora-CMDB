@@ -39,12 +39,12 @@ type Repository interface {
 
 // MemoryRepository is an in-memory implementation (tests, --no-db).
 type MemoryRepository struct {
-	mu       sync.RWMutex
-	types    map[string]*Type
-	fields   map[string][]Field            // typeID -> fields
-	globals  map[string][]Field            // orgID -> global fields
-	inst     map[string][]InstanceField    // ciID -> instance fields
-	seq      int
+	mu      sync.RWMutex
+	types   map[string]*Type
+	fields  map[string][]Field         // typeID -> fields
+	globals map[string][]Field         // orgID -> global fields
+	inst    map[string][]InstanceField // ciID -> instance fields
+	seq     int
 }
 
 // NewMemoryRepository creates an empty in-memory CI type repository.

@@ -7415,6 +7415,18 @@ paths:
           description: Unauthorized
 
 
+  /api/v1/inventory/items/{id}/convert:
+    post:
+      operationId: convertInventoryItemToAsset
+      summary: Convert one unit of a quantity item into a serialized asset
+      responses:
+        '201':
+          description: Serialized asset created from one unit
+        '401':
+          description: Unauthorized
+        '409':
+          description: No stock available to convert
+
 components:
   securitySchemes:
     BearerAuth:

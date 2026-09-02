@@ -25,23 +25,23 @@ var MovementTypes = map[string]bool{
 
 // Movement is one auditable inventory transaction.
 type Movement struct {
-	ID             string     `json:"id"`
-	OrganizationID string     `json:"organization_id"`
-	ItemKind       string     `json:"item_kind"` // asset | quantity_item
-	AssetID        string     `json:"asset_id,omitempty"`
-	QuantityItemID string     `json:"quantity_item_id,omitempty"`
-	MovementType   string     `json:"movement_type"`
-	FromLocationID string     `json:"from_location_id,omitempty"`
-	ToLocationID   string     `json:"to_location_id,omitempty"`
-	Quantity       *float64   `json:"quantity,omitempty"`
-	ActorID        string     `json:"actor_id,omitempty"`
-	Reason         string     `json:"reason,omitempty"`
-	TicketID       string     `json:"ticket_id,omitempty"`
-	OrderID        string     `json:"order_id,omitempty"`
-	WorkflowRunID  string     `json:"workflow_run_id,omitempty"`
-	DocumentID     string     `json:"document_id,omitempty"`
-	Notes          string     `json:"notes,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organization_id"`
+	ItemKind       string    `json:"item_kind"` // asset | quantity_item
+	AssetID        string    `json:"asset_id,omitempty"`
+	QuantityItemID string    `json:"quantity_item_id,omitempty"`
+	MovementType   string    `json:"movement_type"`
+	FromLocationID string    `json:"from_location_id,omitempty"`
+	ToLocationID   string    `json:"to_location_id,omitempty"`
+	Quantity       *float64  `json:"quantity,omitempty"`
+	ActorID        string    `json:"actor_id,omitempty"`
+	Reason         string    `json:"reason,omitempty"`
+	TicketID       string    `json:"ticket_id,omitempty"`
+	OrderID        string    `json:"order_id,omitempty"`
+	WorkflowRunID  string    `json:"workflow_run_id,omitempty"`
+	DocumentID     string    `json:"document_id,omitempty"`
+	Notes          string    `json:"notes,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // CreateMovementRequest is the payload for recording a movement.
@@ -104,11 +104,11 @@ type CreateItemRequest struct {
 
 // UpdateItemRequest is the payload for updating a quantity item.
 type UpdateItemRequest struct {
-	Name       *string         `json:"name,omitempty"`
-	Category   *string         `json:"category,omitempty"`
-	Unit       *string         `json:"unit,omitempty"`
-	MinLevel   *float64        `json:"min_level,omitempty"`
-	LocationID *string         `json:"location_id,omitempty"`
-	Notes      *string         `json:"notes,omitempty"`
-	Attributes map[string]any  `json:"attributes,omitempty"`
+	Name       *string        `json:"name,omitempty"`
+	Category   *string        `json:"category,omitempty"`
+	Unit       *string        `json:"unit,omitempty"`
+	MinLevel   *float64       `json:"min_level,omitempty"`
+	LocationID *string        `json:"location_id,omitempty"`
+	Notes      *string        `json:"notes,omitempty"`
+	Attributes map[string]any `json:"attributes,omitempty"`
 }

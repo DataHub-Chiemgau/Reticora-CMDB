@@ -24,9 +24,9 @@ type Change struct {
 
 // StateSnapshot is the reconstructed state of an entity at a point in time.
 type StateSnapshot struct {
-	EntityType string         `json:"entity_type"`
-	EntityID   string         `json:"entity_id"`
-	At         time.Time      `json:"at"`
+	EntityType string    `json:"entity_type"`
+	EntityID   string    `json:"entity_id"`
+	At         time.Time `json:"at"`
 	// Fields holds the last known value per field up to the snapshot time.
 	Fields map[string]any `json:"fields"`
 	// Deleted is true when a delete change precedes the snapshot time.

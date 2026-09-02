@@ -29,28 +29,28 @@ type UpsertRequest struct {
 // FilterSpec is the structured filter DSL (spec §17). Every field is
 // optional; set fields are AND-ed.
 type FilterSpec struct {
-	CIType            string   `json:"ci_type,omitempty"`
-	AssetCategory     string   `json:"asset_category,omitempty"`
-	Lifecycle         string   `json:"lifecycle,omitempty"`
-	Status            string   `json:"status,omitempty"`
-	ClientID          string   `json:"client_id,omitempty"`
-	LocationID        string   `json:"location_id,omitempty"`
-	LocationSubtree   string   `json:"location_subtree,omitempty"`
-	WarehouseOnly     bool     `json:"warehouse_only,omitempty"`
-	AvailableOnly     bool     `json:"available_only,omitempty"`
-	Reserved          *bool    `json:"reserved,omitempty"`
-	WarrantyWithinDays int     `json:"warranty_within_days,omitempty"`
-	HasOwner          *bool    `json:"has_owner,omitempty"`
+	CIType             string `json:"ci_type,omitempty"`
+	AssetCategory      string `json:"asset_category,omitempty"`
+	Lifecycle          string `json:"lifecycle,omitempty"`
+	Status             string `json:"status,omitempty"`
+	ClientID           string `json:"client_id,omitempty"`
+	LocationID         string `json:"location_id,omitempty"`
+	LocationSubtree    string `json:"location_subtree,omitempty"`
+	WarehouseOnly      bool   `json:"warehouse_only,omitempty"`
+	AvailableOnly      bool   `json:"available_only,omitempty"`
+	Reserved           *bool  `json:"reserved,omitempty"`
+	WarrantyWithinDays int    `json:"warranty_within_days,omitempty"`
+	HasOwner           *bool  `json:"has_owner,omitempty"`
 	// HasRelationship requires at least one relationship of the given type.
 	HasRelationship string `json:"has_relationship,omitempty"`
 	// LacksRelationship requires the absence of the given relationship type.
 	LacksRelationship string `json:"lacks_relationship,omitempty"`
 	// UpstreamOf / DownstreamOf scope to graph dependencies of a CI.
-	UpstreamOf   string `json:"upstream_of,omitempty"`
-	DownstreamOf string `json:"downstream_of,omitempty"`
-	DiscoverySource    string `json:"discovery_source,omitempty"`
-	ReconciliationConflict bool `json:"reconciliation_conflict,omitempty"`
-	Tags           []string `json:"tags,omitempty"`
+	UpstreamOf             string   `json:"upstream_of,omitempty"`
+	DownstreamOf           string   `json:"downstream_of,omitempty"`
+	DiscoverySource        string   `json:"discovery_source,omitempty"`
+	ReconciliationConflict bool     `json:"reconciliation_conflict,omitempty"`
+	Tags                   []string `json:"tags,omitempty"`
 	// Attributes matches dynamic JSONB attributes (both type- and
 	// instance-level values share ci.attributes).
 	Attributes map[string]any `json:"attributes,omitempty"`

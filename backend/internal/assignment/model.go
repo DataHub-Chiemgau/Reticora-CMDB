@@ -7,11 +7,11 @@ import "time"
 // Signature is a captured digital signature for handover/return. The image is
 // either inline base64 or an S3 object key; metadata records signer and time.
 type Signature struct {
-	ImageBase64  string `json:"image_base64,omitempty"`
-	ObjectKey    string `json:"object_key,omitempty"`
-	SignerName   string `json:"signer_name,omitempty"`
-	SignedAt     string `json:"signed_at,omitempty"`
-	Method       string `json:"method,omitempty"` // touchscreen | drawn | typed
+	ImageBase64 string `json:"image_base64,omitempty"`
+	ObjectKey   string `json:"object_key,omitempty"`
+	SignerName  string `json:"signer_name,omitempty"`
+	SignedAt    string `json:"signed_at,omitempty"`
+	Method      string `json:"method,omitempty"` // touchscreen | drawn | typed
 }
 
 type Assignment struct {
