@@ -695,9 +695,19 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 		if source == "" {
 			source = ci.SourceSweep
 		}
+		// Discovered custom attributes are persisted on the CI itself so they
+		// are visible, searchable and filterable like any other attribute; the
+		// per-field provenance recorded below keeps the reporting source and
+		// timestamp available for reconciliation.
 		attributes := map[string]any{
 			"fingerprint": item.Fingerprint,
 			"raw_data":    item.RawData,
+		}
+		for k, v := range item.Attributes {
+			if k == "fingerprint" || k == "raw_data" {
+				continue
+			}
+			attributes[k] = v
 		}
 
 		switch result.Action {
@@ -748,8 +758,15 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			// Protected manual overrides win over discovery (spec §13): the
 			// field keeps its overridden value, the discovered value is still
 			// recorded as provenance, and the divergence is reviewable.
-			protected := h.protectedFields(r.Context(), t.OrganizationID, result.MatchedCIID,
-				[]string{"name", "manufacturer", "model", "serial_number", "management_ip"})
+			guarded := []string{"name", "manufacturer", "model", "serial_number", "management_ip"}
+			for k := range item.Attributes {
+				guarded = append(guarded, k)
+			}
+			protected := h.protectedFields(r.Context(), t.OrganizationID, result.MatchedCIID, guarded)
+			// Never merge a discovered value over a protected custom attribute.
+			for k := range protected {
+				delete(attributes, k)
+			}
 			update := ci.UpdateRequest{
 				Attributes:      attributes,
 				DiscoverySource: &source,
@@ -869,6 +886,17 @@ func applySourceTrust(matched *ci.Item, item *IngestItem, incomingSource string,
 	item.Model = firstNonEmpty(matched.Model, item.Model)
 	item.SerialNumber = firstNonEmpty(matched.SerialNumber, item.SerialNumber)
 	item.ManagementIP = firstNonEmpty(matched.ManagementIP, item.ManagementIP)
+	// A less trusted source may still contribute attributes the CI does not
+	// have yet, but it must not overwrite values a more trusted source
+	// reported recently.
+	for k := range attributes {
+		if k == "fingerprint" || k == "raw_data" {
+			continue
+		}
+		if stored, ok := matched.Attributes[k]; ok {
+			attributes[k] = stored
+		}
+	}
 	// Keep the stored fingerprint dominant by re-merging it over the incoming
 	// one; new keys from the incoming sighting are still added.
 	merged := map[string]any{}
