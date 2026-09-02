@@ -18,6 +18,7 @@ import {
   ImpactSection,
 } from '../components/cmdb/CIDetailSections';
 import { CIRelationshipsCard } from '../components/cmdb/CIRelationshipsCard';
+import { CIParentAssetCard } from '../components/cmdb/CIParentAssetCard';
 
 export interface NeighborEntry {
   id: string;
@@ -147,6 +148,8 @@ export function CIDetailPage() {
             </pre>
           )}
         </Card>
+
+        <CIParentAssetCard ciId={ci.id} />
 
         <CIRelationshipsCard ciId={ci.id} />
 

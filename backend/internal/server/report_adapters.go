@@ -132,3 +132,34 @@ func (l ciLookup) GetByID(ctx context.Context, orgID, id string) (*asset.CIRef, 
 		DiscoverySource: item.DiscoverySource,
 	}, nil
 }
+
+// parentAssetLookup adapts asset.Repository to the composition.AssetLookup
+// port (spec §5: a child CI displays the parent asset's shared inventory
+// identity read-only instead of duplicating it). It is the mirror image of
+// ciLookup, which projects the opposite direction.
+type parentAssetLookup struct {
+	repo asset.Repository
+}
+
+func (l parentAssetLookup) GetByID(ctx context.Context, orgID, id string) (*composition.ParentAssetRef, error) {
+	a, err := l.repo.GetByID(ctx, orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	return &composition.ParentAssetRef{
+		ID:            a.ID,
+		Name:          a.Name,
+		AssetTag:      a.AssetTag,
+		Status:        a.Status,
+		SerialNumber:  a.SerialNumber,
+		Barcode:       a.Barcode,
+		RFIDTag:       a.RFIDTag,
+		PurchaseDate:  a.PurchaseDate,
+		PurchaseCost:  a.PurchaseCost,
+		Currency:      a.Currency,
+		Supplier:      a.Supplier,
+		InvoiceNumber: a.InvoiceNumber,
+		WarrantyEnd:   a.WarrantyEnd,
+		Location:      a.Location,
+	}, nil
+}

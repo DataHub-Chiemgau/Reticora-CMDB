@@ -7052,6 +7052,18 @@ paths:
         '401':
           description: Unauthorized
 
+  /api/v1/cis/{id}/parent:
+    get:
+      operationId: getCisIdParent
+      summary: Get the parent asset owning this CI and the inventory fields it contributes
+      responses:
+        '200':
+          description: Parent composition link and the parent asset's read-only inventory identity
+        '401':
+          description: Unauthorized
+        '404':
+          description: CI has no parent asset
+
   /api/v1/cis/{id}/state:
     get:
       operationId: listCisIdState

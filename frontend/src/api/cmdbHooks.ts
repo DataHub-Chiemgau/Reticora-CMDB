@@ -212,6 +212,20 @@ export function useCompositionChildren(assetId: string | undefined) {
   });
 }
 
+/**
+ * Resolves the parent asset a CI belongs to. A standalone CI legitimately has
+ * no parent, so a 404 is an expected answer rather than an error worth
+ * retrying.
+ */
+export function useCIParent(ciId: string | undefined) {
+  return useQuery({
+    queryKey: ['ci-parent', ciId],
+    queryFn: () => compositionApi.parentOfCI(ciId!),
+    enabled: !!ciId,
+    retry: false,
+  });
+}
+
 // Provenance / overrides
 export function useFieldValues(ciId: string | undefined) {
   return useQuery({

@@ -297,7 +297,14 @@
       "toolbarLabel": "Massenbearbeitung",
       "success": "Status von {{count}} Assets aktualisiert",
       "error": "Die Massenänderung konnte nicht vollständig angewendet werden"
-    }
+    },
+    "barcode": "Barcode",
+    "rfidTag": "RFID-Tag",
+    "purchaseDate": "Kaufdatum",
+    "purchaseCost": "Kaufpreis",
+    "invoiceNumber": "Rechnungsnummer",
+    "warrantyEnd": "Garantie bis",
+    "status": "Status"
   },
   "assignment": {
     "title": "Zuweisungen",
@@ -811,7 +818,9 @@
     "serialized": "eigen serialisiert",
     "none": "Keine Komponenten. Dieses Asset ist eigenständig.",
     "locatable": "eigen lokalisierbar",
-    "configOnly": "nur Konfiguration"
+    "configOnly": "nur Konfiguration",
+    "parentTitle": "Übergeordnetes Asset",
+    "readOnly": "schreibgeschützt"
   },
   "locations": {
     "createChild": "Unterpunkt in",

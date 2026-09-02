@@ -297,7 +297,14 @@
       "toolbarLabel": "Bulk edit",
       "success": "Updated status of {{count}} assets",
       "error": "The bulk change could not be fully applied"
-    }
+    },
+    "barcode": "Barcode",
+    "rfidTag": "RFID tag",
+    "purchaseDate": "Purchase date",
+    "purchaseCost": "Purchase cost",
+    "invoiceNumber": "Invoice number",
+    "warrantyEnd": "Warranty end",
+    "status": "Status"
   },
   "assignment": {
     "title": "Assignments",
@@ -811,7 +818,9 @@
     "serialized": "independently serialized",
     "none": "No components. This asset is standalone.",
     "locatable": "independently locatable",
-    "configOnly": "configuration only"
+    "configOnly": "configuration only",
+    "parentTitle": "Parent asset",
+    "readOnly": "read-only"
   },
   "locations": {
     "createChild": "Create child in",
