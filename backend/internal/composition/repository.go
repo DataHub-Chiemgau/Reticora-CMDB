@@ -20,6 +20,16 @@ type Repository interface {
 	ParentOf(ctx context.Context, orgID, childCIID, childAssetID string) (*Composition, error)
 }
 
+// ParentOfAsset reports whether an asset participates as a composition child.
+// Shared helper used by the asset module to reject parent-owned fields.
+func ParentOfAsset(ctx context.Context, repo Repository, orgID, assetID string) (bool, error) {
+	c, err := repo.ParentOf(ctx, orgID, "", assetID)
+	if err != nil {
+		return false, err
+	}
+	return c != nil, nil
+}
+
 // MemoryRepository is an in-memory implementation (tests, --no-db).
 type MemoryRepository struct {
 	mu    sync.RWMutex

@@ -211,11 +211,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		ci.NewHandler(opts.CIService, opts.Dispatcher),
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher),
-		discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship),
+		discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
+			WithProvenance(overrideProvenance{repo: repos.Override}),
 		topology.NewHandler(repos.CI, repos.Relationship),
 		export.NewHandler(repos.CI),
 		export.NewJobHandler(repos.ExportJobs, export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs), opts.Blobs),
-		asset.NewHandler(repos.Asset),
+		asset.NewHandler(repos.Asset).
+			WithComposition(compositionParentLookup{repo: repos.Composition}).
+			WithCIs(ciLookup{repo: repos.CI}),
 		assignment.NewHandler(repos.Assignment).WithMovements(repos.Movement),
 		document.NewHandler(repos.Document, opts.Blobs),
 		stocktake.NewHandler(repos.Stocktake),

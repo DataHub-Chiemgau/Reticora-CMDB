@@ -5,9 +5,13 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/composition"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -71,4 +75,60 @@ func (c assetCreator) Create(ctx context.Context, ref *movement.AssetRef) (strin
 		return "", err
 	}
 	return a.ID, nil
+}
+
+// compositionParentLookup adapts composition.Repository to the
+// asset.ParentLookup port (spec §5: child assets inherit shared inventory
+// fields from the parent read-only).
+type compositionParentLookup struct {
+	repo composition.Repository
+}
+
+func (l compositionParentLookup) ParentOfAsset(ctx context.Context, orgID, assetID string) (bool, error) {
+	return composition.ParentOfAsset(ctx, l.repo, orgID, assetID)
+}
+
+// overrideProvenance adapts override.Repository to the
+// discovery.ProvenanceRecorder port (spec §13).
+type overrideProvenance struct {
+	repo override.Repository
+}
+
+func (a overrideProvenance) RecordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string) (*discovery.FieldProvenance, error) {
+	fv, err := a.repo.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source)
+	if err != nil {
+		return nil, err
+	}
+	return &discovery.FieldProvenance{Diverged: fv.Diverged}, nil
+}
+
+func (a overrideProvenance) IsProtected(ctx context.Context, orgID, ciID, fieldName string) (bool, error) {
+	return override.IsProtected(ctx, a.repo, orgID, ciID, fieldName)
+}
+
+// ciLookup adapts ci.Repository to the asset.CILookup port (spec §4: the
+// asset reads the linked CI's technical identity read-only).
+type ciLookup struct {
+	repo ci.Repository
+}
+
+func (l ciLookup) GetByID(ctx context.Context, orgID, id string) (*asset.CIRef, error) {
+	item, err := l.repo.GetByID(ctx, orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	return &asset.CIRef{
+		ID:              item.ID,
+		Name:            item.Name,
+		Status:          item.Status,
+		Hostname:        item.Hostname,
+		FQDN:            item.FQDN,
+		ManagementIP:    item.ManagementIP,
+		Manufacturer:    item.Manufacturer,
+		Model:           item.Model,
+		SerialNumber:    item.SerialNumber,
+		OSName:          item.OSName,
+		OSVersion:       item.OSVersion,
+		DiscoverySource: item.DiscoverySource,
+	}, nil
 }

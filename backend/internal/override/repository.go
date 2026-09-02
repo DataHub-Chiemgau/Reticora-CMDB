@@ -27,6 +27,18 @@ type Repository interface {
 	UpsertPolicy(ctx context.Context, policy *SourcePolicy) error
 }
 
+// IsProtected reports whether the field carries a protected manual override.
+// Shared helper so other modules (discovery ingest) honor the protection
+// without depending on the concrete repository (spec §13).
+func IsProtected(ctx context.Context, repo Repository, orgID, ciID, fieldName string) (bool, error) {
+	fv, err := repo.Get(ctx, orgID, ciID, fieldName)
+	if err != nil {
+		// No provenance row yet: nothing is protected.
+		return false, nil
+	}
+	return fv.Protected && fv.OverrideValue != nil, nil
+}
+
 // MemoryRepository is an in-memory implementation (tests, --no-db).
 type MemoryRepository struct {
 	mu       sync.RWMutex

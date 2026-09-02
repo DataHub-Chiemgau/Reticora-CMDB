@@ -1,22 +1,86 @@
 package asset
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"reflect"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
+// ParentLookup reports whether an asset is a composition child (spec §5:
+// children must not duplicate the parent's shared inventory properties).
+type ParentLookup interface {
+	// ParentOfAsset returns true when the asset participates as a child in a
+	// composition.
+	ParentOfAsset(ctx context.Context, orgID, assetID string) (bool, error)
+}
+
+// CILookup resolves the technical identity of a linked CI (spec §4: the CI
+// owns the technical/configuration view; the asset reads it through the
+// optional 1:1 association instead of duplicating fields).
+type CILookup interface {
+	GetByID(ctx context.Context, orgID, id string) (*CIRef, error)
+}
+
+// CIRef is the read-only technical identity projection of the linked CI.
+type CIRef struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Status          string `json:"status"`
+	Hostname        string `json:"hostname,omitempty"`
+	FQDN            string `json:"fqdn,omitempty"`
+	ManagementIP    string `json:"management_ip,omitempty"`
+	Manufacturer    string `json:"manufacturer,omitempty"`
+	Model           string `json:"model,omitempty"`
+	SerialNumber    string `json:"serial_number,omitempty"`
+	OSName          string `json:"os_name,omitempty"`
+	OSVersion       string `json:"os_version,omitempty"`
+	DiscoverySource string `json:"discovery_source,omitempty"`
+}
+
 // Handler provides HTTP handlers for asset endpoints.
 type Handler struct {
-	repo Repository
+	repo        Repository
+	composition ParentLookup
+	cis         CILookup
 }
 
 // NewHandler creates a new asset handler.
 func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
+}
+
+// WithComposition attaches the composition lookup used to reject
+// parent-owned shared fields on child assets.
+func (h *Handler) WithComposition(lookup ParentLookup) *Handler {
+	h.composition = lookup
+	return h
+}
+
+// WithCIs attaches the CI lookup used to enrich an asset with the linked
+// CI's read-only technical identity (spec §4).
+func (h *Handler) WithCIs(lookup CILookup) *Handler {
+	h.cis = lookup
+	return h
+}
+
+// parentOwnedColumns are the shared inventory properties owned by the parent
+// asset in a composition (spec §5). Children inherit them read-only.
+var parentOwnedColumns = map[string]string{
+	"serial_number":  "SerialNumber",
+	"barcode":        "Barcode",
+	"rfid_tag":       "RFIDTag",
+	"purchase_date":  "PurchaseDate",
+	"purchase_cost":  "PurchaseCost",
+	"supplier":       "Supplier",
+	"invoice_number": "InvoiceNumber",
+	"warranty_end":   "WarrantyEnd",
+	"location":       "Location",
 }
 
 // RegisterRoutes registers asset routes on the given mux.
@@ -90,6 +154,18 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "asset not found")
 		return
+	}
+
+	// Enrich with the linked CI's read-only technical identity (spec §4); the
+	// CI stays the source of truth for technical data.
+	if h.cis != nil && item.CIID != "" {
+		if linked, err := h.cis.GetByID(r.Context(), t.OrganizationID, item.CIID); err == nil && linked != nil {
+			api.WriteJSON(w, http.StatusOK, map[string]any{
+				"asset": item,
+				"ci":    linked,
+			})
+			return
+		}
 	}
 
 	api.WriteJSON(w, http.StatusOK, item)
@@ -175,6 +251,14 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Children must not duplicate the parent asset's shared inventory
+	// properties (spec §5). Reject writes to parent-owned fields when the
+	// asset participates as a composition child.
+	if err := h.rejectParentOwnedFields(r.Context(), t.OrganizationID, id, &req); err != nil {
+		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		return
+	}
+
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "asset not found")
@@ -182,6 +266,31 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// rejectParentOwnedFields returns an error when the request writes a
+// parent-owned shared inventory property on a composition child.
+func (h *Handler) rejectParentOwnedFields(ctx context.Context, orgID, id string, req *UpdateRequest) error {
+	if h.composition == nil {
+		return nil
+	}
+	isChild, err := h.composition.ParentOfAsset(ctx, orgID, id)
+	if err != nil || !isChild {
+		return err
+	}
+	v := reflect.ValueOf(req).Elem()
+	for column, field := range parentOwnedColumns {
+		f := v.FieldByName(field)
+		if !f.IsValid() || f.IsNil() {
+			continue
+		}
+		// A nil-to-nil clear is allowed; only setting a value conflicts.
+		empty := reflect.Zero(f.Type().Elem())
+		if !reflect.DeepEqual(f.Elem().Interface(), empty.Interface()) {
+			return fmt.Errorf("field %q is owned by the parent asset and is read-only on composition children", column)
+		}
+	}
+	return nil
 }
 
 // Label handles GET /api/v1/assets/{id}/label.svg — renders the printable

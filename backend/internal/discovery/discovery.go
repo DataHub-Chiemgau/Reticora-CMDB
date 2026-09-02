@@ -71,17 +71,25 @@ type IngestItem struct {
 
 	// Relationships discovered from the CI toward neighbors (L2/L3 topology).
 	Relationships []wire.IngestRelationship `json:"relationships,omitempty"`
+
+	// Attributes carries dynamic discovery attributes (spec §1 hybrid model).
+	// They feed per-field provenance records (spec §13) without being forced
+	// into typed columns.
+	Attributes map[string]any `json:"attributes,omitempty"`
 }
 
 // BulkIngestResponse is the response for bulk ingest.
 type BulkIngestResponse struct {
-	Received      int    `json:"received"`
-	Created       int    `json:"created"`
-	Updated       int    `json:"updated"`
-	Conflicts     int    `json:"conflicts"`
-	ReviewItems   int    `json:"review_items"`
-	Relationships int    `json:"relationships"`
-	JobID         string `json:"job_id,omitempty"`
+	Received      int `json:"received"`
+	Created       int `json:"created"`
+	Updated       int `json:"updated"`
+	Conflicts     int `json:"conflicts"`
+	ReviewItems   int `json:"review_items"`
+	Relationships int `json:"relationships"`
+	// ProtectedOverrides counts matched CIs whose protected manual overrides
+	// suppressed one or more discovered writes (spec §13).
+	ProtectedOverrides int    `json:"protected_overrides,omitempty"`
+	JobID              string `json:"job_id,omitempty"`
 }
 
 // Repository defines persistence operations for collectors, discovery jobs and
@@ -267,12 +275,31 @@ func enrollmentCodeHash(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// ProvenanceRecorder records discovered field values with their source
+// metadata (spec §13). Satisfied by the override repository; the ingest
+// pipeline calls it for every field it applies so the reconciliation layer
+// keeps per-field discovered/discovered_source/discovered_at state and never
+// overwrites protected manual overrides.
+type ProvenanceRecorder interface {
+	RecordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string) (*FieldProvenance, error)
+	// IsProtected reports whether the field carries a protected manual
+	// override that discovery must not overwrite.
+	IsProtected(ctx context.Context, orgID, ciID, fieldName string) (bool, error)
+}
+
+// FieldProvenance is the subset of the override.FieldValue the ingest path
+// consumes: it only needs the divergence flag to surface conflicts.
+type FieldProvenance struct {
+	Diverged bool
+}
+
 // Handler provides HTTP handlers for discovery endpoints.
 type Handler struct {
 	repo       Repository
 	ciRepo     ci.Repository
 	relRepo    relationship.Repository
 	typeLookup CITypeLookup
+	provenance ProvenanceRecorder
 }
 
 // CITypeLookup resolves a CI type name or UUID to the canonical ci_type id.
@@ -294,6 +321,39 @@ func NewHandler(repo Repository, ciRepo ci.Repository, relRepo ...relationship.R
 		h.relRepo = relRepo[0]
 	}
 	return h
+}
+
+// WithProvenance attaches the field-provenance recorder (spec §13). Without
+// one, ingest keeps its pre-extension behavior (no per-field provenance).
+func (h *Handler) WithProvenance(recorder ProvenanceRecorder) *Handler {
+	h.provenance = recorder
+	return h
+}
+
+// recordDiscovered fields the provenance of one applied field. It never
+// fails the ingest: provenance is best-effort alongside the audited CI row.
+func (h *Handler) recordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string) {
+	if h.provenance == nil || ciID == "" {
+		return
+	}
+	_, _ = h.provenance.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source)
+}
+
+// protectedFields returns the set of field names whose protected manual
+// override forbids discovery writes (spec §13: discovery never silently
+// overwrites a protected manual override).
+func (h *Handler) protectedFields(ctx context.Context, orgID, ciID string, names []string) map[string]bool {
+	protected := map[string]bool{}
+	if h.provenance == nil || ciID == "" {
+		return protected
+	}
+	for _, name := range names {
+		ok, err := h.provenance.IsProtected(ctx, orgID, ciID, name)
+		if err == nil && ok {
+			protected[name] = true
+		}
+	}
+	return protected
 }
 
 // isUUID reports whether value looks like a canonical UUID.
@@ -442,8 +502,8 @@ func (h *Handler) CreateEnrollmentCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Label     string `json:"label"`
-		TTLMinutes int   `json:"ttl_minutes,omitempty"`
+		Label      string `json:"label"`
+		TTLMinutes int    `json:"ttl_minutes,omitempty"`
 	}
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -668,24 +728,65 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			existing = append(existing, newItem)
 			resolvedCIID[i] = newItem.ID
 			resp.Created++
+			// New CIs carry no overrides; every discovered field is recorded
+			// as provenance so future drift is visible (spec §13).
+			h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, "name", item.Name, source)
+			h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, "manufacturer", item.Manufacturer, source)
+			h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, "model", item.Model, source)
+			h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, "serial_number", item.SerialNumber, source)
+			h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, "management_ip", item.ManagementIP, source)
+			h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, "hostname", item.Hostname, source)
+			h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, "fqdn", item.FQDN, source)
+			for k, v := range item.Attributes {
+				h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, k, v, source)
+			}
 		case ReconcileMatched:
 			matched := findCI(existing, result.MatchedCIID)
 			if matched != nil {
 				applySourceTrust(matched, &item, source, attributes)
 			}
-			updated, err := h.ciRepo.Update(r.Context(), t.OrganizationID, result.MatchedCIID, ci.UpdateRequest{
-				Name:            stringPtr(item.Name),
-				Manufacturer:    stringPtr(item.Manufacturer),
-				Model:           stringPtr(item.Model),
-				SerialNumber:    stringPtr(item.SerialNumber),
-				ManagementIP:    stringPtr(item.ManagementIP),
+			// Protected manual overrides win over discovery (spec §13): the
+			// field keeps its overridden value, the discovered value is still
+			// recorded as provenance, and the divergence is reviewable.
+			protected := h.protectedFields(r.Context(), t.OrganizationID, result.MatchedCIID,
+				[]string{"name", "manufacturer", "model", "serial_number", "management_ip"})
+			update := ci.UpdateRequest{
 				Attributes:      attributes,
 				DiscoverySource: &source,
 				LastSeenAt:      &now,
-			})
+			}
+			if !protected["name"] {
+				update.Name = stringPtr(item.Name)
+			}
+			if !protected["manufacturer"] {
+				update.Manufacturer = stringPtr(item.Manufacturer)
+			}
+			if !protected["model"] {
+				update.Model = stringPtr(item.Model)
+			}
+			if !protected["serial_number"] {
+				update.SerialNumber = stringPtr(item.SerialNumber)
+			}
+			if !protected["management_ip"] {
+				update.ManagementIP = stringPtr(item.ManagementIP)
+			}
+			updated, err := h.ciRepo.Update(r.Context(), t.OrganizationID, result.MatchedCIID, update)
 			if err != nil {
 				api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 				return
+			}
+			// Record provenance for every discovered field, protected or not:
+			// drift stays visible (spec §13).
+			h.recordDiscovered(r.Context(), t.OrganizationID, updated.ID, "name", item.Name, source)
+			h.recordDiscovered(r.Context(), t.OrganizationID, updated.ID, "manufacturer", item.Manufacturer, source)
+			h.recordDiscovered(r.Context(), t.OrganizationID, updated.ID, "model", item.Model, source)
+			h.recordDiscovered(r.Context(), t.OrganizationID, updated.ID, "serial_number", item.SerialNumber, source)
+			h.recordDiscovered(r.Context(), t.OrganizationID, updated.ID, "management_ip", item.ManagementIP, source)
+			for k, v := range item.Attributes {
+				h.recordDiscovered(r.Context(), t.OrganizationID, updated.ID, k, v, source)
+			}
+			if len(protected) > 0 {
+				resp.ProtectedOverrides++
 			}
 			for j := range existing {
 				if existing[j].ID == updated.ID {
