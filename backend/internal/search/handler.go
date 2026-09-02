@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -37,10 +38,20 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	q := Query{OrganizationID: t.OrganizationID, UserID: t.UserID, Text: r.URL.Query().Get("q"), EntityTypes: splitTypes(r.URL.Query().Get("type")), Limit: page.Limit, Offset: page.Offset, Highlight: true}
 	res, err := h.backend.Query(r.Context(), q)
 	if err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
-	res.Data = h.filterAllowed(r.Context(), t, res.Data)
+	filtered, err := h.filterAllowed(r.Context(), t, res.Data)
+	if err != nil {
+		// A failing permission lookup must be visible, never silently
+		// return an empty result set (audit finding H3b).
+		slog.Error("search permission filter failed",
+			"org_id", t.OrganizationID, "user_id", t.UserID, "error", err)
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error",
+			"could not resolve search permissions")
+		return
+	}
+	res.Data = filtered
 	res.Total = len(res.Data)
 	res.HasMore = false
 	api.WriteJSON(w, http.StatusOK, res)
@@ -57,27 +68,41 @@ func (h *Handler) Reindex(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.backend.ReindexTenant(r.Context(), t.OrganizationID)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		slog.Error("search reindex failed", "org_id", t.OrganizationID, "error", err)
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusAccepted, out)
 }
-func (h *Handler) filterAllowed(ctx context.Context, t tenant.TenantInfo, hits []Hit) []Hit {
+
+// filterAllowed removes hits the user is not permitted to see. Permission
+// lookups are cached per key; a lookup error is returned to the caller so it
+// can surface the failure instead of silently dropping every hit.
+func (h *Handler) filterAllowed(ctx context.Context, t tenant.TenantInfo, hits []Hit) ([]Hit, error) {
 	if h.permissions == nil || t.UserID == "" {
-		return hits
+		return hits, nil
 	}
+	allowed := map[string]bool{}
 	out := hits[:0]
 	for _, hit := range hits {
 		key := permissionFor(hit.EntityType)
 		if key == "" {
 			continue
 		}
-		ok, err := h.permissions.HasPermission(ctx, t.OrganizationID, t.UserID, key)
-		if err == nil && ok {
+		ok, cached := allowed[key]
+		if !cached {
+			var err error
+			ok, err = h.permissions.HasPermission(ctx, t.OrganizationID, t.UserID, key)
+			if err != nil {
+				return nil, err
+			}
+			allowed[key] = ok
+		}
+		if ok {
 			out = append(out, hit)
 		}
 	}
-	return out
+	return out, nil
 }
 func permissionFor(entity string) string {
 	switch entity {
@@ -93,6 +118,10 @@ func permissionFor(entity string) string {
 		return "contact:read"
 	case "compliance":
 		return "compliance:read"
+	case "location", "reservation":
+		// Locations and reservations are read through the asset scope
+		// (see server/authz.go route mapping).
+		return "asset:read"
 	default:
 		return ""
 	}

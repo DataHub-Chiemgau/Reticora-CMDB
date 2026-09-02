@@ -122,12 +122,16 @@ func (r *PGRepository) EffectivePermissions(ctx context.Context, orgID, userID s
 				JOIN role_permission rp ON rp.role_id = ra.role_id AND rp.organization_id = ra.organization_id
 				WHERE ra.organization_id = $1 AND ra.user_id = $2
 				UNION
-				SELECT jsonb_array_elements_text(COALESCE(r.permissions, '[]'::jsonb)) AS key
+				SELECT jsonb_array_elements_text(
+					CASE WHEN jsonb_typeof(r.permissions) = 'array' THEN r.permissions ELSE '[]'::jsonb END
+				) AS key
 				FROM role_assignment ra
 				JOIN role r ON r.id = ra.role_id AND r.organization_id = ra.organization_id
 				WHERE ra.organization_id = $1 AND ra.user_id = $2
 				UNION
-				SELECT jsonb_array_elements_text(COALESCE(cr.permissions, '[]'::jsonb)) AS key
+				SELECT jsonb_array_elements_text(
+					CASE WHEN jsonb_typeof(cr.permissions) = 'array' THEN cr.permissions ELSE '[]'::jsonb END
+				) AS key
 				FROM user_custom_role ucr
 				JOIN custom_role cr ON cr.id = ucr.custom_role_id
 				WHERE cr.organization_id = $1 AND ucr.user_id = $2

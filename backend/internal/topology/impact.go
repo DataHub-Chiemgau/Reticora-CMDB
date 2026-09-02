@@ -63,9 +63,11 @@ func (h *Handler) GetDependencies(w http.ResponseWriter, r *http.Request) {
 	var reachable map[string]struct{}
 	switch direction {
 	case "upstream":
-		reachable = walkDirected(id, graph.Edges, true)
-	case "downstream":
+		// Dependencies of the node: follow its outgoing edges source→target.
 		reachable = walkDirected(id, graph.Edges, false)
+	case "downstream":
+		// Dependents of the node: follow incoming edges target→source.
+		reachable = walkDirected(id, graph.Edges, true)
 	default:
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "direction must be upstream or downstream")
 		return
@@ -134,10 +136,11 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, result)
 }
 
-// walkDirected performs a directed BFS. upstream=true follows edges from
-// target to source (dependencies of the node); otherwise source to target
-// (dependents of the node).
-func walkDirected(rootID string, edges []Edge, upstream bool) map[string]struct{} {
+// walkDirected performs a directed BFS. Relationship edges point from the
+// dependent to its dependency (source depends on target). reverse=true
+// follows edges from target to source (the node's dependents); reverse=false
+// follows source to target (the node's dependencies).
+func walkDirected(rootID string, edges []Edge, reverse bool) map[string]struct{} {
 	reachable := map[string]struct{}{}
 	queue := []string{rootID}
 	for len(queue) > 0 {
@@ -145,7 +148,7 @@ func walkDirected(rootID string, edges []Edge, upstream bool) map[string]struct{
 		queue = queue[1:]
 		for _, edge := range edges {
 			var from, to string
-			if upstream {
+			if reverse {
 				from, to = edge.TargetCIID, edge.SourceCIID
 			} else {
 				from, to = edge.SourceCIID, edge.TargetCIID
@@ -164,31 +167,32 @@ func walkDirected(rootID string, edges []Edge, upstream bool) map[string]struct{
 }
 
 // findSPOFs approximates single points of failure within the affected set: a
-// node is a SPOF when removing the failed CI leaves it with no remaining
-// incoming redundancy edge of the same dependency class.
+// direct dependent of the failed CI is a SPOF candidate when it has no
+// remaining outgoing redundancy edge of the same dependency class to a
+// surviving node.
 func findSPOFs(failedID string, edges []Edge, affected []Node) []Node {
-	incoming := map[string]map[string]int{} // target -> relType -> count from non-failed sources
+	outgoing := map[string]map[string]int{} // source -> relType -> count to non-failed targets
 	for _, edge := range edges {
-		if edge.SourceCIID == failedID {
+		if edge.TargetCIID == failedID {
 			continue
 		}
-		if _, ok := incoming[edge.TargetCIID]; !ok {
-			incoming[edge.TargetCIID] = map[string]int{}
+		if _, ok := outgoing[edge.SourceCIID]; !ok {
+			outgoing[edge.SourceCIID] = map[string]int{}
 		}
-		incoming[edge.TargetCIID][edge.RelType]++
+		outgoing[edge.SourceCIID][edge.RelType]++
 	}
 	var spofs []Node
 	for _, node := range affected {
 		if node.ID == failedID {
 			continue
 		}
-		// Direct dependents of the failed node with no surviving incoming
+		// Direct dependents of the failed node with no surviving outgoing
 		// edge of the same type have no redundancy.
 		for _, edge := range edges {
-			if edge.SourceCIID != failedID || edge.TargetCIID != node.ID {
+			if edge.TargetCIID != failedID || edge.SourceCIID != node.ID {
 				continue
 			}
-			if incoming[node.ID][edge.RelType] == 0 {
+			if outgoing[node.ID][edge.RelType] == 0 {
 				spofs = append(spofs, node)
 				break
 			}

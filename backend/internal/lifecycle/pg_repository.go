@@ -100,6 +100,43 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Definiti
 	return out, err
 }
 
+// GetByKey resolves a lifecycle definition by key including states and
+// transitions. A tenant-scoped definition takes precedence over a global
+// system definition with the same key.
+func (r *PGRepository) GetByKey(ctx context.Context, orgID, key string) (*Definition, error) {
+	var out *Definition
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var d Definition
+		err := tx.QueryRow(ctx, `
+			SELECT id::text, COALESCE(organization_id::text, ''), key, name,
+				applies_to, is_system, COALESCE(description, ''), created_at, updated_at
+			FROM lifecycle_definition WHERE key = $1
+			ORDER BY (organization_id IS NOT NULL) DESC
+			LIMIT 1`, key).
+			Scan(&d.ID, &d.OrganizationID, &d.Key, &d.Name, &d.AppliesTo,
+				&d.IsSystem, &d.Description, &d.CreatedAt, &d.UpdatedAt)
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return fmt.Errorf("not found")
+			}
+			return fmt.Errorf("get lifecycle definition by key: %w", err)
+		}
+		states, err := r.listStatesTx(ctx, tx, d.ID)
+		if err != nil {
+			return err
+		}
+		d.States = states
+		transitions, err := r.listTransitionsTx(ctx, tx, d.ID)
+		if err != nil {
+			return err
+		}
+		d.Transitions = transitions
+		out = &d
+		return nil
+	})
+	return out, err
+}
+
 func (r *PGRepository) listStatesTx(ctx context.Context, tx pgx.Tx, definitionID string) ([]State, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, definition_id::text, key, label, is_initial, is_terminal,

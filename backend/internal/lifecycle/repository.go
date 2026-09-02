@@ -14,6 +14,10 @@ import (
 type Repository interface {
 	List(ctx context.Context, orgID string, page api.PaginationParams) ([]Definition, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Definition, error)
+	// GetByKey resolves a definition by key including its states and
+	// transitions. Tenant-scoped definitions take precedence over global
+	// system definitions with the same key.
+	GetByKey(ctx context.Context, orgID, key string) (*Definition, error)
 	Create(ctx context.Context, def *Definition) error
 	Delete(ctx context.Context, orgID, id string) error
 }
@@ -86,6 +90,29 @@ func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Defini
 	}
 	out := *d
 	return &out, nil
+}
+
+func (r *MemoryRepository) GetByKey(_ context.Context, orgID, key string) (*Definition, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var system *Definition
+	for _, d := range r.defs {
+		if d.Key != key {
+			continue
+		}
+		if d.OrganizationID == orgID && orgID != "" {
+			out := *d
+			return &out, nil
+		}
+		if d.OrganizationID == "" {
+			system = d
+		}
+	}
+	if system != nil {
+		out := *system
+		return &out, nil
+	}
+	return nil, fmt.Errorf("not found")
 }
 
 func (r *MemoryRepository) Create(_ context.Context, def *Definition) error {

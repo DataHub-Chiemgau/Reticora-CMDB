@@ -3,8 +3,6 @@ package lifecycle
 import (
 	"context"
 	"fmt"
-
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
 // Service applies lifecycle definitions to assets and CIs: it resolves the
@@ -27,18 +25,16 @@ func NewService(repo Repository, states StateStore, changes ChangeRecorder) *Ser
 	return &Service{repo: repo, states: states, changes: changes}
 }
 
-// DefinitionForKey resolves a definition by key within the tenant scope.
+// DefinitionForKey resolves a definition by key within the tenant scope,
+// including its states and transitions (required by Transition). A
+// tenant-scoped definition takes precedence over a global system definition
+// with the same key.
 func (s *Service) DefinitionForKey(ctx context.Context, orgID, key string) (*Definition, error) {
-	defs, _, err := s.repo.List(ctx, orgID, api.PaginationParams{Limit: api.MaxPageLimit})
-	if err != nil {
-		return nil, err
+	def, err := s.repo.GetByKey(ctx, orgID, key)
+	if err != nil || def == nil {
+		return nil, fmt.Errorf("lifecycle definition %q not found", key)
 	}
-	for _, d := range defs {
-		if d.Key == key {
-			return &d, nil
-		}
-	}
-	return nil, fmt.Errorf("lifecycle definition %q not found", key)
+	return def, nil
 }
 
 // Transition executes a guarded lifecycle transition for an entity.

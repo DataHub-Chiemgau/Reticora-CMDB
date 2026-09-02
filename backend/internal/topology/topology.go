@@ -196,9 +196,12 @@ func (h *Handler) GetImpact(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// computeImpact walks directed edges source→target from the failed CI and
-// returns the set of dependent CI ids. An empty relType follows every edge;
-// otherwise only edges of that relationship type are followed.
+// computeImpact walks directed edges in reverse (target→source) from the
+// failed CI and returns the set of dependent CI ids. Relationship edges point
+// from the dependent to its dependency (A —runs_on/depends_on/powered_by→ B
+// means A depends on B), so when B fails the impacted set is every transitive
+// source of an edge into B. An empty relType follows every edge; otherwise
+// only edges of that relationship type are followed.
 func computeImpact(failedID string, edges []Edge, relType string) map[string]struct{} {
 	impacted := map[string]struct{}{}
 	queue := []string{failedID}
@@ -209,19 +212,20 @@ func computeImpact(failedID string, edges []Edge, relType string) map[string]str
 			if relType != "" && edge.RelType != relType {
 				continue
 			}
-			// Only follow edges that originate from the current node.
-			if edge.SourceCIID != current {
+			// Only follow edges that point into the current node: their
+			// sources depend on it and are therefore impacted.
+			if edge.TargetCIID != current {
 				continue
 			}
 			// Never follow a back-edge into the failed node itself.
-			if edge.TargetCIID == failedID {
+			if edge.SourceCIID == failedID {
 				continue
 			}
-			if _, seen := impacted[edge.TargetCIID]; seen {
+			if _, seen := impacted[edge.SourceCIID]; seen {
 				continue
 			}
-			impacted[edge.TargetCIID] = struct{}{}
-			queue = append(queue, edge.TargetCIID)
+			impacted[edge.SourceCIID] = struct{}{}
+			queue = append(queue, edge.SourceCIID)
 		}
 	}
 	return impacted
