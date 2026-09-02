@@ -153,6 +153,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Fields:                   req.Fields,
 	}
 	if err := h.repo.Create(r.Context(), typ); err != nil {
+		if api.WriteDBError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
 		return
 	}
@@ -195,6 +198,9 @@ func (h *Handler) Clone(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if err.Error() == "not found" {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "ci type not found")
+			return
+		}
+		if api.WriteDBError(w, err) {
 			return
 		}
 		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
@@ -275,6 +281,9 @@ func (h *Handler) UpsertField(w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := h.repo.UpsertField(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
+		if api.WriteDBError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
@@ -324,6 +333,9 @@ func (h *Handler) UpsertGlobalField(w http.ResponseWriter, r *http.Request) {
 	req.Scope = "global"
 	f, err := h.repo.UpsertField(r.Context(), t.OrganizationID, "", req)
 	if err != nil {
+		if api.WriteDBError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
@@ -374,6 +386,9 @@ func (h *Handler) UpsertInstanceField(w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := h.repo.UpsertInstanceField(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
+		if api.WriteDBError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
