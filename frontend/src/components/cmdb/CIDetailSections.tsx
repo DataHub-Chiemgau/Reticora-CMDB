@@ -18,6 +18,7 @@ import {
   useLifecycleTransition,
 } from '../../api/cmdbHooks';
 import { DynamicForm, validateAll } from '../form/DynamicForm';
+import { ApiError } from '../../api/client';
 import type { FieldDefinition } from '../../lib/fieldmeta';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -58,10 +59,13 @@ export function InstanceFieldsSection({
   ciId,
   attributes,
   onChanged,
+  serverError,
 }: {
   ciId: string;
   attributes: Record<string, unknown>;
   onChanged: (attrs: Record<string, unknown>) => void;
+  /** Rejection from the last attribute save, so 422 violations render inline. */
+  serverError?: Error | null;
 }) {
   const { t } = useTranslation();
   const fields = useInstanceFields(ciId);
@@ -69,6 +73,15 @@ export function InstanceFieldsSection({
   const remove = useDeleteInstanceField(ciId);
   const [showAdd, setShowAdd] = useState(false);
   const [draft, setDraft] = useState<FieldDefinition>({ name: '', data_type: 'text' });
+  const [localErrors, setLocalErrors] = useState<Record<string, string | null>>({});
+  // Local draft of the attribute values. The saved CI stays the source of
+  // truth, but edits are rendered from the draft so in-flight (and invalid)
+  // input is not overwritten by the server response mid-typing.
+  const [valueDraft, setValueDraft] = useState<Record<string, unknown> | null>(null);
+  const draftValues = valueDraft ?? attributes;
+
+  const serverViolations =
+    serverError instanceof ApiError ? serverError.violationsByField() : ({} as Record<string, string>);
 
   const defs = fields.data?.data ?? [];
   return (
@@ -104,6 +117,12 @@ export function InstanceFieldsSection({
       <Button size="sm" variant="secondary" onClick={() => setShowAdd(true)}>
         + {t('ci.addInstanceField', 'Instanzfeld hinzufügen')}
       </Button>
+
+      {serverError && Object.keys(serverViolations).length === 0 ? (
+        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+          {serverError.message}
+        </p>
+      ) : null}
 
       <Modal
         open={showAdd}
@@ -166,10 +185,19 @@ export function InstanceFieldsSection({
         <div className="mt-4 border-t border-gray-100 pt-3 dark:border-gray-800">
           <DynamicForm
             fields={defs}
-            values={attributes}
+            values={draftValues}
+            errors={{ ...localErrors, ...serverViolations }}
             onChange={(name, value) => {
-              const errs = validateAll(defs, { ...attributes, [name]: value });
-              if (!errs[name]) onChanged({ ...attributes, [name]: value });
+              // Render from a local draft so the keystroke stays visible even
+              // when it is invalid. Previously an invalid value was dropped on
+              // the floor with no message, so the input appeared frozen. Only
+              // values that pass client validation are propagated to the save
+              // handler; the server re-validates and can still reject them.
+              const next = { ...draftValues, [name]: value };
+              setValueDraft(next);
+              const errs = validateAll(defs, next);
+              setLocalErrors((current) => ({ ...current, [name]: errs[name] ?? null }));
+              if (!errs[name]) onChanged(next);
             }}
           />
         </div>

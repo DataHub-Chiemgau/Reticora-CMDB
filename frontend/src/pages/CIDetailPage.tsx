@@ -234,6 +234,7 @@ export function CIDetailPage() {
           ciId={ci.id}
           attributes={ci.attributes ?? {}}
           onChanged={(attrs) => updateCI.mutate({ id: ci.id, data: { attributes: attrs } })}
+          serverError={updateCI.error as Error | null}
         />
         <ProvenanceSection ciId={ci.id} />
         <LifecycleSection

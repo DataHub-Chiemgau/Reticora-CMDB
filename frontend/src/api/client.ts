@@ -74,8 +74,44 @@ export interface Relationship {
   rel_type: string;
   attributes: Record<string, unknown>;
   source: string;
+  confidence?: number;
+  first_seen_at?: string;
+  last_seen_at?: string;
+  verification_state?: string;
+  source_system?: string;
+  notes?: string;
   created_at: string;
   updated_at: string;
+}
+
+/** Verification vocabulary accepted by the relationships API. */
+export const verificationStates = ['unverified', 'verified', 'disputed', 'stale'] as const;
+
+export type VerificationState = (typeof verificationStates)[number];
+
+export interface RelationshipCreateRequest {
+  source_ci_id: string;
+  target_ci_id: string;
+  rel_type: string;
+  attributes?: Record<string, unknown>;
+  source?: string;
+  confidence?: number;
+  verification_state?: string;
+  source_system?: string;
+  notes?: string;
+}
+
+/**
+ * RelationshipUpdateRequest edits provenance and verification metadata. The
+ * edge endpoints and `rel_type` are deliberately immutable server-side —
+ * rewiring is expressed as delete + recreate so graph history stays truthful.
+ */
+export interface RelationshipUpdateRequest {
+  attributes?: Record<string, unknown>;
+  confidence?: number;
+  verification_state?: string;
+  source_system?: string;
+  notes?: string;
 }
 
 export interface Collector {
@@ -126,6 +162,95 @@ function mergeHeaders(options?: RequestInit) {
   return headers;
 }
 
+/**
+ * FieldViolation is a single rejected field from a server-side validation
+ * failure. `field` is the attribute/field name exactly as the backend knows it
+ * (e.g. `ram_gb`), so it maps directly onto a form input name.
+ */
+export interface FieldViolation {
+  field: string;
+  detail: string;
+}
+
+/**
+ * ApiError carries the parsed RFC 7807 problem detail of a failed request.
+ *
+ * The backend answers field-metadata validation failures with HTTP 422 and a
+ * `violations` array so clients can attach messages to the offending inputs
+ * instead of dumping one opaque string at the user. Throwing a plain `Error`
+ * discarded that array, so callers keep `message` for the summary banner and
+ * read `violations` for per-field rendering.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly title?: string;
+  readonly detail?: string;
+  readonly violations: FieldViolation[];
+
+  constructor(
+    status: number,
+    message: string,
+    options: { title?: string; detail?: string; violations?: FieldViolation[] } = {},
+  ) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.title = options.title;
+    this.detail = options.detail;
+    this.violations = options.violations ?? [];
+  }
+
+  /** Whether the failure carries per-field violations that a form can render. */
+  get hasViolations() {
+    return this.violations.length > 0;
+  }
+
+  /** violationsByField indexes the violations for direct form lookup. */
+  violationsByField(): Record<string, string> {
+    const byField: Record<string, string> = {};
+    for (const violation of this.violations) {
+      // Keep the first message per field; the backend orders them by field
+      // definition, so the first is the most relevant.
+      if (!(violation.field in byField)) {
+        byField[violation.field] = violation.detail;
+      }
+    }
+    return byField;
+  }
+
+  /** fromProblem builds an ApiError from an arbitrary parsed response body. */
+  static fromProblem(status: number, statusText: string, body: unknown): ApiError {
+    if (typeof body !== 'object' || body === null) {
+      return new ApiError(status, statusText);
+    }
+
+    const problem = body as {
+      title?: unknown;
+      detail?: unknown;
+      violations?: unknown;
+    };
+
+    const title = typeof problem.title === 'string' ? problem.title : undefined;
+    const detail = typeof problem.detail === 'string' ? problem.detail : undefined;
+
+    const violations: FieldViolation[] = Array.isArray(problem.violations)
+      ? problem.violations.flatMap((entry) => {
+          if (typeof entry !== 'object' || entry === null) return [];
+          const { field, detail: violationDetail } = entry as Record<string, unknown>;
+          if (typeof field !== 'string' || field === '') return [];
+          return [
+            {
+              field,
+              detail: typeof violationDetail === 'string' ? violationDetail : '',
+            },
+          ];
+        })
+      : [];
+
+    return new ApiError(status, detail || title || statusText, { title, detail, violations });
+  }
+}
+
 export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
   const request = () =>
     fetch(`${API_BASE}${path}`, {
@@ -149,8 +274,8 @@ export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<
       clearSession();
     }
 
-    const error = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(error.detail || res.statusText);
+    const body: unknown = await res.json().catch(() => null);
+    throw ApiError.fromProblem(res.status, res.statusText, body);
   }
   if (res.status === 204) {
     return undefined as T;
@@ -204,6 +329,26 @@ export const ciApi = {
 
   exportCIs(format: 'json' | 'csv' = 'json'): string {
     return `${API_BASE}/export/cis?format=${format}`;
+  },
+};
+
+export const relationshipApi = {
+  create(data: RelationshipCreateRequest): Promise<Relationship> {
+    return fetchAPI('/relationships', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  update(id: string, data: RelationshipUpdateRequest): Promise<Relationship> {
+    return fetchAPI(`/relationships/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/relationships/${id}`, { method: 'DELETE' });
   },
 };
 
