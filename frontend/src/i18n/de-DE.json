@@ -220,7 +220,8 @@
     },
     "validation": {
       "nameRequired": "Name ist erforderlich.",
-      "ciTypeRequired": "CI-Typ ist erforderlich."
+      "ciTypeRequired": "CI-Typ ist erforderlich.",
+      "serverRejected": "Bitte korrigieren Sie die markierten Felder."
     }
   },
   "discovery": {
@@ -840,5 +841,24 @@
     "title": "Lebenszyklus",
     "current": "Aktuell",
     "apply": "Anwenden"
+  },
+  "relationship": {
+    "add": "Beziehung hinzufügen",
+    "edit": "Beziehung bearbeiten",
+    "editHint": "Endpunkte und Typ sind unveränderlich — zum Umhängen die Beziehung löschen und neu anlegen.",
+    "verify": "Bestätigen",
+    "direction": "Richtung",
+    "outgoing": "Dieses CI → Ziel",
+    "incoming": "Quelle → dieses CI",
+    "type": "Beziehungstyp",
+    "targetCi": "CI-ID der Gegenstelle",
+    "notes": "Notiz",
+    "verificationState": "Prüfstatus",
+    "state": {
+      "unverified": "Ungeprüft",
+      "verified": "Bestätigt",
+      "disputed": "Widersprochen",
+      "stale": "Veraltet"
+    }
   }
 }
