@@ -82,4 +82,11 @@ export const navFeatureFor: Record<string, string | undefined> = {
   monitoring: 'monitoring',
   audit: undefined,
   security: undefined,
+  // Enterprise CMDB + asset/inventory extension. ci-types and saved-views are
+  // core (admin/self-service); locations and inventory follow the inventory
+  // entitlement.
+  'ci-types': undefined,
+  locations: 'inventory',
+  inventory: 'inventory',
+  'saved-views': undefined,
 };

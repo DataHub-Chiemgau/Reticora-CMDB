@@ -30,7 +30,10 @@ function lazyPage(loader: () => Promise<Record<string, unknown>>, name: string) 
 }
 
 const AssetListPage = lazyPage(() => import('./pages/AssetListPage'), 'AssetListPage');
-const AssignmentListPage = lazyPage(() => import('./pages/AssignmentListPage'), 'AssignmentListPage');
+const AssignmentListPage = lazyPage(
+  () => import('./pages/AssignmentListPage'),
+  'AssignmentListPage',
+);
 const AssistantPage = lazyPage(() => import('./pages/AssistantPage'), 'AssistantPage');
 const CIFormModal = lazyPage(() => import('./pages/CIFormModal'), 'CIFormModal');
 const CIDetailPage = lazyPage(() => import('./pages/CIDetailPage'), 'CIDetailPage');
@@ -50,14 +53,24 @@ const CompliancePage = lazyPage(() => import('./pages/CompliancePage'), 'Complia
 const IGAPage = lazyPage(() => import('./pages/IGAPage'), 'IGAPage');
 const StocktakeListPage = lazyPage(() => import('./pages/StocktakeListPage'), 'StocktakeListPage');
 const TicketListPage = lazyPage(() => import('./pages/TicketListPage'), 'TicketListPage');
-const UserManagementPage = lazyPage(() => import('./pages/UserManagementPage'), 'UserManagementPage');
+const UserManagementPage = lazyPage(
+  () => import('./pages/UserManagementPage'),
+  'UserManagementPage',
+);
 const WebhooksPage = lazyPage(() => import('./pages/WebhooksPage'), 'WebhooksPage');
 const AuditPage = lazyPage(() => import('./pages/AuditPage'), 'AuditPage');
 const SecurityPage = lazyPage(() => import('./pages/SecurityPage'), 'SecurityPage');
-const ConsumableListPage = lazyPage(() => import('./pages/ConsumableListPage'), 'ConsumableListPage');
+const ConsumableListPage = lazyPage(
+  () => import('./pages/ConsumableListPage'),
+  'ConsumableListPage',
+);
 const OrderListPage = lazyPage(() => import('./pages/OrderListPage'), 'OrderListPage');
 const MaintenancePage = lazyPage(() => import('./pages/MaintenancePage'), 'MaintenancePage');
 const DisposalListPage = lazyPage(() => import('./pages/DisposalListPage'), 'DisposalListPage');
+const CITypeAdminPage = lazyPage(() => import('./pages/CITypeAdminPage'), 'CITypeAdminPage');
+const LocationTreePage = lazyPage(() => import('./pages/LocationTreePage'), 'LocationTreePage');
+const InventoryPage = lazyPage(() => import('./pages/InventoryPage'), 'InventoryPage');
+const SavedViewsPage = lazyPage(() => import('./pages/SavedViewsPage'), 'SavedViewsPage');
 const KeyListPage = lazyPage(() => import('./pages/KeyListPage'), 'KeyListPage');
 const TrainingListPage = lazyPage(() => import('./pages/TrainingListPage'), 'TrainingListPage');
 const DeskListPage = lazyPage(() => import('./pages/DeskListPage'), 'DeskListPage');
@@ -132,6 +145,9 @@ function App() {
       'roomplan',
       'racks',
       'assets',
+      'inventory',
+      'locations',
+      'saved-views',
       'tickets',
       'assignments',
       'documents',
@@ -148,6 +164,7 @@ function App() {
       'discovery',
       'users',
       'permissions',
+      'ci-types',
       'slas',
       'forms',
       'workflows',
@@ -277,43 +294,47 @@ function App() {
                 </Suspense>
               }
             >
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/cmdb" element={<CIListPage onCreateCI={openCreateCI} />} />
-            <Route path="/cmdb/:id" element={<CIDetailPage />} />
-            <Route path="/topology" element={<TopologyPage />} />
-            <Route path="/map" element={<MapPage />} />
-            <Route path="/roomplan" element={<RoomPlanPage />} />
-            <Route path="/racks" element={<RackPage />} />
-            <Route path="/discovery" element={<DiscoveryPage />} />
-            <Route path="/assets" element={<AssetListPage />} />
-            <Route path="/assignments" element={<AssignmentListPage />} />
-            <Route path="/documents" element={<DocumentListPage />} />
-            <Route path="/stocktake" element={<StocktakeListPage />} />
-            <Route path="/consumables" element={<ConsumableListPage />} />
-            <Route path="/orders" element={<OrderListPage />} />
-            <Route path="/maintenance" element={<MaintenancePage />} />
-            <Route path="/disposal" element={<DisposalListPage />} />
-            <Route path="/keys" element={<KeyListPage />} />
-            <Route path="/trainings" element={<TrainingListPage />} />
-            <Route path="/desks" element={<DeskListPage />} />
-            <Route path="/agents" element={<AgentListPage />} />
-            <Route path="/findings" element={<FindingsPage />} />
-            <Route path="/tickets" element={<TicketListPage />} />
-            <Route path="/users" element={<UserManagementPage />} />
-            <Route path="/permissions" element={<PermissionsPage />} />
-            <Route path="/slas" element={<SLAPage />} />
-            <Route path="/forms" element={<FormsPage />} />
-            <Route path="/workflows" element={<WorkflowPage />} />
-            <Route path="/compliance" element={<CompliancePage />} />
-            <Route path="/iga" element={<IGAPage />} />
-            <Route path="/assistant" element={<AssistantPage />} />
-            <Route path="/webhooks" element={<WebhooksPage />} />
-            <Route path="/export" element={<ExportPage />} />
-            <Route path="/monitoring" element={<MonitoringPage />} />
-            <Route path="/audit" element={<AuditPage />} />
-            <Route path="/security" element={<SecurityPage />} />
-            <Route path="*" element={<CIListPage onCreateCI={openCreateCI} />} />
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/cmdb" element={<CIListPage onCreateCI={openCreateCI} />} />
+              <Route path="/cmdb/:id" element={<CIDetailPage />} />
+              <Route path="/topology" element={<TopologyPage />} />
+              <Route path="/map" element={<MapPage />} />
+              <Route path="/roomplan" element={<RoomPlanPage />} />
+              <Route path="/racks" element={<RackPage />} />
+              <Route path="/discovery" element={<DiscoveryPage />} />
+              <Route path="/assets" element={<AssetListPage />} />
+              <Route path="/inventory" element={<InventoryPage />} />
+              <Route path="/locations" element={<LocationTreePage />} />
+              <Route path="/saved-views" element={<SavedViewsPage />} />
+              <Route path="/ci-types" element={<CITypeAdminPage />} />
+              <Route path="/assignments" element={<AssignmentListPage />} />
+              <Route path="/documents" element={<DocumentListPage />} />
+              <Route path="/stocktake" element={<StocktakeListPage />} />
+              <Route path="/consumables" element={<ConsumableListPage />} />
+              <Route path="/orders" element={<OrderListPage />} />
+              <Route path="/maintenance" element={<MaintenancePage />} />
+              <Route path="/disposal" element={<DisposalListPage />} />
+              <Route path="/keys" element={<KeyListPage />} />
+              <Route path="/trainings" element={<TrainingListPage />} />
+              <Route path="/desks" element={<DeskListPage />} />
+              <Route path="/agents" element={<AgentListPage />} />
+              <Route path="/findings" element={<FindingsPage />} />
+              <Route path="/tickets" element={<TicketListPage />} />
+              <Route path="/users" element={<UserManagementPage />} />
+              <Route path="/permissions" element={<PermissionsPage />} />
+              <Route path="/slas" element={<SLAPage />} />
+              <Route path="/forms" element={<FormsPage />} />
+              <Route path="/workflows" element={<WorkflowPage />} />
+              <Route path="/compliance" element={<CompliancePage />} />
+              <Route path="/iga" element={<IGAPage />} />
+              <Route path="/assistant" element={<AssistantPage />} />
+              <Route path="/webhooks" element={<WebhooksPage />} />
+              <Route path="/export" element={<ExportPage />} />
+              <Route path="/monitoring" element={<MonitoringPage />} />
+              <Route path="/audit" element={<AuditPage />} />
+              <Route path="/security" element={<SecurityPage />} />
+              <Route path="*" element={<CIListPage onCreateCI={openCreateCI} />} />
             </Route>
           </Route>
         </Routes>
