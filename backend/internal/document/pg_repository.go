@@ -169,9 +169,9 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Document
 	var doc *Document
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf("SELECT %s FROM document WHERE id = $1", documentSelectColumns)
+		query := fmt.Sprintf("SELECT %s FROM document WHERE id = $1 AND organization_id = $2", documentSelectColumns)
 		var err error
-		doc, err = scanDocument(tx.QueryRow(ctx, query, id))
+		doc, err = scanDocument(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
 				return fmt.Errorf("not found")
@@ -254,9 +254,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		}
 
 		if len(setClauses) == 0 {
-			query := fmt.Sprintf("SELECT %s FROM document WHERE id = $1", documentSelectColumns)
+			query := fmt.Sprintf("SELECT %s FROM document WHERE id = $1 AND organization_id = $2", documentSelectColumns)
 			var err error
-			doc, err = scanDocument(tx.QueryRow(ctx, query, id))
+			doc, err = scanDocument(tx.QueryRow(ctx, query, id, orgID))
 			if err != nil {
 				if err == pgx.ErrNoRows {
 					return fmt.Errorf("not found")
@@ -267,7 +267,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		}
 
 		setClauses = append(setClauses, "updated_at = NOW()")
-		query := fmt.Sprintf("UPDATE document SET %s WHERE id = $1 RETURNING %s", strings.Join(setClauses, ", "), documentSelectColumns)
+		// Redundant with row-level security, kept as defense in depth.
+		query := fmt.Sprintf("UPDATE document SET %s WHERE id = $1 AND organization_id = $%d RETURNING %s", strings.Join(setClauses, ", "), argPos, documentSelectColumns)
+		args = append(args, orgID)
 		var err error
 		doc, err = scanDocument(tx.QueryRow(ctx, query, args...))
 		if err != nil {
@@ -292,8 +294,8 @@ func (r *PGRepository) SetStorage(ctx context.Context, orgID, id, storageKey, mi
 		row := tx.QueryRow(ctx, `
 			UPDATE document
 			SET storage_key = $2, mime_type = $3, file_size = $4, updated_at = NOW()
-			WHERE id = $1
-			RETURNING `+documentSelectColumns, id, storageKey, mimeType, size)
+			WHERE id = $1 AND organization_id = $5
+			RETURNING `+documentSelectColumns, id, storageKey, mimeType, size, orgID)
 		var err error
 		doc, err = scanDocument(row)
 		if err == pgx.ErrNoRows {
@@ -307,7 +309,7 @@ func (r *PGRepository) SetStorage(ctx context.Context, orgID, id, storageKey, mi
 // Delete deletes a document. The document table has no deleted_at column, so this is a hard delete.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmdTag, err := tx.Exec(ctx, "DELETE FROM document WHERE id = $1", id)
+		cmdTag, err := tx.Exec(ctx, "DELETE FROM document WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete document: %w", err)
 		}

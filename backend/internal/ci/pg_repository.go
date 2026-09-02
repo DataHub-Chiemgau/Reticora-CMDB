@@ -196,9 +196,9 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, er
 	var item *Item
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND deleted_at IS NULL", ciSelectColumns)
+		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL", ciSelectColumns)
 		var err error
-		item, err = scanCI(tx.QueryRow(ctx, query, id))
+		item, err = scanCI(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
 				return fmt.Errorf("not found")
@@ -305,8 +305,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	var item *Item
 
 	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		beforeQuery := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND deleted_at IS NULL", ciSelectColumns)
-		before, err := scanCI(tx.QueryRow(ctx, beforeQuery, id))
+		beforeQuery := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL", ciSelectColumns)
+		before, err := scanCI(tx.QueryRow(ctx, beforeQuery, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
 				return fmt.Errorf("not found")
@@ -368,11 +368,16 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		}
 
 		setClauses = append(setClauses, "updated_at = NOW()")
+		// The tenant predicate is redundant with row-level security but is kept
+		// as defense in depth: a missing or wrong app.org_id must never allow a
+		// cross-tenant write.
 		query := fmt.Sprintf(
-			"UPDATE ci SET %s WHERE id = $1 AND deleted_at IS NULL RETURNING %s",
+			"UPDATE ci SET %s WHERE id = $1 AND organization_id = $%d AND deleted_at IS NULL RETURNING %s",
 			strings.Join(setClauses, ", "),
+			argPos,
 			ciSelectColumns,
 		)
+		args = append(args, orgID)
 
 		item, err = scanCI(tx.QueryRow(ctx, query, args...))
 		if err != nil {
@@ -413,8 +418,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 // Delete soft-deletes a CI.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND deleted_at IS NULL", ciSelectColumns)
-		before, err := scanCI(tx.QueryRow(ctx, query, id))
+		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL", ciSelectColumns)
+		before, err := scanCI(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
 				return fmt.Errorf("not found")
@@ -422,7 +427,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 			return fmt.Errorf("get ci for delete: %w", err)
 		}
 
-		cmdTag, err := tx.Exec(ctx, "UPDATE ci SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL", id)
+		cmdTag, err := tx.Exec(ctx, "UPDATE ci SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL", id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete ci: %w", err)
 		}
