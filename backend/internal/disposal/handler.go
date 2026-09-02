@@ -1,10 +1,12 @@
 package disposal
 
 import (
+	"context"
 	"net/http"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -14,14 +16,29 @@ var validMethods = map[string]bool{
 	"secure_erasure": true, "physical_destruction": true, "return_to_vendor": true,
 }
 
+// MovementRecorder records the disposal movement into the inventory ledger
+// (spec §9). Satisfied by the movement repository.
+type MovementRecorder interface {
+	Record(ctx context.Context, m *movement.Movement) error
+}
+
 // Handler provides HTTP handlers for disposal records (append-only).
 type Handler struct {
-	repo Repository
+	repo      Repository
+	movements MovementRecorder
 }
 
 // NewHandler creates a new disposal handler.
 func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
+}
+
+// WithMovements attaches the movement ledger so disposal records emit an
+// auditable disposal movement. Movement failures never fail the disposal
+// record itself.
+func (h *Handler) WithMovements(recorder MovementRecorder) *Handler {
+	h.movements = recorder
+	return h
 }
 
 // RegisterRoutes registers disposal routes. There are deliberately no
@@ -111,6 +128,16 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.Create(r.Context(), rec); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
+	}
+	if h.movements != nil && rec.AssetID != "" {
+		_ = h.movements.Record(r.Context(), &movement.Movement{
+			OrganizationID: t.OrganizationID,
+			ItemKind:       "asset",
+			AssetID:        rec.AssetID,
+			MovementType:   "disposal",
+			Reason:         rec.Method,
+			Notes:          rec.Notes,
+		})
 	}
 	api.WriteJSON(w, http.StatusCreated, rec)
 }

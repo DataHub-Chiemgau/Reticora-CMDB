@@ -22,8 +22,15 @@ type Relationship struct {
 	RelType        string         `json:"rel_type"`
 	Attributes     map[string]any `json:"attributes"`
 	Source         string         `json:"source"`
-	CreatedAt      string         `json:"created_at"`
-	UpdatedAt      string         `json:"updated_at"`
+	// Provenance and verification metadata (spec §12).
+	Confidence        *float64 `json:"confidence,omitempty"`
+	FirstSeenAt       string   `json:"first_seen_at,omitempty"`
+	LastSeenAt        string   `json:"last_seen_at,omitempty"`
+	VerificationState string   `json:"verification_state,omitempty"`
+	SourceSystem      string   `json:"source_system,omitempty"`
+	Notes             string   `json:"notes,omitempty"`
+	CreatedAt         string   `json:"created_at"`
+	UpdatedAt         string   `json:"updated_at"`
 }
 
 // CreateRequest is the payload for creating a relationship.
@@ -33,9 +40,16 @@ type CreateRequest struct {
 	RelType    string         `json:"rel_type"`
 	Attributes map[string]any `json:"attributes,omitempty"`
 	Source     string         `json:"source,omitempty"`
+	Confidence        *float64 `json:"confidence,omitempty"`
+	VerificationState string   `json:"verification_state,omitempty"`
+	SourceSystem      string   `json:"source_system,omitempty"`
+	Notes             string   `json:"notes,omitempty"`
 }
 
-// ValidRelTypes lists allowed relationship types.
+// ValidRelTypes lists the built-in relationship types. The relationship_type
+// metadata table (migration 000055) is the authoritative catalogue; this map
+// remains as the fallback for repositories without metadata access and keeps
+// every type that was ever valid (additive).
 var ValidRelTypes = map[string]bool{
 	"connected_to":      true,
 	"hosted_on":         true,
@@ -50,6 +64,24 @@ var ValidRelTypes = map[string]bool{
 	"stores":            true,
 	"monitors":          true,
 	"backs_up":          true,
+	// Extended standard catalogue (spec §11).
+	"backed_up_by":  true,
+	"managed_by":    true,
+	"manages":       true,
+	"assigned_to":   true,
+	"contains":      true,
+	"contained_by":  true,
+	"parent_of":     true,
+	"child_of":      true,
+	"located_in":    true,
+	"uses":          true,
+	"used_by":       true,
+}
+
+// ValidSources lists the origin vocabulary for relationships (spec §12).
+var ValidSources = map[string]bool{
+	"manual": true, "discovery": true, "agent": true, "import": true,
+	"api": true, "integration": true, "workflow": true, "rule": true,
 }
 
 // Repository defines persistence operations for relationships.
@@ -180,14 +212,28 @@ func (r *MemoryRepository) TraverseFrom(_ context.Context, orgID, rootCIID strin
 	return result, nil
 }
 
-// Handler provides HTTP handlers for relationship endpoints.
-type Handler struct {
-	repo Repository
+// TypeChecker validates a rel_type against the relationship_type metadata
+// catalogue when available. Implementations return (true, nil) for known keys
+// and (false, nil) for unknown ones.
+type TypeChecker interface {
+	Exists(ctx context.Context, orgID, key string) (bool, error)
 }
 
-// NewHandler creates a new relationship handler.
-func NewHandler(repo Repository) *Handler {
-	return &Handler{repo: repo}
+// Handler provides HTTP handlers for relationship endpoints.
+type Handler struct {
+	repo  Repository
+	types TypeChecker
+}
+
+// NewHandler creates a new relationship handler. An optional TypeChecker
+// enables metadata-driven rel_type validation; without one the built-in
+// ValidRelTypes catalogue is enforced.
+func NewHandler(repo Repository, checkers ...TypeChecker) *Handler {
+	h := &Handler{repo: repo}
+	if len(checkers) > 0 {
+		h.types = checkers[0]
+	}
+	return h
 }
 
 // RegisterRoutes registers relationship routes.
@@ -242,8 +288,16 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "source_ci_id, target_ci_id, and rel_type are required")
 		return
 	}
-	if !ValidRelTypes[req.RelType] {
+	if !h.validRelType(r, t.OrganizationID, req.RelType) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid rel_type")
+		return
+	}
+	if req.Source != "" && !ValidSources[req.Source] {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid source")
+		return
+	}
+	if req.Confidence != nil && (*req.Confidence < 0 || *req.Confidence > 1) {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "confidence must be between 0 and 1")
 		return
 	}
 
@@ -254,12 +308,22 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		RelType:        req.RelType,
 		Attributes:     req.Attributes,
 		Source:         req.Source,
+		Confidence:     req.Confidence,
+		SourceSystem:   req.SourceSystem,
+		Notes:          req.Notes,
 	}
 	if rel.Attributes == nil {
 		rel.Attributes = make(map[string]any)
 	}
 	if rel.Source == "" {
 		rel.Source = "manual"
+	}
+	if rel.Source == "manual" {
+		// Manual relationships are born verified; they must never be removed
+		// silently because discovery does not detect them (spec §12).
+		rel.VerificationState = "verified"
+	} else {
+		rel.VerificationState = req.VerificationState
 	}
 
 	if err := h.repo.Create(r.Context(), rel); err != nil {
@@ -268,6 +332,18 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	api.WriteJSON(w, http.StatusCreated, rel)
+}
+
+// validRelType resolves the rel_type against the metadata catalogue when
+// available, falling back to the built-in list.
+func (h *Handler) validRelType(r *http.Request, orgID, relType string) bool {
+	if h.types != nil {
+		ok, err := h.types.Exists(r.Context(), orgID, relType)
+		if err == nil {
+			return ok
+		}
+	}
+	return ValidRelTypes[relType]
 }
 
 // Delete handles DELETE /api/v1/relationships/{id}

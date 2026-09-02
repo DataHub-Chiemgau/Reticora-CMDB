@@ -49,21 +49,21 @@ type CreateOrderRequest struct {
 
 // UpdateOrderRequest is the payload for updating an order.
 type UpdateOrderRequest struct {
-	ClientID   *string  `json:"client_id,omitempty"`
-	Title      *string  `json:"title,omitempty"`
-	Supplier   *string  `json:"supplier,omitempty"`
-	TotalCost  *float64 `json:"total_cost,omitempty"`
-	Currency   *string  `json:"currency,omitempty"`
-	Notes      *string  `json:"notes,omitempty"`
+	ClientID  *string  `json:"client_id,omitempty"`
+	Title     *string  `json:"title,omitempty"`
+	Supplier  *string  `json:"supplier,omitempty"`
+	TotalCost *float64 `json:"total_cost,omitempty"`
+	Currency  *string  `json:"currency,omitempty"`
+	Notes     *string  `json:"notes,omitempty"`
 }
 
 // CreateItemRequest adds a position to an order.
 type CreateItemRequest struct {
-	Description   string  `json:"description"`
-	Quantity      float64 `json:"quantity"`
-	UnitPrice     float64 `json:"unit_price,omitempty"`
-	ConsumableID  string  `json:"consumable_id,omitempty"`
-	AssetID       string  `json:"asset_id,omitempty"`
+	Description  string  `json:"description"`
+	Quantity     float64 `json:"quantity"`
+	UnitPrice    float64 `json:"unit_price,omitempty"`
+	ConsumableID string  `json:"consumable_id,omitempty"`
+	AssetID      string  `json:"asset_id,omitempty"`
 }
 
 // FilterParams scopes order list queries.

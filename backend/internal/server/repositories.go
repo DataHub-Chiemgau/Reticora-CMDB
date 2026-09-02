@@ -7,35 +7,45 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/composition"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/training"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locationnode"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/order"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/training"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
@@ -57,12 +67,26 @@ func MemoryRepositories() Repositories {
 	} {
 		discoveryRepo.SeedCIType(typ, typ)
 	}
+	lifecycleStates := lifecycle.NewMemoryStateStore()
 	return Repositories{
 		CI:                ci.NewMemoryRepository(),
 		Relationship:      relationship.NewMemoryRepository(),
 		Webhook:           webhook.NewMemoryRepository(),
 		WebhookDeliveries: webhook.NewMemoryDeliveryStore(),
 		Discovery:         discoveryRepo,
+		CIType:            citype.NewMemoryRepository(),
+		RelationshipType:  relationshiptype.NewMemoryRepository(),
+		Lifecycle:         lifecycle.NewMemoryRepository(),
+		LocationNode:      locationnode.NewMemoryRepository(),
+		Movement:          movement.NewMemoryRepository(),
+		Reservation:       reservation.NewMemoryRepository(),
+		Composition:       composition.NewMemoryRepository(),
+		Override:          override.NewMemoryRepository(),
+		History:           history.NewMemoryRepository(),
+		SavedView:         savedview.NewMemoryRepository(),
+		FilterQuery:       nil, // memory mode: query engine requires SQL; endpoint reports 501
+		LifecycleStates:   lifecycleStates,
+		LifecycleResolver: lifecycleStates,
 		Asset:             assets,
 		Assignment:        assignment.NewMemoryRepository(),
 		Document:          document.NewMemoryRepository(),
@@ -142,5 +166,19 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		AI:                ai.NewPGRepository(pool),
 		ExportJobs:        export.NewPGJobRepository(pool),
 		Privacy:           privacy.NewPGRepository(pool),
+		CIType:            citype.NewPGRepository(pool),
+		RelationshipType:  relationshiptype.NewPGRepository(pool),
+		Lifecycle:         lifecycle.NewPGRepository(pool),
+		LocationNode:      locationnode.NewPGRepository(pool),
+		Movement:          movement.NewPGRepository(pool),
+		Reservation:       reservation.NewPGRepository(pool),
+		Composition:       composition.NewPGRepository(pool),
+		Override:          override.NewPGRepository(pool),
+		History:           history.NewPGRepository(pool),
+		SavedView:         savedview.NewPGRepository(pool),
+		FilterQuery:       savedview.NewPGQueryEngine(pool),
+		LifecycleStates:   lifecycle.NewPGStateStore(pool),
+		LifecycleResolver: lifecycle.NewResolver(pool),
+		Availability:      reservation.NewPGAvailability(pool),
 	}
 }

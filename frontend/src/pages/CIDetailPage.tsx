@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { TopologyGraphData } from '../api/client';
-import { useCI, useCINeighbors, useCIRelationships } from '../api/hooks';
+import { useCI, useCINeighbors, useCIRelationships, useUpdateCI } from '../api/hooks';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -11,6 +11,12 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { CIFormModal } from './CIFormModal';
 import { getStatusBadgeVariant, getStatusTranslationKey } from './ciStatus';
+import {
+  InstanceFieldsSection,
+  ProvenanceSection,
+  LifecycleSection,
+  ImpactSection,
+} from '../components/cmdb/CIDetailSections';
 
 export interface NeighborEntry {
   id: string;
@@ -64,6 +70,7 @@ export function CIDetailPage() {
   const ciQuery = useCI(id);
   const relationshipsQuery = useCIRelationships(id);
   const neighborsQuery = useCINeighbors(id);
+  const updateCI = useUpdateCI();
 
   if (ciQuery.isLoading) {
     return <SkeletonList rows={5} label={t('app.loading')} />;
@@ -217,6 +224,24 @@ export function CIDetailPage() {
             </ul>
           )}
         </Card>
+      </div>
+
+      {/* Advanced sections (progressive disclosure, spec §18): instance
+          fields, provenance/overrides, lifecycle, and impact analysis live
+          behind expandable sections so the simple view stays simple. */}
+      <div className="space-y-3">
+        <InstanceFieldsSection
+          ciId={ci.id}
+          attributes={ci.attributes ?? {}}
+          onChanged={(attrs) => updateCI.mutate({ id: ci.id, data: { attributes: attrs } })}
+        />
+        <ProvenanceSection ciId={ci.id} />
+        <LifecycleSection
+          entityType="cis"
+          entityId={ci.id}
+          currentState={(ci as { lifecycle_state?: string }).lifecycle_state}
+        />
+        <ImpactSection ciId={ci.id} />
       </div>
 
       <CIFormModal open={isEditOpen} onOpenChange={setIsEditOpen} ci={ci} />

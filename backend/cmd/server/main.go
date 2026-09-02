@@ -30,6 +30,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
@@ -242,20 +243,20 @@ func main() {
 	}()
 
 	mux, httpMetrics, err := server.NewRouter(repos, server.Options{
-		Version:            version,
-		MetricsTenantLabel: cfg.MetricsTenantLabel,
-		Entitlements:       entitlementSvc,
-		Dispatcher:         webhookDispatcher,
-		CIService:          ci.NewServiceWithLimits(repos.CI, entitlementSvc),
-		Credentials:        credential.NewService(repos.Credential, encryptor),
-		OIDC:               oidcProvider,
-		Sessions:           sessionIssuer,
-		UserProvisioner:    userProvisioner(repos),
+		Version:              version,
+		MetricsTenantLabel:   cfg.MetricsTenantLabel,
+		Entitlements:         entitlementSvc,
+		Dispatcher:           webhookDispatcher,
+		CIService:            ci.NewServiceWithLimits(repos.CI, entitlementSvc),
+		Credentials:          credential.NewService(repos.Credential, encryptor),
+		OIDC:                 oidcProvider,
+		Sessions:             sessionIssuer,
+		UserProvisioner:      userProvisioner(repos),
 		DefaultProvisionRole: cfg.DefaultProvisionRole,
-		Audit:              auditHandler,
-		AuditPool:          auditPool,
-		AIProvider:         aiProvider,
-		Blobs:              blobStore,
+		Audit:                auditHandler,
+		AuditPool:            auditPool,
+		AIProvider:           aiProvider,
+		Blobs:                blobStore,
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -281,6 +282,13 @@ func main() {
 		defer stopEvaluator()
 		go evaluator.Run(evalCtx, time.Minute)
 	}
+
+	// Release expired reservations until shutdown (spec §10). The sweeper is
+	// interval-driven and shares no state with request handling.
+	sweeper := reservation.NewSweeper(repos.Reservation, webhookDispatcher, time.Minute)
+	sweepCtx, stopSweeper := context.WithCancel(context.Background())
+	defer stopSweeper()
+	go sweeper.Run(sweepCtx)
 
 	// Session tokens are always verified cryptographically unless the operator
 	// explicitly opted into the insecure development mode. API keys are

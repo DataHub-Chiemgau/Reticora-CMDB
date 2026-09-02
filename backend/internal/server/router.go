@@ -17,33 +17,42 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/composition"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/training"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locationnode"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/order"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
@@ -51,6 +60,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/training"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
@@ -101,6 +111,21 @@ type Repositories struct {
 	AI                ai.Repository
 	ExportJobs        export.JobRepository
 	Privacy           privacy.Repository
+	// Enterprise CMDB + asset/inventory extension (additive modules).
+	CIType            citype.Repository
+	RelationshipType  relationshiptype.Repository
+	Lifecycle         lifecycle.Repository
+	LocationNode      locationnode.Repository
+	Movement          movement.Repository
+	Reservation       reservation.Repository
+	Composition       composition.Repository
+	Override          override.Repository
+	History           history.Repository
+	SavedView         savedview.Repository
+	FilterQuery       savedview.QueryEngine
+	LifecycleStates   lifecycle.StateStore
+	LifecycleResolver lifecycle.EntityResolver
+	Availability      reservation.AvailabilityProvider
 }
 
 // Options carries everything the router needs beyond the repositories.
@@ -185,20 +210,23 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		identity.NewHandler(opts.OIDC, opts.Sessions).WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole),
 		entitlement.NewHandler(opts.Entitlements),
 		ci.NewHandler(opts.CIService, opts.Dispatcher),
-		relationship.NewHandler(repos.Relationship),
+		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher),
-		discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship),
+		discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
+			WithProvenance(overrideProvenance{repo: repos.Override}),
 		topology.NewHandler(repos.CI, repos.Relationship),
 		export.NewHandler(repos.CI),
 		export.NewJobHandler(repos.ExportJobs, export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs), opts.Blobs),
-		asset.NewHandler(repos.Asset),
-		assignment.NewHandler(repos.Assignment),
+		asset.NewHandler(repos.Asset).
+			WithComposition(compositionParentLookup{repo: repos.Composition}).
+			WithCIs(ciLookup{repo: repos.CI}),
+		assignment.NewHandler(repos.Assignment).WithMovements(repos.Movement),
 		document.NewHandler(repos.Document, opts.Blobs),
 		stocktake.NewHandler(repos.Stocktake),
 		consumable.NewHandler(repos.Consumable),
-		order.NewHandler(repos.Order),
+		order.NewHandler(repos.Order).WithMovements(repos.Movement),
 		maintenance.NewHandler(repos.Maintenance),
-		disposal.NewHandler(repos.Disposal),
+		disposal.NewHandler(repos.Disposal).WithMovements(repos.Movement),
 		keymgmt.NewHandler(repos.Key),
 		training.NewHandler(repos.Training),
 		desk.NewHandler(repos.Desk),
@@ -221,6 +249,17 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		ipam.NewHandler(repos.IPAM),
 		monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)),
 		graphqlbff.NewHandler(repos.CI, repos.Relationship),
+		relationshiptype.NewHandler(repos.RelationshipType),
+		citype.NewHandler(repos.CIType, opts.Dispatcher),
+		lifecycle.NewHandler(repos.Lifecycle,
+			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, nil), repos.LifecycleResolver),
+		locationnode.NewHandler(repos.LocationNode),
+		movement.NewHandler(repos.Movement, opts.Dispatcher).WithAssets(assetCreator{repo: repos.Asset}),
+		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
+		composition.NewHandler(repos.Composition, opts.Dispatcher),
+		override.NewHandler(repos.Override, opts.Dispatcher),
+		history.NewHandler(repos.History),
+		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery),
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
 		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),
@@ -286,6 +325,26 @@ func validate(repos Repositories, opts Options) error {
 		return fmt.Errorf("server: entitlement service is required")
 	case opts.Credentials == nil:
 		return fmt.Errorf("server: credential service is required")
+	case repos.CIType == nil:
+		return fmt.Errorf("server: CI type repository is required")
+	case repos.RelationshipType == nil:
+		return fmt.Errorf("server: relationship type repository is required")
+	case repos.Lifecycle == nil:
+		return fmt.Errorf("server: lifecycle repository is required")
+	case repos.LocationNode == nil:
+		return fmt.Errorf("server: location node repository is required")
+	case repos.Movement == nil:
+		return fmt.Errorf("server: movement repository is required")
+	case repos.Reservation == nil:
+		return fmt.Errorf("server: reservation repository is required")
+	case repos.Composition == nil:
+		return fmt.Errorf("server: composition repository is required")
+	case repos.Override == nil:
+		return fmt.Errorf("server: override repository is required")
+	case repos.History == nil:
+		return fmt.Errorf("server: history repository is required")
+	case repos.SavedView == nil:
+		return fmt.Errorf("server: saved view repository is required")
 	}
 	return nil
 }

@@ -20,6 +20,12 @@ const relationshipSelectColumns = `
 	rel_type,
 	attributes,
 	source,
+	confidence,
+	first_seen_at,
+	last_seen_at,
+	verification_state,
+	COALESCE(source_system, ''),
+	COALESCE(notes, ''),
 	created_at,
 	updated_at
 `
@@ -123,12 +129,26 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 				target_ci_id,
 				rel_type,
 				attributes,
-				source
-			) VALUES ($1, $2, $3, $4, $5, $6)
+				source,
+				confidence,
+				first_seen_at,
+				last_seen_at,
+				verification_state,
+				source_system,
+				notes
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 			RETURNING id::text, created_at, updated_at
 		`
 		var createdAt time.Time
 		var updatedAt time.Time
+		firstSeen := any(nil)
+		if rel.Source != "manual" {
+			firstSeen = time.Now().UTC()
+		}
+		verification := rel.VerificationState
+		if verification == "" {
+			verification = "unverified"
+		}
 		if err := tx.QueryRow(ctx, query,
 			rel.OrganizationID,
 			rel.SourceCIID,
@@ -136,6 +156,12 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 			rel.RelType,
 			rel.Attributes,
 			rel.Source,
+			rel.Confidence,
+			firstSeen,
+			firstSeen,
+			verification,
+			nilIfEmptyStr(rel.SourceSystem),
+			nilIfEmptyStr(rel.Notes),
 		).Scan(&rel.ID, &createdAt, &updatedAt); err != nil {
 			return fmt.Errorf("create relationship: %w", err)
 		}
@@ -248,6 +274,9 @@ func scanRelationship(scanner relationshipScanner) (*Relationship, error) {
 	item := &Relationship{}
 	var createdAt time.Time
 	var updatedAt time.Time
+	var confidence *float64
+	var firstSeen, lastSeen *time.Time
+	var verification *string
 	if err := scanner.Scan(
 		&item.ID,
 		&item.OrganizationID,
@@ -256,6 +285,12 @@ func scanRelationship(scanner relationshipScanner) (*Relationship, error) {
 		&item.RelType,
 		&item.Attributes,
 		&item.Source,
+		&confidence,
+		&firstSeen,
+		&lastSeen,
+		&verification,
+		&item.SourceSystem,
+		&item.Notes,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
@@ -264,7 +299,24 @@ func scanRelationship(scanner relationshipScanner) (*Relationship, error) {
 	if item.Attributes == nil {
 		item.Attributes = make(map[string]any)
 	}
+	item.Confidence = confidence
+	if firstSeen != nil {
+		item.FirstSeenAt = firstSeen.UTC().Format(time.RFC3339Nano)
+	}
+	if lastSeen != nil {
+		item.LastSeenAt = lastSeen.UTC().Format(time.RFC3339Nano)
+	}
+	if verification != nil {
+		item.VerificationState = *verification
+	}
 	item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 	item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
 	return item, nil
+}
+
+func nilIfEmptyStr(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
 }

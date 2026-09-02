@@ -50,6 +50,21 @@ var ValidEvents = map[string]bool{
 	"relationship.created": true,
 	"relationship.deleted": true,
 	"discovery.completed":  true,
+	// Enterprise CMDB + asset/inventory extension (spec §20).
+	"ci_type.created":               true,
+	"ci_type.updated":               true,
+	"ci_type.deactivated":           true,
+	"ci_attribute.changed":          true,
+	"lifecycle.transitioned":        true,
+	"asset.movement":                true,
+	"inventory.movement":            true,
+	"reservation.created":           true,
+	"reservation.released":          true,
+	"composition.created":           true,
+	"composition.updated":           true,
+	"composition.deleted":           true,
+	"override.changed":              true,
+	"reconciliation.policy_changed": true,
 }
 
 // Repository defines persistence operations for webhooks.

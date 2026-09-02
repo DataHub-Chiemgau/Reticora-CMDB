@@ -84,4 +84,18 @@ var Catalogue = []Permission{
 	{Key: "agent:ingest", Resource: "agent", Action: "ingest", Description: "Ingest endpoint agent telemetry"},
 	{Key: "security:read", Resource: "security", Action: "read", Description: "Read security findings"},
 	{Key: "security:write", Resource: "security", Action: "write", Description: "Manage security findings"},
+	// Enterprise CMDB + asset/inventory extension (spec §21).
+	{Key: "ci_type:manage", Resource: "ci_type", Action: "manage", Description: "Manage CI types"},
+	{Key: "ci_attribute:manage", Resource: "ci_attribute", Action: "manage", Description: "Manage CI attribute definitions"},
+	{Key: "ci_instance_attribute:manage", Resource: "ci_instance_attribute", Action: "manage", Description: "Manage CI instance attributes"},
+	{Key: "relationship_type:manage", Resource: "relationship_type", Action: "manage", Description: "Manage relationship types"},
+	{Key: "asset:assign", Resource: "asset", Action: "assign", Description: "Assign assets to users or teams"},
+	{Key: "asset:move", Resource: "asset", Action: "move", Description: "Move assets between locations"},
+	{Key: "asset:reserve", Resource: "asset", Action: "reserve", Description: "Reserve assets and inventory items"},
+	{Key: "inventory:manage", Resource: "inventory", Action: "manage", Description: "Manage inventory locations and stock"},
+	{Key: "lifecycle:manage", Resource: "lifecycle", Action: "manage", Description: "Manage lifecycle definitions and transitions"},
+	{Key: "reconciliation:resolve", Resource: "reconciliation", Action: "resolve", Description: "Resolve reconciliation conflicts"},
+	{Key: "override:write", Resource: "override", Action: "write", Description: "Create and clear manual field overrides"},
+	{Key: "saved_view:read", Resource: "saved_view", Action: "read", Description: "Read saved views"},
+	{Key: "saved_view:write", Resource: "saved_view", Action: "write", Description: "Manage saved views"},
 }

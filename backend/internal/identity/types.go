@@ -91,6 +91,22 @@ const (
 	PermSearchRead        Permission = "search:read"
 	PermSearchWrite       Permission = "search:write"
 	PermAIRead            Permission = "ai:read"
+
+	// Enterprise CMDB + asset/inventory extension (spec §21). These keys are
+	// seeded into the permission catalogue by migration 000055.
+	PermCITypeManageNew         Permission = "ci_type:manage"
+	PermCIAttributeManage       Permission = "ci_attribute:manage"
+	PermCIInstanceAttributeManage Permission = "ci_instance_attribute:manage"
+	PermRelationshipTypeManage  Permission = "relationship_type:manage"
+	PermAssetAssign             Permission = "asset:assign"
+	PermAssetMove               Permission = "asset:move"
+	PermAssetReserve            Permission = "asset:reserve"
+	PermInventoryManage         Permission = "inventory:manage"
+	PermLifecycleManage         Permission = "lifecycle:manage"
+	PermReconciliationResolve   Permission = "reconciliation:resolve"
+	PermOverrideWrite           Permission = "override:write"
+	PermSavedViewRead           Permission = "saved_view:read"
+	PermSavedViewWrite          Permission = "saved_view:write"
 )
 
 // AllPermissions returns the full set of permissions the identity layer can
@@ -180,6 +196,19 @@ func allPermissions() []Permission {
 		PermSearchRead,
 		PermSearchWrite,
 		PermAIRead,
+		PermCITypeManageNew,
+		PermCIAttributeManage,
+		PermCIInstanceAttributeManage,
+		PermRelationshipTypeManage,
+		PermAssetAssign,
+		PermAssetMove,
+		PermAssetReserve,
+		PermInventoryManage,
+		PermLifecycleManage,
+		PermReconciliationResolve,
+		PermOverrideWrite,
+		PermSavedViewRead,
+		PermSavedViewWrite,
 	}
 }
 

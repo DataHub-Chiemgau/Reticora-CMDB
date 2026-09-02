@@ -41,7 +41,12 @@ export type AppPage =
   | 'trainings'
   | 'desks'
   | 'agents'
-  | 'findings';
+  | 'findings'
+  // Enterprise CMDB + asset/inventory extension (Phase E).
+  | 'ci-types'
+  | 'locations'
+  | 'inventory'
+  | 'saved-views';
 
 export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
@@ -78,6 +83,10 @@ export const pageToPath: Record<AppPage, string> = {
   desks: '/desks',
   agents: '/agents',
   findings: '/findings',
+  'ci-types': '/ci-types',
+  locations: '/locations',
+  inventory: '/inventory',
+  'saved-views': '/saved-views',
 };
 
 interface CommandPaletteProps {
@@ -136,176 +145,177 @@ export function CommandPalette({
   const search = useSearch({ q: open ? query : '', limit: 5 });
 
   const commands = useMemo<CommandItem[]>(
-    () => [
-      {
-        id: 'nav-dashboard',
-        label: t('commandPalette.commands.dashboard'),
-        keywords: ['dashboard overview'],
-        action: () => onNavigate('dashboard'),
-      },
-      {
-        id: 'nav-cmdb',
-        label: t('commandPalette.commands.cmdb'),
-        keywords: ['cmdb cis configuration items'],
-        action: () => onNavigate('cmdb'),
-      },
-      {
-        id: 'nav-topology',
-        label: t('commandPalette.commands.topology'),
-        keywords: ['topology topologie graph netzwerk'],
-        action: () => onNavigate('topology'),
-      },
-      {
-        id: 'nav-racks',
-        label: t('commandPalette.commands.racks'),
-        keywords: ['racks rack schrank he units'],
-        action: () => onNavigate('racks'),
-      },
-      {
-        id: 'nav-discovery',
-        label: t('commandPalette.commands.discovery'),
-        keywords: ['discovery collectors'],
-        action: () => onNavigate('discovery'),
-      },
-      {
-        id: 'create-ci',
-        label: t('commandPalette.commands.createCI'),
-        keywords: ['create ci new asset item'],
-        action: onCreateCI,
-      },
-      {
-        id: 'toggle-theme',
-        label: t('commandPalette.commands.toggleDarkMode'),
-        keywords: ['theme dark light appearance'],
-        action: onToggleDarkMode,
-      },
-      {
-        id: 'nav-assets',
-        label: t('commandPalette.commands.assets', 'Inventar öffnen'),
-        keywords: ['assets inventar hardware'],
-        action: () => onNavigate('assets'),
-      },
-      {
-        id: 'nav-assignments',
-        label: t('commandPalette.commands.assignments', 'Zuweisungen öffnen'),
-        keywords: ['assignments zuweisungen transfer'],
-        action: () => onNavigate('assignments'),
-      },
-      {
-        id: 'nav-documents',
-        label: t('commandPalette.commands.documents', 'Dokumente öffnen'),
-        keywords: ['documents dokumente files'],
-        action: () => onNavigate('documents'),
-      },
-      {
-        id: 'nav-stocktake',
-        label: t('commandPalette.commands.stocktake', 'Inventur öffnen'),
-        keywords: ['stocktake inventur scan'],
-        action: () => onNavigate('stocktake'),
-      },
-      {
-        id: 'nav-tickets',
-        label: t('commandPalette.commands.tickets', 'Tickets öffnen'),
-        keywords: ['tickets support helpdesk'],
-        action: () => onNavigate('tickets'),
-      },
-      {
-        id: 'nav-users',
-        label: t('commandPalette.commands.users', 'Benutzer & Teams öffnen'),
-        keywords: ['users teams roles benutzer rollen'],
-        action: () => onNavigate('users'),
-      },
-      {
-        id: 'nav-permissions',
-        label: t('commandPalette.commands.permissions'),
-        keywords: ['permissions berechtigungen rbac abac'],
-        action: () => onNavigate('permissions'),
-      },
-      {
-        id: 'nav-slas',
-        label: t('commandPalette.commands.slas'),
-        keywords: ['sla service levels breach policies'],
-        action: () => onNavigate('slas'),
-      },
-      {
-        id: 'nav-forms',
-        label: t('commandPalette.commands.forms'),
-        keywords: ['forms formulare submissions'],
-        action: () => onNavigate('forms'),
-      },
-      {
-        id: 'nav-workflows',
-        label: t('commandPalette.commands.workflows'),
-        keywords: ['workflow automation approvals'],
-        action: () => onNavigate('workflows'),
-      },
-      {
-        id: 'nav-compliance',
-        label: t('commandPalette.commands.compliance'),
-        keywords: ['compliance iso nis2 score'],
-        action: () => onNavigate('compliance'),
-      },
-      {
-        id: 'nav-iga',
-        label: t('commandPalette.commands.iga'),
-        keywords: ['iga provisioning scim access reviews'],
-        action: () => onNavigate('iga'),
-      },
-      {
-        id: 'nav-assistant',
-        label: t('commandPalette.commands.assistant'),
-        keywords: ['assistant ki ai rag'],
-        action: () => onNavigate('assistant'),
-      },
-      {
-        id: 'nav-webhooks',
-        label: t('commandPalette.commands.webhooks'),
-        keywords: ['webhooks subscriptions deliveries dead letter'],
-        action: () => onNavigate('webhooks'),
-      },
-      {
-        id: 'nav-export',
-        label: t('commandPalette.commands.export'),
-        keywords: ['export csv datev json download'],
-        action: () => onNavigate('export'),
-      },
-      {
-        id: 'nav-monitoring',
-        label: t('commandPalette.commands.monitoring'),
-        keywords: ['monitoring metrics alerts'],
-        action: () => onNavigate('monitoring'),
-      },
-      {
-        id: 'nav-audit',
-        label: t('commandPalette.commands.audit', 'Audit-Protokoll öffnen'),
-        keywords: ['audit protokoll hash chain compliance'],
-        action: () => onNavigate('audit'),
-      },
-      {
-        id: 'nav-security',
-        label: t('commandPalette.commands.security', 'Sicherheit & DSGVO öffnen'),
-        keywords: ['security sicherheit dsgvo gdpr privacy retention compliance report'],
-        action: () => onNavigate('security'),
-      },
-      {
-        id: 'nav-map',
-        label: t('commandPalette.commands.map', 'Karte öffnen'),
-        keywords: ['map karte gis standorte sites'],
-        action: () => onNavigate('map'),
-      },
-      {
-        id: 'nav-roomplan',
-        label: t('commandPalette.commands.roomplan', 'Raumplan öffnen'),
-        keywords: ['roomplan raumplan floorplan raum position'],
-        action: () => onNavigate('roomplan'),
-      },
-    ].filter((cmd) => {
-      // Hide navigation commands for modules the tenant's plan does not
-      // include, mirroring the gated main navigation.
-      if (!cmd.id.startsWith('nav-')) return true;
-      const page = cmd.id.slice(4) as AppPage;
-      return isFeatureEnabled(navFeatureFor[page]);
-    }),
+    () =>
+      [
+        {
+          id: 'nav-dashboard',
+          label: t('commandPalette.commands.dashboard'),
+          keywords: ['dashboard overview'],
+          action: () => onNavigate('dashboard'),
+        },
+        {
+          id: 'nav-cmdb',
+          label: t('commandPalette.commands.cmdb'),
+          keywords: ['cmdb cis configuration items'],
+          action: () => onNavigate('cmdb'),
+        },
+        {
+          id: 'nav-topology',
+          label: t('commandPalette.commands.topology'),
+          keywords: ['topology topologie graph netzwerk'],
+          action: () => onNavigate('topology'),
+        },
+        {
+          id: 'nav-racks',
+          label: t('commandPalette.commands.racks'),
+          keywords: ['racks rack schrank he units'],
+          action: () => onNavigate('racks'),
+        },
+        {
+          id: 'nav-discovery',
+          label: t('commandPalette.commands.discovery'),
+          keywords: ['discovery collectors'],
+          action: () => onNavigate('discovery'),
+        },
+        {
+          id: 'create-ci',
+          label: t('commandPalette.commands.createCI'),
+          keywords: ['create ci new asset item'],
+          action: onCreateCI,
+        },
+        {
+          id: 'toggle-theme',
+          label: t('commandPalette.commands.toggleDarkMode'),
+          keywords: ['theme dark light appearance'],
+          action: onToggleDarkMode,
+        },
+        {
+          id: 'nav-assets',
+          label: t('commandPalette.commands.assets', 'Inventar öffnen'),
+          keywords: ['assets inventar hardware'],
+          action: () => onNavigate('assets'),
+        },
+        {
+          id: 'nav-assignments',
+          label: t('commandPalette.commands.assignments', 'Zuweisungen öffnen'),
+          keywords: ['assignments zuweisungen transfer'],
+          action: () => onNavigate('assignments'),
+        },
+        {
+          id: 'nav-documents',
+          label: t('commandPalette.commands.documents', 'Dokumente öffnen'),
+          keywords: ['documents dokumente files'],
+          action: () => onNavigate('documents'),
+        },
+        {
+          id: 'nav-stocktake',
+          label: t('commandPalette.commands.stocktake', 'Inventur öffnen'),
+          keywords: ['stocktake inventur scan'],
+          action: () => onNavigate('stocktake'),
+        },
+        {
+          id: 'nav-tickets',
+          label: t('commandPalette.commands.tickets', 'Tickets öffnen'),
+          keywords: ['tickets support helpdesk'],
+          action: () => onNavigate('tickets'),
+        },
+        {
+          id: 'nav-users',
+          label: t('commandPalette.commands.users', 'Benutzer & Teams öffnen'),
+          keywords: ['users teams roles benutzer rollen'],
+          action: () => onNavigate('users'),
+        },
+        {
+          id: 'nav-permissions',
+          label: t('commandPalette.commands.permissions'),
+          keywords: ['permissions berechtigungen rbac abac'],
+          action: () => onNavigate('permissions'),
+        },
+        {
+          id: 'nav-slas',
+          label: t('commandPalette.commands.slas'),
+          keywords: ['sla service levels breach policies'],
+          action: () => onNavigate('slas'),
+        },
+        {
+          id: 'nav-forms',
+          label: t('commandPalette.commands.forms'),
+          keywords: ['forms formulare submissions'],
+          action: () => onNavigate('forms'),
+        },
+        {
+          id: 'nav-workflows',
+          label: t('commandPalette.commands.workflows'),
+          keywords: ['workflow automation approvals'],
+          action: () => onNavigate('workflows'),
+        },
+        {
+          id: 'nav-compliance',
+          label: t('commandPalette.commands.compliance'),
+          keywords: ['compliance iso nis2 score'],
+          action: () => onNavigate('compliance'),
+        },
+        {
+          id: 'nav-iga',
+          label: t('commandPalette.commands.iga'),
+          keywords: ['iga provisioning scim access reviews'],
+          action: () => onNavigate('iga'),
+        },
+        {
+          id: 'nav-assistant',
+          label: t('commandPalette.commands.assistant'),
+          keywords: ['assistant ki ai rag'],
+          action: () => onNavigate('assistant'),
+        },
+        {
+          id: 'nav-webhooks',
+          label: t('commandPalette.commands.webhooks'),
+          keywords: ['webhooks subscriptions deliveries dead letter'],
+          action: () => onNavigate('webhooks'),
+        },
+        {
+          id: 'nav-export',
+          label: t('commandPalette.commands.export'),
+          keywords: ['export csv datev json download'],
+          action: () => onNavigate('export'),
+        },
+        {
+          id: 'nav-monitoring',
+          label: t('commandPalette.commands.monitoring'),
+          keywords: ['monitoring metrics alerts'],
+          action: () => onNavigate('monitoring'),
+        },
+        {
+          id: 'nav-audit',
+          label: t('commandPalette.commands.audit', 'Audit-Protokoll öffnen'),
+          keywords: ['audit protokoll hash chain compliance'],
+          action: () => onNavigate('audit'),
+        },
+        {
+          id: 'nav-security',
+          label: t('commandPalette.commands.security', 'Sicherheit & DSGVO öffnen'),
+          keywords: ['security sicherheit dsgvo gdpr privacy retention compliance report'],
+          action: () => onNavigate('security'),
+        },
+        {
+          id: 'nav-map',
+          label: t('commandPalette.commands.map', 'Karte öffnen'),
+          keywords: ['map karte gis standorte sites'],
+          action: () => onNavigate('map'),
+        },
+        {
+          id: 'nav-roomplan',
+          label: t('commandPalette.commands.roomplan', 'Raumplan öffnen'),
+          keywords: ['roomplan raumplan floorplan raum position'],
+          action: () => onNavigate('roomplan'),
+        },
+      ].filter((cmd) => {
+        // Hide navigation commands for modules the tenant's plan does not
+        // include, mirroring the gated main navigation.
+        if (!cmd.id.startsWith('nav-')) return true;
+        const page = cmd.id.slice(4) as AppPage;
+        return isFeatureEnabled(navFeatureFor[page]);
+      }),
     [onCreateCI, onNavigate, onToggleDarkMode, t, isFeatureEnabled],
   );
 
