@@ -56,6 +56,11 @@ Usage:
   ./install-cloud.sh                    interactive installation
   ./install-cloud.sh --non-interactive  use existing .env / defaults /
                                         generated secrets without prompting
+
+Non-interactive runs never enable HTTPS on their own: a public base URL only
+seeds the interactive prompt. To provision a Let's Encrypt certificate
+unattended, set RETICORA_TLS_DOMAIN (and optionally RETICORA_CERT_EMAIL) in
+the environment or .env explicitly.
 EOF
 }
 
@@ -372,6 +377,23 @@ valid_email() {
     printf '%s' "$1" | grep -qE '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'
 }
 
+# explain_domain_error <value> <suggestion-nameref> — warns why a domain was
+# rejected and, when the mistake is fixable (a URL with scheme, a trailing
+# port or path), suggests the stripped hostname via the nameref so it becomes
+# the next prompt's default. Without a suggestion ask_validated would offer
+# the rejected value itself as the default, looping on every Enter.
+explain_domain_error() {
+    local -n _suggest="$2"
+    local stripped
+    stripped="$(printf '%s' "$1" | sed -E 's|^[a-zA-Z][a-zA-Z0-9+.-]*://||; s|^//||; s|[:/].*$||')"
+    if [ -n "$stripped" ] && [ "$stripped" != "$1" ] && valid_domain "$stripped"; then
+        _suggest="$stripped"
+        warn "Invalid input — enter a plain domain name without scheme, port or path (e.g. $_suggest)."
+    else
+        warn "Invalid input — enter a public DNS domain name such as cmdb.example.com (labels separated by dots; no scheme, port or path), or leave empty for plain HTTP."
+    fi
+}
+
 # Optional variants: empty input keeps the feature disabled.
 valid_optional_domain() { [ -z "$1" ] || valid_domain "$1"; }
 valid_optional_email()  { [ -z "$1" ] || valid_email "$1"; }
@@ -551,26 +573,35 @@ collect_config() {
     # A public domain enables automatic TLS via nginx + Certbot: the installer
     # bootstraps a self-signed certificate so nginx can start, then issues the
     # real certificate with the ACME http-01 challenge and reloads nginx.
+    #
+    # Interactive runs derive a suggestion from the public base URL when it is
+    # not a localhost/literal-IP address (Let's Encrypt requires a public DNS
+    # name). Non-interactive runs deliberately do NOT: the derived value is a
+    # prompt suggestion, not a decision — a placeholder such as the documented
+    # example "cmdb.example.com", or any DNS name that does not resolve to
+    # this host, would otherwise silently switch the UI to port 80 and start a
+    # Let's Encrypt attempt that can never succeed. Unattended runs therefore
+    # only reuse an explicitly configured RETICORA_TLS_DOMAIN (existing .env
+    # or environment); to enable HTTPS unattended, set RETICORA_TLS_DOMAIN.
     local def_tls_domain
     def_tls_domain="$(env_get RETICORA_TLS_DOMAIN || true)"
-    if [ -z "$def_tls_domain" ]; then
-        # Derive a suggestion from the public base URL when it is not a
-        # localhost/literal-IP address (Let's Encrypt requires a public DNS name).
-        def_tls_domain="$(printf '%s' "$RETICORA_PUBLIC_BASE_URL" | sed -E 's|^https?://||; s|[:/].*$||')"
-        case "$def_tls_domain" in
-            localhost|127.*|0.0.0.0|[0-9]*.[0-9]*.[0-9]*.[0-9]*) def_tls_domain="" ;;
-        esac
-    fi
+    def_tls_domain="${def_tls_domain:-${RETICORA_TLS_DOMAIN:-}}"
     if is_tty; then
+        if [ -z "$def_tls_domain" ]; then
+            def_tls_domain="$(printf '%s' "$RETICORA_PUBLIC_BASE_URL" | sed -E 's|^https?://||; s|[:/].*$||')"
+            case "$def_tls_domain" in
+                localhost|127.*|0.0.0.0|[0-9]*.[0-9]*.[0-9]*.[0-9]*) def_tls_domain="" ;;
+            esac
+        fi
         echo
         echo "HTTPS (recommended for production): enter a public domain name to"
         echo "automatically obtain a free Let's Encrypt certificate (requires ports"
         echo "80/443 reachable from the internet; the UI is then served at"
         echo "https://<domain> on port 443). Leave empty to keep plain HTTP."
-        ask_validated RETICORA_TLS_DOMAIN "Public domain for HTTPS (empty = no TLS, optional)" "$def_tls_domain" valid_optional_domain
+        ask_validated RETICORA_TLS_DOMAIN "Public domain for HTTPS (empty = no TLS, optional)" "$def_tls_domain" valid_optional_domain explain_domain_error
     elif [ -n "$def_tls_domain" ] && valid_domain "$def_tls_domain"; then
-        # Non-interactive run: reuse the configured domain (from .env, or
-        # derived above from an https:// public base URL with a DNS name).
+        # Non-interactive run: reuse the explicitly configured domain (.env or
+        # process environment).
         RETICORA_TLS_DOMAIN="$def_tls_domain"
     else
         RETICORA_TLS_DOMAIN=""

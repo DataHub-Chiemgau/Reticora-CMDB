@@ -129,6 +129,70 @@ run_test   "validate_tls_material accepts a consistent cert/key pair" test_tls_v
 expect_fail "validate_tls_material rejects a mismatched key"          test_tls_key_mismatch
 expect_fail "validate_tls_material rejects an unparseable cert"       test_tls_unparseable
 
+# ─── URL / domain validators and error hints ──────────────────────────────────
+
+test_valid_url_https_host() { valid_url "https://dev.reticora.cloud"; }
+test_valid_url_http_localhost_port() { valid_url "http://localhost:3000"; }
+test_valid_url_rejects_bare_host() { valid_url "dev.reticora.cloud"; }
+
+test_explain_url_error_suggests_scheme() {
+    local suggestion=""
+    explain_url_error "dev.reticora.cloud" suggestion 2>/dev/null
+    [ "$suggestion" = "https://dev.reticora.cloud" ] && valid_url "$suggestion"
+}
+
+test_valid_domain_simple() { valid_domain "dev.reticora.cloud"; }
+test_valid_domain_rejects_url() { valid_domain "https://dev.reticora.cloud"; }
+test_valid_domain_rejects_path() { valid_domain "dev.reticora.cloud/auth"; }
+test_valid_domain_rejects_port() { valid_domain "dev.reticora.cloud:443"; }
+test_valid_domain_rejects_single_label() { valid_domain "localhost"; }
+
+test_valid_optional_domain_accepts_empty() { valid_optional_domain ""; }
+test_valid_optional_domain_rejects_url() { valid_optional_domain "https://dev.reticora.cloud"; }
+
+test_explain_domain_error_strips_scheme() {
+    local suggestion=""
+    explain_domain_error "https://dev.reticora.cloud" suggestion 2>/dev/null
+    [ "$suggestion" = "dev.reticora.cloud" ] && valid_domain "$suggestion"
+}
+
+test_explain_domain_error_strips_port_and_path() {
+    local suggestion=""
+    explain_domain_error "dev.reticora.cloud:8443/auth" suggestion 2>/dev/null
+    [ "$suggestion" = "dev.reticora.cloud" ] && valid_domain "$suggestion"
+}
+
+test_explain_domain_error_leaves_empty_alone() {
+    # An empty answer is valid (TLS disabled) and must never be "corrected".
+    local suggestion=""
+    explain_domain_error "" suggestion 2>/dev/null
+    [ -z "$suggestion" ]
+}
+
+test_explain_domain_error_no_fixable_suggestion() {
+    # Nothing salvageable: the hint must not echo the rejected value back,
+    # otherwise ask_validated would offer it as the new default and loop.
+    local suggestion=""
+    explain_domain_error "not a domain" suggestion 2>/dev/null
+    [ -z "$suggestion" ]
+}
+
+run_test   "valid_url accepts an https URL"                            test_valid_url_https_host
+run_test   "valid_url accepts http://localhost with port"              test_valid_url_http_localhost_port
+expect_fail "valid_url rejects a bare hostname"                        test_valid_url_rejects_bare_host
+run_test   "explain_url_error suggests adding the https:// scheme"     test_explain_url_error_suggests_scheme
+run_test   "valid_domain accepts a plain domain"                       test_valid_domain_simple
+expect_fail "valid_domain rejects a URL with scheme"                   test_valid_domain_rejects_url
+expect_fail "valid_domain rejects a domain with a path"                test_valid_domain_rejects_path
+expect_fail "valid_domain rejects a domain with a port"                test_valid_domain_rejects_port
+expect_fail "valid_domain rejects a single-label host"                 test_valid_domain_rejects_single_label
+run_test   "valid_optional_domain accepts empty input"                 test_valid_optional_domain_accepts_empty
+expect_fail "valid_optional_domain rejects a URL"                      test_valid_optional_domain_rejects_url
+run_test   "explain_domain_error strips a scheme"                      test_explain_domain_error_strips_scheme
+run_test   "explain_domain_error strips port and path"                 test_explain_domain_error_strips_port_and_path
+run_test   "explain_domain_error leaves empty input alone"             test_explain_domain_error_leaves_empty_alone
+run_test   "explain_domain_error does not recycle unfixable input"     test_explain_domain_error_no_fixable_suggestion
+
 # ─── summary ──────────────────────────────────────────────────────────────────
 echo
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
