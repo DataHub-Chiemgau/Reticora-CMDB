@@ -126,6 +126,9 @@ func (r *MemoryRepository) RecordDiscovered(_ context.Context, orgID, ciID, fiel
 }
 
 func (r *MemoryRepository) SetOverride(_ context.Context, orgID, ciID, fieldName string, value any, author, reason string, protected bool) (*FieldValue, error) {
+	if reason == "" {
+		return nil, fmt.Errorf("override reason is required")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := time.Now().UTC()

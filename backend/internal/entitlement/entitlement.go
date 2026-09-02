@@ -177,6 +177,7 @@ type Options struct {
 
 type cacheEntry struct {
 	entitlements []Entitlement
+	basePlan     Plan
 	fetchedAt    time.Time
 }
 
@@ -210,19 +211,19 @@ func NewService(repo Repository, opts Options) *Service {
 }
 
 // List returns the effective entitlements for the organization, including the
-// implicit ones derived from the default plan.
+// implicit ones derived from the organization's base plan.
 func (s *Service) List(ctx context.Context, orgID string) ([]Entitlement, error) {
-	stored, err := s.load(ctx, orgID)
+	basePlan, stored, err := s.load(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
-	return s.effective(orgID, stored), nil
+	return s.effective(orgID, basePlan, stored), nil
 }
 
 // Check returns the effective entitlement for a feature and whether it grants
 // access.
 func (s *Service) Check(ctx context.Context, orgID, featureKey string) (Entitlement, bool, error) {
-	stored, err := s.load(ctx, orgID)
+	basePlan, stored, err := s.load(ctx, orgID)
 	if err != nil {
 		return Entitlement{}, false, err
 	}
@@ -241,8 +242,8 @@ func (s *Service) Check(ctx context.Context, orgID, featureKey string) (Entitlem
 	implied := Entitlement{
 		OrganizationID: orgID,
 		FeatureKey:     featureKey,
-		Plan:           s.opts.DefaultPlan,
-		Enabled:        planIncludes(s.opts.DefaultPlan, featureKey),
+		Plan:           basePlan,
+		Enabled:        planIncludes(basePlan, featureKey),
 	}
 	if !s.opts.Enforce {
 		implied.Enabled = true
@@ -304,26 +305,36 @@ func (s *Service) Grant(ctx context.Context, ent Entitlement) (Entitlement, erro
 	return stored, nil
 }
 
-func (s *Service) load(ctx context.Context, orgID string) ([]Entitlement, error) {
+func (s *Service) load(ctx context.Context, orgID string) (Plan, []Entitlement, error) {
 	now := s.now()
 
 	s.mu.RLock()
 	entry, ok := s.cache[orgID]
 	s.mu.RUnlock()
 	if ok && now.Sub(entry.fetchedAt) < s.opts.CacheTTL {
-		return entry.entitlements, nil
+		return entry.basePlan, entry.entitlements, nil
 	}
 
 	items, err := s.repo.List(ctx, orgID)
 	if err != nil {
-		return nil, err
+		return "", nil, err
+	}
+
+	// The per-organization plan column is the base plan; the server-wide
+	// default only applies when the organization has no plan set. Plan
+	// changes propagate within CacheTTL.
+	basePlan := s.opts.DefaultPlan
+	if orgPlan, err := s.repo.OrganizationPlan(ctx, orgID); err == nil {
+		if trimmed := strings.TrimSpace(string(orgPlan)); trimmed != "" {
+			basePlan = normalizePlan(orgPlan)
+		}
 	}
 
 	s.mu.Lock()
-	s.cache[orgID] = cacheEntry{entitlements: items, fetchedAt: now}
+	s.cache[orgID] = cacheEntry{entitlements: items, basePlan: basePlan, fetchedAt: now}
 	s.mu.Unlock()
 
-	return items, nil
+	return basePlan, items, nil
 }
 
 func (s *Service) invalidate(orgID string) {
@@ -333,8 +344,8 @@ func (s *Service) invalidate(orgID string) {
 }
 
 // effective merges the stored entitlements with the features implied by the
-// default plan so callers see the complete picture.
-func (s *Service) effective(orgID string, stored []Entitlement) []Entitlement {
+// organization's base plan so callers see the complete picture.
+func (s *Service) effective(orgID string, basePlan Plan, stored []Entitlement) []Entitlement {
 	now := s.now()
 	seen := make(map[string]bool, len(stored))
 	out := make([]Entitlement, 0, len(stored))
@@ -349,14 +360,14 @@ func (s *Service) effective(orgID string, stored []Entitlement) []Entitlement {
 		out = append(out, ent)
 	}
 
-	for _, feature := range PlanFeatures(s.opts.DefaultPlan) {
+	for _, feature := range PlanFeatures(basePlan) {
 		if seen[feature] {
 			continue
 		}
 		out = append(out, Entitlement{
 			OrganizationID: orgID,
 			FeatureKey:     feature,
-			Plan:           s.opts.DefaultPlan,
+			Plan:           basePlan,
 			Enabled:        true,
 		})
 	}

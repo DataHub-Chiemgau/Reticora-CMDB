@@ -38,9 +38,10 @@ func (s *Schema) RegisterQuery(name string, resolver QueryResolver) {
 
 // Handler serves the GraphQL BFF endpoint.
 type Handler struct {
-	ciRepo  ci.Repository
-	relRepo relationship.Repository
-	schema  *Schema
+	ciRepo   ci.Repository
+	relRepo  relationship.Repository
+	ciLoader func(ctx context.Context, orgID, id string) (*ci.Item, error)
+	schema   *Schema
 }
 
 // User represents the current authenticated user in GraphQL responses.
@@ -103,6 +104,14 @@ func NewHandler(ciRepo ci.Repository, relRepo relationship.Repository) *Handler 
 	}
 	h.registerQueries()
 	defaultHandler = h
+	return h
+}
+
+// WithCILoader replaces the single-CI loader used by the `ci` query, letting
+// the router route reads through the CI service so GraphQL responses carry
+// the same effective (override-aware) attributes as the REST read model.
+func (h *Handler) WithCILoader(loader func(ctx context.Context, orgID, id string) (*ci.Item, error)) *Handler {
+	h.ciLoader = loader
 	return h
 }
 
@@ -242,6 +251,9 @@ func (h *Handler) resolveCI(ctx context.Context, args map[string]any) (any, erro
 		return nil, fmt.Errorf("id is required")
 	}
 
+	if h.ciLoader != nil {
+		return h.ciLoader(ctx, t.OrganizationID, id)
+	}
 	return h.ciRepo.GetByID(ctx, t.OrganizationID, id)
 }
 

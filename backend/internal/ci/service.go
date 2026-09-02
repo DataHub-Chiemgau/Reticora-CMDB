@@ -2,6 +2,7 @@ package ci
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -86,9 +87,10 @@ func ciSummary(item *Item) string {
 // ci_change rows are written by the repository inside the same transaction as
 // the mutation, so history can never diverge from the stored data.
 type Service struct {
-	repo   Repository
-	limit  LimitGuard
-	fields FieldResolver
+	repo      Repository
+	limit     LimitGuard
+	fields    FieldResolver
+	effective EffectiveValueSource
 }
 
 // NewService creates a CI service.
@@ -111,6 +113,21 @@ func (s *Service) WithFieldResolver(fields FieldResolver) *Service {
 	return s
 }
 
+// EffectiveValueSource resolves the effective (override-aware) values of a
+// CI's tracked fields. Implemented by an adapter over the override module;
+// the ci package declares its own narrow port so it does not import override.
+type EffectiveValueSource interface {
+	EffectiveValues(ctx context.Context, orgID, ciID string) (map[string]any, error)
+}
+
+// WithEffectiveValues enables the overlay of override-aware effective values
+// onto single-CI reads (GET /cis/{id} and the GraphQL ci resolver). Without a
+// source, reads return raw attributes only.
+func (s *Service) WithEffectiveValues(src EffectiveValueSource) *Service {
+	s.effective = src
+	return s
+}
+
 // validate checks the effective attributes of a CI against its field metadata.
 func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, existing, patch map[string]any) error {
 	if s.fields == nil {
@@ -128,9 +145,23 @@ func (s *Service) List(ctx context.Context, orgID string, filter FilterParams, p
 	return s.repo.List(ctx, orgID, filter, page)
 }
 
-// GetByID retrieves a single CI by ID.
+// GetByID retrieves a single CI by ID. When an effective-value source is
+// configured, the result carries EffectiveAttributes: the raw attributes
+// overlaid with override-aware effective field values (audit finding H6).
 func (s *Service) GetByID(ctx context.Context, orgID, id string) (*Item, error) {
-	return s.repo.GetByID(ctx, orgID, id)
+	item, err := s.repo.GetByID(ctx, orgID, id)
+	if err != nil || item == nil || s.effective == nil {
+		return item, err
+	}
+	values, err := s.effective.EffectiveValues(ctx, orgID, id)
+	if err != nil {
+		// Best-effort: the raw CI read must not fail because the
+		// provenance store is unavailable, but the gap is logged.
+		slog.Warn("could not resolve effective field values", "ci_id", id, "error", err)
+		return item, nil
+	}
+	item.EffectiveAttributes = mergeAttributes(item.Attributes, values)
+	return item, nil
 }
 
 // Create inserts a new CI after verifying the tenant's licensed CI limit.

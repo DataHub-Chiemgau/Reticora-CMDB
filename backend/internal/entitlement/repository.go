@@ -13,6 +13,9 @@ type Repository interface {
 	// Upsert stores an entitlement, replacing an existing row for the same
 	// (organization, feature) pair.
 	Upsert(ctx context.Context, ent Entitlement) (Entitlement, error)
+	// OrganizationPlan returns the base plan stored on the organization
+	// record, or "" when the organization has no plan set.
+	OrganizationPlan(ctx context.Context, orgID string) (Plan, error)
 }
 
 // MemoryRepository is an in-memory entitlement store used by tests and the
@@ -20,11 +23,26 @@ type Repository interface {
 type MemoryRepository struct {
 	mu    sync.RWMutex
 	items map[string][]Entitlement
+	plans map[string]Plan
 }
 
 // NewMemoryRepository creates an empty in-memory entitlement repository.
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{items: make(map[string][]Entitlement)}
+	return &MemoryRepository{items: make(map[string][]Entitlement), plans: make(map[string]Plan)}
+}
+
+// SetOrganizationPlan stores the base plan for an organization (tests/dev mode).
+func (r *MemoryRepository) SetOrganizationPlan(orgID string, plan Plan) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.plans[orgID] = plan
+}
+
+// OrganizationPlan returns the stored base plan, or "" when unset.
+func (r *MemoryRepository) OrganizationPlan(_ context.Context, orgID string) (Plan, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.plans[orgID], nil
 }
 
 // List returns the entitlements stored for the organization.

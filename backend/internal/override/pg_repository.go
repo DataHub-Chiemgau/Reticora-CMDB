@@ -62,11 +62,29 @@ func policyPrioritiesTx(ctx context.Context, tx pgx.Tx, orgID string) []string {
 }
 
 func (r *PGRepository) withEffectiveTx(ctx context.Context, tx pgx.Tx, fv *FieldValue) *FieldValue {
-	priorities := policyPrioritiesTx(ctx, tx, fv.OrganizationID)
+	return withEffective(fv, policyPrioritiesTx(ctx, tx, fv.OrganizationID))
+}
+
+func withEffective(fv *FieldValue, priorities []string) *FieldValue {
 	out := *fv
 	out.EffectiveValue = ResolveEffective(fv, priorities)
 	out.Diverged = IsDiverged(fv, priorities)
 	return &out
+}
+
+// collectFieldValues drains and closes the row set before any further query
+// runs on the same connection.
+func collectFieldValues(rows pgx.Rows) ([]FieldValue, error) {
+	defer rows.Close()
+	var out []FieldValue
+	for rows.Next() {
+		fv, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *fv)
+	}
+	return out, rows.Err()
 }
 
 // ListForCI returns all tracked field values of a CI with resolved effective
@@ -80,15 +98,18 @@ func (r *PGRepository) ListForCI(ctx context.Context, orgID, ciID string) ([]Fie
 		if err != nil {
 			return fmt.Errorf("list field values: %w", err)
 		}
-		defer rows.Close()
-		for rows.Next() {
-			fv, err := scan(rows)
-			if err != nil {
-				return err
-			}
-			out = append(out, *r.withEffectiveTx(ctx, tx, fv))
+		// Collect all rows before issuing further queries on the same
+		// connection: interleaving QueryRow while rows are open causes
+		// "conn busy" failures under load (audit finding H4).
+		values, err := collectFieldValues(rows)
+		if err != nil {
+			return err
 		}
-		return rows.Err()
+		priorities := policyPrioritiesTx(ctx, tx, orgID)
+		for i := range values {
+			out = append(out, *withEffective(&values[i], priorities))
+		}
+		return nil
 	})
 	return out, err
 }
@@ -210,15 +231,15 @@ func (r *PGRepository) Conflicts(ctx context.Context, orgID string, page api.Pag
 		if err != nil {
 			return fmt.Errorf("list conflicts: %w", err)
 		}
-		defer rows.Close()
-		for rows.Next() {
-			fv, err := scan(rows)
-			if err != nil {
-				return err
-			}
-			out = append(out, *r.withEffectiveTx(ctx, tx, fv))
+		values, err := collectFieldValues(rows)
+		if err != nil {
+			return err
 		}
-		return rows.Err()
+		priorities := policyPrioritiesTx(ctx, tx, orgID)
+		for i := range values {
+			out = append(out, *withEffective(&values[i], priorities))
+		}
+		return nil
 	})
 	return out, total, err
 }

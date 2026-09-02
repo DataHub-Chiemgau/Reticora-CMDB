@@ -97,6 +97,23 @@ func (r *PGRepository) Upsert(ctx context.Context, ent Entitlement) (Entitlement
 	return stored, err
 }
 
+// OrganizationPlan returns the plan stored on the organization record, or ""
+// when the organization does not exist or has no plan.
+func (r *PGRepository) OrganizationPlan(ctx context.Context, orgID string) (Plan, error) {
+	var plan string
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT COALESCE(plan, '') FROM organization WHERE id = $1`, orgID).Scan(&plan)
+		if err == pgx.ErrNoRows {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("get organization plan: %w", err)
+		}
+		return nil
+	})
+	return Plan(plan), err
+}
+
 type entitlementScanner interface {
 	Scan(dest ...any) error
 }

@@ -206,6 +206,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// every route is mapped.
 	protected := authorizingRouter{Router: mux}
 
+	// Single-CI reads surface override-aware effective attribute values
+	// alongside the raw attributes (audit finding H6).
+	opts.CIService.WithEffectiveValues(overrideEffectiveValues{repo: repos.Override})
+
 	registrars := []registrar{
 		identity.NewHandler(opts.OIDC, opts.Sessions).WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole),
 		entitlement.NewHandler(opts.Entitlements),
@@ -248,7 +252,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		contact.NewHandler(repos.Contact),
 		ipam.NewHandler(repos.IPAM),
 		monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)),
-		graphqlbff.NewHandler(repos.CI, repos.Relationship),
+		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithCILoader(opts.CIService.GetByID),
 		relationshiptype.NewHandler(repos.RelationshipType),
 		citype.NewHandler(repos.CIType, opts.Dispatcher),
 		lifecycle.NewHandler(repos.Lifecycle,

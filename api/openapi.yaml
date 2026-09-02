@@ -7865,6 +7865,12 @@ components:
         attributes:
           type: object
           additionalProperties: true
+        effective_attributes:
+          type: object
+          additionalProperties: true
+          description: >-
+            Raw attributes overlaid with override-aware effective field
+            values. Present on single-CI reads only.
         discovery_source:
           $ref: '#/components/schemas/CIDiscoverySource'
         first_seen_at:

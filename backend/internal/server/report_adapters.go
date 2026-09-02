@@ -106,6 +106,27 @@ func (a overrideProvenance) IsProtected(ctx context.Context, orgID, ciID, fieldN
 	return override.IsProtected(ctx, a.repo, orgID, ciID, fieldName)
 }
 
+// overrideEffectiveValues adapts override.Repository to the CI service's
+// EffectiveValueSource port so single-CI reads can surface override-aware
+// effective attribute values.
+type overrideEffectiveValues struct {
+	repo override.Repository
+}
+
+func (a overrideEffectiveValues) EffectiveValues(ctx context.Context, orgID, ciID string) (map[string]any, error) {
+	fvs, err := a.repo.ListForCI(ctx, orgID, ciID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]any, len(fvs))
+	for _, fv := range fvs {
+		if fv.EffectiveValue != nil {
+			out[fv.FieldName] = fv.EffectiveValue
+		}
+	}
+	return out, nil
+}
+
 // ciLookup adapts ci.Repository to the asset.CILookup port (spec §4: the
 // asset reads the linked CI's technical identity read-only).
 type ciLookup struct {

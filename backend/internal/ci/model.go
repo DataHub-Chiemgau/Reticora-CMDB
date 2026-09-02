@@ -26,7 +26,12 @@ type Item struct {
 	FirmwareVersion string         `json:"firmware_version,omitempty"`
 	SysObjectID     string         `json:"sys_object_id,omitempty"`
 	Attributes      map[string]any `json:"attributes"`
-	DiscoverySource string         `json:"discovery_source,omitempty"` // snmp|ssh|redfish|ipmi|wmi|api|agent|sweep|manual
+	// EffectiveAttributes overlays protected/manual override values from the
+	// field-value provenance store onto Attributes. It is populated on
+	// single-CI reads when an effective-value source is wired; raw
+	// Attributes stay untouched so consumers can compare both.
+	EffectiveAttributes map[string]any `json:"effective_attributes,omitempty"`
+	DiscoverySource     string         `json:"discovery_source,omitempty"` // snmp|ssh|redfish|ipmi|wmi|api|agent|sweep|manual
 	FirstSeenAt     *time.Time     `json:"first_seen_at,omitempty"`
 	LastSeenAt      *time.Time     `json:"last_seen_at,omitempty"`
 	IsManual        bool           `json:"is_manual"`
