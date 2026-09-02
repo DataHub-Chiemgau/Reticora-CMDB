@@ -713,6 +713,13 @@ empty endpoint the providers stay no-op.
 The server is configured via environment variables:
 - `RETICORA_PORT` — HTTP listen port (default 8080).
 - `RETICORA_DATABASE_URL` — PostgreSQL connection string.
+- `RETICORA_DB_APP_ROLE` — database role every pooled connection switches into
+  (default `reticora_app`, created by migration `000056`). Row Level Security is
+  bypassed for superusers, `BYPASSRLS` roles and — without `FORCE ROW LEVEL
+  SECURITY` — table owners, so the server switches into a restricted role before
+  serving any request and **refuses to start** if the effective role can still
+  bypass RLS. Set this only when the login role is already restricted; setting it
+  to an empty value disables the role switch but not the startup check.
 - `RETICORA_NATS_URL` — NATS server URL.
 - `RETICORA_REDIS_URL` — Redis connection string.
 - `RETICORA_ENVIRONMENT` — Environment name (development/staging/production).
