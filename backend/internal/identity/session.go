@@ -57,6 +57,21 @@ func NewSessionIssuer(privateKeyPEM []byte) (*SessionIssuer, error) {
 	}, nil
 }
 
+// NewEphemeralSessionIssuer generates an in-memory RSA key pair for the
+// explicit insecure development mode. Tokens issued by it are properly
+// signature-verified but do not survive a restart, which is acceptable for
+// local development only.
+func NewEphemeralSessionIssuer() (*SessionIssuer, error) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, fmt.Errorf("identity: generate ephemeral session key: %w", err)
+	}
+	return &SessionIssuer{
+		privateKey: privateKey,
+		publicKey:  &privateKey.PublicKey,
+	}, nil
+}
+
 // Issue signs the provided claims as an RS256 JWT.
 func (s *SessionIssuer) Issue(claims SessionClaims) (string, error) {
 	if s == nil || s.privateKey == nil {

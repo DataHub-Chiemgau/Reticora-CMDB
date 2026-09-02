@@ -18,6 +18,10 @@ type Repository interface {
 	Create(ctx context.Context, a *Assignment) error
 	Update(ctx context.Context, orgID, id string, a *Assignment) error
 	Delete(ctx context.Context, orgID, id string) error
+	// Transfer atomically marks the existing assignment as transferred and
+	// creates the successor assignment. On any failure the original
+	// assignment stays active.
+	Transfer(ctx context.Context, orgID, id string, successor *Assignment) error
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -141,6 +145,34 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, updated *
 	updated.CreatedAt = existing.CreatedAt
 	updated.UpdatedAt = time.Now().UTC()
 	r.assignments[id] = updated
+	return nil
+}
+
+// Transfer atomically marks the assignment as transferred and creates the
+// successor. If the successor is invalid, the original stays untouched.
+func (r *MemoryRepository) Transfer(_ context.Context, orgID, id string, successor *Assignment) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	existing, ok := r.assignments[id]
+	if !ok || existing.OrganizationID != orgID {
+		return fmt.Errorf("assignment not found")
+	}
+	if successor == nil || successor.AssignedTo == "" {
+		return fmt.Errorf("successor assignee is required")
+	}
+
+	r.nextID++
+	successor.ID = fmt.Sprintf("assign-%d", r.nextID)
+	successor.OrganizationID = orgID
+	now := time.Now().UTC()
+	successor.CreatedAt = now
+	successor.UpdatedAt = now
+	successor.AssignedAt = now
+	r.assignments[successor.ID] = successor
+
+	existing.Status = "transferred"
+	existing.UpdatedAt = now
 	return nil
 }
 

@@ -249,15 +249,9 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mark old assignment as transferred
-	transferred := *existing
-	transferred.Status = "transferred"
-	if err := h.repo.Update(r.Context(), t.OrganizationID, id, &transferred); err != nil {
-		api.WriteRepoError(w, err)
-		return
-	}
-
-	// Create new assignment for new assignee
+	// Flip + successor insert happen atomically in the repository so a
+	// failed successor insert never strands the asset without an active
+	// assignment (audit finding 2.2).
 	newAssignment := &Assignment{
 		OrganizationID: t.OrganizationID,
 		AssetID:        existing.AssetID,
@@ -269,7 +263,7 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 		Notes:          req.Notes,
 	}
 
-	if err := h.repo.Create(r.Context(), newAssignment); err != nil {
+	if err := h.repo.Transfer(r.Context(), t.OrganizationID, id, newAssignment); err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}

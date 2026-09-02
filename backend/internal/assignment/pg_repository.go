@@ -277,6 +277,50 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, a *Assignme
 }
 
 // Delete deletes an assignment. The assignment table has no deleted_at column, so this is a hard delete.
+// Transfer atomically flips the original assignment to "transferred" and
+// inserts the successor in the same transaction, so a failing successor
+// insert (e.g. unknown assignee) leaves the original assignment active.
+func (r *PGRepository) Transfer(ctx context.Context, orgID, id string, successor *Assignment) error {
+	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx,
+			`UPDATE assignment SET status = 'transferred', updated_at = NOW() WHERE id = $1`, id)
+		if err != nil {
+			return fmt.Errorf("mark assignment transferred: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("not found")
+		}
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO assignment (
+				organization_id, asset_id, ci_id, assigned_to, assigned_by, assignment_type,
+				status, assigned_at, due_date, returned_at, return_condition, notes
+			) VALUES (
+				$1, $2, $3, $4, $5, $6,
+				$7, NOW(), $8, $9, $10, $11
+			)
+			RETURNING id::text, assigned_at, created_at, updated_at`,
+			orgID,
+			nilIfEmpty(successor.AssetID),
+			nilIfEmpty(successor.CIID),
+			successor.AssignedTo,
+			successor.AssignedBy,
+			successor.AssignmentType,
+			successor.Status,
+			nilIfEmpty(successor.DueDate),
+			nilIfEmpty(successor.ReturnedAt),
+			nilIfEmpty(successor.ReturnCondition),
+			nilIfEmpty(successor.Notes),
+		).Scan(&successor.ID, &successor.AssignedAt, &successor.CreatedAt, &successor.UpdatedAt); err != nil {
+			return fmt.Errorf("create successor assignment: %w", err)
+		}
+		successor.AssignedAt = successor.AssignedAt.UTC()
+		successor.CreatedAt = successor.CreatedAt.UTC()
+		successor.UpdatedAt = successor.UpdatedAt.UTC()
+		return nil
+	})
+}
+
+// Delete handles deleting an assignment row.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM assignment WHERE id = $1", id)

@@ -290,14 +290,17 @@ func main() {
 	defer stopSweeper()
 	go sweeper.Run(sweepCtx)
 
-	// Session tokens are always verified cryptographically unless the operator
-	// explicitly opted into the insecure development mode. API keys are
-	// verified against the database when available, which gives service
-	// tokens the same authenticated principal as interactive users.
-	authMiddleware := middleware.AuthMiddlewareWithAPIKeys(sessionIssuer, identity.NewAPIKeyServiceWithStore(apiKeyStore))
-	if sessionIssuer == nil {
+		// Session tokens are always verified cryptographically: even the explicit
+	// insecure development mode uses an ephemeral in-memory key. Assign the
+	// issuer into the interface variable only when non-nil so a typed-nil
+	// pointer can never masquerade as a working verifier.
+	var sessionVerifier middleware.SessionVerifier
+	if sessionIssuer != nil {
+		sessionVerifier = sessionIssuer
+	} else {
 		slog.Warn("INSECURE DEVELOPMENT MODE: bearer tokens are accepted without signature verification")
 	}
+	authMiddleware := middleware.AuthMiddlewareWithAPIKeys(sessionVerifier, identity.NewAPIKeyServiceWithStore(apiKeyStore))
 
 	// Middleware chain per spec:
 	// RequestID/Tracing -> Panic-Recovery -> Security-Headers -> Auth ->
@@ -367,8 +370,8 @@ func loadSessionIssuer(cfg *config.Config) (*identity.SessionIssuer, error) {
 	if cfg.SessionKeyPath == "" {
 		if cfg.AllowInsecureDevAuth {
 			slog.Warn("RETICORA_SESSION_KEY_PATH not set and RETICORA_ALLOW_INSECURE_DEV_AUTH=true; " +
-				"session tokens will NOT be signature-verified — never use this outside local development")
-			return nil, nil
+				"using an ephemeral in-memory session key — tokens do not survive restarts; never use this outside local development")
+			return identity.NewEphemeralSessionIssuer()
 		}
 		return nil, fmt.Errorf("RETICORA_SESSION_KEY_PATH is required; " +
 			"set RETICORA_ALLOW_INSECURE_DEV_AUTH=true to explicitly opt into insecure development mode")
@@ -378,8 +381,8 @@ func loadSessionIssuer(cfg *config.Config) (*identity.SessionIssuer, error) {
 	if err != nil {
 		if cfg.AllowInsecureDevAuth {
 			slog.Warn("failed to read session key and RETICORA_ALLOW_INSECURE_DEV_AUTH=true; "+
-				"session tokens will NOT be signature-verified", "path", cfg.SessionKeyPath, "error", err)
-			return nil, nil
+				"using an ephemeral in-memory session key — tokens do not survive restarts", "path", cfg.SessionKeyPath, "error", err)
+			return identity.NewEphemeralSessionIssuer()
 		}
 		return nil, fmt.Errorf("read session key %q: %w", cfg.SessionKeyPath, err)
 	}
