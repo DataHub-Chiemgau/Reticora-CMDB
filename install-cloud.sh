@@ -1183,6 +1183,7 @@ start_stack() {
     sync_db_password
 
     run_migrations
+    seed_default_organization
 
     info "Starting Keycloak …"
     compose_cmd up -d keycloak
@@ -1257,6 +1258,24 @@ SQL
         done
     fi
     success "Database schema is up to date"
+}
+
+# seed_default_organization makes sure the organization row exists that the
+# bundled Keycloak realm assigns its users to (the UUID-named group
+# 00000000-0000-0000-0000-000000000001). Migration 000054 seeds it for new
+# installs; this step additionally repairs existing installations whose
+# migration bookkeeping was already current while the row was still missing —
+# without it the first login fails with
+#   identity: provision user: ensure oidc user: ERROR: insert or update on
+#   table "app_user" violates foreign key constraint "app_user_organization_id_fkey"
+# Runs as the database superuser, so the org_isolation RLS policy does not
+# apply; the INSERT is idempotent and a re-run leaves existing rows untouched.
+seed_default_organization() {
+    info "Ensuring the default organization exists …"
+    compose_cmd exec -T postgres psql -U reticora -d reticora -v ON_ERROR_STOP=1 -q \
+        -c "INSERT INTO organization (id, name, slug) VALUES ('00000000-0000-0000-0000-000000000001', 'Reticora Demo', 'reticora-demo') ON CONFLICT (id) DO NOTHING" \
+        || die "Could not seed the default organization."
+    success "Default organization is present"
 }
 
 # ─── Health verification ──────────────────────────────────────────────────────
