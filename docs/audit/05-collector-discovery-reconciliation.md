@@ -2,7 +2,26 @@
 
 Prüfstand 2026-09-22, unveränderter Produktstand wie Teil 4; Dokumentationsbasis `b9e3779a526c169550cc1d7491c31b4ad003dd24`. Ausschließlich dieser Bericht wird angelegt; Empfehlungen nicht umgesetzt.
 
-Zwischenstand: PRI-07, GLO-12, COL-01–08, DIS-01–10 und REC-01–09 dokumentiert; verbleibende acht IDs sowie abschließende Statuszählung und G1-Liste folgen. Fehlende v2-Teiltexte werden nicht rekonstruiert.
+**37/37 IDs geprüft; 0 PASS, 5 PARTIAL, 28 ABWEICHEND, 3 FAIL, 1 OFFEN, 0 N/P.** Keine Produktkorrekturen. Fehlende v2-Teiltexte bleiben explizite Unterprüflücken, nicht erfundene Sollkriterien.
+
+| Primärtag | PASS | PARTIAL | ABWEICHEND | FAIL | OFFEN | N/P | Summe |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| [B] | 0 | 2 | 23 | 3 | 0 | 0 | 28 |
+| [P2] | 0 | 0 | 1 | 0 | 0 | 0 | 1 |
+| [P3] | 0 | 1 | 1 | 0 | 0 | 0 | 2 |
+| [P4] | 0 | 1 | 1 | 0 | 1 | 0 | 3 |
+| [A] | 0 | 0 | 1 | 0 | 0 | 0 | 1 |
+| [Q] | 0 | 1 | 0 | 0 | 0 | 0 | 1 |
+| PRI-07 ohne expliziten Tag | 0 | 0 | 1 | 0 | 0 | 0 | 1 |
+
+Gemischte Tags einmal gezählt: COL-07 unter [A] (Relay[P4]), DIS-07 unter [P4] (IGA[A]); optionale Unterteile [O] nicht zusätzlich. PRI-07 bleibt ungetaggter, hier ausdrücklich geforderter Grundsatz.
+
+**Critical:** COL-02 (Klartext-Credential-API, bedingte Zielcredential-Offenlegung), COL-05 (Verlust unbestätigter Spooldaten), OVR-01/02 (stilles Überschreiben manueller Werte/Workflow-Bypass geschützter effektiver Werte).
+**Weitere zentrale High:** GLO-12/REC-01/02/03/05 (Quellzeit, Consumer/Replay, Identität, Rang-/Schreibentscheidung), COL-04 (Enrollment/PKI), DIS-05/09 (Datenvertrag/Scopes), REC-08/12 (Review-/Overridekonflikt), TOP-01/02 (Ableitung/Alterung).
+**G1 nicht freigabefähig:** offene Pflichtanteile in allen 28 [B]-IDs, PRI-07 sowie DIS-08[Q]. Insbesondere Critical-IDs und fehlender Ingest-/Scope-/Offlinevertrag blockieren; REC-10/DIS-08 zusätzlich unvollständig ohne vollständigen Testnachweis. Spätere [P2–P4]/[A], die vorläufige CH30-Profilliste und optionale Air-Gapped-Teile sind keine zusätzlichen G1-Blocker.
+**Tests:** Collectorbuild/-tests Exit0 (112 PASS,12 SKIP); Edgecore Exit0 (58 PASS); Backendbuild und fünf Pakete durch Offline-Dependencycache blockiert, drei Tenanttests PASS. CI gesamt rot; kein DB-/Produktdurchstichnachweis.
+**TST-01:** 10 direkte dedizierte Reconciliation-Unitfunktionen, erweitert11 reine Units bzw.21 Funktionen inklusive10 Handlerfixtures; Pflichtfälle Blocklisten/observed_at/Override-Review/Resurrect fehlen. Kein vollständiger ≥20-Reconciliation-Unitnachweis.
+**Ungeprüfte IDs:** keine der37. Nicht vollständig prüfbare Unteranteile: v2-Credential-/Protokollrest, reale EU-Serverlokation, Deployments/physische Geräte und blockierte Integrations-/Frontendtests; CH30-Profilliste weiterhin V.
 
 ## Ergebnis je Anforderung
 
@@ -39,6 +58,14 @@ Bewertung gemäß `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/READ
 | REC-07 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/discovery.go:69–73,770–790`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/pg_repository.go:390–409,649–682` | Keine Sightings-ohne-ci_change-/Reaktivierungs-/Drei-Misses-Tests. | last_seen_at wird gesetzt, aber als ci_change protokolliert; unknown wird bei Match nicht zu active. Keine Interface-/IP-Entfernung nach drei Fehlbeobachtungen. | High | L |
 | REC-08 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/review.go:16–24,285–349`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000021_spec_alignment.up.sql:189–200`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/pg_repository.go:399–425` | Konflikt-/merge-/create-Tests vorhanden, kein vollständiger Reviewlebenszyklus. | Drei statt zehn Reviewtypen; Aktionen merge/create/dismiss statt merge/new/dismiss/accept. review:resolve, Objekt-/Typ-Deduplizierung, Anlagebenachrichtigung und >14-Tage-Dashboardeskalation fehlen. | High | L |
 | REC-09 | [B] | FAIL | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/cmd/server/main.go:266–291`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/discovery.go:770–790`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/agent/pg_repository.go:173–183` | Kein CI-Offline-/Observable-/Scopeintervall-Grenztest. | Kein Detektor last_seen_at>3×Scopeintervall mit unknown und ci.offline für observable CIs. Agent-Heartbeatreaktivierung betrifft endpoint_agent, nicht diesen CI-Vertrag. | High | L |
+| REC-10 | [B] | PARTIAL | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/override/model.go:20–41`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/frontend/src/components/cmdb/CIDetailSections.tsx:211–290`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/discovery.go:743–751,797–804` | Provenienz-Stubs vorhanden; kein vollständiger Feldtooltip-/Zeit-/Auswahlgrundtest. | API besitzt Discoverywert/-quelle/-zeit, Overridegrund und effektiven Wert. UI zeigt Werte/Quelle, nicht vollständige Zeit-/Auswahlbegründung als Tooltip; nicht alle typisierten Felder werden erfasst. | Medium | M |
+| REC-11 | [P4] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/agent/handler.go:146–164,199–255` | Agent-Repositorytest, kein Agent→Discovery-/Discovery→Agent-Identitätsdurchstich. | Agent und Discovery verwenden verschiedene Matcher; Agent verbindet über Name/Hostname statt gemeinsamer starker Identität. Vorhandene ag.CIID wird nicht als stabiles Ziel verwendet, genau ein CI nicht garantiert. | High | L |
+| REC-12 | [B] | PARTIAL | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/discovery.go:290–294,333–340`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/override/pg_repository.go:115–139,195–223`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/review.go:285–349` | Tests explizit geschützter Overrides mit Stub; kein Review-/Accept-/Dismiss-/Suppressionvertrag. | Discoverywert neben Override aktualisiert, Diverged-Rückgabe aber ignoriert; keine _observed-/override_conflict-Lebenszyklusintegration. Feld-Deduplizierung, accept mit Overrideentfernung und dismiss bis Wertwechsel fehlen. | High | L |
+| TOP-01 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/topology.go:16–17,91–130,202–209`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/relationship/pg_repository.go:125–161` | LLDP-Untertest erwartet falschen Default0,5; FDB-/Trunk-/ARP-Solltests fehlen. | Defaultconfidence0,5 auch LLDP statt1,0, kein FDB0,6-nur-ohne-LLDP oder >4MAC-Trunkfilter. Unbekannte Keys werden connected_to; Confidence in attributes statt dedizierter Spalte. | High | L |
+| TOP-02 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/topology.go:168–213`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/pg_repository.go:514–529` | Suppression-Callbacktest vorhanden; kein Zeit-/Scope-/Cleanup-/Eventtest. | Paarbasierte Suppression vorhanden; Wiederbeobachtung erneuert bestehende Kante/last_seen_at nicht. Cleanup nach max(7Tage,5×Scopeintervall) mit Event fehlt. | High | L |
+| OVR-01 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/override/pg_repository.go:142–192`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/pg_repository.go:194–214,330–353`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/discovery.go:753–790` | Discovery-Schutzstubs; kein persistenter PATCH→Ingest→GET-/Set→Clear→GET-Test. | Separate Discovery-/Overridewerte mit Autor/Zeit/Grund vorhanden, normale CI-Sicht aber nicht einheitlich effektiv und Clear synchronisiert sie nicht. Normaler manueller PATCH erzeugt keinen Schutz und kann durch passenden Ingest ohne Freigabe überschrieben werden. | Critical | L |
+| OVR-02 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/discovery.go:761–790`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/topology.go:193–199`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/workflow/executor.go:194–216` | Kein gemeinsamer Import-/Workflow-/Discovery-Schutzvertrag für alle Objektklassen getestet. | Discovery schützt explizit protected-Felder, Workflow set_ci_field umgeht diesen Schutz über rohes Repository. Kein Beleg pauschaler Asset-/Inventarbewegungen, aber nachgewiesenes stilles Überschreiben manueller/geschützter effektiver CI-Werte. | Critical | L |
+| OVR-03 | [P2] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/frontend/src/pages/CIListPage.tsx:71–89`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/service.go:153–166`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/citype/pg_repository.go:175–248` | Gemockter Bulkstatus-UI-Test, kein Bulkoverride-/Templateerhaltungs-/Auditdurchstich. | Bulkstatus nutzt normale parallele PATCHes ohne neuen Override; gewöhnliche Änderungshistorie existiert. Kein vollständiger geschützter Template-Migrations-/Bulkpropagationsprozess. | High | L |
 
 ### Tests und Nachweisgrenzen
 
@@ -52,6 +79,26 @@ Ausgeführt mit `/opt/hostedtoolcache/go/1.25.14/x64/bin/go`, `GOTOOLCHAIN=local
 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/frontend` | Nicht ausgeführt: node_modules fehlt, keine Installation. |
 
 Temporäre lokale Logs: `/tmp/reticora-audit-05/{collector,edgecore,backend}-{test,build}.log`; nicht Teil der Lieferung. CI-Run [35731844252](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/35731844252), Produktstand `b0f0ee2302e3af5afa41fbeaf738687fe1492504`, erneut über Actions-MCP abgefragt: failure. Logs des Migrationsjobs [106759104594](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/35731844252/job/106759104594) zeigen TestMigrationsApplied/TenantIsolationRLS/ClientScopeRLS mit URL-Parsingfehler nach erfolgreichem up/down/up; kein grüner vollständiger DB-Nachweis. Keine CI ausgelöst.
+
+### TST-01 — Zählung und Fallabdeckung (keine 38. Anforderungszeile)
+
+| Abgrenzung / absolute Quelle | Top-Level-Funktionen | Art |
+|---|---:|---|
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/reconciliation_test.go:18–230` | 11 | 9 direkte Units,2 HTTP-/Memory-Handlerfixtures |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/fingerprint_nil_test.go:12–18` | 1 | direkte Regressionseinheit |
+| Dedizierter Umfang | 12 | **10 direkte Unitfunktionen**,2 Handlerfixtures |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/provenance_test.go:58–211` | 5 | HTTP-/Stub-Handlerfixtures |
+| Fachlicher Anteil `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/review_test.go:23–165` | 4 | 1 Factoryunit,3 Handlerfixtures; Jobs/Topologie/Alias ausgeschlossen |
+| Erweiterter Reconciliation-/Review-/Provenienzumfang | 21 | **11 direkte Units,10 Handlerfixtures** |
+| Gesamtes `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/` | 33 | Auch Enrollment/Collectorverwaltung/Jobs/Topologie, nicht gleich33 Reconciliationtests |
+
+Dedizierte Funktionen: TestReconcilePriorityOrder (:18), TestReconcileConflict (:26), TestBulkIngestUsesReconciliation (:34), TestReconcileMatchesPrimaryMAC (:78), TestReconcileMatchesHostnameFQDN (:86), TestReconcileMatchesHardwareUUIDColumn (:107), TestReconcileReportsValueConflicts (:115), TestReconcileNoValueConflictsWhenIncomingEmpty (:135), TestSourceTrustRanking (:146), TestShouldApplyAttribute (:158), TestBulkIngestQueuesValueConflictsForReview (:184), alle in obiger reconciliation_test.go; zusätzlich TestReconcileDoesNotMatchOnMissingHardwareUUID in obiger fingerprint_nil_test.go.
+
+Abgedeckt: grobe Prioritätsfolge, Mehrfach-Serialkonflikt, MAC-/Hostname-/UUID-Treffer und nil-UUID, unterschiedliche/nicht gelieferte Identitätswerte, relative Quellenränge/Staleness, HTTP-Ingest-Review und explizit geschützte Overridewerte per Stub. Hostname-Automatch, lokal administrierte MAC und niedrigerer Rang nach Staleness bestätigen teilweise **katalogwidriges** Verhalten.
+
+Nicht abgedeckt: exakte Serial-/Klon-UUID-/MAC-Blocklisten, virtuelle Zusatzbedingung, Client/Typ/VRF-Bindung, observed_at-Ordering und >5min-Zähler, 48h-Replay/Parallelität, exakte Rangmatrix, niedrigrangiger Serial-/UUID-Reviewpayload, override_conflict-Deduplizierung/accept/dismiss/Wertwechsel sowie **Resurrect**. Geschützter Wert bleibt erhalten ist nicht gleich vollständig getesteter Override-Konfliktworkflow.
+
+Die12 dedizierten Funktionen enthalten keine t.Run-Untertests; mehrere Assertions einer Funktion werden nicht als separate Tests ausgegeben. Untertests in topology_test.go zählen nicht als Matchingunits. Bei weiter Definition zählen isolierte Handlerfixtures ebenfalls als Units und liefern21 Funktionen; deshalb ist „unter20“ **definitionsabhängig**, der fehlende geforderte Fallnachweis dagegen eindeutig. Lokale Discoverytests wurden wegen Setupblockade nicht ausgeführt; keine grüne TST-01-Abnahme.
 
 ## Befunde im Detail
 
@@ -76,6 +123,8 @@ Serverauthentifizierung ist Bearer/API-Key, Collectorupload sendet Org-/Collecto
 `GET /api/v1/credentials/{id}/decrypt` gibt das vollständige Secret als API-Inhalt aus (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/credential/handler.go:125–143`); GET wird credential:read zugeordnet, auch OIDC-viewer/reader besitzen dies (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/server/authz.go:54,235–237`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/handler.go:315–336`). Voraussetzung: authentifizierter Reader, Discovery-Entitlement und vorhandenes entschlüsselbares Credential im erlaubten Org-/Clientkontext. Org-/Clientfilter bleiben bestehen (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/credential/pg_repository.go:45–60,142–147`). Befund ist Klartext **im API-Body**, nicht notwendigerweise unverschlüsselter Transport und kein behaupteter Cross-Org-Zugriff.
 
 Collector lädt SSH-Benutzer/Passwort in eine gemeinsame Credentialmap, die alle aktivierten Plugins erhalten (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/collector/collectorcmd/collectorcmd.go:264–276,778–798`). Aktiviertes Redfish sendet diese Werte als BasicAuth an gescannte HTTPS-Ziele mit deaktivierter Zertifikatsprüfung **vor** Verifikation eines Managementcontrollers (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/collector/plugins/redfish/redfish.go:41–46,78–95`). Voraussetzung: nicht standardmäßig aktiviertes Redfish, konfigurierte SSH-Credentials sowie kontrolliertes gescanntes Ziel/MitM. Unter diesen Voraussetzungen reale Secret-Offenlegung, nach Audit-Severity Critical; keine pauschale Behauptung aller Collectors betroffen.
+
+Zusätzlicher bereits implementierter Add-on-Pfad: IGA-writer kann Connector-base_url bei bestehendem credential_id ändern und Sync auslösen; SCIM sendet den entschlüsselten bearer_token/token an dieses HTTPS-Ziel, ohne gesonderte Credentialverwendungsfreigabe (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/iga/pg_repository.go:101–128`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/iga/handler.go:193–201`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/iga/reconcile.go:19–30`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/iga/connector.go:50–57,82–90,161–172`). Voraussetzung: IGA-Entitlement/-Schreibrecht, bekannter Connector mit entschlüsselbarem Token und kontrolliertes HTTPS-Ziel mit gültigem Zertifikat; keine Cross-Org-Behauptung. Zielbindung/Neufreigabe von Credentialreferenzen ist auch für den späteren separaten Connectorhost erforderlich. Add-on-Befund erweitert nicht die G1-Phasenpflicht; COL-02 ist bereits durch den Baseline-Klartextabruf Critical.
 
 Für Spool/Logs/Configcache ist damit nicht automatisch Klartextpersistenz bewiesen; Collector-Identitätskeystore ist von Zielcredentials zu unterscheiden. EU-Standort laufender Server und flächendeckende Klartextfreiheit sind statisch nicht abnehmbar.
 
@@ -231,13 +280,51 @@ Aktionen Ist **merge, create, dismiss**: new/accept fehlen, create ist überzäh
 
 **Empfohlene Korrektur:** Exakte Reviewmenge und Aktionen inklusive Berechtigung/semantischer Auflösung vereinheitlichen; Deduplizierungsinvarianten DB-seitig verankern. Erstellung benachrichtigen, Alter>14Tage sichtbar eskalieren und Review-/Merge-/Accept-/Dismiss-Nebenwirkungen mit echten Persistenztests prüfen.
 
+### REC-11 — High, P4: Agentidentität ist kein gemeinsamer Reconciliationpfad
+
+**Beschreibung/Dateien:** Agent sucht über Name/Hostname, statt starke gemeinsame Identität/Clientbindung/Recordordnung zu verwenden; vorhandene ag.CIID wird nicht als stabiles Ziel verwendet (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/agent/handler.go:146–164,199–255`). Daher ist weder Agent→Discovery noch die umgekehrte Reihenfolge als genau ein CI abgesichert. Registrierung/Heartbeat im Agent-Repositorytest belegen diesen Integrationsfall nicht (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/agent/repository_test.go:10`).
+
+**Empfohlene Korrektur:** Agentbeobachtungen über denselben vertrauenswürdigen Identitäts-/Provenienzvertrag führen; vorhandene Bindung nachvollziehbar fortführen und beide Ankunftsreihenfolgen sowie Hostnamensgleichheit verschiedener Geräte testen. P4-Befund, nicht zusätzlicher G1-Blocker.
+
+### REC-12/OVR-01/02 — High/Critical: Schutzmetadaten und effektive CI-Werte laufen auseinander
+
+**Beschreibung/Dateien:** ci_field_value speichert beobachteten und Overridewert mit Autor/Zeit/Grund; RecordDiscovered aktualisiert Discoverywerte, Resolver kann Divergenz berechnen (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/override/model.go:20–41,84–97`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/override/pg_repository.go:115–139`). Discovery ignoriert Diverged-Rückgabe (:290–294,333–340 in `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/discovery.go`). Kein override_conflict-Review, feldweiser Dedup, accept mit Entfernen oder dismiss mit unverändertwertbezogener Unterdrückung. Konfliktliste allein ersetzt diese Zustandsmaschine nicht (REC-12 High).
+
+Set/Clear schreiben nur ci_field_value; Feldresolver fällt nach Clear auf Discovery zurück, normaler CI-GET liest aber ci und wird nicht synchronisiert (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/override/pg_repository.go:142–192`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/pg_repository.go:194–214`). _overrides/_observed als kanonischer effektiver Vertrag sind nicht durchgängig vorhanden.
+
+**Konkreter manueller Verlustpfad:** Normales CI-PATCH ruft Service/Repository ohne Anlage einer Overrideprotektion (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/handler.go:182–212`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/service.go:156–166`). Fehlende Provenienz gilt als unprotected (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/override/repository.go:33–39`). Folgender autorisierter Ingest mit eindeutig passender Serial, ausreichendem Quellenrang und anderem name/custom attribute ersetzt den manuellen Wert ohne Schutzfreigabe (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/discovery.go:753–790,874–899`). Name/Customattributeabweichung ist kein Identitätskonflikt. Historie bleibt bestehen: **„still“ bedeutet ohne menschliche Übernahmeentscheidung, nicht spurlos/irreversibel**.
+
+**Konkreter Workflowpfad:** workflow:write kann bei vorhandenem Workflow-Entitlement ein set_ci_field erzeugen/ausführen; Executor verwendet rohes CI-Repository ohne Zieloperations-/Protected-Prüfung (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/server/authz.go:62–63,245–256`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/workflow/handler.go:61–84,114–140`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/server/router.go:242`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/workflow/executor.go:194–216`). name/status überschreiben typisierte Spalten, andere Felder Attribute; bestehender Overrideeintrag bleibt intakt, normale effektive CI-Sicht wird dennoch geändert. Erforderlich sind bekannte zugängliche CI-ID und passende Workflowrechte; DB-Org-/Clientgrenzen bleiben wirksam. Nach Auditschema sind stille manuelle Überschreibungen Critical (OVR-01/02), auch wenn allgemeine Securityseverity anders gewichtet wird.
+
+**Nicht überbehaupten:** Normaler Discoverypfad schützt ausdrücklich protected-Felder und lässt existierende äquivalente Kanten unverändert. Kein konkreter Nachweis automatischen Assetlöschens, Inventarbewegens oder Entfernens verifizierter Graphdaten; diese Teilinvarianten sind mangels gemeinsamer Guards/Regressionen nicht vollständig abgenommen. Import und spätere Automation sind beim gemeinsamen Schutzvertrag mitzuerfassen, kein erfundener Import-Exploit.
+
+**Empfohlene Korrektur:** Manuelle Änderungen zuverlässig als Rang100/Override markieren und jeden Automationsschreibpfad über gemeinsame autorisierende Schutz-/Provenienzentscheidung führen. Kanonische effektive API-/Graph-/Exportwerte bei Set/Clear konsistent materialisieren oder ableiten; beobachteten Wert behalten. Review-Accept/Dismiss transaktional mit Feld-/Wert-Deduplizierung/Suppression umsetzen und echte PATCH/Workflow/Discovery→GET-Durchstiche testen.
+
+### TOP-01/02 — High: Evidenzrang und Alterung von Discoverykanten fehlen
+
+**Beschreibung/Dateien:** Defaultconfidence0,5, auch für LLDP; keine FDB0,6-nur-ohne-LLDP-Regel oder Trunkgrenze>4MACs (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/topology.go:16–17,91–130`). Unbekannter RelKey wird connected_to, damit wäre auch ein ARP-Key nicht auf Anreicherung beschränkt; **kein gesonderter produktiver ARP-Kantenlieferant nachgewiesen**. Confidence landet in Attributes statt dedizierter Spalte (:202–209).
+
+Paarbasierte Suppression wird berücksichtigt, Ladefehler liefern aber keinen geladenen Sperrsatz (:168–183); Typdimension fehlt im Abfrageergebnis (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/pg_repository.go:514–529`). Bestehende Kante wird bei Wiederbeobachtung unverändert übersprungen (:191–213 in topology.go), last_seen_at damit nicht erneuert. Keine max(7Tage,5×Scopeintervall)-Bereinigung samt Event. Positiv: Discovery überschreibt bestehende äquivalente manuelle Kanten hier nicht.
+
+**Empfohlene Korrektur:** Herkunftsabhängige Ableitung/Confidence mit LLDP-Vorrang, FDB-Trunkfilter und ARP-only-Enrichment im gemeinsamen Vertrag implementieren. Bestätigungszeiten fortschreiben, type-/scopekorrekte Suppression robust prüfen und ausschließlich zulässige unbestätigte Discoverykanten mit Event bereinigen; Uhr-/Grenz-/Manualschutztests ergänzen.
+
+### OVR-03 — High, P2: Bulkänderung erzeugt keine neue manuelle Schutzentscheidung
+
+**Beschreibung/Dateien:** CIList-Bulkstatus sendet parallele gewöhnliche PATCHes (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/frontend/src/pages/CIListPage.tsx:71–89`), Service erzeugt dabei keinen Override (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/service.go:153–166`). Änderungshistorie ist vorhanden (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/pg_repository.go:390–409`), aber kein neuer auditiert wirksamer Override auf bereits übersteuertem Feld. Typmetadatenupdate ist keine geschützte Instanz-/Templatepropagation (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/citype/pg_repository.go:175–248`).
+
+**Empfohlene Korrektur:** Manuelle Bulkaktionen über denselben Rang100-/Overridepfad ausführen und Herkunft/Autor/Grund auditieren; Template-Migrationen bestehende Overrides beibehalten lassen. Gemockten UI-Test durch Persistenz-/Wertschutzdurchstich ergänzen; P2, kein zusätzlicher G1-Blocker.
+
 ## Offene Fragen
 
 - PRI-07 besitzt im gelieferten Text keinen Tag; als eigener ungetaggter Grundsatz zählen, nicht still einen Katalogtag erfinden.
 - Vollständige v2-Credentialtypen (COL-02) und zusätzliche Protokollkriterien (DIS-04) fehlen; gelieferte konkrete Kriterien dennoch bewertet.
 - CH30 nennt Top-20, DIS-02 enthält 23 Gruppen mit weiteren Varianten; verbindliche Modell-/Familienliste und Abnahmekriterien bestätigen. Konkrete Liste ist V, kein zusätzlich erfundener Gateblocker.
 - „Nie auf Disk“ bei COL-02 betrifft Discovery-/Zielcredentials; Umgang mit dauerhaft nötigem Collector-Identitätsschlüssel gegenüber COL-04 explizit abgrenzen.
+- REC-03 beziffert IPMI nicht, obwohl DIS-04 es umfasst; Rang bestätigen, nicht selbst erfinden.
+- TST-01: direkte reine Unitfunktionen gegenüber isolierten HTTP-/Memory-Handlerfixtures als Zähleinheit bestätigen; keine Definition heilt die fehlenden Pflichtfälle.
+- PRI-07 und späterer IGA-Cloudconnector: private kundenseitige SCIM-Ziele müssen über den separat eingeschränkten Collector-/Connectorhost statt direkt vom SaaS erreicht werden; Egressvorgaben für öffentliche Kunden-IdPs/-APIs konkretisieren. Statische Analyse ersetzt keinen Netzwerktest.
+- Gegenprüfung/automatisierte Dokumentvalidierung wird vor Abschluss ergänzt; keine Produkt-Sicherheitsfreigabe durch reine Markdownprüfung.
 
 ## Stand
 
-UNVOLLSTÄNDIG – fortsetzen ab ID REC-10.
+VOLLSTÄNDIG
