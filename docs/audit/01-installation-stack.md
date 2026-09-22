@@ -218,3 +218,5 @@ Workflow-Runs und konkrete Joblogs am 2026-09-22 gelesen; keine Workflows ausgel
 VOLLSTÄNDIG
 
 53 eindeutige IDs mit den vorgegebenen Spalten erfasst, Statuszählung abgeglichen, Zusammenfassung unter 40 Zeilen. Vollständig bedeutet abgeschlossene Bearbeitung dieses Auditteils, nicht Konformität: 30 N/P wegen fehlendem v2-Wortlaut und die dokumentierten Laufzeit-/Testgrenzen bleiben bestehen. Kein Produktivcode, keine Migrationen, Tests oder Abhängigkeiten geändert.
+
+Dokumentprüfung: Unabhängige read-only Gegenprüfung der priorisierten Quellbelege, ID-/Spaltenvollständigkeit und Statuszählung durchgeführt; Webhook-Batch/Lease-Verweis auf `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/webhook/dispatcher.go:25–26` korrigiert. Automatisches Code-Review technisch nicht verfügbar (konfiguriertes Modell nicht gefunden), deshalb dessen „keine Kommentare“ nicht als Prüfbeleg gewertet. CodeQL wegen ausschließlich Markdown-Änderungen übersprungen; Secret-Scan ohne Treffer. Keine weiteren Dokumentkorrekturen aus der Gegenprüfung offen; sämtliche Produktbefunde bleiben bewusst unbehoben.
