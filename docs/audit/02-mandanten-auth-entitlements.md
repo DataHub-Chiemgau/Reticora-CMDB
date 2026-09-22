@@ -18,23 +18,23 @@ Grundlage: `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/00-schema-i
 
 - Jede ID zählt einmal; spätere Teilumfänge stehen zusätzlich in ihrer Zeile. ENT-06-ABWEICHEND betrifft verbindliche CH14-Add-on-Trennung, **nicht** unverbindliche Paketwerte.
 - **Critical:** TEN-02/04/05/06 (Scopes/Policies/DB-Pfade, Cross-Org-Blobzugriff); AUT-01/02/09 (Sperrungsumgehung, dauerhaft erneuerbare Altberechtigungen, bekanntes Default-Administratorkonto); RBA-02/03/04 (verlorene Rollen-Scopes, Viewer kann Credentials entschlüsseln).
-- **High:** TEN-03/09/10, AUT-04/08/10, RBA-01/05/06/08, ENT-01–08. Kernlücken: VRFs, Service-Accounts, Betreibertrennung, Kontingente, Ablauf/Collector-Pause, Allkanal-/Integrationstestnachweis.
+- **High:** TEN-03/09/10, AUT-04/08/10, RBA-01/05/06/08, ENT-01–08. Kernlücken: VRFs, Service-Accounts, Operatorzugriff, Kontingente, Ablauf/Collector-Pause, Allkanal-/Integrationstestnachweis.
 - **G1-Blocker:** TEN-02/03/04/05/06/09/10; AUT-01/02/04/09/10; RBA-01/02/03/04/08; ENT-01/02/03/04/05/07/08. TEN-01 und AUT-03 besitzen weitere offene Baseline-Nachweise/Abweichungen.
 - Spätere fehlende Funktionen (TEN-07/08, AUT-07, RBA-07) sind OFFEN, nicht Baseline-FAIL. Vorhandener P2/P4/[A]-Code ist normal geprüft; seine Unvollständigkeit allein und ENT-06-Vorschlagswerte sperren G1 nicht.
 - **Ungeprüfte IDs wegen fehlendem Wortlaut:** AUT-05, AUT-06 (N/P). Nur der nicht gelieferte v2-Restumfang von AUT-03/TEN-09 bleibt zusätzlich unbewertet; gelieferte Kriterien sind geprüft. Keine sonstige ID ausgelassen.
-- Alle **105 Tabellen** einzeln erfasst; **80 direkte DB-Einstiege in 58 Dateien** klassifiziert. **0 ungemappte registrierte Routen** bei 400 expliziten Operationen, aber falsche Aktionsrechte trotz vollständigem Mapping.
+- Alle **105 Tabellen** einzeln erfasst; **80 direkte DB-Einstiege in 58 Dateien** klassifiziert, davon **70 produktiv in 55 Dateien**. **0 ungemappte registrierte Routen** bei 400 expliziten Operationen, aber falsche Aktionsrechte trotz vollständigem Mapping.
 - Lokal nur drei Tenant-Kontext-/Quelltexttests grün; zehn Testpakete und Backendbuild am Offline-Modulcache blockiert. Kein behaupteter aktueller PG-/Keycloak-/S3-Isolationslauf; CI-Grenzen und Mocknachweise separat dokumentiert.
 
 ## Ergebnis je Anforderung
 
-PASS setzt vollständige, korrekte und testbelegte Umsetzung voraus; Mocks allein genügen nicht. N/P bezeichnet fehlenden prüfbaren Wortlaut, nicht fehlenden Code. Aufwand bezieht sich auf die empfohlene Produktkorrektur: S ≤ 0,5 Tag, M 0,5–2 Tage, L > 2 Tage (aufzuteilen). Vorschläge und optionale/spätere Umfänge werden nicht als fehlende Baseline gegatet.
+PASS setzt vollständige, korrekte und testbelegte Umsetzung voraus; Mocks allein genügen nicht. N/P bezeichnet fehlenden prüfbaren Wortlaut oder eine andere fehlende erforderliche Prüfbasis, nicht fehlenden Code. Aufwand bezieht sich auf die empfohlene Produktkorrektur: S ≤ 0,5 Tag, M 0,5–2 Tage, L > 2 Tage (aufzuteilen). Vorschläge und optionale/spätere Umfänge werden nicht als fehlende Baseline gegatet.
 
 | ID | Tag | Status | Evidenz | Tests | Befund (1–2 Sätze) | Severity | Aufwand |
 |---|---|---|---|---|---|---|---|
 | TEN-01 | [B], Reseller [P4] | PARTIAL | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000001_tenant_model.up.sql:6–66`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000055_cmdb_extensions.up.sql:286–320` | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenantapi/handler_test.go:114`: Memory-Hierarchie, kein erfolgreicher Gesamtroundtrip; T1. | Org/Client/klassische Standorthierarchie, Location-Baum und Assetbezug bestehen, aber durchgängige einheitliche Hierarchie mit Scopewirkung ist nicht nachgewiesen. Reseller fehlt als späterer Teil (TEN-08), vorhandene doppelte Standortstrukturen erfordern Konsolidierung. | Medium | L |
 | TEN-02 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/00-schema-ist.md:9–20,40–144`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000001_tenant_model.up.sql:38–66`; Einzeltabellen unten. | Schema-/RLS-Tests decken nicht alle 105 Tabellen/Spalten ab; T1. | Fünf Tabellen ohne eigene Org-Spalte und fünf nullable, darunter globale Kataloge/Org-Wurzel gesondert zu klären; Standort-/Kindtabellen tragen Client/Site nicht durchgängig denormalisiert. Daraus folgende fehlende Client-/Site-WITH-CHECK-Schranken werden einzeln als Critical geführt, nicht globale Metadaten pauschal als Tenant-Leak. | Critical | L |
 | TEN-03 | [B] | PARTIAL | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/pool.go:52–76,112–130`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000056_rls_enforcement.up.sql:23–78` | `TestPoolRefusesRLSBypassingRole`, bedingter Skip; keine live geprüfte Owner-/DDL-Matrix. | SET ROLE und NOSUPERUSER/NOBYPASSRLS werden geprüft; explizite Grants liefern USAGE/DML statt vollständigem CH19-DDL-Vertrag. Effektive geerbte Rechte/Eigentümerschaft sind nicht live belegt, FORCE wird nur für bereits RLS-aktivierte Tabellen gesetzt. | High | M |
-| TEN-04 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/pool.go:150–180`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenant/tenant.go:9–13`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/handler.go:253–276` | Drei Kontext-/Quelltexttests grün, keine vollständige GUC-/Poolintegration; T1. | Produktive Helfer setzen Org und teils skalaren Client lokal, nicht alle fünf mengenwertigen GUCs pro Request; DB-Rollenscopes fehlen schon in Sessions. Kein produktiver sessionsweiter Tenant-Setter gefunden, aber fehlende Scopes bedeuten org-weiten Zugriff. | Critical | L |
+| TEN-04 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/pool.go:150–180`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenant/tenant.go:9–13`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/handler.go:253–276` | Drei Kontext-/Quelltexttests grün, keine vollständige GUC-/Poolintegration; T1. | Produktive Helfer setzen Org und teils einen Client-Scope-String lokal, nicht alle fünf verlangten GUCs pro Request; SQL unterstützt Clientmengen, deren autoritative Ableitung fehlt aber schon in Sessions. Kein produktiver sessionsweiter Tenant-Setter gefunden, aber fehlende Scopes bedeuten org-weiten Zugriff. | Critical | L |
 | TEN-05 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000033_client_scope_rls.up.sql:29–79`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000056_rls_enforcement.up.sql:62–105`; vollständige Policy-Matrix unten. | `TestClientScopeRLS` prüft andere benannte Clients, nicht NULL-Schreiben/Site/Team; T1. | Nur sieben Tabellen prüfen Client, neun weitere mit client_id nicht; Site/Team fehlen, metric_sample hat keine RLS. WITH CHECK erlaubt auch gescopten Schreibern NULL-Client, Systemausnahmen sind ebenfalls schreibfähig; jede fehlende Client-/Site-Schreibschranke ist Critical. | Critical | L |
 | TEN-06 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/pg_repository.go:66–78`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/export/pg_job_repository.go:174–198`; vollständiges DB-Einstiegsinventar unten. | Keine vollständige negative Pfadmatrix; lokale DB-Tests setupblockiert. | Drei zentrale WithTenant-Varianten werden produktiv nicht aufgerufen; 46 private Helfer und weitere Poolpfade liefern inkonsistenten Kontext statt zentraler Request-/Tenanttransaktion. Worker nutzen teils app.system global statt Mandanteniteration, Exporte/Suche/Lifecycle verlieren Scopes; Dokumentdownloads haben zusätzlich Cross-Org-Blobzugriff. | Critical | L |
 | TEN-07 | [P4] | OFFEN | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/deploy/terraform/main.tf:1–24`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/deploy/k8s/overlays/prod/kustomization.yaml:15–33`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/credential/credential.go:64–70,137–147` | Kein Dedicated-/KRITIS-Provisionierungs-/Isolationstest. | Allgemeine Deployments und Org-DEKs sind Voraussetzungen, keine dedizierte Schema-/Instance-Funktion mit eigenem Betriebsprofil. Kein solcher P4-Code gefunden; keine erwiesene Architekturblockade und kein G1-Fehlen daraus abgeleitet. | – | – |
@@ -79,6 +79,7 @@ RBA-07: Kein rollenabhängiges Feldrechte-Modell gefunden; datenabhängiges Visi
 - **T2 – Build:** `go build ./...` im selben Verzeichnis und derselben Umgebung: **ROT**, Exit 1, derselbe Offline-Cacheblocker. Keine Abhängigkeiten installiert und kein erneuter Lauf mit Downloads. Rohlogs während der Session: `/tmp/reticora-audit-02/test-run.log` und `/tmp/reticora-audit-02/build-run.log` (nicht dauerhaft versioniert).
 - **T3 – CI-Kontext:** [CI 35731844252](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/35731844252), Produktstand `b0f0ee2302e3af5afa41fbeaf738687fe1492504`, am 2026-09-22 erneut über Actions-MCP geprüft: Gesamtstatus failure. Details der separat ausgewerteten Jobs stehen in `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/01-installation-stack.md`, Abschnitt „CI-Nachweise“: Backend-Job grün, Migrationsjob nach erfolgreichem up/down/up in Integrationstest an URL-Parsing gescheitert; kein grüner vollständiger Isolationstestnachweis. Keine Workflows ausgelöst.
 - Frontend-/Browser-Tests nicht ausgeführt: `/home/runner/work/Reticora-CMDB/Reticora-CMDB/frontend/node_modules/` fehlt. Keine neue Testharness, Datenbank, Migration oder Produktdatei angelegt/verändert; keine Laufzeit-Exploitation behauptet. Quelltextnachweise und bestehende Mock-/Integrationstests werden getrennt ausgewiesen.
+- Dokumentprüfung: unabhängige read-only Gegenprüfung, 36-ID-/Spalten-/105-Tabellen-/Quellenkontrolle und Secretscan durchgeführt. Automatisierte Code-Review war wegen nicht verfügbarem Modell technisch nicht ausführbar (trotz erfolgreicher Toolhülle); CodeQL übersprang ausschließlich die Markdownänderungen. Kein Ersatz für fehlende Produktintegrationstests.
 
 ## Befunde im Detail
 
@@ -88,7 +89,7 @@ RBA-07: Kein rollenabhängiges Feldrechte-Modell gefunden; datenabhängiges Visi
 
 - **Org-Spalte:** NOT NULL auf 95 Tabellen; fehlend auf organization, permission, ci_type_attribute, team_member, user_custom_role; nullable auf ci_type, relationship_type, lifecycle_definition, lifecycle_state, lifecycle_transition. Org-Wurzel/globaler Permissionkatalog sind sachliche Ausnahmen, nicht automatisch Fremdmandantendaten. Nullable Metamodellzeilen und indirekte Orgableitung widersprechen dem unqualifizierten TEN-02-Wortlaut und benötigen eine explizite Katalogentscheidung.
 - **ENABLE/FORCE:** Auf 103 Tabellen vorhanden; permission (global) und metric_sample (Mandantendaten) ohne beides. metric_sample_1h ist zusätzlich eine nicht RLS-abgesicherte Continuous-Aggregate-View, keine 106. Anwendungstabelle. Metrikhandler enthalten Org-Prädikate; fehlende DB-RLS allein wird nicht als bereits reproduzierter HTTP-Cross-Org-Leak ausgegeben.
-- **Client:** 15 Tabellen besitzen client_id; davon site NOT NULL, 14 nullable. Nur site/ci/collector/subnet/contact/credential plus client über eigene id besitzen Clientprüfung; sie verwenden skalares uuid statt ANY(uuid[]). Die neun anderen direkten Clienttabellen sind in der Matrix einzeln markiert. NULL-Schreiben ist bei den fünf nullable clientgeprüften Tabellen erlaubt, obwohl TEN-05 es ohne Orgrolle verbietet.
+- **Client:** 15 Tabellen besitzen client_id; davon site NOT NULL, 14 nullable. Nur site/ci/collector/subnet/contact/credential plus client über eigene id besitzen Clientprüfung; die SQL-Policies unterstützen bereits Mengen über ANY(string_to_array(...)::uuid[]) (Migration 33:35,42,68,73). Es fehlen autoritative Ableitung/Weitergabe dieser Mengen, nicht die Mengenfähigkeit der SQL-Clientbedingung. Die neun anderen direkten Clienttabellen sind einzeln markiert; NULL-Schreiben bleibt bei den fünf nullable clientgeprüften Tabellen ohne geforderte Orgrolle erlaubt.
 - **Site:** Nur building, ci, subnet, location_node besitzen site_id (building NOT NULL); alle vier ohne Site-Prädikat in USING **und** WITH CHECK. site prüft auch seine eigene id nicht gegen Site-Scope. Room/Rack und weitere physische/objektbezogene Kinder tragen nicht durchgängig die geforderte denormalisierte Site-/Client-Zuordnung. Standort-FKs übertragen Eltern-RLS nicht automatisch.
 - **Team:** owner_team_id kommt in keiner Tabelle vor, app.team_scope in keiner Policy. Es gibt daher keine Liste vorhandener owner_team_id-Tabellen mit bestandener Prüfung; ticket.team_id/team_member.team_id sind kein Ersatz. Das obligatorische Team-Schreib-/Lesemodell ist nicht umgesetzt.
 
@@ -97,7 +98,7 @@ RBA-07: Kein rollenabhängiges Feldrechte-Modell gefunden; datenabhängiges Visi
 | Tabelle | USING / WITH CHECK | Einzelbefund bzw. Abgrenzung |
 |---|---|---|
 | organization | OID / OID | Org-Wurzel über eigene id; keine eigene organization_id. |
-| client | CID / CID | Client über eigene id, aber nur ein skalarer Scope. |
+| client | CID / CID | Client über eigene id und UUID-Menge; Scopeherkunft/-Weitergabe fehlt. |
 | site | C / C | client_id NOT NULL; Site-Scope über eigene id fehlt. |
 | building | O / O | site_id NOT NULL, keine Client-/Site-Schreibschranke; client_id fehlt. |
 | room | O / O | Eltern Building/Site begrenzen nicht; Client-/Site-Denormalisierung fehlt. |
@@ -105,29 +106,29 @@ RBA-07: Kein rollenabhängiges Feldrechte-Modell gefunden; datenabhängiges Visi
 | ci_type | G / O | nullable Org/globales Metamodell; globale Sichtbarkeit ist keine getrennte DELETE-Sperre. |
 | ci_type_attribute | P(global/eigener Typ) / P(eigener Typ) | Eigene Org-Spalte fehlt; indirekter globaler/Org-Typ, DELETE-Grenze separat. |
 | ci | C / C | NULL-Client schreibbar; vorhandenes site_id ungeprüft. |
-| audit_log | O / O | Org-Audit; keine Sichtbegrenzung auf betroffene Client-/Siteobjekte, obwohl weitere Rollen audit:read erhalten. |
+| audit_log | O / O | Privilegiertes Org-Audit; keine pauschale Clientpflicht. Vergabe von audit:read ist separat zu prüfen. |
 | entitlement | O / O | Org-Vertragsdaten; Operatorgrenze ist ENT-04, keine Clientspalte erfunden. |
 | app_user | O / O | Org-Identitäten; Rechte-/Scopeauflösung nicht durch diese Policy erbracht. |
-| role | O / O | Org-Rollenkatalog, kein Clientobjekt; Scopebindung in Zuweisungen fehlt. |
-| role_assignment | O / O | Gespeicherte Client-/Site-Zuweisungen werden nicht als Zugriffsscope ausgewertet. |
+| role | O / O | Org-Rollenkatalog, kein Clientobjekt; keine zusätzliche Clientpolicy erforderlich. |
+| role_assignment | O / O | Orgweite Grantverwaltung; Scopeattribute beschreiben erteilte Rechte. Deren fehlende Auswertung gehört RBA-03, nicht zur Sichtbarkeit des Grantkatalogs. |
 | ci_relationship | O / O | Endpunkt-CI-/Client-/Site-Scope fehlt. |
-| webhook_subscription | O / O | Empfänger-/Service-Account-Scope fehlt. |
-| webhook_delivery | S / S | System-Schreibausnahme, keine Ereignisobjekt-Scopes. |
-| collector | C / C | NULL-Client schreibbar; skalarer Scope. |
+| webhook_subscription | O / O | Orgweite Integrationskonfiguration; kein pauschaler Clientfilter. Service-Account-/Payloadrechte separat RBA-08. |
+| webhook_delivery | S / S | Administrative Zustellhistorie mit System-Schreibausnahme; kein pauschaler Clientfilter für privilegierte Orgzustellung. |
+| collector | C / C | NULL-Client schreibbar; Clientmengen im SQL unterstützt. |
 | discovery_job | O / O | Collector-/Zielscope fehlt. |
 | discovery_result | O / O | Job-/Device-Scope fehlt. |
 | asset | O / O | client_id vorhanden, Clientbedingung in beiden Teilen fehlt; physischer Site-Scope fehlt. |
 | assignment | O / O | Asset-/Client-/Standortscope fehlt. |
-| document | O / O | Nur Metadaten-Org, kein verknüpfter Objektscope; Blobgrenze zusätzlich verletzt. |
+| document | O / O | Orgweite Bibliothek legitim; bei Objektbindung keine Ableitung von dessen Scope. Blobgrenze zusätzlich verletzt. |
 | document_link | O / O | Verknüpfte Objekte vermitteln keinen Scope. |
-| stocktake | O / O | Inventur-/Zielscope fehlt. |
+| stocktake | O / O | Orgweiter Inventurkopf legitim; site/room/rack-Scope ohne verbindliche Zielberechtigung. Objektgrenzen zusätzlich bei Scans prüfen. |
 | stock_scan | O / O | Inventur-/Assetscope fehlt. |
-| ticket | O / O | Verknüpfter CI-/Teamscope fehlt. |
-| ticket_comment | O / O | Ticket-Scope wird nicht abgeleitet. |
+| ticket | O / O | Ungebundene Orgtickets möglich; bei CI-/Assetbindung keine Objekt-Scopeableitung. team_id ohne Team-RLS. |
+| ticket_comment | O / O | Scope eines fachlich beschränkten Tickets wird nicht abgeleitet; Sichtbarkeit ungebundener Orgtickets separat zu entscheiden. |
 | team | O / O | Org-Teamkatalog; owner_team-Modell fehlt. |
 | team_member | P(Team-Org) / P(Team-Org) | Eigene Org fehlt, referenzierte User-Org nicht zusätzlich durch Policy geprüft. |
 | custom_role | O / O | Org-Rollenkatalog, kein eigener Clientobjektanspruch. |
-| user_custom_role | P(Rollen-Org) / P(Rollen-Org) | Eigene Org fehlt, gespeicherter scope_type/scope_id nicht durchgesetzt. |
+| user_custom_role | P(Rollen-Org) / P(Rollen-Org) | Eigene Org fehlt; Benutzer-Org nicht zusätzlich geprüft. Scopeattribute sind Grantmetadaten, deren Auswertung gehört RBA-03. |
 | network_interface | O / O | CI-/Client-/Site-Scope fehlt. |
 | subnet | C / C | NULL-Client schreibbar; vorhandenes site_id ungeprüft. |
 | ip_address | O / O | Subnet-/CI-Scope fehlt. |
@@ -151,41 +152,41 @@ RBA-07: Kein rollenabhängiges Feldrechte-Modell gefunden; datenabhängiges Visi
 | form_def | O / O | client_id vorhanden, Clientbedingung USING/CHECK fehlt. |
 | form_submission | O / O | Formular-/Bezugsobjektscope fehlt. |
 | workflow_def | O / O | Org-Regeldefinition; Ausführung/Bezugsobjekte benötigen eigene Scopebindung. |
-| workflow_run | O / O | Ausführungs-/Bezugsobjektscope fehlt. |
-| workflow_step | O / O | Run-/Objektscope fehlt. |
+| workflow_run | O / O | Orgweite Laufverwaltung legitim; für Fachdaten im JSON-Kontext fehlt Herkunftsscope. Kein pauschaler Live-Bypass nachgewiesen. |
+| workflow_step | O / O | Orgweite Ablaufverwaltung legitim; objektbezogene Inputs/Outputs erben keinen Quellobjektscope. |
 | compliance_rule | O / O | Org-Regeldefinition; keine Objekt-Scopeprüfung dadurch. |
 | compliance_result | O / O | Regelziel-/Objektscope fehlt. |
 | iga_connector | O / O | Org-Connector, kein Clientobjekt aus Definition abgeleitet. |
-| iga_provisioning_task | O / O | Ziel-/Auftraggeberscope fehlt. |
-| iga_lifecycle_policy | O / O | Org-Policy; keine Team-/Zielscopeprüfung dadurch. |
-| iga_access_request | O / O | Angeforderter Ressourcen-/Teamscope fehlt. |
-| iga_access_review | O / O | Review-Ziel-/Teamscope fehlt. |
-| iga_access_review_item | O / O | Review-/Ressourcenscope fehlt. |
-| iga_drift_finding | O / O | Ressourcen-/Zielscope fehlt. |
+| iga_provisioning_task | O / O | Orgweite Accountverwaltung, kein Inventar-Clientdatensatz; keine pauschale Clientpflicht. |
+| iga_lifecycle_policy | O / O | Orgweite Identitätsregeln, keine zusätzliche Client-/Sitepolicy erforderlich. |
+| iga_access_request | O / O | Accountrechteprozess ohne inhärenten Inventar-Clientscope; Personen-/Entscheiderrechte separat. |
+| iga_access_review | O / O | Orgweiter Governanceprozess, keine zusätzliche Clientpolicy erforderlich. |
+| iga_access_review_item | O / O | Benutzer-/Connector-/Entitlementprüfung; Reviewerzuständigkeit separat, kein inhärenter Inventar-Clientscope. |
+| iga_drift_finding | O / O | Orgweite Accountabweichungen, kein Inventar-Clientdatensatz; keine pauschale Clientpflicht. |
 | search_document | O / O | Kopierter Client-/Site-/Teamscope fehlt. |
-| ai_conversation | O / O | Nur Org, keine Ressourcen-Scopebindung der Inhalte. |
-| ai_message | O / O | Conversation-/Ressourcenscope fehlt. |
+| ai_conversation | O / O | Gesprächsverwaltung ohne zwingenden Client-/Sitebezug; Benutzerbesitz und Inhaltsrechte separat zu prüfen. |
+| ai_message | O / O | Conversationnachrichten ohne pauschale Clientpflicht; Gesprächszugang und referenzierte Fachdaten separat. |
 | ai_chunk | O / O | Quellobjekt-/Client-/Site-Scope fehlt. |
-| webhook_dead_letter | S / S | System-Schreibausnahme, Ereignisobjektscope fehlt. |
-| alert_rule | S / S | System-Schreibausnahme, CI-/Site-Scope fehlt. |
+| webhook_dead_letter | S / S | Administrative Zustellfehler mit System-Schreibausnahme; kein pauschaler Clientfilter für privilegierte Orgverwaltung. |
+| alert_rule | S / S | Orgweite Regel nach metric_name ohne konkrete CI-Bindung; System-Schreibausnahme. Kontextlose Workerupdates separat defekt. |
 | privacy_retention_policy | O / O | Org-Regeldefinition; Scope der bearbeiteten Daten separat erforderlich. |
 | collector_enrollment_code | S / S | System-Schreibausnahme für Bootstrap; kein normaler Tenantjob. |
 | consumable | O / O | client_id vorhanden, Clientbedingung USING/CHECK fehlt. |
 | stock_movement | O / O | Bestand-/Standort-/Clientscope fehlt. |
 | internal_order | O / O | client_id vorhanden, Clientbedingung USING/CHECK fehlt. |
 | internal_order_item | O / O | Order-/Bestandsobjektscope fehlt. |
-| maintenance_window | O / O | Ziel-/Standortscope fehlt. |
+| maintenance_window | O / O | Orgweite Wartungsplanung legitim; bei Ausgabe CI-bezogener Fachdaten keine abgeleitete Zugriffsbeschränkung. |
 | maintenance_window_ci | O / O | CI-/Window-Scope fehlt. |
 | maintenance_notification | O / O | client_id vorhanden, Clientbedingung USING/CHECK fehlt. |
-| disposal_record | O / O | Asset-/Standortscope fehlt. |
+| disposal_record | O / O | Bei Asset-/CI-Bindung kein Objektscope; ungebundene orgweite Nachweise möglich. Append-only ersetzt keine Leseberechtigung. |
 | key_item | O / O | client_id vorhanden, Clientbedingung USING/CHECK fehlt. |
 | key_assignment | O / O | Key-/Empfängerscope fehlt. |
 | training | O / O | Org-Schulungskatalog; kein Clientobjekt aus Definition abgeleitet. |
-| training_assignment | O / O | Nur Org, keine personenbezogene/Team-Scopeableitung. |
-| desk | O / O | Raum-/Standortscope fehlt. |
-| desk_booking | O / O | Desk-/Standortscope fehlt. |
+| training_assignment | O / O | Personenbezogene Schulungszuweisung, kein Inventar-Clientdatensatz; persönlicher Zugriff ist separate Authz. |
+| desk | O / O | Bei Raumzuordnung fehlt Standortscope; ungebundener orgweiter Arbeitsplatz möglich. |
+| desk_booking | O / O | Ein gegebenenfalls vorhandener Standortscope des Desks wird nicht übernommen. |
 | asset_location | O / O | Asset-/Standort-/Clientscope fehlt. |
-| endpoint_agent | O / O | CI-/Gerätescope fehlt. |
+| endpoint_agent | O / O | Orgweite ungebundene Agentverwaltung möglich; bei CI-Bindung fehlt dessen Scope. |
 | security_finding | O / O | CI-/Assetscope fehlt. |
 | ci_instance_field_definition | O / O | CI-/Client-/Site-Scope fehlt. |
 | relationship_type | G / O | nullable Org/globaler Katalog; DELETE-Semantik gesondert. |
@@ -220,9 +221,11 @@ Die fünf S-Policies stammen aus `/home/runner/work/Reticora-CMDB/Reticora-CMDB/
 
 **Zählweise:** 80 direkte Aufrufstellen in 58 Nicht-Test-Go-Dateien (Query/QueryRow/Exec, database/sql-Varianten, SendBatch, Begin/BeginTx/Acquire); SQL auf bereits geöffneter Transaktion nicht nochmals gezählt. 46 private withTenant-Helfer + 2 inTx-Helfer + 32 weitere Aufrufstellen. Keine weiteren PostgreSQL-Zugänge in Collector/Edgecore gefunden. GraphQL delegiert an dieselben Repositories, besitzt keinen zusätzlichen direkten Poolzugriff.
 
+**Produktabgrenzung:** Davon 70 verdrahtete Produktaufrufstellen in 55 Dateien. Sieben Stellen unbenutzter zentraler WithTenant-/SetTenantContext-Varianten, zwei in cmd/audit-seed und PGAPIKeyStore.Save ohne produktiven Aufrufer sind unten separat gekennzeichnet, nicht als aktive Request-/Workerpfade gezählt. Orgweite Administrationshelfer benötigen nicht pauschal Clientfilter, erfüllen aber ebenfalls nicht den zentralen Fünf-GUC-Vertrag.
+
 Alle privaten Helfer öffnen eigene Transaktionen mit `set_config(..., true)`, keine gemeinsame Requesttransaktion. **Produktiv kein sessionsweites Tenant-set_config(false) gefunden**; Schutz vor Poolleaks ist deshalb nicht fälschlich als vollständig fehlend dargestellt. Jedoch fehlen nötige Variablen/Scopeableitungen; leerer Client-Kontext bedeutet unbeschränkt. Drei zentrale WithTenant-Varianten existieren ohne produktive Aufrufer. Auch der unbenutzte SetTenantContext auf *sql.DB ist nicht sicher: mehrere lokale Autocommit-Statements garantieren weder gemeinsame Verbindung noch wirksame Folgetransaktion.
 
-**Acht produktive `PGRepository.withTenant` mit Org und optional skalarem Client:** keiner setzt User/Site/Team.
+**Acht produktive `PGRepository.withTenant` mit Org und optionalem Client-Scope-String:** keiner setzt User/Site/Team. Die SQL-Policies können kommaseparierte UUID-Mengen auswerten; dies ersetzt nicht deren korrekte Herleitung.
 
 | Direkte Begin-Stelle | Befund |
 |---|---|
@@ -295,7 +298,7 @@ Alle privaten Helfer öffnen eigene Transaktionen mit `set_config(..., true)`, k
 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/monitoring/pg_alert_store.go:174` ListEnabled | Globaler produktiver Worker-Read, lokale Systemausnahme. |
 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/monitoring/pg_alert_store.go:202,215,229` MarkPending/MarkFired/ClearPending | Produktive Updates ohne Org/System-GUC; erwartbar keine Änderung/Fehler unter RLS, kein bewiesenes Cross-Org-Schreiben. |
 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/pg_repository.go:584` RedeemEnrollmentCode | Öffentlicher Bootstrap mit lokaler Systemausnahme; Org erst aus Code, ausdrücklich gesondert zu prüfen. |
-| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/audit/audit.go:203,328` Verify/Handler.list | Eigene Transaktionen, nur Org; Verify auch Wartung, list produktiv. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/audit/audit.go:203,328` Verify/Handler.list | Eigene Orgtransaktionen für privilegiertes Audit; Verify auch per HTTP/Complianceadapter produktiv, daneben Wartung. |
 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/lifecycle/states.go:38,61,96` CurrentState/SetState/LifecycleKeyFor | Nur Org bei direktem CI-/Assetzugriff; LifecycleKeyFor verwirft Request-Kontext zugunsten Background. |
 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/reservation/availability.go:29` Availability | Eigene Transaktion nur Org. |
 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/reservation/pg_repository.go:182` ExpireDue | Produktiver Worker ohne Tenant-/System-GUC, keine Mandanteniteration; Sweeper ignoriert Fehler (:40–44 in `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/reservation/sweeper.go`). |
@@ -446,11 +449,12 @@ Die Sollmatrix enthält discovery:ingest aus RBA-01 nicht ausdrücklich; dessen 
 - `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000021_spec_alignment.up.sql:192` erlaubt ambiguous_identity/conflicting_values/unclassified_device, nicht unlicensed_ci. Der Discoverytest `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/discovery_test.go:109–129` injiziert kein CI-Repository; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/limit_test.go:32–50` nur einen Limit-Stub. Keine produktive End-to-End-Kontingentprüfung.
 - **Empfohlene Korrektur:** Alle Ingest-Aliase zentral auf Discovery-Ablauf prüfen und sämtliche CI-Neuanlagen atomar am gleichen Kontingent messen. Bestehende CIs weiter aktualisieren; neue Überlimitgeräte samt Snapshot als unlicensed_ci halten, Metrik/Benachrichtigung und auditiertes Resolve/Dismiss implementieren. ENT-03 macht diese Behandlung ausdrücklich verbindlich, unabhängig vom Vorschlagsvorbehalt in CH21.
 
-### ENT-04 — High: Mandantenadministration ist zugleich Lizenzgeber
+### ENT-04 — High: Geforderte Operatorroute und -identität fehlen
 
 - **Beschreibung / Dateien:** org_admin bekommt entitlement:manage über `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000032_standard_role_seeds.up.sql:35,56–57`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/server/authz.go:115,279–288` fordert nur diese Mandantenberechtigung. `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/entitlement/handler.go:81–93` akzeptiert Featurefreigaben und fehlende Limit-/Ablaufwerte, der Upsert überschreibt damit vorhandene Werte (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/entitlement/pg_repository.go:78–85`). Nil-Limit bedeutet unbegrenzt (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/entitlement/entitlement.go:238,278–279`).
 - Die reale Laufzeitberechtigung folgt nicht aus dem Seed allein: `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/handler.go:270–279,304–311` erteilt OIDC-admin/owner sämtliche allPermissions einschließlich entitlement:manage (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/types.go:148–149`). RLS beschränkt dies auf die eigene Org, ersetzt aber keine Operatoridentität; keine Cross-Org-Schreibmöglichkeit behauptet. Der Handler-Memorytest prüft diese Grenze nicht.
-- **Empfohlene Korrektur:** Schreibzugriff ausschließlich über die verlangte Admin-Org-Route und eine separat verifizierte Betreiberidentität; nicht aus tenantverwalteten Rollen ableitbar. Änderungen mit authentifiziertem Akteur auditieren, Fremdtenant-/Nichtoperator-/Selbstfreigabetests durchführen.
+- RBA-02 gewährt org_admin ausdrücklich entitlement:manage. Deshalb ist Selbstfreigabe allein **keine nachgewiesene Privilegieneskalation**; die fachliche Abweichung betrifft die fehlende verlangte Admin-Org-Route/Operatoridentität. Eine davon unabhängige Billing-Sicherheitsgrenze wird nicht unterstellt.
+- **Empfohlene Korrektur:** Verlangte Admin-Org-Route mit verifizierter Operatoridentität umsetzen; parallel zulässige tenantseitige Grantverwaltung gegenüber RBA-02 verbindlich klären. Änderungen mit authentifiziertem Akteur auditieren und die danach festgelegten Betreiber-/Mandantengrenzen testen.
 
 ### ENT-02/03/05 — High: Export-Gate und produktive Route stimmen nicht überein
 
@@ -481,6 +485,7 @@ Die Sollmatrix enthält discovery:ingest aus RBA-01 nicht ausdrücklich; dessen 
 - AUT-05/AUT-06 benötigen den v2-Wortlaut. AUT-03 kann nur gegen die ausdrücklich gelieferte Aussage „Dev-Login nur außerhalb production“ geprüft werden.
 - TEN-05 erlaubt in seiner allgemeinen WITH-CHECK-Formel `client_id IS NULL`, verbietet danach aber org-weite Schreibzugriffe für ausschließlich client-gescopte Rollen. Maßgeblich für die Prüfung ist zusätzlich dieses ausdrückliche Schreibverbot; die formale Policy-Spezifikation muss beide Aussagen widerspruchsfrei zusammenführen.
 - ENT-06 ist insgesamt ein Vorschlag (V); dessen Paketwerte sind kein verbindliches G1-Kriterium. Die ausdrücklichen Baseline-Feature-Keys aus ENT-02 und Add-on-Trennung nach CH14 bleiben eigenständig verbindlich.
+- ENT-04 fordert Operatoridentität, während RBA-02 org_admin entitlement:manage gibt: Darf diese Mandantenrolle Grants selbst ändern, oder nur eine eingeschränkte Verwaltungsfunktion nutzen? Kein ausdrückliches Operator-only-Verbot oder zusätzliche Billing-Grenze ohne Entscheidung annehmen.
 - RBA-02 nennt discovery:ingest aus RBA-01 nicht in seiner vollständigen Matrix: Rollenverteilung bestätigen. AUT-04 nennt zwischen Prefix und Secret keinen zusätzlichen Trenner; gewünschtes exaktes Format bestätigen, der aktuelle zusätzliche Unterstrich wurde nicht still übernommen.
 - Referenzierte Abschnitte SEC-06/07, TLC-01/03, API-07 und der v2-Umfang von TEN-09 liegen nicht vollständig vor; nur gelieferte Kriterien werden bewertet.
 - Welche globalen Metamodell-/Katalogtabellen sind verbindliche Ausnahmen von TEN-02/05? Der Istbestand globaler NULL-Org-Zeilen und indirekter Orgableitung ist einzeln benannt, nicht still als konform angenommen.
