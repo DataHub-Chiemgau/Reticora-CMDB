@@ -9,7 +9,7 @@ Alle **16 genannten IDs in zwölf Prüfblöcken** untersucht: **7 ABWEICHEND, 4 
 **Keine Sicherheitsfreigabe:** Phase1-Vaultbasis aus CH16/SEC-05 fehlt; weitere Phasen-/Gatetags sind nicht geliefert und werden nicht erfunden.
 **Tests:** 9 Crypto-Unitfunktionen grün; sieben Backendpakete und Gesamtbuild wegen fehlender Offline-Abhängigkeit blockiert. CI insgesamt rot; npm-ci-Audit vorhanden, kein Container-/Go-Abhängigkeitsscan nachgewiesen.
 **Ungeprüfte IDs:** keine im bestätigten Umfang. N/P-Unterteile: exakte Sollrollen/change_kind-Menge, weitere Historienausschlüsse, Retentionfristen, Live-Provider-/Deploymentnachweise und EVT-Subjectdetails über den angegebenen Präfix hinaus.
-Nur dieser Bericht geändert; Empfehlungen nicht umgesetzt. Abschlussgegenprüfung und Dokumentvalidierung folgen.
+Nur dieser Bericht geändert; Empfehlungen nicht umgesetzt. Unabhängige Quellen-/Dokumentgegenprüfung abgeschlossen; automatische Review technisch nicht verfügbar, CodeQL für Markdown übersprungen.
 
 ## Ergebnis je Anforderung
 
@@ -46,6 +46,8 @@ Kontakt-Tests sind `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/intern
 Erneut über GitHub Actions abgefragt: [CI 35731844252](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/35731844252), Commit `b0f0ee2302e3af5afa41fbeaf738687fe1492504`, insgesamt **failure**. Jobs backend und k8s-manifests success; migrations, lint-backend und frontend failure; e2e skipped. Im Migrationsjob up/down/up erfolgreich, PostgreSQL-Integration fehlgeschlagen, anschließende RLS-Assertions übersprungen. Erfolgreiche Cloud-Agent-Läufe sind keine Produkt-CI- oder Scan-Nachweise; keine neue CI ausgelöst.
 
 Logs [Migrationsjob106759104594](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/35731844252/job/106759104594): TestMigrationsApplied, TestTenantIsolationRLS, TestClientScopeRLS scheitern am DB-URL-Parsing, zusätzlich TestPoolRefusesRLSBypassingRole fehlgeschlagen. Logs [Frontendjob106759105891](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/35731844252/job/106759105891): npm ci meldet **8 Vulnerabilities (5 moderate,3 high)** bei429 geprüften Paketen und beendet Installation erfolgreich; der spätere Jobfehler betrifft Formatierung. Dies sind historische Scannerzählungen, keine hier verifizierten ausnutzbaren CVEs und kein Anlass für nicht beauftragte Dependencyupdates.
+
+**Dokumentvalidierung:** Unabhängige Quellen-/Fachgegenprüfung und gesonderte Sicherheitsprüfung durchgeführt; alle16 IDs genau einmal den zwölf Prüfblöcken zugeordnet, Statuszahlen/acht Tabellenspalten/fünf Abschnitte und absolute Quellpfade/Zeilengrenzen geprüft. Secretsscan ohne Treffer. Automatisierte Code-Review angefordert, wegen nicht verfügbarem konfiguriertem Modell **nicht ausgeführt**; CodeQL bei ausschließlich Markdown übersprungen. Weder die Tool-Erfolgsüberschrift noch grüne Crypto-Units sind eine Sicherheitsfreigabe des Produkts.
 
 ## Befunde im Detail
 
