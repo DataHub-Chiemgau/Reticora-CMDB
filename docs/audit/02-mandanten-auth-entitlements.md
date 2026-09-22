@@ -4,7 +4,26 @@ Audit Teil 2 gegen den in diesem Auftrag gelieferten Katalogauszug (Abschnitte 5
 
 Grundlage: `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/00-schema-ist.md`, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/00-bestandsaufnahme.md`, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/README.md` und `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/spec/katalog-v3/00-grundlagen.md`. Das Schema-Inventar beschreibt Migrationen, kein geprüftes Produktionsschema.
 
-Zwischenstand: Prüfaufträge zu Mandanten, Authentifizierung, Autorisierung und Entitlements laufen; abschließende Statuszählung, G1-Blocker und Liste ungeprüfter IDs folgen nach Abgleich der 36 Einzelbewertungen.
+**36/36 IDs erfasst; G1 nicht freigabefähig.** Keine vollständige PASS-Bewertung: vorhandene Funktionen sind widersprüchlich/unvollständig oder nicht durch reale Integrationen belegt.
+
+| Primärer Tag / Zählgruppe | PASS | PARTIAL | ABWEICHEND | FAIL | OFFEN | N/P | Summe |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| [B] | 0 | 3 | 21 | 1 | 0 | 2 | 27 |
+| [Q] | 0 | 1 | 0 | 0 | 0 | 0 | 1 |
+| [P4] | 0 | 1 | 0 | 0 | 3 | 0 | 4 |
+| [P2] | 0 | 0 | 1 | 0 | 1 | 0 | 2 |
+| [P2–P4]/[A] (RBA-05) | 0 | 1 | 0 | 0 | 0 | 0 | 1 |
+| (V), gemischte Phasen (ENT-06) | 0 | 0 | 1 | 0 | 0 | 0 | 1 |
+| **Gesamt** | **0** | **6** | **23** | **1** | **4** | **2** | **36** |
+
+- Jede ID zählt einmal; spätere Teilumfänge stehen zusätzlich in ihrer Zeile. ENT-06-ABWEICHEND betrifft verbindliche CH14-Add-on-Trennung, **nicht** unverbindliche Paketwerte.
+- **Critical:** TEN-02/04/05/06 (Scopes/Policies/DB-Pfade, Cross-Org-Blobzugriff); AUT-01/02/09 (Sperrungsumgehung, dauerhaft erneuerbare Altberechtigungen, bekanntes Default-Administratorkonto); RBA-02/03/04 (verlorene Rollen-Scopes, Viewer kann Credentials entschlüsseln).
+- **High:** TEN-03/09/10, AUT-04/08/10, RBA-01/05/06/08, ENT-01–08. Kernlücken: VRFs, Service-Accounts, Betreibertrennung, Kontingente, Ablauf/Collector-Pause, Allkanal-/Integrationstestnachweis.
+- **G1-Blocker:** TEN-02/03/04/05/06/09/10; AUT-01/02/04/09/10; RBA-01/02/03/04/08; ENT-01/02/03/04/05/07/08. TEN-01 und AUT-03 besitzen weitere offene Baseline-Nachweise/Abweichungen.
+- Spätere fehlende Funktionen (TEN-07/08, AUT-07, RBA-07) sind OFFEN, nicht Baseline-FAIL. Vorhandener P2/P4/[A]-Code ist normal geprüft; seine Unvollständigkeit allein und ENT-06-Vorschlagswerte sperren G1 nicht.
+- **Ungeprüfte IDs wegen fehlendem Wortlaut:** AUT-05, AUT-06 (N/P). Nur der nicht gelieferte v2-Restumfang von AUT-03/TEN-09 bleibt zusätzlich unbewertet; gelieferte Kriterien sind geprüft. Keine sonstige ID ausgelassen.
+- Alle **105 Tabellen** einzeln erfasst; **80 direkte DB-Einstiege in 58 Dateien** klassifiziert. **0 ungemappte registrierte Routen** bei 400 expliziten Operationen, aber falsche Aktionsrechte trotz vollständigem Mapping.
+- Lokal nur drei Tenant-Kontext-/Quelltexttests grün; zehn Testpakete und Backendbuild am Offline-Modulcache blockiert. Kein behaupteter aktueller PG-/Keycloak-/S3-Isolationslauf; CI-Grenzen und Mocknachweise separat dokumentiert.
 
 ## Ergebnis je Anforderung
 
@@ -12,6 +31,16 @@ PASS setzt vollständige, korrekte und testbelegte Umsetzung voraus; Mocks allei
 
 | ID | Tag | Status | Evidenz | Tests | Befund (1–2 Sätze) | Severity | Aufwand |
 |---|---|---|---|---|---|---|---|
+| TEN-01 | [B], Reseller [P4] | PARTIAL | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000001_tenant_model.up.sql:6–66`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000055_cmdb_extensions.up.sql:286–320` | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenantapi/handler_test.go:114`: Memory-Hierarchie, kein erfolgreicher Gesamtroundtrip; T1. | Org/Client/klassische Standorthierarchie, Location-Baum und Assetbezug bestehen, aber durchgängige einheitliche Hierarchie mit Scopewirkung ist nicht nachgewiesen. Reseller fehlt als späterer Teil (TEN-08), vorhandene doppelte Standortstrukturen erfordern Konsolidierung. | Medium | L |
+| TEN-02 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/00-schema-ist.md:9–20,40–144`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000001_tenant_model.up.sql:38–66`; Einzeltabellen unten. | Schema-/RLS-Tests decken nicht alle 105 Tabellen/Spalten ab; T1. | Fünf Tabellen ohne eigene Org-Spalte und fünf nullable, darunter globale Kataloge/Org-Wurzel gesondert zu klären; Standort-/Kindtabellen tragen Client/Site nicht durchgängig denormalisiert. Daraus folgende fehlende Client-/Site-WITH-CHECK-Schranken werden einzeln als Critical geführt, nicht globale Metadaten pauschal als Tenant-Leak. | Critical | L |
+| TEN-03 | [B] | PARTIAL | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/pool.go:52–76,112–130`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000056_rls_enforcement.up.sql:23–78` | `TestPoolRefusesRLSBypassingRole`, bedingter Skip; keine live geprüfte Owner-/DDL-Matrix. | SET ROLE und NOSUPERUSER/NOBYPASSRLS werden geprüft; explizite Grants liefern USAGE/DML statt vollständigem CH19-DDL-Vertrag. Effektive geerbte Rechte/Eigentümerschaft sind nicht live belegt, FORCE wird nur für bereits RLS-aktivierte Tabellen gesetzt. | High | M |
+| TEN-04 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/pool.go:150–180`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenant/tenant.go:9–13`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/handler.go:253–276` | Drei Kontext-/Quelltexttests grün, keine vollständige GUC-/Poolintegration; T1. | Produktive Helfer setzen Org und teils skalaren Client lokal, nicht alle fünf mengenwertigen GUCs pro Request; DB-Rollenscopes fehlen schon in Sessions. Kein produktiver sessionsweiter Tenant-Setter gefunden, aber fehlende Scopes bedeuten org-weiten Zugriff. | Critical | L |
+| TEN-05 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000033_client_scope_rls.up.sql:29–79`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000056_rls_enforcement.up.sql:62–105`; vollständige Policy-Matrix unten. | `TestClientScopeRLS` prüft andere benannte Clients, nicht NULL-Schreiben/Site/Team; T1. | Nur sieben Tabellen prüfen Client, neun weitere mit client_id nicht; Site/Team fehlen, metric_sample hat keine RLS. WITH CHECK erlaubt auch gescopten Schreibern NULL-Client, Systemausnahmen sind ebenfalls schreibfähig; jede fehlende Client-/Site-Schreibschranke ist Critical. | Critical | L |
+| TEN-06 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/pg_repository.go:66–78`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/export/pg_job_repository.go:174–198`; vollständiges DB-Einstiegsinventar unten. | Keine vollständige negative Pfadmatrix; lokale DB-Tests setupblockiert. | Drei zentrale WithTenant-Varianten werden produktiv nicht aufgerufen; 46 private Helfer und weitere Poolpfade liefern inkonsistenten Kontext statt zentraler Request-/Tenanttransaktion. Worker nutzen teils app.system global statt Mandanteniteration, Exporte/Suche/Lifecycle verlieren Scopes; Dokumentdownloads haben zusätzlich Cross-Org-Blobzugriff. | Critical | L |
+| TEN-07 | [P4] | OFFEN | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/deploy/terraform/main.tf:1–24`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/deploy/k8s/overlays/prod/kustomization.yaml:15–33`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/credential/credential.go:64–70,137–147` | Kein Dedicated-/KRITIS-Provisionierungs-/Isolationstest. | Allgemeine Deployments und Org-DEKs sind Voraussetzungen, keine dedizierte Schema-/Instance-Funktion mit eigenem Betriebsprofil. Kein solcher P4-Code gefunden; keine erwiesene Architekturblockade und kein G1-Fehlen daraus abgeleitet. | – | – |
+| TEN-08 | [P4] | OFFEN | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000001_tenant_model.up.sql:6–25`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenantapi/model.go:7–16` | Keine Reseller-Kontext-/Session-/Audit-Teststrecke gefunden. | Keine Resellertabelle/organization.reseller_id oder explizite Orgwechsel-Session; Client innerhalb Org ersetzt keine Reseller-Ebene. Spätere Erweiterung nicht als G1-fällig bewertet, keine unvermeidbare Architekturblockade belegt. | – | – |
+| TEN-09 | [Q] | PARTIAL | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/rls_isolation_test.go:98,189`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenant/rls/isolation_integration_test.go:117–127,164`; Testmatrix unten. | Echte PG-Testfälle vorhanden, aber T1 blockiert; ein Fixture setzt Org sessionsweit über Pool statt Transaktion. | Repräsentative Org-/Client-Reads und INSERT-Abweisung bestehen als Tests, keine vollständige Site-/Team-/NULL-Schreib-/Job-/Notification-/Review-/Location-Abdeckung. v2-Restumfang fehlt; gefundene tatsächliche Expositionspfade bleiben Critical, auch wenn Testlücke hier High ist. | High | L |
+| TEN-10 | [B] | FAIL | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000015_network_ipam.up.sql:22–52`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/permission/catalog.go:3–102`; Suchraum Migrationen/Backend/API. | Kein VRF-CRUD-/Org-Anlage-Defaulttest gefunden. | VRF-Modell, Org-Unique(name), is_default/global bei Org-Anlage sowie CRUD/vrf:manage fehlen. Bestehende Org+CIDR-/Adress-Eindeutigkeit ohne VRF erfüllt CH10 nicht. | High | L |
 | AUT-01 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/oidc.go:202–346`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/handler.go:248–276`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/user/pg_repository.go:972–992` | `TestCallbackRejectsForgedIDToken`, PKCE-/JWKS-Tests mit Fake-IdP; kein echter Einladungs-/Provisionierungs-Roundtrip; T1. | PKCE und Signatur-/Issuer-/Audience-Prüfung bestehen, aber Org kommt aus UUID-Gruppe, Benutzer-Upsert aus oidc_subject statt zugelassenem Org/E-Mail-Erstlogin. Upsert reaktiviert auch lokal gesperrte Benutzer ohne autorisierten Reaktivierungsprozess. | Critical | L |
 | AUT-02 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/handler.go:15–18,155–175,415–418`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/types.go:215–223`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/session.go:17–21,60–140` | `TestRefreshAllowsRecentlyExpiredToken`; lokale RSA-/HTTP-Tests, keine echte Sperr-/Logout-/Refresh-Replay-Prüfung; T1. | RS256 besteht, aber 60 statt 15 Minuten, abweichende Claims/fehlendes kid, kein Refresh-Cookie/Redis-Widerruf. Refresh übernimmt alte Rechte ohne Statusprüfung wiederholt, sodass Deaktivierung/Rechteentzug keine zuverlässige Wirkung entfalten. | Critical | L |
 | AUT-03 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/cmd/server/main.go:366–390`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/config/config.go:110–111`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/session.go:94–97` | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/cmd/server/main_test.go` `TestLoadSessionIssuer*`: keine Production-Matrix. | Kein eigener Dev-Login; AllowInsecureDevAuth ist zwar opt-in, aber nicht ausdrücklich außerhalb production begrenzt. Der typisierte nil-Verifier weist Tokens ab, daher kein nachgewiesener produktiver Auth-Bypass; übriger v2-Wortlaut fehlt. | Medium | M |
@@ -22,7 +51,7 @@ PASS setzt vollständige, korrekte und testbelegte Umsetzung voraus; Mocks allei
 | AUT-08 | [P4] | PARTIAL | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/iga/handler.go:64–76`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/iga/scim.go:175–223,280–300`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/iga/connector.go:82–189` | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/iga/iga_test.go`: InMemory-/HTTPS-Testserver, kein externer End-to-End-Roundtrip. | Inbound und Outbound bestehen, Group-PATCH ist aber PUT-Alias, User-PATCH beschränkt und TaskRunner nicht produktiv aufgerufen. Deprovisionierung entzieht keine Sessions; dieser vorhandene Pfad wird nicht pauschal OFFEN gesetzt. | High | L |
 | AUT-09 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/deploy/keycloak/realm-reticora.json:2,95–107,122–149`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/install-cloud.sh:894–901`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/handler.go:304–312` | Kein echter MFA-/Broker-/Lockout-Test; Realm-Helper aus Teil 1 prüft Struktur, keine Auth-Policy. | Ein Realm/Org-Mapper bestehen, aber Org-Attribut wird nicht verwendet, Admin-Brokering und verpflichtende MFA/Passwort-/Lockout-Policy fehlen. Produktiver Import enthält ein bekanntes nichttemporäres Demo-Administratorkonto, dessen Passwort nicht durch den Installer individualisiert wird. | Critical | L |
 | AUT-10 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/cmd/server/main.go:307–319`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/config/config.go:123`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/middleware/auth.go:79–104`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/middleware/ratelimit.go:138–158` | Memory-Limitertests mit Budgets 2/3, keine Produktionsprüfung 20/min pro IP vor Auth. | Allgemeines Budget 600/min nach Auth statt eigenständigem Pre-Auth20/min; ungültige API-Keys erreichen den Limiter nicht. Signup-/Einladungsannahme fehlen, dedizierte Keycloak-Lockout-Anzeige ist nicht nachgewiesen. | High | M |
-| RBA-01 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/permission/catalog.go:3–102`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000032_standard_role_seeds.up.sql:20–39`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/types.go:11–110` | `TestRoutePermissionsExistInCatalog`/`TestIdentityCatalogCoversRoutePermissions` prüfen Ist-Katalog, nicht v3-Liste; T1. | Neun geforderte Schlüssel fehlen im SQL-/Go-Katalog, location:* ersetzt site:* nicht; collector:manage existiert nur als Identity-Konstante. Ähnliche oder ungenutzte Schlüssel erfüllen die exakten Aktionsrechte nicht. | High | M |
+| RBA-01 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/permission/catalog.go:3–102`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000032_standard_role_seeds.up.sql:20–39`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/types.go:11–110` | `TestRoutePermissionsExistInCatalog`/`TestIdentityCatalogCoversRoutePermissions` prüfen Ist-Katalog, nicht v3-Liste; T1. | Neun geforderte Schlüssel fehlen im SQL-/Go-Katalog; die vorhandenen site:*-Rechte ersetzen die geforderten location:*-Rechte nicht, collector:manage existiert nur als Identity-Konstante. Ähnliche oder ungenutzte Schlüssel erfüllen die exakten Aktionsrechte nicht. | High | M |
 | RBA-02 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000032_standard_role_seeds.up.sql:48–150`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/handler.go:270–277,304–378`; Matrix unten. | Rollen-/Authztests mit Memory/Principals, keine Prüfung der Sollmatrix beim echten Login; T1. | Seed und ausgegebene Session verwenden unterschiedliche Rollenmodelle, engineer/client_technician werden nicht als gleichnamige OIDC-Rollen erkannt; C-Semantik fehlt. Viewer erhält unter anderem credential:read und kann damit den Decrypt-Endpunkt nutzen. | Critical | L |
 | RBA-03 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000005_users_roles.up.sql:17–38`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000014_phase2_users_teams_roles.up.sql:30–55`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/permission/pg_repository.go:115–158` | `TestMemoryRepositoryTeamsAndRoles`, Permissiontests ohne echte Scope-Union; T1. | Custom-Rollen und Rechtevereinigung bestehen, EffectivePermissions ignoriert aber Scope-Spalten und Sessionauflösung übernimmt DB-Rollen nicht. Team-Scope und durchgängige Org→NULL-/Mengenvereinigung fehlen, sodass Client-Rollenzuweisung keine verlässliche Begrenzung ergibt. | Critical | L |
 | RBA-04 | [B] | ABWEICHEND | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/server/authz.go:17–159,181–248,264–359`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/credential/handler.go:23–29,125–143`; Routeninventar unten. | `TestEveryRouteHasAPermissionMapping`, `TestAuthorizationMiddlewareEnforcesPermissions`: vorhandenes Mapping/Memory, nicht richtige Fachrechte; T1. | Statisch alle 400 expliziten Operationen gemappt, unbekanntes Mapping wird verweigert; UNMAPPED-Liste leer. Falsche Aktionszuordnung lässt jedoch Viewer entschlüsseln, ci:write löschen und order:write freigeben; Mappingexistenz genügt nicht. | Critical | L |
@@ -52,6 +81,265 @@ RBA-07: Kein rollenabhängiges Feldrechte-Modell gefunden; datenabhängiges Visi
 - Frontend-/Browser-Tests nicht ausgeführt: `/home/runner/work/Reticora-CMDB/Reticora-CMDB/frontend/node_modules/` fehlt. Keine neue Testharness, Datenbank, Migration oder Produktdatei angelegt/verändert; keine Laufzeit-Exploitation behauptet. Quelltextnachweise und bestehende Mock-/Integrationstests werden getrennt ausgewiesen.
 
 ## Befunde im Detail
+
+### TEN-02/05 — Critical: Vollständiger Tabellen-/Policy-Abgleich
+
+**Quellen und Lesart:** Alle 105 migrationsdefinierten Tabellen wurden gegen den Index `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/00-schema-ist.md:40–144` abgeglichen; dort steht je Tabellensymbol die Erstanlagemigration. Maßgebliche spätere Policyersetzungen: `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000023_rls_variable_unification.up.sql:13–67`, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000033_client_scope_rls.up.sql:29–79`, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000040_ci_type_global_read.up.sql:8–11`, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000041_rls_gap_closure.up.sql:18–72` und `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000056_rls_enforcement.up.sql:62–105`. Nachfolgend kumulativer Istzustand, nicht ungeprüfte Anfangspolicies.
+
+- **Org-Spalte:** NOT NULL auf 95 Tabellen; fehlend auf organization, permission, ci_type_attribute, team_member, user_custom_role; nullable auf ci_type, relationship_type, lifecycle_definition, lifecycle_state, lifecycle_transition. Org-Wurzel/globaler Permissionkatalog sind sachliche Ausnahmen, nicht automatisch Fremdmandantendaten. Nullable Metamodellzeilen und indirekte Orgableitung widersprechen dem unqualifizierten TEN-02-Wortlaut und benötigen eine explizite Katalogentscheidung.
+- **ENABLE/FORCE:** Auf 103 Tabellen vorhanden; permission (global) und metric_sample (Mandantendaten) ohne beides. metric_sample_1h ist zusätzlich eine nicht RLS-abgesicherte Continuous-Aggregate-View, keine 106. Anwendungstabelle. Metrikhandler enthalten Org-Prädikate; fehlende DB-RLS allein wird nicht als bereits reproduzierter HTTP-Cross-Org-Leak ausgegeben.
+- **Client:** 15 Tabellen besitzen client_id; davon site NOT NULL, 14 nullable. Nur site/ci/collector/subnet/contact/credential plus client über eigene id besitzen Clientprüfung; sie verwenden skalares uuid statt ANY(uuid[]). Die neun anderen direkten Clienttabellen sind in der Matrix einzeln markiert. NULL-Schreiben ist bei den fünf nullable clientgeprüften Tabellen erlaubt, obwohl TEN-05 es ohne Orgrolle verbietet.
+- **Site:** Nur building, ci, subnet, location_node besitzen site_id (building NOT NULL); alle vier ohne Site-Prädikat in USING **und** WITH CHECK. site prüft auch seine eigene id nicht gegen Site-Scope. Room/Rack und weitere physische/objektbezogene Kinder tragen nicht durchgängig die geforderte denormalisierte Site-/Client-Zuordnung. Standort-FKs übertragen Eltern-RLS nicht automatisch.
+- **Team:** owner_team_id kommt in keiner Tabelle vor, app.team_scope in keiner Policy. Es gibt daher keine Liste vorhandener owner_team_id-Tabellen mit bestandener Prüfung; ticket.team_id/team_member.team_id sind kein Ersatz. Das obligatorische Team-Schreib-/Lesemodell ist nicht umgesetzt.
+
+**Policycodes:** O = Orgvergleich; OID = organization.id; C = Org+Client, einschließlich NULL-Client; CID = Org+client.id; G = NULL-Org oder eigene Org; P = Eltern-Orgprüfung; S = Org **oder** app.system=on; – = keine Policy. Jede Zelle nennt **USING / WITH CHECK**. Bei keiner Tabelle existiert eigenständige Site-/Teamprüfung. „Kind-/Objekt-Scope fehlt“ bezeichnet fehlende direkte/über Eltern vermittelte Begrenzung für scopepflichtige Daten, nicht die Behauptung, jede Zeile jeder Org-Verwaltungstabelle müsse client_id besitzen. **Jede fehlende Client-/Site-Bedingung in WITH CHECK scopepflichtiger Daten und jedes unerlaubte NULL-Client-Schreiben ist Critical.** Kein Live-Test jeder einzelnen Tabelle behauptet.
+
+| Tabelle | USING / WITH CHECK | Einzelbefund bzw. Abgrenzung |
+|---|---|---|
+| organization | OID / OID | Org-Wurzel über eigene id; keine eigene organization_id. |
+| client | CID / CID | Client über eigene id, aber nur ein skalarer Scope. |
+| site | C / C | client_id NOT NULL; Site-Scope über eigene id fehlt. |
+| building | O / O | site_id NOT NULL, keine Client-/Site-Schreibschranke; client_id fehlt. |
+| room | O / O | Eltern Building/Site begrenzen nicht; Client-/Site-Denormalisierung fehlt. |
+| rack | O / O | Eltern Room/Site begrenzen nicht; Client-/Site-Denormalisierung fehlt. |
+| ci_type | G / O | nullable Org/globales Metamodell; globale Sichtbarkeit ist keine getrennte DELETE-Sperre. |
+| ci_type_attribute | P(global/eigener Typ) / P(eigener Typ) | Eigene Org-Spalte fehlt; indirekter globaler/Org-Typ, DELETE-Grenze separat. |
+| ci | C / C | NULL-Client schreibbar; vorhandenes site_id ungeprüft. |
+| audit_log | O / O | Org-Audit; keine Sichtbegrenzung auf betroffene Client-/Siteobjekte, obwohl weitere Rollen audit:read erhalten. |
+| entitlement | O / O | Org-Vertragsdaten; Operatorgrenze ist ENT-04, keine Clientspalte erfunden. |
+| app_user | O / O | Org-Identitäten; Rechte-/Scopeauflösung nicht durch diese Policy erbracht. |
+| role | O / O | Org-Rollenkatalog, kein Clientobjekt; Scopebindung in Zuweisungen fehlt. |
+| role_assignment | O / O | Gespeicherte Client-/Site-Zuweisungen werden nicht als Zugriffsscope ausgewertet. |
+| ci_relationship | O / O | Endpunkt-CI-/Client-/Site-Scope fehlt. |
+| webhook_subscription | O / O | Empfänger-/Service-Account-Scope fehlt. |
+| webhook_delivery | S / S | System-Schreibausnahme, keine Ereignisobjekt-Scopes. |
+| collector | C / C | NULL-Client schreibbar; skalarer Scope. |
+| discovery_job | O / O | Collector-/Zielscope fehlt. |
+| discovery_result | O / O | Job-/Device-Scope fehlt. |
+| asset | O / O | client_id vorhanden, Clientbedingung in beiden Teilen fehlt; physischer Site-Scope fehlt. |
+| assignment | O / O | Asset-/Client-/Standortscope fehlt. |
+| document | O / O | Nur Metadaten-Org, kein verknüpfter Objektscope; Blobgrenze zusätzlich verletzt. |
+| document_link | O / O | Verknüpfte Objekte vermitteln keinen Scope. |
+| stocktake | O / O | Inventur-/Zielscope fehlt. |
+| stock_scan | O / O | Inventur-/Assetscope fehlt. |
+| ticket | O / O | Verknüpfter CI-/Teamscope fehlt. |
+| ticket_comment | O / O | Ticket-Scope wird nicht abgeleitet. |
+| team | O / O | Org-Teamkatalog; owner_team-Modell fehlt. |
+| team_member | P(Team-Org) / P(Team-Org) | Eigene Org fehlt, referenzierte User-Org nicht zusätzlich durch Policy geprüft. |
+| custom_role | O / O | Org-Rollenkatalog, kein eigener Clientobjektanspruch. |
+| user_custom_role | P(Rollen-Org) / P(Rollen-Org) | Eigene Org fehlt, gespeicherter scope_type/scope_id nicht durchgesetzt. |
+| network_interface | O / O | CI-/Client-/Site-Scope fehlt. |
+| subnet | C / C | NULL-Client schreibbar; vorhandenes site_id ungeprüft. |
+| ip_address | O / O | Subnet-/CI-Scope fehlt. |
+| cable | O / O | Endpunkt-/Standortscope fehlt. |
+| contact | C / C | NULL-Client schreibbar; fehlendes site_id laut TEN-05 hier zulässig. |
+| ci_contact | O / O | CI-/Contact-Scope fehlt. |
+| export_job | S / S | System-Schreibausnahme, Initiatorscope fehlt bei Job/Download. |
+| api_key | O / O | Org-Keydaten; Owner-/Service-Account-Scope nicht umgesetzt. |
+| user_invitation | O / O | Org-Einladung; kein vollständiger Zulassungsfluss. |
+| metric_sample | – / – | Mandantendaten ohne ENABLE/FORCE, ohne Org-/Client-/Site-WITH-CHECK. |
+| rack_mount | O / O | Rack-/CI-/Standortscope fehlt. |
+| relationship_suppression | O / O | Beziehungs-/Endpunktscope fehlt. |
+| credential | C / C | NULL-Client schreibbar; zusätzliche Decrypt-Rechteabweichung RBA-04. |
+| org_dek | O / O | Org-Schlüsselmaterial; kein Clientobjekt, keine automatische Dedicated-Instance-Erfüllung. |
+| review_item | O / O | Device-/CI-/Collector-Scope fehlt. |
+| ci_change | O / O | CI-/Client-/Site-Scope fehlt. |
+| permission | – / – | Globaler Katalog ohne Org; nicht als ungeschützte Tenantdaten eingestuft. |
+| role_permission | O / O | Org-Rollenkatalog; keine Scopeauflösung durch diese Policy. |
+| sla | O / O | client_id vorhanden, Clientbedingung USING/CHECK fehlt. |
+| ticket_sla | O / O | Ticket-/SLA-Scope fehlt. |
+| form_def | O / O | client_id vorhanden, Clientbedingung USING/CHECK fehlt. |
+| form_submission | O / O | Formular-/Bezugsobjektscope fehlt. |
+| workflow_def | O / O | Org-Regeldefinition; Ausführung/Bezugsobjekte benötigen eigene Scopebindung. |
+| workflow_run | O / O | Ausführungs-/Bezugsobjektscope fehlt. |
+| workflow_step | O / O | Run-/Objektscope fehlt. |
+| compliance_rule | O / O | Org-Regeldefinition; keine Objekt-Scopeprüfung dadurch. |
+| compliance_result | O / O | Regelziel-/Objektscope fehlt. |
+| iga_connector | O / O | Org-Connector, kein Clientobjekt aus Definition abgeleitet. |
+| iga_provisioning_task | O / O | Ziel-/Auftraggeberscope fehlt. |
+| iga_lifecycle_policy | O / O | Org-Policy; keine Team-/Zielscopeprüfung dadurch. |
+| iga_access_request | O / O | Angeforderter Ressourcen-/Teamscope fehlt. |
+| iga_access_review | O / O | Review-Ziel-/Teamscope fehlt. |
+| iga_access_review_item | O / O | Review-/Ressourcenscope fehlt. |
+| iga_drift_finding | O / O | Ressourcen-/Zielscope fehlt. |
+| search_document | O / O | Kopierter Client-/Site-/Teamscope fehlt. |
+| ai_conversation | O / O | Nur Org, keine Ressourcen-Scopebindung der Inhalte. |
+| ai_message | O / O | Conversation-/Ressourcenscope fehlt. |
+| ai_chunk | O / O | Quellobjekt-/Client-/Site-Scope fehlt. |
+| webhook_dead_letter | S / S | System-Schreibausnahme, Ereignisobjektscope fehlt. |
+| alert_rule | S / S | System-Schreibausnahme, CI-/Site-Scope fehlt. |
+| privacy_retention_policy | O / O | Org-Regeldefinition; Scope der bearbeiteten Daten separat erforderlich. |
+| collector_enrollment_code | S / S | System-Schreibausnahme für Bootstrap; kein normaler Tenantjob. |
+| consumable | O / O | client_id vorhanden, Clientbedingung USING/CHECK fehlt. |
+| stock_movement | O / O | Bestand-/Standort-/Clientscope fehlt. |
+| internal_order | O / O | client_id vorhanden, Clientbedingung USING/CHECK fehlt. |
+| internal_order_item | O / O | Order-/Bestandsobjektscope fehlt. |
+| maintenance_window | O / O | Ziel-/Standortscope fehlt. |
+| maintenance_window_ci | O / O | CI-/Window-Scope fehlt. |
+| maintenance_notification | O / O | client_id vorhanden, Clientbedingung USING/CHECK fehlt. |
+| disposal_record | O / O | Asset-/Standortscope fehlt. |
+| key_item | O / O | client_id vorhanden, Clientbedingung USING/CHECK fehlt. |
+| key_assignment | O / O | Key-/Empfängerscope fehlt. |
+| training | O / O | Org-Schulungskatalog; kein Clientobjekt aus Definition abgeleitet. |
+| training_assignment | O / O | Nur Org, keine personenbezogene/Team-Scopeableitung. |
+| desk | O / O | Raum-/Standortscope fehlt. |
+| desk_booking | O / O | Desk-/Standortscope fehlt. |
+| asset_location | O / O | Asset-/Standort-/Clientscope fehlt. |
+| endpoint_agent | O / O | CI-/Gerätescope fehlt. |
+| security_finding | O / O | CI-/Assetscope fehlt. |
+| ci_instance_field_definition | O / O | CI-/Client-/Site-Scope fehlt. |
+| relationship_type | G / O | nullable Org/globaler Katalog; DELETE-Semantik gesondert. |
+| lifecycle_definition | G / O | nullable Org/globaler Katalog; DELETE-Semantik gesondert. |
+| lifecycle_state | G / O | nullable seit Migration 56; globale Sichtbarkeit, DELETE-Semantik gesondert. |
+| lifecycle_transition | G / O | nullable seit Migration 56; globale Sichtbarkeit, DELETE-Semantik gesondert. |
+| location_node | O / O | client_id und site_id vorhanden, beide Bedingungen USING/CHECK fehlen. |
+| asset_movement | O / O | Asset-/Start-/Zielstandortscope fehlt. |
+| quantity_item | O / O | client_id vorhanden, Clientbedingung USING/CHECK fehlt. |
+| reservation | O / O | Ressourcen-/Client-/Standortscope fehlt. |
+| composition | O / O | Komponenten-/Asset-/CI-Scope fehlt. |
+| ci_field_value | O / O | CI-/Client-/Site-Scope fehlt. |
+| source_priority_policy | O / O | Org-Regeldefinition; Scope der Ziel-CIs separat nötig. |
+| entity_change | O / O | Bezugsobjekt-/Client-/Site-Scope fehlt. |
+| saved_view | O / O | Gespeicherte Org-Ansicht; Abfrageengine verliert Zielobjektscope. |
+
+Die fünf S-Policies stammen aus `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000024_durable_webhook_delivery.up.sql:21–30`, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000034_webhook_dead_letter.up.sql:28–40`, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000035_export_job_formats.up.sql:13–22`, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000037_alert_rule.up.sql:27–37` und `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000043_enrollment_system_read.up.sql:8–17`. Diese globalen Systemzweige gelten auch schreibend; nicht als nachgewiesener extern auslösbarer Systemflag-Bypass missverstehen.
+
+**NULL-Schreibpfad:** `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/handler.go:140–143` übernimmt optionalen Client, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/pg_repository.go:262–265,321–333` setzt leeren Client auf NULL. Beide Policyhälften erlauben dies; keine zusätzliche Orgrollenprüfung im CI-Service. Tests prüfen shared Reads und fremden benannten INSERT, nicht shared INSERT/UPDATE/DELETE. Bei globalen G/P-Zeilen schützt WITH CHECK generell nicht DELETE; zusätzliche Repositoryprädikate und vorhandene Daten sind separat zu beachten, kein pauschaler API-Löschangriff behauptet.
+
+**Empfohlene Korrektur:** Tenant-/globale Metadatenausnahmen verbindlich definieren; fehlende Spalten und direkte/abgeleitete Client-/Site-/Team-Policies einschließlich strengerer NULL-Schreibregeln ergänzen. Sichtbarkeit und Änderungsrecht ausdrücklich trennen, Systemjobs nach TEN-06 pro Org ausführen und alle Tabellen mit echten negativen Schreibtests abnehmen.
+
+### TEN-03 — High: Rollenhärtung belegt, Owner-/DDL-Vertrag unvollständig
+
+`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/cmd/server/main.go:156–167` nutzt den Produktpool; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/pool.go:52–76,112–130` führt pro Verbindung SET ROLE aus und verweigert effektiven Superuser/BYPASSRLS. Der Compose-Login darf deshalb nicht fälschlich mit der effektiven App-Rolle gleichgesetzt werden.
+
+`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000056_rls_enforcement.up.sql:23–78` vergibt USAGE/DML/Funktionsrechte auf public; expliziter Schema-CREATE-/Tabelleneigentumsvertrag für Laufzeitindizes fehlt. Eigentümer bleiben ohne explizite Umwidmung die jeweiligen Ersteller; wer die Migrationen in einer konkreten Installation ausgeführt hat und welche geerbten/PUBLIC-Rechte bestehen, ist **N/P ohne Live-Katalogabfrage**. Keine Behauptung, die App-Rolle sei zwingend Tabellen-Owner oder sämtliche DDL-Rechte sicher entzogen. FORCE ist bei allen bereits RLS-aktivierten Anwendungstabellen gesetzt und würde auch einen Owner binden, nicht jedoch fehlende RLS auf Metriken ersetzen. Startup prüft Rollenattribute, nicht alle relrowsecurity/relforcerowsecurity-/Owner-/DDL-Eigenschaften.
+
+**Empfohlene Korrektur:** Beschränkten Anwendungs-DDL-/Ownership-Vertrag definieren und effektive Schema-, Tabellen-, Mitgliedschaftsrechte sowie FORCE im echten Deployment unter App-Rolle nachweisen; keine Superuser-/BYPASSRLS-Abkürzung zur Reparatur fehlender Grants.
+
+### TEN-04/06 — Critical: Vollständiges Inventar der PostgreSQL-Einstiege
+
+**Zählweise:** 80 direkte Aufrufstellen in 58 Nicht-Test-Go-Dateien (Query/QueryRow/Exec, database/sql-Varianten, SendBatch, Begin/BeginTx/Acquire); SQL auf bereits geöffneter Transaktion nicht nochmals gezählt. 46 private withTenant-Helfer + 2 inTx-Helfer + 32 weitere Aufrufstellen. Keine weiteren PostgreSQL-Zugänge in Collector/Edgecore gefunden. GraphQL delegiert an dieselben Repositories, besitzt keinen zusätzlichen direkten Poolzugriff.
+
+Alle privaten Helfer öffnen eigene Transaktionen mit `set_config(..., true)`, keine gemeinsame Requesttransaktion. **Produktiv kein sessionsweites Tenant-set_config(false) gefunden**; Schutz vor Poolleaks ist deshalb nicht fälschlich als vollständig fehlend dargestellt. Jedoch fehlen nötige Variablen/Scopeableitungen; leerer Client-Kontext bedeutet unbeschränkt. Drei zentrale WithTenant-Varianten existieren ohne produktive Aufrufer. Auch der unbenutzte SetTenantContext auf *sql.DB ist nicht sicher: mehrere lokale Autocommit-Statements garantieren weder gemeinsame Verbindung noch wirksame Folgetransaktion.
+
+**Acht produktive `PGRepository.withTenant` mit Org und optional skalarem Client:** keiner setzt User/Site/Team.
+
+| Direkte Begin-Stelle | Befund |
+|---|---|
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/pg_repository.go:68` | Org/Client lokal; unvollständiger Scopevertrag. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/contact/pg_repository.go:25` | Ebenso. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/credential/pg_repository.go:46` | Ebenso. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/pg_repository.go:40` | Ebenso, nur Teile der Discoverytabellen werten Client aus. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ipam/pg_repository.go:26` | Ebenso, nur Subnet unter Clientpolicy. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/privacy/pg_repository.go:23` | Ebenso. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/relationship/pg_repository.go:45` | Client gesetzt, Relationshippolicy ignoriert ihn dennoch. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenantapi/pg_repository.go:26` | Kindtabellen erben keine Client-/Site-Policy. |
+
+**38 produktive private Tenanthelfer mit nur Org:** Alle folgenden Begin-Stellen setzen weder Client noch Site/Team/User. Bei reinen Org-Verwaltungsdaten ist das kein erfundener Client-Leak; bei den in der Policy-Matrix benannten scopepflichtigen Daten ist der Vertrag unvollständig.
+
+| Direkte Begin-Stelle (`PGRepository.withTenant`, bei Alerts `PGAlertStore.withTenant`) |
+|---|
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/agent/pg_repository.go:27` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ai/pg_repository.go:16` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/asset/pg_repository.go:51` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/assignment/pg_repository.go:48` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/citype/pg_repository.go:53` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/compliance/pg_repository.go:21` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/composition/pg_repository.go:35` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/consumable/pg_repository.go:26` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/desk/pg_repository.go:29` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/disposal/pg_repository.go:27` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/document/pg_repository.go:68` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/entitlement/pg_repository.go:23` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/form/pg_repository.go:23` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/history/pg_repository.go:31` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/iga/pg_repository.go:18` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/keymgmt/pg_repository.go:29` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/lifecycle/pg_repository.go:25` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/location/pg_repository.go:26` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/locationnode/pg_repository.go:32` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/maintenance/pg_repository.go:29` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/monitoring/pg_alert_store.go:27` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/movement/pg_repository.go:25` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/order/pg_repository.go:28` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/override/pg_repository.go:34` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/permission/pg_repository.go:19` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/rack/pg_repository.go:25` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/relationshiptype/pg_repository.go:32` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/reservation/pg_repository.go:33` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/savedview/pg_repository.go:31` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/search/pg_repository.go:19` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/security/pg_repository.go:27` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/sla/pg_repository.go:26` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/stocktake/pg_repository.go:63` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ticket/pg_repository.go:60` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/training/pg_repository.go:29` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/user/pg_repository.go:81` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/webhook/pg_repository.go:34` |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/workflow/pg_repository.go:24` |
+
+**Zwei dynamische Helfer:** `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/export/pg_job_repository.go:30` `PGJobRepository.inTx` und `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/webhook/pg_delivery_store.go:28` `PGDeliveryStore.inTx` setzen **entweder** Org **oder** app.system lokal. ClaimPending/ClaimDue sind produktive globale Worker, keine Wartung und keine Erfüllung der geforderten Iteration pro Org.
+
+**Übrige 32 direkte Aufrufstellen** (mehrere Zeilen pro Symbolgruppe explizit angegeben):
+
+| Datei / Zeilen / Symbol | Klassifikation |
+|---|---|
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/pool.go:57` AfterConnect; `:115` VerifyRLSEnforced | Zulässige Rolleninitialisierung/Metadatenprüfung, keine Tenantdaten. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/pool.go:154,160` WithTenant | Unbenutzter zentraler Acquire-/Begin-Pfad, nur Org/Client. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/platform/db/db.go:42` WithTenant | Unbenutzte Variante mit Org/Client/User, ohne Site/Team. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenant/rls/rls.go:65` WithTenant | Unbenutzte database/sql-Variante, ebenso unvollständig. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenant/rls/rls.go:25,34,44` SetTenantContext | Drei ExecContext auf *sql.DB; lokale Autocommit-GUCs ohne gebundene Folgetransaktion; unbenutzt, kein produktiver Session-Leak behauptet. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/permission/pg_repository.go:34` ListPermissions | Globaler Katalog, sachlich begründbare Nicht-Tenant-Ausnahme. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/apikey_store.go:31,78,96` LookupByPrefix/Save/MarkUsed | Kontextlose RLS-Zugriffe; Lookup/MarkUsed Authpfad, Save ohne produktive Verwaltungsroute. Unter strikter App-Rolle kein Treffer/Fehler statt bewiesenem Bypass. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/monitoring/pg_store.go:57,82,94,111` Ingest/queryRaw/queryBucketed/queryHourly | Batch/Reads ohne Tenanttransaktion; Org explizit gesetzt/gefiltert, keine Client-/Site-/CI-Prüfung und keine DB-RLS. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/monitoring/pg_alert_store.go:174` ListEnabled | Globaler produktiver Worker-Read, lokale Systemausnahme. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/monitoring/pg_alert_store.go:202,215,229` MarkPending/MarkFired/ClearPending | Produktive Updates ohne Org/System-GUC; erwartbar keine Änderung/Fehler unter RLS, kein bewiesenes Cross-Org-Schreiben. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/discovery/pg_repository.go:584` RedeemEnrollmentCode | Öffentlicher Bootstrap mit lokaler Systemausnahme; Org erst aus Code, ausdrücklich gesondert zu prüfen. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/audit/audit.go:203,328` Verify/Handler.list | Eigene Transaktionen, nur Org; Verify auch Wartung, list produktiv. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/lifecycle/states.go:38,61,96` CurrentState/SetState/LifecycleKeyFor | Nur Org bei direktem CI-/Assetzugriff; LifecycleKeyFor verwirft Request-Kontext zugunsten Background. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/reservation/availability.go:29` Availability | Eigene Transaktion nur Org. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/reservation/pg_repository.go:182` ExpireDue | Produktiver Worker ohne Tenant-/System-GUC, keine Mandanteniteration; Sweeper ignoriert Fehler (:40–44 in `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/reservation/sweeper.go`). |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/savedview/query.go:41` Query | Nur Org bei direkten CI-/Asset-Attributabfragen; Scope geht verloren. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/cmd/audit-seed/main.go:37,49` main | Wartungs-/DR-Werkzeug, kein HTTP-Einstieg; eingeschränkter Pool ohne benötigte GUC, damit funktionale RLS-Problematik. |
+
+Zusätzlich eingeordnet: NewMaintenancePool (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/pool.go:87`) nur Wartung/Fixtures, keine produktive API-Verwendung; Connect (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/database.go:22`) in Test-/Fixturezugängen; alternativer NewPool (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/platform/db/db.go:19`) ohne produktiven Aufrufer. `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/cmd/audit-verify/main.go:33–40` delegiert an org-lokales audit.Verify. Ping/Close/Release sind keine zusätzlichen Tenantdatenzugriffe.
+
+**Empfohlene Korrektur:** Einen kanonischen, gebundenen Tenanttransaktionseinstieg mit allen fünf lokal gesetzten/zurückgesetzten Werten verwenden; echte mengenwertige Scopes, NULL explizit. Systemjobs nach TEN-06 pro Org, privilegierte Bootstrap-/Wartungsausnahmen eng begrenzen. Alle oben genannten Produktpfade einschließlich GraphQLdelegation/Worker über dieselben Regeln führen und Commit/Rollback/Fehler/Poolreuse testen.
+
+### TEN-09 — High: Isolationstests sind weder vollständig noch aktuell grün belegt
+
+| Quelle / Test | Belegte Absicht / Prüflücke |
+|---|---|
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenant/tenant_test.go:8,26` TestTenantContext* | Go-Kontext, keine DB; in T1 grün. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenant/rls_variable_test.go:15` TestRepositoriesUseCanonicalSessionVariable | Prüft veraltete GUC-Namen, nicht vollständige Werte oder Datenpfade; in T1 grün. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenant/rls/rls_test.go:25,36` | Fehlende Org vor Query, kein erfolgreicher DB-/Lokalitätsbeweis. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/integration_test.go:30` TestMigrationsApplied | Existenz von sieben Tabellen, keine komplette Policyprüfung. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/rls_isolation_test.go:98` TestTenantIsolationRLS | CI/Subnet/Ticket-Orgtrennung und Cross-Org-INSERT; nicht alle Tabellen/UPDATE/DELETE. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/rls_isolation_test.go:189` TestClientScopeRLS | Eigene/shared CI und Clientliste, fremder benannter INSERT abgewiesen; kein NULL-Schreiben/Site/Team. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenant/rls/isolation_integration_test.go:134,164` | Rollenstartprüfung, ausgewählte Cross-Org-Reads/Writes/Relationship-FK; kein Owner-/DDL-/Allpfadbeweis. |
+| `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/database/traversal_dlq_test.go:13,142` | Org-Traversal/Dead-Letter; keine vollständige Client-/Site-/Team-Workerprüfung. |
+
+DB-Tests überspringen ohne TEST_DATABASE_URL; Rollenstarttest zusätzlich bei bereits eingeschränkter Loginrolle. Besonders relevant: `scoped()` in `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/tenant/rls/isolation_integration_test.go:117–127` setzt app.org_id mit **false sessionsweit über pool.Exec**; spätere Poolqueries sind nicht an dieselbe Verbindung gebunden. Das ist eine Testschwäche, kein nachgewiesener produktiver Pool-Leak.
+
+Fehlende Abdeckung einzeln: Cross-Site-INSERT/UPDATE/DELETE; Cross-Client-Updates/Deletes und gemeinsame NULL-Zeilen; Team/NULL-Team; Poolreuse aller fünf GUCs; Exportjobs/Download; Benachrichtigungen (kein SMTP-Modul); Review-Items/Resolve; Location-Kinder/Bewegungen; Suchindex/strukturierte Suche; Lifecycle; Alert-/Reservation-Worker; fremde Dokument-Blobkeys. **Empfohlene Korrektur:** Echte App-Rollen-Integration über alle diese Pfade mit Mengen-/Schreibabweisung und gebundenen Transaktionen; keine vorhandenen Tests hier verändert.
+
+### TEN-10 — High: Organisations-VRF fehlt
+
+`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000015_network_ipam.up.sql:22–52` modelliert Org+CIDR bzw. Org+Adresse ohne VRF. Weder Org-VRF-Tabelle/name-Unique/description/is_default noch Anlage von global bei neuer Org, CRUD oder vrf:manage im Katalog vorhanden. **Empfohlene Korrektur:** VRF als Org-Ressource mit Defaultanlage und eindeutiger Subnetzzuordnung pro Org/VRF/CIDR ergänzen und Org-Anlage-/CRUD-/Scopefälle testen; keine Ausweichlösung über Client-VRFs (CH10).
+
+### TEN-06/09 — Critical: Metadatenbesitz schützt nicht den signierten Blobzugriff
+
+- **Beschreibung / Dateien:** `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/document/handler.go:167–174` übernimmt einen vom Aufrufer angegebenen storage_key beim Anlegen eines eigenen Org-Dokuments; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/document/pg_repository.go:190–218` speichert ihn unverändert. Der Content-Endpunkt (:297–324 im Handler) prüft die Metadatenzeile, signiert danach aber diesen Key; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/platform/blob/blob.go:250–269` kennt dafür keine Tenantprüfung.
+- Voraussetzung ist gemeinsamer konfigurierter S3-Speicher, document:write/read und Kenntnis eines existierenden fremden Objektkeys. Ein Angreifer kann ihn an eigene Metadaten binden und einen neuen gültigen Downloadlink erhalten, ohne einen noch gültigen fremden Link besitzen zu müssen. Keine Behauptung, zufällige Objekt-IDs seien erratbar, und kein fremdes Objekt wurde hier tatsächlich abgerufen. Der serverseitig erzeugte Uploadkey (:280) schützt den getrennten Metadaten-Anlagepfad nicht.
+- **Empfohlene Korrektur:** Storagekeys serverseitig vergeben und Objektbesitz/-namespace auch für bestehende Metadaten vor Signierung prüfen; reale Zwei-Org-Tests für Anlage/Download/Versionen und manipulierte Keys. Mandantenisolation umfasst alle Zugriffspfade, nicht nur RLS der Dokumentzeile.
+
+### TEN-04/05/06 — Critical: Scopeherkunft, Export und Suchkopien
+
+- **Beschreibung / Dateien:** `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/identity/handler.go:253–276` erzeugt Sessionrechte aus IdP-Gruppen, nicht DB-Rollenzuweisungen; ClientScope bleibt leer. `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000033_client_scope_rls.up.sql:64–73` interpretiert leeren Client-Scope als org-weit. Ein DB-clientbeschränkter Nutzer mit IdP-reader/editor-Gruppe kann daher eine org-weite Session erhalten; frischer Login behebt den verlorenen DB-Scope nicht.
+- Exportjobs speichern keine verbindlichen Aufruferscopes (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/export/job.go:20–43`), nur aufrufergesteuerte Filter. Der Worker startet mit Background-Kontext und rendert org-weit, wenn der optionale Clientfilter fehlt (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/cmd/server/main.go:268–272`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/export/worker.go:95–97`). Jobliste und signierte URLs prüfen nur Org, nicht Initiator-/Inhaltsscope (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/export/pg_job_repository.go:81–119`; `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/export/job_handler.go:95–103,133–145`).
+- Suche kopiert Inhalte ohne Client-/Site-/Team-Zuordnung und filtert nach Entitätstyprecht, nicht Einzelobjektscope (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/search/model.go:11–32`, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/search/pg_repository.go:18–30,60–82`, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/search/handler.go:37–43,65–80`). Dies ist ein Client-Scope-Befund, kein nachgewiesener Bypass des Org-Prädikats.
+- **Prüfgrenze:** Quelltextbestätigte Verlustpfade; keine Laufzeitreproduktion mit künstlich erzeugten clientbeschränkten Produktionstokens. Der aktuelle Login gibt solche verlässlich beschränkten Tokens gerade nicht aus, der strikte API-Key-Pfad ist zusätzlich vor Auth an RLS blockiert. Diese Einschränkungen widerlegen nicht den nachgewiesenen Scopeverlust bei DB-Rollen oder die fehlende Begrenzung der Job-/Indexmodelle.
+- **Empfohlene Korrektur:** Autoritative Scopes durchgängig aus Rollen ableiten; bei Jobs speichern und beim Rendern/Download anwenden, Suchkopien scopefähig machen bzw. gegen lesbare Quellobjekte validieren. Zwei-Client-/Zwei-Site-/Team-Tests einschließlich Exportfremdjobs und Suchtreffern, nicht nur Filterparameter prüfen.
 
 ### AUT-01/02 — Critical: Lokale Sperrung und Rechteentzug werden umgangen
 
@@ -195,7 +483,11 @@ Die Sollmatrix enthält discovery:ingest aus RBA-01 nicht ausdrücklich; dessen 
 - ENT-06 ist insgesamt ein Vorschlag (V); dessen Paketwerte sind kein verbindliches G1-Kriterium. Die ausdrücklichen Baseline-Feature-Keys aus ENT-02 und Add-on-Trennung nach CH14 bleiben eigenständig verbindlich.
 - RBA-02 nennt discovery:ingest aus RBA-01 nicht in seiner vollständigen Matrix: Rollenverteilung bestätigen. AUT-04 nennt zwischen Prefix und Secret keinen zusätzlichen Trenner; gewünschtes exaktes Format bestätigen, der aktuelle zusätzliche Unterstrich wurde nicht still übernommen.
 - Referenzierte Abschnitte SEC-06/07, TLC-01/03, API-07 und der v2-Umfang von TEN-09 liegen nicht vollständig vor; nur gelieferte Kriterien werden bewertet.
+- Welche globalen Metamodell-/Katalogtabellen sind verbindliche Ausnahmen von TEN-02/05? Der Istbestand globaler NULL-Org-Zeilen und indirekter Orgableitung ist einzeln benannt, nicht still als konform angenommen.
+- Effektive Owner-/DDL-/Mitgliedschaftsrechte im Zielcluster sowie manuell gehärtete Keycloak-Konten/Policies sind nicht aus dem Checkout nachweisbar; Nachlieferung echter Deploymentbelege nötig. Der Bericht bewertet ausgelieferte Vorlagen, nicht unbekannte Betreiberänderungen.
 
 ## Stand
 
-UNVOLLSTÄNDIG – fortsetzen ab ID TEN-01.
+VOLLSTÄNDIG
+
+36 eindeutige IDs in vorgegebener Reihenfolge mit acht Spalten, 105 Tabellen im Policyabgleich und Statuszählung abgeglichen. Vollständigkeit bezeichnet die Bearbeitung des gelieferten Wortlauts, nicht Konformität oder Gatefreigabe; AUT-05/06 sowie ausdrücklich genannte Laufzeit-/v2-Teilgrenzen bleiben N/P beziehungsweise unbewertet. Produktivcode, Migrationen, Tests und Abhängigkeiten unverändert.
