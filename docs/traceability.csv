@@ -17,3 +17,8 @@ SIM-01;[B], Teilumfang [P2];A;.github/workflows/ci.yml;WP-106
 OPS-01;[B];A;backend/internal/server/health_test.go;WP-097
 RBA-03;[B];B;backend/internal/permission/scope_integration_test.go;WP-009
 TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-009
+TEN-05;[B];B;backend/internal/tenant/rls/client_policies_integration_test.go;WP-023
+AST-01;[P2];B;backend/internal/tenant/rls/client_policies_integration_test.go;WP-023
+MGT-11;[P5];B;backend/internal/tenant/rls/client_policies_integration_test.go;WP-023
+MGT-03;[P4];B;backend/internal/tenant/rls/client_policies_integration_test.go;WP-023
+WFL-01;[P3];B;backend/internal/tenant/rls/client_policies_integration_test.go;WP-023

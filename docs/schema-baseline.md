@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000057_composition_acyclic
+Stand: Migration 000058_client_scope_policies
 
 ## Prüfung
 
@@ -92,15 +92,6 @@ TestKnownGapsDocumented ./internal/tenant/rls/` neu.
 | `export_job` | `system-write` | WP-022 |
 | `webhook_dead_letter` | `system-write` | WP-022 |
 | `webhook_delivery` | `system-write` | WP-022 |
-| `asset` | `client-scope` | WP-023 |
-| `consumable` | `client-scope` | WP-023 |
-| `form_def` | `client-scope` | WP-023 |
-| `internal_order` | `client-scope` | WP-023 |
-| `key_item` | `client-scope` | WP-023 |
-| `location_node` | `client-scope` | WP-023 |
-| `maintenance_notification` | `client-scope` | WP-023 |
-| `quantity_item` | `client-scope` | WP-023 |
-| `sla` | `client-scope` | WP-023 |
 | `ci_type` | `global-rows` | WP-024 |
 | `lifecycle_definition` | `global-rows` | WP-024 |
 | `lifecycle_state` | `global-rows` | WP-024 |

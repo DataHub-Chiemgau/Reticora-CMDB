@@ -83,17 +83,6 @@ var KnownGaps = []Gap{
 	{"webhook_dead_letter", RuleSystemWrite, "WP-022"},
 	{"webhook_delivery", RuleSystemWrite, "WP-022"},
 
-	// Tables with client_id whose policies only check the organization.
-	{"asset", RuleClientScope, "WP-023"},
-	{"consumable", RuleClientScope, "WP-023"},
-	{"form_def", RuleClientScope, "WP-023"},
-	{"internal_order", RuleClientScope, "WP-023"},
-	{"key_item", RuleClientScope, "WP-023"},
-	{"location_node", RuleClientScope, "WP-023"},
-	{"maintenance_notification", RuleClientScope, "WP-023"},
-	{"quantity_item", RuleClientScope, "WP-023"},
-	{"sla", RuleClientScope, "WP-023"},
-
 	// Global catalog rows can be changed or deleted by every tenant.
 	{"ci_type", RuleGlobalRows, "WP-024"},
 	{"lifecycle_definition", RuleGlobalRows, "WP-024"},
