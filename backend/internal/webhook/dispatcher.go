@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 const (
@@ -136,13 +137,24 @@ func NewDispatcher(repo Repository, client *http.Client, opts ...DispatcherOptio
 	return d
 }
 
+// orgScoped attaches the org-wide tenant scope of orgID, under which the
+// dispatcher reads subscriptions outside of or beyond the acting request.
+func orgScoped(ctx context.Context, orgID string) context.Context {
+	scope := database.OrgWideScope(orgID, "")
+	return database.ContextWithTenantScope(ctx, &scope)
+}
+
 // Dispatch persists and queues webhook deliveries for matching subscriptions.
 func (d *Dispatcher) Dispatch(ctx context.Context, orgID, event string, payload any) {
 	if d == nil || d.repo == nil {
 		return
 	}
 
-	subs, err := d.repo.ListByEvent(ctx, orgID, event)
+	// Events reach every subscription of the organization, independent of
+	// the acting principal's client scope: the lookup runs org-wide on behalf
+	// of the organization (E-08; WP-022 moves the dispatcher to a system
+	// principal per organization).
+	subs, err := d.repo.ListByEvent(orgScoped(ctx, orgID), orgID, event)
 	if err != nil {
 		slog.Error("list webhook subscriptions failed", "error", err, "organization_id", orgID, "event", event)
 		return
@@ -318,7 +330,7 @@ func (d *Dispatcher) ProcessDue(ctx context.Context) {
 	}
 
 	for _, rec := range records {
-		sub, err := d.repo.GetByID(ctx, rec.OrganizationID, rec.SubscriptionID)
+		sub, err := d.repo.GetByID(orgScoped(ctx, rec.OrganizationID), rec.OrganizationID, rec.SubscriptionID)
 		if err != nil {
 			rec.Attempt++
 			d.finalize(ctx, rec, 0, 0, fmt.Errorf("subscription unavailable: %w", err), true)

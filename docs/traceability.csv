@@ -74,3 +74,6 @@ TEN-06;[B];B;backend/internal/location/location_scope_integration_test.go;WP-014
 TEN-06;[B];B;backend/internal/search/search_scope_integration_test.go;WP-015
 TEN-06;[B];B;backend/internal/savedview/savedview_scope_integration_test.go;WP-015
 TEN-06;[B];B;backend/internal/export/export_scope_integration_test.go;WP-015
+TEN-06;[B];B;backend/internal/webhook/webhook_scope_integration_test.go;WP-016
+TEN-06;[B];B;backend/internal/audit/audit_scope_integration_test.go;WP-016
+TEN-06;[B];B;backend/internal/monitoring/monitoring_scope_integration_test.go;WP-016

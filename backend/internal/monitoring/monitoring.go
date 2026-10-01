@@ -478,7 +478,7 @@ func (h *Handler) QueryMetrics(w http.ResponseWriter, r *http.Request) {
 
 	points, err := h.store.Query(r.Context(), query)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, points)
@@ -518,7 +518,7 @@ func (h *Handler) IngestMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.Ingest(r.Context(), metrics); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusAccepted, map[string]any{"ingested": len(metrics)})
@@ -532,7 +532,7 @@ func (h *Handler) ListAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	rules, err := h.alerts.ListRules(r.Context(), orgID)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, rules)
@@ -606,7 +606,7 @@ func (h *Handler) UpdateAlert(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "alert rule not found")
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, rule)
@@ -620,7 +620,7 @@ func (h *Handler) DeleteAlert(w http.ResponseWriter, r *http.Request) {
 	}
 	deleted, err := h.alerts.DeleteRule(r.Context(), orgID, chi.URLParam(r, "id"))
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	if !deleted {

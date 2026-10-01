@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -199,17 +200,22 @@ func (r *PGRecorder) Record(ctx context.Context, tx pgx.Tx, entry Entry) (*Entry
 }
 
 // Verify walks the persisted audit chain for an organization and reports integrity.
+//
+// The chain links every entry of the organization, so the check reads it
+// org-wide whoever triggers it (the verify endpoint, the compliance report or
+// the audit-verify command); it returns only the integrity result (E-08).
 func Verify(ctx context.Context, pool *pgxpool.Pool, orgID string) (VerifyResult, error) {
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return VerifyResult{}, fmt.Errorf("audit: begin verify transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
+	scope := database.OrgWideScope(orgID, "")
+	var result VerifyResult
+	err := database.WithTenant(ctx, pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		result, err = verifyTx(ctx, tx, orgID)
+		return err
+	})
+	return result, err
+}
 
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return VerifyResult{}, fmt.Errorf("audit: set tenant context: %w", err)
-	}
-
+func verifyTx(ctx context.Context, tx pgx.Tx, orgID string) (VerifyResult, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT
 			id::text,
@@ -296,7 +302,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	entries, total, err := h.list(r.Context(), t.OrganizationID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Entry]{
@@ -318,25 +324,46 @@ func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 
 	result, err := Verify(r.Context(), h.pool, t.OrganizationID)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, result)
 }
 
-func (h *Handler) list(ctx context.Context, orgID string, page api.PaginationParams) ([]Entry, int, error) {
-	tx, err := h.pool.Begin(ctx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("audit: begin list transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
+// restrictedResource hides entries about resources outside a restricted
+// principal's scope: the resource tables' policies filter the subqueries,
+// while audit_log carries no client column. Entries about deleted resources
+// are hidden from restricted principals as well (fail-closed); org-wide
+// principals see the whole log.
+const restrictedResource = `CASE audit_log.resource_type
+	WHEN 'ci' THEN EXISTS (SELECT 1 FROM ci WHERE ci.id = audit_log.resource_id)
+	WHEN 'asset' THEN EXISTS (SELECT 1 FROM asset WHERE asset.id = audit_log.resource_id)
+	WHEN 'contact' THEN EXISTS (SELECT 1 FROM contact WHERE contact.id = audit_log.resource_id)
+	WHEN 'credential' THEN EXISTS (SELECT 1 FROM credential WHERE credential.id = audit_log.resource_id)
+	WHEN 'document' THEN EXISTS (SELECT 1 FROM document WHERE document.id = audit_log.resource_id)
+	WHEN 'ticket' THEN EXISTS (SELECT 1 FROM ticket WHERE ticket.id = audit_log.resource_id)
+	ELSE true END`
 
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return nil, 0, fmt.Errorf("audit: set tenant context: %w", err)
+func (h *Handler) list(ctx context.Context, orgID string, page api.PaginationParams) ([]Entry, int, error) {
+	var entries []Entry
+	var total int
+	err := database.WithRequestTenant(ctx, h.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		entries, total, err = listTx(ctx, tx, orgID, page)
+		return err
+	})
+	return entries, total, err
+}
+
+func listTx(ctx context.Context, tx pgx.Tx, orgID string, page api.PaginationParams) ([]Entry, int, error) {
+	where := "organization_id = $1"
+	if scope, ok := database.TenantScopeFromContext(ctx); ok &&
+		(!scope.Clients.IsAll() || !scope.Sites.IsAll() || !scope.Teams.IsAll()) {
+		where += " AND " + restrictedResource
 	}
 
 	var total int
-	if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM audit_log WHERE organization_id = $1", orgID).Scan(&total); err != nil {
+	if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM audit_log WHERE "+where, orgID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("audit: count entries: %w", err)
 	}
 
@@ -354,7 +381,7 @@ func (h *Handler) list(ctx context.Context, orgID string, page api.PaginationPar
 			COALESCE(previous_hash, ''),
 			hash
 		FROM audit_log
-		WHERE organization_id = $1
+		WHERE `+where+`
 		ORDER BY timestamp DESC, id DESC
 		LIMIT $2 OFFSET $3
 	`, orgID, page.Limit, page.Offset)

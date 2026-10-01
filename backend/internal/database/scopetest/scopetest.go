@@ -63,6 +63,9 @@ func Seed(t *testing.T, tag string) *Fixture {
 		tag:     tag,
 	}
 	cleanup := func() {
+		// Append-only tables refuse deletes through a trigger; the rows of
+		// the fixture organizations are removed with triggers disabled.
+		deleteAppendOnly(t, admin, f.OrgA, f.OrgB)
 		// Most rows go with their organization (ON DELETE CASCADE); tables
 		// whose organization reference does not cascade are emptied first.
 		// They may reference each other, so a failed delete is retried in
@@ -105,6 +108,37 @@ func Seed(t *testing.T, tag string) *Fixture {
 	t.Cleanup(app.Close)
 	f.App = app
 	return f
+}
+
+// appendOnlyTables refuse UPDATE and DELETE through a trigger (migrations
+// 000049, 000055, 000056).
+var appendOnlyTables = []string{"audit_log", "asset_movement", "disposal_record"}
+
+// deleteAppendOnly removes the fixture rows of the append-only tables under
+// session_replication_role = replica, which skips their guard triggers.
+func deleteAppendOnly(t *testing.T, admin *pgxpool.Pool, orgIDs ...string) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := admin.Acquire(ctx)
+	if err != nil {
+		t.Errorf("scopetest cleanup: acquire: %v", err)
+		return
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, `SET session_replication_role = replica`); err != nil {
+		t.Errorf("scopetest cleanup: lift append-only guards: %v", err)
+		return
+	}
+	defer func() {
+		if _, err := conn.Exec(ctx, `SET session_replication_role = origin`); err != nil {
+			t.Errorf("scopetest cleanup: restore replication role: %v", err)
+		}
+	}()
+	for _, table := range appendOnlyTables {
+		if _, err := conn.Exec(ctx, `DELETE FROM `+table+` WHERE organization_id = ANY($1::uuid[])`, orgIDs); err != nil {
+			t.Errorf("scopetest cleanup: %s: %v", table, err)
+		}
+	}
 }
 
 // nonCascadingTables lists the tables whose foreign key to organization does

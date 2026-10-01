@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 // conditionMet reports whether value satisfies the rule condition.
@@ -92,6 +94,11 @@ func (e *Evaluator) Evaluate(ctx context.Context) {
 //     held for rule.Duration the alert fires exactly once per firing;
 //   - condition not met → pending cleared (duration restarts next time).
 func (e *Evaluator) evaluateRule(ctx context.Context, rule AlertRule) error {
+	// The evaluator runs outside a request and reads the metrics of the
+	// rule's organization org-wide (E-08; WP-022 moves it to a system
+	// principal per organization).
+	scope := database.OrgWideScope(rule.OrgID, "")
+	ctx = database.ContextWithTenantScope(ctx, &scope)
 	now := e.Now().UTC()
 	// Look far enough back to observe the duration plus one evaluation gap.
 	lookback := rule.Duration + 15*time.Minute
