@@ -69,7 +69,7 @@ func (h *Handler) ExportCIs(w http.ResponseWriter, r *http.Request) {
 	// failure can still be reported as a proper problem+json response.
 	first, err := h.fetch(r, t.OrganizationID, filter, nil)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -18,7 +19,7 @@ const jobColumns = `id::text, organization_id::text, COALESCE(initiated_by::text
 // PGJobRepository implements JobRepository on PostgreSQL with RLS. The
 // worker's cross-tenant claim is the single exception and uses the
 // `app.system` flag, mirroring webhook.PGDeliveryStore.ClaimDue; request
-// paths always run with `app.org_id` set.
+// paths run in database.WithTenant with the principal's scope.
 type PGJobRepository struct{ pool *pgxpool.Pool }
 
 // NewPGJobRepository creates a PostgreSQL-backed export job repository.
@@ -39,6 +40,15 @@ func (r *PGJobRepository) inTx(ctx context.Context, setting, value string, fn fu
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// workerScope is the scope of the export worker's state changes. The worker
+// runs outside a request on behalf of the job's organization (E-08); WP-022
+// and WP-035 move it to a per-organization system principal and the
+// initiator's scope.
+func workerScope(orgID string) *database.TenantScope {
+	scope := database.OrgWideScope(orgID, "")
+	return &scope
 }
 
 func scanJob(row pgx.Row) (*Job, error) {
@@ -63,7 +73,7 @@ func (r *PGJobRepository) CreateJob(ctx context.Context, orgID string, job *Job)
 	if err != nil {
 		return fmt.Errorf("encode export job filters: %w", err)
 	}
-	return r.inTx(ctx, "app.org_id", orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
 			INSERT INTO export_job (organization_id, initiated_by, format, status, filters)
 			VALUES (current_setting('app.org_id')::uuid, NULLIF($1, '')::uuid, $2, $3, $4)
@@ -80,7 +90,7 @@ func (r *PGJobRepository) CreateJob(ctx context.Context, orgID string, job *Job)
 
 func (r *PGJobRepository) GetJob(ctx context.Context, orgID, id string) (*Job, error) {
 	var job *Job
-	err := r.inTx(ctx, "app.org_id", orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		job, err = scanJob(tx.QueryRow(ctx,
 			"SELECT "+jobColumns+" FROM export_job WHERE organization_id = current_setting('app.org_id')::uuid AND id = $1", id))
@@ -95,7 +105,7 @@ func (r *PGJobRepository) GetJob(ctx context.Context, orgID, id string) (*Job, e
 func (r *PGJobRepository) ListJobs(ctx context.Context, orgID string, limit, offset int) ([]Job, int, error) {
 	var out []Job
 	var total int
-	err := r.inTx(ctx, "app.org_id", orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
 			"SELECT COUNT(*) FROM export_job WHERE organization_id = current_setting('app.org_id')::uuid").Scan(&total); err != nil {
 			return fmt.Errorf("count export jobs: %w", err)
@@ -120,7 +130,7 @@ func (r *PGJobRepository) ListJobs(ctx context.Context, orgID string, limit, off
 }
 
 func (r *PGJobRepository) MarkRunning(ctx context.Context, orgID, id string, at time.Time) error {
-	return r.inTx(ctx, "app.org_id", orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithTenant(ctx, r.pool, workerScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
 			UPDATE export_job SET status = $1, started_at = $2, updated_at = $2
 			WHERE organization_id = current_setting('app.org_id')::uuid AND id = $3 AND status = $4`,
@@ -136,7 +146,7 @@ func (r *PGJobRepository) MarkRunning(ctx context.Context, orgID, id string, at 
 }
 
 func (r *PGJobRepository) CompleteJob(ctx context.Context, orgID, id string, objectKey string, rowCount int, fileSize int64, completedAt, expiresAt time.Time) error {
-	return r.inTx(ctx, "app.org_id", orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithTenant(ctx, r.pool, workerScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
 			UPDATE export_job SET status = $1, object_key = $2, row_count = $3, file_size_bytes = $4,
 				completed_at = $5, expires_at = $6, updated_at = $5
@@ -153,7 +163,7 @@ func (r *PGJobRepository) CompleteJob(ctx context.Context, orgID, id string, obj
 }
 
 func (r *PGJobRepository) FailJob(ctx context.Context, orgID, id, message string, at time.Time) error {
-	return r.inTx(ctx, "app.org_id", orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithTenant(ctx, r.pool, workerScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
 			UPDATE export_job SET status = $1, error_message = $2, completed_at = $3, updated_at = $3
 			WHERE organization_id = current_setting('app.org_id')::uuid AND id = $4`,

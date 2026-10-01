@@ -75,7 +75,7 @@ func (h *JobHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		job.InitiatedBy = principal.Subject
 	}
 	if err := h.jobs.CreateJob(r.Context(), t.OrganizationID, job); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -94,7 +94,7 @@ func (h *JobHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	jobs, total, err := h.jobs.ListJobs(r.Context(), t.OrganizationID, page.Limit, page.Offset)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 

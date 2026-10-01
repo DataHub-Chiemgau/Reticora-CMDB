@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -27,26 +28,11 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 // List returns the caller's own views plus shared views of the organization.
 func (r *PGRepository) List(ctx context.Context, orgID, ownerID string, page api.PaginationParams) ([]View, int, error) {
 	var out []View
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := "organization_id = $1 AND (shared OR owner_id = $2)"
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM saved_view WHERE "+where,
 			orgID, nilIfEmpty(ownerID)).Scan(&total); err != nil {
@@ -74,7 +60,7 @@ func (r *PGRepository) List(ctx context.Context, orgID, ownerID string, page api
 // GetByID returns one view.
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*View, error) {
 	var out *View
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		v, err := scan(tx.QueryRow(ctx, fmt.Sprintf(
 			"SELECT %s FROM saved_view WHERE id = $1 AND organization_id = $2",
 			selectColumns), id, orgID))
@@ -92,7 +78,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*View, er
 
 // Create inserts a saved view.
 func (r *PGRepository) Create(ctx context.Context, view *View) error {
-	return r.withTenant(ctx, view.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, view.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if view.FilterSpec == nil {
 			view.FilterSpec = map[string]any{}
 		}
@@ -113,7 +99,7 @@ func (r *PGRepository) Create(ctx context.Context, view *View) error {
 // Update modifies a view the caller owns (or any shared view).
 func (r *PGRepository) Update(ctx context.Context, orgID, id, ownerID string, req UpsertRequest) (*View, error) {
 	var out *View
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{id, orgID}
 		pos := 3
@@ -152,7 +138,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id, ownerID string, re
 
 // Delete removes a view the caller owns (or any shared view).
 func (r *PGRepository) Delete(ctx context.Context, orgID, id, ownerID string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx,
 			"DELETE FROM saved_view WHERE id = $1 AND organization_id = $2 AND (shared OR owner_id = $3)",
 			id, orgID, nilIfEmpty(ownerID))

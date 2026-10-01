@@ -57,7 +57,7 @@ func (h *Handler) Reindex(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.backend.ReindexTenant(r.Context(), t.OrganizationID)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusAccepted, out)
