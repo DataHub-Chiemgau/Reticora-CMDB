@@ -75,7 +75,7 @@ func (h *Handler) ListClients(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListClients(r.Context(), orgID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	writeList(w, items, total, page)
@@ -165,7 +165,7 @@ func (h *Handler) ListSites(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListSites(r.Context(), orgID, r.URL.Query().Get("client_id"), page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	writeList(w, items, total, page)
@@ -259,7 +259,7 @@ func (h *Handler) ListBuildings(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListBuildings(r.Context(), orgID, r.URL.Query().Get("site_id"), page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	writeList(w, items, total, page)
@@ -351,7 +351,7 @@ func (h *Handler) ListRooms(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListRooms(r.Context(), orgID, r.URL.Query().Get("building_id"), page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	writeList(w, items, total, page)

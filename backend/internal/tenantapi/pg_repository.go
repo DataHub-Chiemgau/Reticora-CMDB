@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -20,28 +20,6 @@ type PGRepository struct {
 // NewPGRepository creates a new PostgreSQL-backed location repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
-}
-
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-
-	if scope := tenant.ClientScope(ctx); scope != "" {
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.client_scope', $1, true)", scope); err != nil {
-			return fmt.Errorf("set client scope: %w", err)
-		}
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
 }
 
 const clientCols = `id::text, organization_id::text, name, slug, settings, created_at, updated_at`
@@ -65,10 +43,34 @@ func scanClient(s scanner) (*Client, error) {
 
 // --- Clients ---
 
+// Buildings and rooms carry no client or site scope column yet (WP-026,
+// WP-027). They are visible only when their site is visible under the
+// transaction's tenant scope, whose site policy filters the subqueries; a
+// building without site belongs to the whole organization.
+const (
+	buildingVisible = "(building.site_id IS NULL OR EXISTS (SELECT 1 FROM site WHERE site.id = building.site_id))"
+	roomVisible     = `EXISTS (SELECT 1 FROM building WHERE building.id = room.building_id
+		AND (building.site_id IS NULL OR EXISTS (SELECT 1 FROM site WHERE site.id = building.site_id)))`
+)
+
+// requireVisible fails with "not found" when the written row of table does not
+// satisfy visible, i.e. when a write placed it under an object outside the
+// tenant scope; the transaction is then rolled back.
+func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
+	var ok bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
+		return fmt.Errorf("check %s visibility: %w", table, err)
+	}
+	if !ok {
+		return fmt.Errorf("not found")
+	}
+	return nil
+}
+
 func (r *PGRepository) ListClients(ctx context.Context, orgID string, page api.PaginationParams) ([]Client, int, error) {
 	var out []Client
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM client WHERE organization_id = $1", orgID).Scan(&total); err != nil {
 			return err
 		}
@@ -91,7 +93,7 @@ func (r *PGRepository) ListClients(ctx context.Context, orgID string, page api.P
 
 func (r *PGRepository) GetClient(ctx context.Context, orgID, id string) (*Client, error) {
 	var c *Client
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		c, err = scanClient(tx.QueryRow(ctx, "SELECT "+clientCols+" FROM client WHERE organization_id = $1 AND id = $2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -106,7 +108,7 @@ func (r *PGRepository) CreateClient(ctx context.Context, c *Client) error {
 	if c.Settings == nil {
 		c.Settings = map[string]any{}
 	}
-	return r.withTenant(ctx, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
 			`INSERT INTO client (organization_id, name, slug, settings) VALUES ($1,$2,$3,$4) RETURNING id::text, created_at, updated_at`,
 			c.OrganizationID, c.Name, c.Slug, c.Settings,
@@ -116,7 +118,7 @@ func (r *PGRepository) CreateClient(ctx context.Context, c *Client) error {
 
 func (r *PGRepository) UpdateClient(ctx context.Context, orgID, id string, req UpdateClientRequest) (*Client, error) {
 	var c *Client
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -152,12 +154,13 @@ func (r *PGRepository) UpdateClient(ctx context.Context, orgID, id string, req U
 }
 
 func (r *PGRepository) DeleteClient(ctx context.Context, orgID, id string) error {
-	return r.deleteByID(ctx, orgID, "client", id)
+	return r.deleteByID(ctx, orgID, "client", "true", id)
 }
 
-func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE organization_id = $1 AND id = $2", orgID, id)
+// deleteByID deletes a row of table that is visible under visible.
+func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, visible, id string) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE organization_id = $1 AND id = $2 AND "+visible, orgID, id)
 		if err != nil {
 			return err
 		}
@@ -185,7 +188,7 @@ func scanSite(s scanner) (*Site, error) {
 func (r *PGRepository) ListSites(ctx context.Context, orgID, clientID string, page api.PaginationParams) ([]Site, int, error) {
 	var out []Site
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := "organization_id = $1"
 		args := []any{orgID}
 		if clientID != "" {
@@ -216,7 +219,7 @@ func (r *PGRepository) ListSites(ctx context.Context, orgID, clientID string, pa
 
 func (r *PGRepository) GetSite(ctx context.Context, orgID, id string) (*Site, error) {
 	var si *Site
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		si, err = scanSite(tx.QueryRow(ctx, "SELECT "+siteCols+" FROM site WHERE organization_id = $1 AND id = $2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -228,7 +231,7 @@ func (r *PGRepository) GetSite(ctx context.Context, orgID, id string) (*Site, er
 }
 
 func (r *PGRepository) CreateSite(ctx context.Context, s *Site) error {
-	return r.withTenant(ctx, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
 			`INSERT INTO site (organization_id, client_id, name, address, geo_lat, geo_lon, notes)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id::text, created_at, updated_at`,
@@ -239,7 +242,7 @@ func (r *PGRepository) CreateSite(ctx context.Context, s *Site) error {
 
 func (r *PGRepository) UpdateSite(ctx context.Context, orgID, id string, req UpdateSiteRequest) (*Site, error) {
 	var si *Site
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -285,7 +288,7 @@ func (r *PGRepository) UpdateSite(ctx context.Context, orgID, id string, req Upd
 }
 
 func (r *PGRepository) DeleteSite(ctx context.Context, orgID, id string) error {
-	return r.deleteByID(ctx, orgID, "site", id)
+	return r.deleteByID(ctx, orgID, "site", "true", id)
 }
 
 // --- Buildings ---
@@ -305,8 +308,8 @@ func scanBuilding(s scanner) (*Building, error) {
 func (r *PGRepository) ListBuildings(ctx context.Context, orgID, siteID string, page api.PaginationParams) ([]Building, int, error) {
 	var out []Building
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := "organization_id = $1"
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		where := "organization_id = $1 AND " + buildingVisible
 		args := []any{orgID}
 		if siteID != "" {
 			where += " AND site_id = $2"
@@ -336,9 +339,9 @@ func (r *PGRepository) ListBuildings(ctx context.Context, orgID, siteID string, 
 
 func (r *PGRepository) GetBuilding(ctx context.Context, orgID, id string) (*Building, error) {
 	var b *Building
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		b, err = scanBuilding(tx.QueryRow(ctx, "SELECT "+buildingCols+" FROM building WHERE organization_id = $1 AND id = $2", orgID, id))
+		b, err = scanBuilding(tx.QueryRow(ctx, "SELECT "+buildingCols+" FROM building WHERE organization_id = $1 AND id = $2 AND "+buildingVisible, orgID, id))
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("not found")
 		}
@@ -348,18 +351,21 @@ func (r *PGRepository) GetBuilding(ctx context.Context, orgID, id string) (*Buil
 }
 
 func (r *PGRepository) CreateBuilding(ctx context.Context, b *Building) error {
-	return r.withTenant(ctx, b.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx,
+	return database.WithRequestTenant(ctx, r.pool, b.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx,
 			`INSERT INTO building (organization_id, site_id, name, floors, floorplan_object_key)
 			 VALUES ($1,$2,$3,$4,$5) RETURNING id::text, created_at, updated_at`,
 			b.OrganizationID, b.SiteID, b.Name, b.Floors, nilIfEmpty(b.FloorplanObjectKey),
-		).Scan(&b.ID, &b.CreatedAt, &b.UpdatedAt)
+		).Scan(&b.ID, &b.CreatedAt, &b.UpdatedAt); err != nil {
+			return err
+		}
+		return requireVisible(ctx, tx, "building", buildingVisible, b.ID)
 	})
 }
 
 func (r *PGRepository) UpdateBuilding(ctx context.Context, orgID, id string, req UpdateBuildingRequest) (*Building, error) {
 	var b *Building
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -380,22 +386,26 @@ func (r *PGRepository) UpdateBuilding(ctx context.Context, orgID, id string, req
 		}
 		var err error
 		if len(sets) == 0 {
-			b, err = scanBuilding(tx.QueryRow(ctx, "SELECT "+buildingCols+" FROM building WHERE organization_id = $1 AND id = $2", orgID, id))
+			b, err = scanBuilding(tx.QueryRow(ctx, "SELECT "+buildingCols+" FROM building WHERE organization_id = $1 AND id = $2 AND "+buildingVisible, orgID, id))
 		} else {
 			sets = append(sets, "updated_at = NOW()")
-			q := "UPDATE building SET " + strings.Join(sets, ", ") + " WHERE organization_id = $1 AND id = $2 RETURNING " + buildingCols
+			q := "UPDATE building SET " + strings.Join(sets, ", ") + " WHERE organization_id = $1 AND id = $2 AND " + buildingVisible + " RETURNING " + buildingCols
 			b, err = scanBuilding(tx.QueryRow(ctx, q, args...))
 		}
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("not found")
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		// The update may move the row under an object outside the scope.
+		return requireVisible(ctx, tx, "building", buildingVisible, id)
 	})
 	return b, err
 }
 
 func (r *PGRepository) DeleteBuilding(ctx context.Context, orgID, id string) error {
-	return r.deleteByID(ctx, orgID, "building", id)
+	return r.deleteByID(ctx, orgID, "building", buildingVisible, id)
 }
 
 // --- Rooms ---
@@ -421,8 +431,8 @@ func scanRoom(s scanner) (*Room, error) {
 func (r *PGRepository) ListRooms(ctx context.Context, orgID, buildingID string, page api.PaginationParams) ([]Room, int, error) {
 	var out []Room
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := "organization_id = $1"
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		where := "organization_id = $1 AND " + roomVisible
 		args := []any{orgID}
 		if buildingID != "" {
 			where += " AND building_id = $2"
@@ -452,9 +462,9 @@ func (r *PGRepository) ListRooms(ctx context.Context, orgID, buildingID string, 
 
 func (r *PGRepository) GetRoom(ctx context.Context, orgID, id string) (*Room, error) {
 	var rm *Room
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		rm, err = scanRoom(tx.QueryRow(ctx, "SELECT "+roomCols+" FROM room WHERE organization_id = $1 AND id = $2", orgID, id))
+		rm, err = scanRoom(tx.QueryRow(ctx, "SELECT "+roomCols+" FROM room WHERE organization_id = $1 AND id = $2 AND "+roomVisible, orgID, id))
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("not found")
 		}
@@ -467,18 +477,21 @@ func (r *PGRepository) CreateRoom(ctx context.Context, rm *Room) error {
 	if rm.RoomType == "" {
 		rm.RoomType = "general"
 	}
-	return r.withTenant(ctx, rm.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx,
+	return database.WithRequestTenant(ctx, r.pool, rm.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx,
 			`INSERT INTO room (organization_id, building_id, name, floor, room_type)
 			 VALUES ($1,$2,$3,$4,$5) RETURNING id::text, created_at, updated_at`,
 			rm.OrganizationID, rm.BuildingID, rm.Name, rm.Floor, rm.RoomType,
-		).Scan(&rm.ID, &rm.CreatedAt, &rm.UpdatedAt)
+		).Scan(&rm.ID, &rm.CreatedAt, &rm.UpdatedAt); err != nil {
+			return err
+		}
+		return requireVisible(ctx, tx, "room", roomVisible, rm.ID)
 	})
 }
 
 func (r *PGRepository) UpdateRoom(ctx context.Context, orgID, id string, req UpdateRoomRequest) (*Room, error) {
 	var rm *Room
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -508,20 +521,24 @@ func (r *PGRepository) UpdateRoom(ctx context.Context, orgID, id string, req Upd
 		}
 		var err error
 		if len(sets) == 0 {
-			rm, err = scanRoom(tx.QueryRow(ctx, "SELECT "+roomCols+" FROM room WHERE organization_id = $1 AND id = $2", orgID, id))
+			rm, err = scanRoom(tx.QueryRow(ctx, "SELECT "+roomCols+" FROM room WHERE organization_id = $1 AND id = $2 AND "+roomVisible, orgID, id))
 		} else {
 			sets = append(sets, "updated_at = NOW()")
-			q := "UPDATE room SET " + strings.Join(sets, ", ") + " WHERE organization_id = $1 AND id = $2 RETURNING " + roomCols
+			q := "UPDATE room SET " + strings.Join(sets, ", ") + " WHERE organization_id = $1 AND id = $2 AND " + roomVisible + " RETURNING " + roomCols
 			rm, err = scanRoom(tx.QueryRow(ctx, q, args...))
 		}
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("not found")
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		// The update may move the row under an object outside the scope.
+		return requireVisible(ctx, tx, "room", roomVisible, id)
 	})
 	return rm, err
 }
 
 func (r *PGRepository) DeleteRoom(ctx context.Context, orgID, id string) error {
-	return r.deleteByID(ctx, orgID, "room", id)
+	return r.deleteByID(ctx, orgID, "room", roomVisible, id)
 }

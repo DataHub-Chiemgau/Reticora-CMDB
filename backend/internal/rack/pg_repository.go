@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -19,21 +20,6 @@ type PGRepository struct {
 // NewPGRepository creates a new PostgreSQL-backed rack repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
-}
-
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
 }
 
 type scanner interface {
@@ -52,11 +38,44 @@ func scanRack(s scanner) (*Rack, error) {
 	return rk, nil
 }
 
+// Racks, mounts and cables carry no client or site scope column yet (WP-025,
+// WP-027). They are visible only when the objects they hang off are visible
+// under the transaction's tenant scope, whose site and ci policies filter the
+// subqueries: a rack through room, building and site, a mount through its
+// rack and CI, a cable through the CIs of both interfaces.
+const (
+	rackVisible = `EXISTS (SELECT 1 FROM room LEFT JOIN building ON building.id = room.building_id
+		WHERE room.id = rack.room_id
+		AND (building.site_id IS NULL OR EXISTS (SELECT 1 FROM site WHERE site.id = building.site_id)))`
+	mountVisible = "EXISTS (SELECT 1 FROM rack WHERE rack.id = rack_mount.rack_id AND " + rackVisible + ")" +
+		" AND EXISTS (SELECT 1 FROM ci WHERE ci.id = rack_mount.ci_id)"
+	cableVisible = `(cable.source_interface_id IS NULL OR EXISTS (
+		SELECT 1 FROM network_interface JOIN ci ON ci.id = network_interface.ci_id
+		WHERE network_interface.id = cable.source_interface_id))
+	AND (cable.target_interface_id IS NULL OR EXISTS (
+		SELECT 1 FROM network_interface JOIN ci ON ci.id = network_interface.ci_id
+		WHERE network_interface.id = cable.target_interface_id))`
+)
+
+// requireVisible fails with ErrNotFound when the written row of table does not
+// satisfy visible, i.e. when a write placed it under an object outside the
+// tenant scope; the transaction is then rolled back.
+func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
+	var ok bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
+		return fmt.Errorf("check %s visibility: %w", table, err)
+	}
+	if !ok {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *PGRepository) ListRacks(ctx context.Context, orgID, roomID string, page api.PaginationParams) ([]Rack, int, error) {
 	var out []Rack
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := "organization_id = $1"
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		where := "organization_id = $1 AND " + rackVisible
 		args := []any{orgID}
 		if roomID != "" {
 			where += " AND room_id = $2"
@@ -86,9 +105,9 @@ func (r *PGRepository) ListRacks(ctx context.Context, orgID, roomID string, page
 
 func (r *PGRepository) GetRack(ctx context.Context, orgID, id string) (*Rack, error) {
 	var rk *Rack
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		rk, err = scanRack(tx.QueryRow(ctx, "SELECT "+rackCols+" FROM rack WHERE organization_id = $1 AND id = $2", orgID, id))
+		rk, err = scanRack(tx.QueryRow(ctx, "SELECT "+rackCols+" FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, orgID, id))
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
@@ -98,18 +117,21 @@ func (r *PGRepository) GetRack(ctx context.Context, orgID, id string) (*Rack, er
 }
 
 func (r *PGRepository) CreateRack(ctx context.Context, rk *Rack) error {
-	return r.withTenant(ctx, rk.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx,
+	return database.WithRequestTenant(ctx, r.pool, rk.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx,
 			`INSERT INTO rack (organization_id, room_id, name, height_u, width_mm, depth_mm, notes)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id::text, created_at, updated_at`,
 			rk.OrganizationID, rk.RoomID, rk.Name, rk.HeightU, rk.WidthMM, rk.DepthMM, nilIfEmpty(rk.Notes),
-		).Scan(&rk.ID, &rk.CreatedAt, &rk.UpdatedAt)
+		).Scan(&rk.ID, &rk.CreatedAt, &rk.UpdatedAt); err != nil {
+			return err
+		}
+		return requireVisible(ctx, tx, "rack", rackVisible, rk.ID)
 	})
 }
 
 func (r *PGRepository) UpdateRack(ctx context.Context, orgID, id string, req UpdateRackRequest) (*Rack, error) {
 	var rk *Rack
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -140,23 +162,27 @@ func (r *PGRepository) UpdateRack(ctx context.Context, orgID, id string, req Upd
 		}
 		var err error
 		if len(sets) == 0 {
-			rk, err = scanRack(tx.QueryRow(ctx, "SELECT "+rackCols+" FROM rack WHERE organization_id = $1 AND id = $2", orgID, id))
+			rk, err = scanRack(tx.QueryRow(ctx, "SELECT "+rackCols+" FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, orgID, id))
 		} else {
 			sets = append(sets, "updated_at = NOW()")
-			q := "UPDATE rack SET " + strings.Join(sets, ", ") + " WHERE organization_id = $1 AND id = $2 RETURNING " + rackCols
+			q := "UPDATE rack SET " + strings.Join(sets, ", ") + " WHERE organization_id = $1 AND id = $2 AND " + rackVisible + " RETURNING " + rackCols
 			rk, err = scanRack(tx.QueryRow(ctx, q, args...))
 		}
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		// The update may move the row under an object outside the scope.
+		return requireVisible(ctx, tx, "rack", rackVisible, id)
 	})
 	return rk, err
 }
 
 func (r *PGRepository) DeleteRack(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "DELETE FROM rack WHERE organization_id = $1 AND id = $2", orgID, id)
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, "DELETE FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, orgID, id)
 		if err != nil {
 			return err
 		}
@@ -180,6 +206,8 @@ func scanMount(s scanner) (*RackMount, error) {
 }
 
 // mountsForRackTx loads all mounts for a rack within an existing transaction.
+// The occupancy check needs every mount, including those of CIs outside the
+// tenant scope, so the result is used for validation only and never returned.
 func mountsForRackTx(ctx context.Context, tx pgx.Tx, orgID, rackID string) ([]RackMount, error) {
 	rows, err := tx.Query(ctx, "SELECT "+mountCols+" FROM rack_mount WHERE organization_id = $1 AND rack_id = $2", orgID, rackID)
 	if err != nil {
@@ -200,7 +228,7 @@ func mountsForRackTx(ctx context.Context, tx pgx.Tx, orgID, rackID string) ([]Ra
 func (r *PGRepository) ListMounts(ctx context.Context, orgID, rackID string, page api.PaginationParams) ([]RackMount, int, error) {
 	var out []RackMount
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM rack WHERE organization_id = $1 AND id = $2)", orgID, rackID).Scan(&exists); err != nil {
 			return err
@@ -208,10 +236,10 @@ func (r *PGRepository) ListMounts(ctx context.Context, orgID, rackID string, pag
 		if !exists {
 			return ErrRackNotFound
 		}
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM rack_mount WHERE organization_id = $1 AND rack_id = $2", orgID, rackID).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM rack_mount WHERE organization_id = $1 AND rack_id = $2 AND "+mountVisible, orgID, rackID).Scan(&total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, "SELECT "+mountCols+" FROM rack_mount WHERE organization_id = $1 AND rack_id = $2 ORDER BY position_u LIMIT $3 OFFSET $4", orgID, rackID, page.Limit, page.Offset)
+		rows, err := tx.Query(ctx, "SELECT "+mountCols+" FROM rack_mount WHERE organization_id = $1 AND rack_id = $2 AND "+mountVisible+" ORDER BY position_u LIMIT $3 OFFSET $4", orgID, rackID, page.Limit, page.Offset)
 		if err != nil {
 			return err
 		}
@@ -229,9 +257,9 @@ func (r *PGRepository) ListMounts(ctx context.Context, orgID, rackID string, pag
 }
 
 func (r *PGRepository) CreateMount(ctx context.Context, m *RackMount) error {
-	return r.withTenant(ctx, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		var height int
-		err := tx.QueryRow(ctx, "SELECT height_u FROM rack WHERE organization_id = $1 AND id = $2", m.OrganizationID, m.RackID).Scan(&height)
+		err := tx.QueryRow(ctx, "SELECT height_u FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, m.OrganizationID, m.RackID).Scan(&height)
 		if err == pgx.ErrNoRows {
 			return ErrRackNotFound
 		}
@@ -253,15 +281,16 @@ func (r *PGRepository) CreateMount(ctx context.Context, m *RackMount) error {
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrValidation, err)
 		}
-		return nil
+		// The mounted CI must be visible under the scope as well.
+		return requireVisible(ctx, tx, "rack_mount", mountVisible, m.ID)
 	})
 }
 
 func (r *PGRepository) GetMount(ctx context.Context, orgID, id string) (*RackMount, error) {
 	var m *RackMount
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		m, err = scanMount(tx.QueryRow(ctx, "SELECT "+mountCols+" FROM rack_mount WHERE organization_id = $1 AND id = $2", orgID, id))
+		m, err = scanMount(tx.QueryRow(ctx, "SELECT "+mountCols+" FROM rack_mount WHERE organization_id = $1 AND id = $2 AND "+mountVisible, orgID, id))
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
@@ -272,8 +301,8 @@ func (r *PGRepository) GetMount(ctx context.Context, orgID, id string) (*RackMou
 
 func (r *PGRepository) UpdateMount(ctx context.Context, orgID, id string, req UpdateMountRequest) (*RackMount, error) {
 	var m *RackMount
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		current, err := scanMount(tx.QueryRow(ctx, "SELECT "+mountCols+" FROM rack_mount WHERE organization_id = $1 AND id = $2", orgID, id))
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		current, err := scanMount(tx.QueryRow(ctx, "SELECT "+mountCols+" FROM rack_mount WHERE organization_id = $1 AND id = $2 AND "+mountVisible, orgID, id))
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
@@ -294,8 +323,8 @@ func (r *PGRepository) UpdateMount(ctx context.Context, orgID, id string, req Up
 			}
 		}
 		var rackHeight int
-		if err := tx.QueryRow(ctx, "SELECT height_u FROM rack WHERE organization_id = $1 AND id = $2", orgID, current.RackID).Scan(&rackHeight); err != nil {
-			return err
+		if heightErr := tx.QueryRow(ctx, "SELECT height_u FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, orgID, current.RackID).Scan(&rackHeight); heightErr != nil {
+			return heightErr
 		}
 		existing, err := mountsForRackTx(ctx, tx, orgID, current.RackID)
 		if err != nil {
@@ -314,8 +343,8 @@ func (r *PGRepository) UpdateMount(ctx context.Context, orgID, id string, req Up
 }
 
 func (r *PGRepository) DeleteMount(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "DELETE FROM rack_mount WHERE organization_id = $1 AND id = $2", orgID, id)
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, "DELETE FROM rack_mount WHERE organization_id = $1 AND id = $2 AND "+mountVisible, orgID, id)
 		if err != nil {
 			return err
 		}
@@ -348,11 +377,11 @@ func scanCable(s scanner) (*Cable, error) {
 func (r *PGRepository) ListCables(ctx context.Context, orgID string, page api.PaginationParams) ([]Cable, int, error) {
 	var out []Cable
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM cable WHERE organization_id = $1", orgID).Scan(&total); err != nil {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM cable WHERE organization_id = $1 AND "+cableVisible, orgID).Scan(&total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, "SELECT "+cableCols+" FROM cable WHERE organization_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", orgID, page.Limit, page.Offset)
+		rows, err := tx.Query(ctx, "SELECT "+cableCols+" FROM cable WHERE organization_id = $1 AND "+cableVisible+" ORDER BY created_at DESC LIMIT $2 OFFSET $3", orgID, page.Limit, page.Offset)
 		if err != nil {
 			return err
 		}
@@ -371,9 +400,9 @@ func (r *PGRepository) ListCables(ctx context.Context, orgID string, page api.Pa
 
 func (r *PGRepository) GetCable(ctx context.Context, orgID, id string) (*Cable, error) {
 	var c *Cable
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		c, err = scanCable(tx.QueryRow(ctx, "SELECT "+cableCols+" FROM cable WHERE organization_id = $1 AND id = $2", orgID, id))
+		c, err = scanCable(tx.QueryRow(ctx, "SELECT "+cableCols+" FROM cable WHERE organization_id = $1 AND id = $2 AND "+cableVisible, orgID, id))
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
@@ -383,19 +412,22 @@ func (r *PGRepository) GetCable(ctx context.Context, orgID, id string) (*Cable, 
 }
 
 func (r *PGRepository) CreateCable(ctx context.Context, c *Cable) error {
-	return r.withTenant(ctx, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx,
+	return database.WithRequestTenant(ctx, r.pool, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx,
 			`INSERT INTO cable (organization_id, label, cable_type, length_m, color, source_interface_id, target_interface_id, status, installed_at)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text, created_at, updated_at`,
 			c.OrganizationID, nilIfEmpty(c.Label), c.CableType, c.LengthM, nilIfEmpty(c.Color),
 			nilIfEmpty(c.SourceInterfaceID), nilIfEmpty(c.TargetInterfaceID), c.Status, nilIfEmptyPtr(c.InstalledAt),
-		).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
+		).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return err
+		}
+		return requireVisible(ctx, tx, "cable", cableVisible, c.ID)
 	})
 }
 
 func (r *PGRepository) UpdateCable(ctx context.Context, orgID, id string, req UpdateCableRequest) (*Cable, error) {
 	var c *Cable
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -435,23 +467,27 @@ func (r *PGRepository) UpdateCable(ctx context.Context, orgID, id string, req Up
 		}
 		var err error
 		if len(sets) == 0 {
-			c, err = scanCable(tx.QueryRow(ctx, "SELECT "+cableCols+" FROM cable WHERE organization_id = $1 AND id = $2", orgID, id))
+			c, err = scanCable(tx.QueryRow(ctx, "SELECT "+cableCols+" FROM cable WHERE organization_id = $1 AND id = $2 AND "+cableVisible, orgID, id))
 		} else {
 			sets = append(sets, "updated_at = NOW()")
-			q := "UPDATE cable SET " + strings.Join(sets, ", ") + " WHERE organization_id = $1 AND id = $2 RETURNING " + cableCols
+			q := "UPDATE cable SET " + strings.Join(sets, ", ") + " WHERE organization_id = $1 AND id = $2 AND " + cableVisible + " RETURNING " + cableCols
 			c, err = scanCable(tx.QueryRow(ctx, q, args...))
 		}
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		// The update may move the row under an object outside the scope.
+		return requireVisible(ctx, tx, "cable", cableVisible, id)
 	})
 	return c, err
 }
 
 func (r *PGRepository) DeleteCable(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "DELETE FROM cable WHERE organization_id = $1 AND id = $2", orgID, id)
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, "DELETE FROM cable WHERE organization_id = $1 AND id = $2 AND "+cableVisible, orgID, id)
 		if err != nil {
 			return err
 		}

@@ -42,7 +42,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.repo.List(r.Context(), t.OrganizationID, filter)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items, "total": len(items)})
@@ -57,7 +57,7 @@ func (h *Handler) Tree(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.repo.Tree(r.Context(), t.OrganizationID)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})

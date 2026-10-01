@@ -63,7 +63,20 @@ func Seed(t *testing.T, tag string) *Fixture {
 		tag:     tag,
 	}
 	cleanup := func() {
-		// Dependent rows go with their organization (ON DELETE CASCADE).
+		// Most rows go with their organization (ON DELETE CASCADE); tables
+		// whose organization reference does not cascade are emptied first.
+		// They may reference each other, so a failed delete is retried in
+		// the next pass.
+		pending := nonCascadingTables(t, admin)
+		for pass := 0; pass < len(pending)+1 && len(pending) > 0; pass++ {
+			var left []string
+			for _, table := range pending {
+				if _, delErr := admin.Exec(ctx, `DELETE FROM `+table+` WHERE organization_id IN ($1::uuid, $2::uuid)`, f.OrgA, f.OrgB); delErr != nil {
+					left = append(left, table)
+				}
+			}
+			pending = left
+		}
 		if _, delErr := admin.Exec(ctx, `DELETE FROM organization WHERE id IN ($1::uuid, $2::uuid)`, f.OrgA, f.OrgB); delErr != nil {
 			t.Errorf("scopetest cleanup: %v", delErr)
 		}
@@ -92,6 +105,33 @@ func Seed(t *testing.T, tag string) *Fixture {
 	t.Cleanup(app.Close)
 	f.App = app
 	return f
+}
+
+// nonCascadingTables lists the tables whose foreign key to organization does
+// not cascade on delete.
+func nonCascadingTables(t *testing.T, admin *pgxpool.Pool) []string {
+	t.Helper()
+	rows, err := admin.Query(context.Background(), `
+		SELECT DISTINCT quote_ident(c.relname) FROM pg_constraint k
+		JOIN pg_class c ON c.oid = k.conrelid
+		WHERE k.contype = 'f' AND k.confrelid = 'organization'::regclass AND k.confdeltype <> 'c'
+		ORDER BY 1`)
+	if err != nil {
+		t.Fatalf("list non-cascading tables: %v", err)
+	}
+	defer rows.Close()
+	var tables []string
+	for rows.Next() {
+		var table string
+		if err := rows.Scan(&table); err != nil {
+			t.Fatalf("scan table: %v", err)
+		}
+		tables = append(tables, table)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("list non-cascading tables: %v", err)
+	}
+	return tables
 }
 
 // f0 builds a fixture id: c0de<tag><org>… keeps every package's ids apart.

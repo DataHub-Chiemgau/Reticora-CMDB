@@ -2,6 +2,7 @@ package location
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -9,6 +10,10 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
+
+// ErrAssetNotFound is returned when the asset of an entry does not exist or is
+// not visible under the caller's tenant scope.
+var ErrAssetNotFound = errors.New("asset not found")
 
 // Repository stores asset location history.
 type Repository interface {
