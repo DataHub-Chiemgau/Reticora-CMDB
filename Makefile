@@ -1,4 +1,4 @@
-.PHONY: generate build test lint lint-backend lint-frontend lint-collector lint-edgecore check-golangci-lint migrate-up migrate-down migrate-roundtrip up down seed e2e fmt vet oapi-codegen generate-api-client check-api-client
+.PHONY: generate build test test-backend test-collector test-edgecore test-db test-frontend lint lint-backend lint-frontend lint-collector lint-edgecore check-golangci-lint migrate-up migrate-down migrate-roundtrip up down seed e2e fmt vet oapi-codegen generate-api-client check-api-client
 
 # ─── Variables ──────────────────────────────────────────────────────────────────
 BACKEND_DIR := backend
@@ -41,7 +41,7 @@ build-frontend:
 	cd $(FRONTEND_DIR) && npm run build
 
 # ─── Test ───────────────────────────────────────────────────────────────────────
-test: test-backend test-frontend
+test: test-backend test-collector test-edgecore test-frontend
 
 test-backend:
 	@echo "==> Testing backend..."
@@ -50,6 +50,18 @@ test-backend:
 test-collector:
 	@echo "==> Testing collector..."
 	cd $(COLLECTOR_DIR) && go test -race ./...
+
+test-edgecore:
+	@echo "==> Testing edgecore..."
+	cd $(EDGECORE_DIR) && go test -race ./...
+
+# Runs every backend test against a migrated PostgreSQL, like the CI
+# migrations job: all DB tests activate themselves through TEST_DATABASE_URL.
+# Packages run sequentially because they share the database.
+TEST_DATABASE_URL ?= $(DATABASE_URL)
+test-db:
+	@echo "==> Testing backend against PostgreSQL..."
+	cd $(BACKEND_DIR) && TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test -count=1 -p 1 -v ./...
 
 test-frontend:
 	@echo "==> Testing frontend..."
