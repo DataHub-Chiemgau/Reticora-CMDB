@@ -231,24 +231,6 @@ func truncateAll(ctx context.Context, t *testing.T, conn *pgx.Conn) {
 // An entry that no longer matches fails the test so the list only shrinks.
 // The final up → down to 0 → up comparison is not affected by this list.
 var knownDownDeviations = map[int][]string{
-	// 000018 down recreates the policies on app.org_id instead of the
-	// app.organization_id policies of 000001. Finding outside WP-006, follow-up WP.
-	18: {
-		"policy organization.org_isolation ", "policy building.building_isolation ",
-		"policy client.client_isolation ", "policy rack.rack_isolation ",
-		"policy room.room_isolation ", "policy site.site_isolation ",
-	},
-	// 000023 down drops the WITH CHECK clauses that already existed for the
-	// location tables and keeps FORCE ROW LEVEL SECURITY on the tables that had
-	// none before. Finding outside WP-006, follow-up WP.
-	23: {
-		"policy building.building_isolation ", "policy client.client_isolation ",
-		"policy rack.rack_isolation ", "policy room.room_isolation ", "policy site.site_isolation ",
-		"relation asset ", "relation assignment ", "relation custom_role ",
-		"relation discovery_result ", "relation document ", "relation document_link ",
-		"relation stock_scan ", "relation stocktake ", "relation team ",
-		"relation ticket ", "relation ticket_comment ",
-	},
 	// 000056 down keeps FORCE ROW LEVEL SECURITY on purpose (see the comment in
 	// the migration): reverting it would weaken tenant isolation.
 	56: {"relation alert_rule ", "relation webhook_dead_letter "},

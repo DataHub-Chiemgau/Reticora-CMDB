@@ -38,8 +38,6 @@ sobald ein Eintrag nicht mehr zutrifft, die Liste kann also nur schrumpfen:
 
 | Migration | Abweichung | Status |
 |---|---|---|
-| 000018 | Down stellt die Policies von `organization`, `client`, `site`, `building`, `room`, `rack` auf `app.org_id` statt auf das ursprüngliche `app.organization_id` wieder her. | Befund, eigenes Folge-WP |
-| 000023 | Down entfernt die vor 000023 vorhandenen `WITH CHECK`-Klauseln der Standorttabellen und belässt `FORCE ROW LEVEL SECURITY` auf elf Tabellen, die es vorher nicht hatten. | Befund, eigenes Folge-WP |
 | 000056 | Down belässt `FORCE ROW LEVEL SECURITY` auf `alert_rule` und `webhook_dead_letter`. | bewusst, siehe Kommentar in der Migration |
 
 ## Konventionen für neue Migrationen

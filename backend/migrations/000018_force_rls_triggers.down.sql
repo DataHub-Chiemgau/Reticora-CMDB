@@ -11,30 +11,31 @@ DROP TRIGGER IF EXISTS trg_site_updated_at ON site;
 DROP TRIGGER IF EXISTS trg_client_updated_at ON client;
 DROP TRIGGER IF EXISTS trg_organization_updated_at ON organization;
 
--- Revert policies to simple USING without WITH CHECK
+-- Revert policies to the definitions of migration 000001: USING only, on the
+-- session variable app.organization_id that was in use before this migration.
 DROP POLICY IF EXISTS rack_isolation ON rack;
 CREATE POLICY rack_isolation ON rack
-    USING (organization_id = current_setting('app.org_id')::UUID);
+    USING (organization_id = current_setting('app.organization_id')::UUID);
 
 DROP POLICY IF EXISTS room_isolation ON room;
 CREATE POLICY room_isolation ON room
-    USING (organization_id = current_setting('app.org_id')::UUID);
+    USING (organization_id = current_setting('app.organization_id')::UUID);
 
 DROP POLICY IF EXISTS building_isolation ON building;
 CREATE POLICY building_isolation ON building
-    USING (organization_id = current_setting('app.org_id')::UUID);
+    USING (organization_id = current_setting('app.organization_id')::UUID);
 
 DROP POLICY IF EXISTS site_isolation ON site;
 CREATE POLICY site_isolation ON site
-    USING (organization_id = current_setting('app.org_id')::UUID);
+    USING (organization_id = current_setting('app.organization_id')::UUID);
 
 DROP POLICY IF EXISTS client_isolation ON client;
 CREATE POLICY client_isolation ON client
-    USING (organization_id = current_setting('app.org_id')::UUID);
+    USING (organization_id = current_setting('app.organization_id')::UUID);
 
 DROP POLICY IF EXISTS org_isolation ON organization;
 CREATE POLICY org_isolation ON organization
-    USING (id = current_setting('app.org_id')::UUID);
+    USING (id = current_setting('app.organization_id')::UUID);
 
 -- Remove FORCE (back to ENABLE only)
 ALTER TABLE discovery_job NO FORCE ROW LEVEL SECURITY;
