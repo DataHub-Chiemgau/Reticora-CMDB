@@ -54,6 +54,75 @@ sobald ein Eintrag nicht mehr zutrifft, die Liste kann also nur schrumpfen:
 - Nach der Änderung wird diese Datei mit dem obigen Befehl aktualisiert und mit
   committet.
 
+## RLS-Katalog und bekannte Lücken
+
+`backend/internal/tenant/rls/catalog_integration_test.go` (`TestRLSCatalog`)
+prüft jede Tabelle in `public` mit `organization_id` (plus `organization`)
+gegen die Regeln aus `backend/internal/tenant/rls/known_gaps.go`. Es zählen
+Policies für `PUBLIC` oder `reticora_app`:
+
+| Regel | Anforderung |
+|---|---|
+| `rls-enabled` | `ENABLE ROW LEVEL SECURITY` |
+| `rls-forced` | `FORCE ROW LEVEL SECURITY` |
+| `policy-commands` | SELECT, INSERT, UPDATE und DELETE sind je durch eine permissive Policy abgedeckt |
+| `using` | jede Policy für SELECT/UPDATE/DELETE/ALL hat `USING` |
+| `with-check` | jede Policy für INSERT/UPDATE/ALL hat ein explizites `WITH CHECK` |
+| `org-predicate` | `USING` und `WITH CHECK` jedes Kommandos verwenden `app.org_id` |
+| `system-write` | `app.system` erweitert höchstens SELECT, nie INSERT/UPDATE/DELETE |
+| `global-rows` | INSERT/UPDATE/DELETE erreichen keine globalen Zeilen (`organization_id IS NULL`) |
+| `client-scope` | Tabellen mit `client_id` verwenden `app.client_scope` in `USING` und `WITH CHECK` |
+| `site-scope` | Tabellen mit `site_id` verwenden `app.site_scope` in `USING` und `WITH CHECK` (CH25) |
+| `team-scope` | Tabellen mit `team_id` verwenden `app.team_scope` in `USING` und `WITH CHECK` (CH25) |
+| `org-column` | jede Tabelle außer `organization` und `schema_migrations` hat `organization_id` |
+
+Ein Prädikat gilt als erzwungen, wenn alle permissiven Policies des Kommandos
+oder eine restriktive Policy das GUC verwenden. Die folgende Liste der heute
+bekannten Lücken muss exakt stimmen: Neue Verstöße und bereits geschlossene
+Lücken lassen den Test fehlschlagen. Neue Tabellen dürfen nicht aufgenommen
+werden (`TestKnownGapsList` verlangt, dass jede Tabelle bis Migration 000057
+existierte). Das schließende WP entfernt seinen Eintrag in `known_gaps.go` und
+erzeugt die Tabelle mit `RETICORA_UPDATE_SCHEMA_BASELINE=1 go test -run
+TestKnownGapsDocumented ./internal/tenant/rls/` neu.
+
+<!-- rls-known-gaps:begin -->
+
+| Tabelle | Regel | Zuständiges WP |
+|---|---|---|
+| `alert_rule` | `system-write` | WP-022 |
+| `collector_enrollment_code` | `system-write` | WP-022 |
+| `export_job` | `system-write` | WP-022 |
+| `webhook_dead_letter` | `system-write` | WP-022 |
+| `webhook_delivery` | `system-write` | WP-022 |
+| `asset` | `client-scope` | WP-023 |
+| `consumable` | `client-scope` | WP-023 |
+| `form_def` | `client-scope` | WP-023 |
+| `internal_order` | `client-scope` | WP-023 |
+| `key_item` | `client-scope` | WP-023 |
+| `location_node` | `client-scope` | WP-023 |
+| `maintenance_notification` | `client-scope` | WP-023 |
+| `quantity_item` | `client-scope` | WP-023 |
+| `sla` | `client-scope` | WP-023 |
+| `ci_type` | `global-rows` | WP-024 |
+| `lifecycle_definition` | `global-rows` | WP-024 |
+| `lifecycle_state` | `global-rows` | WP-024 |
+| `lifecycle_transition` | `global-rows` | WP-024 |
+| `relationship_type` | `global-rows` | WP-024 |
+| `ci_type_attribute` | `org-column` | WP-024 |
+| `permission` | `org-column` | WP-024 |
+| `team_member` | `org-column` | WP-024 |
+| `user_custom_role` | `org-column` | WP-024 |
+| `building` | `site-scope` | WP-027 |
+| `ci` | `site-scope` | WP-027 |
+| `location_node` | `site-scope` | WP-027 |
+| `subnet` | `site-scope` | WP-027 |
+| `ticket` | `team-scope` | WP-029 |
+| `metric_sample` | `rls-enabled` | WP-040 |
+| `metric_sample` | `rls-forced` | WP-040 |
+| `metric_sample` | `policy-commands` | WP-040 |
+
+<!-- rls-known-gaps:end -->
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL

@@ -7,3 +7,6 @@ GLO-11;[Q];A;backend/internal/traceability/traceability_test.go;WP-005
 DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-005
 DB-02;nicht geliefert;A;backend/internal/database/migrations_roundtrip_integration_test.go;WP-006
 REP-01;[B];A;backend/internal/database/migrations_roundtrip_integration_test.go;WP-006
+TEN-05;[B];A;backend/internal/tenant/rls/catalog_integration_test.go;WP-007
+TEN-03;[B];A;backend/internal/tenant/rls/catalog_integration_test.go;WP-007
+TEN-09;[Q];A;backend/internal/tenant/rls/catalog_integration_test.go;WP-007
