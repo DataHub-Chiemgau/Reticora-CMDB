@@ -139,7 +139,12 @@ export function RoomPlanPage() {
               className="relative h-[28rem] w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50 bg-[linear-gradient(to_right,rgba(0,0,0,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(0,0,0,0.05)_1px,transparent_1px)] bg-[size:24px_24px] dark:border-gray-700 dark:bg-gray-900"
               style={
                 floorplanURL
-                  ? { backgroundImage: `url(${floorplanURL})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center' }
+                  ? {
+                      backgroundImage: `url(${floorplanURL})`,
+                      backgroundSize: 'contain',
+                      backgroundRepeat: 'no-repeat',
+                      backgroundPosition: 'center',
+                    }
                   : undefined
               }
             >

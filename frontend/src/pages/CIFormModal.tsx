@@ -92,7 +92,9 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
   // onto a known input are rendered inline; anything else stays in the banner
   // so no server complaint is silently swallowed.
   const serverViolations =
-    serverError instanceof ApiError ? serverError.violationsByField() : ({} as Record<string, string>);
+    serverError instanceof ApiError
+      ? serverError.violationsByField()
+      : ({} as Record<string, string>);
 
   const fieldErrors: Partial<Record<keyof CIFormValues, string>> = { ...errors };
   const unmappedViolations: string[] = [];

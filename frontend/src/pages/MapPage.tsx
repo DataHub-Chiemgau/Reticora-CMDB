@@ -31,7 +31,12 @@ const LANDMASSES: string[] = [
   'M80,60 L94,58 L96,70 L86,74 L78,68 Z',
 ];
 
-function project(lat: number, lon: number, width: number, height: number): { x: number; y: number } {
+function project(
+  lat: number,
+  lon: number,
+  width: number,
+  height: number,
+): { x: number; y: number } {
   const x = ((lon + 180) / 360) * width;
   // clamp latitude to the visible Web-Mercator-ish band and invert Y
   const clamped = Math.max(-80, Math.min(84, lat));
@@ -125,7 +130,9 @@ export function MapPage() {
                   {selected.name}
                 </h3>
                 {selected.address ? (
-                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{selected.address}</p>
+                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                    {selected.address}
+                  </p>
                 ) : null}
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   {selected.geo_lat?.toFixed(4)}, {selected.geo_lon?.toFixed(4)}

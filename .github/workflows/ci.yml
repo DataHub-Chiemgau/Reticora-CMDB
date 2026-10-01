@@ -152,11 +152,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Steps run in sequence; any failing step fails the job.
+      - name: Format check
+        run: npm run format:check
+
       - name: Lint
         run: npm run lint
-
-      - name: Format check
-        run: npx prettier --check .
 
       # The typed client is generated from api/openapi.yaml, so a specification
       # change that was not regenerated must fail the build rather than silently
