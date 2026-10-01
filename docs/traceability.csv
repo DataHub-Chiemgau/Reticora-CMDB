@@ -5,3 +5,5 @@ TST-04;[Q];A;.github/workflows/ci.yml;WP-003
 TST-02;[B];A;.github/workflows/ci.yml;WP-003
 GLO-11;[Q];A;backend/internal/traceability/traceability_test.go;WP-005
 DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-005
+DB-02;nicht geliefert;A;backend/internal/database/migrations_roundtrip_integration_test.go;WP-006
+REP-01;[B];A;backend/internal/database/migrations_roundtrip_integration_test.go;WP-006

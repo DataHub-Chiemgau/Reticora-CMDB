@@ -117,6 +117,8 @@ jobs:
       # Every PostgreSQL test activates itself through TEST_DATABASE_URL, so the
       # whole module runs without a name filter. -p 1 runs packages one after
       # another: they share this database and some fixtures are not isolated.
+      # This includes the migration roundtrip with schema comparison and the
+      # docs/schema-baseline.md check (internal/database, DB-02).
       - name: PostgreSQL integration tests (all packages)
         working-directory: backend
         env:

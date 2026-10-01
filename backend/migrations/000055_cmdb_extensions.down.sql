@@ -42,10 +42,12 @@ ALTER TABLE ci_relationship DROP COLUMN IF EXISTS verification_state;
 ALTER TABLE ci_relationship DROP COLUMN IF EXISTS last_seen_at;
 ALTER TABLE ci_relationship DROP COLUMN IF EXISTS first_seen_at;
 ALTER TABLE ci_relationship DROP COLUMN IF EXISTS confidence;
+-- Restore the vocabulary of migration 000031 (state before 000055).
 ALTER TABLE ci_relationship ADD CONSTRAINT ci_relationship_rel_type_check
     CHECK (rel_type IN (
-        'connected_to', 'hosted_on', 'depends_on', 'member_of',
-        'powers', 'powered_by', 'stores', 'monitors', 'backs_up'
+        'connected_to', 'hosted_on', 'depends_on', 'member_of', 'member_of_cluster',
+        'powers', 'powered_by', 'runs_on', 'mounted_in', 'uplink_to',
+        'stores', 'monitors', 'backs_up'
     ));
 DROP TABLE IF EXISTS relationship_type;
 
@@ -76,6 +78,7 @@ ALTER TABLE ci_type DROP COLUMN IF EXISTS is_active;
 ALTER TABLE ci_type DROP COLUMN IF EXISTS category;
 ALTER TABLE ci_type DROP COLUMN IF EXISTS description;
 
+DROP INDEX IF EXISTS idx_asset_ci_unique;
 ALTER TABLE asset DROP COLUMN IF EXISTS parent_asset_id;
 ALTER TABLE asset DROP COLUMN IF EXISTS asset_type_id;
 

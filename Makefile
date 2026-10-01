@@ -1,4 +1,4 @@
-.PHONY: generate build test test-backend test-collector test-edgecore test-db test-frontend lint lint-backend lint-frontend lint-collector lint-edgecore check-golangci-lint migrate-up migrate-down migrate-roundtrip up down seed e2e fmt vet oapi-codegen generate-api-client check-api-client
+.PHONY: generate build test test-backend test-collector test-edgecore test-db test-frontend lint lint-backend lint-frontend lint-collector lint-edgecore check-golangci-lint migrate-up migrate-down migrate-roundtrip schema-baseline up down seed e2e fmt vet oapi-codegen generate-api-client check-api-client
 
 # ─── Variables ──────────────────────────────────────────────────────────────────
 BACKEND_DIR := backend
@@ -125,6 +125,14 @@ migrate-roundtrip:
 	migrate -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" up
 	migrate -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" down -all
 	migrate -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" up
+	@echo "==> Comparing schemas of every up/down step and docs/schema-baseline.md..."
+	cd $(BACKEND_DIR) && TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test -count=1 -v \
+		-run 'TestMigrationsRoundtrip|TestSchemaBaselineMatchesMigratedSchema' ./internal/database/
+
+schema-baseline:
+	@echo "==> Regenerating docs/schema-baseline.md..."
+	cd $(BACKEND_DIR) && RETICORA_UPDATE_SCHEMA_BASELINE=1 TEST_DATABASE_URL="$(TEST_DATABASE_URL)" \
+		go test -count=1 -v -run TestSchemaBaselineMatchesMigratedSchema ./internal/database/
 
 migrate-create:
 	@echo "==> Creating migration: $(name)"
