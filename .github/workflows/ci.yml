@@ -158,6 +158,35 @@ jobs:
             exit 1
           fi
 
+  # GLO-11/DOD-01: docs/traceability.csv is checked on every PR (E-30).
+  # Format, known IDs, existing test files and the rows the plan prescribes for
+  # the PR's work packages block; completeness is reported until gate G1.
+  traceability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      # Work packages are taken from the PR title and the "Arbeitspakete:" line
+      # of the PR template. Untrusted text is only read through env variables.
+      - name: Determine work packages of the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          wps=$( { printf '%s\n' "$PR_TITLE"; printf '%s\n' "$PR_BODY" | grep -iE '^[*_ ]*Arbeitspakete?[*_ ]*:' || true; } \
+            | grep -oE 'WP-[0-9]{3}' | sort -u | tr '\n' ' ' || true)
+          echo "Work packages: ${wps:-none}"
+          echo "TRACEABILITY_WPS=${wps}" >> "$GITHUB_ENV"
+
+      - name: Check docs/traceability.csv
+        working-directory: backend
+        run: go test -count=1 -v -run 'TestTraceabilityFile' ./internal/traceability/
+
   lint:
     runs-on: ubuntu-latest
     strategy:
