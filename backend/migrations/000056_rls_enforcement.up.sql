@@ -134,9 +134,36 @@ CREATE TRIGGER trg_audit_log_no_delete BEFORE DELETE ON audit_log
 ALTER TABLE ci ADD CONSTRAINT ci_id_organization_key UNIQUE (id, organization_id);
 ALTER TABLE asset ADD CONSTRAINT asset_id_organization_key UNIQUE (id, organization_id);
 
-DELETE FROM ci_relationship r
-WHERE NOT EXISTS (SELECT 1 FROM ci c WHERE c.id = r.source_ci_id AND c.organization_id = r.organization_id)
-   OR NOT EXISTS (SELECT 1 FROM ci c WHERE c.id = r.target_ci_id AND c.organization_id = r.organization_id);
+-- Rows whose references cross tenants (or dangle) would block the composite
+-- foreign keys below. They are not deleted but moved, unchanged, into
+-- migration_quarantine so an operator can review and repair them (E-26); the
+-- down migration moves them back.
+CREATE TABLE migration_quarantine (
+    id              BIGSERIAL PRIMARY KEY,
+    organization_id UUID NOT NULL,
+    source_table    TEXT NOT NULL,
+    row_data        JSONB NOT NULL,
+    reason          TEXT NOT NULL,
+    migration       TEXT NOT NULL,
+    quarantined_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_migration_quarantine_org ON migration_quarantine (organization_id, source_table);
+ALTER TABLE migration_quarantine ENABLE ROW LEVEL SECURITY;
+ALTER TABLE migration_quarantine FORCE ROW LEVEL SECURITY;
+CREATE POLICY migration_quarantine_isolation ON migration_quarantine
+    USING (organization_id = current_setting('app.org_id')::UUID)
+    WITH CHECK (organization_id = current_setting('app.org_id')::UUID);
+
+WITH moved AS (
+    DELETE FROM ci_relationship r
+    WHERE NOT EXISTS (SELECT 1 FROM ci c WHERE c.id = r.source_ci_id AND c.organization_id = r.organization_id)
+       OR NOT EXISTS (SELECT 1 FROM ci c WHERE c.id = r.target_ci_id AND c.organization_id = r.organization_id)
+    RETURNING r.*
+)
+INSERT INTO migration_quarantine (organization_id, source_table, row_data, reason, migration)
+SELECT moved.organization_id, 'ci_relationship', to_jsonb(moved),
+       'source or target CI missing in the same organization', '000056'
+FROM moved;
 
 ALTER TABLE ci_relationship
     ADD CONSTRAINT ci_relationship_source_tenant_fkey
@@ -145,10 +172,17 @@ ALTER TABLE ci_relationship
     ADD CONSTRAINT ci_relationship_target_tenant_fkey
     FOREIGN KEY (target_ci_id, organization_id) REFERENCES ci (id, organization_id) ON DELETE CASCADE;
 
-DELETE FROM composition k
-WHERE NOT EXISTS (SELECT 1 FROM asset a WHERE a.id = k.parent_asset_id AND a.organization_id = k.organization_id)
-   OR (k.child_ci_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ci c WHERE c.id = k.child_ci_id AND c.organization_id = k.organization_id))
-   OR (k.child_asset_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM asset a WHERE a.id = k.child_asset_id AND a.organization_id = k.organization_id));
+WITH moved AS (
+    DELETE FROM composition k
+    WHERE NOT EXISTS (SELECT 1 FROM asset a WHERE a.id = k.parent_asset_id AND a.organization_id = k.organization_id)
+       OR (k.child_ci_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ci c WHERE c.id = k.child_ci_id AND c.organization_id = k.organization_id))
+       OR (k.child_asset_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM asset a WHERE a.id = k.child_asset_id AND a.organization_id = k.organization_id))
+    RETURNING k.*
+)
+INSERT INTO migration_quarantine (organization_id, source_table, row_data, reason, migration)
+SELECT moved.organization_id, 'composition', to_jsonb(moved),
+       'parent or child missing in the same organization', '000056'
+FROM moved;
 
 ALTER TABLE composition
     ADD CONSTRAINT composition_parent_tenant_fkey

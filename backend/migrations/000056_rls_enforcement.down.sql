@@ -9,6 +9,18 @@ ALTER TABLE ci_relationship DROP CONSTRAINT IF EXISTS ci_relationship_source_ten
 ALTER TABLE asset DROP CONSTRAINT IF EXISTS asset_id_organization_key;
 ALTER TABLE ci DROP CONSTRAINT IF EXISTS ci_id_organization_key;
 
+-- Move the quarantined rows back unchanged; without the composite foreign keys
+-- they are accepted again, so the down migration loses no data.
+INSERT INTO ci_relationship
+SELECT (jsonb_populate_record(NULL::ci_relationship, q.row_data)).*
+FROM migration_quarantine q
+WHERE q.source_table = 'ci_relationship' AND q.migration = '000056';
+INSERT INTO composition
+SELECT (jsonb_populate_record(NULL::composition, q.row_data)).*
+FROM migration_quarantine q
+WHERE q.source_table = 'composition' AND q.migration = '000056';
+DROP TABLE IF EXISTS migration_quarantine;
+
 DROP TRIGGER IF EXISTS trg_audit_log_no_update ON audit_log;
 DROP TRIGGER IF EXISTS trg_audit_log_no_delete ON audit_log;
 DROP FUNCTION IF EXISTS reject_audit_log_mutation();
