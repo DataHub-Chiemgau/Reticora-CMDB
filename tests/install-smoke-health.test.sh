@@ -104,6 +104,18 @@ reset
 STUB_PS=""
 expect "empty container list fails" fail
 
+reset
+STUB_PS="$(row postgres running healthy)
+$(row server running healthy)"
+expect "certbot is not expected without RETICORA_TLS_DOMAIN" pass
+
+reset
+STUB_PS="$(row postgres running healthy)
+$(row server running healthy)"
+echo "RETICORA_TLS_DOMAIN=cmdb.example.com" > "$TMP_ROOT/compose/.env"
+expect "certbot is expected with RETICORA_TLS_DOMAIN" fail
+: > "$TMP_ROOT/compose/.env"
+
 echo
 echo "passed: $PASS, failed: $FAIL"
 [ "$FAIL" -eq 0 ]

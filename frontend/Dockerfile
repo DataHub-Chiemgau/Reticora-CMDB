@@ -25,7 +25,9 @@ COPY keycloak-proxy.conf /etc/nginx/reticora-keycloak-proxy.conf
 # directory written via the compile-time default paths — must be writable.
 # The stock default.conf server on port 80 is replaced by our own server
 # block in nginx.conf.
-RUN rm -f /etc/nginx/conf.d/default.conf \
+# apk upgrade pulls security fixes released after the base image (SEC-11).
+RUN apk --no-cache upgrade \
+    && rm -f /etc/nginx/conf.d/default.conf \
     && chown -R nginx:nginx /etc/nginx/conf.d /var/log/nginx
 # The image entrypoint renders every mounted template unconditionally; this
 # hook drops the rendered TLS server block again when no domain is set.

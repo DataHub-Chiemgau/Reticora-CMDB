@@ -10,7 +10,9 @@
 #   - a container with a health check is not "healthy".
 # The expected services are the ones `docker compose config --services`
 # reports for the active profiles, so a service added to the stack is checked
-# without changing this script.
+# without changing this script. The certbot renewal service is only started
+# by install-cloud.sh when RETICORA_TLS_DOMAIN is set; without a domain it is
+# not expected.
 #
 # Usage: tests/install-smoke-health.sh <compose-dir> [env-file]
 #   DOCKER                  docker binary (default: docker; tests use a stub)
@@ -38,6 +40,10 @@ if ! services=$("${compose[@]}" config --services 2>&1); then
     exit 1
 fi
 services=$(printf '%s\n' "$services" | sed '/^[[:space:]]*$/d' | sort -u)
+tls_domain=$(sed -n 's/^RETICORA_TLS_DOMAIN=//p' "$env_file" 2>/dev/null | tail -n 1 | tr -d "\"' ")
+if [ -z "$tls_domain" ]; then
+    services=$(printf '%s\n' "$services" | grep -vx certbot || true)
+fi
 if [ -z "$services" ]; then
     echo "FAIL: docker compose config lists no services"
     exit 1
