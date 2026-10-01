@@ -8,9 +8,11 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 - **vorläufig entschieden (4):** Die Empfehlung legt eine Übergangsregel bis zum Eingang eines fehlenden Textes fest; diese gilt jetzt.
 - **offen (10):** Die Empfehlung verlangt eine Lieferung oder Bestätigung durch Dritte. Die Übergangsregel aus der Empfehlung gilt; die Lieferung steht als Aufgabe im Abschnitt [Offene Aufgaben](#offene-aufgaben).
 
+**Nachtrag vom 2026-10-01 (Lieferung A-01):** Die Katalogteile 02, 04, 05 und 06 liegen in `docs/spec/katalog-v3/` vor. Damit sind [E-01](#e-01) und [E-23](#e-23) entschieden; [E-32](#e-32) bleibt offen, weil die gelieferte REC-03-Rangtabelle IPMI nicht nennt. Stand jetzt: 24 entschieden, 4 vorläufig entschieden, 8 offen.
+
 | Nr. | Thema | Status | Sperrt / betrifft | WPs mit Verweis |
 |---|---|---|---|---:|
-| [E-01](#e-01) | Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 | offen | Blockiert alle WPs mit diesem Verweis (Start ab M0.1). | 130 |
+| [E-01](#e-01) | Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 | entschieden | Keine Sperre mehr; WPs mit Verweis prüfen ihre Kriterien gegen den Text. | 130 |
 | [E-02](#e-02) | Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) | offen | Teilumfänge von c-ui-*, WP-152 (`d-protocols`), WP-212 (`g1-abnahme`), WP-231 (`m-workflow`), WP-232 (`m-iga`), WP-237 (`m-ui-mods`), WP-219 (`m-relay`). | 9 |
 | [E-03](#e-03) | Umgang mit vorhandenem Code späterer Phasen im G1-Release | entschieden | Steuert den gesamten Meilenstein M-S und den G1-Umfang. | 37 |
 | [E-04](#e-04) | Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells | offen | Keiner für M0; Namensschema für WP-142 (`b-met-ddl`). | 3 |
@@ -32,7 +34,7 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 | [E-20](#e-20) | CH29 (V): Hostname-Treffer nur als Review | entschieden | WP-086 (`identity`). | 1 |
 | [E-21](#e-21) | CH30 (V)/DIS-02: Geräteprofilliste | entschieden | WP-151 (`d-classify`). | 1 |
 | [E-22](#e-22) | CH21 (V): Ausgestaltung `unlicensed_ci` | entschieden | WP-073 (`ent-unlic`). | 1 |
-| [E-23](#e-23) | Abgrenzung GLO-13 (reservierte Namensräume) zu CI-10 (Speichermodell) | offen | WP-091 (`glo13-ns`). | 1 |
+| [E-23](#e-23) | Abgrenzung GLO-13 (reservierte Namensräume) zu CI-10 (Speichermodell) | entschieden | WP-091 (`glo13-ns`). | 1 |
 | [E-24](#e-24) | NET-08: Eindeutigkeit bei VLAN ohne Site | entschieden | WP-081 (`vlan`). | 1 |
 | [E-25](#e-25) | API-05/JOB: verbindliche Pfade, Revert, Snapshot | entschieden | WP-053 (`loc-api`), WP-168 (`c-paths`), WP-181 (`c-bulk`), WP-182 (`c-jobs-api`), WP-183 (`c-jobs-adopt`). | 6 |
 | [E-26](#e-26) | Änderung der bereits ausgelieferten Migration 000056 | entschieden | WP-052 (`mig56`). | 1 |
@@ -51,11 +53,13 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
 
-**Status:** offen (2026-10-01)
+**Status:** entschieden (2026-10-01, Lieferung A-01)
 
-**Festlegung:** Keine Festlegung möglich: Die Texte kann nur der Auftraggeber liefern. Die Übergangsregel aus der Empfehlung gilt ab sofort: Nur M0.0-WPs ohne Verweis auf E-01 starten (WP-001, WP-002, WP-003, WP-005, WP-006, WP-007). WP-004 und alle WPs ab M0.1 warten auf die Texte.
+**Festlegung:** Option 1. Die Texte liegen vor: `02-mandanten-auth-entitlements.md`, `04-ci-netz-rack-beziehungen-impact.md`, `05-collector-discovery-reconciliation.md` und `06-audit-sicherheit-events.md` in `docs/spec/katalog-v3/`. Die Spalte „Anforderungstext“ der WP-Tabellen verweist auf die jeweilige Zeile. WP-004 und die WPs ab M0.1 sind freigegeben, soweit ihre übrigen Entscheidungen es zulassen. Jedes WP mit Verweis auf E-01 prüft seine Akzeptanzkriterien vor Beginn gegen den Text; Abweichungen werden im WP-PR korrigiert. Das bereits gemergte WP-007 wird gegen TEN-03, TEN-05 und TEN-09 nachgeprüft.
 
-**Aufgabe:** Katalogteile 02, 04, 05 und 06 in `docs/spec/katalog-v3/` nachliefern. Zuständig: Auftraggeber/Product Owner. Termin: vor Beginn von M0.1 (WP-008).
+Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40–44 (Teil 03, Aufgabe A-03) sowie die v2-Originaltexte (Aufgabe A-02, u. a. IGA-02/03, AUT-05/06, NET-04, DIS-04 „wie v2“).
+
+**Aufgabe:** erledigt (A-01).
 
 **Frage:** Für die IDs der Bereiche Mandanten/Auth/Entitlements (TEN, AUT, RBA, ENT, TLC), CI/Netz/Rack/Beziehungen/Impact (CI, NET, RCK, REL, IMP, LCY), Collector/Discovery/Reconciliation (COL, DIS, REC, OVR, TOP) sowie Audit/Sicherheit/Events (AUD, SEC, EVT) liegen in `docs/spec/katalog-v3/` keine Anforderungstexte vor. Die WPs stützen sich daher nur auf Befundtexte und Teilberichte des Audits.
 
@@ -612,11 +616,11 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Abgrenzung GLO-13 (reservierte Namensräume) zu CI-10 (Speichermodell)
 
-**Status:** offen (2026-10-01)
+**Status:** entschieden (2026-10-01, durch den Text aus E-01)
 
-**Festlegung:** Laut Empfehlung ist der Text nachzuliefern (E-01); eine vorläufige Regel ist nicht vorgesehen.
+**Festlegung:** Option 1; die Abgrenzung ergibt sich aus den Texten. CI-10 (`docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:32`) ist das Speichermodell: `attributes` enthält die fachlichen Schlüssel ohne Präfix und die vier Namensräume `_overrides`, `_observed`, `_provenance` und `_instance` (Instanzattribute nach MET-14 liegen also in `attributes._instance`, nicht auf oberster Ebene). Typisierte Spalten werden unter ihrem Spaltennamen in denselben Namensräumen geführt. GLO-13 (`docs/spec/katalog-v3/00-grundlagen.md:105`) ist die Validierungsregel dazu: Diese vier Namen sind als Attributschlüssel unzulässig (Attributdefinitionen, Instanzattribut-Schlüssel, Schreibpfade auf fachliche Attribute); nur der Reconciliation- und Override-Code schreibt in die Namensräume.
 
-**Aufgabe:** Abgrenzung GLO-13/CI-10 mit den Texten aus E-01 nachliefern. Zuständig: Auftraggeber/Product Owner. Termin: vor WP-091 (`glo13-ns`).
+**Aufgabe:** erledigt (A-06).
 
 **Frage:** Welche Namensräume reserviert sind und wie `_instance` gegenüber `attributes` liegt, ist ohne Text nicht eindeutig.
 
@@ -852,6 +856,8 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Frage:** Die Rangtabelle nennt IPMI nicht eindeutig.
 
+**Nachtrag 2026-10-01:** Der gelieferte Text bestätigt die Lücke. REC-03 (`docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:54`) nennt manual/override 100, import 95, workflow 92, redfish 90, agent 85, snmp 80, api 75, integration 75, wmi 70, ssh/nas 60 und sweep 20, aber keinen Rang für `ipmi`. CI-01 führt `ipmi` dennoch als `discovery_source`, DIS-04 als Protokoll (Best Effort). Die Aufgabe A-09 bleibt offen.
+
 **Optionen:**
 
 1. Rang aus nachgeliefertem Text.
@@ -976,14 +982,14 @@ Diese Aufgaben folgen aus den Empfehlungen. Die betroffenen WPs starten erst, we
 
 | Nr. | Entscheidung | Aufgabe | Zuständig | Termin |
 |---|---|---|---|---|
-| A-01 | [E-01](#e-01) | Katalogteile 02, 04, 05 und 06 in `docs/spec/katalog-v3/` nachliefern | Auftraggeber/Product Owner | vor Beginn von M0.1 (WP-008) |
+| A-01 | [E-01](#e-01) | **erledigt 2026-10-01:** Katalogteile 02, 04, 05 und 06 in `docs/spec/katalog-v3/` nachliefern | Auftraggeber/Product Owner | vor Beginn von M0.1 (WP-008) |
 | A-02 | [E-02](#e-02) | v2-Originaltexte (UI-01–UI-10, ABN-01, DIS-04, IGA, WFL-04, AUT-05/06, NET-04, REP-01) nachliefern | Auftraggeber/Product Owner | vor Epic C (UI) bzw. vor WP-212 (ABN-01) |
 | A-03 | [E-04](#e-04) | Teil 03 in `docs/audit/befunde.csv` und `docs/audit/99-gesamtbericht.md` konsolidieren; Texte DB-01, MET-20, MET-30–34, MET-40–44 mit E-01 anfordern | Audit | vor WP-142 (`b-met-ddl`), spätestens vor G1 |
 | A-04 | [E-15](#e-15) | Option zu CH16/PII-Vault wählen (eigenes WP-Paket oder nur Gerüst und Konzept) | Product Owner/Datenschutz | vor Beginn von Epic B (WP-107) |
 | A-05 | [E-17](#e-17) | Skalierungsziel CH15 bestätigen (1.000–10.000 Objekte, Headroom 50.000) oder anderen Wert festlegen | Product Owner | vor WP-093 (`a-preflight`), spätestens vor WP-203 (`lt-seed`) |
-| A-06 | [E-23](#e-23) | Abgrenzung GLO-13/CI-10 mit den Texten aus E-01 nachliefern | Auftraggeber/Product Owner | vor WP-091 (`glo13-ns`) |
+| A-06 | [E-23](#e-23) | **erledigt 2026-10-01** (durch CI-10/GLO-13): Abgrenzung GLO-13/CI-10 mit den Texten aus E-01 nachliefern | Auftraggeber/Product Owner | vor WP-091 (`glo13-ns`) |
 | A-07 | [E-28](#e-28) | Pentest-Dienstleister beauftragen, Umfang und Termin festlegen | Auftraggeber | parallel zu Epic C, vor WP-210 |
 | A-08 | [E-29](#e-29) | Werkzeug für WAL-Archivierung und Basisbackups wählen (pgBackRest, WAL-G oder Managed-Postgres) | Betrieb | vor WP-100 (`a-backup`) |
-| A-09 | [E-32](#e-32) | REC-03-Rangtabelle (IPMI) mit den Texten aus E-01 nachliefern | Auftraggeber/Product Owner | vor WP-058 (`rec-decide`) |
+| A-09 | [E-32](#e-32) | REC-03-Rang für IPMI festlegen (der am 2026-10-01 gelieferte REC-03-Text nennt IPMI nicht) | Auftraggeber/Product Owner | vor WP-058 (`rec-decide`) |
 | A-10 | [E-33](#e-33) | Captcha-Anbieter, Wegwerf-Domain-Liste und Trial-Werte festlegen | Produkt/Datenschutz | vor WP-111 (`b-signup`) |
 | A-11 | [E-35](#e-35) | Subprozessorenliste liefern | Betreiber | vor WP-105 (`a-reference`) |
