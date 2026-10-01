@@ -24,3 +24,5 @@ MGT-03;[P4];B;backend/internal/tenant/rls/client_policies_integration_test.go;WP
 WFL-01;[P3];B;backend/internal/tenant/rls/client_policies_integration_test.go;WP-023
 TEN-02;[B];B;backend/internal/tenant/rls/global_rows_integration_test.go;WP-024
 TEN-05;[B];B;backend/internal/tenant/rls/global_rows_integration_test.go;WP-024
+TEC-06;[B], [Q] Spike;B;backend/internal/monitoring/timescale_rls_spike_integration_test.go;WP-039
+MON-01;[B];B;backend/internal/monitoring/timescale_rls_spike_integration_test.go;WP-039
