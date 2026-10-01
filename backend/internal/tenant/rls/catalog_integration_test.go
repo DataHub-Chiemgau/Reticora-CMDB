@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,7 +42,9 @@ type catalogTable struct {
 	name                    string
 	rls, force              bool
 	org, client, site, team bool
-	policies                []catalogPolicy
+	// appWrite: reticora_app holds INSERT, UPDATE or DELETE on the table.
+	appWrite bool
+	policies []catalogPolicy
 }
 
 var commands = []string{"SELECT", "INSERT", "UPDATE", "DELETE"}
@@ -135,6 +138,7 @@ func TestKnownGapsList(t *testing.T) {
 		rls.RuleUsing: true, rls.RuleWithCheck: true, rls.RuleOrgPredicate: true,
 		rls.RuleSystemWrite: true, rls.RuleGlobalRows: true, rls.RuleClientScope: true,
 		rls.RuleSiteScope: true, rls.RuleTeamScope: true, rls.RuleOrgColumn: true,
+		rls.RuleReadOnlyCatalog: true,
 	}
 	plan, err := os.ReadFile(planPath)
 	if err != nil {
@@ -208,6 +212,14 @@ func gapsTable() string {
 
 // violations evaluates every catalog rule for one table.
 func violations(tbl *catalogTable) []rls.Rule {
+	if slices.Contains(rls.GlobalCatalogTables, tbl.name) {
+		// Documented exception (E-10): a global catalog without
+		// organization_id must be read-only for the application.
+		if tbl.appWrite {
+			return []rls.Rule{rls.RuleReadOnlyCatalog}
+		}
+		return nil
+	}
 	if !tbl.org && tbl.name != "organization" {
 		return []rls.Rule{rls.RuleOrgColumn}
 	}
@@ -335,19 +347,20 @@ func loadCatalog(ctx context.Context, t *testing.T, pool *pgxpool.Pool) map[stri
 	rows, err := pool.Query(ctx, `
 		SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
 		       bool_or(a.attname = 'organization_id'), bool_or(a.attname = 'client_id'),
-		       bool_or(a.attname = 'site_id'), bool_or(a.attname = 'team_id')
+		       bool_or(a.attname = 'site_id'), bool_or(a.attname = 'team_id'),
+		       has_table_privilege('reticora_app', c.oid, 'INSERT, UPDATE, DELETE')
 		  FROM pg_class c
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
 		  JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
 		 WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
 		   AND c.relname <> 'schema_migrations'
-		 GROUP BY c.relname, c.relrowsecurity, c.relforcerowsecurity`)
+		 GROUP BY c.oid, c.relname, c.relrowsecurity, c.relforcerowsecurity`)
 	if err != nil {
 		t.Fatalf("query tables: %v", err)
 	}
 	for rows.Next() {
 		tbl := &catalogTable{}
-		if scanErr := rows.Scan(&tbl.name, &tbl.rls, &tbl.force, &tbl.org, &tbl.client, &tbl.site, &tbl.team); scanErr != nil {
+		if scanErr := rows.Scan(&tbl.name, &tbl.rls, &tbl.force, &tbl.org, &tbl.client, &tbl.site, &tbl.team, &tbl.appWrite); scanErr != nil {
 			t.Fatalf("scan table: %v", scanErr)
 		}
 		tables[tbl.name] = tbl

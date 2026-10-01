@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000058_client_scope_policies
+Stand: Migration 000059_global_rows_readonly
 
 ## Prüfung
 
@@ -72,7 +72,14 @@ Policies für `PUBLIC` oder `reticora_app`:
 | `client-scope` | Tabellen mit `client_id` verwenden `app.client_scope` in `USING` und `WITH CHECK` |
 | `site-scope` | Tabellen mit `site_id` verwenden `app.site_scope` in `USING` und `WITH CHECK` (CH25) |
 | `team-scope` | Tabellen mit `team_id` verwenden `app.team_scope` in `USING` und `WITH CHECK` (CH25) |
-| `org-column` | jede Tabelle außer `organization` und `schema_migrations` hat `organization_id` |
+| `org-column` | jede Tabelle außer `organization`, `schema_migrations` und den globalen Katalogen hat `organization_id` |
+| `read-only-catalog` | globale Kataloge ohne `organization_id` (`rls.GlobalCatalogTables`) gewähren `reticora_app` kein INSERT/UPDATE/DELETE |
+
+Globale Kataloge ohne Org-Spalte sind nach E-10 eine dokumentierte Ausnahme,
+keine Lücke: Sie werden nur durch Migrationen gepflegt und sind für die
+App-Rolle schreibgeschützt. Heute ist das nur `permission` (WP-024). Globale
+Katalogzeilen in Tabellen mit Org-Spalte (`organization_id IS NULL`, z. B.
+System-CI-Typen) sind über getrennte Policies je Kommando nur lesbar.
 
 Ein Prädikat gilt als erzwungen, wenn alle permissiven Policies des Kommandos
 oder eine restriktive Policy das GUC verwenden. Die folgende Liste der heute
@@ -92,15 +99,6 @@ TestKnownGapsDocumented ./internal/tenant/rls/` neu.
 | `export_job` | `system-write` | WP-022 |
 | `webhook_dead_letter` | `system-write` | WP-022 |
 | `webhook_delivery` | `system-write` | WP-022 |
-| `ci_type` | `global-rows` | WP-024 |
-| `lifecycle_definition` | `global-rows` | WP-024 |
-| `lifecycle_state` | `global-rows` | WP-024 |
-| `lifecycle_transition` | `global-rows` | WP-024 |
-| `relationship_type` | `global-rows` | WP-024 |
-| `ci_type_attribute` | `org-column` | WP-024 |
-| `permission` | `org-column` | WP-024 |
-| `team_member` | `org-column` | WP-024 |
-| `user_custom_role` | `org-column` | WP-024 |
 | `building` | `site-scope` | WP-027 |
 | `ci` | `site-scope` | WP-027 |
 | `location_node` | `site-scope` | WP-027 |
@@ -140,8 +138,8 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ci_field_value` | ja | ja | ci_field_value_isolation (ALL) |
 | `ci_instance_field_definition` | ja | ja | ci_instance_field_definition_isolation (ALL) |
 | `ci_relationship` | ja | ja | ci_relationship_isolation (ALL) |
-| `ci_type` | ja | ja | ci_type_isolation (ALL) |
-| `ci_type_attribute` | ja | ja | ci_type_attribute_isolation (ALL) |
+| `ci_type` | ja | ja | ci_type_isolation_delete (DELETE), ci_type_isolation_insert (INSERT), ci_type_isolation_select (SELECT), ci_type_isolation_update (UPDATE) |
+| `ci_type_attribute` | ja | ja | ci_type_attribute_isolation_delete (DELETE), ci_type_attribute_isolation_insert (INSERT), ci_type_attribute_isolation_select (SELECT), ci_type_attribute_isolation_update (UPDATE) |
 | `client` | ja | ja | client_isolation (ALL) |
 | `collector` | ja | ja | collector_isolation (ALL) |
 | `collector_enrollment_code` | ja | ja | collector_enrollment_code_isolation (ALL) |
@@ -177,9 +175,9 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ip_address` | ja | ja | org_isolation (ALL) |
 | `key_assignment` | ja | ja | key_assignment_isolation (ALL) |
 | `key_item` | ja | ja | key_item_isolation (ALL) |
-| `lifecycle_definition` | ja | ja | lifecycle_definition_isolation (ALL) |
-| `lifecycle_state` | ja | ja | lifecycle_state_isolation (ALL) |
-| `lifecycle_transition` | ja | ja | lifecycle_transition_isolation (ALL) |
+| `lifecycle_definition` | ja | ja | lifecycle_definition_isolation_delete (DELETE), lifecycle_definition_isolation_insert (INSERT), lifecycle_definition_isolation_select (SELECT), lifecycle_definition_isolation_update (UPDATE) |
+| `lifecycle_state` | ja | ja | lifecycle_state_isolation_delete (DELETE), lifecycle_state_isolation_insert (INSERT), lifecycle_state_isolation_select (SELECT), lifecycle_state_isolation_update (UPDATE) |
+| `lifecycle_transition` | ja | ja | lifecycle_transition_isolation_delete (DELETE), lifecycle_transition_isolation_insert (INSERT), lifecycle_transition_isolation_select (SELECT), lifecycle_transition_isolation_update (UPDATE) |
 | `location_node` | ja | ja | location_node_isolation (ALL) |
 | `maintenance_notification` | ja | ja | maintenance_notification_isolation (ALL) |
 | `maintenance_window` | ja | ja | maintenance_window_isolation (ALL) |
@@ -195,7 +193,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `rack` | ja | ja | rack_isolation (ALL) |
 | `rack_mount` | ja | ja | rack_mount_isolation (ALL) |
 | `relationship_suppression` | ja | ja | suppression_isolation (ALL) |
-| `relationship_type` | ja | ja | relationship_type_isolation (ALL) |
+| `relationship_type` | ja | ja | relationship_type_isolation_delete (DELETE), relationship_type_isolation_insert (INSERT), relationship_type_isolation_select (SELECT), relationship_type_isolation_update (UPDATE) |
 | `reservation` | ja | ja | reservation_isolation (ALL) |
 | `review_item` | ja | ja | review_item_isolation (ALL) |
 | `role` | ja | ja | role_isolation (ALL) |
