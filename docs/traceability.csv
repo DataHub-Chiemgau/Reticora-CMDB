@@ -10,3 +10,5 @@ REP-01;[B];A;backend/internal/database/migrations_roundtrip_integration_test.go;
 TEN-05;[B];A;backend/internal/tenant/rls/catalog_integration_test.go;WP-007
 TEN-03;[B];A;backend/internal/tenant/rls/catalog_integration_test.go;WP-007
 TEN-09;[Q];A;backend/internal/tenant/rls/catalog_integration_test.go;WP-007
+TEN-04;[B];B;backend/internal/database/tenant_scope_test.go;WP-008
+TEN-06;[B];B;backend/internal/database/tenant_scope_test.go;WP-008

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -194,8 +195,28 @@ func TenantMiddleware(next http.Handler) http.Handler {
 			ClientID:       principal.ClientScope,
 			UserID:         principal.Subject,
 		})
+		scope := TenantScopeFor(&principal)
+		ctx = database.ContextWithTenantScope(ctx, &scope)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// TenantScopeFor builds the database scope of a principal for
+// database.WithTenant. A principal without client scope is org-wide; the
+// session carries no site or team scope yet, so both are org-wide until
+// WP-009 derives all scopes authoritatively from the role assignments.
+func TenantScopeFor(p *identity.Principal) database.TenantScope {
+	scope := database.OrgWideScope(p.OrganizationID, p.Subject)
+	if clients := strings.TrimSpace(p.ClientScope); clients != "" {
+		var ids []string
+		for _, id := range strings.Split(clients, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				ids = append(ids, id)
+			}
+		}
+		scope.Clients = database.ScopeIDs(ids...)
+	}
+	return scope
 }
 
 // ClaimsFromContext extracts auth claims from the request context.

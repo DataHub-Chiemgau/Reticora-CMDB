@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -35,6 +37,10 @@ func TestTenantMiddlewareFromJWT(t *testing.T) {
 		if tenantInfo.OrganizationID != "org-jwt" {
 			t.Fatalf("expected org-jwt, got %s", tenantInfo.OrganizationID)
 		}
+		scope, ok := database.TenantScopeFromContext(r.Context())
+		if !ok || scope.OrgID != "org-jwt" || scope.Clients.IsAll() || len(scope.Clients.IDs()) != 1 || scope.Clients.IDs()[0] != "client-1" {
+			t.Fatalf("expected the principal's scope in the context, got %+v (%v)", scope, ok)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
@@ -45,6 +51,42 @@ func TestTenantMiddlewareFromJWT(t *testing.T) {
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", w.Code)
+	}
+}
+
+// TestTenantScopeFor: no client scope means org-wide; a client scope is a
+// restricted list, and a scope without ids grants nothing (E-08).
+func TestTenantScopeFor(t *testing.T) {
+	const org = "aaaa1111-0000-4000-8000-000000000001"
+	const c1, c2 = "aaaa1111-0000-4000-8000-0000000000a1", "aaaa1111-0000-4000-8000-0000000000a2"
+	cases := []struct {
+		name    string
+		clients string
+		all     bool
+		ids     []string
+	}{
+		{"org-wide", "", true, nil},
+		{"one client", c1, false, []string{c1}},
+		{"several clients", c1 + ", " + c2, false, []string{c1, c2}},
+		{"separators only", " , ", false, nil},
+	}
+	for _, tc := range cases {
+		scope := TenantScopeFor(&identity.Principal{OrganizationID: org, Subject: "user-1", ClientScope: tc.clients})
+		if err := scope.Validate(); err != nil {
+			t.Fatalf("%s: scope is not complete: %v", tc.name, err)
+		}
+		if scope.UserID != "user-1" || !scope.Sites.IsAll() || !scope.Teams.IsAll() {
+			t.Fatalf("%s: unexpected scope %+v", tc.name, scope)
+		}
+		got := scope.Clients.IDs()
+		if scope.Clients.IsAll() != tc.all || len(got) != len(tc.ids) {
+			t.Fatalf("%s: clients = %v (all %v), want %v (all %v)", tc.name, got, scope.Clients.IsAll(), tc.ids, tc.all)
+		}
+		for i := range got {
+			if got[i] != tc.ids[i] {
+				t.Fatalf("%s: clients = %v, want %v", tc.name, got, tc.ids)
+			}
+		}
 	}
 }
 
