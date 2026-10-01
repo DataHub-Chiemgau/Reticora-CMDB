@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 )
 
@@ -93,6 +94,11 @@ func (w *JobWorker) ProcessOne(ctx context.Context) bool {
 }
 
 func (w *JobWorker) process(ctx context.Context, job Job) {
+	// The worker runs outside a request, so the CI repository finds no
+	// principal scope in ctx. It keeps reading org-wide as before; WP-035
+	// (export-scope) replaces this with the scope of the job's initiator.
+	scope := database.OrgWideScope(job.OrganizationID, "")
+	ctx = database.ContextWithTenantScope(ctx, &scope)
 	var buf bytes.Buffer
 	rowCount, err := RenderFormat(ctx, w.CIs, job.OrganizationID, job.Format, job.Filters, &buf)
 	if err != nil {

@@ -2,12 +2,13 @@ package relationship
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -40,37 +41,20 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// withTenant executes fn within a transaction that has app.org_id set for RLS.
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-
-	if scope := tenant.ClientScope(ctx); scope != "" {
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.client_scope', $1, true)", scope); err != nil {
-			return fmt.Errorf("set client scope: %w", err)
-		}
-	}
-
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
-}
+// visibleEndpoints restricts relationship rows to edges whose source and
+// target CI are both visible under the transaction's tenant scope: the ci
+// policy filters the subqueries by client scope, while ci_relationship itself
+// carries no client column yet (WP-025). A client-scoped principal therefore
+// neither sees nor changes edges that touch another client's CI.
+const visibleEndpoints = `EXISTS (SELECT 1 FROM ci WHERE ci.id = ci_relationship.source_ci_id)
+	AND EXISTS (SELECT 1 FROM ci WHERE ci.id = ci_relationship.target_ci_id)`
 
 func (r *PGRepository) List(ctx context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
 	items := make([]Relationship, 0)
 	var total int
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		whereParts := []string{"organization_id = $1"}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		whereParts := []string{"organization_id = $1", visibleEndpoints}
 		args := []any{orgID}
 		argPos := 2
 		if ciID != "" {
@@ -115,7 +99,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, ciID string, page
 }
 
 func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
-	return r.withTenant(ctx, rel.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, rel.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if rel.Attributes == nil {
 			rel.Attributes = make(map[string]any)
 		}
@@ -136,7 +120,11 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 				verification_state,
 				source_system,
 				notes
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			)
+			SELECT $1::uuid, $2::uuid, $3::uuid, $4::text, $5::jsonb, $6::text, $7::numeric,
+				$8::timestamptz, $9::timestamptz, $10::text, $11::text, $12::text
+			WHERE EXISTS (SELECT 1 FROM ci WHERE ci.id = $2)
+			  AND EXISTS (SELECT 1 FROM ci WHERE ci.id = $3)
 			RETURNING id::text, created_at, updated_at
 		`
 		var createdAt time.Time
@@ -163,6 +151,9 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 			nilIfEmptyStr(rel.SourceSystem),
 			nilIfEmptyStr(rel.Notes),
 		).Scan(&rel.ID, &createdAt, &updatedAt); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("not found")
+			}
 			return fmt.Errorf("create relationship: %w", err)
 		}
 		rel.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
@@ -175,7 +166,7 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 // The edge endpoints and rel_type are intentionally immutable.
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Relationship, error) {
 	var out *Relationship
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{"updated_at = now()"}
 		args := []any{id, orgID}
 		pos := 3
@@ -207,8 +198,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 
 		row := tx.QueryRow(ctx, fmt.Sprintf(`
 			UPDATE ci_relationship SET %s
-			WHERE id = $1 AND organization_id = $2
-			RETURNING %s`, strings.Join(sets, ", "), relationshipSelectColumns), args...)
+			WHERE id = $1 AND organization_id = $2 AND %s
+			RETURNING %s`, strings.Join(sets, ", "), visibleEndpoints, relationshipSelectColumns), args...)
 		scanned, err := scanRelationship(row)
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -226,8 +217,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 }
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmdTag, err := tx.Exec(ctx, "DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2", id, orgID)
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		cmdTag, err := tx.Exec(ctx, "DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2 AND "+visibleEndpoints, id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete relationship: %w", err)
 		}
@@ -251,7 +242,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error) {
 	items := make([]Relationship, 0)
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			WITH RECURSIVE walk AS (
 				SELECT

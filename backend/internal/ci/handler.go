@@ -77,7 +77,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -169,7 +169,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		if api.WriteDBError(w, err) {
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	if h.dispatcher != nil {
@@ -245,7 +245,7 @@ func (h *Handler) ListChanges(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	changes, total, err := h.svc.ListChanges(r.Context(), t.OrganizationID, id, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 

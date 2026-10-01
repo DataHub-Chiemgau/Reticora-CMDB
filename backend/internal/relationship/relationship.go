@@ -312,7 +312,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	rels, total, err := h.repo.List(r.Context(), t.OrganizationID, ciID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -391,7 +391,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Create(r.Context(), rel); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 

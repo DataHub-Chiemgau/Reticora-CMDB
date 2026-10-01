@@ -114,7 +114,7 @@ func (h *Handler) GetTopology(w http.ResponseWriter, r *http.Request) {
 		graph, err = h.buildFull(r.Context(), t.OrganizationID, filter)
 	}
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, graph)
@@ -136,7 +136,7 @@ func (h *Handler) GetNeighbors(w http.ResponseWriter, r *http.Request) {
 
 	graph, err := h.buildFromRoot(r.Context(), t.OrganizationID, id, 1, "")
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, graph)
@@ -175,7 +175,7 @@ func (h *Handler) GetImpact(w http.ResponseWriter, r *http.Request) {
 
 	graph, err := h.buildFromRoot(r.Context(), t.OrganizationID, id, depth, "")
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
