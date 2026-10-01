@@ -460,3 +460,17 @@ jobs:
             echo "== kustomize build $overlay"
             kustomize build "$overlay" > /dev/null
           done
+
+      # OPS-03 (WP-099): every build injects the mandatory master key from the
+      # reticora-secrets secret into the server container.
+      - name: Assert master key secret reference
+        run: |
+          set -euo pipefail
+          for overlay in deploy/k8s/base deploy/k8s/overlays/staging deploy/k8s/overlays/prod; do
+            ref=$(kustomize build "$overlay" | grep -A6 -- '- name: RETICORA_MASTER_KEY' || true)
+            if ! grep -q 'name: reticora-secrets' <<<"$ref" || ! grep -q 'key: master-key' <<<"$ref"; then
+              echo "::error::$overlay does not inject RETICORA_MASTER_KEY from secret reticora-secrets/master-key"
+              exit 1
+            fi
+            echo "$overlay: RETICORA_MASTER_KEY <- reticora-secrets/master-key"
+          done

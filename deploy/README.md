@@ -230,6 +230,28 @@ Docker/Compose in `--docker` mode), builds the collector binary from source
 compose project in `/opt/reticora-collector/` — and verifies that the
 collector is running.
 
+## 3. Kubernetes (Kustomize)
+
+`deploy/k8s/` contains the server deployment (`base`) and the `staging` and
+`prod` overlays. The manifests do not create secrets; create them in the target
+namespace before the first rollout:
+
+```bash
+kubectl -n reticora create secret generic reticora-secrets \
+  --from-literal=database-url='postgres://…' \
+  --from-literal=master-key="$(openssl rand -base64 32)"
+kubectl -n reticora create secret generic reticora-session-key \
+  --from-file=private.pem=session-private.pem
+```
+
+`RETICORA_MASTER_KEY` (envelope encryption of credentials, OPS-03) is
+mandatory: the deployment references `reticora-secrets/master-key` without
+`optional`, so a missing key keeps the pod in `CreateContainerConfigError`,
+and the server's start check refuses an empty key. Keep the master key in a
+backup outside the cluster; without it, stored credentials cannot be
+decrypted. CI (`k8s-manifests`) builds base and both overlays and asserts the
+secret reference.
+
 ## Layout
 
 ```
