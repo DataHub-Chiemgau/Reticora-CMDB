@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -76,30 +77,11 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// withTenant executes fn within a transaction that has app.org_id set for RLS.
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
-}
-
 func (r *PGRepository) ListUsers(ctx context.Context, orgID, search string, page api.PaginationParams) ([]User, int, error) {
 	items := make([]User, 0)
 	var total int
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		whereParts := []string{"organization_id = $1"}
 		args := []any{orgID}
 		argPos := 2
@@ -144,7 +126,7 @@ func (r *PGRepository) ListUsers(ctx context.Context, orgID, search string, page
 
 func (r *PGRepository) GetUser(ctx context.Context, orgID, id string) (*User, error) {
 	var item *User
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM app_user WHERE id = $1 AND organization_id = $2", userSelectColumns)
 		var err error
 		item, err = scanUser(tx.QueryRow(ctx, query, id, orgID))
@@ -163,7 +145,7 @@ func (r *PGRepository) GetUser(ctx context.Context, orgID, id string) (*User, er
 }
 
 func (r *PGRepository) CreateUser(ctx context.Context, u *User) error {
-	return r.withTenant(ctx, u.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, u.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		query := `
 			INSERT INTO app_user (
 				organization_id,
@@ -194,7 +176,7 @@ func (r *PGRepository) CreateUser(ctx context.Context, u *User) error {
 
 func (r *PGRepository) UpdateUser(ctx context.Context, orgID, id string, req UpdateUserRequest) (*User, error) {
 	var item *User
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		setClauses := make([]string, 0, 4)
 		args := []any{id, orgID}
 		argPos := 3
@@ -247,7 +229,7 @@ func (r *PGRepository) UpdateUser(ctx context.Context, orgID, id string, req Upd
 }
 
 func (r *PGRepository) DeleteUser(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM app_user WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete user: %w", err)
@@ -265,7 +247,7 @@ func (r *PGRepository) DeleteUser(ctx context.Context, orgID, id string) error {
 // no longer identifies a person.
 func (r *PGRepository) AnonymizeUser(ctx context.Context, orgID, id string) (*User, error) {
 	var item *User
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
 			UPDATE app_user
 			SET email = $3,
@@ -290,7 +272,7 @@ func (r *PGRepository) AnonymizeUser(ctx context.Context, orgID, id string) (*Us
 func (r *PGRepository) ListTeams(ctx context.Context, orgID, search string, page api.PaginationParams) ([]Team, int, error) {
 	items := make([]Team, 0)
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		whereParts := []string{"organization_id = $1"}
 		args := []any{orgID}
 		argPos := 2
@@ -333,7 +315,7 @@ func (r *PGRepository) ListTeams(ctx context.Context, orgID, search string, page
 
 func (r *PGRepository) GetTeam(ctx context.Context, orgID, id string) (*Team, error) {
 	var item *Team
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM team WHERE id = $1 AND organization_id = $2", teamSelectColumns)
 		var err error
 		item, err = scanTeam(tx.QueryRow(ctx, query, id, orgID))
@@ -352,7 +334,7 @@ func (r *PGRepository) GetTeam(ctx context.Context, orgID, id string) (*Team, er
 }
 
 func (r *PGRepository) CreateTeam(ctx context.Context, t *Team) error {
-	return r.withTenant(ctx, t.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, t.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		query := `
 			INSERT INTO team (
 				organization_id,
@@ -376,7 +358,7 @@ func (r *PGRepository) CreateTeam(ctx context.Context, t *Team) error {
 
 func (r *PGRepository) UpdateTeam(ctx context.Context, orgID, id string, req UpdateTeamRequest) (*Team, error) {
 	var item *Team
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		setClauses := make([]string, 0, 4)
 		args := []any{id, orgID}
 		argPos := 3
@@ -425,7 +407,7 @@ func (r *PGRepository) UpdateTeam(ctx context.Context, orgID, id string, req Upd
 }
 
 func (r *PGRepository) DeleteTeam(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM team WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete team: %w", err)
@@ -438,7 +420,7 @@ func (r *PGRepository) DeleteTeam(ctx context.Context, orgID, id string) error {
 }
 
 func (r *PGRepository) AddTeamMember(ctx context.Context, orgID string, m *TeamMember) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM team WHERE id = $1 AND organization_id = $2)", m.TeamID, orgID).Scan(&exists); err != nil {
 			return fmt.Errorf("check team for member: %w", err)
@@ -466,7 +448,7 @@ func (r *PGRepository) AddTeamMember(ctx context.Context, orgID string, m *TeamM
 }
 
 func (r *PGRepository) RemoveTeamMember(ctx context.Context, orgID, teamID, userID string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM team WHERE id = $1 AND organization_id = $2)", teamID, orgID).Scan(&exists); err != nil {
 			return fmt.Errorf("check team for member removal: %w", err)
@@ -487,7 +469,7 @@ func (r *PGRepository) RemoveTeamMember(ctx context.Context, orgID, teamID, user
 
 func (r *PGRepository) ListTeamMembers(ctx context.Context, orgID, teamID string) ([]TeamMember, error) {
 	items := make([]TeamMember, 0)
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM team WHERE id = $1 AND organization_id = $2)", teamID, orgID).Scan(&exists); err != nil {
 			return fmt.Errorf("check team for members: %w", err)
@@ -519,7 +501,7 @@ func (r *PGRepository) ListTeamMembers(ctx context.Context, orgID, teamID string
 func (r *PGRepository) ListRoles(ctx context.Context, orgID string, page api.PaginationParams) ([]CustomRole, int, error) {
 	items := make([]CustomRole, 0)
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		// Union the seeded standard roles (table `role`) with tenant-defined
 		// custom roles so the API exposes one assignable catalogue.
 		const unionQuery = `
@@ -591,7 +573,7 @@ func scanUnifiedRole(scanner userScanner) (*CustomRole, error) {
 
 func (r *PGRepository) GetRole(ctx context.Context, orgID, id string) (*CustomRole, error) {
 	var item *CustomRole
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM custom_role WHERE id = $1 AND organization_id = $2", customRoleSelectColumns)
 		var err error
 		item, err = scanCustomRole(tx.QueryRow(ctx, query, id, orgID))
@@ -610,7 +592,7 @@ func (r *PGRepository) GetRole(ctx context.Context, orgID, id string) (*CustomRo
 }
 
 func (r *PGRepository) CreateRole(ctx context.Context, role *CustomRole) error {
-	return r.withTenant(ctx, role.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, role.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if role.Permissions == nil {
 			role.Permissions = []string{}
 		}
@@ -639,7 +621,7 @@ func (r *PGRepository) CreateRole(ctx context.Context, role *CustomRole) error {
 
 func (r *PGRepository) UpdateRole(ctx context.Context, orgID, id string, req UpdateRoleRequest) (*CustomRole, error) {
 	var item *CustomRole
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var isSystem bool
 		if err := tx.QueryRow(ctx, "SELECT is_system FROM custom_role WHERE id = $1 AND organization_id = $2", id, orgID).Scan(&isSystem); err != nil {
 			if err == pgx.ErrNoRows {
@@ -700,7 +682,7 @@ func (r *PGRepository) UpdateRole(ctx context.Context, orgID, id string, req Upd
 }
 
 func (r *PGRepository) DeleteRole(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var isSystem bool
 		if err := tx.QueryRow(ctx, "SELECT is_system FROM custom_role WHERE id = $1 AND organization_id = $2", id, orgID).Scan(&isSystem); err != nil {
 			if err == pgx.ErrNoRows {
@@ -728,7 +710,7 @@ func (r *PGRepository) AssignRole(ctx context.Context, orgID string, a *UserRole
 	if a.RoleID != "" {
 		return r.assignStandardRole(ctx, orgID, a)
 	}
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM custom_role WHERE id = $1 AND organization_id = $2)", a.CustomRoleID, orgID).Scan(&exists); err != nil {
 			return fmt.Errorf("check role for assignment: %w", err)
@@ -766,7 +748,7 @@ func (r *PGRepository) AssignRole(ctx context.Context, orgID string, a *UserRole
 // mapping scope_type onto the role_assignment scope columns. The organization
 // scope maps to NULL client/site; client/site scopes validate the reference.
 func (r *PGRepository) assignStandardRole(ctx context.Context, orgID string, a *UserRoleAssignment) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM role WHERE id = $1 AND organization_id = $2)", a.RoleID, orgID).Scan(&exists); err != nil {
 			return fmt.Errorf("check standard role for assignment: %w", err)
@@ -807,7 +789,7 @@ func (r *PGRepository) assignStandardRole(ctx context.Context, orgID string, a *
 
 func (r *PGRepository) ListUserRoles(ctx context.Context, orgID, userID string) ([]UserRoleAssignment, error) {
 	items := make([]UserRoleAssignment, 0)
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		// Union custom-role and standard-role assignments so callers see every
 		// effective role of the user regardless of which backing table holds it.
 		// user_custom_role has no organization_id column; the tenant filter is
@@ -966,6 +948,14 @@ func statusIsActive(status string) bool {
 
 // ─── OIDC first-login provisioning (identity.UserProvisioner) ────────────────
 
+// loginScope is the tenant scope of first-login provisioning. It runs in the
+// login callback before a principal and its scope exist, on behalf of the
+// organization the IdP token names, so it acts org-wide (E-08).
+func loginScope(orgID string) *database.TenantScope {
+	scope := database.OrgWideScope(orgID, "")
+	return &scope
+}
+
 // EnsureUser returns the app_user id for the given OIDC subject, creating the
 // record on first login. The oidc_subject unique constraint makes the
 // read-then-create race safe: on conflict the existing row is returned.
@@ -977,7 +967,7 @@ func (r *PGRepository) EnsureUser(ctx context.Context, orgID, oidcSubject, email
 		displayName = email
 	}
 	var id string
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
 		// On conflict (returning user) refresh profile fields so an email/name
 		// change in the IdP propagates; the subject itself never changes.
 		return tx.QueryRow(ctx, `
@@ -1001,7 +991,7 @@ func (r *PGRepository) EnsureUser(ctx context.Context, orgID, oidcSubject, email
 // standard role yet, so first login lands on a sensible least-privilege
 // baseline instead of an empty permission set.
 func (r *PGRepository) EnsureRole(ctx context.Context, orgID, userID, roleName string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
 		var existing int
 		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM role_assignment WHERE organization_id = $1 AND user_id = $2`, orgID, userID).Scan(&existing); err != nil {
 			return fmt.Errorf("check role assignments: %w", err)

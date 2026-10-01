@@ -49,7 +49,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Finding]{
@@ -109,7 +109,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Status:           "open",
 	}
 	if err := h.repo.Create(r.Context(), f); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, f)
@@ -148,7 +148,7 @@ func (h *Handler) Summary(w http.ResponseWriter, r *http.Request) {
 	}
 	summary, err := h.repo.Summary(r.Context(), t.OrganizationID)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	total := 0

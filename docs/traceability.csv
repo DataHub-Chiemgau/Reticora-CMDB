@@ -59,3 +59,9 @@ TEN-06;[B];B;backend/internal/history/history_scope_integration_test.go;WP-011
 TEN-06;[B];B;backend/internal/contact/contact_scope_integration_test.go;WP-011
 TEN-06;[B];B;backend/internal/credential/credential_scope_integration_test.go;WP-011
 TEN-06;[B];B;backend/internal/privacy/privacy_scope_integration_test.go;WP-011
+TEN-06;[B];B;backend/internal/user/user_scope_integration_test.go;WP-012
+TEN-06;[B];B;backend/internal/permission/permission_scope_integration_test.go;WP-012
+TEN-06;[B];B;backend/internal/entitlement/entitlement_scope_integration_test.go;WP-012
+TEN-06;[B];B;backend/internal/security/security_scope_integration_test.go;WP-012
+TEN-06;[B];B;backend/internal/identity/apikey_scope_integration_test.go;WP-012
+AUT-04;[B];B;backend/internal/identity/apikey_scope_integration_test.go;WP-012

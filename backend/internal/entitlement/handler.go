@@ -36,7 +36,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	items, err := h.service.List(r.Context(), t.OrganizationID)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -92,7 +92,7 @@ func (h *Handler) Grant(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt:      req.ExpiresAt,
 	})
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -115,7 +115,7 @@ func (h *Handler) Check(w http.ResponseWriter, r *http.Request) {
 
 	ent, enabled, err := h.service.Check(r.Context(), t.OrganizationID, feature)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 

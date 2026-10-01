@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -20,6 +21,11 @@ func NewPGAPIKeyStore(pool *pgxpool.Pool) *PGAPIKeyStore {
 }
 
 // LookupByPrefix returns stored key metadata for a given public ID prefix.
+//
+// The lookup identifies the key's organization, so it cannot run in a tenant
+// transaction. Under FORCE RLS the application role cannot read api_key
+// without app.org_id; the identification path without tenant context is part
+// of WP-067 (AUT-04).
 func (s *PGAPIKeyStore) LookupByPrefix(ctx context.Context, prefix string) (*StoredAPIKey, error) {
 	query := `
 		SELECT id, organization_id, name, key_hash, key_prefix, permissions,
@@ -64,7 +70,8 @@ func (s *PGAPIKeyStore) LookupByPrefix(ctx context.Context, prefix string) (*Sto
 	return &key, nil
 }
 
-// Save persists a new API key record.
+// Save persists a new API key record in the creating principal's tenant
+// transaction.
 func (s *PGAPIKeyStore) Save(ctx context.Context, key StoredAPIKey) error {
 	permissions := make([]string, len(key.Permissions))
 	for i, p := range key.Permissions {
@@ -75,30 +82,31 @@ func (s *PGAPIKeyStore) Save(ctx context.Context, key StoredAPIKey) error {
 		INSERT INTO api_key (organization_id, name, key_hash, key_prefix, permissions, created_by, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
-	_, err := s.pool.Exec(ctx, query,
-		key.OrganizationID,
-		key.Name,
-		key.KeyHash,
-		key.KeyPrefix,
-		permissions,
-		key.CreatedBy,
-		key.ExpiresAt,
-	)
-	if err != nil {
-		return fmt.Errorf("insert api_key: %w", err)
-	}
-
-	return nil
+	return database.WithRequestTenant(ctx, s.pool, key.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, query,
+			key.OrganizationID,
+			key.Name,
+			key.KeyHash,
+			key.KeyPrefix,
+			permissions,
+			key.CreatedBy,
+			key.ExpiresAt,
+		); err != nil {
+			return fmt.Errorf("insert api_key: %w", err)
+		}
+		return nil
+	})
 }
 
-// MarkUsed updates the last_used_at timestamp.
-func (s *PGAPIKeyStore) MarkUsed(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx,
-		"UPDATE api_key SET last_used_at = now() WHERE id = $1",
-		id,
-	)
-	if err != nil {
-		return fmt.Errorf("update api_key last_used: %w", err)
-	}
-	return nil
+// MarkUsed updates the last_used_at timestamp. It runs while the key is being
+// validated, before a principal exists, on behalf of the key's organization,
+// so it uses an org-wide scope (E-08).
+func (s *PGAPIKeyStore) MarkUsed(ctx context.Context, orgID, id string) error {
+	scope := database.OrgWideScope(orgID, "")
+	return database.WithTenant(ctx, s.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "UPDATE api_key SET last_used_at = now() WHERE id = $1", id); err != nil {
+			return fmt.Errorf("update api_key last_used: %w", err)
+		}
+		return nil
+	})
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -23,20 +24,11 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(context.Context, pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
+// visibleCI restricts findings about a CI to CIs visible under the
+// transaction's tenant scope: the ci policy filters the subquery by client
+// scope, while security_finding carries no client column yet (WP-025).
+// Findings without a CI stay organization-wide.
+const visibleCI = "(security_finding.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = security_finding.ci_id))"
 
 func scanFinding(s pgx.Row) (*Finding, error) {
 	f := &Finding{}
@@ -49,8 +41,8 @@ func scanFinding(s pgx.Row) (*Finding, error) {
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Finding, int, error) {
 	out := []Finding{}
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := []string{"organization_id = $1"}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		where := []string{"organization_id = $1", visibleCI}
 		args := []any{orgID}
 		pos := 2
 		for col, val := range map[string]string{"ci_id": filter.CIID, "kind": filter.Kind, "severity": filter.Severity, "status": filter.Status} {
@@ -83,9 +75,9 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Finding, error) {
 	var f *Finding
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		f, err = scanFinding(tx.QueryRow(ctx, "SELECT "+findingCols+" FROM security_finding WHERE organization_id = $1 AND id = $2", orgID, id))
+		f, err = scanFinding(tx.QueryRow(ctx, "SELECT "+findingCols+" FROM security_finding WHERE organization_id = $1 AND id = $2 AND "+visibleCI, orgID, id))
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("finding not found")
 		}
@@ -95,7 +87,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Finding,
 }
 
 func (r *PGRepository) Create(ctx context.Context, f *Finding) error {
-	return r.withTenant(ctx, f.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, f.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if f.Status == "" {
 			f.Status = "open"
 		}
@@ -104,6 +96,15 @@ func (r *PGRepository) Create(ctx context.Context, f *Finding) error {
 		}
 		if f.DetectedAt.IsZero() {
 			f.DetectedAt = time.Now().UTC()
+		}
+		if f.CIID != "" {
+			var visible bool
+			if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid)", f.CIID).Scan(&visible); err != nil {
+				return fmt.Errorf("check ci visibility: %w", err)
+			}
+			if !visible {
+				return fmt.Errorf("ci not found")
+			}
 		}
 		return tx.QueryRow(ctx, `
 			INSERT INTO security_finding (organization_id, ci_id, kind, severity, title, detail, package_name, installed_version, fixed_version, reference, status, detected_at)
@@ -116,7 +117,7 @@ func (r *PGRepository) Create(ctx context.Context, f *Finding) error {
 
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateFindingRequest) (*Finding, error) {
 	var f *Finding
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{"updated_at = now()"}
 		args := []any{orgID, id}
 		pos := 3
@@ -131,7 +132,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateF
 			}
 		}
 		var err error
-		f, err = scanFinding(tx.QueryRow(ctx, "UPDATE security_finding SET "+strings.Join(sets, ", ")+" WHERE organization_id = $1 AND id = $2 RETURNING "+findingCols, args...))
+		f, err = scanFinding(tx.QueryRow(ctx, "UPDATE security_finding SET "+strings.Join(sets, ", ")+" WHERE organization_id = $1 AND id = $2 AND "+visibleCI+" RETURNING "+findingCols, args...))
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("finding not found")
 		}
@@ -142,8 +143,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateF
 
 func (r *PGRepository) Summary(ctx context.Context, orgID string) (map[string]int, error) {
 	out := map[string]int{}
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, "SELECT severity, COUNT(*) FROM security_finding WHERE organization_id = $1 AND status = 'open' GROUP BY severity", orgID)
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, "SELECT severity, COUNT(*) FROM security_finding WHERE organization_id = $1 AND status = 'open' AND "+visibleCI+" GROUP BY severity", orgID)
 		if err != nil {
 			return err
 		}
