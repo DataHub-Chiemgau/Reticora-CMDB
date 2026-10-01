@@ -241,7 +241,7 @@ func (h *Handler) ListReviewItems(w http.ResponseWriter, r *http.Request) {
 	}
 	items, total, err := h.repo.ListReviewItems(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -300,7 +300,7 @@ func (h *Handler) ResolveReviewItem(w http.ResponseWriter, r *http.Request) {
 				DiscoverySource: &source,
 				LastSeenAt:      &now,
 			}); err != nil {
-				api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+				api.WriteRepoError(w, err)
 				return
 			}
 		}
@@ -330,7 +330,7 @@ func (h *Handler) ResolveReviewItem(w http.ResponseWriter, r *http.Request) {
 				LastSeenAt:      &nowTime,
 			}
 			if err := h.ciRepo.Create(r.Context(), &newItem); err != nil {
-				api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+				api.WriteRepoError(w, err)
 				return
 			}
 			newID = newItem.ID
@@ -351,7 +351,7 @@ func (h *Handler) ResolveReviewItem(w http.ResponseWriter, r *http.Request) {
 
 	resolved, err := h.repo.ResolveReviewItem(r.Context(), t.OrganizationID, id, body)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, resolved)

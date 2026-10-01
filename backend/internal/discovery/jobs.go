@@ -137,7 +137,7 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	}
 	jobs, total, err := h.repo.ListJobs(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -183,7 +183,7 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		Config:         req.Config,
 	}
 	if err := h.repo.CreateJob(r.Context(), job); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, job)

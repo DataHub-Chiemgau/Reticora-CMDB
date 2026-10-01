@@ -18,6 +18,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/wire"
@@ -449,7 +450,7 @@ func (h *Handler) ListCollectors(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	collectors, total, err := h.repo.ListCollectors(r.Context(), t.OrganizationID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -487,7 +488,7 @@ func (h *Handler) RegisterCollector(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.RegisterCollector(r.Context(), &c); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -529,7 +530,7 @@ func (h *Handler) CreateEnrollmentCode(w http.ResponseWriter, r *http.Request) {
 	}
 	code.SetRawCode(raw)
 	if err := h.repo.CreateEnrollmentCode(r.Context(), code); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -577,8 +578,13 @@ func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
 		ClientID:       req.ClientID,
 		Config:         map[string]any{},
 	}
-	if err := h.repo.RegisterCollector(r.Context(), c); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+	// The request is unauthenticated, so there is no principal scope: the
+	// redeemed code authorizes registration for its organization (E-08). The
+	// client/site binding of codes follows with WP-038.
+	scope := database.OrgWideScope(orgID, "")
+	ctx := database.ContextWithTenantScope(r.Context(), &scope)
+	if err := h.repo.RegisterCollector(ctx, c); err != nil {
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -698,7 +704,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			},
 		}
 		if err := h.repo.CreateReviewItem(r.Context(), reviewItem); err != nil {
-			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			api.WriteRepoError(w, err)
 			return
 		}
 		resp.ReviewItems++
@@ -706,7 +712,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 
 	existing, _, err := h.ciRepo.List(r.Context(), t.OrganizationID, ci.FilterParams{}, api.PaginationParams{Limit: 10000, Offset: 0})
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -770,7 +776,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 				LastSeenAt:      &nowTime,
 			}
 			if err := h.ciRepo.Create(r.Context(), &newItem); err != nil {
-				api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+				api.WriteRepoError(w, err)
 				return
 			}
 			existing = append(existing, newItem)
@@ -827,7 +833,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			}
 			updated, err := h.ciRepo.Update(r.Context(), t.OrganizationID, result.MatchedCIID, update)
 			if err != nil {
-				api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+				api.WriteRepoError(w, err)
 				return
 			}
 			// Record provenance for every discovered field, protected or not:
@@ -857,7 +863,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			if len(result.ValueConflicts) > 0 && matched != nil {
 				if reviewItem := reviewItemFromValueConflicts(t.OrganizationID, *matched, item, result); reviewItem != nil {
 					if err := h.repo.CreateReviewItem(r.Context(), reviewItem); err != nil {
-						api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+						api.WriteRepoError(w, err)
 						return
 					}
 					resp.ReviewItems++
@@ -867,7 +873,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			resp.Conflicts++
 			if reviewItem := reviewItemFromConflict(t.OrganizationID, item, result); reviewItem != nil {
 				if err := h.repo.CreateReviewItem(r.Context(), reviewItem); err != nil {
-					api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+					api.WriteRepoError(w, err)
 					return
 				}
 				resp.ReviewItems++

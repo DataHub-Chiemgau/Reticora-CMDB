@@ -65,3 +65,5 @@ TEN-06;[B];B;backend/internal/entitlement/entitlement_scope_integration_test.go;
 TEN-06;[B];B;backend/internal/security/security_scope_integration_test.go;WP-012
 TEN-06;[B];B;backend/internal/identity/apikey_scope_integration_test.go;WP-012
 AUT-04;[B];B;backend/internal/identity/apikey_scope_integration_test.go;WP-012
+TEN-06;[B];B;backend/internal/discovery/discovery_scope_integration_test.go;WP-013
+TEN-06;[B];B;backend/internal/ipam/ipam_scope_integration_test.go;WP-013
