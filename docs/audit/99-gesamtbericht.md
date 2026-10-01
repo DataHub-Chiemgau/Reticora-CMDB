@@ -1,30 +1,29 @@
 ## Fehlende Teilberichte – Gesamtprüfung unvollständig
 
-**Zuerst nachholen:** Teil 03 (Datenmodell/Standorte/Metamodell), Teil 08 (Frontend/Monitoring/NFR/Tests/Gates/Traceability) und Teil 09 (Phase-2+-Module). Die Dateien fehlen im geprüften Checkout; diese Teile müssen erstellt beziehungsweise ihre bereits vorhandenen Ergebnisse bereitgestellt werden:
+**Zuerst nachholen:** Teil 03 (Datenmodell/Standorte/Metamodell), anschließend Teil 08 (Frontend/Monitoring/NFR/Tests/Gates/Traceability). Diese beiden Dateien fehlen im geprüften Checkout; die Teile müssen erstellt beziehungsweise ihre bereits vorhandenen Ergebnisse bereitgestellt werden:
 
 - `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/03-datenmodell-standorte-metamodell.md`
 - `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/08-frontend-monitoring-nfr-tests.md`
-- `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/09-module-phase2plus.md`
 
-Vorhanden und jeweils als VOLLSTÄNDIG bezeichnet: Teile 01, 02, 04, 05, 06, 07. Das bezeichnet dort abgeschlossene Bearbeitung, nicht Konformität oder erfolgreiche Integrationsnachweise. Insbesondere Teil 06 deckt nur seinen ausdrücklich gelieferten Umfang mit gemeinsamen Prüfblöcken und überwiegend unbekannten Tags ab. Fehlende Teile werden weder als PASS noch pauschal als Produkt-FAIL gezählt; ihre unbekannten ID-Mengen werden nicht erfunden.
+Vorhanden und jeweils als VOLLSTÄNDIG bezeichnet: Teile 01, 02, 04, 05, 06, 07, **09**. Das bezeichnet dort abgeschlossene Bearbeitung, nicht Konformität oder erfolgreiche Integrationsnachweise. Der als „08 erneut“ nachgereichte Text ist nach Inhalt und Ausgabepfaden tatsächlich **Teil 09**; seine 46 IDs sind jetzt konsolidiert, ersetzen aber Teil 08 nicht. Insbesondere Teil 06 deckt nur seinen ausdrücklich gelieferten Umfang mit gemeinsamen Prüfblöcken und überwiegend unbekannten Tags ab. Fehlende Teile werden weder als PASS noch pauschal als Produkt-FAIL gezählt; ihre unbekannten ID-Mengen werden nicht erfunden.
 
 ## Management-Zusammenfassung
 
-Stand 2026-10-01; Prüfkopie `d8f35e05f891d7c950f9e19824221a095807493c`.
-**Gesamtabdeckung unvollständig:** Teile 03, 08 und 09 fehlen; sechs vorhandene Teile ergeben **233 eindeutige IDs**.
+Stand 2026-10-01; Produktstand `b7e747a6181cad553e529a2a4d7aa7d1582a7743`, ohne Produktänderung gegenüber der ursprünglichen Konsolidierungsprüfkopie `d8f35e05f891d7c950f9e19824221a095807493c`.
+**Gesamtabdeckung unvollständig:** Teile 03 und 08 fehlen; sieben vorhandene Teile ergeben **279 eindeutige IDs** (bisher 233, neu 46 aus Teil 09).
 **Nachgewiesener Phase-1-Erfüllungsgrad im verfügbaren Korpus: 0/141 [B]-oder-[Q]-IDs = 0 % PASS**; keine Vollkatalogquote und nicht „0 % Produktcode vorhanden“.
-Nach Widerspruchsbereinigung: **30 Critical und 123 High** über alle Phasen, gezählt je ID, nicht je unabhängiger Ursache.
+Nach Widerspruchsbereinigung: **47 Critical und 144 High** über alle Phasen, gezählt je ID, nicht je unabhängiger Ursache; Teil 09 ergänzt 17 Critical, 21 High, drei Medium und fünf OFFEN ohne Defekt-Severity.
 Davon betreffen **25 Critical und 97 High** explizite [B]/[Q]-IDs; spätere/ungeklärte Tags sind getrennt ausgewiesen.
 **G1 nicht freigabefähig:** Isolation, Autorisierung, manuelle Datenhoheit und zuverlässige Verarbeitung haben belegte Lücken; erforderliche Abnahmen fehlen.
 Lasttest, vollständige Isolation, Pentest und Install-Smoke für beide Plattformen sind nicht vollständig nachgewiesen.
-**180 bekannte [B]/[Pn]/[A]-IDs ohne Traceability-Eintrag**: 179 aus Teilberichten plus GLO-10 aus den Grundlagen; weiterer Umfang unbekannt.
+**225 bekannte [B]/[Pn]/[A]-IDs ohne Traceability-Eintrag**: 224 aus Teilberichten plus GLO-10 aus den Grundlagen; zuvor 180, nun 45 zusätzliche nichtoptionale IDs aus Teil 09.
 **34 N/P-IDs**, überwiegend wegen fehlendem v2-Text; CH16-Vaultvorschlag wird nicht als beschlossene G1-Pflicht ausgegeben.
 Priorität: Isolation/RLS → Auth/Authz → Datenmodell/Migrationen → Ingest/Reconciliation → API/Jobs → Frontend; anschließend unabhängige Gate-Nachweise.
-Geändert wurden ausschließlich die beiden angeforderten Konsolidierungsdokumente, keine Produktivdateien, Migrationen oder Tests.
+Die Fortsetzung umfasst ausschließlich vier Dokumente: Teil-09-Katalogtext, Teil-09-Bericht und beide Konsolidierungsdokumente; keine Produktiv-, Migrations-, Test- oder Dependencydateien. Die Testausführung zu Teil 09 wich jedoch vom Offline-/Installationsverbot ab; grüne Folgeläufe sind kein konformer Offline-Nachweis (Stand unten).
 
 ## Datengrundlage und Zählregeln
 
-Erst Zusammenfassung und Stand, anschließend die Ergebnistabellen der vorhandenen Teile gelesen. Quelltexte werden nur zur Klärung berichtsübergreifender Widersprüche erneut geprüft. Historische Testläufe bleiben als solche gekennzeichnet; diese Konsolidierung ist kein neuer Produkt-/Pentest.
+Erst Zusammenfassung und Stand, anschließend die Ergebnistabellen der vorhandenen Teile gelesen. Quelltexte werden nur zur Klärung berichtsübergreifender Widersprüche erneut geprüft. Historische Testläufe bleiben als solche gekennzeichnet; die neuen Teil-09-Läufe sind gesondert eingeordnet und überschreiben keine früheren Testgrenzen. Die Konsolidierung selbst prüft Dokumentstruktur und Zählungen, nicht das Produkt oder einen Pentest.
 
 | Teil | Berichtsstatus | Einzel-IDs / Tabellenblöcke | Quelle |
 |---|---|---|---|
@@ -36,9 +35,9 @@ Erst Zusammenfassung und Stand, anschließend die Ergebnistabellen der vorhanden
 | 06 | VOLLSTÄNDIG nur für eingeschränkten Auftrag | 16 / 12 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/06-audit-sicherheit-events.md:16–33,208–210` |
 | 07 | VOLLSTÄNDIG, Laufzeit-/Teiltextlücken | 39 / 39 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/07-api-suche-jobs-lebenszyklus.md:24–64,269–273` |
 | 08 | FEHLT | nicht bestimmbar | Fehlender Pfad oben |
-| 09 | FEHLT | nicht bestimmbar | Fehlender Pfad oben |
+| 09 | VOLLSTÄNDIG, gemeinsame IGA-Kriterien, v2-/Laufzeitlücken | 46 / 46 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/09-module-phase2plus.md:27–74,164–216` |
 
-Die CSV hat eine Zeile pro **Anforderungs-ID**, nicht pro Ursache oder Prüftabellenblock. Gemeinsam bewertete AUD-01/02, AUD-05/07/09 und EVT-01/02 werden für die angeforderten Einzelzeilen aufgeteilt und als gemeinsame Bewertung gekennzeichnet. `CH16` ist eine Entscheidung und keine zusätzliche Anforderungszeile. Mehrere IDs können dieselbe Ursache betreffen; Critical-/High-Zähler sind deshalb keine Anzahl unabhängiger Schwachstellen.
+Die CSV hat eine Zeile pro **Anforderungs-ID**, nicht pro Ursache oder Prüftabellenblock. Gemeinsam bewertete AUD-01/02, AUD-05/07/09 und EVT-01/02 werden für die angeforderten Einzelzeilen aufgeteilt und als gemeinsame Bewertung gekennzeichnet. **IGA-01–04 [A]** erhalten vier ID-Bewertungen ausschließlich für denselben ausdrücklich gelieferten Gruppenvertrag, keine erfundenen v2-Einzelverträge; Details bleiben N/P. MGT-05/06 teilen den Desk-Scopefehler, AST-01/MGT-11 den Asset-Scopefehler. `CH16` ist eine Entscheidung und keine zusätzliche Anforderungszeile. Mehrere IDs können dieselbe Ursache betreffen; Critical-/High-Zähler und Aufwand sind deshalb keine Anzahl beziehungsweise Summe unabhängiger Schwachstellen.
 
 `abschnitt` bezeichnet den **Auditteil** (01–09), nicht eine aus Präfixen geschätzte Katalogabschnittsnummer. `bericht` verweist absolut auf die Quellzeile; `evidenz` enthält die dort genannten Belege. Nicht bekannte Tags bleiben unbekannt. [B]/[Q]-Quote zählt jede ID mit explizitem [B] oder [Q] genau einmal; gemischte Phasen-/Vorschlagsgruppen werden gesondert erläutert und nicht heimlich als Baseline eingerechnet.
 
@@ -58,7 +57,7 @@ Explizite Tagzugehörigkeit, Mehrfachzugehörigkeit nur einmal gezählt. 136 IDs
 | 06 | — | — | — | — | — | — | Tags unbestätigt |
 | 07 | 0 | 7 | 12 | 8 | 0 | 0 | 27 |
 | 08 | — | — | — | — | — | — | Bericht fehlt |
-| 09 | — | — | — | — | — | — | Bericht fehlt |
+| 09 | 0 | 0 | 0 | 0 | 0 | 0 | 0 (keine [B]/[Q]-ID) |
 | **Bekannte Gesamtmenge** | **0** | **27** | **91** | **20** | **0** | **3** | **141** |
 
 Keine WARN-Kategorie im vorliegenden Bewertungsschema; vorhandene PARTIAL/ABWEICHEND werden nicht nachträglich zu erlaubten SOLL-WARN umgedeutet. Die Phasengeltung unbekannter Tags muss geklärt werden.
@@ -69,24 +68,24 @@ Keine WARN-Kategorie im vorliegenden Bewertungsschema; vorhandene PARTIAL/ABWEIC
 
 | Haupttaggruppe | PASS | Vorhanden, nicht PASS | OFFEN | Summe |
 |---|---:|---:|---:|---:|
-| [P2] | 0 | 15 | 7 | 22 |
-| [P3] | 0 | 2 | 5 | 7 |
-| [P4] | 0 | 3 | 6 | 9 |
-| [P5] | 0 | 1 | 0 | 1 |
-| [A] führend (COL-07, Relay auch P4) | 0 | 1 | 0 | 1 |
+| [P2] | 0 | 34 | 8 | 42 |
+| [P3] | 0 | 7 | 5 | 12 |
+| [P4] | 0 | 13 | 8 | 21 |
+| [P5] | 0 | 2 | 1 | 3 |
+| [A] führend (COL-07, IGA-01–04, AI-01/02; Relay auch P4) | 0 | 7 | 0 | 7 |
 | Mehrphasig P2–P4/[A] (RBA-05, API-06) | 0 | 2 | 0 | 2 |
 | (V), B–P4/[A] (ENT-06; Befund nur zu CH14 verbindlich) | 0 | 1 | 0 | 1 |
-| **Gesamt dieser Gruppen** | **0** | **25** | **18** | **43** |
+| **Gesamt dieser Gruppen** | **0** | **66** | **22** | **88** |
 
-Auch diese Übersicht ist **keine vollständige P2–P5-/GA-Abnahme**, insbesondere ohne Teil 09. Ungetaggte Teil-06-IDs werden nicht als spätere Phase einsortiert. [O] als Haupttag betrifft TEC-16/INS-08 (beide OFFEN); optionale Unteranteile anderer IDs erzeugen keine Extrazeilen.
+Auch diese Übersicht ist **keine vollständige P2–P5-/GA-Abnahme**: Teil 09 ist vollständig bearbeitet, aber benannte Teiltext-/Laufzeitnachweise und Teile 03/08 fehlen. Ungetaggte Teil-06-IDs werden nicht als spätere Phase einsortiert. [O] als Haupttag betrifft TEC-16/INS-08/TKT-03 (alle OFFEN); optionale Unteranteile anderer IDs erzeugen keine Extrazeilen. Gemischte Teilpflichten in INV-02/03, TKT-01 und WFL-04 bleiben im führenden P2-/P3-Haupttag gezählt, nicht zusätzlich in P4/[A].
 
 ### Alle verfügbaren Einzel-IDs nach Korrektur
 
 | PASS | PARTIAL | ABWEICHEND | FAIL | OFFEN | N/P | Summe |
 |---:|---:|---:|---:|---:|---:|---:|
-| 0 | 46 | 112 | 21 | 20 | 34 | **233** |
+| 0 | 51 | 148 | 21 | 25 | 34 | **279** |
 
-Severity: **30 Critical, 123 High, 23 Medium, 3 Low, 54 ohne Defekt-Severity**. Die ursprünglichen 31 Critical/125 High werden nicht unkritisch addiert: SEC-05 sowie AUD-01/02 sind wegen unbestätigter Vaultpflicht normativ korrigiert (K1/K2). Unveränderte technische Risiken und ursprüngliche Ratings bleiben ausdrücklich erhalten. Vollständige Status-/Tagwerte stehen in der CSV.
+Severity: **47 Critical, 144 High, 26 Medium, 3 Low, 59 ohne Defekt-Severity**. Im bisherigen 233-ID-Korpus wurden die ursprünglichen 31 Critical/125 High durch K1/K2 auf 30/123 korrigiert: SEC-05 sowie AUD-01/02 wegen unbestätigter Vaultpflicht. Diese Korrekturen bleiben unverändert; hinzu kommen die 17 Critical/21 High aus Teil 09, nicht vier unabhängige IGA-Ursachen. Unveränderte technische Risiken und ursprüngliche Ratings bleiben ausdrücklich erhalten. Vollständige Status-/Tagwerte stehen in der CSV.
 
 ## Gate-Check G1
 
@@ -95,14 +94,14 @@ Maßstab sind GATE-01/02/03/05 aus dem aktuellen Auftrag; fehlender Teil 08 wird
 | Kriterium | Ergebnis | Begründung / benötigter Nachweis |
 |---|---|---|
 | GATE-01: kein offenes Critical im Gate | nicht erfüllt | Bereits explizite Baselinebefunde zur Isolation, Authentifizierung und manuellen Datenhoheit offen, etwa TEN-04/05, AUT-01/02, CI-04/10, OVR-01/02 und API-04/07. |
-| GATE-02: sämtliche Phasen- und Qualitätsanforderungen PASS | nicht erfüllt | Keine vorhandene [B]/[Q]-ID PASS; N/P ist ebenfalls kein PASS. Drei Berichte fehlen, DOD-/SEQ-/GLO-11-Gesamtabdeckung aus Teil 08 nicht vorhanden. |
+| GATE-02: sämtliche Phasen- und Qualitätsanforderungen PASS | nicht erfüllt | Keine vorhandene [B]/[Q]-ID PASS; N/P ist ebenfalls kein PASS. Zwei Berichte fehlen, DOD-/SEQ-/GLO-11-Gesamtabdeckung aus Teil 08 nicht vorhanden. |
 | GATE-03: Lasttest NFR-10 bestanden | nicht erfüllt (Nachweis fehlt) | Kein vorgelegter Lasttestnachweis, NFR-Bericht 08 fehlt. Lastprofil und CH15-Zielwerte müssen verbindlich bestätigt und messbar geprüft werden. |
 | GATE-03: Pentest ohne offene High/Critical | nicht erfüllt | Vorhandene statische Sicherheitsbefunde nicht behoben; kein freigabefähiger Pentestbericht nachgewiesen. Statisches Audit ist kein Pentest. |
 | GATE-03: Isolationstest TEN-09 vollständig | nicht erfüllt | TEN-09 PARTIAL: keine vollständige Site-/Team-/Schreib-/Kanalabdeckung; vorhandene Integrationstests sind nicht durchgängig ausgeführt. Quelle Teil 02:42. |
 | GATE-03: Install-Smoke auf beiden Plattformen | nicht erfüllt | INS-01 PARTIAL: Workflow nur ubuntu-latest, kein belegter zweiter Zielplattformlauf; Tests mit gemocktem IdP ersetzen Install→Login nicht (INS-04). |
-| GATE-05: [O] beeinflusst kein Gate | erfüllt als Bewertungsregel | TEC-16/INS-08 und optionale Zusatzprotokolle/Textsyntax/Air-Gapped-Teile werden aus der Pflichtquote und allen G1-Blockern ausgeschlossen. Das ist eine Regel der Konsolidierung, kein erfundener Produkt-PASS. |
+| GATE-05: [O] beeinflusst kein Gate | erfüllt als Bewertungsregel | TEC-16/INS-08/TKT-03 und optionale Zusatzprotokolle/Textsyntax/Air-Gapped-Teile werden aus der Pflichtquote und allen G1-Blockern ausgeschlossen. TKT-03/CH17-Tagkonflikt bleibt klärungsbedürftig, kein erfundener Pflichtblocker. Das ist eine Regel der Konsolidierung, kein erfundener Produkt-PASS. |
 
-Ein Gate wird nicht dadurch grün, dass seine Kriterien mangels Bericht unbewertet sind. Die P2–P5-/[A]-Unvollständigkeit löst für sich kein G1-Fehlen aus; bereits implementierte Isolation-/Authfehler müssen für die im Release tatsächlich aktivierten Kanäle dennoch behoben oder nachweislich ausgeschlossen werden. GATE-04 betrifft GA, nicht G1.
+Ein Gate wird nicht dadurch grün, dass seine Kriterien mangels Bericht unbewertet sind. Die P2–P5-/[A]-Unvollständigkeit löst für sich kein G1-Fehlen aus; bereits implementierte Isolation-/Auth-/Datenhoheitsfehler müssen für die im Release tatsächlich aktivierten Kanäle dennoch behoben oder nachweislich ausgeschlossen werden. Teil 09 bestätigt solche aktiven Modul-, Agent-, Workflow-, Blob- und AI-Pfade sowie eine destruktive Migrationsbereinigung (AST-05), nicht zusätzliche G1-FAILs allein wegen fehlender späterer Module. GATE-04 betrifft GA, nicht G1.
 
 ## Invarianten PRI-10
 
@@ -110,15 +109,15 @@ Wortlaut: `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/spec/katalog-v3/00
 
 | Nr. / Invariante | Bewertung | Betreffende Befunde / Abgrenzung |
 |---|---|---|
-| 1. Ein Gerät → ein CI; kein Auto-Merge ohne belastbare Identität | verletzt | REC-02: Hostname-Automatch, unzureichende Serial-/MAC-/Client-/VRF-Qualifikation; CI-13: gelöschte Geräte können neu angelegt werden; REC-11: separater Agentmatcher. Keine Garantie durch bloße Existenz eines Matchers. |
-| 2. Asset/CI getrennt und komponierbar, Asset führend für kaufmännische Daten/Serial/Standort/Lifecycle | verletzt | EXP-01 (DATEV-Teil): DATEV verwendet CI-Serial und freie CI-Kauf-/Standortattribute statt Assetdaten; RCK-03 übernimmt Standort nicht nach DB-05. Gegenbeleg direkt in `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/export/export.go:194–204`. Vollständige Asset-/Kompositionsprüfung mangels Teile 03/09 offen. |
-| 3. Genau ein kanonischer Speicherort; Kopien abgeleitet und read-only | verletzt | CI-10/OVR-01: getrennte Feldwert-/CI-Sicht ohne konsistenten effektiven Wert; EXP-01: kaufmännische CI-Attributkopien. `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/pg_repository.go:330–353` lässt Serial-/Standort-/Attributänderungen zu. Keine pauschale Behauptung, jeder Doppelwert sei bereits ein Verstoß. |
-| 4. Manuell gewinnt; Automation zerstört nie still manuelle Daten | verletzt | CI-04/CI-10, REC-03/05/12, OVR-01/02, API-07: fehlende Autooverrides, manual20 statt100, fail-open Schutzabfrage und direkter Workflow-Schreibpfad. Vorhandene Historie heilt den Verlust des wirksamen manuellen Werts nicht. |
-| 5. Kein stilles Verwerfen; unklare Fälle → Review | verletzt | OPS-06/COL-05: unbestätigte Spooldaten durch Alter-/Größenbereinigung gelöscht; REC-06/08: Eingangskonflikt kann verloren gehen, unvollständiger Reviewprozess. CH21(V) bestätigt allein keine Lizenz-Reviewpflicht; Teil 02:450 bewertet den unlicensed_ci-Prozess jedoch als eigenständige ENT-03-Einzelpflicht, die davon getrennt bestehen bleibt. |
-| 6. Historisierung aller Bewegungen/Änderungen mit observed_at | verletzt | GLO-12, AUD-03, REC-07, RCK-03, REL-09: Server- statt Quellzeit, falsche Granularität, fehlende Änderungsereignisse; JOB-04: State-at verwendet created_at (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/history/pg_repository.go:91–97`). Ein bloßes History-API ist kein Quellzeitnachweis. |
-| 7. Server-/DB-Isolation einschließlich Client/Site/Team | verletzt | TEN-02/04/05/06, RBA-03, IMP-07, TEC-06/12, GQL-04, SRC-01/03/04, EXP-01; bei Dokumenten zusätzlich Cross-Org-Blobpfad laut TEN-06. Org-RLS allein genügt nicht. |
-| 8. Server-seitige Entitlements | verletzt | ENT-02/03/04/05/06/07/08, API-04/06, GQL-04: Ingest-/Export-Aliasse umgehen Gates, tenantseitige Selbstfreigabe, Add-ons implizit im Plan und falsche Ablaufwirkung. CH14/CH21 sind verbindlich, vorgeschlagene Paketwerte nicht. |
-| 9. Erweiterungen ergänzen, ersetzen die Architektur nicht | unklar | Wiederverwendete Ports/Repositories stehen separatem Agentmatcher (REC-11), rohem Workflow-Schreibpfad (OVR-02) und uneinheitlicher Rechteverdrahtung (RBA-05) gegenüber. Diese konkreten Verletzungen sind oben erfasst; ohne Teile 03/09 kein vollständiges Architektururteil über sämtliche Erweiterungen. |
+| 1. Ein Gerät → ein CI; kein Auto-Merge ohne belastbare Identität | verletzt | REC-02: Hostname-Automatch, unzureichende Serial-/MAC-/Client-/VRF-Qualifikation; CI-13: gelöschte Geräte können neu angelegt werden; REC-11/AGT-05: separater Agentmatcher verwendet den ersten Name-/Hostnametreffer statt bestehender CI-Verknüpfung. AST-03 belegt keine vollständige physische Dublettenfreiheit. Keine Garantie durch bloße Existenz eines Matchers. |
+| 2. Asset/CI getrennt und komponierbar, Asset führend für kaufmännische Daten/Serial/Standort/Lifecycle | verletzt | EXP-01 (DATEV-Teil): DATEV verwendet CI-Serial und freie CI-Kauf-/Standortattribute statt Assetdaten; RCK-03 übernimmt Standort nicht nach DB-05. Gegenbeleg direkt in `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/export/export.go:194–204`. Teil 09 ergänzt AST-01/04/05: fehlende kanonische Felder/Kindmodi, CI-Serial weiterhin schreibbar; vollständiger DB-/Standortvertrag aus Teil 03 bleibt offen. |
+| 3. Genau ein kanonischer Speicherort; Kopien abgeleitet und read-only | verletzt | CI-10/OVR-01: getrennte Feldwert-/CI-Sicht ohne konsistenten effektiven Wert; EXP-01: kaufmännische CI-Attributkopien. `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/pg_repository.go:330–353` lässt Serial-/Standort-/Attributänderungen zu. AST-02/07/STK-04 ergänzen parallele schreibbare Assignments und zwei Ledger; INV-01 schreibt Assets direkt statt über Bewegungen. Keine pauschale Behauptung, jeder Doppelwert sei bereits ein Verstoß. |
+| 4. Manuell gewinnt; Automation zerstört nie still manuelle Daten | verletzt | CI-04/CI-10, REC-03/05/12, OVR-01/02, API-07: fehlende Autooverrides, manual20 statt100, fail-open Schutzabfrage und direkter Workflow-Schreibpfad. AGT-05/WFL-02 umgehen die zentrale Provenienz-/Overrideentscheidung; agent70 statt85, kein workflow92. Vorhandene Historie heilt den Verlust des wirksamen manuellen Werts nicht. |
+| 5. Kein stilles Verwerfen; unklare Fälle → Review | verletzt | OPS-06/COL-05: unbestätigte Spooldaten durch Alter-/Größenbereinigung gelöscht; REC-06/08: Eingangskonflikt kann verloren gehen, unvollständiger Reviewprozess. AST-05 belegt direktes Löschen inkonsistenter Composition-Zeilen vor FK-Härtung, ohne Quarantäne; Produktionsbetroffenheit N/P. AGT-03 hat fehlerhafte ACK-/Replaypfade. CH21(V) bestätigt allein keine Lizenz-Reviewpflicht; Teil 02:450 bewertet den unlicensed_ci-Prozess jedoch als eigenständige ENT-03-Einzelpflicht, die davon getrennt bestehen bleibt. |
+| 6. Historisierung aller Bewegungen/Änderungen mit observed_at | verletzt | GLO-12, AUD-03, REC-07, RCK-03, REL-09: Server- statt Quellzeit, falsche Granularität, fehlende Änderungsereignisse; JOB-04: State-at verwendet created_at (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/history/pg_repository.go:91–97`). AST-02/07, STK-04/05, INV-01 und MGT-02 ergänzen nichtatomare/ignorierte Bewegungen und veränderbare Historie. Ein bloßes History-API ist kein Quellzeitnachweis. |
+| 7. Server-/DB-Isolation einschließlich Client/Site/Team | verletzt | TEN-02/04/05/06, RBA-03, IMP-07, TEC-06/12, GQL-04, SRC-01/03/04, EXP-01; zusätzlich AST-01/MGT-11, MGT-02/03/04/05/06/07, TKT-01, AGT-06, WFL-01/02 und AI-01. TEN-06/MGT-01 betreffen denselben zusätzlichen Cross-Org-Blobpfad. ENABLE/FORCE und Org-USING/WITH CHECK sind in den Modulen vorhanden, aber keine vollständigen Bereichs-/Feldrechte; orgweite Konfigurationen werden nicht pauschal clientbezogen verlangt. Keine behauptete Live-Exfiltration. |
+| 8. Server-seitige Entitlements | verletzt | ENT-02/03/04/05/06/07/08, API-04/06, GQL-04: Ingest-/Export-Aliasse umgehen Gates, tenantseitige Selbstfreigabe, Add-ons implizit im Plan und falsche Ablaufwirkung. IGA-01–04 bestätigen denselben gemeinsamen Add-on-Mangel; AI-02 indexiert ohne Org-Opt-in/Entitlement am tatsächlichen Providerpfad. CH14/CH21 sind verbindlich, vorgeschlagene Paketwerte nicht; tatsächlicher Verarbeitungsort/Nichttraining bleibt ohne Betriebs-/Vertragsbelege N/P. |
+| 9. Erweiterungen ergänzen, ersetzen die Architektur nicht | unklar als Gesamturteil | Wiederverwendete Ports/Repositories stehen separatem Agentmatcher (REC-11/AGT-05), rohem Workflow-Schreibpfad (OVR-02/WFL-02) und uneinheitlicher Rechteverdrahtung (RBA-05) gegenüber. Teil 09:168–181 bestätigt erweiterbare Entitlement-Keys, aber fehlende kanonische Assetspalten/Eventsequenzen. Diese konkreten Verletzungen sind oben erfasst; AST-05 belegt einen destruktiven Pfad, nicht unvermeidlichen Datenverlust durch jede spätere Erweiterung. Ohne Teil 03 und weitere Detail-/Laufzeitnachweise kein vollständiges Architektururteil. |
 
 ## Critical- und High-Befunde nach Fundament
 
@@ -134,6 +133,10 @@ Die folgenden Gruppen nennen sämtliche betreffenden Einzel-IDs; Mehrfachursache
 | Isolation/RLS | IMP-07 | Traversierung vor Sichtbarkeitsprüfung; unsichtbare Zwischenknoten | 04:76 |
 | Isolation/RLS | SRC-01, SRC-03, SRC-04 | Org-only Suche/CTEs und fehlendes Entitätsleserecht im strukturierten Suchpfad | 07:39,41–42 |
 | Isolation/RLS | EXP-01 | Scopeverlust im Exportworker; Jobzugriff nur orggebunden | 07:47 |
+| Isolation/RLS | AST-01, MGT-11 | Asset-/Cloud-Assetpfad nur orggesichert; dieselbe Scopeursache, zwei ID-Bewertungen | 09:29,54 |
+| Isolation/RLS | MGT-01 | Frei gesetzter StorageKey kann fremdes Org-Blob referenzieren; Metadatenbesitz genügt nicht | 09:44 |
+| Isolation/RLS | MGT-02, MGT-03, MGT-04, MGT-05, MGT-06, MGT-07, TKT-01 | Objekt-/Personen-/Raum-/Teambezüge ohne geerbte Bereichsrechte; Desk-Scopeursache für zwei IDs | 09:45–50,56 |
+| Isolation/RLS | AGT-06, WFL-01, AI-01 | Enrollment/Formscope und RAG-Quellobjekt-/Feldrechte fehlen trotz Org-RLS | 09:64–65,73 |
 | Auth/Authz | AUT-01, AUT-02, TLC-04 | Login reaktiviert gesperrte Nutzer; Refresh wiederholt alte Rechte ohne wirksamen Widerruf | 02:44–45; 07:52 |
 | Auth/Authz | AUT-09 | Produktiver Demo-Admin und fehlende zwingende Authentifizierungspolicies | 02:52 |
 | Auth/Authz | RBA-02, RBA-03, RBA-04 | Rollen-/Scopeauflösung inkonsistent; falsche Aktionsrechte trotz vollständig gemappter Routen | 02:55–57 |
@@ -141,8 +144,11 @@ Die folgenden Gruppen nennen sämtliche betreffenden Einzel-IDs; Mehrfachursache
 | Auth/Authz | SEC-08 | Ausgehende Webhook-/SCIM-Ziele ohne hinreichende private/Metadaten-/Redirect-Zielprüfung | 06:30 |
 | Auth/Authz | API-04 | Nichtatomare orgweite Idempotenzantwort vor Aktionsrechten; fehlende Rate-Buckets | 07:29 |
 | Auth/Authz | GQL-04 | ci:write statt Resolverleserechten; volle Objekte ohne Feldprojektion | 07:38 |
+| Auth/Authz | AGT-03 | Klartext-Relay/HTTP-Fallback und nicht interoperabler Auth-/Payload-/Replayvertrag; kein behaupteter Auth-Bypass | 09:61 |
+| Datenmodell/Migrationen | AST-05 | Migration 56 löscht inkonsistente Composition-Zeilen vor FK-Härtung ohne Quarantäne; tatsächliche Produktionsbetroffenheit N/P | 09:33,81 |
 | Ingest/Reconciliation | CI-04, CI-10, OVR-01, OVR-02, API-07 | Fehlende Autooverrides/einheitliche effektive Werte, fail-open Schutzprüfung, Workflowumgehung; keine CI-Konkurrenzkontrolle | 04:33,39; 05:66–67; 07:32 |
 | Ingest/Reconciliation | OPS-06, COL-05 | Unbestätigte Spooldaten werden ohne fachliche Verlustmeldung gelöscht | 01:84; 05:38 |
+| Ingest/Reconciliation | AGT-05, WFL-02 | Agent-/Workflow-Schreibpfade umgehen zentrale Identitäts-, Provenienz-, Override- und CI-Serialisierungsregeln | 09:63,66 |
 
 Keine zusätzlich als Critical bewertete reine Frontend-ID liegt vor; Kanal-/Jobbefunde stehen entsprechend ihrer eigentlichen Isolation-/Auth-/Datenhoheitsursache oben.
 
@@ -160,6 +166,8 @@ Keine zusätzlich als Critical bewertete reine Frontend-ID liegt vor; Kanal-/Job
 | Auth/Authz | ENT-07, ENT-08 | Lizenzablauf sperrt falsche Funktionen; Downgrade/Bestands-/Ingestvertrag nicht vollständig | 02:68–69 |
 | Auth/Authz | SEC-07 | Operator-/Break-Glass-/MFA-/separater Auditpfad fehlt | 06:29 |
 | Auth/Authz | INS-02 | Issuer-Erreichbarkeit/-Richtigkeit und Brokerkonfiguration nicht vollständig geprüft | 01:72 |
+| Auth/Authz | IGA-01, IGA-02, IGA-03, IGA-04 | Gemeinsamer expliziter Gruppenvertrag: keine erzwungene zweite Freigabe, implizites Enterprise-Add-on, kein produktiver RunDue; vier Ratings, keine vier unabhängigen Ursachen | 09:69–72 |
+| Auth/Authz | AI-02 | Providerindexierung ohne Org-Opt-in/Add-on-Prüfung und Air-Gap-Abschaltung; tatsächliche EU-Verarbeitung/Nichttraining nicht belegt | 09:74 |
 | Datenmodell/Migrationen | TEC-09, INS-01, INS-03 | Kein vollständiger OS-/Smoke-/TLS-/ACME-Installationsvertrag | 01:60,71,73 |
 | Datenmodell/Migrationen | INS-05 | Socket-Passwortprobe/Keycloak-DB-Abgleich und Konfigurationserhalt problematisch | 01:75 |
 | Datenmodell/Migrationen | TEC-15, SEC-11 | Signatur-/SBOM-Releaseprozess und vollständige Go-/Container-Scans fehlen; npm-Audit existiert | 01:64; 06:32 |
@@ -174,6 +182,9 @@ Keine zusätzlich als Critical bewertete reine Frontend-ID liegt vor; Kanal-/Job
 | Datenmodell/Migrationen | REL-01, REL-02, REL-09 | Typ-/Interface-/Impact-/Constraintvertrag sowie Änderungshistorie unvollständig | 04:61–62,69 |
 | Datenmodell/Migrationen | AUD-03, AUD-04 | Historiengranularität/Feldbenennung und Hash-/Commit-/Outboxvertrag abweichend; genauer Soll-Enumvergleich N/P | 06:23–24 |
 | Datenmodell/Migrationen | AUD-05, AUD-07, AUD-09 | Request-/Correlation-ID und selbst auditierte Retentionjobs fehlen | 06:25 |
+| Datenmodell/Migrationen | AST-02, AST-04, AST-06, AST-07 | Nichtatomare Zuweisung/Reservierung, fehlender kanonischer Asset-/CI-Vertrag und parallele Historien | 09:30,32,34–35 |
+| Datenmodell/Migrationen | STK-02, STK-03, STK-04, INV-01 | Globale statt Binsalden, Überreservierung/falsche Buchungssemantik, veränderbares Ledger und Inventur ohne unveränderlichen Snapshotabschluss | 09:37–39,41 |
+| Datenmodell/Migrationen | AGT-01, AGT-04 | Keine vollständige signierte Zielplattformdistribution oder produktive Heartbeat-/Policy-/Updatekette | 09:59,62 |
 | Ingest/Reconciliation | PRI-07, COL-08 | Verbindlicher Outbound-/TLS-/Hostname-/Portvertrag nicht durchgängig nachgewiesen | 05:32,41 |
 | Ingest/Reconciliation | GLO-12, GLO-13 | Quellzeit/Zukunftsabwehr und Ablehnung reservierter Attributschlüssel fehlen | 05:33; 04:29 |
 | Ingest/Reconciliation | COL-01, COL-04, INS-06 | Collectorstatus/-Zertifikat-/Enrollmentvertrag und UI→CLI→API-Durchstich abweichend | 05:34,37; 01:76 |
@@ -186,6 +197,7 @@ Keine zusätzlich als Critical bewertete reine Frontend-ID liegt vor; Kanal-/Job
 | Ingest/Reconciliation | CI-11, CI-13, LCY-05 | Reklassifikation fehlt; Tombstones/CI-Offlinedetektion werden nicht korrekt behandelt | 04:40,42,47 |
 | Ingest/Reconciliation | TOP-01, TOP-02, REL-03, REL-04 | Confidence-/Suppression-/Wiedersichtungs-/Cleanupregeln abweichend | 05:64–65; 04:63–64 |
 | Ingest/Reconciliation | IMP-09 | Keine vollständige Erzeugung von Versorgungs-/Redundanz-/Outletketten | 04:78 |
+| Ingest/Reconciliation | AGT-02 | Prozessmetriken statt vollständigem Inventar, Software im falschen Speichervertrag; Remote-Actions fehlen | 09:60 |
 | API/Jobs | TEC-13, TEC-14, OPS-05 | Notifier loggt; gemeinsame zuverlässige Worker-/Scheduler-/Fehlersicht fehlt | 01:62–63,83 |
 | API/Jobs | API-05, API-08, API-09 | Ressourcen-/CI-Aktionen, serverseitiger Bulkvertrag und generische Job-API fehlen | 07:30,33–34 |
 | API/Jobs | GQL-01, GQL-02, SEC-10 | Eigenparser/BFF-Vertrag, Resolver/Dataloader und Ausführungsgrenzen unvollständig | 07:35–36; 06:31 |
@@ -194,28 +206,32 @@ Keine zusätzlich als Critical bewertete reine Frontend-ID liegt vor; Kanal-/Job
 | API/Jobs | JOB-01, JOB-02, JOB-03, JOB-04 | Generische persistente Jobs, Recovery, Scheduler, Cancel/Revert und verpflichtende Hintergrundpfade fehlen | 07:61–64 |
 | API/Jobs | EVT-01, EVT-02 | NATS-Helfer ohne vollständige produktive Stream-/Publisherverdrahtung | 06:33 |
 | API/Jobs | IMP-01, IMP-02, IMP-03, IMP-04, IMP-05, IMP-08 | Falsche Ausfallrichtung/Netzheuristik, fehlende Redundanz-/Pfad-/Mehrfachausfallsemantik | 04:70–74,77 |
+| API/Jobs | STK-01, STK-05 | Mindestbestandsfarbe ohne Zustellung; receipt bereits bei Bestellposition statt geprüftem Wareneingang | 09:36,40 |
+| API/Jobs | TKT-02, WFL-04 | Fester UTC-Kalender statt Client-/Orgvertrag; fehlende fachliche Workflowketten und Definitions-ID als Run-ID | 09:57,68 |
 | Frontend | IMP-06 | Typfilter falsch; graphischer Gesamtumfang ohne verlangte 2.000er-Abweisung | 04:75 |
 | Frontend | BLK-01 | Promise.all-Einzelrequests statt serverseitigem Bulkjob und Einzel-ID-Fehlerbericht | 07:45 |
+| Frontend | INV-03 | Dekorative Balken statt scannerfähigem Code, fehlende org-eindeutige Vergabe/Lookup/Kamera/PDF-Vorlagen | 09:43 |
 
 ## Querschnittsmuster
 
 | Muster | Betroffene IDs | Gemeinsamer Befund |
 |---|---|---|
-| Kontext endet an Kanal-/Transaktionsgrenzen | TEN-04/05/06, TEN-09, RBA-03, TEC-06/12, IMP-07, GQL-04, SRC-01/03/04, EXP-01, JOB-01 | **Nicht** pauschal fehlendes WITH CHECK: überwiegend vorhanden, jedoch Org-only; Client nur selektiv, Site/Team fehlen. Backgroundjobs und Suchprojektionen verlieren Aufruferscopes. |
-| Mapping-/Bausteinexistenz mit korrekter Durchsetzung verwechselt | RBA-01/02/04/05/06/08, AUT-04, ENT-02/03/04/05, GQL-04, TLC-04 | Fail-closed bei unbekannter Route verhindert keine falsch zugeordnete bekannte Aktion; Key-/Session-/Objekt-/Feldrechte sind nicht durchgängig dieselbe Autorität. |
-| Manual-/Quellzeitvertrag nicht zentral durchgesetzt | GLO-12/13, CI-04/10/13, REC-01/02/03/05/06/07/08/12, OVR-01/02/03, API-07 | Parallelmodelle, fehlende reservierte Namespaces, Serverzeit, falsche Ränge und fehlende Konfliktreviews; Review-"Merge" ist nicht CI-Merge. |
-| Historie/Audit/Events fehlen am tatsächlichen Schreibpfad | AUD-03/04/05/07/09, RCK-03, REL-09, REC-07, EVT-01/02, API-03 | ci_change, entity_change, Audit, NATS und Webhooks bilden keine geschlossene Ereigniskette; Request-/Correlation-ID und Auftragstransaktion fehlen teils. |
-| Einzelworker statt verlässlichem Job-/Zustellungsvertrag | TEC-13/14, OPS-02/05/06, COL-05, BLK-01, API-08/09, NTF-01/03/04/05, JOB-01/02/03/04 | Crash-Recovery/Single-Runner/Cancel fehlen; Log/Statusflag ist kein Versand. Claim-Sperre ersetzt weder Scheduler-Leader noch persistentes Catch-up. |
-| Datenmodell und konsumierender Vertrag divergieren | TEN-10, NET-01/02/03/05/08/09, CI-01/03, RCK-01/02, REL-01/02, LCY-02/03, SRC-01, EXP-01 | Fehlende VRFs/FKs/Enums, andere Routen-/Fehlercodes, ignorierte Felder und Suchtypen außerhalb DB-CHECK; vorhandene Tabellen reichen nicht. |
-| Tests beweisen Ersatzverhalten statt Soll | TEN-09, RBA-04, CI-01, RCK-01/02, IMP-01/03, DIS-05, REC-03/05, TOP-01, GQL-01/02/04, SRC-01/03/04, EXP-01, TLC-04 | Memory-/SQL-String-/Happy-Path-Tests beziehungsweise Tests falscher Konstanten ersetzen keine echte PostgreSQL-/Kanal-/Negativprüfung (TST-04). Setupblockierte Tests sind weder bestanden noch fachlich fehlgeschlagene Assertions. |
-| UI und i18n nicht durchgängig angebunden | REC-10, DIS-08, IMP-06, SRC-03, VIE-02, BLK-01, NTF-03/04, JOB-03 | Fehlende Builder/Freigaben/Feldbegründungen/Jobcenter, falsche Typfilter und Sammelfehler; NTF-03 belegt fehlende Nachrichten-i18n. Kein pauschales „gesamte Frontend-i18n fehlt“ ohne Teil 08. |
-| Installation/Betrieb nicht als vollständige Kette nachgewiesen | TEC-09/15, INS-01/02/03/04/05/06, OPS-01/03/04, SEC-11, TLC-01 | Plattform-/TLS-/Issuer-/Login-/Enrollment-/Backup-Verträge brechen an Übergängen; Healthcheck oder vorhandener Workflow bedeutet keinen erfolgreich geprüften Releasepfad. |
+| Kontext endet an Kanal-/Transaktionsgrenzen | TEN-04/05/06, TEN-09, RBA-03, TEC-06/12, IMP-07, GQL-04, SRC-01/03/04, EXP-01, JOB-01, AST-01, MGT-01/02/03/04/05/06/07/11, TKT-01, AGT-06, WFL-01/02, AI-01 | **Nicht** pauschal fehlendes WITH CHECK: überwiegend vorhanden, jedoch Org-only; Client nur selektiv, Site/Team fehlen. Backgroundjobs und Such-/RAG-Projektionen verlieren Aufruferscopes; Objekt-FKs oder Metadatenbesitz beweisen keine Bereichs-/Blobrechte. |
+| Mapping-/Bausteinexistenz mit korrekter Durchsetzung verwechselt | RBA-01/02/04/05/06/08, AUT-04, ENT-02/03/04/05, GQL-04, TLC-04, IGA-01/02/03/04, AI-02 | Fail-closed bei unbekannter Route verhindert keine falsch zugeordnete bekannte Aktion; Key-/Session-/Objekt-/Feldrechte sind nicht durchgängig dieselbe Autorität. Gespeicherte Entscheider ersetzen keine zweite Identität; HTTP-Add-on-Gates sichern nicht den Providerindexer. |
+| Manual-/Quellzeitvertrag nicht zentral durchgesetzt | GLO-12/13, CI-04/10/13, REC-01/02/03/05/06/07/08/12, OVR-01/02/03, API-07, AGT-05, WFL-02 | Parallelmodelle, fehlende reservierte Namespaces, Serverzeit, falsche Ränge und fehlende Konfliktreviews; Review-"Merge" ist nicht CI-Merge. Agent/Workflow umgehen dieselbe verbindliche Override-/Provenienzentscheidung. |
+| Historie/Audit/Events fehlen am tatsächlichen Schreibpfad | AUD-03/04/05/07/09, RCK-03, REL-09, REC-07, EVT-01/02, API-03, AST-02/07, STK-04/05, INV-01, MGT-02, WFL-01/02 | ci_change, entity_change, Audit, NATS und Webhooks bilden keine geschlossene Ereigniskette; Request-/Correlation-ID und Auftragstransaktion fehlen teils. Ledger/Assignments konkurrieren, Bewegungsfehler werden ignoriert und mutable Formdefinitionen verändern historischen Kontext. |
+| Einzelworker statt verlässlichem Job-/Zustellungsvertrag | TEC-13/14, OPS-02/05/06, COL-05, BLK-01, API-08/09, NTF-01/03/04/05, JOB-01/02/03/04, AST-06, STK-01, MGT-04, WFL-02/04, IGA-01/02/03/04 | Crash-Recovery/Single-Runner/Cancel fehlen; Log/Statusflag oder Warnfarbe ist kein Versand. Claim-Sperre ersetzt weder Scheduler-Leader noch persistentes Catch-up; RunDue ohne Aufrufer und Definitions-ID statt Run-ID sind keine Workflowausführung. |
+| Datenmodell und konsumierender Vertrag divergieren | TEN-10, NET-01/02/03/05/08/09, CI-01/03, RCK-01/02, REL-01/02, LCY-02/03, SRC-01, EXP-01, AST-01/04/05, STK-02/03, AGT-02, TKT-02 | Fehlende VRFs/FKs/Enums, andere Routen-/Fehlercodes, ignorierte Felder und Suchtypen außerhalb DB-CHECK; vorhandene Tabellen reichen nicht. Asset-/CI-Kanonizität, Binsalden, Softwareinventar und Client-/Org-Kalender sind weitere konkrete Vertragsabweichungen. |
+| Nichtatomare Prüfung und destruktive Korrektur | AST-02/05/06, STK-03/05, INV-01, MGT-05 | Getrennte Transfer-/Bewegungscommits, Überreservierung und SELECT-vor-INSERT-Rennen; Migration 56 löscht inkonsistente Composition ohne Quarantäne. Kein Beleg, dass jede fehlende Vorbereitung zwangsläufig Datenverlustmigration erfordert. |
+| Tests beweisen Ersatzverhalten statt Soll | TEN-09, RBA-04, CI-01, RCK-01/02, IMP-01/03, DIS-05, REC-03/05, TOP-01, GQL-01/02/04, SRC-01/03/04, EXP-01, TLC-04, AST-05/07, STK-04, INV-01, MGT-05, TKT-02, AGT-03, IGA-01/02/03/04, AI-01 | Memory-/SQL-String-/Happy-Path-Tests beziehungsweise Tests falscher Konstanten ersetzen keine echte PostgreSQL-/Kanal-/Negativprüfung (TST-04). Asset-Append-only prüft nicht stock_movement, UTC-Wochenendtest keinen Orgkalender. Setupblockierte Tests sind weder bestanden noch fachlich fehlgeschlagene Assertions; die Teil-09-Nachladeläufe sind kein konformer Offline-Nachweis. |
+| UI und i18n nicht durchgängig angebunden | REC-10, DIS-08, IMP-06, SRC-03, VIE-02, BLK-01, NTF-03/04, JOB-03, INV-03, AGT-04, WFL-03/04 | Fehlende Builder/Freigaben/Feldbegründungen/Jobcenter, falsche Typfilter und Sammelfehler; Barcodegrafik, Policyverwaltung oder Workflowliste beweisen keine reale Scanner-/Agent-/Fachkette. NTF-03 belegt fehlende Nachrichten-i18n. Kein pauschales „gesamte Frontend-i18n fehlt“ ohne Teil 08. |
+| Installation/Betrieb nicht als vollständige Kette nachgewiesen | TEC-09/15, INS-01/02/03/04/05/06, OPS-01/03/04, SEC-11, TLC-01, AGT-01/03/04/06, AI-02 | Plattform-/TLS-/Issuer-/Login-/Enrollment-/Backup-Verträge brechen an Übergängen; Healthcheck, Linux-ELF, konfigurierbarer EU-Provider oder vorhandener Workflow bedeutet keinen erfolgreich geprüften Release-/Betriebspfad. |
 
 ## Traceability
 
 Die verlangte `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/traceability.csv` fehlt. Schon Teil 0 dokumentiert das Fehlen (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/00-bestandsaufnahme.md:210–225`); die Pfadkontrolle wurde wiederholt. Eine Audit-CSV ersetzt weder Epic-/Testdateizuordnung noch CI-Durchsetzung nach GLO-11. Dateizeilen/-inhalt sind mangels Datei nicht prüfbar, nicht als „vorhandene leere CSV“ beschrieben.
 
-**179 von 179 bekannten prüfpflichtig getaggten IDs aus den Teilberichten ohne Eintrag, zuzüglich GLO-10 [B] aus den Grundlagen = mindestens 180 fehlende Zuordnungen.** GLO-10 erhält dadurch keine erfundene Ergebniszeile. Nicht mitgezählt: 30 ungetaggte v2-IDs, PRI-07, die 16 Teil-06-IDs ohne bestätigtes Tag sowie reine [Q]/[O]-IDs. [Q] bleibt gleichwohl Qualitätsmaßstab nach GLO-11/DOD-01; TEC-06 zählt wegen zusätzlichem [B] zur verpflichtenden CI-Menge.
+**224 von 224 bekannten prüfpflichtig getaggten IDs aus den Teilberichten ohne Eintrag, zuzüglich GLO-10 [B] aus den Grundlagen = mindestens 225 fehlende Zuordnungen.** Die bisherige Menge 180 steigt um die 45 nichtoptionalen Teil-09-IDs; **TKT-03 [O] ist ausgeschlossen**. GLO-10 erhält dadurch keine erfundene Ergebniszeile. Nicht mitgezählt: 30 ungetaggte v2-IDs, PRI-07, die 16 Teil-06-IDs ohne bestätigtes Tag sowie reine [Q]/[O]-IDs. [Q] bleibt gleichwohl Qualitätsmaßstab nach GLO-11/DOD-01; TEC-06 zählt wegen zusätzlichem [B] zur verpflichtenden CI-Menge.
 
 Vollständige Liste der bekannten fehlenden Einträge:
 
@@ -226,10 +242,11 @@ Vollständige Liste der bekannten fehlenden Einträge:
 | Teil 04 | 52 | GLO-13, CI-01, CI-02, CI-03, CI-04, CI-05, CI-06, CI-07, CI-08, CI-09, CI-10, CI-11, CI-12, CI-13, LCY-01, LCY-02, LCY-03, LCY-04, LCY-05, LCY-06, NET-01, NET-02, NET-03, NET-04, NET-05, NET-06, NET-07, NET-08, NET-09, RCK-01, RCK-02, RCK-03, REL-01, REL-02, REL-03, REL-04, REL-05, REL-06, REL-07, REL-08, REL-09, IMP-01, IMP-02, IMP-03, IMP-04, IMP-05, IMP-06, IMP-07, IMP-08, IMP-09, IMP-10, IMP-11 |
 | Teil 05 | 35 | GLO-12, COL-01, COL-02, COL-03, COL-04, COL-05, COL-06, COL-07, COL-08, DIS-01, DIS-02, DIS-03, DIS-04, DIS-05, DIS-06, DIS-07, DIS-09, DIS-10, REC-01, REC-02, REC-03, REC-04, REC-05, REC-06, REC-07, REC-08, REC-09, REC-10, REC-11, REC-12, TOP-01, TOP-02, OVR-01, OVR-02, OVR-03 |
 | Teil 07 | 39 | API-01, API-02, API-03, API-04, API-05, API-06, API-07, API-08, API-09, GQL-01, GQL-02, GQL-03, GQL-04, SRC-01, SRC-02, SRC-03, SRC-04, VIE-01, VIE-02, BLK-01, BLK-02, EXP-01, IMP-IO-01, TLC-01, TLC-02, TLC-03, TLC-04, TLC-05, TLC-06, TLC-07, NTF-01, NTF-02, NTF-03, NTF-04, NTF-05, JOB-01, JOB-02, JOB-03, JOB-04 |
+| Teil 09 | 45 | AST-01, AST-02, AST-03, AST-04, AST-05, AST-06, AST-07, STK-01, STK-02, STK-03, STK-04, STK-05, INV-01, INV-02, INV-03, MGT-01, MGT-02, MGT-03, MGT-04, MGT-05, MGT-06, MGT-07, MGT-08, MGT-09, MGT-10, MGT-11, MGT-12, TKT-01, TKT-02, AGT-01, AGT-02, AGT-03, AGT-04, AGT-05, AGT-06, WFL-01, WFL-02, WFL-03, WFL-04, IGA-01, IGA-02, IGA-03, IGA-04, AI-01, AI-02 |
 | Grundlagen, ohne Ergebniszeile | 1 | GLO-10 |
-| **Bekannte Gesamtmenge** | **180** | Keine doppelte ID; zusätzliche IDs aus fehlenden Teilen nicht bestimmbar |
+| **Bekannte Gesamtmenge** | **225** | Keine doppelte ID; zusätzliche IDs aus fehlenden Teilen nicht bestimmbar |
 
-Für Teile 03/08/09 lässt sich keine vollständige Soll-ID-Menge ableiten. Statische Suche nach Traceability-Durchsetzung in `/home/runner/work/Reticora-CMDB/Reticora-CMDB/.github/workflows/` und `/home/runner/work/Reticora-CMDB/Reticora-CMDB/Makefile` findet keine entsprechende Prüfung; die vorhandenen Test-/Parity-Jobs ersetzen sie nicht. GLO-11-Abdeckung ist **nicht erfüllt**. Es wurde kein aktueller Remote-CI-Lauf als grün/rot bewertet.
+Für Teile 03/08 lässt sich keine vollständige Soll-ID-Menge ableiten; Teil 09 ist nun ID-genau berücksichtigt. Statische Suche nach Traceability-Durchsetzung in `/home/runner/work/Reticora-CMDB/Reticora-CMDB/.github/workflows/` und `/home/runner/work/Reticora-CMDB/Reticora-CMDB/Makefile` findet keine entsprechende Prüfung; die vorhandenen Test-/Parity-Jobs ersetzen sie nicht. GLO-11-Abdeckung ist **nicht erfüllt**. Es wurde kein aktueller Remote-CI-Lauf als grün/rot bewertet.
 
 ## N/P und offene Nachweise
 
@@ -249,7 +266,9 @@ Nach Bereinigung **34 vollständige N/P-Zeilen**: 33 Quell-N/P-IDs plus SEC-05 (
 
 **Nicht ganze IDs, sondern weiterhin N/P-Unteranteile:** REP-01/INS-/OPS-Betriebsnachweise (v2-Rest, reale Plattformen, EU-Lokation, Restore); TEN-09 (v2-Rest und vollständige RLS-Laufzeitmatrix); COL-02/DIS-04 (referenzierter Credential-/Protokollrest, physische Geräte); AUD-01/02 (exakte Kontaktrollen), AUD-03 (Soll-Enum), AUD-05/07/09 (Fristen); API-01 (Releasehistorie/Sunset), API-03 (v2-Fehlertabelle); SEC-10/GQL-01 (Originalgrenzen), GQL-04 (vollständiger RBA-07-Feldrechtsvertrag), IMP-IO-01 (referenzierter SEC-09-Dateivertrag). Benötigt werden jeweils Originalanforderungen beziehungsweise echte Integrations-/Releaseartefakte, keine Rekonstruktion aus Mocks oder früheren Auditbehauptungen.
 
-Teile 03/08/09 haben **unbekannte fehlende ID-Mengen**; das sind weder zusätzliche gezählte N/P-Zeilen noch Null-Anforderungen. In Teil 06 fehlen für 15 IDs explizite Tags, SEC-05 hat nur eine Phasenangabe aus CH16(V); auch bei PRI-07 ist kein Tag angegeben. Tags und einzelne AUD-/EVT-Verträge müssen nachgeliefert werden, gemeinsame Quellbewertung ist noch kein Einzeltest.
+**Neue N/P-Unteranteile aus Teil 09, keine zusätzlichen vollständigen N/P-Zeilen:** IGA-01–04 (Original-v2-Einzelverträge jenseits des ausdrücklichen gemeinsamen Gruppenabsatzes), WFL-03 (unbekannte v2-Beispiele), MGT-01 (SEC-09-Detailtext), AST/WFL (nur referenzierte DB-05-/MET-45-Details), MGT-02 (konkrete BSI-/ISO-Norm/Abnahmekriterien), AI-02 (tatsächliche EU-/Self-Hosting-/Nichttraining-Verträge), AGT-01/03/04/06 (Zielplattform-/Enrollment-/Transportabnahme) sowie echte DB-/Scope-/Konkurrenz-/Serviceketten. AST-05 belegt den destruktiven Migrationspfad, nicht tatsächlich gelöschte Produktionsdaten. Keine fehlenden Originalpflichten aus vorhandenen Mocks rekonstruieren.
+
+Teile 03/08 haben **unbekannte fehlende ID-Mengen**; das sind weder zusätzliche gezählte N/P-Zeilen noch Null-Anforderungen. In Teil 06 fehlen für 15 IDs explizite Tags, SEC-05 hat nur eine Phasenangabe aus CH16(V); auch bei PRI-07 ist kein Tag angegeben. Tags und einzelne AUD-/EVT-Verträge müssen nachgeliefert werden, gemeinsame Quellbewertung ist noch kein Einzeltest.
 
 ## Offene Katalogentscheidungen
 
@@ -260,7 +279,8 @@ Grundlage ist der Entscheidungswortlaut unter `/home/runner/work/Reticora-CMDB/R
 | CH15 (S mit ausdrücklichem Bestätigungsvorbehalt) | „1000-1000“ → 1.000–10.000/50.000-Headroom bestätigen; NFR-01/10 aus fehlendem Teil 08 mit prüfbarem Lastprofil vorlegen. Kein bestandener Lasttest aus angenommenen Zahlen. |
 | CH30 / DIS-02 (V) | Verbindliche Top-20-Familien/Varianten und Abnahmedatensätze; Teil 05 nennt 23 Gruppen im Vorschlag. Die fehlende Klassifikationskette bleibt unabhängig davon ABWEICHEND. |
 | ENT-06 (V) | Pakete, Limits, Trialwerte und Phasenmatrix bestätigen. **CH14-Add-on-Trennung ist bereits verbindlich**: ENT-06/API-06 bleiben deswegen High, nicht wegen nicht umgesetzter Vorschlagszahlen. |
-| CH16 (V) | Vault-/Surrogatmodell, Phase-1-Umfang, Crypto-Shredding und Erhalt der Hashkette bestätigen; SEC-05 sowie AUD-01/02 benötigen Originalvertrag. Bereits persistierte Klartextattribute sind eine verifizierte Tatsache, aber der spezifische Architekturvorschlag ist nicht dadurch beschlossen. |
+| CH16 (V) | Vault-/Surrogatmodell, Phase-1-Umfang, Crypto-Shredding und Erhalt der Hashkette bestätigen; SEC-05 sowie AUD-01/02 benötigen Originalvertrag. Bereits persistierte Klartextattribute sind eine verifizierte Tatsache, aber der spezifische Architekturvorschlag ist nicht dadurch beschlossen. Die ausdrücklichen STK-04-/AI-02-Surrogatpflichten aus Teil 09 gelten separat; sie beschließen nicht den gesamten exklusiven Vaultentwurf und heben K1/K2 nicht auf. |
+| TKT-03 [O] / CH17 | Der neue Einzeltext taggt das Providerinterface optional, CH17 nur konkrete Integrationen. Pflicht-/Tagabgrenzung bestätigen; TKT-03 bleibt bis dahin OFFEN ohne Gatewirkung und ohne verpflichtenden Traceability-Zähler. |
 | CH21: Limitüberschreitung nur „(V, analog)“ | Den Analogievorschlag als Entscheidung bestätigen; **nicht** die separat berichtete ENT-03-Pflicht dadurch suspendieren: Teil 02:450 fordert unlicensed_ci ausdrücklich unabhängig von CH21(V). Zusätzliche Detail-/Retentionfestlegungen klären (ENT-03/08). Verbindlich bleibt außerdem: Ablauf stoppt ausschließlich Discovery/Ingest; andere Funktionen verfügbar (ENT-07/API-04). |
 | CH26 (V) | Realm-/Org-Attribut-/Brokering-/MFA-Zielmodell bestätigen; AUT-01/09 und SEC-07 betreffen daneben konkrete bereits belegte Risiken. Vorschlagsstatus entschuldigt weder ein bekanntes Demo-Administratorkonto noch wirkungslose Deaktivierung. |
 | CH27 (V) | Impact-Richtung/Strukturprojektion bestätigen; REL-01, IMP-01/02/03/04/10. Explizite Einzelanforderungen und falsche vorhandene Ausfallberechnung bleiben eigenständig zu bewerten. |
@@ -272,7 +292,7 @@ Zusätzlich fehlen bestätigte v2-Übernahmen und einzelne Querverweisverträge 
 
 ## Berichtswidersprüche und Konsolidierungskorrekturen
 
-Keine Anforderungs-ID steht doppelt in den vorhandenen Ergebnistabellen. Widersprüche betreffen daher überwiegend gemeinsame Quellstellen, Prüfvoraussetzungen oder unterschiedliche Teile desselben Ablaufs. Ein Vergleich der Produktpfade zwischen `b3fe0390056cde41441efca8d870e644c531e1bd` und der Prüfkopie ergab keine Änderungen; die unterschiedliche Bewertung wird nicht mit einem unbelegten Produktfortschritt erklärt.
+Keine Anforderungs-ID steht doppelt in den vorhandenen Ergebnistabellen. Widersprüche betreffen daher überwiegend gemeinsame Quellstellen, Prüfvoraussetzungen oder unterschiedliche Teile desselben Ablaufs. Der ursprüngliche Vergleich der Produktpfade zwischen `b3fe0390056cde41441efca8d870e644c531e1bd` und der Prüfkopie `d8f35e05f891d7c950f9e19824221a095807493c` ergab keine Änderungen; auch die Fortsetzung auf Produktstand `b7e747a6181cad553e529a2a4d7aa7d1582a7743` ändert keinen Produktcode. Unterschiedliche Bewertungen oder zusätzliche Befunde sind kein belegter Produktfortschritt.
 
 | Vermerk / IDs | Quelle → konsolidierte Bewertung | Nachprüfung und Begründung |
 |---|---|---|
@@ -285,22 +305,36 @@ Keine Anforderungs-ID steht doppelt in den vorhandenen Ergebnistabellen. Widersp
 | API-08 versus BLK-01; API-09 versus JOB-03 | FAIL versus ABWEICHEND/PARTIAL bleibt | Generische Server-Bulk-/Job-API fehlt, UI-Fan-out/Fachjoblisten bestehen: unterschiedliche geprüfte Objekte. `/home/runner/work/Reticora-CMDB/Reticora-CMDB/frontend/src/pages/CIListPage.tsx:71–89`; Teil 07:33–34,45,63. |
 | TEN-05/06 versus vorhandene WITH CHECK; Fail-closed-Router versus RBA-04 | Präzisierung, kein Statuswechsel | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000033_client_scope_rls.up.sql:64–73`, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000030_search_ai.up.sql:65–67`, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/migrations/000035_export_job_formats.up.sql:13–22` haben Policies. Fehlende Scopeprädikate/NULL-/Systemausnahmen bleiben der konkrete Mangel. Vollständige Routenabdeckung ist nicht korrekte Aktionszuordnung. |
 
-Historische Teilberichte bleiben unverändert; K1–K3 sind in der CSV am betroffenen ID-Befund markiert. GLO-10/GLO-11 stehen nicht als Einzelzeilen in den vorhandenen Teilen; sie werden **nicht** zusätzlich in die 233 importiert. GLO-11 ist unabhängig davon über die fehlende Traceability-Datei und aktuelle Referenz zu bewerten, GLO-10 im fehlenden Teil 08 nachzuholen.
+**Abgleich mit Teil 09:** TEN-06/MGT-01 betreffen denselben Blobpfad, OVR-02/WFL-02 denselben direkten Workflow-Schreibpfad und REC-11/AGT-05 denselben separaten Agentmatcher. AST-01/MGT-11 und MGT-05/06 teilen jeweils die genannte Scopeursache; vier IGA-Ratings erben nur die gemeinsame ausdrückliche Prüfbasis, nicht vier unabhängige Ursachen oder vier rekonstruierte v2-Verträge. STK-04 verlangt Nutzersurrogate, AI-02 deren Nichtauflösung im Prompt; diese eigenständigen Pflichten ersetzen den fehlenden SEC-05-/AUD-01/02-Originalvertrag nicht. **K1 bleibt N/P, K2 PARTIAL, K3 mit N/P der numerischen Grenzen.**
+
+Historische Teilberichte 01–07 bleiben unverändert; K1–K3 sind in der CSV am betroffenen ID-Befund markiert. GLO-10/GLO-11 stehen nicht als Einzelzeilen in den vorhandenen Teilen; sie werden **nicht** zusätzlich in die 279 importiert. GLO-11 ist unabhängig davon über die fehlende Traceability-Datei und aktuelle Referenz zu bewerten, GLO-10 im fehlenden Teil 08 nachzuholen.
 
 ## Stand
 
-**UNVOLLSTÄNDIG – Gesamtprüfung fortsetzen mit Teil 03, anschließend Teil 08 und Teil 09.** Eine genaue erste fehlende ID ist ohne diese Berichte und vollständige Katalogtexte nicht belastbar bestimmbar.
+**UNVOLLSTÄNDIG – Gesamtprüfung fortsetzen mit Teil 03, anschließend Teil 08. Teil 09 ist VOLLSTÄNDIG bearbeitet und konsolidiert.** Eine genaue erste fehlende ID ist ohne die beiden ausstehenden Berichte und vollständige Katalogtexte nicht belastbar bestimmbar.
 
-Die Konsolidierung der **233 vorhandenen Einzel-IDs** ist inhaltlich abgeschlossen; keine dieser IDs wurde ausgelassen. Offen bleiben die drei fehlenden Teilberichte, 34 N/P-IDs, benannte Teiltext-/Laufzeitnachweise und die Bestätigung offener Katalogentscheidungen. Nach Ergänzung CSV, Gesamtquoten, Traceability-Menge und Gates erneut konsolidieren; G1 bleibt bis zum Nachweis aller Kriterien gesperrt.
+Die Konsolidierung der **279 vorhandenen Einzel-IDs** ist inhaltlich abgeschlossen; keine dieser IDs wurde ausgelassen. Die bisherigen 233 CSV-Zeilen einschließlich K1–K3 bleiben unverändert, die 46 Teil-09-Zeilen wurden ergänzt. Offen bleiben die zwei fehlenden Teilberichte, 34 N/P-IDs, benannte Teiltext-/Laufzeitnachweise und die Bestätigung offener Katalogentscheidungen. Nach Ergänzung CSV, Gesamtquoten, Traceability-Menge und Gates erneut konsolidieren; G1 bleibt bis zum Nachweis aller Kriterien gesperrt.
+
+### Teststand der Fortsetzung
+
+Die früheren Testbefunde werden **nicht** durch neue grüne Läufe überschrieben. Teil 09 dokumentiert die tatsächlichen Ausführungen und ihre Grenzen unter `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/09-module-phase2plus.md:187–203`:
+
+- Initialer Offlineversuch setupblockiert (`module lookup disabled by GOPROXY=off`); dessen Log wurde vom Wiederholungslauf überschrieben, ursprünglicher Exitcode/vollständiges Erstlog nicht belastbar erhalten.
+- Der delegierte Testausführer entfernte entgegen Auftrag die Offline-/Readonly-Vorgaben und lud **37 vorhandene Go-Modulversionen** nach (37 verschiedene Downloadzeilen, sieben beim Backendtest, 30 beim Build; unabhängig aus den erhaltenen Rohlogs bestätigt). Das verletzte das Installations-/Nachladeverbot; der Nutzer wurde informiert, weitere Läufe gestoppt. Keine neuen Dependency-/go.mod-/go.sum-/Lockfiledateien oder Produkt-/Teständerungen.
+- Danach Backend: **18 von 21 Paketen `ok`**, reservation/movement/disposal ohne Tests; Agent-/Server-Build erfolgreich laut Ausführer. Wiederholte Agent-/Form-/Workflow-Detailfälle werden nicht als zusätzliche Pakete gezählt.
+- Edgecore: fünf Pakete `ok`; Collector: acht Testfälle erfolgreich. Diese Komponententests liefen im abweichenden Kontext und beweisen weder einen konformen Offline-Gesamtlauf noch die Agent→Relay→Backend-Kette.
+- Keine echte `TEST_DATABASE_URL`-/DB-/Serviceabnahme, keine Frontend-Testausführung und keine nachgewiesene Zielplattform-, Last-, Pentest- oder vollständige Isolationstestabnahme. Grüne Unit-/Memorytests sind kein PASS einer ganzen Anforderung; ein Setupfehler ist keine fehlgeschlagene fachliche Assertion.
 
 ### Prüfung der Konsolidierung
 
-- Quelltabellen nach Einzel-IDs aufgelöst: 233, keine Dubletten; CH16 keine eigene Zeile. Genau die gekennzeichneten K1/K2-Statuskorrekturen und K3-Sollwertpräzisierung.
-- Critical-/High-Inventar gegen die Einzel-ID-Menge abgeglichen: 30/123, jede ID genau einmal in der jeweiligen priorisierten Tabelle.
-- Pfadkontrolle: nur die ausdrücklich fehlenden drei Teilberichte und Traceability-Datei nicht vorhanden.
-- Katalogabgleich: genau eine zusätzliche explizite [B]/[Pn]/[A]-ID außerhalb der Quelltabellen gefunden, GLO-10; in der Traceability-Liste ergänzt, nicht in der Befund-CSV erfunden.
-- Keine neuen Produktivtests/Builds ausgeführt: ausschließlich Dokumentkonsolidierung, historische Testergebnisse nicht als neue bestandene Prüfungen ausgegeben.
-- CSV-Strukturkontrolle abgeschlossen: UTF-8, Semikolon, exakte neun Kopfspalten, 233 eindeutige Datenzeilen mit Evidenz; vollständige Quell-ID-Abdeckung, 229 unveränderte und vier explizit korrigierte Zeilen. B/Q-Menge, 34 N/P-IDs, alle priorisierten IDs und 180 Traceability-Lücken stimmen mit den Berichtstabellen überein.
-- Unabhängige Read-only-Quellen-/Dokumentreview durchgeführt; drei Textpräzisierungen eingearbeitet (JOB-04 statt GQL-03 beim State-at-Befund, eigenständige ENT-03-Pflicht gegenüber CH21(V), Feldbenennung statt unbekanntem AUD-03-Sollenum). Keine weiteren materiellen Einwände gemeldet.
-- Secret-Scans beider Ergebnisdateien ohne Befund; `git diff --check` ohne Befund. Gegenüber der Prüfkopie ausschließlich `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/befunde.csv` und `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/99-gesamtbericht.md` geändert.
-- Parallele Validierung aufgerufen: Wrapper meldet „Success“, erklärt aber ausdrücklich, dass das automatische Reviewwerkzeug fehlt. **Automatisierte Code-Review daher nicht verfügbar, kein bestandener Reviewnachweis daraus.** CodeQL wegen ausschließlich trivialer Dokumentänderungen übersprungen, nicht als ausgeführter Sicherheitstest ausgegeben. Die unabhängige Read-only-Review und Strukturkontrollen sind davon getrennte Nachweise.
+- Quelltabellen nach Einzel-IDs aufgelöst: **279**, keine Dubletten; CH16 keine eigene Zeile. Die bisherigen 233 Zeilen samt K1/K2-Statuskorrekturen und K3-Sollwertpräzisierung unverändert; 46 neue Zeilen entsprechen der Teil-09-Quelltabelle einschließlich Evidenz, Befund, Tags und absoluten Berichtszeilen.
+- Critical-/High-Inventar gegen die Einzel-ID-Menge abgeglichen: **47/144**, jede ID genau einmal in der jeweiligen priorisierten Tabelle und in der geforderten Fundament-Reihenfolge.
+- Pfadkontrolle: die beiden ausstehenden Teilberichte 03/08 und die Traceability-Datei fehlen; Teil 09 ist vorhanden.
+- Katalogabgleich: GLO-10 bleibt eine zusätzliche explizite [B]/[Pn]/[A]-ID außerhalb der Quelltabellen; in der Traceability-Liste enthalten, nicht in der Befund-CSV erfunden. 224 Quell-IDs plus GLO-10 ergeben **225**, TKT-03[O] ausgeschlossen.
+- CSV-Strukturkontrolle: UTF-8, Semikolon, exakte neun Kopfspalten, **279 eindeutige Datenzeilen** mit vollständiger Quell-ID-Abdeckung. Status-/Severitysummen, B/Q-Menge, Phasengruppen, 34 N/P-IDs und priorisierte/Traceability-Listen stimmen mit den Berichtstabellen überein.
+- **Aktuelle unabhängige Quellenreview verfügbar:** Eine zweite, nur lesende Stichprobe der Teil-09-Produktquellen (Dokumente, Management/Desk/Tickets, Workflows, AI, Cloud-Assets und Migrationen 33/50/56) ergab keinen materiellen Korrekturbedarf. Die Elternprüfung bestätigte zusätzlich 46 IDs, acht Spalten, fünf Hauptabschnitte, 19 Zusammenfassungszeilen und vorhandene zitierte Dateipfade; genaue Testsymbolfundstellen sind ergänzt. Quelle: `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/09-module-phase2plus.md:207–216`. Das ist eine Quellen-/Dokumentreview, weder das historisch fehlende automatische Reviewwerkzeug noch eine DB-/Service-/Pentestabnahme.
+- Die Ergänzung dieser beiden Konsolidierungsdateien wurde durch Dokumentparsing und `git diff --check` geprüft, ohne weitere Produktläufe/Installationen. Das ist keine Behauptung, in der gesamten Fortsetzung seien keine Tests gelaufen: die abweichenden Teil-09-Läufe stehen oben.
+
+**Historischer Abschlussstand der ersten 233-ID-Konsolidierung (kein neuer Nachweis für die Ergänzung):** Damals 229 Quellzeilen unverändert und vier durch K1–K3 ausdrücklich korrigiert; Dokumentkonsolidierung ohne Produktivtests/Builds. Unabhängige Read-only-Quellen-/Dokumentreview mit drei eingearbeiteten Präzisierungen (JOB-04 statt GQL-03 bei State-at, eigenständige ENT-03-Pflicht gegenüber CH21(V), Feldbenennung statt unbekanntem AUD-03-Sollenum); keine weiteren materiellen Einwände gemeldet. Secret-Scans beider damaligen Ergebnisdateien und `git diff --check` ohne Befund, damals nur die beiden Konsolidierungsdateien geändert.
+
+Die damalige parallele Validierung meldete im Wrapper „Success“, erklärte aber ausdrücklich, dass das automatische Reviewwerkzeug fehlte: **kein bestandener automatisierter Reviewnachweis**. CodeQL wurde wegen ausschließlich trivialer Dokumentänderungen übersprungen, nicht als ausgeführter Sicherheitstest ausgegeben. Diese historischen Prüfungen und die damalige unabhängige Review sind von der aktuellen Dokumentstrukturkontrolle und den oben genannten Teil-09-Testbeobachtungen getrennt.
