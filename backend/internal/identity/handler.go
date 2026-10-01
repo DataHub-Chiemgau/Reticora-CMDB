@@ -28,6 +28,16 @@ type Handler struct {
 	// defaultRole is the standard role assigned on auto-provisioning
 	// (e.g. "viewer"); empty assigns no role.
 	defaultRole string
+	// access resolves the role grants of the user from the database at login
+	// and refresh (RBA-03). Nil keeps the IdP groups as the only grant
+	// (tests, --no-db without users).
+	access AccessResolver
+}
+
+// AccessResolver loads the role grants of a user: every role assignment and
+// custom role assignment with its permissions and scope.
+type AccessResolver interface {
+	AccessGrants(ctx context.Context, orgID, userID string) ([]Grant, error)
 }
 
 // UserProvisioner upserts the authenticated OIDC subject into app_user.
@@ -48,6 +58,13 @@ func NewHandler(oidc *OIDCProvider, sessions *SessionIssuer) *Handler {
 func (h *Handler) WithProvisioning(p UserProvisioner, defaultRole string) *Handler {
 	h.provisioner = p
 	h.defaultRole = defaultRole
+	return h
+}
+
+// WithAccessResolver makes login and refresh read the role assignments from
+// the database instead of relying on token claims only.
+func (h *Handler) WithAccessResolver(resolver AccessResolver) *Handler {
+	h.access = resolver
 	return h
 }
 
@@ -169,6 +186,12 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	refreshedClaims := cloneSessionClaims(claims)
+	// Roles and scopes are re-read on every refresh so revoked or narrowed
+	// assignments take effect without a new login.
+	if err = h.applyAccess(r.Context(), &refreshedClaims); err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "resolve role assignments")
+		return
+	}
 	refreshedClaims.IssuedAt = now
 	refreshedClaims.ExpiresAt = now.Add(sessionLifetime)
 
@@ -271,9 +294,12 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 	claims := SessionClaims{
 		Subject:        subject,
 		OrganizationID: orgID,
-		Permissions:    permissionsFromGroups(idToken.Groups),
+		Groups:         append([]string(nil), idToken.Groups...),
 		IssuedAt:       now,
 		ExpiresAt:      now.Add(sessionLifetime),
+	}
+	if err = h.applyAccess(ctx, &claims); err != nil {
+		return "", time.Time{}, authResult{}, fmt.Errorf("identity: resolve role assignments: %w", err)
 	}
 
 	sessionToken, err := h.sessions.Issue(claims)
@@ -285,6 +311,35 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 		idToken: idToken,
 		claims:  claims,
 	}, nil
+}
+
+// applyAccess sets permissions and scopes of the session from the IdP groups
+// and the role assignments in the database. IdP group roles are org-wide
+// grants; database assignments carry their client and site scope. A failing
+// lookup fails the login or refresh instead of issuing an unscoped session.
+func (h *Handler) applyAccess(ctx context.Context, claims *SessionClaims) error {
+	if h.access == nil && len(claims.Groups) == 0 {
+		// Nothing to resolve from: keep the token's access unchanged.
+		return nil
+	}
+	grants := make([]Grant, 0, 4)
+	if groupPermissions := permissionsFromGroups(claims.Groups); len(groupPermissions) > 0 {
+		grants = append(grants, OrgWideGrant(groupPermissions))
+	}
+	if h.access != nil {
+		stored, err := h.access.AccessGrants(ctx, claims.OrganizationID, claims.Subject)
+		if err != nil {
+			return err
+		}
+		grants = append(grants, stored...)
+	}
+	access := ResolveAccess(grants)
+	scope := access.Scope
+	claims.Permissions = access.Permissions
+	claims.Scope = &scope
+	claims.PermissionScopes = access.PermissionScopes
+	claims.ClientScope = scope.LegacyClientScope()
+	return nil
 }
 
 func bearerTokenFromRequest(r *http.Request) (string, error) {
@@ -415,6 +470,17 @@ func normalizeGroup(value string) string {
 func cloneSessionClaims(claims *SessionClaims) SessionClaims {
 	cloned := *claims
 	cloned.Permissions = append([]Permission(nil), claims.Permissions...)
+	cloned.Groups = append([]string(nil), claims.Groups...)
+	if claims.Scope != nil {
+		scope := *claims.Scope
+		cloned.Scope = &scope
+	}
+	if claims.PermissionScopes != nil {
+		cloned.PermissionScopes = make(map[Permission]Scope, len(claims.PermissionScopes))
+		for k, v := range claims.PermissionScopes {
+			cloned.PermissionScopes[k] = v
+		}
+	}
 	return cloned
 }
 
