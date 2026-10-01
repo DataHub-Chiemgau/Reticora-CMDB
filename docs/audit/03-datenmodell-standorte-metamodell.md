@@ -7,6 +7,13 @@ TEILPRÜFUNG ABGESCHLOSSEN – alle 46 vorgegebenen IDs erfasst; zwölf mangels 
 Prüfdatum: 2026-10-01. Geprüfter Produktstand: `198f142a453f3f9445062f69569cb56c990a4f97`.
 Nur Dokumente unter `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/` und `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/spec/` werden geändert; Produktivcode, Migrationen und Tests bleiben unverändert.
 
+## Kurzurteil
+
+- **Nicht vollständig und korrekt umgesetzt.** Insbesondere fehlen zentrale Attributdefinitionen, Schema-Generierung/-Versionierung, attributgetriebene Unique-Indizes und ein durchgehend kanonischer Location-Baum.
+- **Kritisch:** unvollständige Client-/Site-/Team-Isolation im Standortbereich, Löschungen mit stillem Verlust von Standortzuordnungen/Mounts sowie falsches Instanzdefinitionsrecht und fehlender automatischer Schutz manueller Instanzwerte.
+- Physische Seeds stimmen statisch exakt; logische Seeds fehlen vollständig. Ein grüner Unit-Testlauf bestätigt diese fehlenden Anforderungen nicht.
+- Zwölf IDs bleiben wegen fehlendem Sollwortlaut N/P; spätere Phasen werden ohne belegte Fälligkeit nicht als überfällig bewertet.
+
 ## Quellen und Grenzen
 
 - Vorbereitung: `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/README.md`, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/00-bestandsaufnahme.md`, `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/00-schema-ist.md`. Vorhandene Bestandsaufnahme ist Orientierung, kein Ersatz für aktuelle Quellprüfung.
@@ -174,7 +181,7 @@ Ausführung am Prüfstand oben, Go **1.25.14**, `GOTOOLCHAIN=local`, `GOFLAGS=-m
 | CH18 | Teilweise JSON-Metadaten, keine gemeinsame AST-Spezifikation/Konformanz; MET-10/45. Kein vollständiger Klick-Regelbuilder aus Form-Renderer ableitbar. |
 | CH19 | Laufzeitrolle fail-closed gegen Superuser/BYPASSRLS, DDL-Job/-Rechte fehlen: DB-04. |
 | CH20 | Keine `installed_software`-Tabelle; Telemetrie-Softwareliste reicht nicht: DB-05/MET-03. |
-| CH21 | Keine Entitlement-/Lizenz-Gesamtabnahme; CI-Service prüft bereits jede Erstellung mit `AllowCreate`, nicht allein Discovery (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/service.go:136–150`). Das ist ein Prüfhinweis für die getrennte Lizenzprüfung, kein Beleg des präzisen `valid_until`-Verhaltens. |
+| CH21 | Gegenbefund im vorhandenen Ablaufmodell: bei `Enforce=true` macht `expires_at` jedes betroffene Feature inaktiv (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/entitlement/entitlement.go:129–136,224–238`); Middleware blockiert dann auch GET auf Assets/Export, nicht nur Discovery/Ingest (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/entitlement/middleware.go:21,40,71–96`). CI-Service prüft außerdem jede Erstellung mit `AllowCreate` (`/home/runner/work/Reticora-CMDB/Reticora-CMDB/backend/internal/ci/service.go:136–150`). High/L für diesen Gegenbefund; keine Gleichsetzung der anders benannten Felder mit einem nachgewiesenen vollständigen `valid_until`-Lizenzworkflow. |
 | CH22 | Keine Änderungen/Schlussfolgerungen zu Installer-Distributionen aus diesem Datenmodell-Audit. N/P in diesem Teil. |
 | CH23 | Org-Feldprüfung LOC-01 belegt kein Self-Signup/Operator-/Reseller-Provisioning. N/P in diesem Teil. |
 | CH24 | Fehlende Metamodell-Audits/Events sind kein Beweis für Benachrichtigungskanal-Konformität. E-Mail/SMS/Pager nicht abgenommen. |
@@ -199,4 +206,8 @@ GLO-10: überwiegend englische Schlüssel, aber exakte Typkeys und i18n-Maps wei
 - Verteilung: **0 PASS, 6 PARTIAL, 23 ABWEICHEND, 1 FAIL, 4 OFFEN, 12 N/P**. Kein PASS allein aus Memory-/Mock-Tests oder statischer Existenz.
 - Alle angeführten Repository-Belegpfade vorhanden, ausgenommen die ausdrücklich als fehlend bewerteten `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/schema-baseline.md` und `/home/runner/work/Reticora-CMDB/Reticora-CMDB/api/rules.schema.json`.
 - Fehlende Solltexte verhindern eine vollständige Konformitätsaussage. OFFEN bewertet spätere Phasen, nicht eine Erlaubnis, MUSS-Anforderungen wegzulassen.
-- Dokumentreview/Secrets-/Diff-Abschlussprüfung: noch ausstehend.
+- `git diff --check` ohne Befund; ausschließlich die zwei benannten neuen Markdown-Dateien geändert, keine Produktiv-, Migrations-, Test- oder Lockdateien.
+- Secrets-Scans der Dokumente ohne Treffer. 161 Beleganfänge beim ersten Abschlusscheck gegen vorhandene Dateien/Zeilen geprüft; ergänzte Belege anschließend ebenfalls kontrolliert.
+- `parallel_validation` aufgerufen, Änderungen für CodeQL als trivial bewertet (nur Dokumentation). **CodeQL übersprungen**; keine Produktsicherheitsprüfung daraus ableiten.
+- **Automatischer Code-Review technisch nicht ausführbar**: gemeldetes Modell nicht verfügbar. Der zusammenfassende Erfolgsstatus des Tools wird deshalb nicht als erfolgreicher Review gewertet. Zusätzliches unabhängiges Read-only-Gegenlesen der beiden Dokumente: keine wesentlichen Befunde, ID-Menge/Statistik und priorisierte Codeaussagen bestätigt.
+- Unaufgelöste Prüflücken: fehlender Katalogwortlaut, nicht ausgeführte DB-/Frontend-/E2E-/Lasttests und nicht verfügbarer automatischer Review. Dokumentierte Produktabweichungen wurden dem reinen Prüfauftrag entsprechend **nicht behoben**.
