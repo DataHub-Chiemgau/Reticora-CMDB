@@ -146,9 +146,15 @@ down:
 	docker compose down
 
 # ─── Seed ───────────────────────────────────────────────────────────────────────
+# SIM-01 (WP-106): until the demo/scale seed of WP-203 exists, make seed
+# creates one tenant with a valid audit hash chain through the production code
+# path (cmd/audit-seed). Any error fails the target; the slug must be new.
+SEED_ORG_SLUG ?= seed-demo
+SEED_AUDIT_ENTRIES ?= 5
 seed:
 	@echo "==> Seeding database..."
-	psql "$(DATABASE_URL)" -f $(BACKEND_DIR)/migrations/seed.sql 2>/dev/null || echo "No seed file found"
+	cd $(BACKEND_DIR) && go run ./cmd/audit-seed -database-url "$(DATABASE_URL)" \
+		-org-slug "$(SEED_ORG_SLUG)" -entries $(SEED_AUDIT_ENTRIES)
 
 # ─── E2E ────────────────────────────────────────────────────────────────────────
 e2e:

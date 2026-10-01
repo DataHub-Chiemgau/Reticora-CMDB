@@ -73,6 +73,57 @@ restorability without touching production data:
 The job fails if the restore or any integrity check fails. It uses only
 generated test data — never real credentials or tenant data.
 
+## Migration 000056: quarantined references (E-26)
+
+Migration 000056 adds composite foreign keys so that `ci_relationship` and
+`composition` can only reference CIs and assets of their own organization.
+Rows that violate this (dangling or cross-tenant references) block the
+constraints.
+
+**Current behaviour.** The migration moves such rows unchanged into
+`migration_quarantine` (`source_table`, `row_data` as JSON, `reason`,
+`migration = '000056'`). Nothing is deleted. The table has RLS per
+organization; an operator reviews it with a maintenance connection:
+
+```sql
+SELECT organization_id, source_table, reason, quarantined_at, row_data
+FROM migration_quarantine
+ORDER BY organization_id, source_table;
+```
+
+Repair a row by re-creating the relationship or composition with valid
+references through the API, then delete the quarantine entry. `migrate down`
+past 000056 moves all quarantined rows back into their tables.
+
+**Release note for installations migrated before this change.** Earlier
+builds of 000056 deleted those rows without a copy. An installation is
+affected if it reached schema version 56 or later while `migration_quarantine`
+did not exist yet (the table is only created by the corrected migration, so
+it is missing there). Check from backup whether rows were lost:
+
+1. Restore the last backup taken **before** the upgrade to version 56 into an
+   isolated database (never over production), see the procedures above.
+   `SELECT version FROM schema_migrations` must report a version below 56.
+2. On that restored copy, list the rows the old migration would have deleted:
+
+   ```sql
+   SELECT 'ci_relationship' AS source_table, r.*
+   FROM ci_relationship r
+   WHERE NOT EXISTS (SELECT 1 FROM ci c WHERE c.id = r.source_ci_id AND c.organization_id = r.organization_id)
+      OR NOT EXISTS (SELECT 1 FROM ci c WHERE c.id = r.target_ci_id AND c.organization_id = r.organization_id);
+
+   SELECT 'composition' AS source_table, k.*
+   FROM composition k
+   WHERE NOT EXISTS (SELECT 1 FROM asset a WHERE a.id = k.parent_asset_id AND a.organization_id = k.organization_id)
+      OR (k.child_ci_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ci c WHERE c.id = k.child_ci_id AND c.organization_id = k.organization_id))
+      OR (k.child_asset_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM asset a WHERE a.id = k.child_asset_id AND a.organization_id = k.organization_id));
+   ```
+
+3. Empty results: nothing was lost. Otherwise export the rows (`\copy (…) TO
+   'lost-000056.csv' CSV HEADER`), clarify each row with the affected tenant
+   and re-create the valid ones through the API. Record the check in the
+   operations log.
+
 ## DR checklist
 
 - [ ] Confirm the last successful base backup / WAL archive lag is within RPO.

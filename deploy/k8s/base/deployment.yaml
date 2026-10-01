@@ -49,6 +49,10 @@ spec:
             - name: session-key
               mountPath: /etc/reticora/session
               readOnly: true
+          # Liveness only asks whether the process serves HTTP; readiness
+          # (/readyz) also checks database, Redis, object storage and NATS, so
+          # a dependency outage removes the pod from the Service without
+          # restarting it (OPS-01).
           livenessProbe:
             httpGet:
               path: /healthz
@@ -57,7 +61,7 @@ spec:
             periodSeconds: 10
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: http
             initialDelaySeconds: 3
             periodSeconds: 5

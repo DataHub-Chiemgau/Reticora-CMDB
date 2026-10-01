@@ -1,8 +1,9 @@
 // Package main provides the audit-seed CLI. It creates a tenant and appends a
 // short, cryptographically valid audit hash chain via the production
 // PGRecorder, so the nightly backup/restore test can verify that a restored
-// database still passes audit.Verify. It exists only for the DR/restore test
-// and is never deployed.
+// database still passes audit.Verify. It is used by the DR/restore test and,
+// until the demo/scale seed of WP-203 exists, by `make seed` (SIM-01). It is
+// never deployed.
 package main
 
 import (
@@ -13,6 +14,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/jackc/pgx/v5"
 )
 
 func main() {
@@ -33,39 +35,44 @@ func main() {
 	}
 	defer pool.Close()
 
+	// The organization row is only visible under its own app.org_id, so the
+	// id is drawn first and the tenant is created inside its own scope. The
+	// restore test always starts from an empty database; an existing slug is
+	// reported instead of being reused.
 	var orgID string
-	err = pool.QueryRow(ctx, `
-		INSERT INTO organization (name, slug, plan)
-		VALUES ($1, $2, 'enterprise')
-		ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
-		RETURNING id::text
-	`, "Restore Test Org", *orgSlug).Scan(&orgID)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "audit-seed: create organization: %v\n", err)
+	if err = pool.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&orgID); err != nil {
+		fmt.Fprintf(os.Stderr, "audit-seed: generate organization id: %v\n", err)
 		os.Exit(1)
 	}
 
 	recorder := audit.NewPGRecorder()
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "audit-seed: begin: %v\n", err)
-		os.Exit(1)
-	}
-	defer tx.Rollback(ctx)
-	for i := 0; i < *count; i++ {
-		if _, err := recorder.Record(ctx, tx, audit.Entry{
-			OrganizationID: orgID,
-			ActorType:      "system",
-			Action:         "restore.test",
-			ResourceType:   "audit",
-			Changes:        map[string]interface{}{"seq": i},
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "audit-seed: record: %v\n", err)
-			os.Exit(1)
+	scope := database.OrgWideScope(orgID, "")
+	err = database.WithTenant(ctx, pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		tag, insErr := tx.Exec(ctx, `
+			INSERT INTO organization (id, name, slug, plan)
+			VALUES ($1, $2, $3, 'enterprise')
+			ON CONFLICT (slug) DO NOTHING`, orgID, "Restore Test Org", *orgSlug)
+		if insErr != nil {
+			return fmt.Errorf("create organization: %w", insErr)
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "audit-seed: commit: %v\n", err)
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("create organization: slug %q already exists", *orgSlug)
+		}
+		for i := 0; i < *count; i++ {
+			if _, recErr := recorder.Record(ctx, tx, audit.Entry{
+				OrganizationID: orgID,
+				ActorType:      "system",
+				Action:         "restore.test",
+				ResourceType:   "audit",
+				Changes:        map[string]interface{}{"seq": i},
+			}); recErr != nil {
+				return fmt.Errorf("record: %w", recErr)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "audit-seed: %v\n", err)
 		os.Exit(1)
 	}
 	// Print the org ID so the workflow can pass it to audit-verify.

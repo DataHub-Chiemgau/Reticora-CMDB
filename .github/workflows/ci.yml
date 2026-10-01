@@ -160,6 +160,11 @@ jobs:
             exit 1
           fi
 
+      # SIM-01 (WP-106): make seed must succeed against the migrated database.
+      # It runs after the tests so the seeded tenant cannot affect them.
+      - name: Seed the database (make seed)
+        run: make seed
+
   # GLO-11/DOD-01: docs/traceability.csv is checked on every PR (E-30).
   # Format, known IDs, existing test files and the rows the plan prescribes for
   # the PR's work packages block; completeness is reported until gate G1.

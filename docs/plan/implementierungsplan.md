@@ -116,11 +116,11 @@ Innerhalb eines Meilensteins dürfen WPs parallel laufen, sobald ihre Voraussetz
 
 Der Auftraggeber hat angewiesen, nach den Empfehlungen in `entscheidungen.md` vorzugehen. Ergebnis: 22 Entscheidungen sind getroffen, 4 vorläufig mit Übergangsregel getroffen und 10 offen, weil sie eine Lieferung oder Bestätigung Dritter verlangen (Aufgaben A-01 bis A-11 in [`entscheidungen.md`](entscheidungen.md#offene-aufgaben)). Folgen für den Plan:
 
-- **Startfreigabe:** Nach der Empfehlung zu [E-01](entscheidungen.md#e-01) starten jetzt nur die M0.0-WPs ohne E-01-Verweis: WP-001 (`lint`), WP-002 (`fe-ci`), WP-003 (`ci-tests`), WP-005 (`trace`), WP-006 (`mig-rt`) und WP-007 (`rls-cat`). WP-004 (`dep-scan`) und alle WPs ab M0.1 warten auf die Katalogteile 02, 04, 05 und 06 (Aufgabe A-01).
+- **Startfreigabe:** Die Katalogteile 02, 04, 05 und 06 liegen seit 2026-10-01 in `docs/spec/katalog-v3/` vor (Aufgabe A-01 erledigt, [E-01](entscheidungen.md#e-01) entschieden). Damit sind WP-004 (`dep-scan`) und die WPs ab M0.1 freigegeben, soweit ihre übrigen Entscheidungen und Voraussetzungen es zulassen. Jedes WP mit E-01-Verweis prüft seine Akzeptanzkriterien vor Beginn gegen den Anforderungstext in seiner Tabelle. WP-007 (`rls-cat`) ist bereits gemergt und wird gegen TEN-03, TEN-05 und TEN-09 nachgeprüft.
 - **G1-Umfang** ([E-03](entscheidungen.md#e-03), deaktivieren): WP-214 (`m-gates`) ist G1-Pflicht und schaltet Spätphasen-Module standardmäßig ab. WP-215 bis WP-239 sind verschoben. Die M0-WPs in Spätphasen-Modulen bleiben verpflichtend; ihre Kriterien „Alternative nach E-03“ entfallen.
 - **Epics und Traceability** ([E-06](entscheidungen.md#e-06), [E-07](entscheidungen.md#e-07)): Die Epic-Zuordnung ist bestätigt; M0-WPs tragen ihr fachliches Epic.
 - **Festgelegte Umsetzungsregeln:** fail-closed-Scopes und `WithSystem` ([E-08](entscheidungen.md#e-08)), NULL-Scope-Schreiben nur org-weit ([E-09](entscheidungen.md#e-09)), globale Kataloge read-only ([E-10](entscheidungen.md#e-10)), Team-Scope als Schnittmenge (vorläufig, [E-11](entscheidungen.md#e-11)), CH21/CH26–CH30 bestätigt ([E-14](entscheidungen.md#e-14), [E-18](entscheidungen.md#e-18) bis [E-22](entscheidungen.md#e-22)), VLAN-Eindeutigkeit über zwei Teilindizes ([E-24](entscheidungen.md#e-24)), API-05-Pfade wörtlich mit Deprecation/Sunset ([E-25](entscheidungen.md#e-25)), Quarantäne in 000056 ([E-26](entscheidungen.md#e-26)), Install-Matrix nach CH22 ([E-27](entscheidungen.md#e-27)), externer Pentest ([E-28](entscheidungen.md#e-28)), Traceability stufenweise blockierend ([E-30](entscheidungen.md#e-30)), Werkzeuge govulncheck/npm audit/Trivy/cosign keyless/k6 ([E-31](entscheidungen.md#e-31)), DB-05 nur [B]-Zeilen für G1 ([E-36](entscheidungen.md#e-36)).
-- **Offen mit Termin:** E-01, E-02, E-04, E-15, E-17, E-23, E-29, E-32, E-33 und E-35. Die WP-Blöcke zeigen den Status jeder verwiesenen Entscheidung im Feld „Entscheidungsbedarf“.
+- **Offen mit Termin:** E-02, E-04, E-15, E-17, E-29, E-32, E-33 und E-35 (E-01 und E-23 sind seit der Lieferung vom 2026-10-01 entschieden). Die WP-Blöcke zeigen den Status jeder verwiesenen Entscheidung im Feld „Entscheidungsbedarf“.
 
 ## Konventionen für alle WPs
 
@@ -128,7 +128,7 @@ Diese Regeln gelten für jedes WP und werden in den Blöcken nicht wiederholt.
 
 1. **Ein WP = ein PR** mit 0,5–2 PT (DOD-01, `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:73`). Höchstens ca. 15 geänderte Dateien. Eine Migration zählt als zwei Dateien (up/down). Ausnahme ist nur rein mechanische Formatierung (WP-002 (`fe-ci`)).
 2. **Voraussetzungen** sind gemergte WPs. Ein WP baut nie auf einem offenen Nachbar-PR auf.
-3. **Vor Beginn lesen:** die Befundquelle (Pfad:Zeile im Auditbericht) und den Anforderungstext jeder ID aus der Tabelle des WPs. Fehlt der Anforderungstext („fehlt“), gilt der Befundtext als Arbeitsgrundlage, und E-01 ist zu beachten.
+3. **Vor Beginn lesen:** die Befundquelle (Pfad:Zeile im Auditbericht) und den Anforderungstext jeder ID aus der Tabelle des WPs. Fehlt der Anforderungstext („fehlt“), gilt der Befundtext als Arbeitsgrundlage, und die in der Tabelle genannte Entscheidung ist zu beachten.
 4. **Migrationen** (DB-02): Dateiname mit der nächsten freien Nummer zum Umsetzungszeitpunkt (Stand Audit: höchste vorhandene Nummer 000057), immer `.up.sql` und `.down.sql`. Der Roundtrip-Test aus WP-006 (`mig-rt`) muss grün sein. Bestehende Migrationen werden nicht geändert (Ausnahme: E-26).
 5. **Neue Mandantentabellen** (TEN-05): Die Migration aktiviert RLS und FORCE RLS und legt Policies mit USING und WITH CHECK über die Scope-GUCs an. Der RLS-Katalogtest aus WP-007 (`rls-cat`) darf keine neue Ausnahme enthalten. Datenzugriff läuft nur über den Mandantenkontext (`WithTenant`, WP-008 (`tenant-core`)).
 6. **API** (spec-first): Neue oder geänderte Routen zuerst in `api/openapi.yaml`, dann Mapping in `backend/internal/server/authz.go`. `TestRoutesAndSpecificationAreInParity` muss grün sein, danach `npm run generate:api` in `frontend/` ausführen (CI prüft `generate:api:check`). Repository-Fehler meldet der Handler über `api.WriteRepoError` und nie mit Roh-Fehlertext.
@@ -293,7 +293,7 @@ TST-02;[B];A;.github/workflows/ci.yml;WP-003
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | TST-04 | [Q] | ABWEICHEND | High | schließt | `docs/audit/08-frontend-monitoring-nfr-tests.md:69` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:69` |
-| SEC-11 | nicht angegeben | PARTIAL | High | Teil | `docs/audit/06-audit-sicherheit-events.md:32` | fehlt → E-01 |
+| SEC-11 | [Q] | PARTIAL | High | Teil | `docs/audit/06-audit-sicherheit-events.md:32` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:44` |
 
 **Problem:** TST-04 verlangt Abhängigkeits-Scans; SEC-11 bemängelt fehlenden Go-Abhängigkeitsscan und Container-Vulnerability-Scan.
 
@@ -320,10 +320,10 @@ TST-02;[B];A;.github/workflows/ci.yml;WP-003
 
 ```text
 TST-04;[Q];A;docs/security/abhaengigkeitsscans.md;WP-004
-SEC-11;nicht angegeben;A;docs/security/abhaengigkeitsscans.md;WP-004
+SEC-11;[Q];A;docs/security/abhaengigkeitsscans.md;WP-004
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-31](entscheidungen.md#e-31) Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-31](entscheidungen.md#e-31) Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -428,9 +428,9 @@ REP-01;[B];A;backend/internal/database/migrations_roundtrip_integration_test.go;
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:38` | fehlt → E-01 |
-| TEN-03 | [B] | PARTIAL | High | Teil | `docs/audit/02-mandanten-auth-entitlements.md:36` | fehlt → E-01 |
-| TEN-09 | [Q] | PARTIAL | High | Teil | `docs/audit/02-mandanten-auth-entitlements.md:42` | fehlt → E-01 |
+| TEN-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:38` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:12` |
+| TEN-03 | [B] | PARTIAL | High | Teil | `docs/audit/02-mandanten-auth-entitlements.md:36` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:8` |
+| TEN-09 | [Q] | PARTIAL | High | Teil | `docs/audit/02-mandanten-auth-entitlements.md:42` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:25` |
 
 Weitere Anforderungstexte: CH25 (`docs/spec/katalog-v3/00-grundlagen.md:49`), PRI-10 (`docs/spec/katalog-v3/00-grundlagen.md:82`)
 
@@ -463,7 +463,7 @@ TEN-03;[B];A;backend/internal/tenant/rls/catalog_integration_test.go;WP-007
 TEN-09;[Q];A;backend/internal/tenant/rls/catalog_integration_test.go;WP-007
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -518,8 +518,8 @@ TEN-09;[Q];A;backend/internal/tenant/rls/catalog_integration_test.go;WP-007
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-04 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/02-mandanten-auth-entitlements.md:37` | fehlt → E-01 |
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-04 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/02-mandanten-auth-entitlements.md:37` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:10` |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 
 Weitere Anforderungstexte: CH11 (`docs/spec/katalog-v3/00-grundlagen.md:21`), CH25 (`docs/spec/katalog-v3/00-grundlagen.md:49`), PRI-10 (`docs/spec/katalog-v3/00-grundlagen.md:82`)
 
@@ -558,7 +558,7 @@ TEN-04;[B];B;backend/internal/database/tenant_scope_test.go;WP-008
 TEN-06;[B];B;backend/internal/database/tenant_scope_test.go;WP-008
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-08](entscheidungen.md#e-08) TEN-04: GUC-Namen, Semantik leerer Scopes, Systempfade (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-08](entscheidungen.md#e-08) TEN-04: GUC-Namen, Semantik leerer Scopes, Systempfade (entschieden)
 
 **Nicht Bestandteil:** Umstellung der Repositories erfolgt gebündelt in den Folge-WPs „WithTenant-Migration“.
 
@@ -570,8 +570,8 @@ TEN-06;[B];B;backend/internal/database/tenant_scope_test.go;WP-008
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| RBA-03 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/02-mandanten-auth-entitlements.md:56` | fehlt → E-01 |
-| TEN-04 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:37` | fehlt → E-01 |
+| RBA-03 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/02-mandanten-auth-entitlements.md:56` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:66` |
+| TEN-04 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:37` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:10` |
 
 Weitere Anforderungstexte: CH11 (`docs/spec/katalog-v3/00-grundlagen.md:21`), CH25 (`docs/spec/katalog-v3/00-grundlagen.md:49`)
 
@@ -610,7 +610,7 @@ RBA-03;[B];B;backend/internal/permission/scope_integration_test.go;WP-009
 TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-009
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-11](entscheidungen.md#e-11) Semantik des Team-Scopes (vorläufig entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-11](entscheidungen.md#e-11) Semantik des Team-Scopes (vorläufig entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -622,7 +622,7 @@ TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-009
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 
 **Problem:** TEN-06: 46 private `withTenant`-Helfer und direkte Poolpfade liefern inkonsistenten Kontext. Dieses WP stellt die Pakete ci, citype, relationship, relationshiptype, topology vollständig auf `database.WithTenant` mit Principal-Scope um.
 
@@ -656,7 +656,7 @@ TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-009
 TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-010
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -668,7 +668,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-010
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 
 **Problem:** TEN-06: 46 private `withTenant`-Helfer und direkte Poolpfade liefern inkonsistenten Kontext. Dieses WP stellt die Pakete lifecycle, override, history, contact, credential, privacy vollständig auf `database.WithTenant` mit Principal-Scope um.
 
@@ -703,7 +703,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-010
 TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-011
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -715,8 +715,8 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-011
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
-| AUT-04 | [B] | ABWEICHEND | High | Teil | `docs/audit/02-mandanten-auth-entitlements.md:47` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
+| AUT-04 | [B] | ABWEICHEND | High | Teil | `docs/audit/02-mandanten-auth-entitlements.md:47` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:37` |
 
 **Problem:** TEN-06: 46 private `withTenant`-Helfer und direkte Poolpfade liefern inkonsistenten Kontext. Dieses WP stellt die Pakete user, permission, entitlement, identity (API-Key-Store), security, middleware (Idempotenz-Store), api vollständig auf `database.WithTenant` mit Principal-Scope um.
 
@@ -753,7 +753,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-012
 AUT-04;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-012
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -765,7 +765,7 @@ AUT-04;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-012
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 
 **Problem:** TEN-06: 46 private `withTenant`-Helfer und direkte Poolpfade liefern inkonsistenten Kontext. Dieses WP stellt die Pakete discovery, ipam vollständig auf `database.WithTenant` mit Principal-Scope um.
 
@@ -796,7 +796,7 @@ AUT-04;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-012
 TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-013
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -808,7 +808,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-013
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 
 **Problem:** TEN-06: 46 private `withTenant`-Helfer und direkte Poolpfade liefern inkonsistenten Kontext. Dieses WP stellt die Pakete rack, tenantapi, locationnode, location vollständig auf `database.WithTenant` mit Principal-Scope um.
 
@@ -841,7 +841,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-013
 TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-014
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -853,7 +853,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-014
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 
 **Problem:** TEN-06: 46 private `withTenant`-Helfer und direkte Poolpfade liefern inkonsistenten Kontext. Dieses WP stellt die Pakete search, savedview, export (Handler/Repository, nicht Worker) vollständig auf `database.WithTenant` mit Principal-Scope um.
 
@@ -885,7 +885,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-014
 TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-015
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -897,7 +897,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-015
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 
 **Problem:** TEN-06: 46 private `withTenant`-Helfer und direkte Poolpfade liefern inkonsistenten Kontext. Dieses WP stellt die Pakete webhook, audit, monitoring (Handler/Repository) vollständig auf `database.WithTenant` mit Principal-Scope um.
 
@@ -929,7 +929,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-015
 TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-016
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -941,7 +941,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-016
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 | AST-01 | [P2] | ABWEICHEND | Critical | Teil | `docs/audit/09-module-phase2plus.md:29` | `docs/spec/katalog-v3/09-module-phase2plus.md:4` |
 | MGT-11 | [P5] | ABWEICHEND | Critical | Teil | `docs/audit/09-module-phase2plus.md:54` | `docs/spec/katalog-v3/09-module-phase2plus.md:60` |
 
@@ -978,7 +978,7 @@ AST-01;[P2];B;backend/internal/<paket>/*_scope_integration_test.go;WP-017
 MGT-11;[P5];B;backend/internal/<paket>/*_scope_integration_test.go;WP-017
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -990,7 +990,7 @@ MGT-11;[P5];B;backend/internal/<paket>/*_scope_integration_test.go;WP-017
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 
 **Problem:** TEN-06: 46 private `withTenant`-Helfer und direkte Poolpfade liefern inkonsistenten Kontext. Dieses WP stellt die Pakete movement, stocktake, consumable, order, disposal vollständig auf `database.WithTenant` mit Principal-Scope um.
 
@@ -1024,7 +1024,7 @@ MGT-11;[P5];B;backend/internal/<paket>/*_scope_integration_test.go;WP-017
 TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-018
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -1036,7 +1036,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-018
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 | MGT-03 | [P4] | ABWEICHEND | Critical | Teil | `docs/audit/09-module-phase2plus.md:46` | `docs/spec/katalog-v3/09-module-phase2plus.md:44` |
 
 **Problem:** TEN-06: 46 private `withTenant`-Helfer und direkte Poolpfade liefern inkonsistenten Kontext. Dieses WP stellt die Pakete document, desk, keymgmt, training vollständig auf `database.WithTenant` mit Principal-Scope um.
@@ -1071,7 +1071,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-019
 MGT-03;[P4];B;backend/internal/<paket>/*_scope_integration_test.go;WP-019
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -1083,7 +1083,7 @@ MGT-03;[P4];B;backend/internal/<paket>/*_scope_integration_test.go;WP-019
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 | TKT-01 | [P2]; Pro [P4]; Monitoring/Findings/Automationen [P3] | ABWEICHEND | Critical | Teil | `docs/audit/09-module-phase2plus.md:56` | `docs/spec/katalog-v3/09-module-phase2plus.md:66` |
 | MGT-04 | [P3] | ABWEICHEND | Critical | Teil | `docs/audit/09-module-phase2plus.md:47` | `docs/spec/katalog-v3/09-module-phase2plus.md:46` |
 
@@ -1120,7 +1120,7 @@ TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/
 MGT-04;[P3];B;backend/internal/<paket>/*_scope_integration_test.go;WP-020
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -1132,7 +1132,7 @@ MGT-04;[P3];B;backend/internal/<paket>/*_scope_integration_test.go;WP-020
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 | WFL-01 | [P3] | ABWEICHEND | Critical | Teil | `docs/audit/09-module-phase2plus.md:65` | `docs/spec/katalog-v3/09-module-phase2plus.md:88` |
 
 **Problem:** TEN-06: 46 private `withTenant`-Helfer und direkte Poolpfade liefern inkonsistenten Kontext. Dieses WP stellt die Pakete form, workflow, agent, ai, iga vollständig auf `database.WithTenant` mit Principal-Scope um.
@@ -1168,7 +1168,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-021
 WFL-01;[P3];B;backend/internal/<paket>/*_scope_integration_test.go;WP-021
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -1180,8 +1180,8 @@ WFL-01;[P3];B;backend/internal/<paket>/*_scope_integration_test.go;WP-021
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
-| TEN-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:38` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
+| TEN-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:38` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:12` |
 | OPS-05 | [B] | ABWEICHEND | High | Teil | `docs/audit/01-installation-stack.md:83` | `docs/spec/katalog-v3/01-installation-stack.md:55` |
 | MON-04 | [P3] | ABWEICHEND | High | Teil | `docs/audit/08-frontend-monitoring-nfr-tests.md:35` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:10` |
 | AST-06 | [P2] | ABWEICHEND | High | Teil | `docs/audit/09-module-phase2plus.md:34` | `docs/spec/katalog-v3/09-module-phase2plus.md:14` |
@@ -1225,7 +1225,7 @@ MON-04;[P3];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-0
 AST-06;[P2];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-022
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1237,7 +1237,7 @@ AST-06;[P2];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-0
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:38` | fehlt → E-01 |
+| TEN-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:38` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:12` |
 | AST-01 | [P2] | ABWEICHEND | Critical | Teil | `docs/audit/09-module-phase2plus.md:29` | `docs/spec/katalog-v3/09-module-phase2plus.md:4` |
 | MGT-11 | [P5] | ABWEICHEND | Critical | Teil | `docs/audit/09-module-phase2plus.md:54` | `docs/spec/katalog-v3/09-module-phase2plus.md:60` |
 | MGT-03 | [P4] | ABWEICHEND | Critical | Teil | `docs/audit/09-module-phase2plus.md:46` | `docs/spec/katalog-v3/09-module-phase2plus.md:44` |
@@ -1277,7 +1277,7 @@ MGT-03;[P4];B;backend/internal/tenant/rls/client_policies_integration_test.go;WP
 WFL-01;[P3];B;backend/internal/tenant/rls/client_policies_integration_test.go;WP-023
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-09](entscheidungen.md#e-09) Schreiben von Zeilen mit `client_id`/`site_id` NULL (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-09](entscheidungen.md#e-09) Schreiben von Zeilen mit `client_id`/`site_id` NULL (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1289,8 +1289,8 @@ WFL-01;[P3];B;backend/internal/tenant/rls/client_policies_integration_test.go;WP
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-02 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:35` | fehlt → E-01 |
-| TEN-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:38` | fehlt → E-01 |
+| TEN-02 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:35` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:6` |
+| TEN-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:38` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:12` |
 
 **Problem:** G-Policies (ci_type, relationship_type, lifecycle_* u. a.) erlauben Ändern/Löschen globaler Zeilen (`organization_id IS NULL`); fünf Tabellen ohne Org-Spalte sind ungeklärt.
 
@@ -1320,7 +1320,7 @@ TEN-02;[B];B;backend/internal/tenant/rls/global_rows_integration_test.go;WP-024
 TEN-05;[B];B;backend/internal/tenant/rls/global_rows_integration_test.go;WP-024
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-10](entscheidungen.md#e-10) Tabellen ohne Org-Spalte und globale Katalogzeilen (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-10](entscheidungen.md#e-10) Tabellen ohne Org-Spalte und globale Katalogzeilen (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1332,9 +1332,9 @@ TEN-05;[B];B;backend/internal/tenant/rls/global_rows_integration_test.go;WP-024
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-02 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:35` | fehlt → E-01 |
-| TEN-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:38` | fehlt → E-01 |
-| IMP-07 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:76` | fehlt → E-01 |
+| TEN-02 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:35` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:6` |
+| TEN-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:38` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:12` |
+| IMP-07 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:76` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:116` |
 | SRC-01 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:39` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:34` |
 
 **Problem:** Kindtabellen tragen Client/Site nicht durchgängig denormalisiert; dadurch fehlen Client-/Site-WITH-CHECK-Schranken.
@@ -1368,7 +1368,7 @@ IMP-07;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-025
 SRC-01;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-025
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1381,7 +1381,7 @@ SRC-01;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-025
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | LOC-10 | B/G1 | ABWEICHEND | Critical | Teil | `docs/audit/03-datenmodell-standorte-metamodell.md:46` | `docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:56` |
-| TEN-02 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:35` | fehlt → E-01 |
+| TEN-02 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:35` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:6` |
 | TEC-06 | [B]; [Q] Spike | ABWEICHEND | Critical | Teil | `docs/audit/01-installation-stack.md:59` | `docs/spec/katalog-v3/01-installation-stack.md:6` |
 
 Weitere Anforderungstexte: CH28 (`docs/spec/katalog-v3/00-grundlagen.md:55`)
@@ -1419,7 +1419,7 @@ TEN-02;[B];B;backend/internal/locations/pg_repository_integration_test.go;WP-026
 TEC-06;[B], [Q] Spike;B;backend/internal/locations/pg_repository_integration_test.go;WP-026
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-19](entscheidungen.md#e-19) CH28 (V): gemeinsamer Location-Baum (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-19](entscheidungen.md#e-19) CH28 (V): gemeinsamer Location-Baum (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1431,8 +1431,8 @@ TEC-06;[B], [Q] Spike;B;backend/internal/locations/pg_repository_integration_tes
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:38` | fehlt → E-01 |
-| TEN-04 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:37` | fehlt → E-01 |
+| TEN-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:38` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:12` |
+| TEN-04 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:37` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:10` |
 | TEC-12 | [P5] | ABWEICHEND | Critical | Teil | `docs/audit/01-installation-stack.md:61` | `docs/spec/katalog-v3/01-installation-stack.md:10` |
 
 Weitere Anforderungstexte: CH25 (`docs/spec/katalog-v3/00-grundlagen.md:49`)
@@ -1466,7 +1466,7 @@ TEN-04;[B];B;backend/internal/tenant/rls/site_policies_integration_test.go;WP-02
 TEC-12;[P5];B;backend/internal/tenant/rls/site_policies_integration_test.go;WP-027
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-09](entscheidungen.md#e-09) Schreiben von Zeilen mit `client_id`/`site_id` NULL (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-09](entscheidungen.md#e-09) Schreiben von Zeilen mit `client_id`/`site_id` NULL (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1531,7 +1531,7 @@ MGT-03;[P4];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-0
 | MGT-06 | [P4] | ABWEICHEND | Critical | schließt | `docs/audit/09-module-phase2plus.md:49` | `docs/spec/katalog-v3/09-module-phase2plus.md:50` |
 | MGT-07 | [P4] | ABWEICHEND | Critical | schließt | `docs/audit/09-module-phase2plus.md:50` | `docs/spec/katalog-v3/09-module-phase2plus.md:52` |
 | TKT-01 | [P2]; Pro [P4]; Monitoring/Findings/Automationen [P3] | ABWEICHEND | Critical | Teil | `docs/audit/09-module-phase2plus.md:56` | `docs/spec/katalog-v3/09-module-phase2plus.md:66` |
-| TEN-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:38` | fehlt → E-01 |
+| TEN-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:38` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:12` |
 
 Weitere Anforderungstexte: CH25 (`docs/spec/katalog-v3/00-grundlagen.md:49`)
 
@@ -1568,7 +1568,7 @@ TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/
 TEN-05;[B];B;backend/internal/tenant/rls/team_scope_integration_test.go;WP-029
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-11](entscheidungen.md#e-11) Semantik des Team-Scopes (vorläufig entschieden); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-11](entscheidungen.md#e-11) Semantik des Team-Scopes (vorläufig entschieden); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1581,7 +1581,7 @@ TEN-05;[B];B;backend/internal/tenant/rls/team_scope_integration_test.go;WP-029
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | MGT-01 | [P2] | ABWEICHEND | Critical | Teil | `docs/audit/09-module-phase2plus.md:44` | `docs/spec/katalog-v3/09-module-phase2plus.md:40` |
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 
 **Problem:** Ein frei gesetzter StorageKey kann auf ein fremdes Org-Blob zeigen (Cross-Org-Blobzugriff).
 
@@ -1614,7 +1614,7 @@ MGT-01;[P2];B;backend/internal/document/blob_isolation_test.go;WP-030
 TEN-06;[B];B;backend/internal/document/blob_isolation_test.go;WP-030
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1626,8 +1626,8 @@ TEN-06;[B];B;backend/internal/document/blob_isolation_test.go;WP-030
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| IMP-07 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:76` | fehlt → E-01 |
-| CI-05 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:34` | fehlt → E-01 |
+| IMP-07 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:76` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:116` |
+| CI-05 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:34` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:22` |
 
 **Problem:** Die CTE traversiert vor der Sichtbarkeitsprüfung; unsichtbare Knoten werden erst nachträglich entfernt; maxNodes unterscheidet sich zwischen PG und Memory; gelöschte Zwischenknoten stoppen den Traversal nicht.
 
@@ -1658,7 +1658,7 @@ IMP-07;[B];B;backend/internal/topology/scope_integration_test.go;WP-031
 CI-05;[B];B;backend/internal/topology/scope_integration_test.go;WP-031
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1799,7 +1799,7 @@ SRC-04;[P2];B;backend/internal/savedview/scope_integration_test.go;WP-034
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | EXP-01 | [B]; DATEV [P2] | ABWEICHEND | Critical | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:47` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:50` |
-| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 
 **Problem:** Der Export-Worker verliert den Nutzerscope; Job-GET/-Liste sind nur orggebunden.
 
@@ -1833,7 +1833,7 @@ EXP-01;[B], DATEV [P2];B;backend/internal/export/scope_integration_test.go;WP-03
 TEN-06;[B];B;backend/internal/export/scope_integration_test.go;WP-035
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2056,7 +2056,7 @@ TEC-06;[B], [Q] Spike;B;backend/internal/monitoring/pg_store_integration_test.go
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-06 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/02-mandanten-auth-entitlements.md:39` | fehlt → E-01 |
+| TEN-06 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/02-mandanten-auth-entitlements.md:39` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:19` |
 
 **Problem:** Nach Umstellung aller Repository-Gruppen fehlt eine dauerhafte Absicherung gegen neue direkte Pool-Zugriffe ohne WithTenant.
 
@@ -2085,7 +2085,7 @@ TEC-06;[B], [Q] Spike;B;backend/internal/monitoring/pg_store_integration_test.go
 TEN-06;[B];B;backend/internal/database/tenantguard_test.go;WP-041
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-08](entscheidungen.md#e-08) TEN-04: GUC-Namen, Semantik leerer Scopes, Systempfade (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-08](entscheidungen.md#e-08) TEN-04: GUC-Namen, Semantik leerer Scopes, Systempfade (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2117,8 +2117,8 @@ TEN-06;[B];B;backend/internal/database/tenantguard_test.go;WP-041
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | TLC-04 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/07-api-suche-jobs-lebenszyklus.md:52` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:62` |
-| AUT-02 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:45` | fehlt → E-01 |
-| AUT-01 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:44` | fehlt → E-01 |
+| AUT-02 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:45` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:33` |
+| AUT-01 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:44` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:31` |
 
 **Problem:** Deaktivierung ändert nur `is_active`; Refresh übernimmt alte Rechte ohne Statusprüfung; erneuter Login reaktiviert gesperrte Benutzer; API-Keys bleiben gültig.
 
@@ -2153,7 +2153,7 @@ AUT-02;[B];B;backend/internal/identity/deactivation_integration_test.go;WP-042
 AUT-01;[B];B;backend/internal/identity/deactivation_integration_test.go;WP-042
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2165,8 +2165,8 @@ AUT-01;[B];B;backend/internal/identity/deactivation_integration_test.go;WP-042
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| AUT-01 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:44` | fehlt → E-01 |
-| AUT-09 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:52` | fehlt → E-01 |
+| AUT-01 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:44` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:31` |
+| AUT-09 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:52` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:45` |
 
 Weitere Anforderungstexte: CH26 (`docs/spec/katalog-v3/00-grundlagen.md:51`)
 
@@ -2201,7 +2201,7 @@ AUT-01;[B];B;backend/internal/identity/oidc_test.go;WP-043
 AUT-09;[B];B;backend/internal/identity/oidc_test.go;WP-043
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-14](entscheidungen.md#e-14) CH26 (V): Keycloak-Org-Attribut, MFA-Pflicht, Brokering (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-14](entscheidungen.md#e-14) CH26 (V): Keycloak-Org-Attribut, MFA-Pflicht, Brokering (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2213,7 +2213,7 @@ AUT-09;[B];B;backend/internal/identity/oidc_test.go;WP-043
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| AUT-09 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:52` | fehlt → E-01 |
+| AUT-09 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/02-mandanten-auth-entitlements.md:52` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:45` |
 
 Weitere Anforderungstexte: CH26 (`docs/spec/katalog-v3/00-grundlagen.md:51`)
 
@@ -2248,7 +2248,7 @@ Weitere Anforderungstexte: CH26 (`docs/spec/katalog-v3/00-grundlagen.md:51`)
 AUT-09;[B];B;tests/install-cloud-helpers.test.sh;WP-044
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-14](entscheidungen.md#e-14) CH26 (V): Keycloak-Org-Attribut, MFA-Pflicht, Brokering (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-14](entscheidungen.md#e-14) CH26 (V): Keycloak-Org-Attribut, MFA-Pflicht, Brokering (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2260,10 +2260,10 @@ AUT-09;[B];B;tests/install-cloud-helpers.test.sh;WP-044
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| RBA-04 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/02-mandanten-auth-entitlements.md:57` | fehlt → E-01 |
-| RBA-06 | [P2] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:59` | fehlt → E-01 |
+| RBA-04 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/02-mandanten-auth-entitlements.md:57` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:68` |
+| RBA-06 | [P2] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:59` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:72` |
 | MET-14 | P2/G2 | ABWEICHEND | Critical | Teil | `docs/audit/03-datenmodell-standorte-metamodell.md:58` | `docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:85` |
-| CI-10 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:39` | fehlt → E-01 |
+| CI-10 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:39` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:32` |
 
 **Problem:** Mapping existiert für alle 400 Operationen, ordnet aber falsch zu: Viewer kann entschlüsseln, `ci:write` löscht, `order:write` gibt frei; verschachtelte Overrides/Instanzattribute/Transitions/Reconciliation-Einstellungen werden über das erste Pfadsegment umgangen; Override-Löschung ohne `override:write`.
 
@@ -2297,7 +2297,7 @@ MET-14;P2/G2;B;backend/internal/server/authz_test.go;WP-045
 CI-10;[B];B;backend/internal/server/authz_test.go;WP-045
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2309,7 +2309,7 @@ CI-10;[B];B;backend/internal/server/authz_test.go;WP-045
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| RBA-02 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/02-mandanten-auth-entitlements.md:55` | fehlt → E-01 |
+| RBA-02 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/02-mandanten-auth-entitlements.md:55` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:53` |
 
 **Problem:** Seed und Session verwenden unterschiedliche Rollenmodelle; engineer/client_technician werden nicht erkannt; Viewer erhält credential:read.
 
@@ -2339,7 +2339,7 @@ CI-10;[B];B;backend/internal/server/authz_test.go;WP-045
 RBA-02;[B];B;backend/internal/permission/role_matrix_integration_test.go;WP-046
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-13](entscheidungen.md#e-13) RBA-02-Rollenmatrix und AUT-04-Schlüsselformat (vorläufig entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-13](entscheidungen.md#e-13) RBA-02-Rollenmatrix und AUT-04-Schlüsselformat (vorläufig entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2351,8 +2351,8 @@ RBA-02;[B];B;backend/internal/permission/role_matrix_integration_test.go;WP-046
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| SEC-01 | nicht angegeben | ABWEICHEND | Critical | schließt | `docs/audit/06-audit-sicherheit-events.md:26` | fehlt → E-01 |
-| COL-02 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/05-collector-discovery-reconciliation.md:35` | fehlt → E-01 |
+| SEC-01 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/06-audit-sicherheit-events.md:26` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:24` |
+| COL-02 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/05-collector-discovery-reconciliation.md:35` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:6` |
 
 **Problem:** `credential:read` kann Klartext per `/decrypt` abrufen; Webhook-Authheader sind in GET/Liste sichtbar; Logger ohne Redaktionshandler; `maskDSN` deckt nicht alle Passwortformate.
 
@@ -2387,11 +2387,11 @@ RBA-02;[B];B;backend/internal/permission/role_matrix_integration_test.go;WP-046
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SEC-01;nicht angegeben;B;backend/internal/credential/handler_test.go;WP-047
+SEC-01;[B];B;backend/internal/credential/handler_test.go;WP-047
 COL-02;[B];B;backend/internal/credential/handler_test.go;WP-047
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2403,7 +2403,7 @@ COL-02;[B];B;backend/internal/credential/handler_test.go;WP-047
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| COL-02 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/05-collector-discovery-reconciliation.md:35` | fehlt → E-01 |
+| COL-02 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/05-collector-discovery-reconciliation.md:35` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:6` |
 
 **Problem:** Aktiviertes Redfish sendet gemeinsame SSH-Zugangsdaten an gescannte Ziele ohne Zertifikatsprüfung.
 
@@ -2431,7 +2431,7 @@ COL-02;[B];B;backend/internal/credential/handler_test.go;WP-047
 COL-02;[B];B;collector/plugins/redfish/redfish_test.go;WP-048
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2443,7 +2443,7 @@ COL-02;[B];B;collector/plugins/redfish/redfish_test.go;WP-048
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| SEC-08 | nicht angegeben | ABWEICHEND | Critical | schließt | `docs/audit/06-audit-sicherheit-events.md:30` | fehlt → E-01 |
+| SEC-08 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/06-audit-sicherheit-events.md:30` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:38` |
 
 **Problem:** Webhook-/SCIM-URLs ohne Filter für private/Link-Local-/Metadaten-/IPv6-Ziele, ohne DNS-Pinning; keine ≤ 3 erneut geprüften Redirects.
 
@@ -2472,10 +2472,10 @@ COL-02;[B];B;collector/plugins/redfish/redfish_test.go;WP-048
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SEC-08;nicht angegeben;B;backend/internal/platform/egress/egress_test.go;WP-049
+SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-049
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2488,7 +2488,7 @@ SEC-08;nicht angegeben;B;backend/internal/platform/egress/egress_test.go;WP-049
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | API-04 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:29` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:10` |
-| AUT-10 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:53` | fehlt → E-01 |
+| AUT-10 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:53` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:47` |
 
 **Problem:** Pre-Auth-IP-Limit fehlt (ungültige API-Keys erreichen den Limiter nicht), Validierung steht vor Auth; 24-h-Idempotenz ist nicht atomar und erlaubt orgweit geteiltes Replay vor Routenrechten.
 
@@ -2520,7 +2520,7 @@ API-04;[B];B;backend/internal/middleware/middleware_test.go;WP-050
 AUT-10;[B];B;backend/internal/middleware/middleware_test.go;WP-050
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Session-/Org-Buckets und X-RateLimit-Header folgen in Epic C (WP-166 (`c-ratelimit`)).
 
@@ -2835,8 +2835,8 @@ MET-14;P2/G2;B;backend/internal/discovery/instance_field_test.go;WP-056
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| CI-04 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:33` | fehlt → E-01 |
-| OVR-01 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/05-collector-discovery-reconciliation.md:66` | fehlt → E-01 |
+| CI-04 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:33` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:20` |
+| OVR-01 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/05-collector-discovery-reconciliation.md:66` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:80` |
 
 Weitere Anforderungstexte: CH9 (`docs/spec/katalog-v3/00-grundlagen.md:17`), PRI-10 (`docs/spec/katalog-v3/00-grundlagen.md:82`)
 
@@ -2872,7 +2872,7 @@ CI-04;[B];D;backend/internal/ci/mergepatch_test.go;WP-057
 OVR-01;[B];D;backend/internal/ci/mergepatch_test.go;WP-057
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2884,11 +2884,11 @@ OVR-01;[B];D;backend/internal/ci/mergepatch_test.go;WP-057
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| REC-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:54` | fehlt → E-01 |
-| OVR-01 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/05-collector-discovery-reconciliation.md:66` | fehlt → E-01 |
-| CI-10 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:39` | fehlt → E-01 |
+| REC-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:54` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:54` |
+| OVR-01 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/05-collector-discovery-reconciliation.md:66` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:80` |
+| CI-10 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:39` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:32` |
 | API-07 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:32` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:16` |
-| REC-12 | [B] | PARTIAL | High | Teil | `docs/audit/05-collector-discovery-reconciliation.md:63` | fehlt → E-01 |
+| REC-12 | [B] | PARTIAL | High | Teil | `docs/audit/05-collector-discovery-reconciliation.md:63` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:72` |
 
 Weitere Anforderungstexte: CH9 (`docs/spec/katalog-v3/00-grundlagen.md:17`), PRI-10 (`docs/spec/katalog-v3/00-grundlagen.md:82`)
 
@@ -2927,7 +2927,7 @@ API-07;[B];D;backend/internal/override/decide_test.go;WP-058
 REC-12;[B];D;backend/internal/override/decide_test.go;WP-058
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-32](entscheidungen.md#e-32) REC-03: Rang der Quelle IPMI (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-32](entscheidungen.md#e-32) REC-03: Rang der Quelle IPMI (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2939,7 +2939,7 @@ REC-12;[B];D;backend/internal/override/decide_test.go;WP-058
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| OVR-02 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/05-collector-discovery-reconciliation.md:67` | fehlt → E-01 |
+| OVR-02 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/05-collector-discovery-reconciliation.md:67` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:82` |
 | WFL-02 | [P3] | ABWEICHEND | Critical | Teil | `docs/audit/09-module-phase2plus.md:66` | `docs/spec/katalog-v3/09-module-phase2plus.md:90` |
 | AGT-05 | [P4] | ABWEICHEND | Critical | schließt | `docs/audit/09-module-phase2plus.md:63` | `docs/spec/katalog-v3/09-module-phase2plus.md:82` |
 
@@ -2974,7 +2974,7 @@ WFL-02;[P3];D;backend/internal/workflow/executor_test.go;WP-059
 AGT-05;[P4];D;backend/internal/workflow/executor_test.go;WP-059
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2986,8 +2986,8 @@ AGT-05;[P4];D;backend/internal/workflow/executor_test.go;WP-059
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| OVR-01 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/05-collector-discovery-reconciliation.md:66` | fehlt → E-01 |
-| CI-10 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:39` | fehlt → E-01 |
+| OVR-01 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/05-collector-discovery-reconciliation.md:66` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:80` |
+| CI-10 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:39` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:32` |
 
 **Problem:** Normale CI-Sicht ist nicht einheitlich effektiv; Clear synchronisiert nicht.
 
@@ -3020,7 +3020,7 @@ OVR-01;[B];D;backend/internal/ci/effective_view_integration_test.go;WP-060
 CI-10;[B];D;backend/internal/ci/effective_view_integration_test.go;WP-060
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3082,7 +3082,7 @@ API-03;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-061
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| COL-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/05-collector-discovery-reconciliation.md:38` | fehlt → E-01 |
+| COL-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/05-collector-discovery-reconciliation.md:38` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:12` |
 | OPS-06 | [Q] | ABWEICHEND | Critical | Teil | `docs/audit/01-installation-stack.md:84` | `docs/spec/katalog-v3/01-installation-stack.md:57` |
 | NFR-04 | [B]; Teilumfang [P5] | ABWEICHEND | Critical | Teil | `docs/audit/08-frontend-monitoring-nfr-tests.md:57` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:40` |
 
@@ -3118,7 +3118,7 @@ OPS-06;[Q];D;edgecore/buffer/buffer_test.go;WP-062
 NFR-04;[B], Teilumfang [P5];D;edgecore/buffer/buffer_test.go;WP-062
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3185,7 +3185,7 @@ NTF-05;[B], Zusätze [P2], [P3];D;backend/internal/maintenance/status_test.go;WP
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-03 | [B] | PARTIAL | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:36` | fehlt → E-01 |
+| TEN-03 | [B] | PARTIAL | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:36` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:8` |
 | DB-04 | nicht geliefert | ABWEICHEND | High | Teil | `docs/audit/03-datenmodell-standorte-metamodell.md:35` | `docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:4` |
 
 Weitere Anforderungstexte: CH19 (`docs/spec/katalog-v3/00-grundlagen.md:37`)
@@ -3221,7 +3221,7 @@ TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-064
 DB-04;nicht geliefert;B;backend/internal/database/role_check_integration_test.go;WP-064
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3233,7 +3233,7 @@ DB-04;nicht geliefert;B;backend/internal/database/role_check_integration_test.go
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-09 | [Q] | PARTIAL | High | Teil | `docs/audit/02-mandanten-auth-entitlements.md:42` | fehlt → E-01 |
+| TEN-09 | [Q] | PARTIAL | High | Teil | `docs/audit/02-mandanten-auth-entitlements.md:42` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:25` |
 | TST-02 | [B] | PARTIAL | High | Teil | `docs/audit/08-frontend-monitoring-nfr-tests.md:67` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:65` |
 
 Weitere Anforderungstexte: CH25 (`docs/spec/katalog-v3/00-grundlagen.md:49`)
@@ -3265,7 +3265,7 @@ TEN-09;[Q];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-065
 TST-02;[B];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-065
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Kanal-Matrix (Export, Suche, GraphQL, Jobs, Benachrichtigungen, Review, Webhooks) folgt im Sicherheitsreview (WP-208 (`sr-matrix`)).
 
@@ -3297,8 +3297,8 @@ TST-02;[B];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-065
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| AUT-02 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/02-mandanten-auth-entitlements.md:45` | fehlt → E-01 |
-| SEC-06 | nicht angegeben | ABWEICHEND | High | Teil | `docs/audit/06-audit-sicherheit-events.md:28` | fehlt → E-01 |
+| AUT-02 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/02-mandanten-auth-entitlements.md:45` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:33` |
+| SEC-06 | [B] | ABWEICHEND | High | Teil | `docs/audit/06-audit-sicherheit-events.md:28` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:34` |
 
 **Problem:** RS256 besteht, aber 60 statt 15 Minuten, abweichende Claims, kein kid, kein Refresh-Cookie, kein Redis-Widerruf.
 
@@ -3331,10 +3331,10 @@ TST-02;[B];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-065
 
 ```text
 AUT-02;[B];B;backend/internal/identity/session_test.go;WP-066
-SEC-06;nicht angegeben;B;backend/internal/identity/session_test.go;WP-066
+SEC-06;[B];B;backend/internal/identity/session_test.go;WP-066
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3346,7 +3346,7 @@ SEC-06;nicht angegeben;B;backend/internal/identity/session_test.go;WP-066
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| AUT-04 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:47` | fehlt → E-01 |
+| AUT-04 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:47` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:37` |
 | API-05 | [B] | PARTIAL | High | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:30` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:12` |
 
 **Problem:** Nur `rk_live_` mit zusätzlichem Trenner; `rk_test_`, Owner-Rechteschnitt, einmalige Ausgabe/Verwaltung und überlappende Rotation fehlen; PG-Lookup vor Tenant-Kontext.
@@ -3383,7 +3383,7 @@ AUT-04;[B];B;backend/internal/identity/apikey_integration_test.go;WP-067
 API-05;[B];B;backend/internal/identity/apikey_integration_test.go;WP-067
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-13](entscheidungen.md#e-13) RBA-02-Rollenmatrix und AUT-04-Schlüsselformat (vorläufig entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-13](entscheidungen.md#e-13) RBA-02-Rollenmatrix und AUT-04-Schlüsselformat (vorläufig entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3395,7 +3395,7 @@ API-05;[B];B;backend/internal/identity/apikey_integration_test.go;WP-067
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| RBA-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:54` | fehlt → E-01 |
+| RBA-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:54` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:51` |
 
 **Problem:** Neun geforderte Schlüssel fehlen im SQL-/Go-Katalog; `site:*` ersetzt `location:*` nicht; `collector:manage` existiert nur als Konstante.
 
@@ -3425,7 +3425,7 @@ API-05;[B];B;backend/internal/identity/apikey_integration_test.go;WP-067
 RBA-01;[B];B;backend/internal/server/authz_catalog_test.go;WP-068
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3437,7 +3437,7 @@ RBA-01;[B];B;backend/internal/server/authz_catalog_test.go;WP-068
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| RBA-08 | [B] | PARTIAL | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:61` | fehlt → E-01 |
+| RBA-08 | [B] | PARTIAL | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:61` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:83` |
 | API-05 | [B] | PARTIAL | High | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:30` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:12` |
 
 **Problem:** Service-Accounts mit Rollen/Scopes fehlen; Subscriptions erhalten volle Ereignisse ohne gebundene Objektleserechte.
@@ -3472,7 +3472,7 @@ RBA-08;[B];B;backend/internal/user/service_account_integration_test.go;WP-069
 API-05;[B];B;backend/internal/user/service_account_integration_test.go;WP-069
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3484,7 +3484,7 @@ API-05;[B];B;backend/internal/user/service_account_integration_test.go;WP-069
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| SEC-07 | nicht angegeben | FAIL | High | schließt | `docs/audit/06-audit-sicherheit-events.md:29` | fehlt → E-01 |
+| SEC-07 | [B] | FAIL | High | schließt | `docs/audit/06-audit-sicherheit-events.md:29` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:36` |
 | API-05 | [B] | PARTIAL | High | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:30` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:12` |
 
 **Problem:** Kein `/admin`-Operatorpfad, keine Auswertung von `RETICORA_OPERATOR_TOKEN`, kein `operator_audit`.
@@ -3515,11 +3515,11 @@ API-05;[B];B;backend/internal/user/service_account_integration_test.go;WP-069
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SEC-07;nicht angegeben;B;backend/internal/operator/operator_test.go;WP-070
+SEC-07;[B];B;backend/internal/operator/operator_test.go;WP-070
 API-05;[B];B;backend/internal/operator/operator_test.go;WP-070
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3531,8 +3531,8 @@ API-05;[B];B;backend/internal/operator/operator_test.go;WP-070
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| ENT-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:62` | fehlt → E-01 |
-| ENT-02 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:63` | fehlt → E-01 |
+| ENT-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:62` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:87` |
+| ENT-02 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:63` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:89` |
 
 **Problem:** Skalare `limit_value`/`expires_at` statt `limits` JSONB/`valid_until`; `source` fehlt; Schlüssel `cmdb`/`export` statt `cmdb_core`/`export_csv`; topology/rack_view/api_access/notifications_email und max_*-Kontingente fehlen; Core ist deaktivierbar.
 
@@ -3566,7 +3566,7 @@ ENT-01;[B];B;backend/internal/entitlement/entitlement_test.go;WP-071
 ENT-02;[B];B;backend/internal/entitlement/entitlement_test.go;WP-071
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3578,9 +3578,9 @@ ENT-02;[B];B;backend/internal/entitlement/entitlement_test.go;WP-071
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| ENT-05 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:66` | fehlt → E-01 |
-| ENT-07 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:68` | fehlt → E-01 |
-| ENT-03 | [B] | ABWEICHEND | High | Teil | `docs/audit/02-mandanten-auth-entitlements.md:64` | fehlt → E-01 |
+| ENT-05 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:66` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:95` |
+| ENT-07 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:68` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:112` |
+| ENT-03 | [B] | ABWEICHEND | High | Teil | `docs/audit/02-mandanten-auth-entitlements.md:64` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:91` |
 | API-04 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:29` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:10` |
 
 Weitere Anforderungstexte: CH21 (`docs/spec/katalog-v3/00-grundlagen.md:41`)
@@ -3620,7 +3620,7 @@ ENT-03;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-072
 API-04;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-072
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3632,8 +3632,8 @@ API-04;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-072
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| ENT-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:64` | fehlt → E-01 |
-| ENT-08 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:69` | fehlt → E-01 |
+| ENT-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:64` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:91` |
+| ENT-08 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:69` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:114` |
 
 Weitere Anforderungstexte: CH21 (`docs/spec/katalog-v3/00-grundlagen.md:41`)
 
@@ -3668,7 +3668,7 @@ ENT-03;[B];B;backend/internal/entitlement/unlicensed_integration_test.go;WP-073
 ENT-08;[B];B;backend/internal/entitlement/unlicensed_integration_test.go;WP-073
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-22](entscheidungen.md#e-22) CH21 (V): Ausgestaltung `unlicensed_ci` (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-22](entscheidungen.md#e-22) CH21 (V): Ausgestaltung `unlicensed_ci` (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3680,7 +3680,7 @@ ENT-08;[B];B;backend/internal/entitlement/unlicensed_integration_test.go;WP-073
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| ENT-04 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:65` | fehlt → E-01 |
+| ENT-04 | [B] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:65` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:93` |
 | API-05 | [B] | PARTIAL | High | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:30` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:12` |
 
 **Problem:** Schreiben erfolgt über POST /api/v1/entitlements mit tenantseitigem `entitlement:manage`; org_admin kann eigene Freigaben ändern.
@@ -3715,7 +3715,7 @@ ENT-04;[B];B;backend/internal/operator/entitlements_test.go;WP-074
 API-05;[B];B;backend/internal/operator/entitlements_test.go;WP-074
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-12](entscheidungen.md#e-12) ENT-04: Wer darf Entitlements schreiben? (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-12](entscheidungen.md#e-12) ENT-04: Wer darf Entitlements schreiben? (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3727,7 +3727,7 @@ API-05;[B];B;backend/internal/operator/entitlements_test.go;WP-074
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| ENT-06 | (V), [B–P4], [A] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:67` | fehlt → E-01 |
+| ENT-06 | (V), [B–P4], [A] | ABWEICHEND | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:67` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:97` |
 | API-06 | [P2]/[P3]/[P4]/[A] | ABWEICHEND | High | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:31` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:14` |
 | IGA-01 | [A] | ABWEICHEND | High | Teil | `docs/audit/09-module-phase2plus.md:69` | `docs/spec/katalog-v3/09-module-phase2plus.md:98` |
 | IGA-02 | [A] | ABWEICHEND | High | Teil | `docs/audit/09-module-phase2plus.md:70` | `docs/spec/katalog-v3/09-module-phase2plus.md:98` |
@@ -3770,7 +3770,7 @@ IGA-04;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 AI-02;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-34](entscheidungen.md#e-34) ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan (vorläufig entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-34](entscheidungen.md#e-34) ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan (vorläufig entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3892,7 +3892,7 @@ AST-04;[P2];B;backend/internal/ci/asset_canonical_integration_test.go;WP-077
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| RCK-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:60` | fehlt → E-01 |
+| RCK-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:60` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:80` |
 | DB-05 | nicht geliefert; CH12/PRI-10 | ABWEICHEND | High | Teil | `docs/audit/03-datenmodell-standorte-metamodell.md:36` | `docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:17` |
 
 **Problem:** Umpositionieren/Unmount schreiben nur `rack_mount`; Standortübernahme nach DB-05 sowie ci_change und Audit fehlen.
@@ -3921,7 +3921,7 @@ RCK-03;[B];B;backend/internal/rack/mount_location_integration_test.go;WP-078
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/rack/mount_location_integration_test.go;WP-078
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3934,7 +3934,7 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/rack/mount_location_integr
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | DB-05 | nicht geliefert; CH12/PRI-10 | ABWEICHEND | High | Teil | `docs/audit/03-datenmodell-standorte-metamodell.md:36` | `docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:17` |
-| REL-01 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:61` | fehlt → E-01 |
+| REL-01 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:61` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:84` |
 | AST-05 | [P2] | ABWEICHEND | Critical | Teil | `docs/audit/09-module-phase2plus.md:33` | `docs/spec/katalog-v3/09-module-phase2plus.md:12` |
 
 **Problem:** Kein `ci.parent_ci_id`; `contains`, `mounted_in`, `located_in` sind speicherbare Beziehungen statt Projektionen.
@@ -3970,7 +3970,7 @@ REL-01;[B];B;backend/internal/relationship/projection_integration_test.go;WP-079
 AST-05;[P2];B;backend/internal/relationship/projection_integration_test.go;WP-079
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4026,10 +4026,10 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/health_integration_test
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| NET-08 | [B] | FAIL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:56` | fehlt → E-01 |
+| NET-08 | [B] | FAIL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:56` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:70` |
 | DB-05 | nicht geliefert; CH12/PRI-10 | ABWEICHEND | High | Teil | `docs/audit/03-datenmodell-standorte-metamodell.md:36` | `docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:17` |
-| NET-01 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:49` | fehlt → E-01 |
-| NET-02 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:50` | fehlt → E-01 |
+| NET-01 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:49` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:56` |
+| NET-02 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:50` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:58` |
 
 **Problem:** Keine Tabelle `vlan`; `subnet.vlan_id` ist Integer ohne FK; Interface ohne VLAN-Referenz.
 
@@ -4061,7 +4061,7 @@ NET-01;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
 NET-02;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-24](entscheidungen.md#e-24) NET-08: Eindeutigkeit bei VLAN ohne Site (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-24](entscheidungen.md#e-24) NET-08: Eindeutigkeit bei VLAN ohne Site (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4073,9 +4073,9 @@ NET-02;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-10 | [B] | FAIL | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:43` | fehlt → E-01 |
-| NET-02 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:50` | fehlt → E-01 |
-| NET-03 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:51` | fehlt → E-01 |
+| TEN-10 | [B] | FAIL | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:43` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:27` |
+| NET-02 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:50` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:58` |
+| NET-03 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:51` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:60` |
 
 Weitere Anforderungstexte: CH10 (`docs/spec/katalog-v3/00-grundlagen.md:19`)
 
@@ -4111,7 +4111,7 @@ NET-02;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
 NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4141,7 +4141,7 @@ NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| DIS-05 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:46` | fehlt → E-01 |
+| DIS-05 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:46` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:30` |
 | GLO-12 | [B] | ABWEICHEND | High | Teil | `docs/audit/05-collector-discovery-reconciliation.md:33` | `docs/spec/katalog-v3/00-grundlagen.md:103` |
 
 **Problem:** Collector sendet ein Result-Array, Server erwartet `collector_id/items` mit anderem Feldvertrag; DeviceRecord mit record_id/observed_at/VRF/Scope/Client/Site und strukturierten Blöcken fehlt.
@@ -4177,7 +4177,7 @@ DIS-05;[B];D;backend/internal/discovery/devicerecord_test.go;WP-083
 GLO-12;[B];D;backend/internal/discovery/devicerecord_test.go;WP-083
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4190,7 +4190,7 @@ GLO-12;[B];D;backend/internal/discovery/devicerecord_test.go;WP-083
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | GLO-12 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:33` | `docs/spec/katalog-v3/00-grundlagen.md:103` |
-| REC-05 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:56` | fehlt → E-01 |
+| REC-05 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:56` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:58` |
 
 **Problem:** Ingest/Provenienz nutzen Serverzeit; keine Ablehnung > 5 min Zukunft; gleich-/höherrangige Werte gewinnen ohne Quellzeitprüfung; Vergleich CI-weit statt feldweise.
 
@@ -4222,7 +4222,7 @@ GLO-12;[B];D;backend/internal/override/decide_test.go;WP-084
 REC-05;[B];D;backend/internal/override/decide_test.go;WP-084
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4234,7 +4234,7 @@ REC-05;[B];D;backend/internal/override/decide_test.go;WP-084
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| REC-01 | [B] | FAIL | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:52` | fehlt → E-01 |
+| REC-01 | [B] | FAIL | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:52` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:44` |
 | NFR-03 | [B]; Teilumfang [P5] | ABWEICHEND | High | Teil | `docs/audit/08-frontend-monitoring-nfr-tests.md:56` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:38` |
 
 **Problem:** Konsument mit WithTenant-Transaktion, record_id/48h-Idempotenz und serieller Quellzeitordnung pro CI fehlt; HTTP-Batchschleife ersetzt ihn nicht.
@@ -4269,7 +4269,7 @@ REC-01;[B];D;backend/internal/discovery/consumer_test.go;WP-085
 NFR-03;[B], Teilumfang [P5];D;backend/internal/discovery/consumer_test.go;WP-085
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4281,7 +4281,7 @@ NFR-03;[B], Teilumfang [P5];D;backend/internal/discovery/consumer_test.go;WP-085
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| REC-02 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:53` | fehlt → E-01 |
+| REC-02 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:53` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:46` |
 | NFR-01 | [B]; Teilumfang [P5] | ABWEICHEND | High | Teil | `docs/audit/08-frontend-monitoring-nfr-tests.md:54` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:34` |
 
 Weitere Anforderungstexte: CH29 (`docs/spec/katalog-v3/00-grundlagen.md:57`)
@@ -4316,7 +4316,7 @@ REC-02;[B];D;backend/internal/discovery/identity_test.go;WP-086
 NFR-01;[B], Teilumfang [P5];D;backend/internal/discovery/identity_test.go;WP-086
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-20](entscheidungen.md#e-20) CH29 (V): Hostname-Treffer nur als Review (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-20](entscheidungen.md#e-20) CH29 (V): Hostname-Treffer nur als Review (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4328,7 +4328,7 @@ NFR-01;[B], Teilumfang [P5];D;backend/internal/discovery/identity_test.go;WP-086
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| CI-13 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:42` | fehlt → E-01 |
+| CI-13 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:42` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:38` |
 
 **Problem:** Identitätsabgleich ignoriert softgelöschte CIs; danach Neuanlage; `resurrected_device` fehlt.
 
@@ -4355,7 +4355,7 @@ NFR-01;[B], Teilumfang [P5];D;backend/internal/discovery/identity_test.go;WP-086
 CI-13;[B];D;backend/internal/discovery/resurrect_test.go;WP-087
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4367,7 +4367,7 @@ CI-13;[B];D;backend/internal/discovery/resurrect_test.go;WP-087
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| REC-08 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:59` | fehlt → E-01 |
+| REC-08 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:59` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:64` |
 | API-05 | [B] | PARTIAL | High | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:30` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:12` |
 
 **Problem:** Drei statt zehn Reviewtypen; Aktionen merge/create/dismiss statt merge/new/dismiss/accept; `review:resolve`, Deduplizierung, Anlagebenachrichtigung und > 14-Tage-Eskalation fehlen.
@@ -4404,7 +4404,7 @@ REC-08;[B];D;backend/internal/reviews/service_test.go;WP-088
 API-05;[B];D;backend/internal/reviews/service_test.go;WP-088
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-25](entscheidungen.md#e-25) API-05/JOB: verbindliche Pfade, Revert, Snapshot (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-25](entscheidungen.md#e-25) API-05/JOB: verbindliche Pfade, Revert, Snapshot (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4416,8 +4416,8 @@ API-05;[B];D;backend/internal/reviews/service_test.go;WP-088
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| REC-06 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:57` | fehlt → E-01 |
-| REC-12 | [B] | PARTIAL | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:63` | fehlt → E-01 |
+| REC-06 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:57` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:60` |
+| REC-12 | [B] | PARTIAL | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:63` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:72` |
 
 **Problem:** Bei niedrigem Rang wird der widersprechende Eingangswert vor Reviewaufbau ersetzt; Diverged-Rückgabe ignoriert; accept mit Overrideentfernung und dismiss bis Wertwechsel fehlen.
 
@@ -4447,7 +4447,7 @@ REC-06;[B];D;backend/internal/reviews/conflict_test.go;WP-089
 REC-12;[B];D;backend/internal/reviews/conflict_test.go;WP-089
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4459,9 +4459,9 @@ REC-12;[B];D;backend/internal/reviews/conflict_test.go;WP-089
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| REC-07 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:58` | fehlt → E-01 |
-| AUD-03 | nicht angegeben | ABWEICHEND | High | Teil | `docs/audit/06-audit-sicherheit-events.md:23` | fehlt → E-01 |
-| NET-01 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:49` | fehlt → E-01 |
+| REC-07 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:58` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:62` |
+| AUD-03 | [B] | ABWEICHEND | High | Teil | `docs/audit/06-audit-sicherheit-events.md:23` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:8` |
+| NET-01 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:49` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:56` |
 
 **Problem:** `last_seen_at` wird als ci_change protokolliert; unknown wird bei Match nicht active; keine Interface-/IP-Entfernung nach drei Fehlbeobachtungen.
 
@@ -4489,11 +4489,11 @@ REC-12;[B];D;backend/internal/reviews/conflict_test.go;WP-089
 
 ```text
 REC-07;[B];D;backend/internal/discovery/last_seen_test.go;WP-090
-AUD-03;nicht angegeben;D;backend/internal/discovery/last_seen_test.go;WP-090
+AUD-03;[B];D;backend/internal/discovery/last_seen_test.go;WP-090
 NET-01;[B];D;backend/internal/discovery/last_seen_test.go;WP-090
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4506,7 +4506,7 @@ NET-01;[B];D;backend/internal/discovery/last_seen_test.go;WP-090
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | GLO-13 | [B] | FAIL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:29` | `docs/spec/katalog-v3/00-grundlagen.md:105` |
-| CI-10 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:39` | fehlt → E-01 |
+| CI-10 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:39` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:32` |
 
 **Problem:** Keine generelle Ablehnung der vier reservierten Schlüssel bei Create/PATCH/Ingest; separate `ci_field_value`-Tabelle statt verlangter Namespaces; `_instance` fehlt.
 
@@ -4541,7 +4541,7 @@ GLO-13;[B];D;backend/internal/ci/validation_test.go;WP-091
 CI-10;[B];D;backend/internal/ci/validation_test.go;WP-091
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-23](entscheidungen.md#e-23) Abgrenzung GLO-13 (reservierte Namensräume) zu CI-10 (Speichermodell) (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-23](entscheidungen.md#e-23) Abgrenzung GLO-13 (reservierte Namensräume) zu CI-10 (Speichermodell) (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5010,7 +5010,7 @@ OPS-04;[B], [P5];A;tests/restore-pitr.sh;WP-101
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | TEC-15 | [B] | ABWEICHEND | High | schließt | `docs/audit/01-installation-stack.md:64` | `docs/spec/katalog-v3/01-installation-stack.md:16` |
-| COL-06 | [B], Air-Gapped [O] | ABWEICHEND | High | Teil | `docs/audit/05-collector-discovery-reconciliation.md:39` | fehlt → E-01 |
+| COL-06 | [B], Air-Gapped [O] | ABWEICHEND | High | Teil | `docs/audit/05-collector-discovery-reconciliation.md:39` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:14` |
 
 **Problem:** Kein cosign-/Sigstore-/SBOM-Releaseprozess; Updater ersetzt Binärdateien mit nur optionaler Prüfsumme.
 
@@ -5039,7 +5039,7 @@ TEC-15;[B];A;edgecore/update/update_test.go;WP-102
 COL-06;[B], Air-Gapped [O];A;edgecore/update/update_test.go;WP-102
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-31](entscheidungen.md#e-31) Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-31](entscheidungen.md#e-31) Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5119,7 +5119,7 @@ OPS-05;[B];A;backend/internal/server/workers_test.go;WP-103
 OPS-06;[Q];A;tests/outage/;WP-104
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5262,7 +5262,7 @@ SIM-01;[B], Teilumfang [P2];A;.github/workflows/ci.yml;WP-106
 | LOC-01 | B/G1 | PARTIAL | Medium | schließt | `docs/audit/03-datenmodell-standorte-metamodell.md:37` | `docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:38` |
 | LOC-02 | B/G1 | ABWEICHEND | Medium | schließt | `docs/audit/03-datenmodell-standorte-metamodell.md:38` | `docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:40` |
 | LOC-03 | B/G1 | ABWEICHEND | Medium | schließt | `docs/audit/03-datenmodell-standorte-metamodell.md:39` | `docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:42` |
-| TEN-01 | [B], Reseller [P4] | PARTIAL | Medium | Teil | `docs/audit/02-mandanten-auth-entitlements.md:34` | fehlt → E-01 |
+| TEN-01 | [B], Reseller [P4] | PARTIAL | Medium | Teil | `docs/audit/02-mandanten-auth-entitlements.md:34` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:4` |
 | API-05 | [B] | PARTIAL | High | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:30` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:12` |
 
 **Problem:** Keine validierten IANA-Zeitzonen, ISO-4217-Währung, Locale; Client-Unique auf Slug statt Name, external_ref nicht im CRUD; Site-Unique (org,name) statt (org,client_id,name); Zeitzonen fehlen.
@@ -5301,7 +5301,7 @@ TEN-01;[B], Reseller [P4];B;backend/internal/tenantapi/handler_test.go;WP-107
 API-05;[B];B;backend/internal/tenantapi/handler_test.go;WP-107
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5362,7 +5362,7 @@ LOC-06;B/G1;B;backend/internal/tenantapi/location_uniques_integration_test.go;WP
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-01 | [B], Reseller [P4] | PARTIAL | Medium | schließt | `docs/audit/02-mandanten-auth-entitlements.md:34` | fehlt → E-01 |
+| TEN-01 | [B], Reseller [P4] | PARTIAL | Medium | schließt | `docs/audit/02-mandanten-auth-entitlements.md:34` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:4` |
 
 **Problem:** Org/Client/Standorthierarchie, Location-Baum und Assetbezug bestehen, die durchgängige Hierarchie mit Scopewirkung ist nicht nachgewiesen; doppelte Standortstrukturen sind zu konsolidieren.
 
@@ -5388,7 +5388,7 @@ LOC-06;B/G1;B;backend/internal/tenantapi/location_uniques_integration_test.go;WP
 TEN-01;[B], Reseller [P4];B;backend/internal/locations/hierarchy_integration_test.go;WP-109
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5400,7 +5400,7 @@ TEN-01;[B], Reseller [P4];B;backend/internal/locations/hierarchy_integration_tes
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| AUT-03 | [B] | ABWEICHEND | Medium | schließt | `docs/audit/02-mandanten-auth-entitlements.md:46` | fehlt → E-01 |
+| AUT-03 | [B] | ABWEICHEND | Medium | schließt | `docs/audit/02-mandanten-auth-entitlements.md:46` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:35` |
 
 **Problem:** Kein eigener Dev-Login; `AllowInsecureDevAuth` ist opt-in, aber nicht ausdrücklich außerhalb production begrenzt.
 
@@ -5428,7 +5428,7 @@ TEN-01;[B], Reseller [P4];B;backend/internal/locations/hierarchy_integration_tes
 AUT-03;[B];B;backend/internal/config/config_test.go;WP-110
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5715,7 +5715,7 @@ API-05;[B];B;backend/internal/citype/attrdef_integration_test.go;WP-116
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | MET-11 | B/G1; Teil P2/G2 | ABWEICHEND | High | schließt | `docs/audit/03-datenmodell-standorte-metamodell.md:55` | `docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:79` |
-| CI-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:32` | fehlt → E-01 |
+| CI-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:32` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:18` |
 
 **Problem:** `multiline`/`multiselect` fehlen zugunsten `textarea`/`multi_enum`; `uuid` fehlt; Validierung sieht nur `attributes`, typisierte Felder (z. B. hostname) erfüllen Pflichtfelder nicht; Discovery umgeht die Servicevalidierung.
 
@@ -5746,7 +5746,7 @@ MET-11;B/G1, Teil P2/G2;B;backend/internal/fieldmeta/fieldmeta_test.go;WP-117
 CI-03;[B];B;backend/internal/fieldmeta/fieldmeta_test.go;WP-117
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5853,7 +5853,7 @@ MET-04;B/G1;B;backend/internal/citype/compose_test.go;WP-119
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| CI-01 | [B], Teilfelder [P2]/[P3] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:30` | fehlt → E-01 |
+| CI-01 | [B], Teilfelder [P2]/[P3] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:30` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:4` |
 
 **Problem:** `discovery_source` ohne `import`; mehrere Spalten/DTO-Felder fehlen; Create ignoriert deklarierte Standort-/Hardware-/Netz-/OS-Felder und setzt `IsManual=false`.
 
@@ -5886,7 +5886,7 @@ MET-04;B/G1;B;backend/internal/citype/compose_test.go;WP-119
 CI-01;[B], Teilfelder [P2]/[P3];B;backend/internal/ci/handler_test.go;WP-120
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5898,7 +5898,7 @@ CI-01;[B], Teilfelder [P2]/[P3];B;backend/internal/ci/handler_test.go;WP-120
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| CI-02 | [B] | ABWEICHEND | Medium | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:31` | fehlt → E-01 |
+| CI-02 | [B] | ABWEICHEND | Medium | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:31` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:16` |
 
 **Problem:** Location-Index einspaltig; Org/Asset- und Org/Parent-Indizes fehlen; attributes-GIN ohne `jsonb_path_ops`.
 
@@ -5925,7 +5925,7 @@ CI-01;[B], Teilfelder [P2]/[P3];B;backend/internal/ci/handler_test.go;WP-120
 CI-02;[B];B;backend/internal/ci/indexes_integration_test.go;WP-121
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5937,7 +5937,7 @@ CI-02;[B];B;backend/internal/ci/indexes_integration_test.go;WP-121
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| LCY-01 | [B] | PARTIAL | Low | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:43` | fehlt → E-01 |
+| LCY-01 | [B] | PARTIAL | Low | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:43` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:42` |
 
 **Problem:** Trennung umgesetzt, aber ohne vollständigen Testnachweis.
 
@@ -5961,7 +5961,7 @@ CI-02;[B];B;backend/internal/ci/indexes_integration_test.go;WP-121
 LCY-01;[B];B;backend/internal/lifecycle/status_separation_integration_test.go;WP-122
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5973,7 +5973,7 @@ LCY-01;[B];B;backend/internal/lifecycle/status_separation_integration_test.go;WP
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| NET-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:49` | fehlt → E-01 |
+| NET-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:49` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:56` |
 
 **Problem:** `if_index`, `mtu`, `vlan_id`-FK, `miss_count`, UNIQUE(ci,name), Index(org,mac) fehlen; Feldnamen weichen ab.
 
@@ -6002,7 +6002,7 @@ LCY-01;[B];B;backend/internal/lifecycle/status_separation_integration_test.go;WP
 NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-123
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6014,7 +6014,7 @@ NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-123
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| NET-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:51` | fehlt → E-01 |
+| NET-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:51` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:60` |
 
 **Problem:** Status active/reserved/deprecated/dhcp/available statt type discovered/reserved/static/dhcp; Teilindizes ohne vrf_id.
 
@@ -6044,7 +6044,7 @@ NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-123
 NET-03;[B];B;backend/internal/ipam/ip_integration_test.go;WP-124
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6056,7 +6056,7 @@ NET-03;[B];B;backend/internal/ipam/ip_integration_test.go;WP-124
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| NET-05 | [B] | PARTIAL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:53` | fehlt → E-01 |
+| NET-05 | [B] | PARTIAL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:53` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:64` |
 | API-05 | [B] | PARTIAL | High | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:30` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:12` |
 
 **Problem:** VRF-/VLAN-Ressourcen und deren CRUD fehlen.
@@ -6088,7 +6088,7 @@ NET-05;[B];B;backend/internal/ipam/handler_test.go;WP-125
 API-05;[B];B;backend/internal/ipam/handler_test.go;WP-125
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6100,7 +6100,7 @@ API-05;[B];B;backend/internal/ipam/handler_test.go;WP-125
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| RCK-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:58` | fehlt → E-01 |
+| RCK-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:58` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:76` |
 
 **Problem:** Kollisionsfehler 400 statt 409; keine Sperre für Kompositionskinder.
 
@@ -6127,7 +6127,7 @@ API-05;[B];B;backend/internal/ipam/handler_test.go;WP-125
 RCK-01;[B];B;backend/internal/rack/rules_integration_test.go;WP-126
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6139,7 +6139,7 @@ RCK-01;[B];B;backend/internal/rack/rules_integration_test.go;WP-126
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| REL-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:61` | fehlt → E-01 |
+| REL-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:61` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:84` |
 
 Weitere Anforderungstexte: CH27 (`docs/spec/katalog-v3/00-grundlagen.md:53`)
 
@@ -6170,7 +6170,7 @@ Weitere Anforderungstexte: CH27 (`docs/spec/katalog-v3/00-grundlagen.md:53`)
 REL-01;[B];B;backend/internal/relationshiptype/seed_integration_test.go;WP-127
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-18](entscheidungen.md#e-18) CH27 (V): impact_direction (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-18](entscheidungen.md#e-18) CH27 (V): impact_direction (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6182,7 +6182,7 @@ REL-01;[B];B;backend/internal/relationshiptype/seed_integration_test.go;WP-127
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| REL-02 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:62` | fehlt → E-01 |
+| REL-02 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:62` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:86` |
 
 **Problem:** Interface-Endpunkte, `last_confirmed_at`, `verified_by/at` und metadata-Vertrag fehlen; Confidence nur HTTP-seitig begrenzt; Sollindizes fehlen.
 
@@ -6211,7 +6211,7 @@ REL-01;[B];B;backend/internal/relationshiptype/seed_integration_test.go;WP-127
 REL-02;[B];B;backend/internal/relationship/pg_repository_integration_test.go;WP-128
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6358,7 +6358,7 @@ OPS-03;[B], [P5];B;backend/internal/jobs/scheduler_test.go;WP-131
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| AUD-04 | nicht angegeben | ABWEICHEND | High | schließt | `docs/audit/06-audit-sicherheit-events.md:24` | fehlt → E-01 |
+| AUD-04 | [B] | ABWEICHEND | High | schließt | `docs/audit/06-audit-sicherheit-events.md:24` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:10` |
 
 **Problem:** Hashkette nicht je Org mit lückenloser Sequenz und vollständiger Prüfung umgesetzt.
 
@@ -6384,10 +6384,10 @@ OPS-03;[B], [P5];B;backend/internal/jobs/scheduler_test.go;WP-131
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUD-04;nicht angegeben;B;backend/internal/audit/audit_test.go;WP-132
+AUD-04;[B];B;backend/internal/audit/audit_test.go;WP-132
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6399,8 +6399,8 @@ AUD-04;nicht angegeben;B;backend/internal/audit/audit_test.go;WP-132
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| AUD-05 | nicht angegeben | PARTIAL | High | schließt | `docs/audit/06-audit-sicherheit-events.md:25 (gemeinsamer Originalprüfblock AUD-05 / AUD-07 / AUD-09; keine unabhängige Einzelprüfung)` | fehlt → E-01 |
-| AUD-09 | nicht angegeben | PARTIAL | High | schließt | `docs/audit/06-audit-sicherheit-events.md:25 (gemeinsamer Originalprüfblock AUD-05 / AUD-07 / AUD-09; keine unabhängige Einzelprüfung)` | fehlt → E-01 |
+| AUD-05 | [B] | PARTIAL | High | schließt | `docs/audit/06-audit-sicherheit-events.md:25 (gemeinsamer Originalprüfblock AUD-05 / AUD-07 / AUD-09; keine unabhängige Einzelprüfung)` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:12` |
+| AUD-09 | [B] | PARTIAL | High | schließt | `docs/audit/06-audit-sicherheit-events.md:25 (gemeinsamer Originalprüfblock AUD-05 / AUD-07 / AUD-09; keine unabhängige Einzelprüfung)` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:20` |
 
 **Problem:** Pflichtfelder (Actor-Typ, Request-/Correlation-ID, Vorher/Nachher) nicht vollständig; nicht alle Mutationspfade auditiert.
 
@@ -6425,11 +6425,11 @@ AUD-04;nicht angegeben;B;backend/internal/audit/audit_test.go;WP-132
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-AUD-05;nicht angegeben;B;backend/internal/server/audit_coverage_test.go;WP-133
-AUD-09;nicht angegeben;B;backend/internal/server/audit_coverage_test.go;WP-133
+AUD-05;[B];B;backend/internal/server/audit_coverage_test.go;WP-133
+AUD-09;[B];B;backend/internal/server/audit_coverage_test.go;WP-133
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6442,7 +6442,7 @@ AUD-09;nicht angegeben;B;backend/internal/server/audit_coverage_test.go;WP-133
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | MET-54 | B/G1; Teil P2/G2 | ABWEICHEND | High | schließt | `docs/audit/03-datenmodell-standorte-metamodell.md:77` | `docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:101` |
-| AUD-07 | nicht angegeben | PARTIAL | High | schließt | `docs/audit/06-audit-sicherheit-events.md:25 (gemeinsamer Originalprüfblock AUD-05 / AUD-07 / AUD-09; keine unabhängige Einzelprüfung)` | fehlt → E-01 |
+| AUD-07 | [B] | PARTIAL | High | schließt | `docs/audit/06-audit-sicherheit-events.md:25 (gemeinsamer Originalprüfblock AUD-05 / AUD-07 / AUD-09; keine unabhängige Einzelprüfung)` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:16` |
 
 **Problem:** Kein Metamodell-Export; PG-Typänderungen ohne Audit-Recorder/History.
 
@@ -6471,10 +6471,10 @@ AUD-09;nicht angegeben;B;backend/internal/server/audit_coverage_test.go;WP-133
 
 ```text
 MET-54;B/G1, Teil P2/G2;B;backend/internal/citype/export_audit_integration_test.go;WP-134
-AUD-07;nicht angegeben;B;backend/internal/citype/export_audit_integration_test.go;WP-134
+AUD-07;[B];B;backend/internal/citype/export_audit_integration_test.go;WP-134
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6526,8 +6526,8 @@ NFR-06;[B];B;backend/internal/jobs/retention_integration_test.go;WP-135
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| EVT-01 | nicht angegeben | PARTIAL | High | schließt | `docs/audit/06-audit-sicherheit-events.md:33 (gemeinsamer Originalprüfblock EVT-01 / EVT-02; keine unabhängige Einzelprüfung)` | fehlt → E-01 |
-| EVT-02 | nicht angegeben | PARTIAL | High | schließt | `docs/audit/06-audit-sicherheit-events.md:33 (gemeinsamer Originalprüfblock EVT-01 / EVT-02; keine unabhängige Einzelprüfung)` | fehlt → E-01 |
+| EVT-01 | [B] | PARTIAL | High | schließt | `docs/audit/06-audit-sicherheit-events.md:33 (gemeinsamer Originalprüfblock EVT-01 / EVT-02; keine unabhängige Einzelprüfung)` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:48` |
+| EVT-02 | [B] | PARTIAL | High | schließt | `docs/audit/06-audit-sicherheit-events.md:33 (gemeinsamer Originalprüfblock EVT-01 / EVT-02; keine unabhängige Einzelprüfung)` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:50` |
 
 **Problem:** Kein einheitlicher Event-Vertrag/Outbox; Events gehen bei Ausfall verloren.
 
@@ -6555,11 +6555,11 @@ NFR-06;[B];B;backend/internal/jobs/retention_integration_test.go;WP-135
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-EVT-01;nicht angegeben;B;backend/internal/events/outbox_integration_test.go;WP-136
-EVT-02;nicht angegeben;B;backend/internal/events/outbox_integration_test.go;WP-136
+EVT-01;[B];B;backend/internal/events/outbox_integration_test.go;WP-136
+EVT-02;[B];B;backend/internal/events/outbox_integration_test.go;WP-136
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6743,7 +6743,7 @@ OPS-05;[B];B;backend/internal/notify/events_integration_test.go;WP-140
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| SEC-06 | nicht angegeben | ABWEICHEND | High | schließt | `docs/audit/06-audit-sicherheit-events.md:28` | fehlt → E-01 |
+| SEC-06 | [B] | ABWEICHEND | High | schließt | `docs/audit/06-audit-sicherheit-events.md:28` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:34` |
 
 **Problem:** Rotation des Master-/Datenschlüssels ohne Neuverschlüsselungslauf und Versionierung.
 
@@ -6769,10 +6769,10 @@ OPS-05;[B];B;backend/internal/notify/events_integration_test.go;WP-140
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SEC-06;nicht angegeben;B;backend/internal/platform/crypto/crypto_test.go;WP-141
+SEC-06;[B];B;backend/internal/platform/crypto/crypto_test.go;WP-141
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-15](entscheidungen.md#e-15) CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-15](entscheidungen.md#e-15) CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6862,8 +6862,8 @@ MET-15;B/G1;B;backend/internal/citype/ddl_job_integration_test.go;WP-142
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| COL-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:34` | fehlt → E-01 |
-| COL-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/05-collector-discovery-reconciliation.md:38` | fehlt → E-01 |
+| COL-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:34` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:4` |
+| COL-05 | [B] | ABWEICHEND | Critical | Teil | `docs/audit/05-collector-discovery-reconciliation.md:38` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:12` |
 
 **Problem:** Statusmenge online/offline/degraded statt pending/active/offline/disabled/paused; Site, cert_fingerprint/not_after und Entitlement-pause fehlen; kein Offline-Übergang nach 5 min.
 
@@ -6898,7 +6898,7 @@ COL-01;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-
 COL-05;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-143
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6910,7 +6910,7 @@ COL-05;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| COL-04 | [B] | ABWEICHEND | High | Teil | `docs/audit/05-collector-discovery-reconciliation.md:37` | fehlt → E-01 |
+| COL-04 | [B] | ABWEICHEND | High | Teil | `docs/audit/05-collector-discovery-reconciliation.md:37` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:10` |
 
 **Problem:** Default 30 min statt 24 h; paralleler Verbrauch kann mehrere Registrierungen erlauben.
 
@@ -6938,7 +6938,7 @@ COL-05;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-
 COL-04;[B];D;backend/internal/discovery/enroll_handler_test.go;WP-144
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6950,7 +6950,7 @@ COL-04;[B];D;backend/internal/discovery/enroll_handler_test.go;WP-144
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| COL-04 | [B] | ABWEICHEND | High | Teil | `docs/audit/05-collector-discovery-reconciliation.md:37` | fehlt → E-01 |
+| COL-04 | [B] | ABWEICHEND | High | Teil | `docs/audit/05-collector-discovery-reconciliation.md:37` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:10` |
 
 **Problem:** Kein CSR-Zertifikat, keine Bootstrap-ENV/CN-Bindung, keine 90d/60%-Erneuerung, kein Dual-Trust und keine disabled→CRL/NATS-Sperre.
 
@@ -6983,7 +6983,7 @@ COL-04;[B];D;backend/internal/discovery/enroll_handler_test.go;WP-144
 COL-04;[B];D;backend/internal/discovery/ca_test.go;WP-145
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6995,7 +6995,7 @@ COL-04;[B];D;backend/internal/discovery/ca_test.go;WP-145
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| COL-08 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:41` | fehlt → E-01 |
+| COL-08 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:41` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:18` |
 | PRI-07 | Grundsatz (ohne Tag) | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:32` | `docs/spec/katalog-v3/00-grundlagen.md:80` |
 
 **Problem:** Compose-NATS ohne TLS/Clientzertifikate, nur Loopback; konkrete Kunden-Firewall-/Hostname-/TLS-Matrix fehlt.
@@ -7027,7 +7027,7 @@ COL-08;[B];D;tests/nats-mtls.test.sh;WP-146
 PRI-07;Grundsatz (ohne Tag);D;tests/nats-mtls.test.sh;WP-146
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-05](entscheidungen.md#e-05) Fehlende oder abweichende Tags (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-05](entscheidungen.md#e-05) Fehlende oder abweichende Tags (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7039,7 +7039,7 @@ PRI-07;Grundsatz (ohne Tag);D;tests/nats-mtls.test.sh;WP-146
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| COL-02 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/05-collector-discovery-reconciliation.md:35` | fehlt → E-01 |
+| COL-02 | [B] | ABWEICHEND | Critical | schließt | `docs/audit/05-collector-discovery-reconciliation.md:35` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:6` |
 
 **Problem:** Verschlüsseltes NATS-Bundle fehlt (Klartext-Decrypt bereits in WP-047 (`cred-secrets`) geschlossen).
 
@@ -7068,7 +7068,7 @@ PRI-07;Grundsatz (ohne Tag);D;tests/nats-mtls.test.sh;WP-146
 COL-02;[B];D;backend/internal/credential/bundle_test.go;WP-147
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7080,7 +7080,7 @@ COL-02;[B];D;backend/internal/credential/bundle_test.go;WP-147
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| COL-06 | [B], Air-Gapped [O] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:39` | fehlt → E-01 |
+| COL-06 | [B], Air-Gapped [O] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:39` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:14` |
 
 **Problem:** Nicht angeschlossener Updater mit optionaler SHA-Prüfung statt signierter Auto-Updates, stable/beta und Fehlstart-Rollback.
 
@@ -7108,7 +7108,7 @@ COL-02;[B];D;backend/internal/credential/bundle_test.go;WP-147
 COL-06;[B], Air-Gapped [O];D;edgecore/update/update_test.go;WP-148
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7120,7 +7120,7 @@ COL-06;[B], Air-Gapped [O];D;edgecore/update/update_test.go;WP-148
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| DIS-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:42` | fehlt → E-01 |
+| DIS-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:42` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:22` |
 
 **Problem:** TCP-Sweep mit Default 64 ohne harte Obergrenze 256, kein ICMP/ARP; Ports 623/5985/8006 fehlen, zusätzliche 3389/8080/8443.
 
@@ -7147,7 +7147,7 @@ COL-06;[B], Air-Gapped [O];D;edgecore/update/update_test.go;WP-148
 DIS-01;[B];D;collector/plugins/sweep/sweep_test.go;WP-149
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7159,8 +7159,8 @@ DIS-01;[B];D;collector/plugins/sweep/sweep_test.go;WP-149
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| DIS-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:44` | fehlt → E-01 |
-| DIS-04 | [B] | ABWEICHEND | High | Teil | `docs/audit/05-collector-discovery-reconciliation.md:45` | fehlt → E-01 |
+| DIS-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:44` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:26` |
+| DIS-04 | [B] | ABWEICHEND | High | Teil | `docs/audit/05-collector-discovery-reconciliation.md:45` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:28` |
 
 **Problem:** Interface Name/Discover/Collect mit Result statt Name/Probe/Collect mit DeviceRecord; Hauptschleife ruft nur Discover.
 
@@ -7195,7 +7195,7 @@ DIS-03;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-150
 DIS-04;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-150
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7207,7 +7207,7 @@ DIS-04;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-150
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| DIS-02 | [B], Profilliste (V) | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:43` | fehlt → E-01 |
+| DIS-02 | [B], Profilliste (V) | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:43` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:24` |
 
 Weitere Anforderungstexte: CH30 (`docs/spec/katalog-v3/00-grundlagen.md:59`)
 
@@ -7238,7 +7238,7 @@ Weitere Anforderungstexte: CH30 (`docs/spec/katalog-v3/00-grundlagen.md:59`)
 DIS-02;[B], Profilliste (V);D;collector/profiles/profiles_test.go;WP-151
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-21](entscheidungen.md#e-21) CH30 (V)/DIS-02: Geräteprofilliste (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-21](entscheidungen.md#e-21) CH30 (V)/DIS-02: Geräteprofilliste (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7250,7 +7250,7 @@ DIS-02;[B], Profilliste (V);D;collector/profiles/profiles_test.go;WP-151
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| DIS-04 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:45` | fehlt → E-01 |
+| DIS-04 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:45` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:28` |
 
 **Problem:** SNMP faktisch nur v2c; SSH nur Banner/Command-Metadaten; Redfish/WMI/NAS/IPMI/Strom teilweise; weiterer Umfang „wie v2“ N/P.
 
@@ -7281,7 +7281,7 @@ DIS-02;[B], Profilliste (V);D;collector/profiles/profiles_test.go;WP-151
 DIS-04;[B];D;collector/plugins/snmp/snmp_test.go;WP-152
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7293,7 +7293,7 @@ DIS-04;[B];D;collector/plugins/snmp/snmp_test.go;WP-152
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| DIS-09 | [B] | FAIL | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:50` | fehlt → E-01 |
+| DIS-09 | [B] | FAIL | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:50` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:38` |
 | API-05 | [B] | PARTIAL | High | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:30` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:12` |
 
 **Problem:** `discovery_scope` mit Client/Site/VRF/Zeitplan/Credentials/Plugins/Laufergebnis und CRUD fehlt; kein scope_suggested.
@@ -7329,7 +7329,7 @@ DIS-09;[B];D;backend/internal/discovery/scope_integration_test.go;WP-153
 API-05;[B];D;backend/internal/discovery/scope_integration_test.go;WP-153
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7341,7 +7341,7 @@ API-05;[B];D;backend/internal/discovery/scope_integration_test.go;WP-153
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| DIS-10 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:51` | fehlt → E-01 |
+| DIS-10 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:51` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:40` |
 | NFR-03 | [B]; Teilumfang [P5] | ABWEICHEND | High | Teil | `docs/audit/08-frontend-monitoring-nfr-tests.md:56` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:38` |
 
 **Problem:** Ein Ticker 15 min für alle Protokolle; keine Scope-/Orgsteuerung, keine Mindestintervalle; Spool-Flush max. 16 Batches je Zyklus.
@@ -7371,7 +7371,7 @@ DIS-10;[B];D;collector/collectorcmd/schedule_test.go;WP-154
 NFR-03;[B], Teilumfang [P5];D;collector/collectorcmd/schedule_test.go;WP-154
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7383,7 +7383,7 @@ NFR-03;[B], Teilumfang [P5];D;collector/collectorcmd/schedule_test.go;WP-154
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| DIS-08 | [Q] | PARTIAL | Medium | schließt | `docs/audit/05-collector-discovery-reconciliation.md:49` | fehlt → E-01 |
+| DIS-08 | [Q] | PARTIAL | Medium | schließt | `docs/audit/05-collector-discovery-reconciliation.md:49` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:36` |
 
 **Problem:** Kein vollständiges Discovery-Fehlerzustandsmodell samt spezifischen Metriken und Job-/Scopefehlerdarstellung.
 
@@ -7413,7 +7413,7 @@ NFR-03;[B], Teilumfang [P5];D;collector/collectorcmd/schedule_test.go;WP-154
 DIS-08;[Q];D;backend/internal/discovery/errors_test.go;WP-155
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7466,8 +7466,8 @@ INS-06;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-156
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| REC-09 | [B] | FAIL | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:60` | fehlt → E-01 |
-| LCY-05 | [B] | FAIL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:47` | fehlt → E-01 |
+| REC-09 | [B] | FAIL | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:60` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:66` |
+| LCY-05 | [B] | FAIL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:47` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:50` |
 
 **Problem:** Kein Detektor für observable CIs; Collector-/Agent-Offlinestatus ersetzt die UND-Verknüpfung nicht.
 
@@ -7496,7 +7496,7 @@ REC-09;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-157
 LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-157
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7508,7 +7508,7 @@ LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-157
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TOP-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:64` | fehlt → E-01 |
+| TOP-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:64` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:74` |
 
 **Problem:** Default-Confidence 0,5 auch LLDP; kein FDB-0,6-nur-ohne-LLDP oder >4-MAC-Trunkfilter; unbekannte Keys werden connected_to.
 
@@ -7534,7 +7534,7 @@ LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-157
 TOP-01;[B];D;backend/internal/discovery/topology_test.go;WP-158
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7546,8 +7546,8 @@ TOP-01;[B];D;backend/internal/discovery/topology_test.go;WP-158
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TOP-02 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:65` | fehlt → E-01 |
-| REL-08 | [B] | ABWEICHEND | Medium | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:68` | fehlt → E-01 |
+| TOP-02 | [B] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:65` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:76` |
+| REL-08 | [B] | ABWEICHEND | Medium | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:68` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:98` |
 
 **Problem:** Wiederbeobachtung erneuert Kante/last_seen_at nicht; Cleanup mit Event fehlt; Quellen-Policy/Akteur/Zeit unvollständig.
 
@@ -7577,7 +7577,7 @@ TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-159
 REL-08;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-159
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7589,9 +7589,9 @@ REL-08;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-159
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| REL-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:63` | fehlt → E-01 |
-| REL-04 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:64` | fehlt → E-01 |
-| REL-05 | [B] | PARTIAL | Medium | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:65` | fehlt → E-01 |
+| REL-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:63` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:88` |
+| REL-04 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:64` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:90` |
+| REL-05 | [B] | PARTIAL | Medium | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:65` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:92` |
 
 **Problem:** Ladefehler deaktivieren die Prüfung; Typ wird ignoriert; DELETE ohne Herkunfts-/force-Prüfung und ohne Suppression; Regressionstest für REL-05 fehlt.
 
@@ -7623,7 +7623,7 @@ REL-04;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-16
 REL-05;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-160
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7635,7 +7635,7 @@ REL-05;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-16
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| IMP-09 | [B] | PARTIAL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:78` | fehlt → E-01 |
+| IMP-09 | [B] | PARTIAL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:78` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:120` |
 
 **Problem:** Vollständige Versorgungskette, redundante Einspeisungen und Outlet-Mapping als Kantengenerator fehlen.
 
@@ -7662,7 +7662,7 @@ REL-05;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-16
 IMP-09;[B];D;backend/internal/discovery/power_test.go;WP-161
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7919,7 +7919,7 @@ API-02;[B];C;backend/internal/api/listquery_test.go;WP-165
 API-04;[B];C;backend/internal/middleware/ratelimit_test.go;WP-166
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8015,7 +8015,7 @@ API-05;[B];C;backend/internal/server/authz_test.go;WP-168
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | API-05 | [B] | PARTIAL | High | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:30` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:12` |
-| CI-05 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:34` | fehlt → E-01 |
+| CI-05 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:34` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:22` |
 
 **Problem:** CI-`include` und Restore fehlen.
 
@@ -8045,7 +8045,7 @@ API-05;[B];C;backend/internal/ci/handler_test.go;WP-169
 CI-05;[B];C;backend/internal/ci/handler_test.go;WP-169
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8057,8 +8057,8 @@ CI-05;[B];C;backend/internal/ci/handler_test.go;WP-169
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| CI-05 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:34` | fehlt → E-01 |
-| LCY-01 | [B] | PARTIAL | Low | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:43` | fehlt → E-01 |
+| CI-05 | [B] | ABWEICHEND | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:34` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:22` |
+| LCY-01 | [B] | PARTIAL | Low | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:43` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:42` |
 
 **Problem:** Delete setzt nur deleted_at, nicht decommissioned; Traversal stoppt nicht am gelöschten Knoten; Retention/Hard-Delete samt IP-Bereinigung und Asset-Unlink fehlen.
 
@@ -8089,7 +8089,7 @@ CI-05;[B];C;backend/internal/ci/delete_integration_test.go;WP-170
 LCY-01;[B];C;backend/internal/ci/delete_integration_test.go;WP-170
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8101,8 +8101,8 @@ LCY-01;[B];C;backend/internal/ci/delete_integration_test.go;WP-170
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| CI-06 | [B] | PARTIAL | Medium | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:35` | fehlt → E-01 |
-| AUD-03 | nicht angegeben | ABWEICHEND | High | schließt | `docs/audit/06-audit-sicherheit-events.md:23` | fehlt → E-01 |
+| CI-06 | [B] | PARTIAL | Medium | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:35` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:24` |
+| AUD-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/06-audit-sicherheit-events.md:23` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:8` |
 
 **Problem:** Standort-/Zeitangaben nicht vollständig; Unified-History liest nur entity_change; Audit-Abfrage unvollständig.
 
@@ -8132,10 +8132,10 @@ LCY-01;[B];C;backend/internal/ci/delete_integration_test.go;WP-170
 
 ```text
 CI-06;[B];C;backend/internal/history/history_integration_test.go;WP-171
-AUD-03;nicht angegeben;C;backend/internal/history/history_integration_test.go;WP-171
+AUD-03;[B];C;backend/internal/history/history_integration_test.go;WP-171
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8147,7 +8147,7 @@ AUD-03;nicht angegeben;C;backend/internal/history/history_integration_test.go;WP
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| CI-11 | [B] | FAIL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:40` | fehlt → E-01 |
+| CI-11 | [B] | FAIL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:40` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:34` |
 
 **Problem:** Weder Discovery-Upgrade noch manueller Typwechsel; type_changed und Zielpflichtfelder fehlen.
 
@@ -8178,7 +8178,7 @@ AUD-03;nicht angegeben;C;backend/internal/history/history_integration_test.go;WP
 CI-11;[B];C;backend/internal/ci/typechange_test.go;WP-172
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8190,7 +8190,7 @@ CI-11;[B];C;backend/internal/ci/typechange_test.go;WP-172
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| CI-12 | [B] | FAIL | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:41` | fehlt → E-01 |
+| CI-12 | [B] | FAIL | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:41` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:36` |
 
 **Problem:** Kein CI-Merge inkl. Referenzübernahme, Override-Konflikten, Tombstone, 301/12 Monate, Snapshot/30 Tage, Parallelitätsvertrag.
 
@@ -8221,7 +8221,7 @@ CI-11;[B];C;backend/internal/ci/typechange_test.go;WP-172
 CI-12;[B];C;backend/internal/ci/merge_integration_test.go;WP-173
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8233,7 +8233,7 @@ CI-12;[B];C;backend/internal/ci/merge_integration_test.go;WP-173
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| CI-12 | [B] | FAIL | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:41` | fehlt → E-01 |
+| CI-12 | [B] | FAIL | High | Teil | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:41` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:36` |
 
 **Problem:** Unmerge fehlt.
 
@@ -8261,7 +8261,7 @@ CI-12;[B];C;backend/internal/ci/merge_integration_test.go;WP-173
 CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-174
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8273,7 +8273,7 @@ CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-174
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| RCK-02 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:59` | fehlt → E-01 |
+| RCK-02 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:59` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:78` |
 
 **Problem:** GET layout und PUT mounts/{ci_id} fehlen; Ersatzrouten mit falschem Routen-/Fehlervertrag.
 
@@ -8303,7 +8303,7 @@ CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-174
 RCK-02;[B];C;backend/internal/rack/handler_test.go;WP-175
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8315,8 +8315,8 @@ RCK-02;[B];C;backend/internal/rack/handler_test.go;WP-175
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| IMP-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:70` | fehlt → E-01 |
-| IMP-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:72` | fehlt → E-01 |
+| IMP-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:70` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:104` |
+| IMP-03 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:72` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:108` |
 
 **Problem:** Impact folgt Source→Target statt impact_direction; connected_to propagiert gerichtet ohne Heuristikkennzeichen.
 
@@ -8346,7 +8346,7 @@ IMP-01;[B];C;backend/internal/topology/impact_test.go;WP-176
 IMP-03;[B];C;backend/internal/topology/impact_test.go;WP-176
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-18](entscheidungen.md#e-18) CH27 (V): impact_direction (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-18](entscheidungen.md#e-18) CH27 (V): impact_direction (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8358,7 +8358,7 @@ IMP-03;[B];C;backend/internal/topology/impact_test.go;WP-176
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| IMP-02 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:71` | fehlt → E-01 |
+| IMP-02 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:71` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:106` |
 | NFR-02 | [B] | ABWEICHEND | High | Teil | `docs/audit/08-frontend-monitoring-nfr-tests.md:55` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:36` |
 
 **Problem:** Maximal 10 statt 20 Hops; Ergebnispfade, Kürzestpfadwahl, Kategorien und projizierte physical-Kanten fehlen; N+1-Risiko.
@@ -8389,7 +8389,7 @@ IMP-02;[B];C;backend/internal/topology/impact_test.go;WP-177
 NFR-02;[B];C;backend/internal/topology/impact_test.go;WP-177
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8401,7 +8401,7 @@ NFR-02;[B];C;backend/internal/topology/impact_test.go;WP-177
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| CI-09 | [B] | PARTIAL | Medium | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:38` | fehlt → E-01 |
+| CI-09 | [B] | PARTIAL | Medium | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:38` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:30` |
 
 **Problem:** Vollständiger Historien-/Impactnachweis für assetfreie CIs fehlt.
 
@@ -8425,7 +8425,7 @@ NFR-02;[B];C;backend/internal/topology/impact_test.go;WP-177
 CI-09;[B];C;backend/internal/ci/assetfree_integration_test.go;WP-178
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8437,7 +8437,7 @@ CI-09;[B];C;backend/internal/ci/assetfree_integration_test.go;WP-178
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| IMP-04 | [B] | FAIL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:73` | fehlt → E-01 |
+| IMP-04 | [B] | FAIL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:73` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:110` |
 
 **Problem:** Kein Redundanz-Postfilter; findSPOFs ist keine korrekte Ausfallmengenberechnung.
 
@@ -8464,7 +8464,7 @@ CI-09;[B];C;backend/internal/ci/assetfree_integration_test.go;WP-178
 IMP-04;[B];C;backend/internal/topology/redundancy_test.go;WP-179
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8476,8 +8476,8 @@ IMP-04;[B];C;backend/internal/topology/redundancy_test.go;WP-179
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| IMP-05 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:74` | fehlt → E-01 |
-| IMP-06 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:75` | fehlt → E-01 |
+| IMP-05 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:74` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:112` |
+| IMP-06 | [B] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:75` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:114` |
 
 **Problem:** /impact?ci_ids=… und /impact/{ci_id} fehlen; ohne Root bis 10.000 CIs geladen statt 422 über 2.000; UI-Typfilter nutzt Schlüssel statt ID.
 
@@ -8509,7 +8509,7 @@ IMP-05;[B];C;backend/internal/topology/multi_integration_test.go;WP-180
 IMP-06;[B];C;backend/internal/topology/multi_integration_test.go;WP-180
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8651,7 +8651,7 @@ JOB-04;[B];C;backend/internal/reviews/merge_job_integration_test.go;WP-183
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | GQL-01 | [B] | ABWEICHEND | High | schließt | `docs/audit/07-api-suche-jobs-lebenszyklus.md:35` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:24` |
-| SEC-10 | nicht angegeben | PARTIAL | High | schließt | `docs/audit/06-audit-sicherheit-events.md:31` | fehlt → E-01 |
+| SEC-10 | [B] | PARTIAL | High | schließt | `docs/audit/06-audit-sicherheit-events.md:31` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:42` |
 
 **Problem:** Eigenparser unter `/api/v1/graphql` statt gqlgen unter `/bff/graphql`; API-Keys nicht ausgeschlossen; Tiefen-/Komplexitätslimits fehlen.
 
@@ -8681,10 +8681,10 @@ JOB-04;[B];C;backend/internal/reviews/merge_job_integration_test.go;WP-183
 
 ```text
 GQL-01;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-184
-SEC-10;nicht angegeben;C;backend/internal/graphqlbff/graphqlbff_test.go;WP-184
+SEC-10;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-184
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-16](entscheidungen.md#e-16) SEC-10: Zahlenwerte für GraphQL-Limits (vorläufig entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-16](entscheidungen.md#e-16) SEC-10: Zahlenwerte für GraphQL-Limits (vorläufig entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9273,7 +9273,7 @@ UI-16;[B];C;frontend/src/components/NotificationCenter.test.tsx;WP-197
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| REC-10 | [B] | PARTIAL | Medium | schließt | `docs/audit/05-collector-discovery-reconciliation.md:61` | fehlt → E-01 |
+| REC-10 | [B] | PARTIAL | Medium | schließt | `docs/audit/05-collector-discovery-reconciliation.md:61` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:68` |
 
 **Problem:** UI zeigt Werte/Quelle, nicht Zeit/Auswahlbegründung; nicht alle typisierten Felder erfasst.
 
@@ -9303,7 +9303,7 @@ UI-16;[B];C;frontend/src/components/NotificationCenter.test.tsx;WP-197
 REC-10;[B];C;backend/internal/ci/provenance_integration_test.go;WP-198
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9715,7 +9715,7 @@ ABN-03;[Q], jeweilige Phase;LT;backend/internal/ci/concurrency_integration_test.
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| TEN-09 | [Q] | PARTIAL | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:42` | fehlt → E-01 |
+| TEN-09 | [Q] | PARTIAL | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:42` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:25` |
 | TST-02 | [B] | PARTIAL | High | schließt | `docs/audit/08-frontend-monitoring-nfr-tests.md:67` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:65` |
 
 **Problem:** Site-/Team-/Mehrfachscope- und vollständige Schreibmatrix fehlen; Ingest→Webhook, Zertifikatserneuerung, Mehrfachimpact, Lizenzablauf, Offline, Single-Runner nicht vollständig getestet.
@@ -9745,7 +9745,7 @@ TEN-09;[Q];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-
 TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-208
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9758,7 +9758,7 @@ TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | GATE-03 | [Q] | PARTIAL | High | Teil | `docs/audit/08-frontend-monitoring-nfr-tests.md:74` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:89` |
-| SEC-11 | nicht angegeben | PARTIAL | High | Teil | `docs/audit/06-audit-sicherheit-events.md:32` | fehlt → E-01 |
+| SEC-11 | [Q] | PARTIAL | High | Teil | `docs/audit/06-audit-sicherheit-events.md:32` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:44` |
 
 **Problem:** Kein dokumentiertes Sicherheitsreview vor G1.
 
@@ -9782,10 +9782,10 @@ TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-
 
 ```text
 GATE-03;[Q];SR;docs/security/review-g1.md;WP-209
-SEC-11;nicht angegeben;SR;docs/security/review-g1.md;WP-209
+SEC-11;[Q];SR;docs/security/review-g1.md;WP-209
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-31](entscheidungen.md#e-31) Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-31](entscheidungen.md#e-31) Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -10013,7 +10013,7 @@ REP-01;[B];G1;tests/rep01-structure.test.sh;WP-213
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
 | API-06 | [P2]/[P3]/[P4]/[A] | ABWEICHEND | High | Teil | `docs/audit/07-api-suche-jobs-lebenszyklus.md:31` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:14` |
-| RBA-05 | [P2–P4], [A] | PARTIAL | High | Teil | `docs/audit/02-mandanten-auth-entitlements.md:58` | fehlt → E-01 |
+| RBA-05 | [P2–P4], [A] | PARTIAL | High | Teil | `docs/audit/02-mandanten-auth-entitlements.md:58` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:70` |
 
 **Problem:** Spätphasen-Module haben reale REST-/PG-Anbindung; IGA/KI werden aus Professional/Enterprise impliziert; Rechte-/Schlüsselmodelle weichen ab.
 
@@ -10047,7 +10047,7 @@ API-06;[P2]/[P3]/[P4]/[A];Phase;backend/internal/server/modules_test.go;WP-214
 RBA-05;[P2–P4], [A];Phase;backend/internal/server/modules_test.go;WP-214
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -10059,8 +10059,8 @@ RBA-05;[P2–P4], [A];Phase;backend/internal/server/modules_test.go;WP-214
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| LCY-02 | [P2] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:44` | fehlt → E-01 |
-| LCY-03 | [P2] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:45` | fehlt → E-01 |
+| LCY-02 | [P2] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:44` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:44` |
+| LCY-03 | [P2] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:45` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:46` |
 
 **Problem:** PG-Transition lädt keine States und lehnt Zielzustände ab; Pflichtfelder nur nichtleere Kontextwerte statt geprüfter Referenzen.
 
@@ -10088,7 +10088,7 @@ LCY-02;[P2];Phase;backend/internal/lifecycle/transition_integration_test.go;WP-2
 LCY-03;[P2];Phase;backend/internal/lifecycle/transition_integration_test.go;WP-215
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
@@ -10100,7 +10100,7 @@ LCY-03;[P2];Phase;backend/internal/lifecycle/transition_integration_test.go;WP-2
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| NET-09 | [P2] | PARTIAL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:57` | fehlt → E-01 |
+| NET-09 | [P2] | PARTIAL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:57` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:72` |
 
 **Problem:** `POST /subnets/{id}/reservations` und Review bei Konflikt mit Discovery fehlen.
 
@@ -10130,7 +10130,7 @@ LCY-03;[P2];Phase;backend/internal/lifecycle/transition_integration_test.go;WP-2
 NET-09;[P2];Phase;backend/internal/ipam/reservation_integration_test.go;WP-216
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
@@ -10142,7 +10142,7 @@ NET-09;[P2];Phase;backend/internal/ipam/reservation_integration_test.go;WP-216
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| REL-09 | [P2] | PARTIAL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:69` | fehlt → E-01 |
+| REL-09 | [P2] | PARTIAL | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:69` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:100` |
 
 **Problem:** Mutationen erzeugen den geforderten Historieneintrag nicht.
 
@@ -10168,7 +10168,7 @@ NET-09;[P2];Phase;backend/internal/ipam/reservation_integration_test.go;WP-216
 REL-09;[P2];Phase;backend/internal/relationship/history_integration_test.go;WP-217
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
@@ -10180,7 +10180,7 @@ REL-09;[P2];Phase;backend/internal/relationship/history_integration_test.go;WP-2
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| IMP-08 | [P2] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:77` | fehlt → E-01 |
+| IMP-08 | [P2] | ABWEICHEND | High | schließt | `docs/audit/04-ci-netz-rack-beziehungen-impact.md:77` | `docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:118` |
 
 **Problem:** AffectedServices bleibt leer; SPOF zählt eingehende Kanten.
 
@@ -10207,7 +10207,7 @@ REL-09;[P2];Phase;backend/internal/relationship/history_integration_test.go;WP-2
 IMP-08;[P2];Phase;backend/internal/topology/blast_test.go;WP-218
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
@@ -10219,7 +10219,7 @@ IMP-08;[P2];Phase;backend/internal/topology/blast_test.go;WP-218
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| COL-07 | [A], Relay [P4] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:40` | fehlt → E-01 |
+| COL-07 | [A], Relay [P4] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:40` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:16` |
 
 **Problem:** Agent-Relay spult Agentdaten als Discoverydaten an falschen Endpunkt; separater Writer-Host mit Enrollment/Least-Privilege fehlt.
 
@@ -10246,7 +10246,7 @@ IMP-08;[P2];Phase;backend/internal/topology/blast_test.go;WP-218
 COL-07;[A], Relay [P4];Phase;edgecore/transport/transport_test.go;WP-219
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
@@ -10258,8 +10258,8 @@ COL-07;[A], Relay [P4];Phase;edgecore/transport/transport_test.go;WP-219
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| REC-04 | [P3] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:55` | fehlt → E-01 |
-| REC-11 | [P4] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:62` | fehlt → E-01 |
+| REC-04 | [P3] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:55` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:56` |
+| REC-11 | [P4] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:62` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:70` |
 | AGT-05 | [P4] | ABWEICHEND | Critical | Teil | `docs/audit/09-module-phase2plus.md:63` | `docs/spec/katalog-v3/09-module-phase2plus.md:82` |
 
 **Problem:** Orgweite SourcePolicy ohne Attributdimension; manual_override verdrängbar; Agent nutzt eigenen Matcher statt gemeinsamer Identität.
@@ -10292,7 +10292,7 @@ REC-11;[P4];Phase;backend/internal/override/policy_integration_test.go;WP-220
 AGT-05;[P4];Phase;backend/internal/override/policy_integration_test.go;WP-220
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden); [E-32](entscheidungen.md#e-32) REC-03: Rang der Quelle IPMI (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden); [E-32](entscheidungen.md#e-32) REC-03: Rang der Quelle IPMI (offen)
 
 **Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
@@ -10304,7 +10304,7 @@ AGT-05;[P4];Phase;backend/internal/override/policy_integration_test.go;WP-220
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| OVR-03 | [P2] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:68` | fehlt → E-01 |
+| OVR-03 | [P2] | ABWEICHEND | High | schließt | `docs/audit/05-collector-discovery-reconciliation.md:68` | `docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:84` |
 
 **Problem:** Bulkstatus nutzt parallele PATCHes ohne Override; kein geschützter Template-Migrationspfad.
 
@@ -10331,7 +10331,7 @@ AGT-05;[P4];Phase;backend/internal/override/policy_integration_test.go;WP-220
 OVR-03;[P2];Phase;backend/internal/ci/bulk_override_integration_test.go;WP-221
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
@@ -10829,7 +10829,7 @@ IGA-04;[A];Phase;backend/internal/iga/iga_test.go;WP-232
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
-| AUT-08 | [P4] | PARTIAL | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:51` | fehlt → E-01 |
+| AUT-08 | [P4] | PARTIAL | High | schließt | `docs/audit/02-mandanten-auth-entitlements.md:51` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:43` |
 
 **Problem:** Group-PATCH ist PUT-Alias, User-PATCH beschränkt, TaskRunner nicht produktiv; Deprovisionierung unvollständig.
 
@@ -10856,7 +10856,7 @@ IGA-04;[A];Phase;backend/internal/iga/iga_test.go;WP-232
 AUT-08;[P4];Phase;backend/internal/iga/scim_test.go;WP-233
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 

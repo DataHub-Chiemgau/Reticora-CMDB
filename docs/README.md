@@ -680,7 +680,7 @@ counts and verifies the audit hash chain with the `audit-verify` binary.
 | PostgreSQL + TimescaleDB | timescale/timescaledb:latest-pg16 | Primary database with time-series |
 | NATS | nats:2.10-alpine | Event bus (JetStream) |
 | Redis | redis:7-alpine | Cache, sessions, rate-limiting |
-| MinIO | minio/minio:latest | S3-compatible object storage |
+| MinIO (Silo build) | pgsty/minio:RELEASE.2026-08-04T00-00-00Z | S3-compatible object storage; `minio/minio` is no longer published |
 | Keycloak | keycloak:24.0 | OIDC identity provider |
 
 **Terraform:**

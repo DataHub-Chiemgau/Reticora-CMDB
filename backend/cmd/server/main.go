@@ -6,7 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -50,6 +52,15 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	slog.SetDefault(logger)
+
+	// Fail-closed start (OPS-01): missing or invalid settings stop the server
+	// instead of silently falling back to development defaults.
+	if err := cfg.Validate(*noDB); err != nil {
+		slog.Error("invalid configuration", "error", err)
+		os.Exit(1)
+	}
+	// readiness collects the dependencies /readyz verifies.
+	var readiness []server.ReadinessCheck
 
 	shutdown, err := observability.Init(cfg.OTelEndpoint, "reticora-server", cfg.Environment)
 	if err != nil {
@@ -109,21 +120,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize Redis-backed cache store
+	// Initialize the Redis-backed cache store. An unreachable Redis is fatal:
+	// the in-memory store is per replica and would silently weaken rate
+	// limits, idempotency and the logout blacklist. Only --no-db and the
+	// implicit development default may fall back, with a warning.
 	var cacheStore cache.Store
-	if cfg.RedisURL != "" {
-		redisClient, err := redisx.Connect(context.Background(), cfg.RedisURL)
-		if err != nil {
-			slog.Warn("failed to connect to Redis, falling back to in-memory cache", "error", err)
-			cacheStore = cache.NewMemoryStore()
-		} else {
-			defer redisClient.Close()
-			cacheStore = cache.NewRedisStore(redisClient.Unwrap())
-			slog.Info("Redis cache store initialized")
-		}
-	} else {
-		slog.Info("RETICORA_REDIS_URL not set, using in-memory cache")
+	redisClient, err := redisx.Connect(context.Background(), cfg.RedisURL)
+	switch {
+	case err == nil:
+		defer redisClient.Close()
+		cacheStore = cache.NewRedisStore(redisClient.Unwrap())
+		readiness = append(readiness, server.ReadinessCheck{Name: "redis", Check: redisClient.Ping})
+		slog.Info("Redis cache store initialized")
+	case *noDB || (cfg.IsDevelopment() && !cfg.IsSet("RETICORA_REDIS_URL")):
+		slog.Warn("Redis unreachable; using the per-process in-memory cache (development only)", "error", err)
 		cacheStore = cache.NewMemoryStore()
+	default:
+		slog.Error("failed to connect to Redis", "error", err)
+		os.Exit(1)
 	}
 
 	// Repositories. PostgreSQL is the only supported production backend; the
@@ -161,30 +175,46 @@ func main() {
 		defer pool.Close()
 
 		slog.Info("connected to PostgreSQL", "url", maskDSN(cfg.DatabaseURL))
+		dbCheck := server.DatabaseReadiness(pool, server.RequiredExtensions)
+		if err := dbCheck.Check(context.Background()); err != nil {
+			slog.Error("database is not ready", "error", err)
+			os.Exit(1)
+		}
+		readiness = append(readiness, dbCheck)
 		repos = server.PostgresRepositories(pool, audit.NewPGRecorder())
 		auditHandler = audit.NewHandler(pool)
 		auditPool = pool
 		apiKeyStore = identity.NewPGAPIKeyStore(pool)
 
 		// Asynchronous exports render into object storage and are served via
-		// signed URLs. A missing or unreachable store disables job creation
-		// (503) but never the streaming export.
-		s3Store, s3Err := blob.NewS3Store(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3UseSSL)
-		if s3Err != nil {
-			slog.Warn("S3 blob storage unavailable; asynchronous export jobs are disabled", "error", s3Err)
-		} else {
-			// Bootstrap the buckets the platform writes to so exports and
-			// documents work out of the box instead of failing on first use.
-			for _, bucket := range []string{export.ExportBucket, "reticora-documents", cfg.S3Bucket} {
-				if bucket == "" {
-					continue
-				}
-				if err := s3Store.EnsureBucket(context.Background(), bucket); err != nil {
-					slog.Warn("failed to ensure S3 bucket", "bucket", bucket, "error", err)
-				}
+		// signed URLs. Without object storage, job creation answers 503 but
+		// the streaming export stays available. Configured object storage
+		// that cannot be used is fatal outside development.
+		if cfg.S3Configured() {
+			s3Store, s3Err := setupObjectStorage(cfg)
+			switch {
+			case s3Err == nil:
+				blobStore = s3Store
+				readiness = append(readiness, server.TCPReadiness("object_storage", cfg.S3Endpoint))
+			case cfg.IsDevelopment():
+				slog.Warn("S3 blob storage unavailable; asynchronous export jobs are disabled", "error", s3Err)
+			default:
+				slog.Error("S3 blob storage unavailable", "endpoint", cfg.S3Endpoint, "error", s3Err)
+				os.Exit(1)
 			}
-			blobStore = s3Store
+		} else {
+			slog.Warn("object storage not configured (RETICORA_S3_*); asynchronous export jobs are disabled")
 		}
+	}
+	// The server does not use NATS yet; a configured NATS is still part of the
+	// platform and reported by /readyz.
+	if cfg.IsSet("RETICORA_NATS_URL") {
+		addr, natsErr := hostPort(cfg.NATSUrl, "4222")
+		if natsErr != nil {
+			slog.Error("invalid RETICORA_NATS_URL", "error", natsErr)
+			os.Exit(1)
+		}
+		readiness = append(readiness, server.TCPReadiness("nats", addr))
 	}
 	if strings.EqualFold(cfg.SearchBackend, "opensearch") {
 		if cfg.OpenSearchURL == "" {
@@ -257,6 +287,7 @@ func main() {
 		AuditPool:            auditPool,
 		AIProvider:           aiProvider,
 		Blobs:                blobStore,
+		Readiness:            readiness,
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -410,4 +441,38 @@ func maskDSN(dsn string) string {
 		return dsn
 	}
 	return prefix + rest[:passStart+1] + "***" + rest[passEnd:]
+}
+
+// setupObjectStorage connects the S3-compatible store and creates the buckets
+// the platform writes to, so exports and documents work out of the box.
+func setupObjectStorage(cfg *config.Config) (*blob.S3Store, error) {
+	store, err := blob.NewS3Store(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3UseSSL)
+	if err != nil {
+		return nil, err
+	}
+	for _, bucket := range []string{export.ExportBucket, "reticora-documents", cfg.S3Bucket} {
+		if bucket == "" {
+			continue
+		}
+		if err := store.EnsureBucket(context.Background(), bucket); err != nil {
+			return nil, err
+		}
+	}
+	return store, nil
+}
+
+// hostPort extracts host:port from a URL such as nats://nats:4222.
+func hostPort(rawURL, defaultPort string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	if u.Hostname() == "" {
+		return "", fmt.Errorf("no host in %q", rawURL)
+	}
+	port := u.Port()
+	if port == "" {
+		port = defaultPort
+	}
+	return net.JoinHostPort(u.Hostname(), port), nil
 }

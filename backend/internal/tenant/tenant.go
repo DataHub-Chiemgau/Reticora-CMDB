@@ -27,9 +27,11 @@ func FromContext(ctx context.Context) TenantInfo {
 }
 
 // ClientScope returns the optional client (sub-tenant) scope attached to the
-// request context, or "" when the request is organization-wide. Repositories
-// use it to set app.client_scope so RLS policies can enforce client scoping
-// at the database level.
+// request context, or "" when the request is organization-wide.
+//
+// Deprecated: Repositories take the complete scope from
+// database.TenantScopeFromContext and pass it to database.WithTenant; the
+// remaining callers move there in the WithTenant migration WPs.
 func ClientScope(ctx context.Context) string {
 	return FromContext(ctx).ClientID
 }

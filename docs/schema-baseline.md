@@ -194,6 +194,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `maintenance_window` | ja | ja | maintenance_window_isolation (ALL) |
 | `maintenance_window_ci` | ja | ja | maintenance_window_ci_isolation (ALL) |
 | `metric_sample` | nein | nein | – |
+| `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |
 | `network_interface` | ja | ja | org_isolation (ALL) |
 | `org_dek` | ja | ja | org_dek_isolation (ALL) |
 | `organization` | ja | ja | org_isolation (ALL) |

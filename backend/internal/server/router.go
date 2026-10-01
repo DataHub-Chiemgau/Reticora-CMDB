@@ -160,6 +160,8 @@ type Options struct {
 	// Blobs persists asynchronous export results; nil disables export-job
 	// creation (the streaming export endpoint stays available).
 	Blobs blob.Store
+	// Readiness lists the dependencies /readyz verifies (OPS-01).
+	Readiness []ReadinessCheck
 }
 
 // registrar is implemented by every domain handler.
@@ -198,7 +200,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		api.WriteError(w, http.StatusMethodNotAllowed, "Method Not Allowed", "the method is not allowed for this resource")
 	})
 
-	httpMetrics := registerOperational(mux, opts.Version, opts.MetricsTenantLabel)
+	httpMetrics := registerOperational(mux, opts.Version, opts.MetricsTenantLabel, opts.Readiness)
 
 	// Every domain route is registered through the authorizing router, which
 	// attaches the permission middleware resolved from the route table.
@@ -350,16 +352,18 @@ func validate(repos Repositories, opts Options) error {
 	return nil
 }
 
-// registerOperational adds the unauthenticated health and metrics endpoints.
-// It returns the HTTP metrics middleware so main can mount it on the outer
-// middleware chain; the middleware records into the same registry that serves
-// /metrics.
-func registerOperational(mux *chi.Mux, version string, includeTenantLabel bool) func(http.Handler) http.Handler {
+// registerOperational adds the unauthenticated health and metrics endpoints:
+// /healthz is the liveness probe (the process serves HTTP), /readyz the
+// readiness probe (all dependencies usable). It returns the HTTP metrics
+// middleware so main can mount it on the outer middleware chain; the
+// middleware records into the same registry that serves /metrics.
+func registerOperational(mux *chi.Mux, version string, includeTenantLabel bool, readiness []ReadinessCheck) func(http.Handler) http.Handler {
 	mux.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
+	mux.Get("/readyz", readinessHandler(readiness))
 	handler, httpMetrics := metricsHandler(version, includeTenantLabel)
 	mux.Handle("/metrics", handler)
 	return httpMetrics

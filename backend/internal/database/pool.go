@@ -147,30 +147,36 @@ func quoteIdentifier(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
-// WithTenant executes fn within a database transaction that sets the RLS
-// session variables app.org_id and app.client_scope. The callback receives
-// the transaction (pgx.Tx) for executing queries within the tenant scope.
-func WithTenant(ctx context.Context, pool *pgxpool.Pool, orgID string, clientScope string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		return fmt.Errorf("acquire connection: %w", err)
+// WithTenant is the single database entry point for tenant-scoped work
+// (TEN-06). It validates the scope, opens a transaction, sets every GUC of
+// TEN-04 transaction-locally, runs fn and commits on success. Because the
+// GUCs are set with is_local = true, they end with the transaction and never
+// leak to the next user of the pooled connection. An incomplete scope fails
+// before any connection is used.
+func WithTenant(ctx context.Context, pool *pgxpool.Pool, scope *TenantScope, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	if err := scope.Validate(); err != nil {
+		return err
 	}
-	defer conn.Release()
 
-	tx, err := conn.Begin(ctx)
+	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set app.org_id: %w", err)
-	}
-
-	if clientScope != "" {
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.client_scope', $1, true)", clientScope); err != nil {
-			return fmt.Errorf("set app.client_scope: %w", err)
-		}
+	// All values are set in every transaction, including the empty ones, so a
+	// session-level value set elsewhere on this connection can never widen
+	// the scope.
+	if _, err := tx.Exec(ctx, `SELECT
+		set_config('`+OrgGUC+`', $1, true),
+		set_config('`+UserGUC+`', $2, true),
+		set_config('`+ClientScopeGUC+`', $3, true),
+		set_config('`+SiteScopeGUC+`', $4, true),
+		set_config('`+TeamScopeGUC+`', $5, true)`,
+		scope.OrgID, scope.UserID,
+		scope.Clients.gucValue(), scope.Sites.gucValue(), scope.Teams.gucValue(),
+	); err != nil {
+		return fmt.Errorf("set tenant context: %w", err)
 	}
 
 	if err := fn(ctx, tx); err != nil {
