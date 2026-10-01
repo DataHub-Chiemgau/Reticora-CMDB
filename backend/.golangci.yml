@@ -1,45 +1,71 @@
+version: "2"
+
 run:
-  timeout: 5m
   modules-download-mode: readonly
 
+# v1 → v2 migration notes (WP-001):
+#   - gosimple is part of staticcheck in v2.
+#   - typecheck is no longer a linter; type errors are always reported.
+#   - gofmt and goimports moved to the formatters section.
+#   - exportloopref is removed upstream (obsolete since Go 1.22 loop
+#     semantics); copyloopvar is its successor.
 linters:
+  default: none
   enable:
     - errcheck
     - govet
     - staticcheck
     - unused
-    - gosimple
     - ineffassign
-    - typecheck
-    - gofmt
-    - goimports
     - misspell
     - unconvert
     - gocritic
     - revive
-    - exportloopref
-
-linters-settings:
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-  revive:
+    - copyloopvar
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    revive:
+      rules:
+        - name: unexported-return
+          disabled: true
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+  exclusions:
+    generated: lax
+    # Reproduce the v1 default exclusions so the rule set is unchanged.
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      - name: unexported-return
-        disabled: true
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-      - performance
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gocritic
+      - path: cmd/
+        linters:
+          - gocritic
 
 issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-        - gocritic
-    - path: cmd/
-      linters:
-        - gocritic
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Baseline (WP-001): the v2 rule set reports ~580 pre-existing findings in
+  # ~200 files across backend, collector and edgecore. Only findings in code
+  # changed since this commit (main at the time of the migration) fail the
+  # build; the backlog is cleared in a follow-up work package, which then
+  # removes this line. Requires full git history (fetch-depth: 0 in CI).
+  new-from-rev: 257e6fa0b74fd0a789490b48436b6cecf5cb3d24
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax

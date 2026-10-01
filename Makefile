@@ -1,9 +1,10 @@
-.PHONY: generate build test lint migrate-up migrate-down migrate-roundtrip up down seed e2e fmt vet oapi-codegen generate-api-client check-api-client
+.PHONY: generate build test lint lint-backend lint-frontend lint-collector lint-edgecore check-golangci-lint migrate-up migrate-down migrate-roundtrip up down seed e2e fmt vet oapi-codegen generate-api-client check-api-client
 
 # ─── Variables ──────────────────────────────────────────────────────────────────
 BACKEND_DIR := backend
 FRONTEND_DIR := frontend
 COLLECTOR_DIR := collector
+EDGECORE_DIR := edgecore
 MIGRATIONS_DIR := $(BACKEND_DIR)/migrations
 DATABASE_URL ?= ******localhost:5432/reticora?sslmode=disable
 
@@ -55,20 +56,36 @@ test-frontend:
 	cd $(FRONTEND_DIR) && npx vitest run
 
 # ─── Lint ───────────────────────────────────────────────────────────────────────
-lint: lint-backend lint-frontend lint-collector
+# Must match GOLANGCI_LINT_VERSION in .github/workflows/ci.yml (CI checks this).
+GOLANGCI_LINT_VERSION := v2.14.0
+GOLANGCI_LINT ?= golangci-lint
+# All go.work modules share the backend configuration.
+GOLANGCI_LINT_RUN := $(GOLANGCI_LINT) run --config $(CURDIR)/$(BACKEND_DIR)/.golangci.yml ./...
 
-lint-backend:
+lint: lint-backend lint-frontend lint-collector lint-edgecore
+
+check-golangci-lint:
+	@$(GOLANGCI_LINT) version --short 2>/dev/null | grep -qx '$(patsubst v%,%,$(GOLANGCI_LINT_VERSION))' || { \
+		echo "golangci-lint $(GOLANGCI_LINT_VERSION) is required. Install it with:"; \
+		echo "  curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b \$$(go env GOPATH)/bin $(GOLANGCI_LINT_VERSION)"; \
+		exit 1; }
+
+lint-backend: check-golangci-lint
 	@echo "==> Linting backend..."
-	cd $(BACKEND_DIR) && golangci-lint run ./...
+	cd $(BACKEND_DIR) && $(GOLANGCI_LINT_RUN)
 
 lint-frontend:
 	@echo "==> Linting frontend..."
 	cd $(FRONTEND_DIR) && npm run lint
 	cd $(FRONTEND_DIR) && npx prettier --check .
 
-lint-collector:
+lint-collector: check-golangci-lint
 	@echo "==> Linting collector..."
-	cd $(COLLECTOR_DIR) && golangci-lint run ./... 2>/dev/null || echo "No linter config for collector yet"
+	cd $(COLLECTOR_DIR) && $(GOLANGCI_LINT_RUN)
+
+lint-edgecore: check-golangci-lint
+	@echo "==> Linting edgecore..."
+	cd $(EDGECORE_DIR) && $(GOLANGCI_LINT_RUN)
 
 # ─── Format ─────────────────────────────────────────────────────────────────────
 fmt:
