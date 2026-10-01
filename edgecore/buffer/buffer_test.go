@@ -376,63 +376,22 @@ func TestPeekBatchCorruptFileReturnsError(t *testing.T) {
 	}
 }
 
-func TestDiskBufferMaxAgeDropsExpiredMessages(t *testing.T) {
-	dir := t.TempDir()
-	b := &DiskBuffer{Dir: dir, MaxAge: time.Hour}
-
-	// Backdate a message by writing it and rewinding its mtime.
-	oldID, err := b.Enqueue(context.Background(), Message{Topic: "discovery", Payload: []byte("old")})
-	if err != nil {
-		t.Fatalf("enqueue old: %v", err)
-	}
-	oldPath := filepath.Join(dir, oldID+".json")
-	stale := time.Now().Add(-2 * time.Hour)
-	if err := os.Chtimes(oldPath, stale, stale); err != nil {
+// backdate rewinds the modification time of a spooled message.
+func backdate(t *testing.T, dir, id string, age time.Duration) {
+	t.Helper()
+	stale := time.Now().Add(-age)
+	if err := os.Chtimes(filepath.Join(dir, id+".json"), stale, stale); err != nil {
 		t.Fatalf("chtimes: %v", err)
-	}
-
-	if _, err := b.Enqueue(context.Background(), Message{Topic: "discovery", Payload: []byte("fresh")}); err != nil {
-		t.Fatalf("enqueue fresh: %v", err)
-	}
-
-	n, err := b.Len(context.Background())
-	if err != nil {
-		t.Fatalf("len: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("expected 1 message after expiry, got %d", n)
-	}
-	msgs, err := b.PeekBatch(context.Background(), 10)
-	if err != nil {
-		t.Fatalf("peek: %v", err)
-	}
-	if string(msgs[0].Payload) != "fresh" {
-		t.Fatalf("expected the fresh message to survive, got %q", msgs[0].Payload)
 	}
 }
 
-func TestDiskBufferMaxBytesDropsOldest(t *testing.T) {
-	dir := t.TempDir()
-	// Cap comfortably below three messages but above two.
-	b := &DiskBuffer{Dir: dir}
-
-	var ids []string
-	for _, payload := range []string{"aaaa", "bbbb", "cccc"} {
-		id, err := b.Enqueue(context.Background(), Message{Topic: "discovery", Payload: []byte(payload)})
-		if err != nil {
-			t.Fatalf("enqueue: %v", err)
-		}
-		ids = append(ids, id)
-		// Distinct timestamps guarantee oldest-first ordering by file name.
-		time.Sleep(2 * time.Millisecond)
-	}
-
-	// Measure the spool size and set the cap to just below it.
-	var total int64
+func spoolSize(t *testing.T, dir string) int64 {
+	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("readdir: %v", err)
 	}
+	var total int64
 	for _, e := range entries {
 		info, err := e.Info()
 		if err != nil {
@@ -440,31 +399,114 @@ func TestDiskBufferMaxBytesDropsOldest(t *testing.T) {
 		}
 		total += info.Size()
 	}
-	oneSize := total / 3
-	b.MaxBytes = total - oneSize - 1
+	return total
+}
 
-	// The next enqueue enforces the cap and drops the oldest message.
-	if _, err := b.Enqueue(context.Background(), Message{Topic: "discovery", Payload: []byte("dddd")}); err != nil {
-		t.Fatalf("enqueue trigger: %v", err)
+// NFR-04: a MaxAge below 24 h never drops unacknowledged messages younger than
+// 24 h; older messages are dropped and reported as loss.
+func TestDiskBufferMaxAgeKeepsMessagesFor24Hours(t *testing.T) {
+	dir := t.TempDir()
+	var losses []Loss
+	b := &DiskBuffer{Dir: dir, MaxAge: time.Hour, OnDrop: func(l Loss) { losses = append(losses, l) }}
+	ctx := context.Background()
+
+	youngID, err := b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("23h")})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
 	}
+	backdate(t, dir, youngID, 23*time.Hour)
+	oldID, err := b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("25h")})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	backdate(t, dir, oldID, 25*time.Hour)
 
-	msgs, err := b.PeekBatch(context.Background(), 100)
+	if _, err = b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("fresh")}); err != nil {
+		t.Fatalf("enqueue fresh: %v", err)
+	}
+	msgs, err := b.PeekBatch(ctx, 10)
 	if err != nil {
 		t.Fatalf("peek: %v", err)
 	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected the 23 h old and the fresh message, got %d", len(msgs))
+	}
 	for _, m := range msgs {
-		if m.ID == ids[0] {
-			t.Fatalf("oldest message %s should have been dropped", ids[0])
+		if m.ID == oldID {
+			t.Fatal("message older than 24 h and MaxAge should be dropped")
 		}
 	}
-	var after int64
-	entries, _ = os.ReadDir(dir)
-	for _, e := range entries {
-		info, _ := e.Info()
-		after += info.Size()
+	if len(losses) != 1 || losses[0].Reason != LossMaxAge || losses[0].Messages != 1 {
+		t.Fatalf("losses = %+v, want one max_age loss", losses)
 	}
-	if after > total {
-		t.Fatalf("spool grew past the cap: before=%d after=%d", total, after)
+	stats, _ := b.Stats(ctx)
+	if stats.DroppedMessages != 1 || stats.DroppedBytes == 0 {
+		t.Fatalf("stats = %+v, want the loss counted", stats)
+	}
+}
+
+// At the size limit the spool applies backpressure: young messages are never
+// dropped, the new message is refused with ErrSpoolFull and counted.
+func TestDiskBufferSizeLimitAppliesBackpressure(t *testing.T) {
+	dir := t.TempDir()
+	var losses []Loss
+	b := &DiskBuffer{Dir: dir, OnDrop: func(l Loss) { losses = append(losses, l) }}
+	ctx := context.Background()
+	var ids []string
+	for _, payload := range []string{"aaaa", "bbbb", "cccc"} {
+		id, err := b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte(payload)})
+		if err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	b.MaxBytes = spoolSize(t, dir) + 10
+
+	if saturated, err := b.Saturated(ctx); err != nil || !saturated {
+		t.Fatalf("spool at the cap must be saturated, got %v (%v)", saturated, err)
+	}
+	if _, err := b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("dddd")}); !errors.Is(err, ErrSpoolFull) {
+		t.Fatalf("expected ErrSpoolFull, got %v", err)
+	}
+	if n, _ := b.Len(ctx); n != 3 {
+		t.Fatalf("young messages must be kept, got %d", n)
+	}
+	if len(losses) != 1 || losses[0].Reason != LossSpoolFull {
+		t.Fatalf("losses = %+v, want one spool_full loss", losses)
+	}
+
+	// Messages older than 24 h may make room; that loss is reported too.
+	backdate(t, dir, ids[0], 25*time.Hour)
+	if _, err := b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("eeee")}); err != nil {
+		t.Fatalf("enqueue after the old message can be dropped: %v", err)
+	}
+	if len(losses) != 2 || losses[1].Reason != LossSizeLimit || losses[1].Messages != 1 {
+		t.Fatalf("losses = %+v, want a size_limit loss for the old message", losses)
+	}
+	if after := spoolSize(t, dir); after > b.MaxBytes {
+		t.Fatalf("spool grew past the cap: %d > %d", after, b.MaxBytes)
+	}
+}
+
+// COL-05: delivery follows the source time, not the enqueue order.
+func TestPeekBatchOrdersBySourceTime(t *testing.T) {
+	dir := t.TempDir()
+	b := &DiskBuffer{Dir: dir}
+	ctx := context.Background()
+	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	for _, offset := range []int{3, 1, 2} {
+		if _, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte{byte(offset)}, CreatedAt: base.Add(time.Duration(offset) * time.Minute)}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+	}
+	msgs, err := b.PeekBatch(ctx, 10)
+	if err != nil {
+		t.Fatalf("peek: %v", err)
+	}
+	for i, m := range msgs {
+		if int(m.Payload[0]) != i+1 {
+			t.Fatalf("message %d has source offset %d, want ascending source time", i, m.Payload[0])
+		}
 	}
 }
 

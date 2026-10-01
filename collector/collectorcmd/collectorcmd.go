@@ -57,11 +57,12 @@ type collectorConfig struct {
 	// SpoolDir is the disk buffer location for discovery results collected
 	// while the backend is unreachable (offline operation per spec §5.2).
 	SpoolDir string
-	// SpoolMaxBytes caps the total spool size (oldest messages dropped
-	// first); 0 = unlimited (Epic D4 hardening).
+	// SpoolMaxBytes caps the total spool size; 0 = unlimited. At 90 % the
+	// collector pauses discovery (backpressure); messages younger than 24 h
+	// are never dropped (NFR-04, COL-05).
 	SpoolMaxBytes int64
-	// SpoolMaxAge drops buffered messages older than this on enqueue;
-	// 0 = keep forever (Epic D4 hardening).
+	// SpoolMaxAge drops buffered messages older than this on enqueue, but
+	// never before 24 h; 0 = keep forever.
 	SpoolMaxAge time.Duration
 	// TrapListenAddr enables the SNMP trap receiver when set (e.g. ":162").
 	// Traps are normalized into metric events and sent to the monitoring
@@ -175,7 +176,16 @@ type uploader struct {
 func newUploader(ctx context.Context, cfg collectorConfig) (*uploader, error) {
 	u := &uploader{cfg: cfg}
 	if cfg.SpoolDir != "" {
-		u.spool = &buffer.DiskBuffer{Dir: cfg.SpoolDir, MaxBytes: cfg.SpoolMaxBytes, MaxAge: cfg.SpoolMaxAge}
+		u.spool = &buffer.DiskBuffer{
+			Dir: cfg.SpoolDir, MaxBytes: cfg.SpoolMaxBytes, MaxAge: cfg.SpoolMaxAge,
+			// Every loss is an event in the collector log and is reported to
+			// the server with the next heartbeat (Stats.Dropped*).
+			OnDrop: func(l buffer.Loss) {
+				slog.Error("spool data lost",
+					"event", "collector.spool.data_lost",
+					"reason", l.Reason, "messages", l.Messages, "bytes", l.Bytes)
+			},
+		}
 	}
 
 	certPEM, keyPEM, caPEM, err := loadTLSMaterial(ctx, cfg)
@@ -264,6 +274,20 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 
 	for {
 		cycleStart := time.Now()
+		// Backlog first: spooled batches are delivered before anything new
+		// is collected (COL-05).
+		up.flushSpool(ctx)
+		if up.backpressure(ctx) {
+			slog.Warn("discovery paused: spool is saturated and the backend is unreachable",
+				"event", "collector.spool.backpressure")
+			select {
+			case <-ctx.Done():
+				slog.Info("discovery loop stopped")
+				return
+			case <-ticker.C:
+				continue
+			}
+		}
 		slog.Info("discovery cycle started", "scan_subnets", cfg.ScanSubnets, "protocols", cfg.Protocols)
 
 		var allResults []plugins.Result
@@ -295,7 +319,7 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 		// Upload results to the backend in a compressed batch, then flush any
 		// results spooled while the backend was unreachable.
 		if len(allResults) > 0 {
-			if err := up.uploadResults(ctx, allResults); err != nil {
+			if err := up.uploadResultsAt(ctx, allResults, cycleStart); err != nil {
 				slog.Error("failed to upload discovery results", "error", err, "count", len(allResults))
 			} else {
 				slog.Info("discovery results uploaded", "count", len(allResults))
@@ -358,11 +382,18 @@ func incrementIP(ip net.IP) {
 	}
 }
 
-// uploadResults sends discovery results to the backend via compressed JSON
-// POST. When the upload fails and a spool directory is configured, the batch
-// is persisted to the disk buffer and delivered by flushSpool once the
-// backend is reachable again.
+// uploadResults uploads results collected now; see uploadResultsAt.
 func (u *uploader) uploadResults(ctx context.Context, results []plugins.Result) error {
+	return u.uploadResultsAt(ctx, results, time.Now())
+}
+
+// uploadResultsAt sends discovery results collected at sourceTime to the
+// backend via compressed JSON POST. While older batches wait in the spool the
+// new batch is queued behind them, so the backend receives data in source-time
+// order (COL-05). When the upload fails and a spool directory is configured,
+// the batch is persisted and delivered by flushSpool once the backend is
+// reachable again.
+func (u *uploader) uploadResultsAt(ctx context.Context, results []plugins.Result, sourceTime time.Time) error {
 	cfg := u.cfg
 	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
 		slog.Warn("skipping upload due to incomplete configuration")
@@ -374,8 +405,18 @@ func (u *uploader) uploadResults(ctx context.Context, results []plugins.Result) 
 		return fmt.Errorf("marshal results: %w", err)
 	}
 
+	if u.spool != nil {
+		if backlog, lenErr := u.spool.Len(ctx); lenErr == nil && backlog > 0 {
+			if spoolErr := u.spoolResults(ctx, payload, sourceTime); spoolErr != nil {
+				return fmt.Errorf("queue behind spool backlog: %w", spoolErr)
+			}
+			u.flushSpool(ctx)
+			return nil
+		}
+	}
+
 	if err := u.postPayload(ctx, payload); err != nil {
-		if spoolErr := u.spoolResults(ctx, payload); spoolErr != nil {
+		if spoolErr := u.spoolResults(ctx, payload, sourceTime); spoolErr != nil {
 			return fmt.Errorf("upload failed (%v) and spooling failed: %w", err, spoolErr)
 		}
 		return err
@@ -448,12 +489,14 @@ func (u *uploader) postAgentTelemetry(ctx context.Context, payload []byte) error
 	return nil
 }
 
-// spoolResults persists an undeliverable batch to the disk buffer.
-func (u *uploader) spoolResults(ctx context.Context, payload []byte) error {
+// spoolResults persists an undeliverable batch to the disk buffer. A full
+// spool returns buffer.ErrSpoolFull; the loss is counted and reported by the
+// buffer, and discovery pauses through backpressure.
+func (u *uploader) spoolResults(ctx context.Context, payload []byte, sourceTime time.Time) error {
 	if u.spool == nil {
 		return nil
 	}
-	id, err := u.spool.Enqueue(ctx, buffer.Message{Topic: spoolTopic, Payload: payload})
+	id, err := u.spool.Enqueue(ctx, buffer.Message{Topic: spoolTopic, Payload: payload, CreatedAt: sourceTime.UTC()})
 	if err != nil {
 		return err
 	}
@@ -482,37 +525,67 @@ func (u *uploader) logSpoolStats(ctx context.Context) {
 	)
 }
 
-// flushSpool delivers buffered batches in oldest-first order. Delivery stops
-// at the first failure so spooled batches are never reordered or dropped.
+// spoolFlushBatch is the number of messages read per spool pass; the flush
+// continues with further passes until the spool is empty (no per-cycle cap).
+const spoolFlushBatch = 64
+
+// flushSpool delivers buffered batches in source-time order until the spool is
+// empty. Delivery stops at the first failure so spooled batches are never
+// reordered or dropped.
 func (u *uploader) flushSpool(ctx context.Context) {
 	if u.spool == nil || u.cfg.ServerURL == "" {
 		return
 	}
-	msgs, err := u.spool.PeekBatch(ctx, 16)
+	delivered := 0
+	defer func() {
+		if delivered > 0 {
+			u.logSpoolStats(ctx)
+		}
+	}()
+	for {
+		msgs, err := u.spool.PeekBatch(ctx, spoolFlushBatch)
+		if err != nil {
+			slog.Error("read upload spool failed", "error", err)
+			return
+		}
+		progressed := false
+		for _, msg := range msgs {
+			if ctx.Err() != nil {
+				return
+			}
+			if msg.Topic != spoolTopic {
+				continue
+			}
+			if err := u.postPayload(ctx, msg.Payload); err != nil {
+				slog.Warn("spool flush postponed; backend still unreachable", "message_id", msg.ID, "error", err)
+				return
+			}
+			if err := u.spool.Ack(ctx, []string{msg.ID}); err != nil {
+				slog.Error("spool ack failed", "message_id", msg.ID, "error", err)
+				return
+			}
+			delivered++
+			progressed = true
+			slog.Info("spooled discovery results delivered", "message_id", msg.ID)
+		}
+		if len(msgs) < spoolFlushBatch || !progressed {
+			return
+		}
+	}
+}
+
+// backpressure reports whether collection has to pause because the spool is
+// saturated (COL-05: throttle instead of dropping data).
+func (u *uploader) backpressure(ctx context.Context) bool {
+	if u.spool == nil {
+		return false
+	}
+	saturated, err := u.spool.Saturated(ctx)
 	if err != nil {
-		slog.Error("read upload spool failed", "error", err)
-		return
+		slog.Warn("spool saturation unknown", "error", err)
+		return false
 	}
-	for _, msg := range msgs {
-		if ctx.Err() != nil {
-			return
-		}
-		if msg.Topic != spoolTopic {
-			continue
-		}
-		if err := u.postPayload(ctx, msg.Payload); err != nil {
-			slog.Warn("spool flush postponed; backend still unreachable", "message_id", msg.ID, "error", err)
-			return
-		}
-		if err := u.spool.Ack(ctx, []string{msg.ID}); err != nil {
-			slog.Error("spool ack failed", "message_id", msg.ID, "error", err)
-			return
-		}
-		slog.Info("spooled discovery results delivered", "message_id", msg.ID)
-	}
-	if len(msgs) > 0 {
-		u.logSpoolStats(ctx)
-	}
+	return saturated
 }
 
 func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
@@ -520,7 +593,7 @@ func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 	defer ticker.Stop()
 
 	for {
-		postHeartbeat(ctx, up.client, cfg)
+		postHeartbeat(ctx, up.client, cfg, up.spoolReport(ctx))
 		select {
 		case <-ctx.Done():
 			slog.Info("heartbeat loop stopped")
@@ -530,7 +603,40 @@ func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 	}
 }
 
-func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig) {
+// spoolReport is the spool state sent with every heartbeat so the server sees
+// backlog, backpressure and losses (NFR-04, OPS-06).
+type spoolReport struct {
+	Messages         int   `json:"messages"`
+	Bytes            int64 `json:"bytes"`
+	OldestAgeSeconds int64 `json:"oldest_age_seconds"`
+	DroppedMessages  int64 `json:"dropped_messages"`
+	DroppedBytes     int64 `json:"dropped_bytes"`
+	Backpressure     bool  `json:"backpressure"`
+}
+
+type heartbeatBody struct {
+	Spool *spoolReport `json:"spool,omitempty"`
+}
+
+func (u *uploader) spoolReport(ctx context.Context) *spoolReport {
+	if u.spool == nil {
+		return nil
+	}
+	stats, err := u.spool.Stats(ctx)
+	if err != nil {
+		return nil
+	}
+	return &spoolReport{
+		Messages:         stats.Messages,
+		Bytes:            stats.Bytes,
+		OldestAgeSeconds: int64(stats.OldestAge.Seconds()),
+		DroppedMessages:  stats.DroppedMessages,
+		DroppedBytes:     stats.DroppedBytes,
+		Backpressure:     u.backpressure(ctx),
+	}
+}
+
+func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport) {
 	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
 		slog.Warn("skipping heartbeat due to incomplete configuration",
 			"server_url", cfg.ServerURL,
@@ -541,11 +647,17 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 	}
 
 	endpoint := strings.TrimRight(cfg.ServerURL, "/") + "/api/v1/collectors/" + cfg.CollectorID + "/heartbeat"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	body, err := json.Marshal(heartbeatBody{Spool: spool})
+	if err != nil {
+		slog.Error("encode heartbeat failed", "error", err)
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		slog.Error("build heartbeat request failed", "error", err)
 		return
 	}
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Organization-ID", cfg.OrganizationID)
 
 	start := time.Now()
@@ -774,7 +886,7 @@ func handleAgentConnection(ctx context.Context, up *uploader, conn net.Conn) {
 	if up != nil {
 		if err := up.postAgentTelemetry(ctx, payload); err != nil {
 			slog.Warn("agent telemetry upload failed, spooling", "remote", remoteAddr, "error", err)
-			if serr := up.spoolResults(ctx, payload); serr != nil {
+			if serr := up.spoolResults(ctx, payload, time.Now()); serr != nil {
 				slog.Error("agent telemetry spool failed", "remote", remoteAddr, "error", serr)
 				_, _ = conn.Write([]byte(`{"status":"error"}` + "\n"))
 				return

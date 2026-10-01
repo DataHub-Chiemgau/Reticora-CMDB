@@ -7,7 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -591,7 +594,27 @@ func generateEnrollmentCode() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
-// Heartbeat handles POST /api/v1/collectors/{id}/heartbeat
+// CollectorSpoolReport is the offline spool state a collector sends with its
+// heartbeat (NFR-04, COL-05, OPS-06). Dropped counters only grow while the
+// collector runs.
+type CollectorSpoolReport struct {
+	Messages         int   `json:"messages"`
+	Bytes            int64 `json:"bytes"`
+	OldestAgeSeconds int64 `json:"oldest_age_seconds"`
+	DroppedMessages  int64 `json:"dropped_messages"`
+	DroppedBytes     int64 `json:"dropped_bytes"`
+	Backpressure     bool  `json:"backpressure"`
+}
+
+// CollectorHeartbeatRequest is the optional body of a collector heartbeat.
+type CollectorHeartbeatRequest struct {
+	Spool *CollectorSpoolReport `json:"spool,omitempty"`
+}
+
+// Heartbeat handles POST /api/v1/collectors/{id}/heartbeat. The body is
+// optional; a spool report with losses or backpressure is logged as an
+// operator-visible warning so a silent data loss in the collector cannot go
+// unnoticed.
 func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -599,10 +622,25 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var req CollectorHeartbeatRequest
+	if err := api.ReadJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid heartbeat body")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if err := h.repo.Heartbeat(r.Context(), t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "collector not found")
 		return
+	}
+	if s := req.Spool; s != nil && (s.DroppedMessages > 0 || s.Backpressure) {
+		slog.WarnContext(r.Context(), "collector reported spool data loss or backpressure",
+			"event", "collector.spool.degraded",
+			"organization_id", t.OrganizationID, "collector_id", id,
+			"spool_messages", s.Messages, "spool_bytes", s.Bytes,
+			"spool_oldest_age_seconds", s.OldestAgeSeconds,
+			"dropped_messages", s.DroppedMessages, "dropped_bytes", s.DroppedBytes,
+			"backpressure", s.Backpressure)
 	}
 
 	w.WriteHeader(http.StatusNoContent)

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,25 +34,72 @@ type Queue interface {
 	Len(ctx context.Context) (int, error)
 }
 
+// DefaultMinRetention is the time an unacknowledged message is kept in any
+// case (NFR-04: 24 hours of offline operation without data loss).
+const DefaultMinRetention = 24 * time.Hour
+
+// ErrSpoolFull is returned by Enqueue when the size limit is reached and no
+// message older than the minimum retention can make room. The message is not
+// stored; callers apply backpressure (pause collection) instead of relying on
+// the spool to drop data.
+var ErrSpoolFull = errors.New("buffer: spool full")
+
+// Loss reasons reported to OnDrop.
+const (
+	LossMaxAge    = "max_age"
+	LossSizeLimit = "size_limit"
+	LossSpoolFull = "spool_full"
+)
+
+// Loss describes messages the spool could not keep.
+type Loss struct {
+	Messages int
+	Bytes    int64
+	Reason   string
+}
+
 // DiskBuffer persists messages as individual JSON files inside a spool directory.
 //
-// Hardening (Epic D4): the spool is bounded so a prolonged backend outage
-// cannot fill the disk. MaxBytes caps the total payload size; when it is
-// exceeded, the oldest messages are dropped first (they are the stalest and
-// the next successful sync re-discovers the current state anyway). MaxAge
-// drops messages older than the given duration on Enqueue. Both limits are
-// optional — zero means "unlimited", preserving the previous behaviour.
+// The spool is bounded so a prolonged backend outage cannot fill the disk, but
+// it never drops unacknowledged messages younger than MinRetention (NFR-04,
+// COL-05):
+//   - MaxAge drops messages older than max(MaxAge, MinRetention) on Enqueue.
+//   - MaxBytes caps the total size. Over the cap, messages older than
+//     MinRetention are dropped oldest first; if that is not enough, Enqueue
+//     returns ErrSpoolFull without storing the new message (backpressure).
+//
+// Every loss is counted (Stats.DroppedMessages/DroppedBytes) and reported to
+// OnDrop so the caller can raise an event and inform the server. Zero limits
+// mean "unlimited".
 type DiskBuffer struct {
 	Dir string
 	// MaxBytes caps the total size of the spool; 0 = unlimited.
 	MaxBytes int64
-	// MaxAge drops messages older than this duration on Enqueue; 0 = keep forever.
+	// MaxAge drops messages older than this duration on Enqueue; 0 = keep
+	// forever. Values below MinRetention are raised to MinRetention.
 	MaxAge time.Duration
+	// MinRetention protects unacknowledged messages from every limit; 0 =
+	// DefaultMinRetention.
+	MinRetention time.Duration
+	// OnDrop is called (with the buffer lock held, so it must not call back
+	// into the buffer) for every loss.
+	OnDrop func(Loss)
 
-	mu sync.Mutex
+	mu           sync.Mutex
+	droppedMsgs  int64
+	droppedBytes int64
+}
+
+func (b *DiskBuffer) minRetention() time.Duration {
+	if b.MinRetention > 0 {
+		return b.MinRetention
+	}
+	return DefaultMinRetention
 }
 
 // Enqueue stores a message on disk and returns its durable identifier.
+// Messages are delivered in the order of their CreatedAt (the source time of
+// the data); when it is zero the enqueue time is used.
 func (b *DiskBuffer) Enqueue(ctx context.Context, msg Message) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -64,15 +112,15 @@ func (b *DiskBuffer) Enqueue(ctx context.Context, msg Message) (string, error) {
 		return "", fmt.Errorf("buffer: create spool: %w", err)
 	}
 
+	if msg.CreatedAt.IsZero() {
+		msg.CreatedAt = time.Now().UTC()
+	}
 	if msg.ID == "" {
-		generated, err := newMessageID()
+		generated, err := newMessageID(msg.CreatedAt)
 		if err != nil {
 			return "", err
 		}
 		msg.ID = generated
-	}
-	if msg.CreatedAt.IsZero() {
-		msg.CreatedAt = time.Now().UTC()
 	}
 
 	data, err := json.MarshalIndent(msg, "", "  ")
@@ -80,22 +128,21 @@ func (b *DiskBuffer) Enqueue(ctx context.Context, msg Message) (string, error) {
 		return "", fmt.Errorf("buffer: encode message: %w", err)
 	}
 
-	if err := os.WriteFile(b.messagePath(msg.ID), data, 0o600); err != nil {
-		return "", fmt.Errorf("buffer: write message: %w", err)
+	if err := b.makeRoomLocked(int64(len(data))); err != nil {
+		return "", err
 	}
 
-	if err := b.enforceLimitsLocked(msg.ID); err != nil {
-		return "", err
+	if err := os.WriteFile(b.messagePath(msg.ID), data, 0o600); err != nil {
+		return "", fmt.Errorf("buffer: write message: %w", err)
 	}
 
 	return msg.ID, nil
 }
 
-// enforceLimitsLocked drops expired and over-limit messages, oldest first.
-// The just-enqueued message (justID) is never dropped by the size limit —
-// if it alone exceeds MaxBytes the spool temporarily holds more than the cap
-// rather than silently losing the newest data point.
-func (b *DiskBuffer) enforceLimitsLocked(justID string) error {
+// makeRoomLocked applies the age and size limits before a message of size
+// bytes is written. It drops only messages older than the minimum retention
+// and returns ErrSpoolFull when the new message still does not fit.
+func (b *DiskBuffer) makeRoomLocked(size int64) error {
 	if b.MaxAge <= 0 && b.MaxBytes <= 0 {
 		return nil
 	}
@@ -105,47 +152,89 @@ func (b *DiskBuffer) enforceLimitsLocked(justID string) error {
 		return err
 	}
 
-	var total int64
 	type spoolFile struct {
 		name string
 		size int64
+		age  time.Duration
 	}
+	maxAge := b.MaxAge
+	if maxAge > 0 && maxAge < b.minRetention() {
+		maxAge = b.minRetention()
+	}
+	var total int64
 	kept := make([]spoolFile, 0, len(files))
-	now := time.Now().UTC()
+	expired := Loss{Reason: LossMaxAge}
+	now := time.Now()
 	for _, entry := range files {
 		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
-		// Age limit: drop messages that would survive a full sync cycle anyway.
-		if b.MaxAge > 0 && now.Sub(info.ModTime()) > b.MaxAge {
+		age := now.Sub(info.ModTime())
+		if maxAge > 0 && age > maxAge {
 			if err := os.Remove(filepath.Join(b.Dir, entry.Name())); err != nil && !os.IsNotExist(err) {
 				return fmt.Errorf("buffer: drop expired message: %w", err)
 			}
+			expired.Messages++
+			expired.Bytes += info.Size()
 			continue
 		}
-		kept = append(kept, spoolFile{name: entry.Name(), size: info.Size()})
+		kept = append(kept, spoolFile{name: entry.Name(), size: info.Size(), age: age})
 		total += info.Size()
 	}
+	b.recordLossLocked(expired)
 
-	if b.MaxBytes <= 0 || total <= b.MaxBytes {
+	if b.MaxBytes <= 0 || total+size <= b.MaxBytes {
 		return nil
 	}
-	// Files are sorted oldest-first (lexical name order carries the
-	// creation timestamp prefix), so trim from the front.
+	// Over the cap: drop the oldest messages beyond the minimum retention.
+	// Files are sorted oldest-first by name (source-time prefix).
+	trimmed := Loss{Reason: LossSizeLimit}
 	for _, f := range kept {
-		if total <= b.MaxBytes {
+		if total+size <= b.MaxBytes {
 			break
 		}
-		if f.name == justID+".json" {
+		if f.age <= b.minRetention() {
 			continue
 		}
 		if err := os.Remove(filepath.Join(b.Dir, f.name)); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("buffer: drop over-limit message: %w", err)
 		}
 		total -= f.size
+		trimmed.Messages++
+		trimmed.Bytes += f.size
+	}
+	b.recordLossLocked(trimmed)
+	if total+size > b.MaxBytes {
+		b.recordLossLocked(Loss{Messages: 1, Bytes: size, Reason: LossSpoolFull})
+		return ErrSpoolFull
 	}
 	return nil
+}
+
+func (b *DiskBuffer) recordLossLocked(l Loss) {
+	if l.Messages == 0 {
+		return
+	}
+	b.droppedMsgs += int64(l.Messages)
+	b.droppedBytes += l.Bytes
+	if b.OnDrop != nil {
+		b.OnDrop(l)
+	}
+}
+
+// Saturated reports whether the spool has reached the high-water mark of 90 %
+// of MaxBytes. Producers pause collection while it is saturated so the size
+// limit is not reached (backpressure instead of loss).
+func (b *DiskBuffer) Saturated(ctx context.Context) (bool, error) {
+	if b.MaxBytes <= 0 {
+		return false, nil
+	}
+	stats, err := b.Stats(ctx)
+	if err != nil {
+		return false, err
+	}
+	return stats.Bytes >= b.MaxBytes/10*9, nil
 }
 
 // PeekBatch returns the oldest buffered messages without deleting them.
@@ -229,6 +318,10 @@ type Stats struct {
 	Bytes int64
 	// OldestAge is the age of the oldest buffered message; zero when empty.
 	OldestAge time.Duration
+	// DroppedMessages and DroppedBytes count every loss of this buffer
+	// instance (all reasons); they only grow.
+	DroppedMessages int64
+	DroppedBytes    int64
 }
 
 // Stats returns the current spool statistics.
@@ -245,7 +338,7 @@ func (b *DiskBuffer) Stats(ctx context.Context) (Stats, error) {
 		return Stats{}, err
 	}
 
-	stats := Stats{Messages: len(entries)}
+	stats := Stats{Messages: len(entries), DroppedMessages: b.droppedMsgs, DroppedBytes: b.droppedBytes}
 	now := time.Now().UTC()
 	for _, entry := range entries {
 		info, err := entry.Info()
@@ -289,11 +382,13 @@ func (b *DiskBuffer) messagePath(id string) string {
 	return filepath.Join(b.Dir, id+".json")
 }
 
-func newMessageID() (string, error) {
+// newMessageID derives the id from the source time, so the lexical file order
+// is the delivery order (oldest data first, COL-05).
+func newMessageID(sourceTime time.Time) (string, error) {
 	var suffix [4]byte
 	if _, err := rand.Read(suffix[:]); err != nil {
 		return "", fmt.Errorf("buffer: generate id: %w", err)
 	}
 
-	return time.Now().UTC().Format("20060102T150405.000000000Z") + "-" + hex.EncodeToString(suffix[:]), nil
+	return sourceTime.UTC().Format("20060102T150405.000000000Z") + "-" + hex.EncodeToString(suffix[:]), nil
 }

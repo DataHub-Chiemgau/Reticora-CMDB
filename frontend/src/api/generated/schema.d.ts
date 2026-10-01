@@ -2543,7 +2543,7 @@ export interface paths {
     put?: never;
     /**
      * Record a collector heartbeat
-     * @description Updates the collector's last-heartbeat timestamp so the platform can track liveness. No request body is required.
+     * @description Updates the collector's last-heartbeat timestamp so the platform can track liveness. The optional body reports the offline spool state; losses and backpressure are logged for operators (NFR-04, COL-05).
      */
     post: operations['collectorHeartbeat'];
     delete?: never;
@@ -4730,6 +4730,22 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    CollectorHeartbeatRequest: {
+      spool?: components['schemas']['CollectorSpoolReport'];
+    };
+    /** @description Offline spool state of a collector; dropped counters only grow while the collector runs. */
+    CollectorSpoolReport: {
+      messages?: number;
+      /** Format: int64 */
+      bytes?: number;
+      /** Format: int64 */
+      oldest_age_seconds?: number;
+      /** Format: int64 */
+      dropped_messages?: number;
+      /** Format: int64 */
+      dropped_bytes?: number;
+      backpressure?: boolean;
+    };
     IGAObject: {
       [key: string]: unknown;
     };
@@ -13450,7 +13466,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['CollectorHeartbeatRequest'];
+      };
+    };
     responses: {
       /** @description Heartbeat recorded */
       204: {
@@ -13459,6 +13479,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
     };

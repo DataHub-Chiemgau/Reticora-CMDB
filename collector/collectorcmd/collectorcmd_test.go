@@ -11,6 +11,8 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
@@ -289,5 +291,85 @@ func TestParseRedfishTLSScopes(t *testing.T) {
 		if _, err := parseRedfishTLSScopes(bad, readFile); err == nil {
 			t.Errorf("%q must be rejected", bad)
 		}
+	}
+}
+
+// COL-05: new results queue behind the spool backlog, so the backend receives
+// batches in source-time order; one flush delivers more than 16 batches.
+func TestUploadResults_BacklogFirstAndUnboundedFlush(t *testing.T) {
+	spoolDir := t.TempDir()
+	var order []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gz, err := gzip.NewReader(r.Body)
+		if err != nil {
+			t.Errorf("gzip: %v", err)
+			return
+		}
+		var results []plugins.Result
+		if err := json.NewDecoder(gz).Decode(&results); err != nil {
+			t.Errorf("decode: %v", err)
+			return
+		}
+		order = append(order, results[0].Name)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	up, err := newUploader(context.Background(), testConfig(srv.URL, spoolDir))
+	if err != nil {
+		t.Fatalf("newUploader: %v", err)
+	}
+	base := time.Now().Add(-time.Hour)
+	for i := 0; i < 20; i++ {
+		payload, _ := json.Marshal([]plugins.Result{{Name: fmt.Sprintf("old-%02d", i)}})
+		if err := up.spoolResults(context.Background(), payload, base.Add(time.Duration(i)*time.Second)); err != nil {
+			t.Fatalf("spool: %v", err)
+		}
+	}
+
+	if err := up.uploadResults(context.Background(), []plugins.Result{{Name: "new"}}); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	if len(order) != 21 || order[0] != "old-00" || order[19] != "old-19" || order[20] != "new" {
+		t.Fatalf("delivery order = %v, want 20 backlog batches then the new one", order)
+	}
+	if n, _ := up.spool.Len(context.Background()); n != 0 {
+		t.Fatalf("spool not drained: %d", n)
+	}
+}
+
+// NFR-04/OPS-06: a saturated spool pauses collection and the heartbeat reports
+// backlog, backpressure and losses to the server.
+func TestHeartbeatReportsSpoolBackpressureAndLoss(t *testing.T) {
+	spoolDir := t.TempDir()
+	var body heartbeatBody
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode heartbeat: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	cfg := testConfig(srv.URL, spoolDir)
+	up, err := newUploader(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newUploader: %v", err)
+	}
+	if err := up.spoolResults(context.Background(), []byte(`[{"Name":"a"}]`), time.Now()); err != nil {
+		t.Fatalf("spool: %v", err)
+	}
+	stats, _ := up.spool.Stats(context.Background())
+	up.spool.MaxBytes = stats.Bytes // spool is full now
+	if !up.backpressure(context.Background()) {
+		t.Fatal("full spool must apply backpressure")
+	}
+	if err := up.spoolResults(context.Background(), []byte(`[{"Name":"b"}]`), time.Now()); !errors.Is(err, buffer.ErrSpoolFull) {
+		t.Fatalf("expected ErrSpoolFull, got %v", err)
+	}
+
+	postHeartbeat(context.Background(), up.client, cfg, up.spoolReport(context.Background()))
+	if body.Spool == nil || body.Spool.Messages != 1 || !body.Spool.Backpressure || body.Spool.DroppedMessages != 1 {
+		t.Fatalf("heartbeat spool report = %+v", body.Spool)
 	}
 }

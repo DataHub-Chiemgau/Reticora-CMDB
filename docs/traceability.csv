@@ -27,3 +27,6 @@ TEN-05;[B];B;backend/internal/tenant/rls/global_rows_integration_test.go;WP-024
 TEC-06;[B], [Q] Spike;B;backend/internal/monitoring/timescale_rls_spike_integration_test.go;WP-039
 MON-01;[B];B;backend/internal/monitoring/timescale_rls_spike_integration_test.go;WP-039
 COL-02;[B];B;collector/plugins/redfish/redfish_test.go;WP-048
+COL-05;[B];D;edgecore/buffer/buffer_test.go;WP-062
+OPS-06;[Q];D;edgecore/buffer/buffer_test.go;WP-062
+NFR-04;[B], Teilumfang [P5];D;edgecore/buffer/buffer_test.go;WP-062
