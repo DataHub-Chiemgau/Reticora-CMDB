@@ -215,4 +215,6 @@ Zusätzliche genaue Testfundstellen zu den Tabellensymbolen:
 
 Eine unabhängige zweite, nur lesende Quellenstichprobe prüfte Dokument-Create/Download, Desk/Booking, Management-/Ticket-Kontexte, Workflow-Aktionen, KI-Indexierung/Retrieval, Cloud-Assets sowie Migrationen 33/50/56 und fand keinen materiellen Korrekturbedarf. Sie bestätigte Tabellenstruktur und Zähler, ersetzt jedoch keine DB-/Serviceabnahme; die Download-/Paketanzahlen wurden separat aus den vorhandenen Rohlogs gezählt.
 
-Abschließende automatisierte Dokumentreview/Secret-Scan sowie Ergänzung der Gesamtauswertung folgen; keine Empfehlungen umgesetzt.
+Die Gesamtauswertung ist ergänzt: 279 eindeutige CSV-IDs, bisherige 233 Zeilen bytegetreu erhalten, 46 genaue Quellenimporte, Critical-/High-Inventare vollständig und 225 bekannte fehlende Traceability-Zuordnungen. Nur die vier erlaubten Dokumentdateien dieses Auftrags sind geändert; keine Empfehlungen umgesetzt. Secret-Scan dieser Dateien ohne Befund.
+
+Parallele Validierung am 2026-10-01 angefordert: Der Wrapper meldet zwar „Success“, das automatische Reviewwerkzeug war jedoch wegen eines nicht verfügbaren Modells nicht ausführbar; **kein bestandener automatisierter Reviewnachweis**. CodeQL wurde für reine Dokumentänderungen übersprungen, nicht ausgeführt. Diese Werkzeuggrenze ist vom Ergebnis der verfügbaren unabhängigen Quellenstichprobe zu unterscheiden.
