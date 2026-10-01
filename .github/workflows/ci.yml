@@ -339,9 +339,9 @@ jobs:
           today=$(date -u +%F)
           active=$(awk -v today="$today" '!/^#/ && NF { until = ""; for (i = 2; i <= NF; i++) if ($i ~ /^exp:/) until = substr($i, 5); if (until >= today) print $1 }' security/scan-exceptions.txt)
           jq -r 'select(.finding != null) | "\(.finding.osv) \(if .finding.trace[0].function then "reachable" else "imported" end)"' "$REPORT" | sort -u | tee govulncheck-findings.txt
-          blocking=$(awk '$2 == "reachable" { print $1 }' govulncheck-findings.txt | sort -u | grep -vxF -f <(printf '%s\n' $active) || true)
+          blocking=$(awk '$2 == "reachable" { print $1 }' govulncheck-findings.txt | sort -u | grep -vxF -f <(printf '%s\n' "$active") || true)
           if [ -n "$blocking" ]; then
-            echo "::error::reachable Go vulnerabilities without valid exception: $(echo $blocking)"
+            echo "::error::reachable Go vulnerabilities without valid exception: $(tr '\n' ' ' <<<"$blocking")"
             exit 1
           fi
 
@@ -379,9 +379,9 @@ jobs:
           jq -r '.metadata.vulnerabilities | "production: critical=\(.critical) high=\(.high) moderate=\(.moderate) low=\(.low)"' npm-audit-prod.json
           jq -r '.metadata.vulnerabilities | "all incl. dev: critical=\(.critical) high=\(.high) moderate=\(.moderate) low=\(.low)"' npm-audit-all.json
           blocking=$(jq -r '.vulnerabilities[] | select(.severity == "high" or .severity == "critical") | .via[] | objects | select(.severity == "high" or .severity == "critical") | .url | sub(".*/"; "")' npm-audit-prod.json \
-            | sort -u | grep -vxF -f <(printf '%s\n' $active) || true)
+            | sort -u | grep -vxF -f <(printf '%s\n' "$active") || true)
           if [ -n "$blocking" ]; then
-            echo "::error::High/Critical npm advisories in production dependencies without valid exception: $(echo $blocking)"
+            echo "::error::High/Critical npm advisories in production dependencies without valid exception: $(tr '\n' ' ' <<<"$blocking")"
             exit 1
           fi
 
@@ -442,6 +442,42 @@ jobs:
           name: trivy-${{ matrix.image }}
           path: trivy-${{ matrix.image }}.json
           retention-days: 30
+
+  # NFR-09/PRI-11 (WP-105): the Terraform module only accepts EU regions for
+  # all data locations (primary, backups, logs, search index).
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Format, init and validate
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+
+      - name: EU regions are accepted
+        run: terraform plan -input=false -var region=eu-central-1 -var backup_region=europe-west3 -var log_region=westeurope -var search_region=fsn1
+
+      - name: Non-EU regions are rejected
+        run: |
+          set -u
+          for var in region=us-east-1 region=eu-west-2 region=eu-central-2 region=europe-west6 \
+                     backup_region=us-west-2 log_region=eastus search_region=switzerlandnorth; do
+            if terraform plan -input=false -var "$var" > /dev/null 2>&1; then
+              echo "::error::terraform accepted the non-EU setting $var"
+              exit 1
+            fi
+            echo "rejected: $var"
+          done
 
   k8s-manifests:
     runs-on: ubuntu-latest

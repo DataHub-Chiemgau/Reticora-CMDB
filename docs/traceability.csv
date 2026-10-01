@@ -36,3 +36,5 @@ OPS-03;[B], [P5];A;.github/workflows/ci.yml;WP-099
 INS-01;[Q];A;tests/install-smoke-health.test.sh;WP-092
 GATE-03;[Q];A;tests/install-smoke-health.test.sh;WP-092
 TEC-09;[B];A;tests/install-smoke-health.test.sh;WP-092
+PRI-11;[B];A;docs/betrieb/referenzmodell.md;WP-105
+NFR-09;[B];A;docs/betrieb/referenzmodell.md;WP-105
