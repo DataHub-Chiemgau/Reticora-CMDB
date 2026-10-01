@@ -1,8 +1,9 @@
 // Package main provides the audit-seed CLI. It creates a tenant and appends a
 // short, cryptographically valid audit hash chain via the production
 // PGRecorder, so the nightly backup/restore test can verify that a restored
-// database still passes audit.Verify. It exists only for the DR/restore test
-// and is never deployed.
+// database still passes audit.Verify. It is used by the DR/restore test and,
+// until the demo/scale seed of WP-203 exists, by `make seed` (SIM-01). It is
+// never deployed.
 package main
 
 import (
