@@ -1,5 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// Lets local runs use a preinstalled Chromium build for the Chromium projects.
+const chromiumLaunch = process.env.PW_CHROMIUM_EXECUTABLE
+  ? { executablePath: process.env.PW_CHROMIUM_EXECUTABLE }
+  : {};
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -12,14 +17,36 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
+  // NFR-07/UI-18 (WP-193): desktop Chrome, Edge, Firefox and Safari (WebKit)
+  // plus mobile Chrome and Safari. Playwright bundles one current build per
+  // engine, so the "previous version" of UI-18 is not covered here.
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: chromiumLaunch,
+      },
+    },
+    {
+      name: 'edge',
+      use: { ...devices['Desktop Edge'], channel: 'msedge' },
     },
     {
       name: 'firefox',
       use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
+    },
+    {
+      name: 'mobile-chrome',
+      use: { ...devices['Pixel 7'], launchOptions: chromiumLaunch },
+    },
+    {
+      name: 'mobile-safari',
+      use: { ...devices['iPhone 14'] },
     },
   ],
   webServer: process.env.CI

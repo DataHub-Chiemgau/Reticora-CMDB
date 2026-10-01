@@ -651,7 +651,7 @@
     "noCoords": "Without coordinates"
   },
   "roomplan": {
-    "summary": "Position objects on the floor plan via drag & drop.",
+    "summary": "Position objects on the floor plan via drag & drop, arrow keys or coordinates.",
     "building": "Building",
     "room": "Room",
     "selectBuilding": "Select building",
@@ -660,7 +660,13 @@
     "emptyHint": "Select a building and a room.",
     "objects": "Objects",
     "noCIs": "No CIs assigned to this room.",
-    "dragHint": "drag to position, double-click opens"
+    "dragHint": "drag to position, double-click opens",
+    "keyboardHint": "Arrow keys move by 1 %, with Shift by 10 %; Enter opens the object.",
+    "markerLabel": "{{name}}, position {{x}} % from left, {{y}} % from top",
+    "positionX": "X (% from left)",
+    "positionY": "Y (% from top)",
+    "applyPosition": "Apply position",
+    "positionFor": "Position of {{name}}"
   },
   "consumables": {
     "summary": "Consumable stock with level and minimum level.",

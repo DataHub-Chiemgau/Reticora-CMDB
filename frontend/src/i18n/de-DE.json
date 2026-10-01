@@ -651,7 +651,7 @@
     "noCoords": "Ohne Koordinaten"
   },
   "roomplan": {
-    "summary": "Objekte auf dem Raumplan per Drag & Drop positionieren.",
+    "summary": "Objekte auf dem Raumplan per Drag & Drop, Pfeiltasten oder Koordinaten positionieren.",
     "building": "Gebäude",
     "room": "Raum",
     "selectBuilding": "Gebäude wählen",
@@ -660,7 +660,13 @@
     "emptyHint": "Wählen Sie ein Gebäude und einen Raum.",
     "objects": "Objekte",
     "noCIs": "Keine CIs in diesem Raum zugeordnet.",
-    "dragHint": "ziehen zum Positionieren, Doppelklick öffnet"
+    "dragHint": "ziehen zum Positionieren, Doppelklick öffnet",
+    "keyboardHint": "Pfeiltasten verschieben um 1 %, mit Umschalt um 10 %; Enter öffnet das Objekt.",
+    "markerLabel": "{{name}}, Position {{x}} % von links, {{y}} % von oben",
+    "positionX": "X (% von links)",
+    "positionY": "Y (% von oben)",
+    "applyPosition": "Position übernehmen",
+    "positionFor": "Position von {{name}}"
   },
   "consumables": {
     "summary": "Verbrauchsmaterial mit Bestand und Mindestbestand.",

@@ -47,3 +47,5 @@ UI-07;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192
 UI-08;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192
 UI-09;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192
 UI-10;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-193
+NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-193
