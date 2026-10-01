@@ -315,3 +315,10 @@ Ausführung im Verzeichnis `/home/runner/work/Reticora-CMDB/Reticora-CMDB/backen
 - `go build ./cmd/server`: Exit 1 mit demselben Offline-Modulauflösungsfehler; kein fachlicher Builddefekt daraus abgeleitet.
 - Frontendtests nicht ausgeführt: `/home/runner/work/Reticora-CMDB/Reticora-CMDB/frontend/node_modules/.bin/vitest` fehlt; keine Installation gemäß Auftrag. Bestehendes Testkommando: `/home/runner/work/Reticora-CMDB/Reticora-CMDB/frontend/package.json:15`.
 - Rohlogs nur temporär: `/tmp/reticora-audit-07-test.log`, `/tmp/reticora-audit-07-build.log`; die Ergebnisse oben sind der dauerhafte Beleg. Kein PASS allein aufgrund von Memory-Repositories, HTTP-Stubs oder Testdateiexistenz (TST-04).
+
+### Abschlusskontrolle der Dokumentänderungen
+
+- Genau 39 eindeutige IDs in Sollreihenfolge, acht Tabellenspalten, Status-/Tagzähler konsistent, Zusammenfassung unter 40 Zeilen. Belegdateien auf Existenz geprüft; ausdrücklich als fehlend dokumentierte Testwerkzeuge sind keine Quellen.
+- Gegenüber dem Prüfstand ausschließlich die beiden verlangten Dateien unter `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/` und `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/spec/katalog-v3/` ergänzt; Produktivcode, Migrationen, Tests und Abhängigkeitsdateien unverändert. `git diff --check` ohne Befund, Secrets-Scan ohne Treffer.
+- `parallel_validation` aufgerufen: automatischer Code-Review tatsächlich **nicht verfügbar** (fehlendes Review-Werkzeug), deshalb kein automatisches Review-PASS behauptet; CodeQL wegen ausschließlich Markdown übersprungen. Unabhängiges read-only Gegenlesen des Berichts gegen Quellen ergab anschließend keine materiellen Fehler; 39-ID-Zähler, 400-Operationen-Abgleich und Critical-Pfade wurden gegengeprüft.
+- Produktbefunde bleiben gemäß reinem Prüfauftrag ausdrücklich **unbehoben**. Fehlender v2-Wortlaut und nicht ausführbare Feature-/Integrationstests sind offene Nachweisgrenzen, keine verdeckten PASS-Bewertungen.
