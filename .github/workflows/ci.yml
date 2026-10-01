@@ -436,17 +436,19 @@ jobs:
 
       # Trivy (E-31): OS packages and application dependencies of the built
       # image. Critical/High findings with an available fix block; the
-      # exceptions file uses the .trivyignore format with exp: dates.
+      # exceptions file uses the .trivyignore format with exp: dates. The
+      # pinned CLI image drives the runner's Docker daemon.
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: reticora-${{ matrix.image }}:scan
-          format: json
-          output: trivy-${{ matrix.image }}.json
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          trivyignores: security/scan-exceptions.txt
-          exit-code: "1"
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/work" -w /work \
+            aquasec/trivy:0.75.0 image \
+            --severity CRITICAL,HIGH --ignore-unfixed \
+            --ignorefile security/scan-exceptions.txt \
+            --format json --output "trivy-${{ matrix.image }}.json" \
+            --exit-code 1 \
+            "reticora-${{ matrix.image }}:scan"
 
       - name: Summarize findings
         if: always()
