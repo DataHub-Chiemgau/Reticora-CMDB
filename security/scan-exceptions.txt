@@ -1,0 +1,11 @@
+# Accepted findings of the dependency and container scans (SEC-11, WP-004).
+#
+# One finding per line: "<ID> exp:<YYYY-MM-DD> # <reason, ticket>".
+# IDs: Go vulnerability IDs (GO-YYYY-NNNN) for govulncheck, GHSA IDs for
+# npm audit, CVE IDs for Trivy. The format is the .trivyignore format, so the
+# file is passed to Trivy unchanged.
+#
+# Every entry needs an expiry within the CVE fix SLA of SEC-11, counted from
+# the day the finding was first reported: Critical at most 7 days, High at
+# most 30 days. Expired entries no longer suppress the finding, so the scan
+# fails again. See docs/security/abhaengigkeitsscans.md.

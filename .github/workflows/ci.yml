@@ -304,6 +304,145 @@ jobs:
           path: frontend/playwright-report/
           retention-days: 7
 
+  # SEC-11/TST-04 (WP-004): dependency and container scans on every PR.
+  # Critical and High findings block; accepted findings need an entry with an
+  # expiry within the CVE fix SLA in security/scan-exceptions.txt (see
+  # docs/security/abhaengigkeitsscans.md). Reports are uploaded as artifacts.
+  govulncheck:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [backend, collector, edgecore]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+
+      # JSON mode always exits 0; the next step decides. Only findings whose
+      # vulnerable symbol is reachable from the module's code count
+      # (trace[0].function set); imported-but-unused code is reported only.
+      - name: Scan Go dependencies and standard library
+        working-directory: ${{ matrix.module }}
+        run: govulncheck -format json ./... > "$GITHUB_WORKSPACE/govulncheck-${{ matrix.module }}.json"
+
+      - name: Evaluate findings
+        env:
+          REPORT: govulncheck-${{ matrix.module }}.json
+        run: |
+          set -euo pipefail
+          today=$(date -u +%F)
+          active=$(awk -v today="$today" '!/^#/ && NF { until = ""; for (i = 2; i <= NF; i++) if ($i ~ /^exp:/) until = substr($i, 5); if (until >= today) print $1 }' security/scan-exceptions.txt)
+          jq -r 'select(.finding != null) | "\(.finding.osv) \(if .finding.trace[0].function then "reachable" else "imported" end)"' "$REPORT" | sort -u | tee govulncheck-findings.txt
+          blocking=$(awk '$2 == "reachable" { print $1 }' govulncheck-findings.txt | sort -u | grep -vxF -f <(printf '%s\n' $active) || true)
+          if [ -n "$blocking" ]; then
+            echo "::error::reachable Go vulnerabilities without valid exception: $(echo $blocking)"
+            exit 1
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: govulncheck-${{ matrix.module }}
+          path: govulncheck-${{ matrix.module }}.json
+          retention-days: 30
+
+  npm-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Threshold: High and Critical advisories of production dependencies
+      # (the shipped bundle) block. Development tooling is reported only.
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: |
+          npm audit --omit=dev --json > "$GITHUB_WORKSPACE/npm-audit-prod.json" || true
+          npm audit --json > "$GITHUB_WORKSPACE/npm-audit-all.json" || true
+
+      - name: Evaluate findings
+        run: |
+          set -euo pipefail
+          today=$(date -u +%F)
+          active=$(awk -v today="$today" '!/^#/ && NF { until = ""; for (i = 2; i <= NF; i++) if ($i ~ /^exp:/) until = substr($i, 5); if (until >= today) print $1 }' security/scan-exceptions.txt)
+          jq -e '.vulnerabilities' npm-audit-prod.json > /dev/null || { echo "::error::npm audit produced no report"; cat npm-audit-prod.json; exit 1; }
+          jq -r '.metadata.vulnerabilities | "production: critical=\(.critical) high=\(.high) moderate=\(.moderate) low=\(.low)"' npm-audit-prod.json
+          jq -r '.metadata.vulnerabilities | "all incl. dev: critical=\(.critical) high=\(.high) moderate=\(.moderate) low=\(.low)"' npm-audit-all.json
+          blocking=$(jq -r '.vulnerabilities[] | select(.severity == "high" or .severity == "critical") | .via[] | objects | select(.severity == "high" or .severity == "critical") | .url | sub(".*/"; "")' npm-audit-prod.json \
+            | sort -u | grep -vxF -f <(printf '%s\n' $active) || true)
+          if [ -n "$blocking" ]; then
+            echo "::error::High/Critical npm advisories in production dependencies without valid exception: $(echo $blocking)"
+            exit 1
+          fi
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit
+          path: npm-audit-*.json
+          retention-days: 30
+
+  image-scan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: backend
+            context: .
+            dockerfile: backend/Dockerfile
+          - image: collector
+            context: .
+            dockerfile: collector/Dockerfile
+          - image: frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t "reticora-${{ matrix.image }}:scan" -f "${{ matrix.dockerfile }}" "${{ matrix.context }}"
+
+      # Trivy (E-31): OS packages and application dependencies of the built
+      # image. Critical/High findings with an available fix block; the
+      # exceptions file uses the .trivyignore format with exp: dates.
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: reticora-${{ matrix.image }}:scan
+          format: json
+          output: trivy-${{ matrix.image }}.json
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: security/scan-exceptions.txt
+          exit-code: "1"
+
+      - name: Summarize findings
+        if: always()
+        run: |
+          if [ -s "trivy-${{ matrix.image }}.json" ]; then
+            jq -r '[.Results[]?.Vulnerabilities[]? | "\(.VulnerabilityID) \(.Severity) \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)"] | unique | .[]' "trivy-${{ matrix.image }}.json"
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-${{ matrix.image }}
+          path: trivy-${{ matrix.image }}.json
+          retention-days: 30
+
   k8s-manifests:
     runs-on: ubuntu-latest
     steps:
