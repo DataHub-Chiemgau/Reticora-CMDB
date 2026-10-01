@@ -2,9 +2,13 @@
 package redfish
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -24,30 +28,122 @@ const (
 )
 
 // Plugin collects hardware facts from Redfish-capable management controllers.
+//
+// TLS certificates are always verified (COL-02): by default against the
+// system roots including the target address. BMCs with self-signed or
+// internal certificates are reachable only through an explicit TLSScope for
+// their network, which names a CA bundle or SPKI pins.
 type Plugin struct {
 	Timeout     time.Duration
 	Concurrency int
 	client      *http.Client
+	scoped      []scopedClient
+	port        int
+}
+
+// TLSScope is a TLS exception for the targets of one network: certificates
+// are verified against RootCAs instead of the system roots, and/or the
+// SHA-256 hash of the leaf certificate's SubjectPublicKeyInfo must match one
+// of PinsSHA256. With pins only, the chain is not verified (self-signed BMC
+// certificates); the pin is the trust anchor.
+type TLSScope struct {
+	Network    *net.IPNet
+	RootCAs    *x509.CertPool
+	PinsSHA256 [][]byte
+}
+
+type scopedClient struct {
+	network *net.IPNet
+	client  *http.Client
+}
+
+// Option configures the plugin.
+type Option func(*Plugin)
+
+// WithTLSScopes adds TLS exceptions per network. The first matching scope
+// wins; targets outside every scope use the default verification.
+func WithTLSScopes(scopes ...TLSScope) Option {
+	return func(p *Plugin) {
+		for _, s := range scopes {
+			if s.Network == nil || (s.RootCAs == nil && len(s.PinsSHA256) == 0) {
+				continue
+			}
+			p.scoped = append(p.scoped, scopedClient{network: s.Network, client: p.newClient(scopeTLSConfig(s))})
+		}
+	}
 }
 
 var _ plugins.Plugin = (*Plugin)(nil)
 
 // New creates a Redfish plugin instance.
-func New() *Plugin {
+func New(opts ...Option) *Plugin {
 	p := &Plugin{
 		Timeout:     defaultTimeout,
 		Concurrency: defaultConcurrency,
+		port:        defaultPort,
 	}
-	p.client = &http.Client{
+	p.client = p.newClient(&tls.Config{MinVersion: tls.VersionTLS12})
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
+}
+
+func (p *Plugin) newClient(cfg *tls.Config) *http.Client {
+	return &http.Client{
 		Timeout: p.Timeout,
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true, // BMC certs are often self-signed
-			},
+			TLSClientConfig:     cfg,
 			MaxIdleConnsPerHost: 4,
 		},
 	}
-	return p
+}
+
+// scopeTLSConfig builds the verification of one TLS scope.
+func scopeTLSConfig(s TLSScope) *tls.Config {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: s.RootCAs}
+	if len(s.PinsSHA256) == 0 {
+		return cfg
+	}
+	pins := s.PinsSHA256
+	if s.RootCAs == nil {
+		// Pinned self-signed certificate: the chain cannot be verified, the
+		// pin check below replaces it.
+		cfg.InsecureSkipVerify = true //nolint:gosec // verified by VerifyConnection (SPKI pin)
+	}
+	cfg.VerifyConnection = func(cs tls.ConnectionState) error {
+		if len(cs.PeerCertificates) == 0 {
+			return errors.New("redfish: no peer certificate")
+		}
+		sum := sha256.Sum256(cs.PeerCertificates[0].RawSubjectPublicKeyInfo)
+		for _, pin := range pins {
+			if bytes.Equal(pin, sum[:]) {
+				return nil
+			}
+		}
+		return errors.New("redfish: certificate does not match a configured pin")
+	}
+	return cfg
+}
+
+// clientFor returns the HTTP client whose TLS verification applies to target.
+func (p *Plugin) clientFor(target string) *http.Client {
+	if ip := net.ParseIP(target); ip != nil {
+		for _, s := range p.scoped {
+			if s.network.Contains(ip) {
+				return s.client
+			}
+		}
+	}
+	return p.client
+}
+
+func (p *Plugin) baseURL(target string) string {
+	port := p.port
+	if port == 0 {
+		port = defaultPort
+	}
+	return fmt.Sprintf("https://%s", net.JoinHostPort(target, fmt.Sprintf("%d", port)))
 }
 
 // Name returns the plugin identifier.
@@ -75,7 +171,7 @@ func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[strin
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			url := fmt.Sprintf("https://%s%s", net.JoinHostPort(t, fmt.Sprintf("%d", defaultPort)), serviceRootPath)
+			url := p.baseURL(t) + serviceRootPath
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 			if err != nil {
 				return
@@ -85,7 +181,9 @@ func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[strin
 				req.SetBasicAuth(user, creds["password"])
 			}
 
-			resp, err := p.client.Do(req)
+			// Credentials (Redfish only, see plugins.CredentialsFor) are sent
+			// after the certificate check of the handshake succeeded.
+			resp, err := p.clientFor(t).Do(req)
 			if err != nil {
 				return
 			}
@@ -162,13 +260,14 @@ type computerSystem struct {
 
 // Collect retrieves system, chassis, and sensor details from a single Redfish endpoint.
 func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
-	baseURL := fmt.Sprintf("https://%s", net.JoinHostPort(target, fmt.Sprintf("%d", defaultPort)))
+	baseURL := p.baseURL(target)
+	client := p.clientFor(target)
 	username := creds["username"]
 	password := creds["password"]
 
 	// Fetch service root
 	var root serviceRoot
-	if err := p.redfishGet(ctx, baseURL+serviceRootPath, username, password, &root); err != nil {
+	if err := p.redfishGet(ctx, client, baseURL+serviceRootPath, username, password, &root); err != nil {
 		return nil, fmt.Errorf("redfish: service root %s: %w", target, err)
 	}
 
@@ -188,9 +287,9 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 	// Fetch systems collection
 	if root.Systems.ID != "" {
 		var systems systemCollection
-		if err := p.redfishGet(ctx, baseURL+root.Systems.ID, username, password, &systems); err == nil && len(systems.Members) > 0 {
+		if err := p.redfishGet(ctx, client, baseURL+root.Systems.ID, username, password, &systems); err == nil && len(systems.Members) > 0 {
 			var sys computerSystem
-			if err := p.redfishGet(ctx, baseURL+systems.Members[0].ID, username, password, &sys); err == nil {
+			if err := p.redfishGet(ctx, client, baseURL+systems.Members[0].ID, username, password, &sys); err == nil {
 				result.Name = sys.Name
 				if result.Name == "" {
 					result.Name = sys.HostName
@@ -218,7 +317,7 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 	return result, nil
 }
 
-func (p *Plugin) redfishGet(ctx context.Context, url, username, password string, out any) error {
+func (p *Plugin) redfishGet(ctx context.Context, client *http.Client, url, username, password string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -228,7 +327,7 @@ func (p *Plugin) redfishGet(ctx context.Context, url, username, password string,
 		req.SetBasicAuth(username, password)
 	}
 
-	resp, err := p.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

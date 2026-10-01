@@ -9,6 +9,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,7 +46,14 @@ type collectorConfig struct {
 	Protocols         []string
 	DiscoveryInterval time.Duration
 	HeartbeatInterval time.Duration
-	Credentials       map[string]string
+	// Credentials are namespaced by protocol ("ssh.username",
+	// "redfish.password", "snmp.community"); plugins receive only their own
+	// namespace through plugins.CredentialsFor (COL-02).
+	Credentials map[string]string
+	// RedfishTLSScopes are the per-network TLS exceptions of the Redfish
+	// plugin (RETICORA_REDFISH_TLS_SCOPES); outside them certificates are
+	// verified against the system roots.
+	RedfishTLSScopes []redfish.TLSScope
 	// SpoolDir is the disk buffer location for discovery results collected
 	// while the backend is unreachable (offline operation per spec §5.2).
 	SpoolDir string
@@ -95,6 +104,7 @@ var pluginRegistry = map[string]plugins.Plugin{
 // module's compatibility shim.
 func Main() {
 	collectorCfg := loadCollectorConfig()
+	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
 
 	environment := envOrDefault("RETICORA_ENVIRONMENT", "development")
 	logLevel := slog.LevelInfo
@@ -273,7 +283,7 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 			}
 
 			slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
-			results, err := plug.Discover(ctx, targets, cfg.Credentials)
+			results, err := plug.Discover(ctx, targets, plugins.CredentialsFor(protocol, cfg.Credentials))
 			if err != nil {
 				slog.Error("discovery plugin error", "protocol", protocol, "error", err)
 				continue
@@ -557,7 +567,7 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 func runTrapReceiver(ctx context.Context, cfg collectorConfig, up *uploader) {
 	rcv := &snmp.TrapReceiver{
 		ListenAddr: cfg.TrapListenAddr,
-		Community:  cfg.Credentials["community"],
+		Community:  plugins.CredentialsFor("snmp", cfg.Credentials)["community"],
 		Sink: func(ctx context.Context, ev snmp.TrapEvent) {
 			slog.Info("snmp trap received", "source", ev.SourceIP, "trap_oid", ev.TrapOID)
 			if err := up.uploadTrapEvent(ctx, ev); err != nil {
@@ -584,6 +594,7 @@ func runMetricsLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 		return
 	}
 
+	creds := plugins.CredentialsFor("snmp", cfg.Credentials)
 	for {
 		targets := expandSubnets(cfg.ScanSubnets)
 		samples := make([]plugins.MetricSample, 0, len(targets)*len(cfg.PollMetrics))
@@ -591,7 +602,7 @@ func runMetricsLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 			if ctx.Err() != nil {
 				break
 			}
-			polled, err := poller.Poll(ctx, target, cfg.Credentials, cfg.PollMetrics)
+			polled, err := poller.Poll(ctx, target, creds, cfg.PollMetrics)
 			if err != nil {
 				slog.Debug("metric poll failed", "target", target, "error", err)
 				continue
@@ -776,15 +787,13 @@ func handleAgentConnection(ctx context.Context, up *uploader, conn net.Conn) {
 }
 
 func loadCollectorConfig() collectorConfig {
-	creds := make(map[string]string)
-	if community := os.Getenv("RETICORA_SNMP_COMMUNITY"); community != "" {
-		creds["community"] = community
-	}
-	if username := os.Getenv("RETICORA_SSH_USERNAME"); username != "" {
-		creds["username"] = username
-	}
-	if password := os.Getenv("RETICORA_SSH_PASSWORD"); password != "" {
-		creds["password"] = password
+	creds := credentialsFromEnv(os.Getenv)
+	tlsScopes, err := parseRedfishTLSScopes(os.Getenv("RETICORA_REDFISH_TLS_SCOPES"), os.ReadFile)
+	if err != nil {
+		// Fail closed: without the exception the default verification
+		// applies and unverifiable BMCs are not contacted.
+		slog.Error("invalid RETICORA_REDFISH_TLS_SCOPES; using default certificate verification", "error", err)
+		tlsScopes = nil
 	}
 
 	return collectorConfig{
@@ -796,6 +805,7 @@ func loadCollectorConfig() collectorConfig {
 		DiscoveryInterval: durationEnvOrDefault("RETICORA_DISCOVERY_INTERVAL", 15*time.Minute),
 		HeartbeatInterval: durationEnvOrDefault("RETICORA_HEARTBEAT_INTERVAL", time.Minute),
 		Credentials:       creds,
+		RedfishTLSScopes:  tlsScopes,
 		SpoolDir:          envOrDefault("RETICORA_SPOOL_DIR", "/var/lib/reticora-collector/spool"),
 		SpoolMaxBytes:     int64EnvOrDefault("RETICORA_SPOOL_MAX_BYTES", 1<<30), // 1 GiB default cap
 		SpoolMaxAge:       durationEnvOrDefault("RETICORA_SPOOL_MAX_AGE", 72*time.Hour),
@@ -811,6 +821,77 @@ func loadCollectorConfig() collectorConfig {
 		TLSServerName:     os.Getenv("RETICORA_TLS_SERVER_NAME"),
 		CredentialsPath:   envOrDefault("RETICORA_CREDENTIALS_PATH", "/var/lib/reticora-collector/credentials.json"),
 	}
+}
+
+// credentialEnv maps the credential environment variables to their protocol
+// namespace (see plugins.CredentialsFor). Redfish has its own account: the SSH
+// account is never sent to BMCs.
+var credentialEnv = []struct{ env, key string }{
+	{"RETICORA_SNMP_COMMUNITY", "snmp.community"},
+	{"RETICORA_SSH_USERNAME", "ssh.username"},
+	{"RETICORA_SSH_PASSWORD", "ssh.password"},
+	{"RETICORA_REDFISH_USERNAME", "redfish.username"},
+	{"RETICORA_REDFISH_PASSWORD", "redfish.password"},
+}
+
+func credentialsFromEnv(getenv func(string) string) map[string]string {
+	creds := make(map[string]string)
+	for _, c := range credentialEnv {
+		if value := getenv(c.env); value != "" {
+			creds[c.key] = value
+		}
+	}
+	return creds
+}
+
+// parseRedfishTLSScopes parses RETICORA_REDFISH_TLS_SCOPES: entries separated
+// by ";" in the form "<cidr>=<rule>[,<rule>...]" with the rules
+// "ca:<path to PEM bundle>" and "pin:<hex SHA-256 of the leaf certificate's
+// SubjectPublicKeyInfo>", e.g.
+// "10.0.10.0/24=ca:/etc/reticora/bmc-ca.pem;10.0.20.5/32=pin:9f86d0…".
+func parseRedfishTLSScopes(value string, readFile func(string) ([]byte, error)) ([]redfish.TLSScope, error) {
+	var scopes []redfish.TLSScope
+	for _, entry := range strings.Split(value, ";") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		cidr, rules, ok := strings.Cut(entry, "=")
+		if !ok {
+			return nil, fmt.Errorf("scope %q: missing \"=\"", entry)
+		}
+		_, network, err := net.ParseCIDR(strings.TrimSpace(cidr))
+		if err != nil {
+			return nil, fmt.Errorf("scope %q: %w", entry, err)
+		}
+		scope := redfish.TLSScope{Network: network}
+		for _, rule := range strings.Split(rules, ",") {
+			kind, arg, _ := strings.Cut(strings.TrimSpace(rule), ":")
+			switch kind {
+			case "ca":
+				pem, readErr := readFile(arg)
+				if readErr != nil {
+					return nil, fmt.Errorf("scope %q: read CA bundle: %w", entry, readErr)
+				}
+				if scope.RootCAs == nil {
+					scope.RootCAs = x509.NewCertPool()
+				}
+				if !scope.RootCAs.AppendCertsFromPEM(pem) {
+					return nil, fmt.Errorf("scope %q: CA bundle %s contains no certificate", entry, arg)
+				}
+			case "pin":
+				pin, hexErr := hex.DecodeString(strings.ReplaceAll(arg, ":", ""))
+				if hexErr != nil || len(pin) != 32 {
+					return nil, fmt.Errorf("scope %q: pin must be a hex SHA-256 hash", entry)
+				}
+				scope.PinsSHA256 = append(scope.PinsSHA256, pin)
+			default:
+				return nil, fmt.Errorf("scope %q: unknown rule %q (want ca: or pin:)", entry, kind)
+			}
+		}
+		scopes = append(scopes, scope)
+	}
+	return scopes, nil
 }
 
 // defaultPollMetrics polls the IF-MIB interface counters of ifIndex 1 when

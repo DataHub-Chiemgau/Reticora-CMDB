@@ -15,7 +15,9 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -241,5 +243,51 @@ func TestPostPayload_SendsCompressedJSON(t *testing.T) {
 	}
 	if len(decoded) != 1 {
 		t.Errorf("expected 1 result, got %d", len(decoded))
+	}
+}
+
+func TestCredentialsFromEnvNamespacesPerProtocol(t *testing.T) {
+	env := map[string]string{
+		"RETICORA_SSH_USERNAME":   "root",
+		"RETICORA_SSH_PASSWORD":   "ssh-secret",
+		"RETICORA_SNMP_COMMUNITY": "public",
+	}
+	creds := credentialsFromEnv(func(k string) string { return env[k] })
+	if creds["ssh.username"] != "root" || creds["snmp.community"] != "public" {
+		t.Fatalf("credentials = %v", creds)
+	}
+	for key := range creds {
+		if strings.HasPrefix(key, "redfish.") || !strings.Contains(key, ".") {
+			t.Fatalf("unexpected credential key %q: SSH settings must not become Redfish or shared credentials", key)
+		}
+	}
+}
+
+func TestParseRedfishTLSScopes(t *testing.T) {
+	pin := strings.Repeat("ab", 32)
+	files := map[string][]byte{}
+	readFile := func(path string) ([]byte, error) {
+		if data, ok := files[path]; ok {
+			return data, nil
+		}
+		return nil, os.ErrNotExist
+	}
+	scopes, err := parseRedfishTLSScopes("10.0.20.5/32=pin:"+pin+"; ", readFile)
+	if err != nil || len(scopes) != 1 || len(scopes[0].PinsSHA256) != 1 || scopes[0].Network.String() != "10.0.20.5/32" {
+		t.Fatalf("scopes = %+v, err = %v", scopes, err)
+	}
+	if scopes, err := parseRedfishTLSScopes("", readFile); err != nil || len(scopes) != 0 {
+		t.Fatalf("empty value = %+v, %v", scopes, err)
+	}
+	for _, bad := range []string{
+		"10.0.0.0/24",                 // no rule
+		"10.0.0.0/33=pin:" + pin,      // bad CIDR
+		"10.0.0.0/24=pin:abcd",        // short pin
+		"10.0.0.0/24=ca:/missing.pem", // unreadable CA
+		"10.0.0.0/24=insecure:true",   // unknown rule
+	} {
+		if _, err := parseRedfishTLSScopes(bad, readFile); err == nil {
+			t.Errorf("%q must be rejected", bad)
+		}
 	}
 }
