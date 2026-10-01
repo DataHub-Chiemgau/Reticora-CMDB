@@ -49,7 +49,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.List(r.Context(), orgID, r.URL.Query().Get("client_id"), page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Contact]{
@@ -88,7 +88,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Notes:          req.Notes,
 	}
 	if err := h.repo.Create(r.Context(), c); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, c)
@@ -149,7 +149,7 @@ func (h *Handler) ListForCI(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListForCI(r.Context(), orgID, chi.URLParam(r, "id"), page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[CIContact]{
@@ -188,6 +188,13 @@ func (h *Handler) Link(w http.ResponseWriter, r *http.Request) {
 		RelationshipType: relType,
 	}
 	if err := h.repo.Link(r.Context(), link); err != nil {
+		if err.Error() == "not found" {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "ci or contact not found")
+			return
+		}
+		if api.WriteDBError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}

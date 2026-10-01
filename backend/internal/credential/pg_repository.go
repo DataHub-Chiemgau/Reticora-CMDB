@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -41,34 +41,9 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// withTenant executes fn within a transaction that has app.org_id set for RLS.
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-
-	if scope := tenant.ClientScope(ctx); scope != "" {
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.client_scope', $1, true)", scope); err != nil {
-			return fmt.Errorf("set client scope: %w", err)
-		}
-	}
-
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
-}
-
 func (r *PGRepository) GetOrgDEK(ctx context.Context, orgID string) (*OrgDEK, error) {
 	var dek *OrgDEK
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM org_dek WHERE organization_id = $1", orgDEKSelectColumns)
 		var err error
 		dek, err = scanOrgDEK(tx.QueryRow(ctx, query, orgID))
@@ -88,7 +63,7 @@ func (r *PGRepository) GetOrgDEK(ctx context.Context, orgID string) (*OrgDEK, er
 
 func (r *PGRepository) CreateOrgDEK(ctx context.Context, orgID string, encryptedDEK []byte, keyVersion int) (*OrgDEK, error) {
 	var dek *OrgDEK
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf(`
 			INSERT INTO org_dek (
 				organization_id,
@@ -111,7 +86,7 @@ func (r *PGRepository) CreateOrgDEK(ctx context.Context, orgID string, encrypted
 }
 
 func (r *PGRepository) Create(ctx context.Context, cred *StoredCredential) error {
-	return r.withTenant(ctx, cred.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, cred.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		query := `
 			INSERT INTO credential (
 				organization_id,
@@ -141,7 +116,7 @@ func (r *PGRepository) Create(ctx context.Context, cred *StoredCredential) error
 
 func (r *PGRepository) Get(ctx context.Context, orgID, id string) (*StoredCredential, error) {
 	var cred *StoredCredential
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM credential WHERE id = $1 AND organization_id = $2", credentialSelectColumns)
 		var err error
 		cred, err = scanStoredCredential(tx.QueryRow(ctx, query, id, orgID))
@@ -161,7 +136,7 @@ func (r *PGRepository) Get(ctx context.Context, orgID, id string) (*StoredCreden
 
 func (r *PGRepository) List(ctx context.Context, orgID string) ([]Credential, error) {
 	items := make([]Credential, 0)
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM credential WHERE organization_id = $1 ORDER BY created_at DESC", credentialSelectColumns)
 		rows, err := tx.Query(ctx, query, orgID)
 		if err != nil {
@@ -185,7 +160,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string) ([]Credential, er
 }
 
 func (r *PGRepository) Update(ctx context.Context, cred *StoredCredential) error {
-	return r.withTenant(ctx, cred.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, cred.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		setClauses := make([]string, 0, 6)
 		args := []any{cred.ID, cred.OrganizationID}
 		argPos := 3
@@ -219,7 +194,7 @@ func (r *PGRepository) Update(ctx context.Context, cred *StoredCredential) error
 }
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM credential WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete credential: %w", err)
@@ -235,7 +210,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 // ciphertext (implements StoredLister for DEK rotation).
 func (r *PGRepository) ListStored(ctx context.Context, orgID string) ([]StoredCredential, error) {
 	items := make([]StoredCredential, 0)
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM credential WHERE organization_id = $1 ORDER BY created_at ASC", credentialSelectColumns)
 		rows, err := tx.Query(ctx, query, orgID)
 		if err != nil {
@@ -262,7 +237,7 @@ func (r *PGRepository) ListStored(ctx context.Context, orgID string) ([]StoredCr
 // (implements DEKUpdater for DEK rotation).
 func (r *PGRepository) UpdateOrgDEK(ctx context.Context, orgID string, encryptedDEK []byte, keyVersion int) (*OrgDEK, error) {
 	var dek *OrgDEK
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf(`
 			UPDATE org_dek
 			SET encrypted_dek = $2, key_version = $3

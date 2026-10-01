@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -21,27 +22,12 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 // List returns the lifecycle definitions visible to the tenant (own + global
 // system definitions).
 func (r *PGRepository) List(ctx context.Context, orgID string, page api.PaginationParams) ([]Definition, int, error) {
 	var out []Definition
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM lifecycle_definition").Scan(&total); err != nil {
 			return fmt.Errorf("count lifecycle definitions: %w", err)
 		}
@@ -70,7 +56,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, page api.Paginati
 // GetByID returns one definition including states and transitions.
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Definition, error) {
 	var out *Definition
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var d Definition
 		err := tx.QueryRow(ctx, `
 			SELECT id::text, COALESCE(organization_id::text, ''), key, name,
@@ -164,7 +150,7 @@ func (r *PGRepository) listTransitionsTx(ctx context.Context, tx pgx.Tx, definit
 
 // Create inserts a definition with its states and transitions.
 func (r *PGRepository) Create(ctx context.Context, def *Definition) error {
-	return r.withTenant(ctx, def.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, def.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		appliesTo := def.AppliesTo
 		if appliesTo == "" {
 			appliesTo = "asset"
@@ -211,7 +197,7 @@ func (r *PGRepository) Create(ctx context.Context, def *Definition) error {
 
 // Delete removes a tenant-owned definition; system definitions are protected.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx,
 			"DELETE FROM lifecycle_definition WHERE id = $1 AND organization_id IS NOT NULL AND NOT is_system", id)
 		if err != nil {

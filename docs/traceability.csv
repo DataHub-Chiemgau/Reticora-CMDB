@@ -53,3 +53,9 @@ TEN-06;[B];B;backend/internal/ci/ci_scope_integration_test.go;WP-010
 TEN-06;[B];B;backend/internal/citype/citype_scope_integration_test.go;WP-010
 TEN-06;[B];B;backend/internal/relationship/relationship_scope_integration_test.go;WP-010
 TEN-06;[B];B;backend/internal/relationshiptype/relationshiptype_scope_integration_test.go;WP-010
+TEN-06;[B];B;backend/internal/lifecycle/lifecycle_scope_integration_test.go;WP-011
+TEN-06;[B];B;backend/internal/override/override_scope_integration_test.go;WP-011
+TEN-06;[B];B;backend/internal/history/history_scope_integration_test.go;WP-011
+TEN-06;[B];B;backend/internal/contact/contact_scope_integration_test.go;WP-011
+TEN-06;[B];B;backend/internal/credential/credential_scope_integration_test.go;WP-011
+TEN-06;[B];B;backend/internal/privacy/privacy_scope_integration_test.go;WP-011

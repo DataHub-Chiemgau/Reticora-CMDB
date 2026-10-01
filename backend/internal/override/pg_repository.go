@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -28,21 +29,6 @@ type PGRepository struct {
 // NewPGRepository creates a PostgreSQL-backed override repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
-}
-
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
 }
 
 // policyPriorities resolves the effective priorities inside a transaction.
@@ -69,26 +55,54 @@ func (r *PGRepository) withEffectiveTx(ctx context.Context, tx pgx.Tx, fv *Field
 	return &out
 }
 
+// visibleCI restricts field value rows to CIs visible under the transaction's
+// tenant scope: the ci policy filters the subquery by client scope, while
+// ci_field_value carries no client column yet (WP-025).
+const visibleCI = "EXISTS (SELECT 1 FROM ci WHERE ci.id = ci_field_value.ci_id)"
+
+// requireVisibleCI rejects writes to a CI the tenant scope does not show; the
+// foreign key alone would accept a CI of another client.
+func requireVisibleCI(ctx context.Context, tx pgx.Tx, ciID string) error {
+	var visible bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1)", ciID).Scan(&visible); err != nil {
+		return fmt.Errorf("check ci visibility: %w", err)
+	}
+	if !visible {
+		return fmt.Errorf("not found")
+	}
+	return nil
+}
+
 // ListForCI returns all tracked field values of a CI with resolved effective
 // values and divergence flags.
 func (r *PGRepository) ListForCI(ctx context.Context, orgID, ciID string) ([]FieldValue, error) {
 	var out []FieldValue
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM ci_field_value WHERE ci_id = $1 ORDER BY field_name ASC",
+			"SELECT %s FROM ci_field_value WHERE ci_id = $1 AND "+visibleCI+" ORDER BY field_name ASC",
 			selectColumns), ciID)
 		if err != nil {
 			return fmt.Errorf("list field values: %w", err)
 		}
-		defer rows.Close()
+		// The rows are read completely before the effective values are
+		// resolved: the connection cannot run a query while rows are open.
+		var values []*FieldValue
 		for rows.Next() {
 			fv, err := scan(rows)
 			if err != nil {
+				rows.Close()
 				return err
 			}
+			values = append(values, fv)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, fv := range values {
 			out = append(out, *r.withEffectiveTx(ctx, tx, fv))
 		}
-		return rows.Err()
+		return nil
 	})
 	return out, err
 }
@@ -96,9 +110,9 @@ func (r *PGRepository) ListForCI(ctx context.Context, orgID, ciID string) ([]Fie
 // Get returns one field value.
 func (r *PGRepository) Get(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error) {
 	var out *FieldValue
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		fv, err := scan(tx.QueryRow(ctx, fmt.Sprintf(
-			"SELECT %s FROM ci_field_value WHERE ci_id = $1 AND field_name = $2",
+			"SELECT %s FROM ci_field_value WHERE ci_id = $1 AND field_name = $2 AND "+visibleCI,
 			selectColumns), ciID, fieldName))
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -117,7 +131,10 @@ func (r *PGRepository) Get(ctx context.Context, orgID, ciID, fieldName string) (
 // is never overwritten by discovery (spec §13).
 func (r *PGRepository) RecordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string) (*FieldValue, error) {
 	var out *FieldValue
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireVisibleCI(ctx, tx, ciID); err != nil {
+			return err
+		}
 		row := tx.QueryRow(ctx, fmt.Sprintf(`
 			INSERT INTO ci_field_value (
 				organization_id, ci_id, field_name, discovered_value,
@@ -145,7 +162,10 @@ func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName s
 		return nil, fmt.Errorf("override reason is required")
 	}
 	var out *FieldValue
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireVisibleCI(ctx, tx, ciID); err != nil {
+			return err
+		}
 		row := tx.QueryRow(ctx, fmt.Sprintf(`
 			INSERT INTO ci_field_value (
 				organization_id, ci_id, field_name, override_value,
@@ -172,13 +192,13 @@ func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName s
 // ClearOverride removes the manual override of a field.
 func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error) {
 	var out *FieldValue
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, fmt.Sprintf(`
 			UPDATE ci_field_value SET
 				override_value = NULL, override_author = NULL,
 				override_reason = NULL, override_at = NULL, protected = false
-			WHERE ci_id = $1 AND field_name = $2
-			RETURNING %s`, selectColumns), ciID, fieldName)
+			WHERE ci_id = $1 AND field_name = $2 AND %s
+			RETURNING %s`, visibleCI, selectColumns), ciID, fieldName)
 		fv, err := scan(row)
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -196,29 +216,39 @@ func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName
 func (r *PGRepository) Conflicts(ctx context.Context, orgID string, page api.PaginationParams) ([]FieldValue, int, error) {
 	var out []FieldValue
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		// Divergence: an override exists and differs from the discovered value.
 		const divergence = "override_value IS NOT NULL AND discovered_value IS NOT NULL AND override_value IS DISTINCT FROM discovered_value"
 		if err := tx.QueryRow(ctx,
-			"SELECT COUNT(*) FROM ci_field_value WHERE organization_id = $1 AND "+divergence,
+			"SELECT COUNT(*) FROM ci_field_value WHERE organization_id = $1 AND "+visibleCI+" AND "+divergence,
 			orgID).Scan(&total); err != nil {
 			return fmt.Errorf("count conflicts: %w", err)
 		}
 		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM ci_field_value WHERE organization_id = $1 AND %s ORDER BY updated_at DESC LIMIT $2 OFFSET $3",
-			selectColumns, divergence), orgID, page.Limit, page.Offset)
+			"SELECT %s FROM ci_field_value WHERE organization_id = $1 AND %s AND %s ORDER BY updated_at DESC LIMIT $2 OFFSET $3",
+			selectColumns, visibleCI, divergence), orgID, page.Limit, page.Offset)
 		if err != nil {
 			return fmt.Errorf("list conflicts: %w", err)
 		}
-		defer rows.Close()
+		// The rows are read completely before the effective values are
+		// resolved: the connection cannot run a query while rows are open.
+		var values []*FieldValue
 		for rows.Next() {
 			fv, err := scan(rows)
 			if err != nil {
+				rows.Close()
 				return err
 			}
+			values = append(values, fv)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, fv := range values {
 			out = append(out, *r.withEffectiveTx(ctx, tx, fv))
 		}
-		return rows.Err()
+		return nil
 	})
 	return out, total, err
 }
@@ -226,7 +256,7 @@ func (r *PGRepository) Conflicts(ctx context.Context, orgID string, page api.Pag
 // Policy returns the tenant's default source-priority policy.
 func (r *PGRepository) Policy(ctx context.Context, orgID string) (*SourcePolicy, error) {
 	var out *SourcePolicy
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var p SourcePolicy
 		var raw []byte
 		err := tx.QueryRow(ctx, `
@@ -256,7 +286,7 @@ func (r *PGRepository) UpsertPolicy(ctx context.Context, policy *SourcePolicy) e
 	if len(policy.Priorities) == 0 {
 		return fmt.Errorf("priorities must not be empty")
 	}
-	return r.withTenant(ctx, policy.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, policy.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		name := policy.Name
 		if name == "" {
 			name = "default"

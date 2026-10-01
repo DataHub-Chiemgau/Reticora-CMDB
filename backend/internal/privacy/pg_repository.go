@@ -2,9 +2,8 @@ package privacy
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -19,28 +18,6 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if scope := tenant.ClientScope(ctx); scope != "" {
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.client_scope', $1, true)", scope); err != nil {
-			return fmt.Errorf("set client scope: %w", err)
-		}
-	}
-
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 const policySelectColumns = `
 	id::text,
 	organization_id::text,
@@ -52,7 +29,7 @@ const policySelectColumns = `
 
 func (r *PGRepository) GetPolicy(ctx context.Context, orgID string) (*RetentionPolicy, error) {
 	var policy *RetentionPolicy
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx,
 			"SELECT "+policySelectColumns+" FROM privacy_retention_policy WHERE organization_id = $1", orgID)
 		var err error
@@ -70,7 +47,7 @@ func (r *PGRepository) GetPolicy(ctx context.Context, orgID string) (*RetentionP
 
 func (r *PGRepository) UpsertPolicy(ctx context.Context, policy *RetentionPolicy) (*RetentionPolicy, error) {
 	var stored *RetentionPolicy
-	err := r.withTenant(ctx, policy.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, policy.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
 			INSERT INTO privacy_retention_policy (organization_id, retention_days, mode)
 			VALUES ($1, $2, $3)
