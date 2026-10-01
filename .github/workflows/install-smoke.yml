@@ -8,12 +8,16 @@ name: Install Smoke Test
 on:
   push:
     branches: [main]
+    # Release tags run the full matrix regardless of the changed paths
+    # (GitHub does not apply path filters to tag pushes).
+    tags: ['v*']
     paths:
       - 'install*.sh'
       - 'deploy/docker-compose/**'
       - 'deploy/keycloak/**'
       - 'backend/Dockerfile'
       - 'frontend/Dockerfile'
+      - 'tests/install-smoke-health*.sh'
       - '.github/workflows/install-smoke.yml'
   pull_request:
     branches: [main]
@@ -23,40 +27,87 @@ on:
       - 'deploy/keycloak/**'
       - 'backend/Dockerfile'
       - 'frontend/Dockerfile'
+      - 'tests/install-smoke-health*.sh'
       - '.github/workflows/install-smoke.yml'
+  # Manual runs (e.g. the G1 evidence for GATE-03) are not path filtered.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  install-cloud-smoke:
+  # Unit tests of the installer helpers and the health check, no Docker needed.
+  installer-script-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install-cloud.sh helpers
+        run: ./tests/install-cloud-helpers.test.sh
+
+      - name: install-smoke-health.sh
+        run: ./tests/install-smoke-health.test.sh
+
+  # INS-01/TEC-09/GATE-03 (WP-092): the cloud installer on every platform of
+  # CH22. Ubuntu runs natively on the GitHub runners; Debian 12 runs the
+  # installer in a debian:12 container that drives the runner's Docker daemon
+  # (E-27). The workspace is mounted at the same path so the compose bind
+  # mounts resolve identically on the host.
+  install-cloud-smoke:
+    needs: installer-script-tests
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            runner: ubuntu-22.04
+          - platform: ubuntu-24.04
+            runner: ubuntu-24.04
+          - platform: debian-12
+            runner: ubuntu-24.04
+            container: debian:12
     steps:
       - uses: actions/checkout@v4
 
       - name: Make installer scripts executable
-        run: chmod +x install.sh install-cloud.sh install-vm.sh
+        run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
 
-      - name: Run the cloud installer non-interactively
+      - name: Run the cloud installer non-interactively (${{ matrix.platform }})
+        if: matrix.container == ''
         run: ./install.sh --cloud --non-interactive
         env:
           RETICORA_SOURCE_DIR: ${{ github.workspace }}
+          RETICORA_STRICT_PLATFORM: "1"
 
-      - name: Verify all containers are healthy
+      - name: Run the cloud installer non-interactively (${{ matrix.platform }} container)
+        if: matrix.container != ''
         run: |
-          cd deploy/docker-compose
-          # Give services a final moment to settle.
+          set -euo pipefail
+          plugins=()
+          for dir in /usr/libexec/docker/cli-plugins /usr/local/lib/docker/cli-plugins; do
+            [ -d "$dir" ] && plugins+=(-v "$dir:$dir:ro")
+          done
+          docker run --rm --network host \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$(command -v docker):/usr/local/bin/docker:ro" \
+            "${plugins[@]}" \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            -e RETICORA_SOURCE_DIR="$GITHUB_WORKSPACE" -e RETICORA_STRICT_PLATFORM=1 \
+            "${{ matrix.container }}" \
+            bash -c 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates git jq openssl >/dev/null && ./install.sh --cloud --non-interactive'
+          # The installer ran as root in the container; hand the generated
+          # .env back to the runner user for the checks below. The session key
+          # keeps the ownership the installer chose for the server container.
+          sudo chown "$(id -u):$(id -g)" deploy/docker-compose/.env
+
+      # Strict: compose/JSON errors, missing or exited containers and every
+      # health state other than "healthy" fail the job.
+      - name: Verify all expected services are running and healthy
+        run: |
           sleep 5
-          unhealthy=$(docker compose --env-file .env ps --format json | \
-            jq -r 'select(.Health != null and .Health != "healthy") | .Name' 2>/dev/null || true)
-          if [ -n "$unhealthy" ]; then
-            echo "Unhealthy containers: $unhealthy"
-            docker compose --env-file .env ps
-            exit 1
-          fi
-          echo "All containers are healthy"
-          docker compose --env-file .env ps
+          ./tests/install-smoke-health.sh deploy/docker-compose .env
 
       - name: Verify backend health endpoint
         run: |

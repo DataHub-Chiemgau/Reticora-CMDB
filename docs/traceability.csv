@@ -33,3 +33,6 @@ NFR-04;[B], Teilumfang [P5];D;edgecore/buffer/buffer_test.go;WP-062
 TST-04;[Q];A;docs/security/abhaengigkeitsscans.md;WP-004
 SEC-11;[Q];A;docs/security/abhaengigkeitsscans.md;WP-004
 OPS-03;[B], [P5];A;.github/workflows/ci.yml;WP-099
+INS-01;[Q];A;tests/install-smoke-health.test.sh;WP-092
+GATE-03;[Q];A;tests/install-smoke-health.test.sh;WP-092
+TEC-09;[B];A;tests/install-smoke-health.test.sh;WP-092

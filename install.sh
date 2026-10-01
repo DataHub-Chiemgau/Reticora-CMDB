@@ -148,6 +148,35 @@ ensure_command() {
     have_cmd "$cmd" || die "'$cmd' is required but could not be installed automatically. Please install it and re-run."
 }
 
+# ─── Platform check (CH22, TEC-09) ────────────────────────────────────────────
+# Supported platforms: Ubuntu 22.04/24.04 LTS and Debian 12. Other systems get
+# a warning; RETICORA_STRICT_PLATFORM=1 (used by the install smoke matrix)
+# turns it into an error, so CI proves it really runs on each target.
+SUPPORTED_PLATFORMS="ubuntu:22.04 ubuntu:24.04 debian:12"
+
+detect_platform() {
+    local os_release="${RETICORA_OS_RELEASE:-/etc/os-release}"
+    [ -r "$os_release" ] || { printf 'unknown'; return; }
+    # shellcheck disable=SC1090
+    ( . "$os_release" && printf '%s:%s' "${ID:-unknown}" "${VERSION_ID:-unknown}" )
+}
+
+check_platform() {
+    local platform
+    platform="$(detect_platform)"
+    case " $SUPPORTED_PLATFORMS " in
+        *" $platform "*)
+            info "Platform $platform is supported."
+            ;;
+        *)
+            if [ "${RETICORA_STRICT_PLATFORM:-0}" = "1" ]; then
+                die "Platform $platform is not supported (supported: $SUPPORTED_PLATFORMS)."
+            fi
+            warn "Platform $platform is not a supported platform ($SUPPORTED_PLATFORMS); continuing without guarantee."
+            ;;
+    esac
+}
+
 # ─── Source bootstrap ─────────────────────────────────────────────────────────
 have_sources() {
     [ -f "$1/install-cloud.sh" ] && [ -f "$1/install-vm.sh" ]
@@ -227,6 +256,7 @@ if [ -z "$MODE" ]; then
     fi
 fi
 
+check_platform
 resolve_sources
 
 case "$MODE" in
