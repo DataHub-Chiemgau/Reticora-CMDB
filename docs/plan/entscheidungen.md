@@ -1,51 +1,61 @@
-# Entscheidungsbedarf – Phase 0/1
+# Entscheidungen – Phase 0/1
 
-Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.md). Jede Entscheidung ist **offen**, bis Product Owner, Architektur oder Betrieb sie bestätigen. Die Empfehlung ist ein Vorschlag des Plans und keine neue Anforderung.
+Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.md). Die Empfehlung ist ein Vorschlag des Plans und keine neue Anforderung.
 
-| Nr. | Thema | Sperrt / betrifft | WPs mit Verweis |
-|---|---|---|---:|
-| [E-01](#e-01) | Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 | Blockiert alle WPs mit diesem Verweis (Start ab M0.1). | 130 |
-| [E-02](#e-02) | Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) | Teilumfänge von c-ui-*, WP-152 (`d-protocols`), WP-212 (`g1-abnahme`), WP-231 (`m-workflow`), WP-232 (`m-iga`), WP-237 (`m-ui-mods`), WP-219 (`m-relay`). | 9 |
-| [E-03](#e-03) | Umgang mit vorhandenem Code späterer Phasen im G1-Release | Steuert den gesamten Meilenstein M-S und den G1-Umfang. | 37 |
-| [E-04](#e-04) | Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells | Keiner für M0; Namensschema für WP-142 (`b-met-ddl`). | 3 |
-| [E-05](#e-05) | Fehlende oder abweichende Tags | Keiner (Annahme konservativ). | 1 |
-| [E-06](#e-06) | Zuordnung der IDs zu Epics A–D | Spalte `epic` in `docs/traceability.csv` (WP-005 (`trace`)). | 1 |
-| [E-07](#e-07) | Vorziehen von M0 vor Epic A (Abweichung von SEQ-01) | Nachweis SEQ-01 in WP-213 (`g1-gate`). | 0 |
-| [E-08](#e-08) | TEN-04: GUC-Namen, Semantik leerer Scopes, Systempfade | WP-008 (`tenant-core`) und alle WithTenant-WPs. | 2 |
-| [E-09](#e-09) | Schreiben von Zeilen mit `client_id`/`site_id` NULL | WP-023 (`rls-client`), WP-027 (`rls-site`). | 2 |
-| [E-10](#e-10) | Tabellen ohne Org-Spalte und globale Katalogzeilen | WP-024 (`rls-global`), WP-065 (`rls-matrix`). | 1 |
-| [E-11](#e-11) | Semantik des Team-Scopes | WP-009 (`scope-resolve`), WP-029 (`rls-team`). | 2 |
-| [E-12](#e-12) | ENT-04: Wer darf Entitlements schreiben? | WP-074 (`ent-operator`). | 1 |
-| [E-13](#e-13) | RBA-02-Rollenmatrix und AUT-04-Schlüsselformat | WP-046 (`role-model`), WP-067 (`apikeys`). | 2 |
-| [E-14](#e-14) | CH26 (V): Keycloak-Org-Attribut, MFA-Pflicht, Brokering | WP-043 (`auth-org`), WP-044 (`kc-admin`). | 2 |
-| [E-15](#e-15) | CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation | WP-141 (`b-sec-rotation`), WP-213 (`g1-gate`) (REP-01-Strukturtest). | 2 |
-| [E-16](#e-16) | SEC-10: Zahlenwerte für GraphQL-Limits | WP-184 (`c-gql-bff`). | 1 |
-| [E-17](#e-17) | CH15: Skalierungsziel bestätigen | WP-093 (`a-preflight`), WP-203 (`lt-seed`), WP-206 (`lt-run`). | 3 |
-| [E-18](#e-18) | CH27 (V): impact_direction | WP-127 (`b-rel-types`), WP-176 (`c-imp-direction`). | 2 |
-| [E-19](#e-19) | CH28 (V): gemeinsamer Location-Baum | WP-026 (`loc-model`) und Folge-WPs. | 1 |
-| [E-20](#e-20) | CH29 (V): Hostname-Treffer nur als Review | WP-086 (`identity`). | 1 |
-| [E-21](#e-21) | CH30 (V)/DIS-02: Geräteprofilliste | WP-151 (`d-classify`). | 1 |
-| [E-22](#e-22) | CH21 (V): Ausgestaltung `unlicensed_ci` | WP-073 (`ent-unlic`). | 1 |
-| [E-23](#e-23) | Abgrenzung GLO-13 (reservierte Namensräume) zu CI-10 (Speichermodell) | WP-091 (`glo13-ns`). | 1 |
-| [E-24](#e-24) | NET-08: Eindeutigkeit bei VLAN ohne Site | WP-081 (`vlan`). | 1 |
-| [E-25](#e-25) | API-05/JOB: verbindliche Pfade, Revert, Snapshot | WP-053 (`loc-api`), WP-168 (`c-paths`), WP-181 (`c-bulk`), WP-182 (`c-jobs-api`), WP-183 (`c-jobs-adopt`). | 6 |
-| [E-26](#e-26) | Änderung der bereits ausgelieferten Migration 000056 | WP-052 (`mig56`). | 1 |
-| [E-27](#e-27) | GATE-03 „beide Plattformen“ und Umgang mit WARN (GATE-02) | WP-092 (`a-matrix`), WP-211 (`g1-install`), WP-213 (`g1-gate`). | 3 |
-| [E-28](#e-28) | Pentest: Dienstleister, Umfang, Termin; NFR-08 | WP-210 (`sr-pentest`). | 1 |
-| [E-29](#e-29) | OPS-04: Werkzeug für WAL-Archivierung und Basisbackups | WP-100 (`a-backup`), WP-101 (`a-restore`). | 1 |
-| [E-30](#e-30) | Traceability-Prüfung: ab wann blockierend? | WP-005 (`trace`), WP-213 (`g1-gate`). | 2 |
-| [E-31](#e-31) | Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest | WP-004 (`dep-scan`), WP-102 (`a-release`), WP-204 (`lt-harness`), WP-209 (`sr-review`). | 4 |
-| [E-32](#e-32) | REC-03: Rang der Quelle IPMI | WP-058 (`rec-decide`), WP-220 (`m-srcpolicy`). | 2 |
-| [E-33](#e-33) | TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte | WP-111 (`b-signup`), WP-112 (`b-signup-protect`). | 2 |
-| [E-34](#e-34) | ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan | Folgeänderung zu WP-071 (`ent-model`), WP-203 (`lt-seed`). | 2 |
-| [E-35](#e-35) | NFR-09: Inhalt der Subprozessorenliste | WP-105 (`a-reference`). | 1 |
-| [E-36](#e-36) | DB-05: Zeilen für Vertrag, installierte Software und Health-Findings | WP-077 (`db05-asset`), WP-080 (`db05-lcy`), WP-230 (`m-agent`). | 3 |
+**Freigabe vom 2026-10-01:** Der Auftraggeber hat angewiesen, nach den Empfehlungen vorzugehen. Daraus folgt:
+
+- **entschieden (22):** Die Empfehlung legt eine Option fest; diese gilt jetzt verbindlich für den Plan.
+- **vorläufig entschieden (4):** Die Empfehlung legt eine Übergangsregel bis zum Eingang eines fehlenden Textes fest; diese gilt jetzt.
+- **offen (10):** Die Empfehlung verlangt eine Lieferung oder Bestätigung durch Dritte. Die Übergangsregel aus der Empfehlung gilt; die Lieferung steht als Aufgabe im Abschnitt [Offene Aufgaben](#offene-aufgaben).
+
+| Nr. | Thema | Status | Sperrt / betrifft | WPs mit Verweis |
+|---|---|---|---|---:|
+| [E-01](#e-01) | Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 | offen | Blockiert alle WPs mit diesem Verweis (Start ab M0.1). | 130 |
+| [E-02](#e-02) | Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) | offen | Teilumfänge von c-ui-*, WP-152 (`d-protocols`), WP-212 (`g1-abnahme`), WP-231 (`m-workflow`), WP-232 (`m-iga`), WP-237 (`m-ui-mods`), WP-219 (`m-relay`). | 9 |
+| [E-03](#e-03) | Umgang mit vorhandenem Code späterer Phasen im G1-Release | entschieden | Steuert den gesamten Meilenstein M-S und den G1-Umfang. | 37 |
+| [E-04](#e-04) | Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells | offen | Keiner für M0; Namensschema für WP-142 (`b-met-ddl`). | 3 |
+| [E-05](#e-05) | Fehlende oder abweichende Tags | entschieden | Keiner (Annahme konservativ). | 1 |
+| [E-06](#e-06) | Zuordnung der IDs zu Epics A–D | entschieden | Spalte `epic` in `docs/traceability.csv` (WP-005 (`trace`)). | 1 |
+| [E-07](#e-07) | Vorziehen von M0 vor Epic A (Abweichung von SEQ-01) | entschieden | Nachweis SEQ-01 in WP-213 (`g1-gate`). | 0 |
+| [E-08](#e-08) | TEN-04: GUC-Namen, Semantik leerer Scopes, Systempfade | entschieden | WP-008 (`tenant-core`) und alle WithTenant-WPs. | 2 |
+| [E-09](#e-09) | Schreiben von Zeilen mit `client_id`/`site_id` NULL | entschieden | WP-023 (`rls-client`), WP-027 (`rls-site`). | 2 |
+| [E-10](#e-10) | Tabellen ohne Org-Spalte und globale Katalogzeilen | entschieden | WP-024 (`rls-global`), WP-065 (`rls-matrix`). | 1 |
+| [E-11](#e-11) | Semantik des Team-Scopes | vorläufig entschieden | WP-009 (`scope-resolve`), WP-029 (`rls-team`). | 2 |
+| [E-12](#e-12) | ENT-04: Wer darf Entitlements schreiben? | entschieden | WP-074 (`ent-operator`). | 1 |
+| [E-13](#e-13) | RBA-02-Rollenmatrix und AUT-04-Schlüsselformat | vorläufig entschieden | WP-046 (`role-model`), WP-067 (`apikeys`). | 2 |
+| [E-14](#e-14) | CH26 (V): Keycloak-Org-Attribut, MFA-Pflicht, Brokering | entschieden | WP-043 (`auth-org`), WP-044 (`kc-admin`). | 2 |
+| [E-15](#e-15) | CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation | offen | WP-141 (`b-sec-rotation`), WP-213 (`g1-gate`) (REP-01-Strukturtest). | 2 |
+| [E-16](#e-16) | SEC-10: Zahlenwerte für GraphQL-Limits | vorläufig entschieden | WP-184 (`c-gql-bff`). | 1 |
+| [E-17](#e-17) | CH15: Skalierungsziel bestätigen | offen | WP-093 (`a-preflight`), WP-203 (`lt-seed`), WP-206 (`lt-run`). | 3 |
+| [E-18](#e-18) | CH27 (V): impact_direction | entschieden | WP-127 (`b-rel-types`), WP-176 (`c-imp-direction`). | 2 |
+| [E-19](#e-19) | CH28 (V): gemeinsamer Location-Baum | entschieden | WP-026 (`loc-model`) und Folge-WPs. | 1 |
+| [E-20](#e-20) | CH29 (V): Hostname-Treffer nur als Review | entschieden | WP-086 (`identity`). | 1 |
+| [E-21](#e-21) | CH30 (V)/DIS-02: Geräteprofilliste | entschieden | WP-151 (`d-classify`). | 1 |
+| [E-22](#e-22) | CH21 (V): Ausgestaltung `unlicensed_ci` | entschieden | WP-073 (`ent-unlic`). | 1 |
+| [E-23](#e-23) | Abgrenzung GLO-13 (reservierte Namensräume) zu CI-10 (Speichermodell) | offen | WP-091 (`glo13-ns`). | 1 |
+| [E-24](#e-24) | NET-08: Eindeutigkeit bei VLAN ohne Site | entschieden | WP-081 (`vlan`). | 1 |
+| [E-25](#e-25) | API-05/JOB: verbindliche Pfade, Revert, Snapshot | entschieden | WP-053 (`loc-api`), WP-168 (`c-paths`), WP-181 (`c-bulk`), WP-182 (`c-jobs-api`), WP-183 (`c-jobs-adopt`). | 6 |
+| [E-26](#e-26) | Änderung der bereits ausgelieferten Migration 000056 | entschieden | WP-052 (`mig56`). | 1 |
+| [E-27](#e-27) | GATE-03 „beide Plattformen“ und Umgang mit WARN (GATE-02) | entschieden | WP-092 (`a-matrix`), WP-211 (`g1-install`), WP-213 (`g1-gate`). | 3 |
+| [E-28](#e-28) | Pentest: Dienstleister, Umfang, Termin; NFR-08 | entschieden | WP-210 (`sr-pentest`). | 1 |
+| [E-29](#e-29) | OPS-04: Werkzeug für WAL-Archivierung und Basisbackups | offen | WP-100 (`a-backup`), WP-101 (`a-restore`). | 1 |
+| [E-30](#e-30) | Traceability-Prüfung: ab wann blockierend? | entschieden | WP-005 (`trace`), WP-213 (`g1-gate`). | 2 |
+| [E-31](#e-31) | Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest | entschieden | WP-004 (`dep-scan`), WP-102 (`a-release`), WP-204 (`lt-harness`), WP-209 (`sr-review`). | 4 |
+| [E-32](#e-32) | REC-03: Rang der Quelle IPMI | offen | WP-058 (`rec-decide`), WP-220 (`m-srcpolicy`). | 2 |
+| [E-33](#e-33) | TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte | offen | WP-111 (`b-signup`), WP-112 (`b-signup-protect`). | 2 |
+| [E-34](#e-34) | ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan | vorläufig entschieden | Folgeänderung zu WP-071 (`ent-model`), WP-203 (`lt-seed`). | 2 |
+| [E-35](#e-35) | NFR-09: Inhalt der Subprozessorenliste | offen | WP-105 (`a-reference`). | 1 |
+| [E-36](#e-36) | DB-05: Zeilen für Vertrag, installierte Software und Health-Findings | entschieden | WP-077 (`db05-asset`), WP-080 (`db05-lcy`), WP-230 (`m-agent`). | 3 |
 
 ## E-01
 
 **Thema:** Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
 
-**Status:** offen
+**Status:** offen (2026-10-01)
+
+**Festlegung:** Keine Festlegung möglich: Die Texte kann nur der Auftraggeber liefern. Die Übergangsregel aus der Empfehlung gilt ab sofort: Nur M0.0-WPs ohne Verweis auf E-01 starten (WP-001, WP-002, WP-003, WP-005, WP-006, WP-007). WP-004 und alle WPs ab M0.1 warten auf die Texte.
+
+**Aufgabe:** Katalogteile 02, 04, 05 und 06 in `docs/spec/katalog-v3/` nachliefern. Zuständig: Auftraggeber/Product Owner. Termin: vor Beginn von M0.1 (WP-008).
 
 **Frage:** Für die IDs der Bereiche Mandanten/Auth/Entitlements (TEN, AUT, RBA, ENT, TLC), CI/Netz/Rack/Beziehungen/Impact (CI, NET, RCK, REL, IMP, LCY), Collector/Discovery/Reconciliation (COL, DIS, REC, OVR, TOP) sowie Audit/Sicherheit/Events (AUD, SEC, EVT) liegen in `docs/spec/katalog-v3/` keine Anforderungstexte vor. Die WPs stützen sich daher nur auf Befundtexte und Teilberichte des Audits.
 
@@ -68,7 +78,11 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“)
 
-**Status:** offen
+**Status:** offen (2026-10-01)
+
+**Festlegung:** Keine Festlegung möglich: Die Texte kann nur der Auftraggeber liefern. Die Übergangsregel gilt ab sofort: WPs setzen nur ausdrücklich genannte Bestandteile um und erfinden keine Funktionen.
+
+**Aufgabe:** v2-Originaltexte (UI-01–UI-10, ABN-01, DIS-04, IGA, WFL-04, AUT-05/06, NET-04, REP-01) nachliefern. Zuständig: Auftraggeber/Product Owner. Termin: vor Epic C (UI) bzw. vor WP-212 (ABN-01).
 
 **Frage:** Mehrere IDs verweisen auf nicht vorliegende v2-Texte: individuelle Verträge UI-01–UI-10, ABN-01 (a)/(b) aus „V §65–66“, DIS-04-Umfang „wie v2“, IGA-Details, WFL-04-Ketten, AUT-05, AUT-06, NET-04 sowie der v2-Bestandteil von REP-01.
 
@@ -91,7 +105,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Umgang mit vorhandenem Code späterer Phasen im G1-Release
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 2 (Deaktivieren). WP-214 (`m-gates`) gehört zum G1-Umfang und schaltet alle Spätphasen-Module im G1-Release standardmäßig ab. WP-215 bis WP-239 werden in die jeweilige Folgephase verschoben und sind nicht G1-Umfang. Alle M0-WPs mit Verweis auf E-03 bleiben verpflichtend (WP-028, WP-029, WP-030, WP-033, WP-037, WP-038, WP-051, WP-056, WP-059, WP-063, WP-076), weil sie Mandantengrenzen, Transportsicherheit, den Override-Schutz oder [B]-IDs betreffen. Ihre Akzeptanzkriterien „Alternative nach E-03“ entfallen.
 
 **Frage:** Module der Phasen P2–P5 und Add-ons sind bereits angebunden und haben Critical/High-Befunde (u. a. Scope-Fehler). Sollen diese vor G1 behoben oder im G1-Release deaktiviert werden?
 
@@ -115,7 +131,11 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells
 
-**Status:** offen
+**Status:** offen (2026-10-01)
+
+**Festlegung:** Vorläufig gilt Option 2: Die Teil-03-Tabelle bleibt direkte Quelle, gekennzeichnet in `abdeckung.csv`. Die empfohlene Konsolidierung ist eine Audit-Aufgabe und nicht Teil dieses Plans. Die fehlenden Texte werden zusammen mit E-01 angefordert.
+
+**Aufgabe:** Teil 03 in `docs/audit/befunde.csv` und `docs/audit/99-gesamtbericht.md` konsolidieren; Texte DB-01, MET-20, MET-30–34, MET-40–44 mit E-01 anfordern. Zuständig: Audit. Termin: vor WP-142 (`b-met-ddl`), spätestens vor G1.
 
 **Frage:** Die Ergebnisse aus Teil 03 (DB-02–DB-05, LOC-*, MET-*) sind nicht in `befunde.csv` übernommen. DB-01, MET-20, MET-30–MET-34 und MET-40–MET-44 sind N/P (kein Wortlaut). Das Namenssuffix nach `idx_attr_` (DB-04) ist nicht spezifiziert.
 
@@ -138,7 +158,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Fehlende oder abweichende Tags
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 2: Die Planannahme [B] ist bestätigt. Liefert der Katalog später ein abweichendes Tag, wird das WP in den passenden Meilenstein verschoben.
 
 **Frage:** Mehrere IDs haben im Befundkorpus kein Tag („nicht angegeben“: AUD-*, SEC-*, EVT-*) oder nur „nicht geliefert“ (DB-02–DB-05); PRI-07 ist ohne Phasenbezug. Der Plan behandelt sie als Phase 1 [B], wenn das Thema ein Fundament betrifft.
 
@@ -161,7 +183,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Zuordnung der IDs zu Epics A–D
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: Zuordnung bestätigt (A = Installation/Betrieb, B = Fundament, C = API/Kernfunktionen/UI/E2E, D = Collector/Discovery). Die Traceability-Spalte `epic` übernimmt sie.
 
 **Frage:** SEQ-01 nennt Epic A–D, der Katalog definiert deren Inhalt aber nicht (einzige Erwähnung: TEC-06-Spike „in Epic A“). Der Plan ordnet zu: A = Installation/Betrieb, B = Fundament (Mandanten, Auth, Daten-/Metamodell, Jobs, Audit, Events, Benachrichtigungen), D = Collector/Discovery, C = API, Kernfunktionen, UI und E2E.
 
@@ -184,7 +208,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Vorziehen von M0 vor Epic A (Abweichung von SEQ-01)
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 2: M0 wird formal als Teil von Epic A/B/D geführt. M0-WPs tragen in der Traceability ihr fachliches Epic (Spalte „Epic (Traceability)“ der WP-Blöcke). WP-213 weist die SEQ-01-Reihenfolge je Epic nach.
 
 **Frage:** Die Aufgabenstellung verlangt M0 vor der SEQ-01-Reihenfolge. Dadurch liegen Fundament-Arbeiten (u. a. RLS, Auth, DB-05, Ingest) vor Epic A, und der TEC-06-Spike (laut Katalog in Epic A) liegt in M0.1a.
 
@@ -207,7 +233,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** TEN-04: GUC-Namen, Semantik leerer Scopes, Systempfade
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1 (fail-closed): Ein leerer Client-/Site-/Team-Scope bedeutet keinen Zugriff; org-weiter Zugriff nur über ein explizites Merkmal. Systempfade laufen über `WithSystem` mit kommentierter Freigabeliste (WP-041). Die GUC-Namen sind nicht Teil der Empfehlung; sie folgen dem TEN-04-Text (E-01).
 
 **Frage:** Namen der Sitzungsvariablen für Org/Client/Site/Team und die Bedeutung eines leeren Scopes sind ohne TEN-04-Text nicht festgelegt. Ebenso ist offen, welche Systempfade (Migration, Scheduler, Operator) org-übergreifend lesen dürfen.
 
@@ -230,7 +258,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Schreiben von Zeilen mit `client_id`/`site_id` NULL
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: Nur Principals mit org-weitem Scope dürfen Zeilen mit `client_id`/`site_id` NULL schreiben.
 
 **Frage:** Darf ein auf Clients/Sites eingeschränkter Principal Zeilen ohne Client/Site anlegen oder ändern?
 
@@ -253,7 +283,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Tabellen ohne Org-Spalte und globale Katalogzeilen
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Regel nach Empfehlung: Globale Kataloge sind für die App-Rolle schreibgeschützt; alle anderen Tabellen erhalten eine Org-Spalte mit RLS. WP-024 dokumentiert die Einordnung je Tabelle im PR.
 
 **Frage:** Fünf Tabellen haben keine eigene Org-Spalte, fünf eine nullable; globale Katalogzeilen (z. B. System-CI-Typen) sind schreibbar.
 
@@ -276,7 +308,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Semantik des Team-Scopes
 
-**Status:** offen
+**Status:** vorläufig entschieden (2026-10-01)
+
+**Festlegung:** Option 1 (Schnittmenge, restriktiver) gilt, bis der TEN-Text vorliegt (E-01). Weicht der Text ab, passt ein Folge-WP das Prädikat aus WP-029 an.
 
 **Frage:** CH25 verlangt Team-Scopes in RLS; welche Objekte einem Team gehören (Ticket-Team, Trainingszuweisung, Desk über Raum) und ob Team-Scope zusätzlich oder alternativ zu Client/Site wirkt, ist ohne TEN-Text offen.
 
@@ -299,7 +333,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** ENT-04: Wer darf Entitlements schreiben?
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: Nur der Operator schreibt Entitlements; org_admin liest.
 
 **Frage:** Der Befund fordert Schreiben nur über den Operator. Darf org_admin weiterhin Plan/Limits sehen bzw. ändern?
 
@@ -322,7 +358,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** RBA-02-Rollenmatrix und AUT-04-Schlüsselformat
 
-**Status:** offen
+**Status:** vorläufig entschieden (2026-10-01)
+
+**Festlegung:** Bis zum RBA-02-/AUT-04-Text (E-01) werden keine Rechte erweitert und kein neues Schlüsselformat eingeführt. Danach gilt Option 1 (Übernahme aus dem Text).
 
 **Frage:** Die exakte Rollen-/Rechtematrix (inkl. `discovery:ingest`) und das Trennzeichen im API-Key-Format sind ohne Katalogtext nicht eindeutig.
 
@@ -345,7 +383,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** CH26 (V): Keycloak-Org-Attribut, MFA-Pflicht, Brokering
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: CH26 ist bestätigt (Org-Zuordnung über Nutzerattribut, MFA-Pflicht für org_admin/Operator, Brokering je Org). Umsetzung in WP-043 und WP-044.
 
 **Frage:** CH26 ist als Vorschlag (V) markiert. Soll die Org-Zuordnung über ein Nutzerattribut, die MFA-Pflicht für org_admin/Operator und Identity-Brokering je Org verbindlich sein?
 
@@ -368,7 +408,11 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation
 
-**Status:** offen
+**Status:** offen (2026-10-01)
+
+**Festlegung:** Laut Empfehlung ist vor Epic B eine Grundsatzentscheidung zu treffen; der Plan kann sie nicht vorwegnehmen. Bei Bestätigung von CH16 werden Folge-WPs (AUD-01/02, SEC-05) ergänzt.
+
+**Aufgabe:** Option zu CH16/PII-Vault wählen (eigenes WP-Paket oder nur Gerüst und Konzept). Zuständig: Product Owner/Datenschutz. Termin: vor Beginn von Epic B (WP-107).
 
 **Frage:** CH16 (Vorschlag) verlangt Surrogat-IDs aus einem PII-Vault bereits in Phase 1 (SEC-05); REP-01 nennt `internal/pii`. Umfang und Bezug zur Schlüsselrotation (SEC-06) sind offen.
 
@@ -391,7 +435,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** SEC-10: Zahlenwerte für GraphQL-Limits
 
-**Status:** offen
+**Status:** vorläufig entschieden (2026-10-01)
+
+**Festlegung:** Die Werte aus dem Befund sind vorbelegt: Abfragetiefe 10, Komplexitätsbudget, 10 s Deadline. Mit dem SEC-10-Text (E-01) werden sie bestätigt oder angepasst.
 
 **Frage:** Befund nennt Tiefe 10, Komplexitätsbudget und 10 s Deadline; der Katalogtext liegt nicht vor.
 
@@ -414,7 +460,11 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** CH15: Skalierungsziel bestätigen
 
-**Status:** offen
+**Status:** offen (2026-10-01)
+
+**Festlegung:** Laut Empfehlung ist eine Bestätigung vor dem Lasttest nötig; der Plan kann den Zielwert nicht festlegen.
+
+**Aufgabe:** Skalierungsziel CH15 bestätigen (1.000–10.000 Objekte, Headroom 50.000) oder anderen Wert festlegen. Zuständig: Product Owner. Termin: vor WP-093 (`a-preflight`), spätestens vor WP-203 (`lt-seed`).
 
 **Frage:** CH15 vermerkt, dass die Antwort „1000-1000“ als 1.000–10.000 Objekte interpretiert wurde und zu bestätigen ist. Davon hängen Sizing-Tabelle, Seed-Größe und Lasttest ab.
 
@@ -437,7 +487,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** CH27 (V): impact_direction
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: CH27 ist bestätigt. WP-127 legt die `impact_direction` je Seed-Beziehungstyp fest und dokumentiert sie im PR zur Abnahme.
 
 **Frage:** CH27 (Vorschlag) führt eine explizite Impact-Richtung je Beziehungstyp ein; die Werte je Seed-Typ sind festzulegen.
 
@@ -460,7 +512,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** CH28 (V): gemeinsamer Location-Baum
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: CH28 ist bestätigt (gemeinsamer Location-Baum Site bis Bin). Grundlage für WP-026 und die Folge-WPs.
 
 **Frage:** CH28 (Vorschlag) verlangt einen gemeinsamen Baum für Site bis Bin (LOC-10).
 
@@ -483,7 +537,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** CH29 (V): Hostname-Treffer nur als Review
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: CH29 ist bestätigt. Ein Hostname-Treffer erzeugt nur ein Review, keinen Auto-Merge.
 
 **Frage:** CH29 (Vorschlag): kein Auto-Merge allein über Hostname.
 
@@ -506,7 +562,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** CH30 (V)/DIS-02: Geräteprofilliste
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: Die Profilliste nach CH30/DIS-02 ist bestätigt. WP-151 gleicht die 21 vorhandenen Repository-Profile mit dieser Liste ab.
 
 **Frage:** Die Top-20-Profile in DIS-02 sind zu bestätigen; im Repository liegen 21 Profile.
 
@@ -529,7 +587,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** CH21 (V): Ausgestaltung `unlicensed_ci`
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: CH21 ist bestätigt (Review-Item `unlicensed_ci`). Die Details zu Freigabe und Ablauf folgen dem ENT-03-Text (E-01).
 
 **Frage:** CH21 (Vorschlag, analog) beschreibt Discovery-CIs über dem Limit als Review-Item `unlicensed_ci`; Details (Freigabe, Ablauf) fehlen.
 
@@ -552,7 +612,11 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Abgrenzung GLO-13 (reservierte Namensräume) zu CI-10 (Speichermodell)
 
-**Status:** offen
+**Status:** offen (2026-10-01)
+
+**Festlegung:** Laut Empfehlung ist der Text nachzuliefern (E-01); eine vorläufige Regel ist nicht vorgesehen.
+
+**Aufgabe:** Abgrenzung GLO-13/CI-10 mit den Texten aus E-01 nachliefern. Zuständig: Auftraggeber/Product Owner. Termin: vor WP-091 (`glo13-ns`).
 
 **Frage:** Welche Namensräume reserviert sind und wie `_instance` gegenüber `attributes` liegt, ist ohne Text nicht eindeutig.
 
@@ -575,7 +639,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** NET-08: Eindeutigkeit bei VLAN ohne Site
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 2: Zwei Teilindizes (`site_id IS NOT NULL` bzw. `IS NULL`), keine Sentinel-Werte.
 
 **Frage:** UNIQUE über (org, site, nummer) mit nullable site benötigt einen Sentinel (COALESCE) oder einen Teilindex; die Vorgabe ist offen.
 
@@ -598,7 +664,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** API-05/JOB: verbindliche Pfade, Revert, Snapshot
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: Pfade nach API-05 wörtlich; alte Pfade nur mit Deprecation/Sunset (WP-167). JOB-03-Revert nur, wo er fachlich definiert ist. Der Snapshot-Umfang folgt JOB-04.
 
 **Frage:** Für die zehn abweichenden Ressourcen ist die verbindliche Pfadliste festzulegen; ferner, ob JOB-03-Revert für Bulk-Jobs gilt und welchen Umfang der JOB-04-State-Snapshot hat.
 
@@ -621,7 +689,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Änderung der bereits ausgelieferten Migration 000056
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: 000056 wird angepasst (Quarantäne statt Löschung). Dazu kommen ein Release-Hinweis für bereits migrierte Installationen und eine Prüfung vorhandener Backups.
 
 **Frage:** 000056 löscht inkonsistente Composition-Zeilen. Eine Änderung wirkt nur auf noch nicht migrierte Installationen; bereits migrierte Daten sind ggf. verloren.
 
@@ -644,7 +714,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** GATE-03 „beide Plattformen“ und Umgang mit WARN (GATE-02)
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: Plattformen nach CH22 (Ubuntu 22.04/24.04, Debian 12); Debian 12 läuft per Container/VM im Workflow. WARN ist nach GATE-02-Wortlaut nur für SOLL-Punkte zulässig und wird im G1-Nachweis mit Begründung geführt.
 
 **Frage:** Welche zwei Plattformen sind gemeint (Ubuntu und Debian nach CH22, oder Compose und Kubernetes, oder VM und Cloud)? Auf welchem Runner wird Debian 12 geprüft? Wie werden SOLL-Punkte mit WARN im G1-Nachweis geführt?
 
@@ -667,7 +739,11 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Pentest: Dienstleister, Umfang, Termin; NFR-08
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: Externer Pentest nach dem Sicherheitsreview. NFR-08 bleibt N/P.
+
+**Aufgabe:** Pentest-Dienstleister beauftragen, Umfang und Termin festlegen. Zuständig: Auftraggeber. Termin: parallel zu Epic C, vor WP-210.
 
 **Frage:** GATE-03 verlangt einen Pentest ohne offene High/Critical. Dienstleister, Umfang und Zeitfenster sind festzulegen; NFR-08 ist N/P.
 
@@ -690,7 +766,11 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** OPS-04: Werkzeug für WAL-Archivierung und Basisbackups
 
-**Status:** offen
+**Status:** offen (2026-10-01)
+
+**Festlegung:** Laut Empfehlung entscheidet der Betrieb; der Plan legt kein Werkzeug fest.
+
+**Aufgabe:** Werkzeug für WAL-Archivierung und Basisbackups wählen (pgBackRest, WAL-G oder Managed-Postgres). Zuständig: Betrieb. Termin: vor WP-100 (`a-backup`).
 
 **Frage:** Für die Backup-Kette ist ein Werkzeug zu wählen (z. B. pgBackRest, WAL-G oder Operator-eigene Lösung in Kubernetes).
 
@@ -714,7 +794,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Traceability-Prüfung: ab wann blockierend?
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: Die Prüfung ist ab WP-005 berichtend und blockiert je PR für neu berührte IDs. Zu G1 (WP-213) blockiert sie vollständig.
 
 **Frage:** Die Prüfung kann nicht sofort blockieren, weil 0/261 IDs eingetragen sind.
 
@@ -737,7 +819,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: govulncheck, npm audit, Trivy (Container-Scan), cosign keyless (Signatur), k6 (Lasttest).
 
 **Frage:** Festzulegen sind: Go-/npm-Scan-Schwellen, Container-Scanner, Signaturverfahren (cosign keyless oder Schlüssel) und Lasttest-Werkzeug.
 
@@ -760,7 +844,11 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** REC-03: Rang der Quelle IPMI
 
-**Status:** offen
+**Status:** offen (2026-10-01)
+
+**Festlegung:** Laut Empfehlung ist der Text nachzuliefern (E-01); eine vorläufige Regel ist nicht vorgesehen.
+
+**Aufgabe:** REC-03-Rangtabelle (IPMI) mit den Texten aus E-01 nachliefern. Zuständig: Auftraggeber/Product Owner. Termin: vor WP-058 (`rec-decide`).
 
 **Frage:** Die Rangtabelle nennt IPMI nicht eindeutig.
 
@@ -783,7 +871,11 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte
 
-**Status:** offen
+**Status:** offen (2026-10-01)
+
+**Festlegung:** Laut Empfehlung geben Produkt und Datenschutz Captcha-Anbieter, Blockliste und Trial-Werte vor.
+
+**Aufgabe:** Captcha-Anbieter, Wegwerf-Domain-Liste und Trial-Werte festlegen. Zuständig: Produkt/Datenschutz. Termin: vor WP-111 (`b-signup`).
 
 **Frage:** Anbieter für Captcha (Datenschutz/EU), Quelle der Blocklist und Trial-Dauer/-Limits sind festzulegen.
 
@@ -806,7 +898,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan
 
-**Status:** offen
+**Status:** vorläufig entschieden (2026-10-01)
+
+**Festlegung:** Die vorgeschlagene Planmatrix (V) hat bis zu ihrer Bestätigung keine Gate-Wirkung; der Demo-Datensatz verwendet Ist-Pläne.
 
 **Frage:** Die vorgeschlagene Planmatrix (V) und der für den Demo-Datensatz zu verwendende Plan sind nicht verbindlich.
 
@@ -829,7 +923,11 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** NFR-09: Inhalt der Subprozessorenliste
 
-**Status:** offen
+**Status:** offen (2026-10-01)
+
+**Festlegung:** Die Liste kann nur der Betreiber liefern.
+
+**Aufgabe:** Subprozessorenliste liefern. Zuständig: Betreiber. Termin: vor WP-105 (`a-reference`).
 
 **Frage:** Die Liste der Subprozessoren kann nur der Betreiber liefern.
 
@@ -851,7 +949,9 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Thema:** DB-05: Zeilen für Vertrag, installierte Software und Health-Findings
 
-**Status:** offen
+**Status:** entschieden (2026-10-01)
+
+**Festlegung:** Option 1: Für G1 nur die [B]-relevanten DB-05-Zeilen (Asset-Hoheit, Standort, Lifecycle, Rack, Enthaltensein, VLAN/Subnetz). `installed_software` kommt mit Agent (P4), `contract` mit P2; der Health-Findings-Anteil ist nicht G1-Umfang.
 
 **Frage:** Die DB-05-Tabelle verlangt kanonische Orte u. a. für Vertrag (P2), installierte Software (CH20) und Health; Tabellen `contract` und `installed_software` fehlen. Ist das für G1 relevant oder phasengebunden?
 
@@ -869,3 +969,21 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 **Betroffene IDs:** AGT-01, AGT-02, AGT-04, AST-04, DB-05
 
 **Betroffene WPs:** WP-077 (`db05-asset`), WP-080 (`db05-lcy`), WP-230 (`m-agent`)
+
+## Offene Aufgaben
+
+Diese Aufgaben folgen aus den Empfehlungen. Die betroffenen WPs starten erst, wenn die Aufgabe erledigt ist (oder sie nutzen die Übergangsregel der Entscheidung).
+
+| Nr. | Entscheidung | Aufgabe | Zuständig | Termin |
+|---|---|---|---|---|
+| A-01 | [E-01](#e-01) | Katalogteile 02, 04, 05 und 06 in `docs/spec/katalog-v3/` nachliefern | Auftraggeber/Product Owner | vor Beginn von M0.1 (WP-008) |
+| A-02 | [E-02](#e-02) | v2-Originaltexte (UI-01–UI-10, ABN-01, DIS-04, IGA, WFL-04, AUT-05/06, NET-04, REP-01) nachliefern | Auftraggeber/Product Owner | vor Epic C (UI) bzw. vor WP-212 (ABN-01) |
+| A-03 | [E-04](#e-04) | Teil 03 in `docs/audit/befunde.csv` und `docs/audit/99-gesamtbericht.md` konsolidieren; Texte DB-01, MET-20, MET-30–34, MET-40–44 mit E-01 anfordern | Audit | vor WP-142 (`b-met-ddl`), spätestens vor G1 |
+| A-04 | [E-15](#e-15) | Option zu CH16/PII-Vault wählen (eigenes WP-Paket oder nur Gerüst und Konzept) | Product Owner/Datenschutz | vor Beginn von Epic B (WP-107) |
+| A-05 | [E-17](#e-17) | Skalierungsziel CH15 bestätigen (1.000–10.000 Objekte, Headroom 50.000) oder anderen Wert festlegen | Product Owner | vor WP-093 (`a-preflight`), spätestens vor WP-203 (`lt-seed`) |
+| A-06 | [E-23](#e-23) | Abgrenzung GLO-13/CI-10 mit den Texten aus E-01 nachliefern | Auftraggeber/Product Owner | vor WP-091 (`glo13-ns`) |
+| A-07 | [E-28](#e-28) | Pentest-Dienstleister beauftragen, Umfang und Termin festlegen | Auftraggeber | parallel zu Epic C, vor WP-210 |
+| A-08 | [E-29](#e-29) | Werkzeug für WAL-Archivierung und Basisbackups wählen (pgBackRest, WAL-G oder Managed-Postgres) | Betrieb | vor WP-100 (`a-backup`) |
+| A-09 | [E-32](#e-32) | REC-03-Rangtabelle (IPMI) mit den Texten aus E-01 nachliefern | Auftraggeber/Product Owner | vor WP-058 (`rec-decide`) |
+| A-10 | [E-33](#e-33) | Captcha-Anbieter, Wegwerf-Domain-Liste und Trial-Werte festlegen | Produkt/Datenschutz | vor WP-111 (`b-signup`) |
+| A-11 | [E-35](#e-35) | Subprozessorenliste liefern | Betreiber | vor WP-105 (`a-reference`) |

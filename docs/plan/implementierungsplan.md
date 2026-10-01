@@ -9,10 +9,10 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt alle offenen Punkte der Pha
 
 ## Umfang und Abgrenzung
 
-- **298 IDs im Umfang**: 259 aus `docs/audit/befunde.csv` und 39 aus dem nicht konsolidierten Teilbericht 03 (`docs/audit/03-datenmodell-standorte-metamodell.md`; siehe E-04).
+- **298 IDs im Umfang**: 259 aus `docs/audit/befunde.csv` und 39 aus dem nicht konsolidierten Teilbericht 03 (`docs/audit/03-datenmodell-standorte-metamodell.md`; siehe E-04, Konsolidierung als Aufgabe A-03).
 - Auswahlregel: Tag [B] oder [Q] mit Status FAIL, PARTIAL oder ABWEICHEND; alle Critical- und High-Befunde unabhängig vom Tag; N/P-Punkte, soweit sie ohne externe Klärung umsetzbar sind.
 - 20 IDs haben den Status N/P. Ohne externe Klärung nicht umsetzbare N/P-Punkte erhalten kein WP. Sie sind in `abdeckung.csv` der zuständigen Entscheidung zugeordnet.
-- **239 Arbeitspakete** mit zusammen **355,0 PT**. Davon fallen 26 WPs (42,5 PT) in den Meilenstein M-S. Wie viel davon vor G1 nötig ist, hängt von E-03 ab.
+- **239 Arbeitspakete** mit zusammen **355,0 PT**. Davon fallen 26 WPs (42,5 PT) in den Meilenstein M-S. Nach E-03 (entschieden: deaktivieren) gehört von M-S nur WP-214 (`m-gates`) zum G1-Umfang. **G1-Umfang: 214 WPs mit 314,0 PT.** WP-215 bis WP-239 (25 WPs, 41,0 PT) sind in die jeweilige Folgephase verschoben.
 - Format der WP-Blöcke: Die Aufgabenstellung bricht nach „### WP-“ ab. Das Format ist deshalb im Abschnitt „Konventionen“ festgelegt. Es enthält alle Felder, die die Planungsregeln verlangen (IDs, Tests, Traceability, Migration/RLS, Voraussetzungen, Aufwand, Entscheidungsbedarf).
 
 ## Überblick
@@ -37,19 +37,19 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt alle offenen Punkte der Pha
 | [Lasttest (NFR-10)](#lasttest-nfr-10) | Lasttest nach NFR-10 mit Nachweis NFR-01/02/03 und ABN-02/03. | WP-203 – WP-207 | 5 | 8,0 | Bericht mit p95-Werten; Budgets eingehalten. |
 | [Sicherheitsreview](#sicherheitsreview) | Sicherheitsreview, vollständige Kanal-Isolationsmatrix und externer Pentest. | WP-208 – WP-210 | 3 | 5,0 | Keine offenen High/Critical. |
 | [Gate G1](#gate-g1) | Gate G1 nach GATE-01 bis GATE-03 (GATE-05 berücksichtigt). | WP-211 – WP-213 | 3 | 3,5 | Gate-Checkliste vollständig belegt. |
-| [M-S – High-Befunde späterer Phasen (nach E-03)](#m-s--high-befunde-späterer-phasen-nach-e-03) | High-/Critical-Befunde in Code späterer Phasen; Umfang hängt von E-03 ab (beheben oder deaktivieren). Start nach Epic A mit WP-214 (`m-gates`); übrige WPs nach ihren Voraussetzungen. | WP-214 – WP-239 | 26 | 42,5 | Bei „deaktivieren“: nur WP-214 (`m-gates`) vor G1; sonst alle M-S-WPs vor G1. |
+| [M-S – High-Befunde späterer Phasen (nach E-03)](#m-s--high-befunde-späterer-phasen-nach-e-03) | High-/Critical-Befunde in Code späterer Phasen. Nach E-03 (entschieden: deaktivieren) schaltet WP-214 (`m-gates`) die Module im G1-Release ab; WP-215 bis WP-239 sind in die Folgephasen verschoben. | WP-214 – WP-239 | 26 (G1: 1) | 42,5 (G1: 1,5) | WP-214 (`m-gates`) gemergt vor G1; die übrigen WPs sind nicht G1-Umfang. |
 
 Reihenfolge nach Auftrag und SEQ-01 (`docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:75`):
 
-1. **M0 Stabilisierung**: Zuerst die Critical-Befunde (M0.1a–d), danach die Fundament-Befunde (M0.2a–d): RLS/Scopes und WithTenant, Auth/Authz, Migrationen und kanonisches Datenmodell nach DB-05, Ingest/Reconciliation/Overrides. M0.0 stellt vorher die Werkzeugkette und die Prüfrahmen bereit. Dass M0 vor Epic A vorgezogen wird, weicht von SEQ-01 ab. Siehe E-07.
+1. **M0 Stabilisierung**: Zuerst die Critical-Befunde (M0.1a–d), danach die Fundament-Befunde (M0.2a–d): RLS/Scopes und WithTenant, Auth/Authz, Migrationen und kanonisches Datenmodell nach DB-05, Ingest/Reconciliation/Overrides. M0.0 stellt vorher die Werkzeugkette und die Prüfrahmen bereit. Dass M0 vor Epic A vorgezogen wird, weicht von SEQ-01 ab. Nach E-07 (entschieden) wird M0 formal als Teil von Epic A/B/D geführt: Jedes M0-WP trägt in der Traceability sein fachliches Epic, und WP-213 (`g1-gate`) belegt die SEQ-01-Reihenfolge je Epic.
 2. **Epic A → Epic B ∥ Epic D → Epic C → Lasttest (NFR-10) → Sicherheitsreview → G1** (GATE-01 bis GATE-03).
-3. **M-S** (High-/Critical-Befunde in Code späterer Phasen) beginnt nach Epic A mit WP-214 (`m-gates`). Die übrigen M-S-WPs folgen, sobald ihre Voraussetzungen gemergt sind (teils aus Epic B/C). Ob die WPs vor G1 Pflicht sind, regelt E-03.
+3. **M-S** (High-/Critical-Befunde in Code späterer Phasen): Nach E-03 (entschieden: deaktivieren) ist nur WP-214 (`m-gates`) G1-Pflicht. Es startet nach Epic A und muss vor WP-213 (`g1-gate`) gemergt sein. WP-215 bis WP-239 sind in die jeweilige Folgephase verschoben. Alle betroffenen IDs haben Phasen-Tags ab P2 bzw. [A]; GATE-02 für G1 bleibt davon unberührt. Die Critical-Anteile zu Scope/RLS dieser IDs schließen M0-WPs.
 
-Der Katalog definiert die Inhalte der Epics A–D nicht. Die hier verwendete Zuordnung (A = Installation/Betrieb, B = Fundament, C = API/Kernfunktionen/UI, D = Collector/Discovery) ist als E-06 zur Bestätigung markiert.
+Der Katalog definiert die Inhalte der Epics A–D nicht. Die hier verwendete Zuordnung (A = Installation/Betrieb, B = Fundament, C = API/Kernfunktionen/UI, D = Collector/Discovery) ist mit E-06 bestätigt.
 
 ### Abhängigkeitsgraph (Meilenstein-Ebene)
 
-Die Kanten folgen aus SEQ-01 und aus den WP-Abhängigkeiten (transitiv reduziert). M-S ist gestrichelt, weil der Umfang von E-03 abhängt.
+Die Kanten folgen aus SEQ-01 und aus den WP-Abhängigkeiten (transitiv reduziert). Nach E-03 gehört von M-S nur WP-214 (`m-gates`) zu G1; die verschobenen WPs sind gestrichelt.
 
 ```mermaid
 flowchart LR
@@ -69,7 +69,8 @@ flowchart LR
     M_LT["Lasttest (NFR-10)<br/>5 WPs · 8,0 PT"]
     M_SR["Sicherheitsreview<br/>3 WPs · 5,0 PT"]
     M_G1["Gate G1<br/>3 WPs · 3,5 PT"]
-    M_MS["M-S – High-Befunde späterer Phasen (nach E-03)<br/>26 WPs · 42,5 PT"]
+    M_MS["M-S: WP-214 Feature-Gates (G1-Pflicht, E-03)<br/>1 WP · 1,5 PT"]
+    M_MSX["M-S: WP-215 – WP-239 verschoben in Folgephasen (E-03)<br/>25 WPs · 41,0 PT"]
     subgraph M0["M0 Stabilisierung"]
         M_M0_0
         M_M0_1a
@@ -102,24 +103,24 @@ flowchart LR
     M_LT --> M_SR
     M_SR --> M_G1
     M_EB -.->|"einzelne WPs"| M_ED
-    M_EA -.->|"ab WP-214"| M_MS
-    M_MS -.->|"nach E-03"| M_G1
+    M_EA --> M_MS
+    M_MS --> M_G1
+    M_MS -.-> M_MSX
     classDef opt stroke-dasharray: 5 5;
-    class M_MS opt;
+    class M_MSX opt;
 ```
 
 Innerhalb eines Meilensteins dürfen WPs parallel laufen, sobald ihre Voraussetzungen gemergt sind. Epic B und Epic D laufen parallel. Vier D-WPs setzen einzelne B-WPs voraus (gestrichelte Kante): WP-143 (`d-col-status`), WP-157 (`d-offline`), WP-158 (`d-lldp`), WP-161 (`d-power`).
 
-### Entscheidungen mit Sperrwirkung
+### Stand der Entscheidungen (Freigabe vom 2026-10-01)
 
-Vor Beginn bzw. vor dem genannten WP zu klären (Details in `entscheidungen.md`):
+Der Auftraggeber hat angewiesen, nach den Empfehlungen in `entscheidungen.md` vorzugehen. Ergebnis: 22 Entscheidungen sind getroffen, 4 vorläufig mit Übergangsregel getroffen und 10 offen, weil sie eine Lieferung oder Bestätigung Dritter verlangen (Aufgaben A-01 bis A-11 in [`entscheidungen.md`](entscheidungen.md#offene-aufgaben)). Folgen für den Plan:
 
-- [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 – Blockiert alle WPs mit diesem Verweis (Start ab M0.1).
-- [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release – Steuert den gesamten Meilenstein M-S und den G1-Umfang.
-- [E-04](entscheidungen.md#e-04) Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells – Keiner für M0; Namensschema für WP-142 (`b-met-ddl`).
-- [E-06](entscheidungen.md#e-06) Zuordnung der IDs zu Epics A–D – Spalte `epic` in `docs/traceability.csv` (WP-005 (`trace`)).
-- [E-07](entscheidungen.md#e-07) Vorziehen von M0 vor Epic A (Abweichung von SEQ-01) – Nachweis SEQ-01 in WP-213 (`g1-gate`).
-- [E-08](entscheidungen.md#e-08) TEN-04: GUC-Namen, Semantik leerer Scopes, Systempfade – WP-008 (`tenant-core`) und alle WithTenant-WPs.
+- **Startfreigabe:** Nach der Empfehlung zu [E-01](entscheidungen.md#e-01) starten jetzt nur die M0.0-WPs ohne E-01-Verweis: WP-001 (`lint`), WP-002 (`fe-ci`), WP-003 (`ci-tests`), WP-005 (`trace`), WP-006 (`mig-rt`) und WP-007 (`rls-cat`). WP-004 (`dep-scan`) und alle WPs ab M0.1 warten auf die Katalogteile 02, 04, 05 und 06 (Aufgabe A-01).
+- **G1-Umfang** ([E-03](entscheidungen.md#e-03), deaktivieren): WP-214 (`m-gates`) ist G1-Pflicht und schaltet Spätphasen-Module standardmäßig ab. WP-215 bis WP-239 sind verschoben. Die M0-WPs in Spätphasen-Modulen bleiben verpflichtend; ihre Kriterien „Alternative nach E-03“ entfallen.
+- **Epics und Traceability** ([E-06](entscheidungen.md#e-06), [E-07](entscheidungen.md#e-07)): Die Epic-Zuordnung ist bestätigt; M0-WPs tragen ihr fachliches Epic.
+- **Festgelegte Umsetzungsregeln:** fail-closed-Scopes und `WithSystem` ([E-08](entscheidungen.md#e-08)), NULL-Scope-Schreiben nur org-weit ([E-09](entscheidungen.md#e-09)), globale Kataloge read-only ([E-10](entscheidungen.md#e-10)), Team-Scope als Schnittmenge (vorläufig, [E-11](entscheidungen.md#e-11)), CH21/CH26–CH30 bestätigt ([E-14](entscheidungen.md#e-14), [E-18](entscheidungen.md#e-18) bis [E-22](entscheidungen.md#e-22)), VLAN-Eindeutigkeit über zwei Teilindizes ([E-24](entscheidungen.md#e-24)), API-05-Pfade wörtlich mit Deprecation/Sunset ([E-25](entscheidungen.md#e-25)), Quarantäne in 000056 ([E-26](entscheidungen.md#e-26)), Install-Matrix nach CH22 ([E-27](entscheidungen.md#e-27)), externer Pentest ([E-28](entscheidungen.md#e-28)), Traceability stufenweise blockierend ([E-30](entscheidungen.md#e-30)), Werkzeuge govulncheck/npm audit/Trivy/cosign keyless/k6 ([E-31](entscheidungen.md#e-31)), DB-05 nur [B]-Zeilen für G1 ([E-36](entscheidungen.md#e-36)).
+- **Offen mit Termin:** E-01, E-02, E-04, E-15, E-17, E-23, E-29, E-32, E-33 und E-35. Die WP-Blöcke zeigen den Status jeder verwiesenen Entscheidung im Feld „Entscheidungsbedarf“.
 
 ## Konventionen für alle WPs
 
@@ -132,7 +133,7 @@ Diese Regeln gelten für jedes WP und werden in den Blöcken nicht wiederholt.
 5. **Neue Mandantentabellen** (TEN-05): Die Migration aktiviert RLS und FORCE RLS und legt Policies mit USING und WITH CHECK über die Scope-GUCs an. Der RLS-Katalogtest aus WP-007 (`rls-cat`) darf keine neue Ausnahme enthalten. Datenzugriff läuft nur über den Mandantenkontext (`WithTenant`, WP-008 (`tenant-core`)).
 6. **API** (spec-first): Neue oder geänderte Routen zuerst in `api/openapi.yaml`, dann Mapping in `backend/internal/server/authz.go`. `TestRoutesAndSpecificationAreInParity` muss grün sein, danach `npm run generate:api` in `frontend/` ausführen (CI prüft `generate:api:check`). Repository-Fehler meldet der Handler über `api.WriteRepoError` und nie mit Roh-Fehlertext.
 7. **Tests**: Unit-Tests im Paket. Integrationstests laufen gegen PostgreSQL nur mit `TEST_DATABASE_URL` (Fixtures über `database.NewMaintenancePool`). Frontend nutzt Vitest bzw. Playwright. Lint, Typecheck und alle CI-Jobs müssen grün sein.
-8. **Traceability** (GLO-11, DOD-01): Jedes WP ergänzt die angegebenen Zeilen in `docs/traceability.csv` (Kopf `id;tag;epic;testdatei;wp`, eingeführt in WP-005 (`trace`)). Die Spalte `epic` folgt der Meilenstein-Zuordnung (E-06). Die Zeile verweist auf die tatsächlich angelegte Testdatei.
+8. **Traceability** (GLO-11, DOD-01): Jedes WP ergänzt die angegebenen Zeilen in `docs/traceability.csv` (Kopf `id;tag;epic;testdatei;wp`, eingeführt in WP-005 (`trace`)). Die Spalte `epic` folgt der bestätigten Epic-Zuordnung (E-06); M0-WPs tragen ihr fachliches Epic (E-07), wie im Feld „Epic (Traceability)“ jedes WP-Blocks angegeben. Die Zeile verweist auf die tatsächlich angelegte Testdatei.
 9. **Audit, Events, i18n** nach der DoD-01-Checkliste der PR-Vorlage (WP-005 (`trace`)), soweit das WP schreibende Pfade oder UI-Texte berührt.
 10. **Abgrenzung**: Nur die genannten Dateien und Pakete ändern. Fallen weitere Befunde auf, entsteht ein neues WP statt einer Erweiterung des PRs.
 
@@ -300,7 +301,7 @@ TST-02;[B];A;.github/workflows/ci.yml;WP-003
 
 - [ ] Expliziter Go-Abhängigkeitsscan (z. B. `govulncheck`) für alle drei Go-Module.
 - [ ] Expliziter npm-Audit-Schritt für `frontend/` mit festgelegter Schwelle.
-- [ ] Container-Image-Scan für die gebauten Images (Werkzeug nach E-31).
+- [ ] Container-Image-Scan mit Trivy für die gebauten Images (E-31).
 - [ ] Schwellen/Blockierwirkung entsprechen dem nachgelieferten SEC-11-Text (E-01); bis dahin berichtend mit dokumentierter Ausnahme.
 - [ ] Ergebnis-Artefakte werden im Workflow hochgeladen.
 
@@ -322,7 +323,7 @@ TST-04;[Q];A;docs/security/abhaengigkeitsscans.md;WP-004
 SEC-11;nicht angegeben;A;docs/security/abhaengigkeitsscans.md;WP-004
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-31](entscheidungen.md#e-31) Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-31](entscheidungen.md#e-31) Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -342,7 +343,7 @@ SEC-11;nicht angegeben;A;docs/security/abhaengigkeitsscans.md;WP-004
 **Akzeptanzkriterien:**
 
 - [ ] `docs/traceability.csv` mit Kopf `id;tag;epic;testdatei;wp` angelegt; jede Zeile referenziert eine existierende Testdatei.
-- [ ] Prüfprogramm (Go-Test `backend/internal/traceability`) liest die Katalog-IDs aus `docs/spec/katalog-v3/*.md` und prüft: Format, existierende Testdateien, keine unbekannten IDs; Vollständigkeit für alle [B]/[Pn]/[A]-IDs wird berichtet (blockierend erst ab Schalter, siehe E-30).
+- [ ] Prüfprogramm (Go-Test `backend/internal/traceability`) liest die Katalog-IDs aus `docs/spec/katalog-v3/*.md` und prüft: Format, existierende Testdateien, keine unbekannten IDs; Vollständigkeit für alle [B]/[Pn]/[A]-IDs wird berichtet; blockierend für die in einem PR neu berührten IDs, vollständig blockierend erst zu G1 (E-30).
 - [ ] CI-Job `traceability` ausgeführt auf jedem PR.
 - [ ] `.github/pull_request_template.md` enthält die DoD-01-Checkliste (OpenAPI, Implementierung, RLS, Audit/Events, i18n, Tests, Lint, Doku, Traceability-Eintrag, WP-Nummer).
 - [ ] README-Aussage zur Rückverfolgbarkeit verweist auf die Datei.
@@ -369,7 +370,7 @@ GLO-11;[Q];A;backend/internal/traceability/traceability_test.go;WP-005
 DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-005
 ```
 
-**Entscheidungsbedarf:** [E-30](entscheidungen.md#e-30) Traceability-Prüfung: ab wann blockierend?; [E-06](entscheidungen.md#e-06) Zuordnung der IDs zu Epics A–D
+**Entscheidungsbedarf:** [E-30](entscheidungen.md#e-30) Traceability-Prüfung: ab wann blockierend? (entschieden); [E-06](entscheidungen.md#e-06) Zuordnung der IDs zu Epics A–D (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -462,7 +463,7 @@ TEN-03;[B];A;backend/internal/tenant/rls/catalog_integration_test.go;WP-007
 TEN-09;[Q];A;backend/internal/tenant/rls/catalog_integration_test.go;WP-007
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -526,7 +527,7 @@ Weitere Anforderungstexte: CH11 (`docs/spec/katalog-v3/00-grundlagen.md:21`), CH
 
 **Akzeptanzkriterien:**
 
-- [ ] Eine einzige API `database.WithTenant(ctx, pool, scope, fn)` setzt transaktionslokal alle in TEN-04 verlangten GUCs (Namen nach E-08) und prüft, dass `scope` vollständig ist.
+- [ ] Eine einzige API `database.WithTenant(ctx, pool, scope, fn)` setzt transaktionslokal alle in TEN-04 verlangten GUCs (Namen nach TEN-04-Text, E-01) und prüft, dass `scope` vollständig ist.
 - [ ] Leerer Client-/Site-/Team-Scope bedeutet „kein Zugriff“, org-weiter Zugriff nur über ein explizites Merkmal im Scope (fail-closed, E-08).
 - [ ] `platform/db/db.go`, `tenant/rls/rls.go` (SetTenantContext) und `tenant/tenant.go` delegieren an die zentrale API oder werden entfernt.
 - [ ] Die Tenant-Middleware legt den `TenantScope` des Principals in den Request-Kontext.
@@ -557,7 +558,7 @@ TEN-04;[B];B;backend/internal/database/tenant_scope_test.go;WP-008
 TEN-06;[B];B;backend/internal/database/tenant_scope_test.go;WP-008
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-08](entscheidungen.md#e-08) TEN-04: GUC-Namen, Semantik leerer Scopes, Systempfade
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-08](entscheidungen.md#e-08) TEN-04: GUC-Namen, Semantik leerer Scopes, Systempfade (entschieden)
 
 **Nicht Bestandteil:** Umstellung der Repositories erfolgt gebündelt in den Folge-WPs „WithTenant-Migration“.
 
@@ -609,7 +610,7 @@ RBA-03;[B];B;backend/internal/permission/scope_integration_test.go;WP-009
 TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-009
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-11](entscheidungen.md#e-11) Semantik des Team-Scopes
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-11](entscheidungen.md#e-11) Semantik des Team-Scopes (vorläufig entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -655,7 +656,7 @@ TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-009
 TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-010
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -702,7 +703,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-010
 TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-011
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -752,7 +753,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-012
 AUT-04;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-012
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -795,7 +796,7 @@ AUT-04;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-012
 TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-013
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -840,7 +841,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-013
 TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-014
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -884,7 +885,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-014
 TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-015
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -928,7 +929,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-015
 TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-016
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -977,7 +978,7 @@ AST-01;[P2];B;backend/internal/<paket>/*_scope_integration_test.go;WP-017
 MGT-11;[P5];B;backend/internal/<paket>/*_scope_integration_test.go;WP-017
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -1023,7 +1024,7 @@ MGT-11;[P5];B;backend/internal/<paket>/*_scope_integration_test.go;WP-017
 TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-018
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -1070,7 +1071,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-019
 MGT-03;[P4];B;backend/internal/<paket>/*_scope_integration_test.go;WP-019
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -1119,7 +1120,7 @@ TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/
 MGT-04;[P3];B;backend/internal/<paket>/*_scope_integration_test.go;WP-020
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -1167,7 +1168,7 @@ TEN-06;[B];B;backend/internal/<paket>/*_scope_integration_test.go;WP-021
 WFL-01;[P3];B;backend/internal/<paket>/*_scope_integration_test.go;WP-021
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Keine Policy-Änderungen; diese erfolgen in den RLS-Querschnitts-WPs. Max. ca. 15 Dateien – bei Überschreitung Paket abspalten.
 
@@ -1224,7 +1225,7 @@ MON-04;[P3];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-0
 AST-06;[P2];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-022
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1249,7 +1250,7 @@ Weitere Anforderungstexte: CH11 (`docs/spec/katalog-v3/00-grundlagen.md:21`)
 **Akzeptanzkriterien:**
 
 - [ ] Eine Migration ergänzt für die neun Tabellen USING- und WITH-CHECK-Prädikate auf das Client-Scope-GUC.
-- [ ] Für alle Tabellen mit Client-Prädikat (16) verbietet WITH CHECK `client_id IS NULL` für Principals ohne org-weiten Scope (Auslegung nach E-09).
+- [ ] Für alle Tabellen mit Client-Prädikat (16) verbietet WITH CHECK `client_id IS NULL` für Principals ohne org-weiten Scope (E-09).
 - [ ] Einträge der Ausnahmeliste entfallen; RLS-Katalogtest grün.
 - [ ] Integrationstest je Tabelle: Lesen/Schreiben fremder Clients und NULL-Client-Schreiben werden abgewiesen.
 
@@ -1276,7 +1277,7 @@ MGT-03;[P4];B;backend/internal/tenant/rls/client_policies_integration_test.go;WP
 WFL-01;[P3];B;backend/internal/tenant/rls/client_policies_integration_test.go;WP-023
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-09](entscheidungen.md#e-09) Schreiben von Zeilen mit `client_id`/`site_id` NULL
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-09](entscheidungen.md#e-09) Schreiben von Zeilen mit `client_id`/`site_id` NULL (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1296,7 +1297,7 @@ WFL-01;[P3];B;backend/internal/tenant/rls/client_policies_integration_test.go;WP
 **Akzeptanzkriterien:**
 
 - [ ] Policies werden je Kommando getrennt: SELECT darf globale Zeilen lesen, INSERT/UPDATE/DELETE verlangen `organization_id = current_org`.
-- [ ] Für die fünf Tabellen ohne Org-Spalte ist die in E-10 entschiedene Behandlung umgesetzt (Org-Spalte + RLS oder dokumentierte Ausnahme im Katalogtest).
+- [ ] Behandlung nach E-10: Globale Katalogzeilen sind für die App-Rolle schreibgeschützt (dokumentierte Ausnahme im Katalogtest); die übrigen der fünf Tabellen ohne Org-Spalte erhalten Org-Spalte und RLS. Die Einordnung je Tabelle steht im PR.
 - [ ] Integrationstest: App-Rolle kann globale Zeilen nicht ändern/löschen.
 
 **Dateien (5 Einträge, Migration = 2):**
@@ -1306,7 +1307,7 @@ WFL-01;[P3];B;backend/internal/tenant/rls/client_policies_integration_test.go;WP
 - `backend/internal/tenant/rls/known_gaps.go`
 - `docs/schema-baseline.md`
 
-**Migration/RLS:** Policies; ggf. Org-Spalten nach E-10; up/down.
+**Migration/RLS:** Policies; Org-Spalten für nicht globale Tabellen (E-10); up/down.
 
 **Tests:**
 
@@ -1319,7 +1320,7 @@ TEN-02;[B];B;backend/internal/tenant/rls/global_rows_integration_test.go;WP-024
 TEN-05;[B];B;backend/internal/tenant/rls/global_rows_integration_test.go;WP-024
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-10](entscheidungen.md#e-10) Tabellen ohne Org-Spalte und globale Katalogzeilen
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-10](entscheidungen.md#e-10) Tabellen ohne Org-Spalte und globale Katalogzeilen (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1367,7 +1368,7 @@ IMP-07;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-025
 SRC-01;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-025
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1418,7 +1419,7 @@ TEN-02;[B];B;backend/internal/locations/pg_repository_integration_test.go;WP-026
 TEC-06;[B], [Q] Spike;B;backend/internal/locations/pg_repository_integration_test.go;WP-026
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-19](entscheidungen.md#e-19) CH28 (V): gemeinsamer Location-Baum
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-19](entscheidungen.md#e-19) CH28 (V): gemeinsamer Location-Baum (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1465,7 +1466,7 @@ TEN-04;[B];B;backend/internal/tenant/rls/site_policies_integration_test.go;WP-02
 TEC-12;[P5];B;backend/internal/tenant/rls/site_policies_integration_test.go;WP-027
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-09](entscheidungen.md#e-09) Schreiben von Zeilen mit `client_id`/`site_id` NULL
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-09](entscheidungen.md#e-09) Schreiben von Zeilen mit `client_id`/`site_id` NULL (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1514,7 +1515,7 @@ MGT-04;[P3];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-0
 MGT-03;[P4];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-028
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1538,7 +1539,7 @@ Weitere Anforderungstexte: CH25 (`docs/spec/katalog-v3/00-grundlagen.md:49`)
 
 **Akzeptanzkriterien:**
 
-- [ ] Team-Scope-Prädikat nach E-11 für ticket (team_id), training_assignment, desk/desk_booking (Room → Site).
+- [ ] Team-Scope-Prädikat als Schnittmenge mit Client/Site (E-11, vorläufig) für ticket (team_id), training_assignment, desk/desk_booking (Room → Site).
 - [ ] Exclusion-Constraint verhindert überlappende Buchungen desselben Desks (MGT-05).
 - [ ] Katalogtest-Ausnahmen entfallen.
 
@@ -1567,7 +1568,7 @@ TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/
 TEN-05;[B];B;backend/internal/tenant/rls/team_scope_integration_test.go;WP-029
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-11](entscheidungen.md#e-11) Semantik des Team-Scopes; [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-11](entscheidungen.md#e-11) Semantik des Team-Scopes (vorläufig entschieden); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1613,7 +1614,7 @@ MGT-01;[P2];B;backend/internal/document/blob_isolation_test.go;WP-030
 TEN-06;[B];B;backend/internal/document/blob_isolation_test.go;WP-030
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1657,7 +1658,7 @@ IMP-07;[B];B;backend/internal/topology/scope_integration_test.go;WP-031
 CI-05;[B];B;backend/internal/topology/scope_integration_test.go;WP-031
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1719,7 +1720,6 @@ SRC-01;[B];B;backend/internal/search/scope_integration_test.go;WP-032
 **Akzeptanzkriterien:**
 
 - [ ] Indexdokumente tragen client_id/site_id; jede Abfrage filtert serverseitig auf den Principal-Scope.
-- [ ] Alternative nach E-03: OpenSearch-Pfad im G1-Release per Konfiguration deaktiviert und Start mit aktivem OpenSearch verweigert.
 - [ ] Umschaltmessung/VictoriaMetrics bleiben außerhalb (P5).
 
 **Dateien (5 Einträge, Migration = 2):**
@@ -1742,7 +1742,7 @@ SRC-01;[B];B;backend/internal/search/scope_integration_test.go;WP-032
 TEC-12;[P5];B;backend/internal/search/opensearch_scope_test.go;WP-033
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1833,7 +1833,7 @@ EXP-01;[B], DATEV [P2];B;backend/internal/export/scope_integration_test.go;WP-03
 TEN-06;[B];B;backend/internal/export/scope_integration_test.go;WP-035
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1894,7 +1894,6 @@ GQL-04;[B];B;backend/internal/graphqlbff/graphqlbff_test.go;WP-036
 
 - [ ] `ai_chunk` trägt client_id/site_id des Quellobjekts (abgeleitet) mit Policies; Retrieval prüft Leserecht je Quellobjekt.
 - [ ] Ohne zulässige Treffer kein Provideraufruf; Antwort enthält Zitate der verwendeten Quellen.
-- [ ] Alternative nach E-03: Add-on im G1-Release deaktiviert.
 
 **Dateien (7 Einträge, Migration = 2):**
 
@@ -1917,7 +1916,7 @@ GQL-04;[B];B;backend/internal/graphqlbff/graphqlbff_test.go;WP-036
 AI-01;[A];B;backend/internal/ai/scope_integration_test.go;WP-037
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -1938,7 +1937,6 @@ AI-01;[A];B;backend/internal/ai/scope_integration_test.go;WP-037
 - [ ] Registrierung nur mit gültigem, einmalig verbrauchtem Enrollment-Token, das Client/Site bindet.
 - [ ] `endpoint_agent` erhält client_id/site_id und Policies mit Client-/Site-Prädikat.
 - [ ] Netzfingerprint-Vorschlag mit manueller Site-Bestätigung nach AGT-06-Text.
-- [ ] Alternative nach E-03: Agent-Registrierung im G1-Release deaktiviert.
 
 **Dateien (8 Einträge, Migration = 2):**
 
@@ -1962,7 +1960,7 @@ AI-01;[A];B;backend/internal/ai/scope_integration_test.go;WP-037
 AGT-06;[P4];B;backend/internal/agent/enroll_integration_test.go;WP-038
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2087,7 +2085,7 @@ TEC-06;[B], [Q] Spike;B;backend/internal/monitoring/pg_store_integration_test.go
 TEN-06;[B];B;backend/internal/database/tenantguard_test.go;WP-041
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-08](entscheidungen.md#e-08) TEN-04: GUC-Namen, Semantik leerer Scopes, Systempfade
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-08](entscheidungen.md#e-08) TEN-04: GUC-Namen, Semantik leerer Scopes, Systempfade (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2155,7 +2153,7 @@ AUT-02;[B];B;backend/internal/identity/deactivation_integration_test.go;WP-042
 AUT-01;[B];B;backend/internal/identity/deactivation_integration_test.go;WP-042
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2176,7 +2174,7 @@ Weitere Anforderungstexte: CH26 (`docs/spec/katalog-v3/00-grundlagen.md:51`)
 
 **Akzeptanzkriterien:**
 
-- [ ] Org wird aus dem Keycloak-Nutzerattribut gelesen (CH26, sofern bestätigt – E-14); fehlt es, wird der Login abgewiesen.
+- [ ] Org wird aus dem Keycloak-Nutzerattribut gelesen (CH26, bestätigt – E-14); fehlt es, wird der Login abgewiesen.
 - [ ] Erstlogin legt einen Benutzer nur an, wenn Org und E-Mail zugelassen sind (Einladung/Signup); sonst 403.
 - [ ] Bestehende Tests für PKCE/Signatur/Issuer/Audience bleiben grün.
 
@@ -2203,7 +2201,7 @@ AUT-01;[B];B;backend/internal/identity/oidc_test.go;WP-043
 AUT-09;[B];B;backend/internal/identity/oidc_test.go;WP-043
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-14](entscheidungen.md#e-14) CH26 (V): Keycloak-Org-Attribut, MFA-Pflicht, Brokering
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-14](entscheidungen.md#e-14) CH26 (V): Keycloak-Org-Attribut, MFA-Pflicht, Brokering (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2250,7 +2248,7 @@ Weitere Anforderungstexte: CH26 (`docs/spec/katalog-v3/00-grundlagen.md:51`)
 AUT-09;[B];B;tests/install-cloud-helpers.test.sh;WP-044
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-14](entscheidungen.md#e-14) CH26 (V): Keycloak-Org-Attribut, MFA-Pflicht, Brokering
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-14](entscheidungen.md#e-14) CH26 (V): Keycloak-Org-Attribut, MFA-Pflicht, Brokering (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2299,7 +2297,7 @@ MET-14;P2/G2;B;backend/internal/server/authz_test.go;WP-045
 CI-10;[B];B;backend/internal/server/authz_test.go;WP-045
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2341,7 +2339,7 @@ CI-10;[B];B;backend/internal/server/authz_test.go;WP-045
 RBA-02;[B];B;backend/internal/permission/role_matrix_integration_test.go;WP-046
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-13](entscheidungen.md#e-13) RBA-02-Rollenmatrix und AUT-04-Schlüsselformat
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-13](entscheidungen.md#e-13) RBA-02-Rollenmatrix und AUT-04-Schlüsselformat (vorläufig entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2393,7 +2391,7 @@ SEC-01;nicht angegeben;B;backend/internal/credential/handler_test.go;WP-047
 COL-02;[B];B;backend/internal/credential/handler_test.go;WP-047
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2433,7 +2431,7 @@ COL-02;[B];B;backend/internal/credential/handler_test.go;WP-047
 COL-02;[B];B;collector/plugins/redfish/redfish_test.go;WP-048
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2477,7 +2475,7 @@ COL-02;[B];B;collector/plugins/redfish/redfish_test.go;WP-048
 SEC-08;nicht angegeben;B;backend/internal/platform/egress/egress_test.go;WP-049
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2522,7 +2520,7 @@ API-04;[B];B;backend/internal/middleware/middleware_test.go;WP-050
 AUT-10;[B];B;backend/internal/middleware/middleware_test.go;WP-050
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Session-/Org-Buckets und X-RateLimit-Header folgen in Epic C (WP-166 (`c-ratelimit`)).
 
@@ -2543,7 +2541,6 @@ AUT-10;[B];B;backend/internal/middleware/middleware_test.go;WP-050
 - [ ] Agent und Relay kommunizieren nur über TLS; kein HTTP-Fallback.
 - [ ] Agent authentifiziert sich mit dem beim Enrollment (WP-038 (`agent-enroll`)) ausgegebenen Geheimnis/Zertifikat.
 - [ ] Payload entspricht dem Backend-Vertrag; Replay geht an den Agent-Telemetrie-Endpunkt.
-- [ ] Alternative nach E-03: Agent-Kanal im G1-Release deaktiviert.
 
 **Dateien (5 Einträge, Migration = 2):**
 
@@ -2565,7 +2562,7 @@ AUT-10;[B];B;backend/internal/middleware/middleware_test.go;WP-050
 AGT-03;[P4];B;backend/internal/agent/transport_test.go;WP-051
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2597,7 +2594,7 @@ AGT-03;[P4];B;backend/internal/agent/transport_test.go;WP-051
 
 **Akzeptanzkriterien:**
 
-- [ ] Für noch nicht migrierte Installationen verschiebt 000056 inkonsistente Zeilen in eine Quarantänetabelle statt sie zu löschen (Vorgehen nach E-26).
+- [ ] Für noch nicht migrierte Installationen verschiebt 000056 inkonsistente Zeilen in eine Quarantänetabelle statt sie zu löschen (E-26); Release-Hinweis für bereits migrierte Installationen.
 - [ ] Für bereits migrierte Installationen: Runbook zur Prüfung aus Backup in `docs/backup-dr.md`.
 - [ ] Test: inkonsistente Zeilen landen in der Quarantäne, nicht verloren.
 
@@ -2620,7 +2617,7 @@ AGT-03;[P4];B;backend/internal/agent/transport_test.go;WP-051
 AST-05;[P2];B;backend/internal/composition/quarantine_integration_test.go;WP-052
 ```
 
-**Entscheidungsbedarf:** [E-26](entscheidungen.md#e-26) Änderung der bereits ausgelieferten Migration 000056
+**Entscheidungsbedarf:** [E-26](entscheidungen.md#e-26) Änderung der bereits ausgelieferten Migration 000056 (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2672,7 +2669,7 @@ LOC-10;B/G1;B;backend/internal/locations/tree_test.go;WP-053
 LOC-07;B/G1;B;backend/internal/locations/tree_test.go;WP-053
 ```
 
-**Entscheidungsbedarf:** [E-25](entscheidungen.md#e-25) API-05/JOB: verbindliche Pfade, Revert, Snapshot
+**Entscheidungsbedarf:** [E-25](entscheidungen.md#e-25) API-05/JOB: verbindliche Pfade, Revert, Snapshot (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2810,7 +2807,7 @@ LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-055
 MET-14;P2/G2;B;backend/internal/discovery/instance_field_test.go;WP-056
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2875,7 +2872,7 @@ CI-04;[B];D;backend/internal/ci/mergepatch_test.go;WP-057
 OVR-01;[B];D;backend/internal/ci/mergepatch_test.go;WP-057
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2930,7 +2927,7 @@ API-07;[B];D;backend/internal/override/decide_test.go;WP-058
 REC-12;[B];D;backend/internal/override/decide_test.go;WP-058
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-32](entscheidungen.md#e-32) REC-03: Rang der Quelle IPMI
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-32](entscheidungen.md#e-32) REC-03: Rang der Quelle IPMI (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -2953,7 +2950,6 @@ REC-12;[B];D;backend/internal/override/decide_test.go;WP-058
 - [ ] Workflow-Aktion schreibt mit Quelle `workflow`/Rang 92 über `DecideAutomatedWrite`, inklusive Provenienz.
 - [ ] Agent-Updates verwenden Rang 85, `ag.CIID` als Anker und dieselbe Entscheidung.
 - [ ] Tests: geschützter manueller Wert bleibt bei Workflow- und Agent-Update erhalten.
-- [ ] Alternative nach E-03 für deaktivierte Module.
 
 **Dateien (6 Einträge, Migration = 2):**
 
@@ -2978,7 +2974,7 @@ WFL-02;[P3];D;backend/internal/workflow/executor_test.go;WP-059
 AGT-05;[P4];D;backend/internal/workflow/executor_test.go;WP-059
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3024,7 +3020,7 @@ OVR-01;[B];D;backend/internal/ci/effective_view_integration_test.go;WP-060
 CI-10;[B];D;backend/internal/ci/effective_view_integration_test.go;WP-060
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3122,7 +3118,7 @@ OPS-06;[Q];D;edgecore/buffer/buffer_test.go;WP-062
 NFR-04;[B], Teilumfang [P5];D;edgecore/buffer/buffer_test.go;WP-062
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3166,7 +3162,7 @@ MGT-04;[P3];D;backend/internal/maintenance/status_test.go;WP-063
 NTF-05;[B], Zusätze [P2], [P3];D;backend/internal/maintenance/status_test.go;WP-063
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3225,7 +3221,7 @@ TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-064
 DB-04;nicht geliefert;B;backend/internal/database/role_check_integration_test.go;WP-064
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3269,7 +3265,7 @@ TEN-09;[Q];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-065
 TST-02;[B];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-065
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Kanal-Matrix (Export, Suche, GraphQL, Jobs, Benachrichtigungen, Review, Webhooks) folgt im Sicherheitsreview (WP-208 (`sr-matrix`)).
 
@@ -3338,7 +3334,7 @@ AUT-02;[B];B;backend/internal/identity/session_test.go;WP-066
 SEC-06;nicht angegeben;B;backend/internal/identity/session_test.go;WP-066
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3387,7 +3383,7 @@ AUT-04;[B];B;backend/internal/identity/apikey_integration_test.go;WP-067
 API-05;[B];B;backend/internal/identity/apikey_integration_test.go;WP-067
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-13](entscheidungen.md#e-13) RBA-02-Rollenmatrix und AUT-04-Schlüsselformat
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-13](entscheidungen.md#e-13) RBA-02-Rollenmatrix und AUT-04-Schlüsselformat (vorläufig entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3429,7 +3425,7 @@ API-05;[B];B;backend/internal/identity/apikey_integration_test.go;WP-067
 RBA-01;[B];B;backend/internal/server/authz_catalog_test.go;WP-068
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3476,7 +3472,7 @@ RBA-08;[B];B;backend/internal/user/service_account_integration_test.go;WP-069
 API-05;[B];B;backend/internal/user/service_account_integration_test.go;WP-069
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3523,7 +3519,7 @@ SEC-07;nicht angegeben;B;backend/internal/operator/operator_test.go;WP-070
 API-05;[B];B;backend/internal/operator/operator_test.go;WP-070
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3570,7 +3566,7 @@ ENT-01;[B];B;backend/internal/entitlement/entitlement_test.go;WP-071
 ENT-02;[B];B;backend/internal/entitlement/entitlement_test.go;WP-071
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3624,7 +3620,7 @@ ENT-03;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-072
 API-04;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-072
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3672,7 +3668,7 @@ ENT-03;[B];B;backend/internal/entitlement/unlicensed_integration_test.go;WP-073
 ENT-08;[B];B;backend/internal/entitlement/unlicensed_integration_test.go;WP-073
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-22](entscheidungen.md#e-22) CH21 (V): Ausgestaltung `unlicensed_ci`
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-22](entscheidungen.md#e-22) CH21 (V): Ausgestaltung `unlicensed_ci` (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3719,7 +3715,7 @@ ENT-04;[B];B;backend/internal/operator/entitlements_test.go;WP-074
 API-05;[B];B;backend/internal/operator/entitlements_test.go;WP-074
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-12](entscheidungen.md#e-12) ENT-04: Wer darf Entitlements schreiben?
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-12](entscheidungen.md#e-12) ENT-04: Wer darf Entitlements schreiben? (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3774,7 +3770,7 @@ IGA-04;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 AI-02;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-34](entscheidungen.md#e-34) ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-34](entscheidungen.md#e-34) ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan (vorläufig entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3817,7 +3813,7 @@ AI-02;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 AI-02;[A];B;backend/internal/ai/ci_indexer_test.go;WP-076
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3884,7 +3880,7 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/asset_canonical_integra
 AST-04;[P2];B;backend/internal/ci/asset_canonical_integration_test.go;WP-077
 ```
 
-**Entscheidungsbedarf:** [E-36](entscheidungen.md#e-36) DB-05: Zeilen für Vertrag, installierte Software und Health-Findings
+**Entscheidungsbedarf:** [E-36](entscheidungen.md#e-36) DB-05: Zeilen für Vertrag, installierte Software und Health-Findings (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3925,7 +3921,7 @@ RCK-03;[B];B;backend/internal/rack/mount_location_integration_test.go;WP-078
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/rack/mount_location_integration_test.go;WP-078
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3974,7 +3970,7 @@ REL-01;[B];B;backend/internal/relationship/projection_integration_test.go;WP-079
 AST-05;[P2];B;backend/internal/relationship/projection_integration_test.go;WP-079
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -3993,7 +3989,7 @@ AST-05;[P2];B;backend/internal/relationship/projection_integration_test.go;WP-07
 **Akzeptanzkriterien:**
 
 - [ ] `ci.lifecycle_state` nur für Typen mit Lifecycle-Modell schreibbar (Validierung + CHECK über Trigger).
-- [ ] `ci.health` wird read-only geführt und aus Monitoring-Zuständen berechnet; Findings-Anteil nach E-36.
+- [ ] `ci.health` wird read-only geführt und aus Monitoring-Zuständen berechnet; Der Findings-Anteil ist nach E-36 nicht G1-Umfang.
 
 **Dateien (9 Einträge, Migration = 2):**
 
@@ -4018,7 +4014,7 @@ AST-05;[P2];B;backend/internal/relationship/projection_integration_test.go;WP-07
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/health_integration_test.go;WP-080
 ```
 
-**Entscheidungsbedarf:** [E-36](entscheidungen.md#e-36) DB-05: Zeilen für Vertrag, installierte Software und Health-Findings
+**Entscheidungsbedarf:** [E-36](entscheidungen.md#e-36) DB-05: Zeilen für Vertrag, installierte Software und Health-Findings (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4039,7 +4035,7 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/health_integration_test
 
 **Akzeptanzkriterien:**
 
-- [ ] Tabelle `vlan` (org, site, nummer, name, beschreibung) mit UNIQUE nach NET-08 (COALESCE-Sentinel nach E-24), RLS.
+- [ ] Tabelle `vlan` (org, site, nummer, name, beschreibung) mit Eindeutigkeit nach NET-08 über zwei Teilindizes (mit Site: org, site, nummer; ohne Site: org, nummer), keine Sentinel-Werte (E-24), RLS.
 - [ ] Subnetz und Interface referenzieren `vlan_id` per FK; Übernahme bestehender Integerwerte.
 
 **Dateien (6 Einträge, Migration = 2):**
@@ -4065,7 +4061,7 @@ NET-01;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
 NET-02;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-24](entscheidungen.md#e-24) NET-08: Eindeutigkeit bei VLAN ohne Site
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-24](entscheidungen.md#e-24) NET-08: Eindeutigkeit bei VLAN ohne Site (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4115,7 +4111,7 @@ NET-02;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
 NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4181,7 +4177,7 @@ DIS-05;[B];D;backend/internal/discovery/devicerecord_test.go;WP-083
 GLO-12;[B];D;backend/internal/discovery/devicerecord_test.go;WP-083
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4226,7 +4222,7 @@ GLO-12;[B];D;backend/internal/override/decide_test.go;WP-084
 REC-05;[B];D;backend/internal/override/decide_test.go;WP-084
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4273,7 +4269,7 @@ REC-01;[B];D;backend/internal/discovery/consumer_test.go;WP-085
 NFR-03;[B], Teilumfang [P5];D;backend/internal/discovery/consumer_test.go;WP-085
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4320,7 +4316,7 @@ REC-02;[B];D;backend/internal/discovery/identity_test.go;WP-086
 NFR-01;[B], Teilumfang [P5];D;backend/internal/discovery/identity_test.go;WP-086
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-20](entscheidungen.md#e-20) CH29 (V): Hostname-Treffer nur als Review
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-20](entscheidungen.md#e-20) CH29 (V): Hostname-Treffer nur als Review (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4359,7 +4355,7 @@ NFR-01;[B], Teilumfang [P5];D;backend/internal/discovery/identity_test.go;WP-086
 CI-13;[B];D;backend/internal/discovery/resurrect_test.go;WP-087
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4380,7 +4376,7 @@ CI-13;[B];D;backend/internal/discovery/resurrect_test.go;WP-087
 
 - [ ] Paket `backend/internal/reviews` (REP-01) mit den zehn Typen und vier Aktionen nach REC-08.
 - [ ] Resolve verlangt `review:resolve`; Deduplizierung je Objekt/Typ.
-- [ ] REST-Ressource `review-items` (Pfad nach E-25); Eskalationsmarker > 14 Tage für das Dashboard.
+- [ ] REST-Ressource `review-items` (Pfad wörtlich nach API-05, E-25); Eskalationsmarker > 14 Tage für das Dashboard.
 - [ ] Benachrichtigung bei Anlage wird angebunden, sobald WP-140 (`b-ntf-events`) gemergt ist (Hook vorhanden).
 
 **Dateien (10 Einträge, Migration = 2):**
@@ -4408,7 +4404,7 @@ REC-08;[B];D;backend/internal/reviews/service_test.go;WP-088
 API-05;[B];D;backend/internal/reviews/service_test.go;WP-088
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-25](entscheidungen.md#e-25) API-05/JOB: verbindliche Pfade, Revert, Snapshot
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-25](entscheidungen.md#e-25) API-05/JOB: verbindliche Pfade, Revert, Snapshot (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4451,7 +4447,7 @@ REC-06;[B];D;backend/internal/reviews/conflict_test.go;WP-089
 REC-12;[B];D;backend/internal/reviews/conflict_test.go;WP-089
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4497,7 +4493,7 @@ AUD-03;nicht angegeben;D;backend/internal/discovery/last_seen_test.go;WP-090
 NET-01;[B];D;backend/internal/discovery/last_seen_test.go;WP-090
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4545,7 +4541,7 @@ GLO-13;[B];D;backend/internal/ci/validation_test.go;WP-091
 CI-10;[B];D;backend/internal/ci/validation_test.go;WP-091
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-23](entscheidungen.md#e-23) Abgrenzung GLO-13 (reservierte Namensräume) zu CI-10 (Speichermodell)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-23](entscheidungen.md#e-23) Abgrenzung GLO-13 (reservierte Namensräume) zu CI-10 (Speichermodell) (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4616,7 +4612,7 @@ GATE-03;[Q];A;tests/install-smoke-health.test.sh;WP-092
 TEC-09;[B];A;tests/install-smoke-health.test.sh;WP-092
 ```
 
-**Entscheidungsbedarf:** [E-27](entscheidungen.md#e-27) GATE-03 „beide Plattformen“ und Umgang mit WARN (GATE-02)
+**Entscheidungsbedarf:** [E-27](entscheidungen.md#e-27) GATE-03 „beide Plattformen“ und Umgang mit WARN (GATE-02) (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4662,7 +4658,7 @@ INS-07;[B];A;tests/install-preflight.test.sh;WP-093
 TEC-09;[B];A;tests/install-preflight.test.sh;WP-093
 ```
 
-**Entscheidungsbedarf:** [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen
+**Entscheidungsbedarf:** [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -4960,7 +4956,7 @@ OPS-04;[B], [P5];A;tests/backup-config.test.sh;WP-100
 NFR-05;[B];A;tests/backup-config.test.sh;WP-100
 ```
 
-**Entscheidungsbedarf:** [E-29](entscheidungen.md#e-29) OPS-04: Werkzeug für WAL-Archivierung und Basisbackups
+**Entscheidungsbedarf:** [E-29](entscheidungen.md#e-29) OPS-04: Werkzeug für WAL-Archivierung und Basisbackups (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5020,7 +5016,7 @@ OPS-04;[B], [P5];A;tests/restore-pitr.sh;WP-101
 
 **Akzeptanzkriterien:**
 
-- [ ] Release-Workflow baut Images/Binaries, erzeugt SBOM und signiert mit cosign (keyless oder Schlüssel nach E-31).
+- [ ] Release-Workflow baut Images/Binaries, erzeugt SBOM und signiert mit cosign keyless (E-31).
 - [ ] `edgecore/update` verweigert Updates ohne gültige Signatur.
 
 **Dateien (4 Einträge, Migration = 2):**
@@ -5043,7 +5039,7 @@ TEC-15;[B];A;edgecore/update/update_test.go;WP-102
 COL-06;[B], Air-Gapped [O];A;edgecore/update/update_test.go;WP-102
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-31](entscheidungen.md#e-31) Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-31](entscheidungen.md#e-31) Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5123,7 +5119,7 @@ OPS-05;[B];A;backend/internal/server/workers_test.go;WP-103
 OPS-06;[Q];A;tests/outage/;WP-104
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5168,7 +5164,7 @@ PRI-11;[B];A;docs/betrieb/referenzmodell.md;WP-105
 NFR-09;[B];A;docs/betrieb/referenzmodell.md;WP-105
 ```
 
-**Entscheidungsbedarf:** [E-35](entscheidungen.md#e-35) NFR-09: Inhalt der Subprozessorenliste
+**Entscheidungsbedarf:** [E-35](entscheidungen.md#e-35) NFR-09: Inhalt der Subprozessorenliste (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5305,7 +5301,7 @@ TEN-01;[B], Reseller [P4];B;backend/internal/tenantapi/handler_test.go;WP-107
 API-05;[B];B;backend/internal/tenantapi/handler_test.go;WP-107
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5392,7 +5388,7 @@ LOC-06;B/G1;B;backend/internal/tenantapi/location_uniques_integration_test.go;WP
 TEN-01;[B], Reseller [P4];B;backend/internal/locations/hierarchy_integration_test.go;WP-109
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5432,7 +5428,7 @@ TEN-01;[B], Reseller [P4];B;backend/internal/locations/hierarchy_integration_tes
 AUT-03;[B];B;backend/internal/config/config_test.go;WP-110
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5481,7 +5477,7 @@ TLC-01;[B];B;backend/internal/signup/service_test.go;WP-111
 API-05;[B];B;backend/internal/signup/service_test.go;WP-111
 ```
 
-**Entscheidungsbedarf:** [E-33](entscheidungen.md#e-33) TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte
+**Entscheidungsbedarf:** [E-33](entscheidungen.md#e-33) TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5521,7 +5517,7 @@ API-05;[B];B;backend/internal/signup/service_test.go;WP-111
 TLC-01;[B];B;backend/internal/signup/protect_test.go;WP-112
 ```
 
-**Entscheidungsbedarf:** [E-33](entscheidungen.md#e-33) TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte
+**Entscheidungsbedarf:** [E-33](entscheidungen.md#e-33) TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5678,7 +5674,7 @@ MET-03;B/G1;B;backend/internal/citype/seed_integration_test.go;WP-115
 
 - [ ] Tabelle `attribute_definition` (org NULL = System, RLS) mit Feldern nach MET-10; Übernahme aus `ci_type_attribute`/Instanzdefinitionen.
 - [ ] `ci_type.attribute_schema` wird generiert und ist über API/UI nicht schreibbar.
-- [ ] REST-Ressource `attribute-definitions` (Pfad nach E-25).
+- [ ] REST-Ressource `attribute-definitions` (Pfad wörtlich nach API-05, E-25).
 
 **Dateien (10 Einträge, Migration = 2):**
 
@@ -5750,7 +5746,7 @@ MET-11;B/G1, Teil P2/G2;B;backend/internal/fieldmeta/fieldmeta_test.go;WP-117
 CI-03;[B];B;backend/internal/fieldmeta/fieldmeta_test.go;WP-117
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5890,7 +5886,7 @@ MET-04;B/G1;B;backend/internal/citype/compose_test.go;WP-119
 CI-01;[B], Teilfelder [P2]/[P3];B;backend/internal/ci/handler_test.go;WP-120
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5929,7 +5925,7 @@ CI-01;[B], Teilfelder [P2]/[P3];B;backend/internal/ci/handler_test.go;WP-120
 CI-02;[B];B;backend/internal/ci/indexes_integration_test.go;WP-121
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5965,7 +5961,7 @@ CI-02;[B];B;backend/internal/ci/indexes_integration_test.go;WP-121
 LCY-01;[B];B;backend/internal/lifecycle/status_separation_integration_test.go;WP-122
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6006,7 +6002,7 @@ LCY-01;[B];B;backend/internal/lifecycle/status_separation_integration_test.go;WP
 NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-123
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6048,7 +6044,7 @@ NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-123
 NET-03;[B];B;backend/internal/ipam/ip_integration_test.go;WP-124
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6092,7 +6088,7 @@ NET-05;[B];B;backend/internal/ipam/handler_test.go;WP-125
 API-05;[B];B;backend/internal/ipam/handler_test.go;WP-125
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6131,7 +6127,7 @@ API-05;[B];B;backend/internal/ipam/handler_test.go;WP-125
 RCK-01;[B];B;backend/internal/rack/rules_integration_test.go;WP-126
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6174,7 +6170,7 @@ Weitere Anforderungstexte: CH27 (`docs/spec/katalog-v3/00-grundlagen.md:53`)
 REL-01;[B];B;backend/internal/relationshiptype/seed_integration_test.go;WP-127
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-18](entscheidungen.md#e-18) CH27 (V): impact_direction
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-18](entscheidungen.md#e-18) CH27 (V): impact_direction (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6215,7 +6211,7 @@ REL-01;[B];B;backend/internal/relationshiptype/seed_integration_test.go;WP-127
 REL-02;[B];B;backend/internal/relationship/pg_repository_integration_test.go;WP-128
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6391,7 +6387,7 @@ OPS-03;[B], [P5];B;backend/internal/jobs/scheduler_test.go;WP-131
 AUD-04;nicht angegeben;B;backend/internal/audit/audit_test.go;WP-132
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6433,7 +6429,7 @@ AUD-05;nicht angegeben;B;backend/internal/server/audit_coverage_test.go;WP-133
 AUD-09;nicht angegeben;B;backend/internal/server/audit_coverage_test.go;WP-133
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6478,7 +6474,7 @@ MET-54;B/G1, Teil P2/G2;B;backend/internal/citype/export_audit_integration_test.
 AUD-07;nicht angegeben;B;backend/internal/citype/export_audit_integration_test.go;WP-134
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6563,7 +6559,7 @@ EVT-01;nicht angegeben;B;backend/internal/events/outbox_integration_test.go;WP-1
 EVT-02;nicht angegeben;B;backend/internal/events/outbox_integration_test.go;WP-136
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6776,7 +6772,7 @@ OPS-05;[B];B;backend/internal/notify/events_integration_test.go;WP-140
 SEC-06;nicht angegeben;B;backend/internal/platform/crypto/crypto_test.go;WP-141
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-15](entscheidungen.md#e-15) CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-15](entscheidungen.md#e-15) CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6825,7 +6821,7 @@ DB-04;nicht geliefert;B;backend/internal/citype/ddl_job_integration_test.go;WP-1
 MET-15;B/G1;B;backend/internal/citype/ddl_job_integration_test.go;WP-142
 ```
 
-**Entscheidungsbedarf:** [E-04](entscheidungen.md#e-04) Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells
+**Entscheidungsbedarf:** [E-04](entscheidungen.md#e-04) Teilbericht 03 nicht konsolidiert (offen); N/P-IDs des Metamodells
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6902,7 +6898,7 @@ COL-01;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-
 COL-05;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-143
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6942,7 +6938,7 @@ COL-05;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-
 COL-04;[B];D;backend/internal/discovery/enroll_handler_test.go;WP-144
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6987,7 +6983,7 @@ COL-04;[B];D;backend/internal/discovery/enroll_handler_test.go;WP-144
 COL-04;[B];D;backend/internal/discovery/ca_test.go;WP-145
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7031,7 +7027,7 @@ COL-08;[B];D;tests/nats-mtls.test.sh;WP-146
 PRI-07;Grundsatz (ohne Tag);D;tests/nats-mtls.test.sh;WP-146
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-05](entscheidungen.md#e-05) Fehlende oder abweichende Tags
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-05](entscheidungen.md#e-05) Fehlende oder abweichende Tags (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7072,7 +7068,7 @@ PRI-07;Grundsatz (ohne Tag);D;tests/nats-mtls.test.sh;WP-146
 COL-02;[B];D;backend/internal/credential/bundle_test.go;WP-147
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7112,7 +7108,7 @@ COL-02;[B];D;backend/internal/credential/bundle_test.go;WP-147
 COL-06;[B], Air-Gapped [O];D;edgecore/update/update_test.go;WP-148
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7151,7 +7147,7 @@ COL-06;[B], Air-Gapped [O];D;edgecore/update/update_test.go;WP-148
 DIS-01;[B];D;collector/plugins/sweep/sweep_test.go;WP-149
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7199,7 +7195,7 @@ DIS-03;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-150
 DIS-04;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-150
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7220,7 +7216,7 @@ Weitere Anforderungstexte: CH30 (`docs/spec/katalog-v3/00-grundlagen.md:59`)
 **Akzeptanzkriterien:**
 
 - [ ] Profile als YAML (Übernahme der 21 Profile); zentrale Klassifikationskette; Fallback `generic_device` plus Unknown-Type-Review.
-- [ ] Konkrete Profilliste (V) nach E-21.
+- [ ] Profilliste nach CH30/DIS-02 (bestätigt, E-21); die vorhandenen 21 Profile sind damit abgeglichen.
 
 **Dateien (5 Einträge, Migration = 2):**
 
@@ -7242,7 +7238,7 @@ Weitere Anforderungstexte: CH30 (`docs/spec/katalog-v3/00-grundlagen.md:59`)
 DIS-02;[B], Profilliste (V);D;collector/profiles/profiles_test.go;WP-151
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-21](entscheidungen.md#e-21) CH30 (V)/DIS-02: Geräteprofilliste
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-21](entscheidungen.md#e-21) CH30 (V)/DIS-02: Geräteprofilliste (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7285,7 +7281,7 @@ DIS-02;[B], Profilliste (V);D;collector/profiles/profiles_test.go;WP-151
 DIS-04;[B];D;collector/plugins/snmp/snmp_test.go;WP-152
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7333,7 +7329,7 @@ DIS-09;[B];D;backend/internal/discovery/scope_integration_test.go;WP-153
 API-05;[B];D;backend/internal/discovery/scope_integration_test.go;WP-153
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7375,7 +7371,7 @@ DIS-10;[B];D;collector/collectorcmd/schedule_test.go;WP-154
 NFR-03;[B], Teilumfang [P5];D;collector/collectorcmd/schedule_test.go;WP-154
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7417,7 +7413,7 @@ NFR-03;[B], Teilumfang [P5];D;collector/collectorcmd/schedule_test.go;WP-154
 DIS-08;[Q];D;backend/internal/discovery/errors_test.go;WP-155
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7500,7 +7496,7 @@ REC-09;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-157
 LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-157
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7538,7 +7534,7 @@ LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-157
 TOP-01;[B];D;backend/internal/discovery/topology_test.go;WP-158
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7581,7 +7577,7 @@ TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-159
 REL-08;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-159
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7627,7 +7623,7 @@ REL-04;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-16
 REL-05;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-160
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7666,7 +7662,7 @@ REL-05;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-16
 IMP-09;[B];D;backend/internal/discovery/power_test.go;WP-161
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7923,7 +7919,7 @@ API-02;[B];C;backend/internal/api/listquery_test.go;WP-165
 API-04;[B];C;backend/internal/middleware/ratelimit_test.go;WP-166
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -7980,7 +7976,7 @@ API-01;[B];C;backend/internal/middleware/openapi_test.go;WP-167
 
 **Akzeptanzkriterien:**
 
-- [ ] Katalogpfade nach API-05 (verbindliche Pfadliste nach E-25); alte Pfade während einer Übergangsfrist mit Deprecation/Sunset (WP-167 (`c-lifecycle`)).
+- [ ] Katalogpfade nach API-05 (wörtlich, E-25); alte Pfade während einer Übergangsfrist mit Deprecation/Sunset (WP-167 (`c-lifecycle`)).
 - [ ] Frontend nutzt neue Pfade.
 
 **Dateien (8 Einträge, Migration = 2):**
@@ -8006,7 +8002,7 @@ API-01;[B];C;backend/internal/middleware/openapi_test.go;WP-167
 API-05;[B];C;backend/internal/server/authz_test.go;WP-168
 ```
 
-**Entscheidungsbedarf:** [E-25](entscheidungen.md#e-25) API-05/JOB: verbindliche Pfade, Revert, Snapshot
+**Entscheidungsbedarf:** [E-25](entscheidungen.md#e-25) API-05/JOB: verbindliche Pfade, Revert, Snapshot (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8049,7 +8045,7 @@ API-05;[B];C;backend/internal/ci/handler_test.go;WP-169
 CI-05;[B];C;backend/internal/ci/handler_test.go;WP-169
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8093,7 +8089,7 @@ CI-05;[B];C;backend/internal/ci/delete_integration_test.go;WP-170
 LCY-01;[B];C;backend/internal/ci/delete_integration_test.go;WP-170
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8139,7 +8135,7 @@ CI-06;[B];C;backend/internal/history/history_integration_test.go;WP-171
 AUD-03;nicht angegeben;C;backend/internal/history/history_integration_test.go;WP-171
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8182,7 +8178,7 @@ AUD-03;nicht angegeben;C;backend/internal/history/history_integration_test.go;WP
 CI-11;[B];C;backend/internal/ci/typechange_test.go;WP-172
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8225,7 +8221,7 @@ CI-11;[B];C;backend/internal/ci/typechange_test.go;WP-172
 CI-12;[B];C;backend/internal/ci/merge_integration_test.go;WP-173
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8265,7 +8261,7 @@ CI-12;[B];C;backend/internal/ci/merge_integration_test.go;WP-173
 CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-174
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8307,7 +8303,7 @@ CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-174
 RCK-02;[B];C;backend/internal/rack/handler_test.go;WP-175
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8350,7 +8346,7 @@ IMP-01;[B];C;backend/internal/topology/impact_test.go;WP-176
 IMP-03;[B];C;backend/internal/topology/impact_test.go;WP-176
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-18](entscheidungen.md#e-18) CH27 (V): impact_direction
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-18](entscheidungen.md#e-18) CH27 (V): impact_direction (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8393,7 +8389,7 @@ IMP-02;[B];C;backend/internal/topology/impact_test.go;WP-177
 NFR-02;[B];C;backend/internal/topology/impact_test.go;WP-177
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8429,7 +8425,7 @@ NFR-02;[B];C;backend/internal/topology/impact_test.go;WP-177
 CI-09;[B];C;backend/internal/ci/assetfree_integration_test.go;WP-178
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8468,7 +8464,7 @@ CI-09;[B];C;backend/internal/ci/assetfree_integration_test.go;WP-178
 IMP-04;[B];C;backend/internal/topology/redundancy_test.go;WP-179
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8513,7 +8509,7 @@ IMP-05;[B];C;backend/internal/topology/multi_integration_test.go;WP-180
 IMP-06;[B];C;backend/internal/topology/multi_integration_test.go;WP-180
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8559,7 +8555,7 @@ API-08;[B];C;backend/internal/ci/bulk_test.go;WP-181
 BLK-01;[B];C;backend/internal/ci/bulk_test.go;WP-181
 ```
 
-**Entscheidungsbedarf:** [E-25](entscheidungen.md#e-25) API-05/JOB: verbindliche Pfade, Revert, Snapshot
+**Entscheidungsbedarf:** [E-25](entscheidungen.md#e-25) API-05/JOB: verbindliche Pfade, Revert, Snapshot (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8603,7 +8599,7 @@ API-09;[B];C;backend/internal/jobs/handler_test.go;WP-182
 JOB-03;[B];C;backend/internal/jobs/handler_test.go;WP-182
 ```
 
-**Entscheidungsbedarf:** [E-25](entscheidungen.md#e-25) API-05/JOB: verbindliche Pfade, Revert, Snapshot
+**Entscheidungsbedarf:** [E-25](entscheidungen.md#e-25) API-05/JOB: verbindliche Pfade, Revert, Snapshot (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8621,7 +8617,7 @@ JOB-03;[B];C;backend/internal/jobs/handler_test.go;WP-182
 
 **Akzeptanzkriterien:**
 
-- [ ] Review-Merge und State-Snapshot laufen als Jobs; Umfang Snapshot nach E-25.
+- [ ] Review-Merge und State-Snapshot laufen als Jobs; Snapshot-Umfang nach JOB-04 (E-25).
 
 **Dateien (4 Einträge, Migration = 2):**
 
@@ -8642,7 +8638,7 @@ JOB-03;[B];C;backend/internal/jobs/handler_test.go;WP-182
 JOB-04;[B];C;backend/internal/reviews/merge_job_integration_test.go;WP-183
 ```
 
-**Entscheidungsbedarf:** [E-25](entscheidungen.md#e-25) API-05/JOB: verbindliche Pfade, Revert, Snapshot
+**Entscheidungsbedarf:** [E-25](entscheidungen.md#e-25) API-05/JOB: verbindliche Pfade, Revert, Snapshot (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8661,7 +8657,7 @@ JOB-04;[B];C;backend/internal/reviews/merge_job_integration_test.go;WP-183
 
 **Akzeptanzkriterien:**
 
-- [ ] gqlgen-Server unter `/bff/graphql`, nur Session-Auth; Limits nach SEC-10 (Zahlen nach E-16).
+- [ ] gqlgen-Server unter `/bff/graphql`, nur Session-Auth; Limits nach SEC-10, vorbelegt mit Abfragetiefe 10, Komplexitätsbudget und 10 s Deadline (E-16, vorläufig bis SEC-10-Text).
 - [ ] Bestehende Resolver portiert inkl. Rechteprüfungen aus WP-036 (`gql-authz`).
 
 **Dateien (8 Einträge, Migration = 2):**
@@ -8688,7 +8684,7 @@ GQL-01;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-184
 SEC-10;nicht angegeben;C;backend/internal/graphqlbff/graphqlbff_test.go;WP-184
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-16](entscheidungen.md#e-16) SEC-10: Zahlenwerte für GraphQL-Limits
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-16](entscheidungen.md#e-16) SEC-10: Zahlenwerte für GraphQL-Limits (vorläufig entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -8995,7 +8991,7 @@ UI-09;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
 UI-10;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
 ```
 
-**Entscheidungsbedarf:** [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“)
+**Entscheidungsbedarf:** [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9051,7 +9047,7 @@ UI-09;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192
 UI-10;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192
 ```
 
-**Entscheidungsbedarf:** [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“)
+**Entscheidungsbedarf:** [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9181,7 +9177,7 @@ UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-194
 UI-06;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-195
 ```
 
-**Entscheidungsbedarf:** [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“)
+**Entscheidungsbedarf:** [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9307,7 +9303,7 @@ UI-16;[B];C;frontend/src/components/NotificationCenter.test.tsx;WP-197
 REC-10;[B];C;backend/internal/ci/provenance_integration_test.go;WP-198
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9529,7 +9525,7 @@ SIM-01;[B], Teilumfang [P2];LT;backend/cmd/seed/seed_integration_test.go;WP-203
 NFR-10;[Q];LT;backend/cmd/seed/seed_integration_test.go;WP-203
 ```
 
-**Entscheidungsbedarf:** [E-34](entscheidungen.md#e-34) ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan; [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen
+**Entscheidungsbedarf:** [E-34](entscheidungen.md#e-34) ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan (vorläufig entschieden); [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9548,7 +9544,7 @@ NFR-10;[Q];LT;backend/cmd/seed/seed_integration_test.go;WP-203
 
 **Akzeptanzkriterien:**
 
-- [ ] k6- oder Go-Lastskripte für NFR-01/02/03-Szenarien unter `tests/load/`; Workflow `load.yml` (manuell/nightly) erzeugt Ergebnisartefakte.
+- [ ] k6-Lastskripte (E-31) für NFR-01/02/03-Szenarien unter `tests/load/`; Workflow `load.yml` (manuell/nightly) erzeugt Ergebnisartefakte.
 - [ ] Query-Budget/N+1-Assertions und EXPLAIN-Prüfung zentraler Abfragen (ABN-02).
 
 **Dateien (4 Einträge, Migration = 2):**
@@ -9571,7 +9567,7 @@ NFR-10;[Q];LT;backend/internal/ci/querybudget_integration_test.go;WP-204
 ABN-02;[Q];LT;backend/internal/ci/querybudget_integration_test.go;WP-204
 ```
 
-**Entscheidungsbedarf:** [E-31](entscheidungen.md#e-31) Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest
+**Entscheidungsbedarf:** [E-31](entscheidungen.md#e-31) Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9657,7 +9653,7 @@ NFR-03;[B], Teilumfang [P5];LT;tests/load/;WP-206
 ABN-02;[Q];LT;tests/load/;WP-206
 ```
 
-**Entscheidungsbedarf:** [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen
+**Entscheidungsbedarf:** [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9749,7 +9745,7 @@ TEN-09;[Q];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-
 TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-208
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9768,7 +9764,7 @@ TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-
 
 **Akzeptanzkriterien:**
 
-- [ ] `docs/security/review-g1.md`: Threat-Model-Abgleich, Prüfung aller Critical/High-Befunde auf Schließung (Verweis auf WP/PR), Scanergebnisse (WP-004 (`dep-scan`), Container-Scan nach E-31).
+- [ ] `docs/security/review-g1.md`: Threat-Model-Abgleich, Prüfung aller Critical/High-Befunde auf Schließung (Verweis auf WP/PR), Scanergebnisse (WP-004 (`dep-scan`), Trivy-Container-Scan nach E-31).
 - [ ] Offene Punkte als neue Befunde mit Severity.
 
 **Dateien (2 Einträge, Migration = 2):**
@@ -9789,7 +9785,7 @@ GATE-03;[Q];SR;docs/security/review-g1.md;WP-209
 SEC-11;nicht angegeben;SR;docs/security/review-g1.md;WP-209
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-31](entscheidungen.md#e-31) Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-31](entscheidungen.md#e-31) Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9807,7 +9803,7 @@ SEC-11;nicht angegeben;SR;docs/security/review-g1.md;WP-209
 
 **Akzeptanzkriterien:**
 
-- [ ] Pentest nach E-28 beauftragt und durchgeführt; Bericht abgelegt; jeder Befund → eigenes WP; Abschluss erst ohne offene Critical/High.
+- [ ] Externer Pentest (E-28; Beauftragung als Aufgabe A-07) durchgeführt; Bericht abgelegt; jeder Befund → eigenes WP; Abschluss erst ohne offene Critical/High.
 
 **Dateien (1 Einträge, Migration = 2):**
 
@@ -9825,7 +9821,7 @@ SEC-11;nicht angegeben;SR;docs/security/review-g1.md;WP-209
 GATE-03;[Q];SR;docs/security/pentest-g1.md;WP-210
 ```
 
-**Entscheidungsbedarf:** [E-28](entscheidungen.md#e-28) Pentest: Dienstleister, Umfang, Termin; NFR-08
+**Entscheidungsbedarf:** [E-28](entscheidungen.md#e-28) Pentest: Dienstleister, Umfang, Termin (entschieden); NFR-08
 
 **Nicht Bestandteil:** Behebungen sind nicht Teil dieses WP; Aufwand des externen Dienstleisters nicht enthalten.
 
@@ -9839,7 +9835,7 @@ GATE-03;[Q];SR;docs/security/pentest-g1.md;WP-210
 |---|---|---|---:|---|
 | [WP-211](#wp-211--g1-nachweis-installation-auf-beiden-referenzplattformen) | `g1-install` | G1-Nachweis Installation auf beiden Referenzplattformen | 0,5 | WP-092, WP-093, WP-200 |
 | [WP-212](#wp-212--abnahmeszenarien-abn-01-b-mit-eingefrorenen-artefakten) | `g1-abnahme` | Abnahmeszenarien ABN-01 [B] mit eingefrorenen Artefakten | 1,5 | WP-201, WP-200, WP-089 |
-| [WP-213](#wp-213--g1-gateprüfung-traceability-blockierend-rep-01-struktur-gate-checkliste) | `g1-gate` | G1-Gateprüfung: Traceability blockierend, REP-01-Struktur, Gate-Checkliste | 1,5 | WP-210, WP-211, WP-212, WP-202, WP-137, WP-129, WP-118, WP-088, WP-026 |
+| [WP-213](#wp-213--g1-gateprüfung-traceability-blockierend-rep-01-struktur-gate-checkliste) | `g1-gate` | G1-Gateprüfung: Traceability blockierend, REP-01-Struktur, Gate-Checkliste | 1,5 | WP-210, WP-211, WP-212, WP-202, WP-137, WP-129, WP-118, WP-088, WP-026, WP-214 |
 
 ### WP-211 – G1-Nachweis Installation auf beiden Referenzplattformen
 
@@ -9875,7 +9871,7 @@ GATE-03;[Q];G1;docs/acceptance/g1-installation.md;WP-211
 INS-01;[Q];G1;docs/acceptance/g1-installation.md;WP-211
 ```
 
-**Entscheidungsbedarf:** [E-27](entscheidungen.md#e-27) GATE-03 „beide Plattformen“ und Umgang mit WARN (GATE-02)
+**Entscheidungsbedarf:** [E-27](entscheidungen.md#e-27) GATE-03 „beide Plattformen“ und Umgang mit WARN (GATE-02) (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9913,7 +9909,7 @@ INS-01;[Q];G1;docs/acceptance/g1-installation.md;WP-211
 ABN-01;[Q];G1;frontend/e2e/conflict.spec.ts;WP-212
 ```
 
-**Entscheidungsbedarf:** [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“)
+**Entscheidungsbedarf:** [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) (offen)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9921,7 +9917,7 @@ ABN-01;[Q];G1;frontend/e2e/conflict.spec.ts;WP-212
 
 **Schlüssel:** `g1-gate` · **Meilenstein:** Gate G1 · **Epic (Traceability):** G1 · **Aufwand:** 1,5 PT
 
-**Voraussetzungen (gemergt):** WP-210 (`sr-pentest`), WP-211 (`g1-install`), WP-212 (`g1-abnahme`), WP-202 (`c-tst01`), WP-137 (`b-ntf-channel`), WP-129 (`b-jobs`), WP-118 (`b-met-rules`), WP-088 (`review-model`), WP-026 (`loc-model`)
+**Voraussetzungen (gemergt):** WP-210 (`sr-pentest`), WP-211 (`g1-install`), WP-212 (`g1-abnahme`), WP-202 (`c-tst01`), WP-137 (`b-ntf-channel`), WP-129 (`b-jobs`), WP-118 (`b-met-rules`), WP-088 (`review-model`), WP-026 (`loc-model`), WP-214 (`m-gates`, nach E-03)
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
@@ -9939,7 +9935,8 @@ ABN-01;[Q];G1;frontend/e2e/conflict.spec.ts;WP-212
 
 - [ ] Traceability-Prüfung blockierend für alle [B]/[Q]-IDs (E-30).
 - [ ] Strukturtest für REP-01 (`internal/{notify,jobs,locations,pii,reviews,rules}`, `api/rules.schema.json`, `docs/acceptance`, `docs/decisions`, `docs/schema-baseline.md`; `pii` nach E-15).
-- [ ] `docs/acceptance/g1-gate.md`: Checkliste GATE-01/02/05 mit Status jeder Phase-1-/Q-ID (PASS-Nachweis per Test/Traceability), SEQ-01-Reihenfolge belegt.
+- [ ] `docs/acceptance/g1-gate.md`: Checkliste GATE-01/02/05 mit Status jeder Phase-1-/Q-ID (PASS-Nachweis per Test/Traceability), SEQ-01-Reihenfolge je Epic belegt (E-07).
+- [ ] Nachweis nach E-03: Im G1-Release sind alle Spätphasen-Module über WP-214 (`m-gates`) abgeschaltet (Routen nicht registriert, Worker aus); SOLL-Punkte mit WARN sind mit Begründung geführt (GATE-02, E-27).
 
 **Dateien (6 Einträge, Migration = 2):**
 
@@ -9968,48 +9965,48 @@ GLO-11;[Q];G1;tests/rep01-structure.test.sh;WP-213
 REP-01;[B];G1;tests/rep01-structure.test.sh;WP-213
 ```
 
-**Entscheidungsbedarf:** [E-15](entscheidungen.md#e-15) CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation; [E-27](entscheidungen.md#e-27) GATE-03 „beide Plattformen“ und Umgang mit WARN (GATE-02); [E-30](entscheidungen.md#e-30) Traceability-Prüfung: ab wann blockierend?
+**Entscheidungsbedarf:** [E-15](entscheidungen.md#e-15) CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation (offen); [E-27](entscheidungen.md#e-27) GATE-03 „beide Plattformen“ und Umgang mit WARN (GATE-02) (entschieden); [E-30](entscheidungen.md#e-30) Traceability-Prüfung: ab wann blockierend? (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
 ## M-S – High-Befunde späterer Phasen (nach E-03)
 
-**Ziel:** High-/Critical-Befunde in Code späterer Phasen; Umfang hängt von E-03 ab (beheben oder deaktivieren). Start nach Epic A mit WP-214 (`m-gates`); übrige WPs nach ihren Voraussetzungen.
+**Ziel:** High-/Critical-Befunde in Code späterer Phasen. Nach E-03 (entschieden: deaktivieren) schaltet WP-214 (`m-gates`) die Module im G1-Release ab. WP-215 bis WP-239 bleiben als Planung erhalten und werden in der jeweiligen Folgephase umgesetzt.
 
-**Ausstieg:** Bei „deaktivieren“: nur WP-214 (`m-gates`) vor G1; sonst alle M-S-WPs vor G1.
+**Ausstieg:** WP-214 (`m-gates`) gemergt vor WP-213 (`g1-gate`). WP-215 bis WP-239 sind nicht G1-Umfang.
 
 | WP | Schlüssel | Titel | PT | Voraussetzungen |
 |---|---|---|---:|---|
 | [WP-214](#wp-214--feature-gates-nicht-freigegebene-spätphasen-module-im-g1-release-deaktivierbar) | `m-gates` | Feature-Gates: nicht freigegebene Spätphasen-Module im G1-Release deaktivierbar | 1,5 | WP-075, WP-098 |
-| [WP-215](#wp-215--lifecycle-übergänge-p2-zustände-laden-pflichtreferenzen-prüfen) | `m-lcy` | Lifecycle-Übergänge P2: Zustände laden, Pflichtreferenzen prüfen | 1,5 | WP-080, WP-214 |
-| [WP-216](#wp-216--subnetz-reservierungen-und-discovery-konflikt-review) | `m-net-res` | Subnetz-Reservierungen und Discovery-Konflikt-Review | 1,5 | WP-124, WP-088, WP-214 |
-| [WP-217](#wp-217--relationship_change-historie-bei-bearbeitenverifizieren) | `m-rel-hist` | relationship_change-Historie bei Bearbeiten/Verifizieren | 1,0 | WP-128, WP-214 |
-| [WP-218](#wp-218--service-blast-radius-betroffene-services-und-korrekte-spof-berechnung) | `m-blast` | Service-Blast-Radius: betroffene Services und korrekte SPOF-Berechnung | 1,0 | WP-179, WP-214 |
-| [WP-219](#wp-219--agent-iga-relay-korrekte-payload-trennung-writer-host-mit-eigener-identität) | `m-relay` | Agent-/IGA-Relay: korrekte Payload-Trennung, Writer-Host mit eigener Identität | 1,5 | WP-051, WP-214 |
-| [WP-220](#wp-220--quellenpolitik-je-attribut-mit-numerischen-rängen-gemeinsamer-matcher-für-agent) | `m-srcpolicy` | Quellenpolitik je Attribut mit numerischen Rängen; gemeinsamer Matcher für Agent | 2,0 | WP-058, WP-086, WP-059, WP-214 |
-| [WP-221](#wp-221--bulk--und-template-migration-erzeugen-overrides) | `m-ovr-bulk` | Bulk- und Template-Migration erzeugen Overrides | 1,0 | WP-181, WP-057, WP-214 |
-| [WP-222](#wp-222--asset-pflichtfelder-orgwährung-version-kindvertrag-child_mode) | `m-asset-core` | Asset-Pflichtfelder, Orgwährung, Version; Kindvertrag child_mode | 2,0 | WP-077, WP-079, WP-107, WP-214 |
-| [WP-223](#wp-223--zuweisung-team-atomarer-transfer-gesperrte-reservierungsübernahme) | `m-assign` | Zuweisung: Team, atomarer Transfer, gesperrte Reservierungsübernahme | 1,5 | WP-222, WP-022 |
-| [WP-224](#wp-224--kanonische-bewegungshistorie-assetstock-append-only) | `m-movement` | Kanonische Bewegungshistorie (asset/stock) append-only | 2,0 | WP-223 |
-| [WP-225](#wp-225--bestand-pro-bin-check--0-atomare-verfügbarkeit-mindestbestand-benachrichtigung) | `m-stock` | Bestand pro Bin, CHECK ≥ 0, atomare Verfügbarkeit, Mindestbestand-Benachrichtigung | 2,0 | WP-224, WP-140 |
-| [WP-226](#wp-226--bestellungen-statusübergänge-wareneingang-erst-bei-empfang) | `m-order` | Bestellungen: Statusübergänge, Wareneingang erst bei Empfang | 1,5 | WP-225 |
-| [WP-227](#wp-227--inventur-eingefrorene-sollmenge-buchung-über-bewegungen-barcode-eindeutig) | `m-inventory` | Inventur: eingefrorene Sollmenge, Buchung über Bewegungen; Barcode eindeutig | 2,0 | WP-224 |
-| [WP-228](#wp-228--wartungsempfänger-über-graph-impact) | `m-maint` | Wartungsempfänger über Graph-Impact | 1,0 | WP-180, WP-138, WP-063, WP-214 |
-| [WP-229](#wp-229--sla-kalender-je-clientorg-mit-zeitzone-und-feiertagen) | `m-sla` | SLA-Kalender je Client/Org mit Zeitzone und Feiertagen | 1,5 | WP-107, WP-214 |
-| [WP-230](#wp-230--agent-paketierung-inventar-nach-installed_software-signierte-updates) | `m-agent` | Agent: Paketierung, Inventar nach installed_software, signierte Updates | 2,0 | WP-220, WP-102, WP-038 |
-| [WP-231](#wp-231--workflow-versionierte-definitionen-met-45-bedingungen-dauerhafte-ausführung) | `m-workflow` | Workflow: versionierte Definitionen, MET-45-Bedingungen, dauerhafte Ausführung | 2,0 | WP-118, WP-130, WP-059, WP-214 |
-| [WP-232](#wp-232--iga-vier-augen-prinzip-rundue-produktiv-add-on-gate) | `m-iga` | IGA: Vier-Augen-Prinzip, RunDue produktiv, Add-on-Gate | 1,5 | WP-214, WP-131 |
-| [WP-233](#wp-233--scim-group-patch-user-patch-produktiver-taskrunner-deprovisionierung) | `m-scim` | SCIM: Group-PATCH, User-PATCH, produktiver TaskRunner, Deprovisionierung | 1,5 | WP-042, WP-049, WP-214 |
-| [WP-234](#wp-234--monitoring-redfish-polling-schwellwert-ast-notifier-folgeaktionen) | `m-monitoring` | Monitoring: Redfish-Polling, Schwellwert-AST, Notifier-Folgeaktionen | 2,0 | WP-190, WP-118, WP-139, WP-214 |
-| [WP-235](#wp-235--p2-ui-objektauswahl-statt-technischer-ids-reservierung-objekthistorie-scanablauf) | `m-ui-p2` | P2-UI: Objektauswahl statt technischer IDs, Reservierung, Objekthistorie, Scanablauf | 2,0 | WP-223, WP-227 |
-| [WP-236](#wp-236--metamodell-ui-vererbungsets-regel-klick-builder-form-builder-draftpublish) | `m-ui-meta` | Metamodell-UI: Vererbung/Sets, Regel-Klick-Builder, Form-Builder Draft/Publish | 2,0 | WP-119, WP-187, WP-214 |
-| [WP-237](#wp-237--modul-uis-p4a-mobil-heatmaps-iga-itementscheidungen) | `m-ui-mods` | Modul-UIs P4/A: Mobil, Heatmaps, IGA-Itementscheidungen | 2,0 | WP-232 |
-| [WP-238](#wp-238--standort-erweiterungen-aus-teil-03-loc-08) | `m-loc-ext` | Standort-Erweiterungen aus Teil 03 (LOC-08) | 1,0 | WP-055, WP-214 |
-| [WP-239](#wp-239--referenz-datentypen-mit-existenz-org-clientprüfung-ci-anlage-wizard-mit-dynamischen-typen) | `m-met-ref` | Referenz-Datentypen mit Existenz-/Org-/Clientprüfung; CI-Anlage-Wizard mit dynamischen Typen | 2,0 | WP-119, WP-053, WP-214 |
+| [WP-215](#wp-215--lifecycle-übergänge-p2-zustände-laden-pflichtreferenzen-prüfen) | `m-lcy` | Lifecycle-Übergänge P2: Zustände laden, Pflichtreferenzen prüfen *(verschoben, E-03)* | 1,5 | WP-080, WP-214 |
+| [WP-216](#wp-216--subnetz-reservierungen-und-discovery-konflikt-review) | `m-net-res` | Subnetz-Reservierungen und Discovery-Konflikt-Review *(verschoben, E-03)* | 1,5 | WP-124, WP-088, WP-214 |
+| [WP-217](#wp-217--relationship_change-historie-bei-bearbeitenverifizieren) | `m-rel-hist` | relationship_change-Historie bei Bearbeiten/Verifizieren *(verschoben, E-03)* | 1,0 | WP-128, WP-214 |
+| [WP-218](#wp-218--service-blast-radius-betroffene-services-und-korrekte-spof-berechnung) | `m-blast` | Service-Blast-Radius: betroffene Services und korrekte SPOF-Berechnung *(verschoben, E-03)* | 1,0 | WP-179, WP-214 |
+| [WP-219](#wp-219--agent-iga-relay-korrekte-payload-trennung-writer-host-mit-eigener-identität) | `m-relay` | Agent-/IGA-Relay: korrekte Payload-Trennung, Writer-Host mit eigener Identität *(verschoben, E-03)* | 1,5 | WP-051, WP-214 |
+| [WP-220](#wp-220--quellenpolitik-je-attribut-mit-numerischen-rängen-gemeinsamer-matcher-für-agent) | `m-srcpolicy` | Quellenpolitik je Attribut mit numerischen Rängen; gemeinsamer Matcher für Agent *(verschoben, E-03)* | 2,0 | WP-058, WP-086, WP-059, WP-214 |
+| [WP-221](#wp-221--bulk--und-template-migration-erzeugen-overrides) | `m-ovr-bulk` | Bulk- und Template-Migration erzeugen Overrides *(verschoben, E-03)* | 1,0 | WP-181, WP-057, WP-214 |
+| [WP-222](#wp-222--asset-pflichtfelder-orgwährung-version-kindvertrag-child_mode) | `m-asset-core` | Asset-Pflichtfelder, Orgwährung, Version; Kindvertrag child_mode *(verschoben, E-03)* | 2,0 | WP-077, WP-079, WP-107, WP-214 |
+| [WP-223](#wp-223--zuweisung-team-atomarer-transfer-gesperrte-reservierungsübernahme) | `m-assign` | Zuweisung: Team, atomarer Transfer, gesperrte Reservierungsübernahme *(verschoben, E-03)* | 1,5 | WP-222, WP-022 |
+| [WP-224](#wp-224--kanonische-bewegungshistorie-assetstock-append-only) | `m-movement` | Kanonische Bewegungshistorie (asset/stock) append-only *(verschoben, E-03)* | 2,0 | WP-223 |
+| [WP-225](#wp-225--bestand-pro-bin-check--0-atomare-verfügbarkeit-mindestbestand-benachrichtigung) | `m-stock` | Bestand pro Bin, CHECK ≥ 0, atomare Verfügbarkeit, Mindestbestand-Benachrichtigung *(verschoben, E-03)* | 2,0 | WP-224, WP-140 |
+| [WP-226](#wp-226--bestellungen-statusübergänge-wareneingang-erst-bei-empfang) | `m-order` | Bestellungen: Statusübergänge, Wareneingang erst bei Empfang *(verschoben, E-03)* | 1,5 | WP-225 |
+| [WP-227](#wp-227--inventur-eingefrorene-sollmenge-buchung-über-bewegungen-barcode-eindeutig) | `m-inventory` | Inventur: eingefrorene Sollmenge, Buchung über Bewegungen; Barcode eindeutig *(verschoben, E-03)* | 2,0 | WP-224 |
+| [WP-228](#wp-228--wartungsempfänger-über-graph-impact) | `m-maint` | Wartungsempfänger über Graph-Impact *(verschoben, E-03)* | 1,0 | WP-180, WP-138, WP-063, WP-214 |
+| [WP-229](#wp-229--sla-kalender-je-clientorg-mit-zeitzone-und-feiertagen) | `m-sla` | SLA-Kalender je Client/Org mit Zeitzone und Feiertagen *(verschoben, E-03)* | 1,5 | WP-107, WP-214 |
+| [WP-230](#wp-230--agent-paketierung-inventar-nach-installed_software-signierte-updates) | `m-agent` | Agent: Paketierung, Inventar nach installed_software, signierte Updates *(verschoben, E-03)* | 2,0 | WP-220, WP-102, WP-038 |
+| [WP-231](#wp-231--workflow-versionierte-definitionen-met-45-bedingungen-dauerhafte-ausführung) | `m-workflow` | Workflow: versionierte Definitionen, MET-45-Bedingungen, dauerhafte Ausführung *(verschoben, E-03)* | 2,0 | WP-118, WP-130, WP-059, WP-214 |
+| [WP-232](#wp-232--iga-vier-augen-prinzip-rundue-produktiv-add-on-gate) | `m-iga` | IGA: Vier-Augen-Prinzip, RunDue produktiv, Add-on-Gate *(verschoben, E-03)* | 1,5 | WP-214, WP-131 |
+| [WP-233](#wp-233--scim-group-patch-user-patch-produktiver-taskrunner-deprovisionierung) | `m-scim` | SCIM: Group-PATCH, User-PATCH, produktiver TaskRunner, Deprovisionierung *(verschoben, E-03)* | 1,5 | WP-042, WP-049, WP-214 |
+| [WP-234](#wp-234--monitoring-redfish-polling-schwellwert-ast-notifier-folgeaktionen) | `m-monitoring` | Monitoring: Redfish-Polling, Schwellwert-AST, Notifier-Folgeaktionen *(verschoben, E-03)* | 2,0 | WP-190, WP-118, WP-139, WP-214 |
+| [WP-235](#wp-235--p2-ui-objektauswahl-statt-technischer-ids-reservierung-objekthistorie-scanablauf) | `m-ui-p2` | P2-UI: Objektauswahl statt technischer IDs, Reservierung, Objekthistorie, Scanablauf *(verschoben, E-03)* | 2,0 | WP-223, WP-227 |
+| [WP-236](#wp-236--metamodell-ui-vererbungsets-regel-klick-builder-form-builder-draftpublish) | `m-ui-meta` | Metamodell-UI: Vererbung/Sets, Regel-Klick-Builder, Form-Builder Draft/Publish *(verschoben, E-03)* | 2,0 | WP-119, WP-187, WP-214 |
+| [WP-237](#wp-237--modul-uis-p4a-mobil-heatmaps-iga-itementscheidungen) | `m-ui-mods` | Modul-UIs P4/A: Mobil, Heatmaps, IGA-Itementscheidungen *(verschoben, E-03)* | 2,0 | WP-232 |
+| [WP-238](#wp-238--standort-erweiterungen-aus-teil-03-loc-08) | `m-loc-ext` | Standort-Erweiterungen aus Teil 03 (LOC-08) *(verschoben, E-03)* | 1,0 | WP-055, WP-214 |
+| [WP-239](#wp-239--referenz-datentypen-mit-existenz-org-clientprüfung-ci-anlage-wizard-mit-dynamischen-typen) | `m-met-ref` | Referenz-Datentypen mit Existenz-/Org-/Clientprüfung; CI-Anlage-Wizard mit dynamischen Typen *(verschoben, E-03)* | 2,0 | WP-119, WP-053, WP-214 |
 
 ### WP-214 – Feature-Gates: nicht freigegebene Spätphasen-Module im G1-Release deaktivierbar
 
-**Schlüssel:** `m-gates` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
+**Schlüssel:** `m-gates` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** ja (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
 
 **Voraussetzungen (gemergt):** WP-075 (`addon`), WP-098 (`a-switches`)
 
@@ -10022,7 +10019,7 @@ REP-01;[B];G1;tests/rep01-structure.test.sh;WP-213
 
 **Akzeptanzkriterien:**
 
-- [ ] Je Modul ein serverseitiger Gate-Schalter (Routen nicht registriert, Worker aus, UI-Navigation ausgeblendet), Default nach E-03.
+- [ ] Je Modul ein serverseitiger Gate-Schalter (Routen nicht registriert, Worker aus, UI-Navigation ausgeblendet). Default nach E-03: Alle Module mit Phasen-Tag ab P2 bzw. [A] sind im G1-Release abgeschaltet.
 - [ ] Parität: deaktivierte Routen werden in OpenAPI als `x-phase` markiert; Paritätstest berücksichtigt das.
 - [ ] IGA/KI nicht implizit aus Planstufe, sondern über Add-on-Entitlement (WP-075 (`addon`)).
 
@@ -10050,13 +10047,13 @@ API-06;[P2]/[P3]/[P4]/[A];Phase;backend/internal/server/modules_test.go;WP-214
 RBA-05;[P2–P4], [A];Phase;backend/internal/server/modules_test.go;WP-214
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
 ### WP-215 – Lifecycle-Übergänge P2: Zustände laden, Pflichtreferenzen prüfen
 
-**Schlüssel:** `m-lcy` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
+**Schlüssel:** `m-lcy` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
 
 **Voraussetzungen (gemergt):** WP-080 (`db05-lcy`), WP-214 (`m-gates`)
 
@@ -10091,13 +10088,13 @@ LCY-02;[P2];Phase;backend/internal/lifecycle/transition_integration_test.go;WP-2
 LCY-03;[P2];Phase;backend/internal/lifecycle/transition_integration_test.go;WP-215
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-216 – Subnetz-Reservierungen und Discovery-Konflikt-Review
 
-**Schlüssel:** `m-net-res` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
+**Schlüssel:** `m-net-res` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
 
 **Voraussetzungen (gemergt):** WP-124 (`b-net-ip`), WP-088 (`review-model`), WP-214 (`m-gates`)
 
@@ -10133,13 +10130,13 @@ LCY-03;[P2];Phase;backend/internal/lifecycle/transition_integration_test.go;WP-2
 NET-09;[P2];Phase;backend/internal/ipam/reservation_integration_test.go;WP-216
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-217 – relationship_change-Historie bei Bearbeiten/Verifizieren
 
-**Schlüssel:** `m-rel-hist` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,0 PT
+**Schlüssel:** `m-rel-hist` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,0 PT
 
 **Voraussetzungen (gemergt):** WP-128 (`b-rel-edges`), WP-214 (`m-gates`)
 
@@ -10171,13 +10168,13 @@ NET-09;[P2];Phase;backend/internal/ipam/reservation_integration_test.go;WP-216
 REL-09;[P2];Phase;backend/internal/relationship/history_integration_test.go;WP-217
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-218 – Service-Blast-Radius: betroffene Services und korrekte SPOF-Berechnung
 
-**Schlüssel:** `m-blast` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,0 PT
+**Schlüssel:** `m-blast` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,0 PT
 
 **Voraussetzungen (gemergt):** WP-179 (`c-imp-redundancy`), WP-214 (`m-gates`)
 
@@ -10210,13 +10207,13 @@ REL-09;[P2];Phase;backend/internal/relationship/history_integration_test.go;WP-2
 IMP-08;[P2];Phase;backend/internal/topology/blast_test.go;WP-218
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-219 – Agent-/IGA-Relay: korrekte Payload-Trennung, Writer-Host mit eigener Identität
 
-**Schlüssel:** `m-relay` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
+**Schlüssel:** `m-relay` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
 
 **Voraussetzungen (gemergt):** WP-051 (`agent-transport`), WP-214 (`m-gates`)
 
@@ -10228,7 +10225,7 @@ IMP-08;[P2];Phase;backend/internal/topology/blast_test.go;WP-218
 
 **Akzeptanzkriterien:**
 
-- [ ] Relay trennt Agent- und Discovery-Payloads; Writer-Host nur nach E-02/E-03 (Spec-Text IGA-Detail fehlt).
+- [ ] Relay trennt Agent- und Discovery-Payloads; Writer-Host erst in der Folgephase (E-03) und nach E-02 (Spec-Text IGA-Detail fehlt).
 
 **Dateien (4 Einträge, Migration = 2):**
 
@@ -10249,13 +10246,13 @@ IMP-08;[P2];Phase;backend/internal/topology/blast_test.go;WP-218
 COL-07;[A], Relay [P4];Phase;edgecore/transport/transport_test.go;WP-219
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-220 – Quellenpolitik je Attribut mit numerischen Rängen; gemeinsamer Matcher für Agent
 
-**Schlüssel:** `m-srcpolicy` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
+**Schlüssel:** `m-srcpolicy` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
 
 **Voraussetzungen (gemergt):** WP-058 (`rec-decide`), WP-086 (`identity`), WP-059 (`auto-paths`), WP-214 (`m-gates`)
 
@@ -10295,13 +10292,13 @@ REC-11;[P4];Phase;backend/internal/override/policy_integration_test.go;WP-220
 AGT-05;[P4];Phase;backend/internal/override/policy_integration_test.go;WP-220
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release; [E-32](entscheidungen.md#e-32) REC-03: Rang der Quelle IPMI
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden); [E-32](entscheidungen.md#e-32) REC-03: Rang der Quelle IPMI (offen)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-221 – Bulk- und Template-Migration erzeugen Overrides
 
-**Schlüssel:** `m-ovr-bulk` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,0 PT
+**Schlüssel:** `m-ovr-bulk` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,0 PT
 
 **Voraussetzungen (gemergt):** WP-181 (`c-bulk`), WP-057 (`manual-ovr`), WP-214 (`m-gates`)
 
@@ -10334,13 +10331,13 @@ AGT-05;[P4];Phase;backend/internal/override/policy_integration_test.go;WP-220
 OVR-03;[P2];Phase;backend/internal/ci/bulk_override_integration_test.go;WP-221
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-222 – Asset-Pflichtfelder, Orgwährung, Version; Kindvertrag child_mode
 
-**Schlüssel:** `m-asset-core` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
+**Schlüssel:** `m-asset-core` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
 
 **Voraussetzungen (gemergt):** WP-077 (`db05-asset`), WP-079 (`db05-struct`), WP-107 (`b-org`), WP-214 (`m-gates`)
 
@@ -10381,13 +10378,13 @@ AST-04;[P2];Phase;backend/internal/asset/asset_integration_test.go;WP-222
 AST-05;[P2];Phase;backend/internal/asset/asset_integration_test.go;WP-222
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-223 – Zuweisung: Team, atomarer Transfer, gesperrte Reservierungsübernahme
 
-**Schlüssel:** `m-assign` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
+**Schlüssel:** `m-assign` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
 
 **Voraussetzungen (gemergt):** WP-222 (`m-asset-core`), WP-022 (`wt-workers`)
 
@@ -10425,13 +10422,13 @@ AST-02;[P2];Phase;backend/internal/assignment/transfer_integration_test.go;WP-22
 AST-06;[P2];Phase;backend/internal/assignment/transfer_integration_test.go;WP-223
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-224 – Kanonische Bewegungshistorie (asset/stock) append-only
 
-**Schlüssel:** `m-movement` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
+**Schlüssel:** `m-movement` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
 
 **Voraussetzungen (gemergt):** WP-223 (`m-assign`)
 
@@ -10470,13 +10467,13 @@ MGT-02;[P2];Phase;backend/internal/movement/movement_integration_test.go;WP-224
 STK-04;[P2];Phase;backend/internal/movement/movement_integration_test.go;WP-224
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-225 – Bestand pro Bin, CHECK ≥ 0, atomare Verfügbarkeit, Mindestbestand-Benachrichtigung
 
-**Schlüssel:** `m-stock` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
+**Schlüssel:** `m-stock` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
 
 **Voraussetzungen (gemergt):** WP-224 (`m-movement`), WP-140 (`b-ntf-events`)
 
@@ -10517,13 +10514,13 @@ STK-02;[P2];Phase;backend/internal/consumable/stock_integration_test.go;WP-225
 STK-03;[P2];Phase;backend/internal/consumable/stock_integration_test.go;WP-225
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-226 – Bestellungen: Statusübergänge, Wareneingang erst bei Empfang
 
-**Schlüssel:** `m-order` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
+**Schlüssel:** `m-order` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
 
 **Voraussetzungen (gemergt):** WP-225 (`m-stock`)
 
@@ -10555,13 +10552,13 @@ STK-03;[P2];Phase;backend/internal/consumable/stock_integration_test.go;WP-225
 STK-05;[P2];Phase;backend/internal/order/order_integration_test.go;WP-226
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-227 – Inventur: eingefrorene Sollmenge, Buchung über Bewegungen; Barcode eindeutig
 
-**Schlüssel:** `m-inventory` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
+**Schlüssel:** `m-inventory` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
 
 **Voraussetzungen (gemergt):** WP-224 (`m-movement`)
 
@@ -10599,13 +10596,13 @@ INV-01;[P2];Phase;backend/internal/stocktake/snapshot_integration_test.go;WP-227
 INV-03;[P2], RFID/Direct-Access [P4];Phase;backend/internal/stocktake/snapshot_integration_test.go;WP-227
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-228 – Wartungsempfänger über Graph-Impact
 
-**Schlüssel:** `m-maint` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,0 PT
+**Schlüssel:** `m-maint` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,0 PT
 
 **Voraussetzungen (gemergt):** WP-180 (`c-imp-multi`), WP-138 (`b-ntf-recipients`), WP-063 (`maint-sent`), WP-214 (`m-gates`)
 
@@ -10637,13 +10634,13 @@ INV-03;[P2], RFID/Direct-Access [P4];Phase;backend/internal/stocktake/snapshot_i
 MGT-04;[P3];Phase;backend/internal/maintenance/recipients_integration_test.go;WP-228
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-229 – SLA-Kalender je Client/Org mit Zeitzone und Feiertagen
 
-**Schlüssel:** `m-sla` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
+**Schlüssel:** `m-sla` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
 
 **Voraussetzungen (gemergt):** WP-107 (`b-org`), WP-214 (`m-gates`)
 
@@ -10681,13 +10678,13 @@ MGT-04;[P3];Phase;backend/internal/maintenance/recipients_integration_test.go;WP
 TKT-02;[P2];Phase;backend/internal/sla/calendar_test.go;WP-229
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-230 – Agent: Paketierung, Inventar nach installed_software, signierte Updates
 
-**Schlüssel:** `m-agent` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
+**Schlüssel:** `m-agent` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
 
 **Voraussetzungen (gemergt):** WP-220 (`m-srcpolicy`), WP-102 (`a-release`), WP-038 (`agent-enroll`)
 
@@ -10727,13 +10724,13 @@ AGT-02;[P4];Phase;backend/internal/agent/inventory_integration_test.go;WP-230
 AGT-04;[P4];Phase;backend/internal/agent/inventory_integration_test.go;WP-230
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release; [E-36](entscheidungen.md#e-36) DB-05: Zeilen für Vertrag, installierte Software und Health-Findings
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden); [E-36](entscheidungen.md#e-36) DB-05: Zeilen für Vertrag, installierte Software und Health-Findings (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-231 – Workflow: versionierte Definitionen, MET-45-Bedingungen, dauerhafte Ausführung
 
-**Schlüssel:** `m-workflow` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
+**Schlüssel:** `m-workflow` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
 
 **Voraussetzungen (gemergt):** WP-118 (`b-met-rules`), WP-130 (`b-jobqueue`), WP-059 (`auto-paths`), WP-214 (`m-gates`)
 
@@ -10773,13 +10770,13 @@ WFL-02;[P3];Phase;backend/internal/workflow/executor_test.go;WP-231
 WFL-04;[P3], delegierte Inventur [P4], IGA [A];Phase;backend/internal/workflow/executor_test.go;WP-231
 ```
 
-**Entscheidungsbedarf:** [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-232 – IGA: Vier-Augen-Prinzip, RunDue produktiv, Add-on-Gate
 
-**Schlüssel:** `m-iga` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
+**Schlüssel:** `m-iga` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
 
 **Voraussetzungen (gemergt):** WP-214 (`m-gates`), WP-131 (`b-scheduler`)
 
@@ -10820,13 +10817,13 @@ IGA-03;[A];Phase;backend/internal/iga/iga_test.go;WP-232
 IGA-04;[A];Phase;backend/internal/iga/iga_test.go;WP-232
 ```
 
-**Entscheidungsbedarf:** [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-233 – SCIM: Group-PATCH, User-PATCH, produktiver TaskRunner, Deprovisionierung
 
-**Schlüssel:** `m-scim` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
+**Schlüssel:** `m-scim` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT
 
 **Voraussetzungen (gemergt):** WP-042 (`auth-status`), WP-049 (`egress`), WP-214 (`m-gates`)
 
@@ -10859,13 +10856,13 @@ IGA-04;[A];Phase;backend/internal/iga/iga_test.go;WP-232
 AUT-08;[P4];Phase;backend/internal/iga/scim_test.go;WP-233
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06; [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-234 – Monitoring: Redfish-Polling, Schwellwert-AST, Notifier-Folgeaktionen
 
-**Schlüssel:** `m-monitoring` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
+**Schlüssel:** `m-monitoring` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
 
 **Voraussetzungen (gemergt):** WP-190 (`c-mon-ci`), WP-118 (`b-met-rules`), WP-139 (`b-ntf-delivery`), WP-214 (`m-gates`)
 
@@ -10901,13 +10898,13 @@ MON-03;[P3];Phase;backend/internal/monitoring/monitoring_test.go;WP-234
 MON-04;[P3];Phase;backend/internal/monitoring/monitoring_test.go;WP-234
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-235 – P2-UI: Objektauswahl statt technischer IDs, Reservierung, Objekthistorie, Scanablauf
 
-**Schlüssel:** `m-ui-p2` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
+**Schlüssel:** `m-ui-p2` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
 
 **Voraussetzungen (gemergt):** WP-223 (`m-assign`), WP-227 (`m-inventory`)
 
@@ -10943,13 +10940,13 @@ MON-04;[P3];Phase;backend/internal/monitoring/monitoring_test.go;WP-234
 UI-15;[P2];Phase;frontend/src/components/pickers/pickers.test.tsx;WP-235
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-236 – Metamodell-UI: Vererbung/Sets, Regel-Klick-Builder, Form-Builder Draft/Publish
 
-**Schlüssel:** `m-ui-meta` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
+**Schlüssel:** `m-ui-meta` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
 
 **Voraussetzungen (gemergt):** WP-119 (`b-met-compose`), WP-187 (`c-filter-ast`), WP-214 (`m-gates`)
 
@@ -10990,13 +10987,13 @@ UI-11;[P2];Phase;frontend/src/components/rules/RuleBuilder.test.tsx;WP-236
 SRC-03;[P2], Textsyntax [O];Phase;frontend/src/components/rules/RuleBuilder.test.tsx;WP-236
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-237 – Modul-UIs P4/A: Mobil, Heatmaps, IGA-Itementscheidungen
 
-**Schlüssel:** `m-ui-mods` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
+**Schlüssel:** `m-ui-mods` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
 
 **Voraussetzungen (gemergt):** WP-232 (`m-iga`)
 
@@ -11009,7 +11006,7 @@ SRC-03;[P2], Textsyntax [O];Phase;frontend/src/components/rules/RuleBuilder.test
 
 **Akzeptanzkriterien:**
 
-- [ ] Nur nach E-03 „beheben“ und E-02 (Detailtexte); IGA-Itementscheidungen als erster Teil.
+- [ ] Umsetzung in der Folgephase (E-03); Detailtexte nach E-02. IGA-Itementscheidungen als erster Teil.
 
 **Dateien (6 Einträge, Migration = 2):**
 
@@ -11033,13 +11030,13 @@ UI-13;[P4];Phase;frontend/src/pages/IGAPage.test.tsx;WP-237
 UI-14;[P2–P4, A];Phase;frontend/src/pages/IGAPage.test.tsx;WP-237
 ```
 
-**Entscheidungsbedarf:** [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release
+**Entscheidungsbedarf:** [E-02](entscheidungen.md#e-02) Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) (offen); [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden)
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-238 – Standort-Erweiterungen aus Teil 03 (LOC-08)
 
-**Schlüssel:** `m-loc-ext` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,0 PT
+**Schlüssel:** `m-loc-ext` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,0 PT
 
 **Voraussetzungen (gemergt):** WP-055 (`loc-delete`), WP-214 (`m-gates`)
 
@@ -11074,13 +11071,13 @@ UI-14;[P2–P4, A];Phase;frontend/src/pages/IGAPage.test.tsx;WP-237
 LOC-08;P2/G2;Phase;backend/internal/locations/loc08_integration_test.go;WP-238
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release; [E-04](entscheidungen.md#e-04) Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden); [E-04](entscheidungen.md#e-04) Teilbericht 03 nicht konsolidiert (offen); N/P-IDs des Metamodells
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ### WP-239 – Referenz-Datentypen mit Existenz-/Org-/Clientprüfung; CI-Anlage-Wizard mit dynamischen Typen
 
-**Schlüssel:** `m-met-ref` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
+**Schlüssel:** `m-met-ref` · **Meilenstein:** M-S – High-Befunde späterer Phasen (nach E-03) · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 2,0 PT
 
 **Voraussetzungen (gemergt):** WP-119 (`b-met-compose`), WP-053 (`loc-api`), WP-214 (`m-gates`)
 
@@ -11120,34 +11117,35 @@ MET-12;P2/G2;Phase;backend/internal/fieldmeta/fieldmeta_test.go;WP-239
 MET-51;P2/G2;Phase;backend/internal/fieldmeta/fieldmeta_test.go;WP-239
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release; [E-04](entscheidungen.md#e-04) Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden); [E-04](entscheidungen.md#e-04) Teilbericht 03 nicht konsolidiert (offen); N/P-IDs des Metamodells
 
-**Nicht Bestandteil:** Nur falls E-03 „beheben“ entscheidet; bei „deaktivieren“ entfällt das WP zugunsten von WP-214 (`m-gates`).
+**Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
 ## Abdeckung
 
 - 232 IDs werden durch mindestens ein WP vollständig geschlossen.
 - 49 IDs werden durch mehrere Teil-WPs gemeinsam geschlossen. Die Liste steht in `abdeckung.csv`; einen Restumfang außerhalb der Phase 1 nennt die Spalte `hinweis`.
+- 45 IDs werden in einem nach E-03 verschobenen WP (WP-215 bis WP-239) abgeschlossen. Alle haben Phasen-Tags ab P2 bzw. [A]; in `abdeckung.csv` sind sie in `hinweis` gekennzeichnet.
 - 17 IDs (N/P) haben kein WP, sondern eine Entscheidung: AUT-05 (E-02), AUT-06 (E-02), DB-01 (E-04), GATE-04 (E-03), MET-20 (E-04), MET-30 (E-04), MET-31 (E-04), MET-32 (E-04), MET-33 (E-04), MET-34 (E-04), MET-40 (E-04), MET-41 (E-04), MET-42 (E-04), MET-43 (E-04), MET-44 (E-04), NET-04 (E-02), NFR-08 (E-28).
 
 Restumfang außerhalb der Phase 1 (nicht geplant, nur dokumentiert):
 
 - **ABN-01:** Wortgetreue Originalabläufe nur nach E-01/E-02 prüfbar; Metamodell-End-to-End-Szenario [P2] nicht Phase 1.
 - **API-06:** Fehlende Sets/Publish/Verträge/Importe sind OFFEN in späteren Phasen.
-- **AST-01:** Rest nach E-03 (M-S).
-- **AST-04:** Rest nach E-03 (M-S).
-- **AST-05:** Rest nach E-03 (M-S).
+- **AST-01:** Restumfang in M-S; nach E-03 in die Folgephase verschoben, im G1-Release über WP-214 (`m-gates`) abgeschaltet.
+- **AST-04:** Restumfang in M-S; nach E-03 in die Folgephase verschoben, im G1-Release über WP-214 (`m-gates`) abgeschaltet.
+- **AST-05:** Restumfang in M-S; nach E-03 in die Folgephase verschoben, im G1-Release über WP-214 (`m-gates`) abgeschaltet.
 - **COL-06:** OVA-/Windows-Paketierung und Air-Gap-Bundle [O] nicht geplant.
 - **DB-05:** Zeilen Vertrag/installierte Software nach E-36.
 - **EXP-01:** DATEV [P2] nicht Phase 1.
 - **GATE-03:** Behebungen aus dem Pentest werden als neue WPs geplant.
-- **MGT-01:** Vertrag/Entsorgung/Location im Link-CHECK sowie Versionierung/Audit gehören zu P2 (nach E-03).
-- **MGT-04:** Rest nach E-03 (M-S).
+- **MGT-01:** Vertrag/Entsorgung/Location im Link-CHECK sowie Versionierung/Audit gehören zu P2 (nach E-03 in die Folgephase verschoben).
+- **MGT-04:** Restumfang in M-S; nach E-03 in die Folgephase verschoben, im G1-Release über WP-214 (`m-gates`) abgeschaltet.
 - **NFR-01:** Teilumfang [P5] nicht Phase 1.
 - **NFR-03:** Teilumfang [P5] nicht Phase 1.
 - **NFR-04:** Teilumfang [P5] und reale SaaS-Verfügbarkeit sind nur im Betrieb nachweisbar.
 - **OPS-03:** GitOps/PG-HA [P5] ist OFFEN und nicht Phase 1.
-- **RBA-05:** Rechte-/Schlüsselmodelle der Spätphasen-Module nach E-03; Contract ohne Modulcode (P2) nicht Phase 1.
+- **RBA-05:** Rechte-/Schlüsselmodelle der Spätphasen-Module in der Folgephase (E-03; im G1-Release über WP-214 abgeschaltet); Contract ohne Modulcode (P2) nicht Phase 1.
 - **REP-01:** v2-Bestandteil N/P (E-02).
 - **SIM-01:** Teilumfang [P2] nicht Phase 1.
 - **SRC-03:** Textsyntax [O] nicht geplant; Klick-Builder [P2] in M-S.
@@ -11162,5 +11160,5 @@ Restumfang außerhalb der Phase 1 (nicht geplant, nur dokumentiert):
 - **UI-08:** Individueller Vertrag N/P (E-02).
 - **UI-09:** Individueller Vertrag N/P (E-02).
 - **UI-10:** Individueller Vertrag N/P (E-02).
-- **WFL-01:** Rest nach E-03 (M-S).
-- **WFL-02:** Rest nach E-03 (M-S).
+- **WFL-01:** Restumfang in M-S; nach E-03 in die Folgephase verschoben, im G1-Release über WP-214 (`m-gates`) abgeschaltet.
+- **WFL-02:** Restumfang in M-S; nach E-03 in die Folgephase verschoben, im G1-Release über WP-214 (`m-gates`) abgeschaltet.
