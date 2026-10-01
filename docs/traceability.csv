@@ -38,3 +38,12 @@ GATE-03;[Q];A;tests/install-smoke-health.test.sh;WP-092
 TEC-09;[B];A;tests/install-smoke-health.test.sh;WP-092
 PRI-11;[B];A;docs/betrieb/referenzmodell.md;WP-105
 NFR-09;[B];A;docs/betrieb/referenzmodell.md;WP-105
+UI-01;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192
+UI-02;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192
+UI-03;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192
+UI-04;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192
+UI-05;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192
+UI-07;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192
+UI-08;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192
+UI-09;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192
+UI-10;[B];C;frontend/src/components/CommandPalette.test.tsx;WP-192

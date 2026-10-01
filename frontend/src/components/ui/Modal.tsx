@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { useId } from 'react';
+import { useId, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 interface ModalProps {
@@ -14,12 +14,28 @@ export function Modal({ open, onOpenChange, title, description, children }: Moda
   const { t } = useTranslation();
   const titleId = useId();
   const descriptionId = description ? `${titleId}-description` : undefined;
+  // Radix returns focus only to a Dialog.Trigger. Modal is opened from
+  // arbitrary controls, so it remembers the focused element itself and
+  // restores it when the dialog closes (UI-10, WP-192).
+  const returnFocusRef = useRef<HTMLElement | null>(null);
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-gray-950/50 backdrop-blur-sm" />
         <Dialog.Content
+          onOpenAutoFocus={() => {
+            // Runs before Radix moves focus into the dialog.
+            returnFocusRef.current =
+              document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          }}
+          onCloseAutoFocus={(event) => {
+            const target = returnFocusRef.current;
+            if (target && target.isConnected) {
+              event.preventDefault();
+              target.focus();
+            }
+          }}
           aria-labelledby={titleId}
           aria-describedby={descriptionId}
           className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-[min(92vw,40rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl outline-none dark:border-gray-800 dark:bg-gray-900"
