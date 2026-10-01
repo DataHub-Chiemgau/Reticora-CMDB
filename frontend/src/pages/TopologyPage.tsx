@@ -129,7 +129,10 @@ export function TopologyPage() {
   // The facet filter also narrows the rendered edges to the selected
   // relationship class so the simulated dependency path is visible.
   const visibleEdges = useMemo(
-    () => (relTypeFacet ? model.edges.filter((e) => e.label?.split(', ').includes(relTypeFacet)) : model.edges),
+    () =>
+      relTypeFacet
+        ? model.edges.filter((e) => e.label?.split(', ').includes(relTypeFacet))
+        : model.edges,
     [model.edges, relTypeFacet],
   );
 

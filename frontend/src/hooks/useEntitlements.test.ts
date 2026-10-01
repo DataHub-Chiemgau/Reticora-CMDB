@@ -3,7 +3,16 @@ import { navFeatureFor } from './useEntitlements';
 
 describe('navFeatureFor', () => {
   it('leaves core CMDB surface ungated', () => {
-    for (const page of ['dashboard', 'cmdb', 'topology', 'racks', 'users', 'permissions', 'audit', 'security']) {
+    for (const page of [
+      'dashboard',
+      'cmdb',
+      'topology',
+      'racks',
+      'users',
+      'permissions',
+      'audit',
+      'security',
+    ]) {
       expect(navFeatureFor[page], page).toBeUndefined();
     }
   });

@@ -55,19 +55,36 @@ function EnrollWizard({ open, onClose }: { open: boolean; onClose: () => void })
   };
 
   return (
-    <Modal open={open} onOpenChange={(o) => { if (!o) { setCode(null); setLabel(''); onClose(); } }} title={t('discovery.enroll.title', 'Collector verbinden')}>
+    <Modal
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) {
+          setCode(null);
+          setLabel('');
+          onClose();
+        }
+      }}
+      title={t('discovery.enroll.title', 'Collector verbinden')}
+    >
       {!code ? (
         <div className="space-y-4">
           <p className="text-sm text-gray-600 dark:text-gray-300">
-            {t('discovery.enroll.intro', 'Schließen Sie einen Collector an: erzeugen Sie einen einmaligen Enrollment-Code und geben Sie ihn im Collector ein. Die Infrastruktur erscheint automatisch.')}
+            {t(
+              'discovery.enroll.intro',
+              'Schließen Sie einen Collector an: erzeugen Sie einen einmaligen Enrollment-Code und geben Sie ihn im Collector ein. Die Infrastruktur erscheint automatisch.',
+            )}
           </p>
           <label className="block text-sm">
-            <span className="mb-1 block text-gray-700 dark:text-gray-300">{t('discovery.enroll.label', 'Bezeichnung (z. B. Standort)')}</span>
+            <span className="mb-1 block text-gray-700 dark:text-gray-300">
+              {t('discovery.enroll.label', 'Bezeichnung (z. B. Standort)')}
+            </span>
             <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="site-a" />
           </label>
           {mint.isError ? <p className="text-sm text-red-600">{t('app.error')}</p> : null}
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={onClose}>{t('common.cancel', 'Abbrechen')}</Button>
+            <Button variant="secondary" onClick={onClose}>
+              {t('common.cancel', 'Abbrechen')}
+            </Button>
             <Button onClick={() => mint.mutate()} disabled={mint.isPending}>
               {mint.isPending ? t('app.loading') : t('discovery.enroll.generate', 'Code erzeugen')}
             </Button>
@@ -76,15 +93,31 @@ function EnrollWizard({ open, onClose }: { open: boolean; onClose: () => void })
       ) : (
         <div className="space-y-4">
           <p className="text-sm text-gray-600 dark:text-gray-300">
-            {t('discovery.enroll.once', 'Dieser Code wird nur einmal angezeigt und läuft ab. Führen Sie im Kundennetz aus:')}
+            {t(
+              'discovery.enroll.once',
+              'Dieser Code wird nur einmal angezeigt und läuft ab. Führen Sie im Kundennetz aus:',
+            )}
           </p>
-          <pre className="overflow-x-auto rounded-lg bg-gray-900 p-3 text-xs text-green-200 dark:bg-black">{enrollCommand}</pre>
+          <pre className="overflow-x-auto rounded-lg bg-gray-900 p-3 text-xs text-green-200 dark:bg-black">
+            {enrollCommand}
+          </pre>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            {t('discovery.enroll.expires', 'Gültig bis')}: {new Date(code.expires_at).toLocaleString()}
+            {t('discovery.enroll.expires', 'Gültig bis')}:{' '}
+            {new Date(code.expires_at).toLocaleString()}
           </p>
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={copy}>{copied ? t('common.copied', 'Kopiert!') : t('common.copy', 'Kopieren')}</Button>
-            <Button onClick={() => { setCode(null); setLabel(''); onClose(); }}>{t('common.done', 'Fertig')}</Button>
+            <Button variant="secondary" onClick={copy}>
+              {copied ? t('common.copied', 'Kopiert!') : t('common.copy', 'Kopieren')}
+            </Button>
+            <Button
+              onClick={() => {
+                setCode(null);
+                setLabel('');
+                onClose();
+              }}
+            >
+              {t('common.done', 'Fertig')}
+            </Button>
           </div>
         </div>
       )}

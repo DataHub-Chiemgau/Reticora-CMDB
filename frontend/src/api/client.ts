@@ -1899,7 +1899,10 @@ export const consumableApi = {
   delete(id: string): Promise<void> {
     return fetchAPI(`/consumables/${id}`, { method: 'DELETE' });
   },
-  addMovement(id: string, data: { direction: 'in' | 'out'; quantity: number; reason?: string }): Promise<unknown> {
+  addMovement(
+    id: string,
+    data: { direction: 'in' | 'out'; quantity: number; reason?: string },
+  ): Promise<unknown> {
     return fetchAPI(`/consumables/${id}/movements`, { method: 'POST', body: JSON.stringify(data) });
   },
 };
@@ -1924,7 +1927,10 @@ export const orderApi = {
   create(data: { title: string; supplier?: string; notes?: string }): Promise<Order> {
     return fetchAPI('/orders', { method: 'POST', body: JSON.stringify(data) });
   },
-  addItem(id: string, data: { description: string; quantity: number; unit_price?: number }): Promise<Order> {
+  addItem(
+    id: string,
+    data: { description: string; quantity: number; unit_price?: number },
+  ): Promise<Order> {
     return fetchAPI(`/orders/${id}/items`, { method: 'POST', body: JSON.stringify(data) });
   },
   submit(id: string): Promise<Order> {
@@ -1954,10 +1960,18 @@ export interface MaintenanceWindow {
 }
 
 export const maintenanceApi = {
-  list(params: ListParams & { status?: string } = {}): Promise<PaginatedResponse<MaintenanceWindow>> {
+  list(
+    params: ListParams & { status?: string } = {},
+  ): Promise<PaginatedResponse<MaintenanceWindow>> {
     return fetchAPI(`/maintenance-windows${buildQuery(params)}`);
   },
-  create(data: { title: string; starts_at: string; ends_at: string; description?: string; ci_ids?: string[] }): Promise<MaintenanceWindow> {
+  create(data: {
+    title: string;
+    starts_at: string;
+    ends_at: string;
+    description?: string;
+    ci_ids?: string[];
+  }): Promise<MaintenanceWindow> {
     return fetchAPI('/maintenance-windows', { method: 'POST', body: JSON.stringify(data) });
   },
   update(id: string, data: { status?: string }): Promise<MaintenanceWindow> {
@@ -1988,7 +2002,14 @@ export const disposalApi = {
   list(params: ListParams & { method?: string } = {}): Promise<PaginatedResponse<DisposalRecord>> {
     return fetchAPI(`/disposal-records${buildQuery(params)}`);
   },
-  create(data: { method: string; asset_id?: string; ci_id?: string; certificate_ref?: string; data_carrier?: string; notes?: string }): Promise<DisposalRecord> {
+  create(data: {
+    method: string;
+    asset_id?: string;
+    ci_id?: string;
+    certificate_ref?: string;
+    data_carrier?: string;
+    notes?: string;
+  }): Promise<DisposalRecord> {
     return fetchAPI('/disposal-records', { method: 'POST', body: JSON.stringify(data) });
   },
 };
@@ -2005,14 +2026,24 @@ export interface KeyItem {
 }
 
 export const keyApi = {
-  list(params: ListParams & { status?: string; key_type?: string } = {}): Promise<PaginatedResponse<KeyItem>> {
+  list(
+    params: ListParams & { status?: string; key_type?: string } = {},
+  ): Promise<PaginatedResponse<KeyItem>> {
     return fetchAPI(`/keys${buildQuery(params)}`);
   },
-  create(data: { name: string; key_type?: string; identifier?: string; location?: string }): Promise<KeyItem> {
+  create(data: {
+    name: string;
+    key_type?: string;
+    identifier?: string;
+    location?: string;
+  }): Promise<KeyItem> {
     return fetchAPI('/keys', { method: 'POST', body: JSON.stringify(data) });
   },
   issue(id: string, assignedTo: string): Promise<unknown> {
-    return fetchAPI(`/keys/${id}/issue`, { method: 'POST', body: JSON.stringify({ assigned_to: assignedTo }) });
+    return fetchAPI(`/keys/${id}/issue`, {
+      method: 'POST',
+      body: JSON.stringify({ assigned_to: assignedTo }),
+    });
   },
   returnKey(id: string): Promise<KeyItem> {
     return fetchAPI(`/keys/${id}/return`, { method: 'POST', body: '{}' });
@@ -2035,7 +2066,12 @@ export const trainingApi = {
   list(params: ListParams = {}): Promise<PaginatedResponse<TrainingCourse>> {
     return fetchAPI(`/trainings${buildQuery(params)}`);
   },
-  create(data: { title: string; description?: string; category?: string; validity_months?: number }): Promise<TrainingCourse> {
+  create(data: {
+    title: string;
+    description?: string;
+    category?: string;
+    validity_months?: number;
+  }): Promise<TrainingCourse> {
     return fetchAPI('/trainings', { method: 'POST', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
@@ -2113,7 +2149,13 @@ export const agentApi = {
   list(params: ListParams = {}): Promise<PaginatedResponse<EndpointAgent>> {
     return fetchAPI(`/agents${buildQuery(params)}`);
   },
-  enroll(data: { agent_id: string; hostname: string; version?: string; os?: string; arch?: string }): Promise<EndpointAgent> {
+  enroll(data: {
+    agent_id: string;
+    hostname: string;
+    version?: string;
+    os?: string;
+    arch?: string;
+  }): Promise<EndpointAgent> {
     return fetchAPI('/agents/enroll', { method: 'POST', body: JSON.stringify(data) });
   },
   updatePolicy(id: string, data: Partial<AgentPolicy>): Promise<EndpointAgent> {
@@ -2143,13 +2185,18 @@ export interface SecurityFinding {
 }
 
 export const securityFindingApi = {
-  list(params: ListParams & { status?: string; severity?: string; kind?: string } = {}): Promise<PaginatedResponse<SecurityFinding>> {
+  list(
+    params: ListParams & { status?: string; severity?: string; kind?: string } = {},
+  ): Promise<PaginatedResponse<SecurityFinding>> {
     return fetchAPI(`/security/findings${buildQuery(params)}`);
   },
   summary(): Promise<{ by_severity: Record<string, number>; open_total: number }> {
     return fetchAPI('/security/findings/summary');
   },
   update(id: string, status: string): Promise<SecurityFinding> {
-    return fetchAPI(`/security/findings/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+    return fetchAPI(`/security/findings/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
   },
 };

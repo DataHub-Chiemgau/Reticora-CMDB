@@ -4,7 +4,11 @@ import { describe, expect, it } from 'vitest';
 // the room (spec §8.5). These tests pin the coordinate math used on drop.
 
 describe('room plan coordinate math', () => {
-  function dropPosition(clientX: number, clientY: number, rect: { left: number; top: number; width: number; height: number }) {
+  function dropPosition(
+    clientX: number,
+    clientY: number,
+    rect: { left: number; top: number; width: number; height: number },
+  ) {
     const x = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
     const y = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
     return { x, y };

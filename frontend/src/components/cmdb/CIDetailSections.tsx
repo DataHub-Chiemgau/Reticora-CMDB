@@ -81,7 +81,9 @@ export function InstanceFieldsSection({
   const draftValues = valueDraft ?? attributes;
 
   const serverViolations =
-    serverError instanceof ApiError ? serverError.violationsByField() : ({} as Record<string, string>);
+    serverError instanceof ApiError
+      ? serverError.violationsByField()
+      : ({} as Record<string, string>);
 
   const defs = fields.data?.data ?? [];
   return (
