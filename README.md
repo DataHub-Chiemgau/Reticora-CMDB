@@ -349,8 +349,8 @@ Zielwerte:
 
 ## 16. Qualitätssicherung
 
-- **Traceability:** Jede Anforderung ist über `docs/traceability.csv` auf Epic und Testart rückführbar; die CI prüft das.
-- **Definition of Done pro PR:** OpenAPI, RLS, Audit/Events, i18n, Tests, Lint, Doku, Traceability. Arbeitspakete umfassen 0,5–2 Tage.
+- **Traceability:** Jede Anforderung ist über [`docs/traceability.csv`](docs/traceability.csv) (`id;tag;epic;testdatei;wp`) auf Epic, Testdatei und Arbeitspaket rückführbar. Der CI-Job `traceability` (`backend/internal/traceability`) prüft Format, bekannte IDs, vorhandene Testdateien und die im Implementierungsplan vorgesehenen Zeilen der WPs eines PRs; die Vollständigkeit aller [B]/[Pn]/[A]-IDs wird berichtet und ist ab G1 blockierend (E-30).
+- **Definition of Done pro PR:** OpenAPI, RLS, Audit/Events, i18n, Tests, Lint, Doku, Traceability. Arbeitspakete umfassen 0,5–2 Tage; die Checkliste steht in der [PR-Vorlage](.github/pull_request_template.md).
 - **Tests:**
   - Unit, u. a. ≥ 20 Reconciliation-Fälle
   - Integration gegen echte Dienste (RLS inkl. Scopes, mTLS, Ingest bis Webhook)

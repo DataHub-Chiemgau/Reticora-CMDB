@@ -32,11 +32,6 @@ DECLARE
 BEGIN
     FOR entry IN
         SELECT * FROM (VALUES
-            ('client', 'client_isolation', 'app.org_id'),
-            ('site', 'site_isolation', 'app.org_id'),
-            ('building', 'building_isolation', 'app.org_id'),
-            ('room', 'room_isolation', 'app.org_id'),
-            ('rack', 'rack_isolation', 'app.org_id'),
             ('ci_type', 'ci_type_isolation', 'app.organization_id'),
             ('ci', 'ci_isolation', 'app.organization_id'),
             ('audit_log', 'audit_isolation', 'app.organization_id'),
@@ -70,3 +65,40 @@ BEGIN
     END LOOP;
 END
 $$;
+
+-- The location tables already had app.org_id with WITH CHECK since 000018.
+DO $$
+DECLARE
+    entry RECORD;
+BEGIN
+    FOR entry IN
+        SELECT * FROM (VALUES
+            ('client', 'client_isolation'),
+            ('site', 'site_isolation'),
+            ('building', 'building_isolation'),
+            ('room', 'room_isolation'),
+            ('rack', 'rack_isolation')
+        ) AS t(table_name, policy_name)
+    LOOP
+        EXECUTE format('DROP POLICY IF EXISTS %I ON %I', entry.policy_name, entry.table_name);
+        EXECUTE format(
+            'CREATE POLICY %I ON %I USING (organization_id = current_setting(''app.org_id'')::UUID) '
+            'WITH CHECK (organization_id = current_setting(''app.org_id'')::UUID)',
+            entry.policy_name, entry.table_name
+        );
+    END LOOP;
+END
+$$;
+
+-- Tables that only got FORCE ROW LEVEL SECURITY from the up migration.
+ALTER TABLE asset NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE assignment NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE custom_role NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE discovery_result NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE document NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE document_link NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE stock_scan NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE stocktake NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE team NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE ticket NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE ticket_comment NO FORCE ROW LEVEL SECURITY;

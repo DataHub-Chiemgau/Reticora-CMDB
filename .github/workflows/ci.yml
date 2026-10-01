@@ -42,6 +42,35 @@ jobs:
           path: backend/coverage.out
           retention-days: 14
 
+  # The collector and edgecore go.work modules are tested in their own jobs.
+  go-modules:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [collector, edgecore]
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
   migrations:
     runs-on: ubuntu-latest
     services:
@@ -82,11 +111,38 @@ jobs:
       - name: Re-apply all migrations
         run: migrate -path backend/migrations -database "$DATABASE_URL" up
 
-      - name: PostgreSQL integration tests
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@v1.13.0
+
+      # Every PostgreSQL test activates itself through TEST_DATABASE_URL, so the
+      # whole module runs without a name filter. -p 1 runs packages one after
+      # another: they share this database and some fixtures are not isolated.
+      # This includes the migration roundtrip with schema comparison and the
+      # docs/schema-baseline.md check (internal/database, DB-02).
+      - name: PostgreSQL integration tests (all packages)
         working-directory: backend
         env:
-          TEST_DATABASE_URL: "******localhost:5432/reticora_migrations?sslmode=disable"
-        run: go test -run 'Integration|PGRepository|Migrations|RLS' ./...
+          TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: gotestsum --format testname --jsonfile test-db.json -- -count=1 -p 1 ./...
+
+      - name: Summarize PostgreSQL test run
+        if: always()
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          test -s test-db.json || { echo "::error::no test output recorded"; exit 1; }
+          pkgs=$(go list $(grep -rl --include='*_test.go' 'TEST_DATABASE_URL' . | xargs -n1 dirname | sort -u) | jq -R . | jq -sc .)
+          jq -r --argjson pkgs "$pkgs" '
+            select(.Test != null and (.Test | contains("/") | not))
+            | select(.Action == "pass" or .Action == "fail" or .Action == "skip")
+            | select(.Package as $p | $pkgs | index($p))
+            | "\(.Action)\t\(.Package | sub(".*/backend/"; ""))\t\(.Test)"' test-db.json | sort -k2 > db-tests.txt
+          cat db-tests.txt
+          echo "Tests in $(echo "$pkgs" | jq length) PostgreSQL-backed packages: passed=$(grep -c '^pass' db-tests.txt || true) failed=$(grep -c '^fail' db-tests.txt || true) skipped=$(grep -c '^skip' db-tests.txt || true)"
+          if grep -q 'TEST_DATABASE_URL not set' test-db.json; then
+            echo "::error::PostgreSQL integration tests were skipped although TEST_DATABASE_URL is set"
+            exit 1
+          fi
 
       - name: Assert every tenant policy uses app.org_id
         run: |
@@ -103,6 +159,35 @@ jobs:
             echo "Tables with RLS enabled but not forced: $unforced"
             exit 1
           fi
+
+  # GLO-11/DOD-01: docs/traceability.csv is checked on every PR (E-30).
+  # Format, known IDs, existing test files and the rows the plan prescribes for
+  # the PR's work packages block; completeness is reported until gate G1.
+  traceability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      # Work packages are taken from the PR title and the "Arbeitspakete:" line
+      # of the PR template. Untrusted text is only read through env variables.
+      - name: Determine work packages of the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          wps=$( { printf '%s\n' "$PR_TITLE"; printf '%s\n' "$PR_BODY" | grep -iE '^[*_ ]*Arbeitspakete?[*_ ]*:' || true; } \
+            | grep -oE 'WP-[0-9]{3}' | sort -u | tr '\n' ' ' || true)
+          echo "Work packages: ${wps:-none}"
+          echo "TRACEABILITY_WPS=${wps}" >> "$GITHUB_ENV"
+
+      - name: Check docs/traceability.csv
+        working-directory: backend
+        run: go test -count=1 -v -run 'TestTraceabilityFile' ./internal/traceability/
 
   lint:
     runs-on: ubuntu-latest

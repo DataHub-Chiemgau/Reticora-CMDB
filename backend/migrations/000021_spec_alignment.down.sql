@@ -6,6 +6,12 @@ DROP TABLE IF EXISTS credential;
 DROP TABLE IF EXISTS relationship_suppression;
 DROP TABLE IF EXISTS rack_mount;
 
+-- Global system types (organization_id NULL) only exist since this migration;
+-- remove them so organization_id can be NOT NULL again. CIs of these types
+-- block the rollback through their foreign key instead of losing data.
+DELETE FROM ci_type WHERE organization_id IS NULL;
+ALTER TABLE ci_type ALTER COLUMN organization_id SET NOT NULL;
+
 ALTER TABLE ci_type DROP COLUMN IF EXISTS key;
 ALTER TABLE ci_type DROP COLUMN IF EXISTS display_name;
 ALTER TABLE ci_type DROP COLUMN IF EXISTS is_system;
@@ -14,6 +20,7 @@ ALTER TABLE ci_type DROP COLUMN IF EXISTS required_fields;
 
 ALTER TABLE building DROP COLUMN IF EXISTS floorplan_object_key;
 
+ALTER TABLE site DROP CONSTRAINT IF EXISTS site_org_name_unique;
 ALTER TABLE site DROP COLUMN IF EXISTS geo_lat;
 ALTER TABLE site DROP COLUMN IF EXISTS geo_lon;
 ALTER TABLE site DROP COLUMN IF EXISTS notes;
