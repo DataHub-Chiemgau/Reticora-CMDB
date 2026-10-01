@@ -106,6 +106,34 @@ func TestHandler_Heartbeat(t *testing.T) {
 	}
 }
 
+// WP-062: the heartbeat accepts the collector's spool report; an invalid body
+// is rejected.
+func TestHandler_HeartbeatWithSpoolReport(t *testing.T) {
+	repo := NewMemoryRepository()
+	h := NewHandler(repo, nil)
+	mux := chi.NewRouter()
+	h.RegisterRoutes(mux)
+	c := &Collector{OrganizationID: "org-1", Name: "spool-collector", Config: map[string]any{}}
+	repo.RegisterCollector(context.Background(), c)
+
+	for _, tc := range []struct {
+		body string
+		want int
+	}{
+		{`{"spool":{"messages":3,"bytes":1200,"oldest_age_seconds":7200,"dropped_messages":1,"dropped_bytes":400,"backpressure":true}}`, http.StatusNoContent},
+		{`{}`, http.StatusNoContent},
+		{`{"spool":{"unknown":1}}`, http.StatusBadRequest},
+	} {
+		req := httptest.NewRequest("POST", "/api/v1/collectors/"+c.ID+"/heartbeat", bytes.NewBufferString(tc.body))
+		req = tenantCtx(req)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != tc.want {
+			t.Errorf("body %s: expected %d, got %d", tc.body, tc.want, w.Code)
+		}
+	}
+}
+
 func TestHandler_BulkIngest(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(repo, nil)

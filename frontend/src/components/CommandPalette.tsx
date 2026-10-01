@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearch } from '../api/hooks';
@@ -143,6 +143,8 @@ export function CommandPalette({
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const search = useSearch({ q: open ? query : '', limit: 5 });
+  const listboxId = useId();
+  const listRef = useRef<HTMLDivElement>(null);
 
   const commands = useMemo<CommandItem[]>(
     () =>
@@ -360,6 +362,14 @@ export function CommandPalette({
     }
   }, [filteredCommands.length, selectedIndex]);
 
+  // Keep the keyboard-selected option visible in the scrollable list.
+  useEffect(() => {
+    const option = listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    option?.scrollIntoView?.({ block: 'nearest' });
+  }, [selectedIndex, open]);
+
+  const optionId = (index: number) => `${listboxId}-option-${index}`;
+
   function handleSelect(command: CommandItem | undefined) {
     if (!command) {
       return;
@@ -389,6 +399,15 @@ export function CommandPalette({
       return;
     }
 
+    if (event.key === 'Home' || event.key === 'End') {
+      if (filteredCommands.length === 0) {
+        return;
+      }
+      event.preventDefault();
+      setSelectedIndex(event.key === 'Home' ? 0 : filteredCommands.length - 1);
+      return;
+    }
+
     if (event.key === 'Enter') {
       event.preventDefault();
       handleSelect(filteredCommands[selectedIndex]);
@@ -409,6 +428,13 @@ export function CommandPalette({
           <div className="border-b border-gray-200 p-3 dark:border-gray-800">
             <input
               autoFocus
+              role="combobox"
+              aria-expanded={filteredCommands.length > 0}
+              aria-controls={listboxId}
+              aria-autocomplete="list"
+              aria-activedescendant={
+                filteredCommands.length > 0 ? optionId(selectedIndex) : undefined
+              }
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={handleListNavigation}
@@ -417,16 +443,31 @@ export function CommandPalette({
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
             />
           </div>
-          <div className="max-h-80 overflow-y-auto p-2">
+          <div
+            ref={listRef}
+            id={listboxId}
+            // Without options the container only shows the "no results" note.
+            role={filteredCommands.length > 0 ? 'listbox' : undefined}
+            aria-label={filteredCommands.length > 0 ? t('commandPalette.title') : undefined}
+            className="max-h-80 overflow-y-auto p-2"
+          >
             {filteredCommands.length === 0 ? (
               <p className="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">
                 {t('common.noResults')}
               </p>
             ) : (
               filteredCommands.map((command, index) => (
+                // Options stay out of the Tab order: focus remains in the
+                // search field and the arrow keys move the active option
+                // (aria-activedescendant), so Tab only cycles between the
+                // dialog's controls.
                 <button
                   key={command.id}
+                  id={optionId(index)}
                   type="button"
+                  role="option"
+                  aria-selected={index === selectedIndex}
+                  tabIndex={-1}
                   onMouseEnter={() => setSelectedIndex(index)}
                   onClick={() => handleSelect(command)}
                   className={cn(

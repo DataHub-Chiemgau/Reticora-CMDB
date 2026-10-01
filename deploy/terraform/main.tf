@@ -1,24 +1,30 @@
 # Reticora CMDB — Terraform Module
 #
-# This is an empty module placeholder for infrastructure provisioning.
-# To be implemented when deploying to a cloud provider.
+# Provider-neutral module skeleton: it fixes the operating model and the EU
+# data residency of all data locations (PRI-11, NFR-09) before provider and
+# resources are added for a target cloud. Variables: variables.tf.
 
 terraform {
-  required_version = ">= 1.5.0"
+  # 1.9: variable validations may refer to locals (EU region list).
+  required_version = ">= 1.9.0"
 }
 
-variable "environment" {
-  description = "Deployment environment (development, staging, production)"
-  type        = string
-  default     = "development"
+locals {
+  # Every data location falls back to the validated primary region.
+  data_locations = {
+    primary = var.region
+    backups = coalesce(var.backup_region, var.region)
+    logs    = coalesce(var.log_region, var.region)
+    search  = coalesce(var.search_region, var.region)
+  }
 }
 
-variable "region" {
-  description = "Cloud provider region"
-  type        = string
-  default     = "eu-central-1"
+output "operating_model" {
+  description = "Operating model of this deployment (PRI-11)"
+  value       = var.operating_model
 }
 
-output "note" {
-  value = "Terraform module placeholder — configure provider and resources for your target cloud."
+output "data_locations" {
+  description = "Regions of all data locations; validated to be in the EU (NFR-09)"
+  value       = local.data_locations
 }

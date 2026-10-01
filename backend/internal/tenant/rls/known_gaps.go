@@ -37,10 +37,19 @@ const (
 	// RuleTeamScope: tables with team_id use TeamScopeGUC in USING and WITH
 	// CHECK of every command (CH25).
 	RuleTeamScope Rule = "team-scope"
-	// RuleOrgColumn: every table of schema public except organization and
-	// schema_migrations has an organization_id column.
+	// RuleOrgColumn: every table of schema public except organization,
+	// schema_migrations and GlobalCatalogTables has an organization_id column.
 	RuleOrgColumn Rule = "org-column"
+	// RuleReadOnlyCatalog: tables of GlobalCatalogTables grant reticora_app
+	// no INSERT, UPDATE or DELETE.
+	RuleReadOnlyCatalog Rule = "read-only-catalog"
 )
+
+// GlobalCatalogTables are global catalogs without organization_id (E-10,
+// WP-024). They are maintained by migrations only; the application role may
+// read but not write them. This is a documented exception to RuleOrgColumn,
+// not a gap: the catalog test checks RuleReadOnlyCatalog for them instead.
+var GlobalCatalogTables = []string{"permission"}
 
 // Session variables (GUCs) the policies are expected to reference. Site and
 // team scope do not exist yet; WP-027 and WP-029 introduce them under these
@@ -82,30 +91,6 @@ var KnownGaps = []Gap{
 	{"export_job", RuleSystemWrite, "WP-022"},
 	{"webhook_dead_letter", RuleSystemWrite, "WP-022"},
 	{"webhook_delivery", RuleSystemWrite, "WP-022"},
-
-	// Tables with client_id whose policies only check the organization.
-	{"asset", RuleClientScope, "WP-023"},
-	{"consumable", RuleClientScope, "WP-023"},
-	{"form_def", RuleClientScope, "WP-023"},
-	{"internal_order", RuleClientScope, "WP-023"},
-	{"key_item", RuleClientScope, "WP-023"},
-	{"location_node", RuleClientScope, "WP-023"},
-	{"maintenance_notification", RuleClientScope, "WP-023"},
-	{"quantity_item", RuleClientScope, "WP-023"},
-	{"sla", RuleClientScope, "WP-023"},
-
-	// Global catalog rows can be changed or deleted by every tenant.
-	{"ci_type", RuleGlobalRows, "WP-024"},
-	{"lifecycle_definition", RuleGlobalRows, "WP-024"},
-	{"lifecycle_state", RuleGlobalRows, "WP-024"},
-	{"lifecycle_transition", RuleGlobalRows, "WP-024"},
-	{"relationship_type", RuleGlobalRows, "WP-024"},
-
-	// Tables without organization_id.
-	{"ci_type_attribute", RuleOrgColumn, "WP-024"},
-	{"permission", RuleOrgColumn, "WP-024"},
-	{"team_member", RuleOrgColumn, "WP-024"},
-	{"user_custom_role", RuleOrgColumn, "WP-024"},
 
 	// Tables with site_id without site scope.
 	{"building", RuleSiteScope, "WP-027"},

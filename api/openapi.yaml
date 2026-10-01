@@ -4753,10 +4753,19 @@ paths:
       summary: Record a collector heartbeat
       description: >-
         Updates the collector's last-heartbeat timestamp so the platform can
-        track liveness. No request body is required.
+        track liveness. The optional body reports the offline spool state;
+        losses and backpressure are logged for operators (NFR-04, COL-05).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollectorHeartbeatRequest'
       responses:
         '204':
           description: Heartbeat recorded
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -7647,6 +7656,23 @@ components:
             $ref: '#/components/schemas/ProblemDetail'
 
   schemas:
+    CollectorHeartbeatRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        spool:
+          $ref: '#/components/schemas/CollectorSpoolReport'
+    CollectorSpoolReport:
+      type: object
+      additionalProperties: false
+      description: Offline spool state of a collector; dropped counters only grow while the collector runs.
+      properties:
+        messages: { type: integer }
+        bytes: { type: integer, format: int64 }
+        oldest_age_seconds: { type: integer, format: int64 }
+        dropped_messages: { type: integer, format: int64 }
+        dropped_bytes: { type: integer, format: int64 }
+        backpressure: { type: boolean }
     IGAObject:
       type: object
       additionalProperties: true

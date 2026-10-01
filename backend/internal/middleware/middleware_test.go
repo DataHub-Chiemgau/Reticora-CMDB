@@ -90,6 +90,37 @@ func TestTenantScopeFor(t *testing.T) {
 	}
 }
 
+// WP-009: a session with resolved role scopes is taken over per dimension; a
+// client-only user is never org-wide.
+func TestTenantScopeForResolvedScope(t *testing.T) {
+	const org = "aaaa1111-0000-4000-8000-000000000001"
+	const c1, s1 = "aaaa1111-0000-4000-8000-0000000000a1", "aaaa1111-0000-4000-8000-0000000000b1"
+	resolved := identity.Scope{
+		Clients: identity.ScopeSet{IDs: []string{c1}},
+		Sites:   identity.ScopeSet{IDs: []string{s1}},
+		Teams:   identity.ScopeSet{All: true},
+	}
+	// The legacy client scope string is ignored when a resolved scope exists.
+	scope := TenantScopeFor(&identity.Principal{OrganizationID: org, Subject: "user-1", ClientScope: "", Scope: &resolved})
+	if err := scope.Validate(); err != nil {
+		t.Fatalf("scope is not complete: %v", err)
+	}
+	if scope.Clients.IsAll() || len(scope.Clients.IDs()) != 1 || scope.Clients.IDs()[0] != c1 {
+		t.Fatalf("clients = %v, want only %s", scope.Clients.IDs(), c1)
+	}
+	if scope.Sites.IsAll() || scope.Sites.IDs()[0] != s1 || !scope.Teams.IsAll() {
+		t.Fatalf("unexpected scope %+v", scope)
+	}
+
+	none := TenantScopeFor(&identity.Principal{OrganizationID: org, Subject: "user-1", Scope: &identity.Scope{}})
+	if err := none.Validate(); err != nil {
+		t.Fatalf("empty scope must stay decided: %v", err)
+	}
+	if none.Clients.IsAll() || len(none.Clients.IDs()) != 0 || none.Sites.IsAll() || none.Teams.IsAll() {
+		t.Fatalf("principal without grants must get no scope, got %+v", none)
+	}
+}
+
 func TestAuthMiddlewareRejectsMissingToken(t *testing.T) {
 	handler := AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

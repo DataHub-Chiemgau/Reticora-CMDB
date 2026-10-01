@@ -44,6 +44,14 @@ patches:
             value: "false"
           - name: RETICORA_SESSION_KEY_PATH
             value: "/etc/reticora/session/private.pem"
+          # The env list is replaced as a whole, so the mandatory master key
+          # of the base deployment has to be repeated here (OPS-03).
+          - name: RETICORA_MASTER_KEY
+            valueFrom:
+              secretKeyRef:
+                name: reticora-secrets
+                key: master-key
+                optional: false
       - op: replace
         path: /spec/template/spec/containers/0/resources
         value:

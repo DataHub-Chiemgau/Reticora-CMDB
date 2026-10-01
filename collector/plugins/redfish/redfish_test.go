@@ -2,6 +2,8 @@ package redfish
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 )
 
 func TestNewDefaults(t *testing.T) {
@@ -316,5 +320,119 @@ func TestDiscoverRequestTargetsPort443(t *testing.T) {
 	_, port, err := net.SplitHostPort(gotHost)
 	if err != nil || port != fmt.Sprintf("%d", defaultPort) {
 		t.Errorf("requested host = %q, want port %d", gotHost, defaultPort)
+	}
+}
+
+// tlsBMC starts a TLS Redfish endpoint with the httptest certificate (issued
+// for 127.0.0.1) and returns the plugin port and the certificate.
+func tlsBMC(t *testing.T, sawAuth *bool) (*httptest.Server, int) {
+	t.Helper()
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, _, ok := r.BasicAuth(); ok && sawAuth != nil {
+			*sawAuth = true
+		}
+		writeJSON(w, serviceRoot{RedfishVersion: "1.13.0", UUID: "tls-bmc"})
+	}))
+	t.Cleanup(srv.Close)
+	_, portText, err := net.SplitHostPort(srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var port int
+	if _, err := fmt.Sscanf(portText, "%d", &port); err != nil {
+		t.Fatal(err)
+	}
+	return srv, port
+}
+
+func loopback(t *testing.T, cidr string) *net.IPNet {
+	t.Helper()
+	_, n, err := net.ParseCIDR(cidr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// COL-02: an untrusted certificate is rejected by default and no credentials
+// are sent to the endpoint.
+func TestCollectRejectsUntrustedCertificateByDefault(t *testing.T) {
+	sawAuth := false
+	_, port := tlsBMC(t, &sawAuth)
+	p := New()
+	p.port = port
+
+	_, err := p.Collect(context.Background(), "127.0.0.1", map[string]string{"username": "admin", "password": "secret"})
+	if err == nil || !strings.Contains(err.Error(), "certificate") {
+		t.Fatalf("expected certificate verification error, got %v", err)
+	}
+	if sawAuth {
+		t.Fatal("credentials must not be sent to an unverified endpoint")
+	}
+	results, _ := p.Discover(context.Background(), []string{"127.0.0.1"}, map[string]string{"username": "admin"})
+	if len(results) != 0 || sawAuth {
+		t.Fatalf("discovery must not accept an unverified endpoint: %v (auth sent: %v)", results, sawAuth)
+	}
+}
+
+func TestCollectAcceptsScopedCAAndPin(t *testing.T) {
+	srv, port := tlsBMC(t, nil)
+	cert := srv.Certificate()
+	pool := x509.NewCertPool()
+	pool.AddCert(cert)
+	pin := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
+	wrong := sha256.Sum256([]byte("other key"))
+
+	cases := []struct {
+		name  string
+		scope TLSScope
+		ok    bool
+	}{
+		{"CA bundle of the scope", TLSScope{Network: loopback(t, "127.0.0.0/8"), RootCAs: pool}, true},
+		{"matching SPKI pin", TLSScope{Network: loopback(t, "127.0.0.1/32"), PinsSHA256: [][]byte{pin[:]}}, true},
+		{"CA plus matching pin", TLSScope{Network: loopback(t, "127.0.0.1/32"), RootCAs: pool, PinsSHA256: [][]byte{pin[:]}}, true},
+		{"wrong pin", TLSScope{Network: loopback(t, "127.0.0.1/32"), PinsSHA256: [][]byte{wrong[:]}}, false},
+		{"scope of another network", TLSScope{Network: loopback(t, "10.0.0.0/8"), RootCAs: pool}, false},
+		{"scope without CA or pin is ignored", TLSScope{Network: loopback(t, "127.0.0.0/8")}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := New(WithTLSScopes(tc.scope))
+			p.port = port
+			res, err := p.Collect(context.Background(), "127.0.0.1", nil)
+			if tc.ok && (err != nil || res.Attributes["bmcUUID"] != "tls-bmc") {
+				t.Fatalf("expected verified connection, got %v, %v", res, err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatal("expected the certificate to be rejected")
+			}
+		})
+	}
+}
+
+// COL-02: credentials are selected per protocol; the SSH account never reaches
+// the Redfish plugin.
+func TestCredentialsForSeparatesProtocols(t *testing.T) {
+	all := map[string]string{
+		"ssh.username":     "root",
+		"ssh.password":     "ssh-secret",
+		"snmp.community":   "public",
+		"redfish.username": "bmc-admin",
+		"redfish.password": "bmc-secret",
+		"username":         "legacy-unnamespaced",
+	}
+	redfishCreds := plugins.CredentialsFor("redfish", all)
+	if len(redfishCreds) != 2 || redfishCreds["username"] != "bmc-admin" || redfishCreds["password"] != "bmc-secret" {
+		t.Fatalf("redfish credentials = %v", redfishCreds)
+	}
+	onlySSH := plugins.CredentialsFor("redfish", map[string]string{"ssh.username": "root", "ssh.password": "x"})
+	if len(onlySSH) != 0 {
+		t.Fatalf("SSH credentials leaked to redfish: %v", onlySSH)
+	}
+	if got := plugins.CredentialsFor("power", all); len(got) != 1 || got["community"] != "public" {
+		t.Fatalf("power must use the SNMP community only, got %v", got)
+	}
+	if got := plugins.CredentialsFor("ssh", all); got["username"] != "root" || got["community"] != "" {
+		t.Fatalf("ssh credentials = %v", got)
 	}
 }

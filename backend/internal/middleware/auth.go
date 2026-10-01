@@ -25,8 +25,12 @@ type Claims struct {
 	TenantID       string                `json:"tenant_id,omitempty"`
 	ClientID       string                `json:"client_id,omitempty"`
 	Permissions    []identity.Permission `json:"permissions,omitempty"`
-	ExpiresAt      int64                 `json:"exp,omitempty"`
-	IssuedAt       int64                 `json:"iat,omitempty"`
+	// Scope and PermissionScopes are the role scopes resolved by the identity
+	// module (RBA-03); nil for development tokens without resolved scope.
+	Scope            *identity.Scope                        `json:"scope,omitempty"`
+	PermissionScopes map[identity.Permission]identity.Scope `json:"permission_scopes,omitempty"`
+	ExpiresAt        int64                                  `json:"exp,omitempty"`
+	IssuedAt         int64                                  `json:"iat,omitempty"`
 }
 
 // SessionVerifier verifies the signature of session tokens issued by the
@@ -125,11 +129,16 @@ func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIK
 		return identity.Principal{}, Claims{}, err
 	}
 	principal := identity.Principal{
-		Subject:        claims.Subject,
-		OrganizationID: claims.Organization(),
-		ClientScope:    claims.ClientID,
-		Permissions:    claims.Permissions,
-		Type:           identity.PrincipalTypeUser,
+		Subject:          claims.Subject,
+		OrganizationID:   claims.Organization(),
+		ClientScope:      claims.ClientID,
+		Scope:            claims.Scope,
+		PermissionScopes: claims.PermissionScopes,
+		Permissions:      claims.Permissions,
+		Type:             identity.PrincipalTypeUser,
+	}
+	if principal.Scope != nil {
+		principal.ClientScope = principal.Scope.LegacyClientScope()
 	}
 	return principal, claims, nil
 }
@@ -163,12 +172,14 @@ func authenticate(r *http.Request, verifier SessionVerifier) (Claims, error) {
 	}
 
 	return Claims{
-		Subject:        sessionClaims.Subject,
-		OrganizationID: sessionClaims.OrganizationID,
-		ClientID:       sessionClaims.ClientScope,
-		Permissions:    sessionClaims.Permissions,
-		IssuedAt:       sessionClaims.IssuedAt.Unix(),
-		ExpiresAt:      sessionClaims.ExpiresAt.Unix(),
+		Subject:          sessionClaims.Subject,
+		OrganizationID:   sessionClaims.OrganizationID,
+		ClientID:         sessionClaims.ClientScope,
+		Permissions:      sessionClaims.Permissions,
+		Scope:            sessionClaims.Scope,
+		PermissionScopes: sessionClaims.PermissionScopes,
+		IssuedAt:         sessionClaims.IssuedAt.Unix(),
+		ExpiresAt:        sessionClaims.ExpiresAt.Unix(),
 	}, nil
 }
 
@@ -202,10 +213,21 @@ func TenantMiddleware(next http.Handler) http.Handler {
 }
 
 // TenantScopeFor builds the database scope of a principal for
-// database.WithTenant. A principal without client scope is org-wide; the
-// session carries no site or team scope yet, so both are org-wide until
-// WP-009 derives all scopes authoritatively from the role assignments.
+// database.WithTenant. User sessions carry the scope resolved from their role
+// assignments (RBA-03, WP-009): it is taken over dimension by dimension, so a
+// user with client assignments only is never org-wide. Credentials without a
+// resolved scope (API keys, development tokens) are restricted by their client
+// scope only.
 func TenantScopeFor(p *identity.Principal) database.TenantScope {
+	if p.Scope != nil {
+		return database.TenantScope{
+			OrgID:   p.OrganizationID,
+			UserID:  p.Subject,
+			Clients: scopeSet(p.Scope.Clients),
+			Sites:   scopeSet(p.Scope.Sites),
+			Teams:   scopeSet(p.Scope.Teams),
+		}
+	}
 	scope := database.OrgWideScope(p.OrganizationID, p.Subject)
 	if clients := strings.TrimSpace(p.ClientScope); clients != "" {
 		var ids []string
@@ -217,6 +239,13 @@ func TenantScopeFor(p *identity.Principal) database.TenantScope {
 		scope.Clients = database.ScopeIDs(ids...)
 	}
 	return scope
+}
+
+func scopeSet(s identity.ScopeSet) database.ScopeSet {
+	if s.All {
+		return database.AllScopes()
+	}
+	return database.ScopeIDs(s.IDs...)
 }
 
 // ClaimsFromContext extracts auth claims from the request context.

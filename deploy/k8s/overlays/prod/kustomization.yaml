@@ -23,7 +23,8 @@ images:
 
 patches:
   # Scale out for production and raise the resource envelope. The base already
-  # sets RETICORA_ENVIRONMENT=production and the observability env vars.
+  # sets RETICORA_ENVIRONMENT=production, the observability env vars and the
+  # mandatory RETICORA_MASTER_KEY from the reticora-secrets secret.
   - target:
       kind: Deployment
       name: reticora-server

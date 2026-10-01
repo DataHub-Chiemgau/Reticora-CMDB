@@ -61,9 +61,13 @@ test.describe('login roundtrip (mocked IdP)', () => {
       const url = new URL(route.request().url());
       const state = url.searchParams.get('state') ?? '';
       const redirectUri = url.searchParams.get('redirect_uri') ?? AUTH_CONFIG.redirect_uri;
+      // A script redirect instead of HTTP 302: WebKit cannot fulfill
+      // intercepted requests with a redirect status in Playwright.
+      const target = `${redirectUri}?code=mock-auth-code&state=${encodeURIComponent(state)}`;
       await route.fulfill({
-        status: 302,
-        headers: { Location: `${redirectUri}?code=mock-auth-code&state=${state}` },
+        status: 200,
+        contentType: 'text/html',
+        body: `<!doctype html><script>location.replace(${JSON.stringify(target)})</script>`,
       });
     });
 

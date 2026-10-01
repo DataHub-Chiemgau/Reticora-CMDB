@@ -209,7 +209,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	protected := authorizingRouter{Router: mux}
 
 	registrars := []registrar{
-		identity.NewHandler(opts.OIDC, opts.Sessions).WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole),
+		identity.NewHandler(opts.OIDC, opts.Sessions).
+			WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole).
+			WithAccessResolver(repos.Permission),
 		entitlement.NewHandler(opts.Entitlements),
 		ci.NewHandler(opts.CIService, opts.Dispatcher),
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),

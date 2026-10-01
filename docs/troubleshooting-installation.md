@@ -191,7 +191,31 @@ docker compose --env-file .env down -v
 
 ---
 
-## 7. Verifying a healthy installation
+## 7. Collector offline spool
+
+While the backend is unreachable the collector buffers discovery results in
+`RETICORA_SPOOL_DIR` and delivers them, oldest source time first, before any
+new results once the connection is back (COL-05).
+
+- **No loss within 24 h:** unacknowledged batches younger than 24 hours are
+  never dropped, whatever `RETICORA_SPOOL_MAX_AGE` says (NFR-04). Older batches
+  are dropped after `RETICORA_SPOOL_MAX_AGE` (default 72 h).
+- **Backpressure:** at 90 % of `RETICORA_SPOOL_MAX_BYTES` (default 1 GiB) the
+  collector pauses discovery (`"event":"collector.spool.backpressure"` in the
+  collector log) instead of overwriting data. Discovery resumes as soon as the
+  spool drains.
+- **Loss reporting:** every unavoidable loss (age limit beyond 24 h, size limit,
+  full spool) is logged as `"event":"collector.spool.data_lost"` with reason and
+  size, counted, and reported with the next heartbeat. The server logs
+  `"event":"collector.spool.degraded"` with organization, collector and the
+  dropped counters.
+
+If the collector reports backpressure: check connectivity to `RETICORA_SERVER_URL`,
+free disk space for the spool, or raise `RETICORA_SPOOL_MAX_BYTES`.
+
+---
+
+## 8. Verifying a healthy installation
 
 ```bash
 # All containers healthy

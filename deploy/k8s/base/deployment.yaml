@@ -45,6 +45,15 @@ spec:
             # production; the pod refuses to start without the key.
             - name: RETICORA_SESSION_KEY_PATH
               value: "/etc/reticora/session/private.pem"
+            # Mandatory master key for envelope encryption (OPS-03). Without
+            # the secret key the pod does not start (CreateContainerConfigError),
+            # and the server's start check refuses an empty key (WP-097).
+            - name: RETICORA_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-secrets
+                  key: master-key
+                  optional: false
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session

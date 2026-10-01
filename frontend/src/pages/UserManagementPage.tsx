@@ -92,7 +92,7 @@ function UsersTab({ search }: { search: string }) {
             ))}
             {(!data?.data || data.data.length === 0) && (
               <tr>
-                <td colSpan={4} className="py-4 text-center text-gray-400">
+                <td colSpan={4} className="py-4 text-center text-gray-600 dark:text-gray-400">
                   {t('common.noData', 'Keine Daten')}
                 </td>
               </tr>
@@ -134,7 +134,7 @@ function TeamsTab({ search }: { search: string }) {
             ))}
             {(!data?.data || data.data.length === 0) && (
               <tr>
-                <td colSpan={3} className="py-4 text-center text-gray-400">
+                <td colSpan={3} className="py-4 text-center text-gray-600 dark:text-gray-400">
                   {t('common.noData', 'Keine Daten')}
                 </td>
               </tr>
@@ -180,7 +180,7 @@ function RolesTab() {
             ))}
             {(!data?.data || data.data.length === 0) && (
               <tr>
-                <td colSpan={4} className="py-4 text-center text-gray-400">
+                <td colSpan={4} className="py-4 text-center text-gray-600 dark:text-gray-400">
                   {t('common.noData', 'Keine Daten')}
                 </td>
               </tr>

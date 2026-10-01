@@ -7,6 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 )
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
@@ -156,6 +158,64 @@ func (r *PGRepository) EffectivePermissions(ctx context.Context, orgID, userID s
 	}
 	sort.Strings(keys)
 	return keys, nil
+}
+
+// AccessGrants reads every role assignment (role_assignment with
+// scope_client_id/scope_site_id) and custom role assignment (user_custom_role
+// with scope_type/scope_id) of the user. NULL scope columns mean org-wide.
+// Assignments of a client or site scope without scope ID are invalid and grant
+// nothing (fail-closed). Only permissions of the catalogue are returned.
+func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) ([]identity.Grant, error) {
+	grants := make([]identity.Grant, 0)
+	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT client_id, site_id,
+			       ARRAY(SELECT DISTINCT k FROM unnest(keys) AS k WHERE k IN (SELECT key FROM permission) ORDER BY k)
+			FROM (
+				SELECT ra.scope_client_id::text AS client_id, ra.scope_site_id::text AS site_id,
+				       ARRAY(
+				           SELECT rp.permission_key FROM role_permission rp
+				           WHERE rp.role_id = ra.role_id AND rp.organization_id = ra.organization_id
+				           UNION
+				           SELECT jsonb_array_elements_text(COALESCE(ro.permissions, '[]'::jsonb))
+				       ) AS keys
+				FROM role_assignment ra
+				JOIN role ro ON ro.id = ra.role_id AND ro.organization_id = ra.organization_id
+				WHERE ra.organization_id = $1 AND ra.user_id = $2
+				UNION ALL
+				SELECT CASE WHEN ucr.scope_type = 'client' THEN ucr.scope_id::text END,
+				       CASE WHEN ucr.scope_type = 'site' THEN ucr.scope_id::text END,
+				       ARRAY(SELECT jsonb_array_elements_text(COALESCE(cr.permissions, '[]'::jsonb)))
+				FROM user_custom_role ucr
+				JOIN custom_role cr ON cr.id = ucr.custom_role_id
+				WHERE cr.organization_id = $1 AND ucr.user_id = $2
+				  AND (ucr.scope_type = 'organization' OR ucr.scope_id IS NOT NULL)
+			) assignments`, orgID, userID)
+		if err != nil {
+			return fmt.Errorf("list role assignments: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var clientID, siteID *string
+			var keys []string
+			if err := rows.Scan(&clientID, &siteID, &keys); err != nil {
+				return fmt.Errorf("scan role assignment: %w", err)
+			}
+			grant := identity.Grant{Permissions: toPermissions(keys)}
+			if clientID != nil {
+				grant.Clients = []string{*clientID}
+			}
+			if siteID != nil {
+				grant.Sites = []string{*siteID}
+			}
+			grants = append(grants, grant)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return grants, nil
 }
 
 func (r *PGRepository) HasPermission(ctx context.Context, orgID, userID, key string) (bool, error) {
