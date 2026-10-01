@@ -27,5 +27,8 @@ COPY keycloak-proxy.conf /etc/nginx/reticora-keycloak-proxy.conf
 # block in nginx.conf.
 RUN rm -f /etc/nginx/conf.d/default.conf \
     && chown -R nginx:nginx /etc/nginx/conf.d /var/log/nginx
+# The image entrypoint renders every mounted template unconditionally; this
+# hook drops the rendered TLS server block again when no domain is set.
+COPY --chmod=0755 docker-entrypoint.d/25-reticora-tls-optional.sh /docker-entrypoint.d/
 
 EXPOSE 80
