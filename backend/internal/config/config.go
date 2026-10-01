@@ -4,9 +4,21 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
+)
+
+// Environments accepted in RETICORA_ENVIRONMENT. Only development keeps the
+// built-in defaults for backing services; staging and production require them
+// to be configured explicitly (fail-closed start, OPS-01).
+const (
+	EnvDevelopment = "development"
+	EnvStaging     = "staging"
+	EnvProduction  = "production"
 )
 
 // Config holds the application configuration.
@@ -49,11 +61,11 @@ type Config struct {
 	AllowInsecureDevAuth bool   // opt-in: accept session tokens without signature verification
 
 	// Entitlements
-	DefaultPlan            string // plan applied to tenants without entitlement rows
+	DefaultPlan string // plan applied to tenants without entitlement rows
 	// DefaultProvisionRole names the standard role assigned to a user on first
 	// OIDC login; empty assigns no role (admins assign explicitly).
-	DefaultProvisionRole string
-	EntitlementEnforcement bool   // when false, feature gating is reported but not enforced
+	DefaultProvisionRole   string
+	EntitlementEnforcement bool // when false, feature gating is reported but not enforced
 
 	// Encryption
 	MasterKey string // 32-byte base64-encoded master key for envelope encryption
@@ -80,90 +92,189 @@ type Config struct {
 	LLMAPIKey         string
 	LLMChatModel      string
 	LLMEmbeddingModel string
+
+	// explicit records the RETICORA_* variables that were set; invalid
+	// lists variables whose value could not be parsed.
+	explicit map[string]bool
+	invalid  []string
 }
 
 // Load reads configuration from environment variables with RETICORA_ prefix
 // and sensible defaults.
 func Load() *Config {
+	l := &loader{set: map[string]bool{}}
 	cfg := &Config{
-		Port:        envOrDefault("RETICORA_PORT", "8080"),
-		Environment: envOrDefault("RETICORA_ENVIRONMENT", "development"),
+		Port:        l.str("RETICORA_PORT", "8080"),
+		Environment: l.str("RETICORA_ENVIRONMENT", "development"),
 
-		DatabaseURL: envOrDefault("RETICORA_DATABASE_URL", "postgres://localhost:5432/reticora?sslmode=disable"),
-		NATSUrl:     envOrDefault("RETICORA_NATS_URL", "nats://localhost:4222"),
-		RedisURL:    envOrDefault("RETICORA_REDIS_URL", "redis://localhost:6379"),
+		DatabaseURL: l.str("RETICORA_DATABASE_URL", "postgres://localhost:5432/reticora?sslmode=disable"),
+		NATSUrl:     l.str("RETICORA_NATS_URL", "nats://localhost:4222"),
+		RedisURL:    l.str("RETICORA_REDIS_URL", "redis://localhost:6379"),
 
-		S3Endpoint:  envOrDefault("RETICORA_S3_ENDPOINT", "localhost:9000"),
-		S3Bucket:    envOrDefault("RETICORA_S3_BUCKET", "reticora"),
-		S3AccessKey: envOrDefault("RETICORA_S3_ACCESS_KEY", "reticora"),
-		S3SecretKey: envOrDefault("RETICORA_S3_SECRET_KEY", "reticora_dev"),
-		S3UseSSL:    envOrDefault("RETICORA_S3_USE_SSL", "false") == "true",
+		S3Endpoint:  l.str("RETICORA_S3_ENDPOINT", "localhost:9000"),
+		S3Bucket:    l.str("RETICORA_S3_BUCKET", "reticora"),
+		S3AccessKey: l.str("RETICORA_S3_ACCESS_KEY", "reticora"),
+		S3SecretKey: l.str("RETICORA_S3_SECRET_KEY", "reticora_dev"),
+		S3UseSSL:    l.str("RETICORA_S3_USE_SSL", "false") == "true",
 		// BlobDir backs export storage in --no-db development mode; in
 		// database mode the S3 settings above are used instead.
-		BlobDir: envOrDefault("RETICORA_BLOB_DIR", ""),
+		BlobDir: l.str("RETICORA_BLOB_DIR", ""),
 
-		OIDCIssuerURL:        envOrDefault("RETICORA_OIDC_ISSUER_URL", "http://localhost:8180/realms/reticora"),
-		OIDCClientID:         envOrDefault("RETICORA_OIDC_CLIENT_ID", "reticora-app"),
-		OIDCClientSecret:     envOrDefault("RETICORA_OIDC_CLIENT_SECRET", ""),
-		OIDCRedirectURL:      envOrDefault("RETICORA_OIDC_REDIRECT_URL", ""),
-		OIDCCACertFile:       envOrDefault("RETICORA_OIDC_CA_CERT_FILE", ""),
-		SessionKeyPath:       envOrDefault("RETICORA_SESSION_KEY_PATH", ""),
-		AllowInsecureDevAuth: envOrDefault("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false") == "true",
+		OIDCIssuerURL:        l.str("RETICORA_OIDC_ISSUER_URL", "http://localhost:8180/realms/reticora"),
+		OIDCClientID:         l.str("RETICORA_OIDC_CLIENT_ID", "reticora-app"),
+		OIDCClientSecret:     l.str("RETICORA_OIDC_CLIENT_SECRET", ""),
+		OIDCRedirectURL:      l.str("RETICORA_OIDC_REDIRECT_URL", ""),
+		OIDCCACertFile:       l.str("RETICORA_OIDC_CA_CERT_FILE", ""),
+		SessionKeyPath:       l.str("RETICORA_SESSION_KEY_PATH", ""),
+		AllowInsecureDevAuth: l.str("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false") == "true",
 
-		DefaultPlan:            envOrDefault("RETICORA_DEFAULT_PLAN", "essential"),
-		DefaultProvisionRole:   envOrDefault("RETICORA_DEFAULT_PROVISION_ROLE", "viewer"),
-		EntitlementEnforcement: envOrDefault("RETICORA_ENTITLEMENT_ENFORCEMENT", "true") != "false",
+		DefaultPlan:            l.str("RETICORA_DEFAULT_PLAN", "essential"),
+		DefaultProvisionRole:   l.str("RETICORA_DEFAULT_PROVISION_ROLE", "viewer"),
+		EntitlementEnforcement: l.str("RETICORA_ENTITLEMENT_ENFORCEMENT", "true") != "false",
 
-		MasterKey: envOrDefault("RETICORA_MASTER_KEY", ""),
+		MasterKey: l.str("RETICORA_MASTER_KEY", ""),
 
-		OTelEndpoint: envOrDefault("RETICORA_OTEL_ENDPOINT", ""),
+		OTelEndpoint: l.str("RETICORA_OTEL_ENDPOINT", ""),
 		// Opt-in: the organization_id label multiplies the HTTP metric series
 		// by the tenant count. Default off; enable for bounded-tenant setups.
-		MetricsTenantLabel: envOrDefaultBool("RETICORA_METRICS_TENANT_LABEL", false),
-		RateLimitRPM:       envOrDefaultInt("RETICORA_RATE_LIMIT_RPM", 600),
+		MetricsTenantLabel: l.boolean("RETICORA_METRICS_TENANT_LABEL", false),
+		RateLimitRPM:       l.integer("RETICORA_RATE_LIMIT_RPM", 600),
 
-		SearchBackend:      envOrDefault("RETICORA_SEARCH_BACKEND", "postgres"),
-		OpenSearchURL:      envOrDefault("RETICORA_OPENSEARCH_URL", ""),
-		OpenSearchUsername: envOrDefault("RETICORA_OPENSEARCH_USERNAME", ""),
-		OpenSearchPassword: envOrDefault("RETICORA_OPENSEARCH_PASSWORD", ""),
-		OpenSearchIndex:    envOrDefault("RETICORA_OPENSEARCH_INDEX", "reticora-search"),
+		SearchBackend:      l.str("RETICORA_SEARCH_BACKEND", "postgres"),
+		OpenSearchURL:      l.str("RETICORA_OPENSEARCH_URL", ""),
+		OpenSearchUsername: l.str("RETICORA_OPENSEARCH_USERNAME", ""),
+		OpenSearchPassword: l.str("RETICORA_OPENSEARCH_PASSWORD", ""),
+		OpenSearchIndex:    l.str("RETICORA_OPENSEARCH_INDEX", "reticora-search"),
 
-		LLMBaseURL:        envOrDefault("RETICORA_LLM_BASE_URL", ""),
-		LLMAPIKey:         envOrDefault("RETICORA_LLM_API_KEY", ""),
-		LLMChatModel:      envOrDefault("RETICORA_LLM_CHAT_MODEL", ""),
-		LLMEmbeddingModel: envOrDefault("RETICORA_LLM_EMBEDDING_MODEL", ""),
+		LLMBaseURL:        l.str("RETICORA_LLM_BASE_URL", ""),
+		LLMAPIKey:         l.str("RETICORA_LLM_API_KEY", ""),
+		LLMChatModel:      l.str("RETICORA_LLM_CHAT_MODEL", ""),
+		LLMEmbeddingModel: l.str("RETICORA_LLM_EMBEDDING_MODEL", ""),
 
 		LogLevel: slog.LevelInfo,
 	}
 
-	if cfg.Environment == "development" {
+	cfg.explicit = l.set
+	cfg.invalid = l.invalid
+
+	if cfg.Environment == EnvDevelopment {
 		cfg.LogLevel = slog.LevelDebug
+	} else if !cfg.anySet(s3Keys...) {
+		// Outside development the local MinIO defaults are never used
+		// silently: without explicit settings object storage is disabled.
+		cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey = "", "", ""
 	}
 
 	return cfg
 }
 
-func envOrDefault(key, defaultValue string) string {
+// Variables that staging and production must set explicitly instead of
+// falling back to the localhost defaults.
+var requiredOutsideDevelopment = []string{
+	"RETICORA_DATABASE_URL",
+	"RETICORA_REDIS_URL",
+	"RETICORA_MASTER_KEY",
+	"RETICORA_OIDC_ISSUER_URL",
+}
+
+var s3Keys = []string{"RETICORA_S3_ENDPOINT", "RETICORA_S3_ACCESS_KEY", "RETICORA_S3_SECRET_KEY"}
+
+// IsDevelopment reports whether the local development defaults apply.
+func (c *Config) IsDevelopment() bool { return c.Environment == EnvDevelopment }
+
+// IsSet reports whether the RETICORA_* variable was set explicitly.
+func (c *Config) IsSet(key string) bool { return c.explicit[key] }
+
+func (c *Config) anySet(keys ...string) bool {
+	for _, k := range keys {
+		if c.explicit[k] {
+			return true
+		}
+	}
+	return false
+}
+
+// S3Configured reports whether object storage is configured.
+func (c *Config) S3Configured() bool { return c.S3Endpoint != "" }
+
+// Validate is the fail-closed start check (OPS-01): it reports every missing
+// or invalid setting at once. noDB is the --no-db flag, which is only allowed
+// in development.
+func (c *Config) Validate(noDB bool) error {
+	var errs []error
+	switch c.Environment {
+	case EnvDevelopment, EnvStaging, EnvProduction:
+	default:
+		errs = append(errs, fmt.Errorf("RETICORA_ENVIRONMENT=%q is not one of %s, %s, %s",
+			c.Environment, EnvDevelopment, EnvStaging, EnvProduction))
+	}
+	for _, key := range c.invalid {
+		errs = append(errs, fmt.Errorf("%s has an invalid value", key))
+	}
+	if c.RateLimitRPM <= 0 {
+		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_RPM must be positive, got %d", c.RateLimitRPM))
+	}
+	if !c.IsDevelopment() {
+		if noDB {
+			errs = append(errs, fmt.Errorf("--no-db is only allowed with RETICORA_ENVIRONMENT=%s", EnvDevelopment))
+		}
+		var missing []string
+		for _, key := range requiredOutsideDevelopment {
+			if !c.explicit[key] {
+				missing = append(missing, key)
+			}
+		}
+		if c.anySet(s3Keys...) {
+			for _, key := range s3Keys {
+				if !c.explicit[key] {
+					missing = append(missing, key)
+				}
+			}
+		}
+		if len(missing) > 0 {
+			errs = append(errs, fmt.Errorf("RETICORA_ENVIRONMENT=%s requires %s", c.Environment, strings.Join(missing, ", ")))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// loader reads RETICORA_* variables and records which were set and which
+// could not be parsed.
+type loader struct {
+	set     map[string]bool
+	invalid []string
+}
+
+func (l *loader) str(key, defaultValue string) string {
 	if v := os.Getenv(key); v != "" {
+		l.set[key] = true
 		return v
 	}
 	return defaultValue
 }
 
-func envOrDefaultInt(key string, defaultValue int) int {
-	if v := os.Getenv(key); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			return i
-		}
+func (l *loader) integer(key string, defaultValue int) int {
+	v := l.str(key, "")
+	if v == "" {
+		return defaultValue
 	}
-	return defaultValue
+	i, err := strconv.Atoi(v)
+	if err != nil {
+		l.invalid = append(l.invalid, key)
+		return defaultValue
+	}
+	return i
 }
 
-func envOrDefaultBool(key string, defaultValue bool) bool {
-	if v := os.Getenv(key); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			return b
-		}
+func (l *loader) boolean(key string, defaultValue bool) bool {
+	v := l.str(key, "")
+	if v == "" {
+		return defaultValue
 	}
-	return defaultValue
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		l.invalid = append(l.invalid, key)
+		return defaultValue
+	}
+	return b
 }

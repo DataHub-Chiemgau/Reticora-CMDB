@@ -21,6 +21,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/readyz': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Readiness check
+     * @description Checks the configured dependencies (database with required extensions, Redis, object storage, NATS) with a timeout per check. Liveness stays on /healthz. Failing checks are only named; the cause is logged by the server.
+     */
+    get: operations['getReadiness'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/auth/config': {
     parameters: {
       query?: never;
@@ -4754,6 +4774,20 @@ export interface components {
       /** @example ok */
       status: string;
     };
+    ReadinessResponse: {
+      /** @enum {string} */
+      status: 'ready' | 'not_ready';
+      /**
+       * @description Result per dependency.
+       * @example {
+       *       "database": "ok",
+       *       "redis": "unavailable"
+       *     }
+       */
+      checks: {
+        [key: string]: 'ok' | 'unavailable';
+      };
+    };
     CallbackRequest: {
       code: string;
       state: string;
@@ -7344,6 +7378,35 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['HealthResponse'];
+        };
+      };
+    };
+  };
+  getReadiness: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description All dependencies are usable */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReadinessResponse'];
+        };
+      };
+      /** @description At least one dependency is unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReadinessResponse'];
         };
       };
     };

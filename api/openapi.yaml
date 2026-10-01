@@ -97,6 +97,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
 
+  /readyz:
+    get:
+      operationId: getReadiness
+      tags: [Health]
+      security: []
+      summary: Readiness check
+      description: >-
+        Checks the configured dependencies (database with required
+        extensions, Redis, object storage, NATS) with a timeout per check.
+        Liveness stays on /healthz. Failing checks are only named; the cause
+        is logged by the server.
+      responses:
+        '200':
+          description: All dependencies are usable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+        '503':
+          description: At least one dependency is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+
   /api/v1/auth/config:
     get:
       operationId: getAuthConfig
@@ -7699,6 +7724,23 @@ components:
         status:
           type: string
           example: ok
+
+    ReadinessResponse:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        checks:
+          type: object
+          description: Result per dependency.
+          additionalProperties:
+            type: string
+            enum: [ok, unavailable]
+          example:
+            database: ok
+            redis: unavailable
 
     CallbackRequest:
       type: object

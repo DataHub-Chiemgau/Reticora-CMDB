@@ -14,3 +14,4 @@ TEN-04;[B];B;backend/internal/database/tenant_scope_test.go;WP-008
 TEN-06;[B];B;backend/internal/database/tenant_scope_test.go;WP-008
 AST-05;[P2];B;backend/internal/composition/quarantine_integration_test.go;WP-052
 SIM-01;[B], Teilumfang [P2];A;.github/workflows/ci.yml;WP-106
+OPS-01;[B];A;backend/internal/server/health_test.go;WP-097
