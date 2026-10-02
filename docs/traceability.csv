@@ -111,3 +111,7 @@ OPS-05;[B];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-02
 MON-04;[P3];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-022
 AST-06;[P2];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-022
 TEN-06;[B];B;backend/internal/database/tenantguard_test.go;WP-041
+TEN-02;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-025
+TEN-05;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-025
+IMP-07;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-025
+SRC-01;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-025

@@ -65,20 +65,21 @@ func TestIPAMRepositoryClientScope(t *testing.T) {
 	if err = repo.DeleteInterface(ctx, f.OrgA, foreignNIC.ID); err == nil {
 		t.Fatal("client-1 principal deleted an interface of a client-2 CI")
 	}
-	if err = repo.CreateInterface(ctx, nic(foreignCI, "eth9")); !errors.Is(err, ipam.ErrNotFound) {
-		t.Fatalf("client-1 interface on client-2 CI: got %v, want ErrNotFound", err)
+	// The interface policy rejects the derived client 2 (WP-025).
+	if err = repo.CreateInterface(ctx, nic(foreignCI, "eth9")); err == nil {
+		t.Fatal("client-1 principal created an interface on a client-2 CI")
 	}
 
 	// Addresses created or moved by client 1 must stay within client 1.
-	if err = repo.CreateIPAddress(ctx, &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: foreignNet.ID, Address: "10.31.2.11", Status: "active"}); !errors.Is(err, ipam.ErrNotFound) {
-		t.Fatalf("client-1 address in client-2 subnet: got %v, want ErrNotFound", err)
+	if err = repo.CreateIPAddress(ctx, &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: foreignNet.ID, Address: "10.31.2.11", Status: "active"}); err == nil {
+		t.Fatal("client-1 principal created an address in a client-2 subnet")
 	}
 	ownIP := &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: ownNet.ID, Address: "10.31.1.10", Status: "active"}
 	if err = repo.CreateIPAddress(ctx, ownIP); err != nil {
 		t.Fatalf("client-1 address in own subnet: %v", err)
 	}
-	if _, err = repo.UpdateIPAddress(ctx, f.OrgA, ownIP.ID, ipam.UpdateIPAddressRequest{InterfaceID: &foreignNIC.ID}); !errors.Is(err, ipam.ErrNotFound) {
-		t.Fatalf("client-1 address moved to client-2 interface: got %v, want ErrNotFound", err)
+	if _, err = repo.UpdateIPAddress(ctx, f.OrgA, ownIP.ID, ipam.UpdateIPAddressRequest{InterfaceID: &foreignNIC.ID}); err == nil {
+		t.Fatal("client-1 principal moved an address to a client-2 interface")
 	}
 	ownNIC := nic(ownCI, "eth0")
 	if err = repo.CreateInterface(ctx, ownNIC); err != nil {
