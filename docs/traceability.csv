@@ -88,3 +88,8 @@ TEN-06;[B];B;backend/internal/consumable/consumable_scope_integration_test.go;WP
 TEN-06;[B];B;backend/internal/order/order_scope_integration_test.go;WP-018
 TEN-06;[B];B;backend/internal/disposal/disposal_scope_integration_test.go;WP-018
 TEN-06;[B];B;backend/internal/stocktake/stocktake_scope_integration_test.go;WP-018
+TEN-06;[B];B;backend/internal/document/document_scope_integration_test.go;WP-019
+TEN-06;[B];B;backend/internal/desk/desk_scope_integration_test.go;WP-019
+TEN-06;[B];B;backend/internal/keymgmt/keymgmt_scope_integration_test.go;WP-019
+TEN-06;[B];B;backend/internal/training/training_scope_integration_test.go;WP-019
+MGT-03;[P4];B;backend/internal/keymgmt/keymgmt_scope_integration_test.go;WP-019

@@ -245,3 +245,18 @@ func (f *Fixture) AppUser(t *testing.T, orgID, name string) string {
 	}
 	return id
 }
+
+// Room inserts a site of clientID in organization A with one building and one
+// room through the maintenance pool and returns the room id.
+func (f *Fixture) Room(t *testing.T, clientID, name string) string {
+	t.Helper()
+	var roomID string
+	if err := f.Admin.QueryRow(context.Background(), `
+		WITH s AS (INSERT INTO site (organization_id, client_id, name) VALUES ($1, $2, $3) RETURNING id),
+		     b AS (INSERT INTO building (organization_id, site_id, name) SELECT $1, id, $3 FROM s RETURNING id)
+		INSERT INTO room (organization_id, building_id, name) SELECT $1, id, $3 FROM b RETURNING id::text`,
+		f.OrgA, clientID, name).Scan(&roomID); err != nil {
+		t.Fatalf("seed room %s: %v", name, err)
+	}
+	return roomID
+}

@@ -358,6 +358,10 @@ func (h *Handler) Link(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.LinkDocument(r.Context(), link); err != nil {
+		if err.Error() == "not found" {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "document or linked object not found")
+			return
+		}
 		api.WriteRepoError(w, err)
 		return
 	}

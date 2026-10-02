@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -23,21 +24,6 @@ type PGRepository struct {
 // NewPGRepository creates a PostgreSQL-backed training repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
-}
-
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(context.Context, pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
 }
 
 func scanCourse(s pgx.Row) (*Course, error) {
@@ -59,7 +45,7 @@ func scanAssignment(s pgx.Row) (*Assignment, error) {
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Course, int, error) {
 	out := []Course{}
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id = $1"}
 		args := []any{orgID}
 		pos := 2
@@ -96,7 +82,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Course, error) {
 	var c *Course
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		c, err = scanCourse(tx.QueryRow(ctx, "SELECT "+courseCols+" FROM training WHERE organization_id = $1 AND id = $2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -108,7 +94,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Course, 
 }
 
 func (r *PGRepository) Create(ctx context.Context, c *Course) error {
-	return r.withTenant(ctx, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
 			INSERT INTO training (organization_id, title, description, category, validity_months)
 			VALUES ($1, $2, $3, $4, $5)
@@ -120,7 +106,7 @@ func (r *PGRepository) Create(ctx context.Context, c *Course) error {
 
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateCourseRequest) (*Course, error) {
 	var c *Course
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -160,7 +146,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateC
 }
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "DELETE FROM training WHERE organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
 			return err
@@ -173,7 +159,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 }
 
 func (r *PGRepository) Assign(ctx context.Context, a *Assignment) (*Assignment, error) {
-	err := r.withTenant(ctx, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if a.Status == "" {
 			a.Status = "assigned"
 		}
@@ -190,7 +176,7 @@ func (r *PGRepository) Assign(ctx context.Context, a *Assignment) (*Assignment, 
 
 func (r *PGRepository) Complete(ctx context.Context, orgID, assignmentID, proofObjectKey string) (*Assignment, error) {
 	var a *Assignment
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		a, err = scanAssignment(tx.QueryRow(ctx, `
 			UPDATE training_assignment SET completed_at = now(), proof_object_key = NULLIF($3,''), status = 'completed'
@@ -206,7 +192,7 @@ func (r *PGRepository) Complete(ctx context.Context, orgID, assignmentID, proofO
 
 func (r *PGRepository) ListAssignments(ctx context.Context, orgID, trainingID string) ([]Assignment, error) {
 	out := []Assignment{}
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, "SELECT "+assignmentCols+" FROM training_assignment WHERE organization_id = $1 AND training_id = $2 ORDER BY assigned_at DESC", orgID, trainingID)
 		if err != nil {
 			return err
