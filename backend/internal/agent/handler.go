@@ -81,7 +81,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Agent]{
@@ -117,7 +117,7 @@ func (h *Handler) Enroll(w http.ResponseWriter, r *http.Request) {
 		Policy:         DefaultPolicy(),
 	}
 	if err := h.repo.Register(r.Context(), a); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, a)
@@ -156,7 +156,7 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 
 	ciID, err := h.reconcileCI(r.Context(), t.OrganizationID, ag, payload)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	if ciID != "" && ag.CIID != ciID {
@@ -188,7 +188,7 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		if err := h.metrics.Ingest(r.Context(), metrics); err != nil {
-			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			api.WriteRepoError(w, err)
 			return
 		}
 	}

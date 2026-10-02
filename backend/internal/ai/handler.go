@@ -32,7 +32,7 @@ func (h *Handler) ListConversations(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.repo.ListConversations(r.Context(), t.OrganizationID, t.UserID)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, items)
@@ -52,7 +52,7 @@ func (h *Handler) CreateConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.repo.CreateConversation(r.Context(), t.OrganizationID, t.UserID, req.Title)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, c)
@@ -81,7 +81,7 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 	if convID == "" {
 		c, err := h.repo.CreateConversation(r.Context(), t.OrganizationID, t.UserID, shortTitle(req.Question))
 		if err != nil {
-			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			api.WriteRepoError(w, err)
 			return
 		}
 		convID = c.ID
@@ -91,7 +91,7 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 	}
 	chunks, cites, err := h.retriever.Retrieve(r.Context(), t.OrganizationID, t.UserID, req.Question, 6)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	prompt := buildPrompt(req.Question, chunks)

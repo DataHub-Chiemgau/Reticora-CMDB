@@ -99,3 +99,9 @@ TEN-06;[B];B;backend/internal/maintenance/maintenance_scope_integration_test.go;
 TEN-06;[B];B;backend/internal/compliance/compliance_scope_integration_test.go;WP-020
 TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/ticket/ticket_scope_integration_test.go;WP-020
 MGT-04;[P3];B;backend/internal/maintenance/maintenance_scope_integration_test.go;WP-020
+TEN-06;[B];B;backend/internal/form/form_scope_integration_test.go;WP-021
+TEN-06;[B];B;backend/internal/workflow/workflow_scope_integration_test.go;WP-021
+TEN-06;[B];B;backend/internal/agent/agent_scope_integration_test.go;WP-021
+TEN-06;[B];B;backend/internal/ai/ai_scope_integration_test.go;WP-021
+TEN-06;[B];B;backend/internal/iga/iga_scope_integration_test.go;WP-021
+WFL-01;[P3];B;backend/internal/workflow/workflow_scope_integration_test.go;WP-021
