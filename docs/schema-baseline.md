@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000070_agent_enrollment_scope
+Stand: Migration 000071_metric_sample_rls
 
 ## Prüfung
 
@@ -94,9 +94,6 @@ TestKnownGapsDocumented ./internal/tenant/rls/` neu.
 
 | Tabelle | Regel | Zuständiges WP |
 |---|---|---|
-| `metric_sample` | `rls-enabled` | WP-040 |
-| `metric_sample` | `rls-forced` | WP-040 |
-| `metric_sample` | `policy-commands` | WP-040 |
 
 <!-- rls-known-gaps:end -->
 

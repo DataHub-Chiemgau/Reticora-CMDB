@@ -11,11 +11,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// PGMetricStore implements MetricStore against the TimescaleDB hypertable
-// created by migration 000020. The table has no RLS yet (WP-040), so every
-// statement filters by organization_id explicitly and runs in the caller's
-// tenant transaction; samples of a CI count only when the CI is visible under
-// the caller's scope.
+// PGMetricStore implements MetricStore against the TimescaleDB metrics. As
+// decided in docs/decisions/0001-timescale-rls.md, the application role has
+// no privileges on the hypertable metric_sample or the continuous aggregate
+// metric_sample_1h; it reads and writes through the security-barrier views
+// metric_sample_v and metric_sample_1h_v (migration 000071), which restrict
+// every row to the transaction's organization. Statements run in the
+// caller's tenant transaction, and samples of a CI count only when the CI is
+// visible under the caller's scope.
 type PGMetricStore struct {
 	pool   *pgxpool.Pool
 	alerts *PGAlertStore
@@ -34,7 +37,7 @@ func NewPGMetricStore(pool *pgxpool.Pool) *PGMetricStore {
 // persistence for rules.
 func (s *PGMetricStore) AlertStore() AlertStore { return s.alerts }
 
-// Ingest inserts the samples into the metric_sample hypertable. Every sample
+// Ingest inserts the samples through metric_sample_v. Every sample
 // must belong to the caller's organization and name a CI visible under its
 // scope (or no CI).
 func (s *PGMetricStore) Ingest(ctx context.Context, metrics []Metric) error {
@@ -57,7 +60,7 @@ func (s *PGMetricStore) Ingest(ctx context.Context, metrics []Metric) error {
 				labels = map[string]string{}
 			}
 			batch.Queue(
-				`INSERT INTO metric_sample (time, organization_id, ci_id, metric_name, value, labels)
+				`INSERT INTO metric_sample_v (time, organization_id, ci_id, metric_name, value, labels)
 				 SELECT $1, $2, NULLIF($3, '')::uuid, $4, $5, $6
 				 WHERE $3 = '' OR EXISTS (SELECT 1 FROM ci WHERE ci.id = NULLIF($3, '')::uuid)`,
 				ts.UTC(), m.OrgID, m.CIID, m.Name, m.Value, labels,
@@ -102,7 +105,7 @@ func (s *PGMetricStore) Query(ctx context.Context, q MetricQuery) ([]MetricPoint
 func queryRaw(ctx context.Context, tx pgx.Tx, q *MetricQuery) ([]MetricPoint, error) {
 	where, args := metricWhere(*q)
 	rows, err := tx.Query(ctx,
-		`SELECT time, value FROM metric_sample WHERE `+where+` ORDER BY time ASC`, args...)
+		`SELECT time, value FROM metric_sample_v WHERE `+where+` ORDER BY time ASC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query metric samples: %w", err)
 	}
@@ -115,7 +118,7 @@ func queryBucketed(ctx context.Context, tx pgx.Tx, q *MetricQuery) ([]MetricPoin
 	args = append(args, fmt.Sprintf("%f seconds", q.Step.Seconds()))
 	rows, err := tx.Query(ctx,
 		`SELECT time_bucket($`+fmt.Sprint(len(args))+`::interval, time) AS bucket, avg(value)
-		 FROM metric_sample WHERE `+where+`
+		 FROM metric_sample_v WHERE `+where+`
 		 GROUP BY bucket ORDER BY bucket ASC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query bucketed metric samples: %w", err)
@@ -124,8 +127,8 @@ func queryBucketed(ctx context.Context, tx pgx.Tx, q *MetricQuery) ([]MetricPoin
 	return scanPoints(rows)
 }
 
-// queryHourly reads the pre-aggregated hourly rollup. Long-range dashboards
-// therefore touch a fraction of the raw data.
+// queryHourly reads the pre-aggregated hourly rollup metric_sample_1h through
+// its view. Long-range dashboards therefore touch a fraction of the raw data.
 func queryHourly(ctx context.Context, tx pgx.Tx, q *MetricQuery) ([]MetricPoint, error) {
 	where, args := metricWhere(*q)
 	where = strings.ReplaceAll(where, "time", "bucket")
@@ -133,7 +136,7 @@ func queryHourly(ctx context.Context, tx pgx.Tx, q *MetricQuery) ([]MetricPoint,
 	rows, err := tx.Query(ctx,
 		`SELECT time_bucket($`+fmt.Sprint(len(args))+`::interval, bucket) AS rollup,
 		        sum(avg_value * sample_count) / sum(sample_count) AS weighted_avg
-		 FROM metric_sample_hourly WHERE `+where+`
+		 FROM metric_sample_1h_v WHERE `+where+`
 		 GROUP BY rollup ORDER BY rollup ASC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query hourly metric rollup: %w", err)
