@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000061_denormalize_ci_scope
+Stand: Migration 000062_location_tree
 
 ## Prüfung
 
@@ -183,6 +183,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `lifecycle_definition` | ja | ja | lifecycle_definition_isolation_delete (DELETE), lifecycle_definition_isolation_insert (INSERT), lifecycle_definition_isolation_select (SELECT), lifecycle_definition_isolation_update (UPDATE) |
 | `lifecycle_state` | ja | ja | lifecycle_state_isolation_delete (DELETE), lifecycle_state_isolation_insert (INSERT), lifecycle_state_isolation_select (SELECT), lifecycle_state_isolation_update (UPDATE) |
 | `lifecycle_transition` | ja | ja | lifecycle_transition_isolation_delete (DELETE), lifecycle_transition_isolation_insert (INSERT), lifecycle_transition_isolation_select (SELECT), lifecycle_transition_isolation_update (UPDATE) |
+| `location` | ja | ja | location_isolation (ALL) |
 | `location_node` | ja | ja | location_node_isolation (ALL) |
 | `maintenance_notification` | ja | ja | maintenance_notification_isolation (ALL) |
 | `maintenance_window` | ja | ja | maintenance_window_isolation (ALL) |

@@ -115,3 +115,6 @@ TEN-02;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-025
 TEN-05;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-025
 IMP-07;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-025
 SRC-01;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-025
+LOC-10;B/G1;B;backend/internal/locations/pg_repository_integration_test.go;WP-026
+TEN-02;[B];B;backend/internal/locations/pg_repository_integration_test.go;WP-026
+TEC-06;[B], [Q] Spike;B;backend/internal/locations/pg_repository_integration_test.go;WP-026
