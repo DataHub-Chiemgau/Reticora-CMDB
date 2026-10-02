@@ -85,6 +85,8 @@ func setupCompositionDB(t *testing.T) *PGRepository {
 func TestCompositionRejectsRecursiveOwnership(t *testing.T) {
 	repo := setupCompositionDB(t)
 	ctx := tenant.WithTenant(context.Background(), tenant.TenantInfo{OrganizationID: cycOrg})
+	scope := database.OrgWideScope(cycOrg, "")
+	ctx = database.ContextWithTenantScope(ctx, &scope)
 
 	t.Run("asset cannot be its own parent", func(t *testing.T) {
 		err := repo.Create(ctx, &Composition{

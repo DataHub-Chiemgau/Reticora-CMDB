@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -43,26 +44,25 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// withTenant executes fn within a transaction that has the tenant setting set for RLS.
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
+// assignmentVisible restricts assignments to those whose asset and CI are
+// visible under the transaction's tenant scope: the asset and ci policies
+// filter the subqueries, while assignment carries no client column yet
+// (WP-025).
+const assignmentVisible = `(assignment.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = assignment.asset_id))
+	AND (assignment.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = assignment.ci_id))`
 
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
+// requireVisible fails with "not found" when the written row of table does not
+// satisfy visible, i.e. when a write pointed it at an object outside the
+// tenant scope; the transaction is then rolled back.
+func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
+	var ok bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
+		return fmt.Errorf("check %s visibility: %w", table, err)
 	}
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set legacy tenant context: %w", err)
+	if !ok {
+		return fmt.Errorf("not found")
 	}
-
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
+	return nil
 }
 
 // List returns paginated assignments filtered by the given parameters.
@@ -70,7 +70,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 	var assignments []Assignment
 	var total int
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		whereParts := []string{"true"}
 		args := make([]any, 0, 5)
 		argPos := 1
@@ -102,7 +102,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 		}
 
 		whereClause := strings.Join(whereParts, " AND ")
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM assignment WHERE "+whereClause, args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM assignment WHERE "+assignmentVisible+" AND "+whereClause, args...).Scan(&total); err != nil {
 			return fmt.Errorf("count assignments: %w", err)
 		}
 
@@ -125,14 +125,14 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 		if page.Cursor != nil {
 			listArgs = append(listArgs, page.Limit)
 			query = fmt.Sprintf(
-				"SELECT %s FROM assignment WHERE %s ORDER BY %s %s, id %s LIMIT $%d",
+				"SELECT %s FROM assignment WHERE "+assignmentVisible+" AND %s ORDER BY %s %s, id %s LIMIT $%d",
 				assignmentSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos,
 			)
 		} else {
 			listArgs = append(listArgs, page.Limit, page.Offset)
 			query = fmt.Sprintf(
-				"SELECT %s FROM assignment WHERE %s ORDER BY %s %s, id %s LIMIT $%d OFFSET $%d",
+				"SELECT %s FROM assignment WHERE "+assignmentVisible+" AND %s ORDER BY %s %s, id %s LIMIT $%d OFFSET $%d",
 				assignmentSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos, argPos+1,
 			)
@@ -163,8 +163,8 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Assignment, error) {
 	var assignment *Assignment
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf("SELECT %s FROM assignment WHERE id = $1", assignmentSelectColumns)
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		query := fmt.Sprintf("SELECT %s FROM assignment WHERE "+assignmentVisible+" AND id = $1", assignmentSelectColumns)
 		var err error
 		assignment, err = scanAssignment(tx.QueryRow(ctx, query, id))
 		if err != nil {
@@ -183,7 +183,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Assignme
 
 // Create inserts a new assignment.
 func (r *PGRepository) Create(ctx context.Context, a *Assignment) error {
-	return r.withTenant(ctx, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		var checkoutSig any
 		if a.CheckoutSignature != nil {
 			if b, err := json.Marshal(a.CheckoutSignature); err == nil {
@@ -220,13 +220,13 @@ func (r *PGRepository) Create(ctx context.Context, a *Assignment) error {
 		a.AssignedAt = a.AssignedAt.UTC()
 		a.CreatedAt = a.CreatedAt.UTC()
 		a.UpdatedAt = a.UpdatedAt.UTC()
-		return nil
+		return requireVisible(ctx, tx, "assignment", assignmentVisible, a.ID)
 	})
 }
 
 // Update replaces mutable fields on an existing assignment.
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, a *Assignment) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var returnSig any
 		if a.ReturnSignature != nil {
 			if b, err := json.Marshal(a.ReturnSignature); err == nil {
@@ -272,14 +272,14 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, a *Assignme
 			return fmt.Errorf("update assignment: %w", err)
 		}
 		*a = *updated
-		return nil
+		return requireVisible(ctx, tx, "assignment", assignmentVisible, id)
 	})
 }
 
 // Delete deletes an assignment. The assignment table has no deleted_at column, so this is a hard delete.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmdTag, err := tx.Exec(ctx, "DELETE FROM assignment WHERE id = $1", id)
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		cmdTag, err := tx.Exec(ctx, "DELETE FROM assignment WHERE "+assignmentVisible+" AND id = $1", id)
 		if err != nil {
 			return fmt.Errorf("delete assignment: %w", err)
 		}

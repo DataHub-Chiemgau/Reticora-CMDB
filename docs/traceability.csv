@@ -77,3 +77,9 @@ TEN-06;[B];B;backend/internal/export/export_scope_integration_test.go;WP-015
 TEN-06;[B];B;backend/internal/webhook/webhook_scope_integration_test.go;WP-016
 TEN-06;[B];B;backend/internal/audit/audit_scope_integration_test.go;WP-016
 TEN-06;[B];B;backend/internal/monitoring/monitoring_scope_integration_test.go;WP-016
+TEN-06;[B];B;backend/internal/asset/asset_scope_integration_test.go;WP-017
+TEN-06;[B];B;backend/internal/assignment/assignment_scope_integration_test.go;WP-017
+TEN-06;[B];B;backend/internal/reservation/reservation_scope_integration_test.go;WP-017
+TEN-06;[B];B;backend/internal/composition/composition_scope_integration_test.go;WP-017
+AST-01;[P2];B;backend/internal/asset/asset_scope_integration_test.go;WP-017
+MGT-11;[P5];B;backend/internal/asset/asset_scope_integration_test.go;WP-017

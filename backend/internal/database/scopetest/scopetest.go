@@ -215,3 +215,33 @@ func (f *Fixture) CI(t *testing.T, orgID, clientID, name string) string {
 	}
 	return id
 }
+
+// Asset inserts an asset through the maintenance pool and returns its id.
+// clientID may be empty for an org-wide asset; tag must be unique.
+func (f *Fixture) Asset(t *testing.T, orgID, clientID, tag string) string {
+	t.Helper()
+	id := f.ID()
+	var client any
+	if clientID != "" {
+		client = clientID
+	}
+	if _, err := f.Admin.Exec(context.Background(),
+		`INSERT INTO asset (id, organization_id, client_id, asset_tag, name) VALUES ($1, $2, $3, $4, $4)`,
+		id, orgID, client, tag); err != nil {
+		t.Fatalf("insert asset %s: %v", tag, err)
+	}
+	return id
+}
+
+// AppUser inserts an active user of orgID through the maintenance pool and
+// returns its id.
+func (f *Fixture) AppUser(t *testing.T, orgID, name string) string {
+	t.Helper()
+	id := f.ID()
+	if _, err := f.Admin.Exec(context.Background(),
+		`INSERT INTO app_user (id, organization_id, oidc_subject, email, display_name) VALUES ($1, $2, $3, $3 || '@scopetest.invalid', $3)`,
+		id, orgID, "scopetest-"+f.tag+"-"+name); err != nil {
+		t.Fatalf("insert user %s: %v", name, err)
+	}
+	return id
+}
