@@ -139,3 +139,5 @@ SRC-01;[B];B;backend/internal/search/scope_integration_test.go;WP-032
 TEC-12;[P5];B;backend/internal/search/opensearch_scope_test.go;WP-033
 SRC-03;[P2], Textsyntax [O];B;backend/internal/savedview/scope_integration_test.go;WP-034
 SRC-04;[P2];B;backend/internal/savedview/scope_integration_test.go;WP-034
+EXP-01;[B], DATEV [P2];B;backend/internal/export/scope_integration_test.go;WP-035
+TEN-06;[B];B;backend/internal/export/scope_integration_test.go;WP-035

@@ -14,7 +14,14 @@ import (
 
 const jobColumns = `id::text, organization_id::text, COALESCE(initiated_by::text, ''), format, status, filters,
 	COALESCE(object_key, ''), row_count, file_size_bytes, COALESCE(error_message, ''),
-	started_at, completed_at, expires_at, created_at, updated_at`
+	started_at, completed_at, expires_at, created_at, updated_at,
+	scope_recorded, scope_clients::text[], scope_sites::text[], scope_teams::text[]`
+
+// ownJob restricts request paths to the jobs of the principal: the user id
+// comes from the transaction's tenant scope, not from the request. It is
+// compared as text, so a principal without a user id (or one that is no
+// uuid) sees no job instead of failing.
+const ownJob = `initiated_by::text = NULLIF(current_setting('app.user_id', true), '')`
 
 // PGJobRepository implements JobRepository on PostgreSQL with RLS. Request
 // paths run in database.WithTenant with the principal's scope; the worker
@@ -27,10 +34,10 @@ func NewPGJobRepository(pool *pgxpool.Pool) *PGJobRepository {
 	return &PGJobRepository{pool: pool}
 }
 
-// workerScope is the scope of the export worker's state changes. The worker
-// runs outside a request on behalf of the job's organization (E-08); WP-022
-// and WP-035 move it to a per-organization system principal and the
-// initiator's scope.
+// workerScope is the scope of the export worker's state changes (claim,
+// complete, fail). The worker runs outside a request on behalf of the job's
+// organization (E-08); the export itself runs with the creator's scope
+// snapshot (JobWorker.process).
 func workerScope(orgID string) *database.TenantScope {
 	scope := database.OrgWideScope(orgID, "")
 	return &scope
@@ -39,11 +46,17 @@ func workerScope(orgID string) *database.TenantScope {
 func scanJob(row pgx.Row) (*Job, error) {
 	var job Job
 	var filters []byte
+	var recorded bool
+	var scope JobScope
 	err := row.Scan(&job.ID, &job.OrganizationID, &job.InitiatedBy, &job.Format, &job.Status,
 		&filters, &job.ObjectKey, &job.RowCount, &job.FileSizeBytes, &job.ErrorMessage,
-		&job.StartedAt, &job.CompletedAt, &job.ExpiresAt, &job.CreatedAt, &job.UpdatedAt)
+		&job.StartedAt, &job.CompletedAt, &job.ExpiresAt, &job.CreatedAt, &job.UpdatedAt,
+		&recorded, &scope.Clients, &scope.Sites, &scope.Teams)
 	if err != nil {
 		return nil, err
+	}
+	if recorded {
+		job.Scope = &scope
 	}
 	if len(filters) > 0 {
 		if err := json.Unmarshal(filters, &job.Filters); err != nil {
@@ -58,12 +71,18 @@ func (r *PGJobRepository) CreateJob(ctx context.Context, orgID string, job *Job)
 	if err != nil {
 		return fmt.Errorf("encode export job filters: %w", err)
 	}
+	if job.Scope == nil {
+		return fmt.Errorf("create export job: missing scope snapshot")
+	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
-			INSERT INTO export_job (organization_id, initiated_by, format, status, filters)
-			VALUES (current_setting('app.org_id')::uuid, NULLIF($1, '')::uuid, $2, $3, $4)
+			INSERT INTO export_job (organization_id, initiated_by, format, status, filters,
+				scope_recorded, scope_clients, scope_sites, scope_teams)
+			VALUES (current_setting('app.org_id')::uuid, NULLIF($1, '')::uuid, $2, $3, $4,
+				true, $5::uuid[], $6::uuid[], $7::uuid[])
 			RETURNING `+jobColumns,
-			job.InitiatedBy, job.Format, JobStatusPending, filters)
+			job.InitiatedBy, job.Format, JobStatusPending, filters,
+			job.Scope.Clients, job.Scope.Sites, job.Scope.Teams)
 		stored, err := scanJob(row)
 		if err != nil {
 			return fmt.Errorf("create export job: %w", err)
@@ -78,7 +97,7 @@ func (r *PGJobRepository) GetJob(ctx context.Context, orgID, id string) (*Job, e
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		job, err = scanJob(tx.QueryRow(ctx,
-			"SELECT "+jobColumns+" FROM export_job WHERE organization_id = current_setting('app.org_id')::uuid AND id = $1", id))
+			"SELECT "+jobColumns+" FROM export_job WHERE organization_id = current_setting('app.org_id')::uuid AND "+ownJob+" AND id = $1", id))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("export job not found")
 		}
@@ -92,11 +111,11 @@ func (r *PGJobRepository) ListJobs(ctx context.Context, orgID string, limit, off
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
-			"SELECT COUNT(*) FROM export_job WHERE organization_id = current_setting('app.org_id')::uuid").Scan(&total); err != nil {
+			"SELECT COUNT(*) FROM export_job WHERE organization_id = current_setting('app.org_id')::uuid AND "+ownJob).Scan(&total); err != nil {
 			return fmt.Errorf("count export jobs: %w", err)
 		}
 		rows, err := tx.Query(ctx,
-			"SELECT "+jobColumns+" FROM export_job WHERE organization_id = current_setting('app.org_id')::uuid ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2",
+			"SELECT "+jobColumns+" FROM export_job WHERE organization_id = current_setting('app.org_id')::uuid AND "+ownJob+" ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2",
 			limit, offset)
 		if err != nil {
 			return fmt.Errorf("list export jobs: %w", err)

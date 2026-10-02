@@ -506,16 +506,17 @@ export interface paths {
     };
     /**
      * List asynchronous export jobs
-     * @description Returns the tenant's export jobs newest first. Completed, unexpired jobs carry a time-limited signed download URL.
+     * @description Returns the caller's own export jobs newest first; jobs of other users are not listed. Completed, unexpired jobs carry a time-limited signed download URL.
      */
     get: operations['listExportJobs'];
     put?: never;
     /**
      * Queue an asynchronous CI export
-     * @description Queues an asynchronous export. A background worker renders the CI set
-     *     in the requested format into object storage; once the job is
-     *     `completed` it exposes a signed download URL until `expires_at`.
-     *     Requires blob storage to be configured — otherwise 503.
+     * @description Queues an asynchronous export. The job records the caller's tenant
+     *     scope (`scope`); a background worker renders the CI set visible in
+     *     exactly this scope in the requested format into object storage. Once
+     *     the job is `completed` it exposes a signed download URL until
+     *     `expires_at`. Requires blob storage to be configured — otherwise 503.
      */
     post: operations['createExportJob'];
     delete?: never;
@@ -534,7 +535,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get an export job */
+    /**
+     * Get an export job
+     * @description Only the job's creator reads it; for anyone else the job does not exist (404).
+     */
     get: operations['getExportJob'];
     put?: never;
     post?: never;
@@ -5220,10 +5224,17 @@ export interface components {
       expires_at?: string;
       /** @description Time-limited signed URL; only present on completed, unexpired jobs. */
       download_url?: string;
+      scope?: components['schemas']['ExportJobScope'];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    /** @description Tenant scope of the job's creator at creation; the export contains only data visible in this scope. null grants the whole organization in that dimension, a list restricts it to the listed ids. */
+    ExportJobScope: {
+      clients: string[] | null;
+      sites: string[] | null;
+      teams: string[] | null;
     };
     ExportJobListResponse: {
       data: components['schemas']['ExportJob'][];

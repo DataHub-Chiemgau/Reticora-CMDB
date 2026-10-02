@@ -6,6 +6,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 // MemoryJobRepository is an in-memory JobRepository for tests and the
@@ -37,24 +39,31 @@ func (r *MemoryJobRepository) CreateJob(_ context.Context, orgID string, job *Jo
 	return nil
 }
 
-func (r *MemoryJobRepository) GetJob(_ context.Context, orgID, id string) (*Job, error) {
+// ownedBy mirrors the creator restriction of the PostgreSQL repository: with
+// a tenant scope in ctx, only the scope's user owns jobs.
+func ownedBy(ctx context.Context, job *Job) bool {
+	scope, ok := database.TenantScopeFromContext(ctx)
+	return !ok || (scope.UserID != "" && job.InitiatedBy == scope.UserID)
+}
+
+func (r *MemoryJobRepository) GetJob(ctx context.Context, orgID, id string) (*Job, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	job, ok := r.jobs[id]
-	if !ok || job.OrganizationID != orgID {
+	if !ok || job.OrganizationID != orgID || !ownedBy(ctx, job) {
 		return nil, fmt.Errorf("export job not found")
 	}
 	cp := *job
 	return &cp, nil
 }
 
-func (r *MemoryJobRepository) ListJobs(_ context.Context, orgID string, limit, offset int) ([]Job, int, error) {
+func (r *MemoryJobRepository) ListJobs(ctx context.Context, orgID string, limit, offset int) ([]Job, int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []Job
 	for i := len(r.order) - 1; i >= 0; i-- {
 		job := r.jobs[r.order[i]]
-		if job.OrganizationID == orgID {
+		if job.OrganizationID == orgID && ownedBy(ctx, job) {
 			out = append(out, *job)
 		}
 	}

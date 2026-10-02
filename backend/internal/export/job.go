@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 // Job status values for an asynchronous export run.
@@ -33,6 +35,44 @@ type Job struct {
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
+	// Scope is the creator's tenant scope at creation; the worker renders
+	// the export with exactly this scope. Nil for jobs without a snapshot,
+	// which the worker refuses.
+	Scope *JobScope `json:"scope,omitempty"`
+}
+
+// JobScope snapshots a tenant scope. A nil list grants the whole
+// organization in that dimension; a non-nil list restricts it to the listed
+// ids (empty: no access, E-08).
+type JobScope struct {
+	Clients []string `json:"clients"`
+	Sites   []string `json:"sites"`
+	Teams   []string `json:"teams"`
+}
+
+// SnapshotScope records scope for a job.
+func SnapshotScope(scope *database.TenantScope) *JobScope {
+	set := func(s database.ScopeSet) []string {
+		if s.IsAll() {
+			return nil
+		}
+		if ids := s.IDs(); ids != nil {
+			return ids
+		}
+		return []string{}
+	}
+	return &JobScope{Clients: set(scope.Clients), Sites: set(scope.Sites), Teams: set(scope.Teams)}
+}
+
+// TenantScope restores the snapshot as the scope of userID in orgID.
+func (s *JobScope) TenantScope(orgID, userID string) database.TenantScope {
+	set := func(ids []string) database.ScopeSet {
+		if ids == nil {
+			return database.AllScopes()
+		}
+		return database.ScopeIDs(ids...)
+	}
+	return database.TenantScope{OrgID: orgID, UserID: userID, Clients: set(s.Clients), Sites: set(s.Sites), Teams: set(s.Teams)}
 }
 
 // JobFilters narrows an export job to a subset of the tenant's CIs.
@@ -49,7 +89,8 @@ type CreateJobRequest struct {
 }
 
 // JobRepository defines persistence for export jobs. All methods are scoped
-// to a tenant; claiming pending jobs for the worker is the single
+// to a tenant; GetJob and ListJobs return only jobs created by the principal
+// of the request (EXP-01). Claiming pending jobs for the worker is the single
 // cross-tenant operation and is never invoked from request paths.
 type JobRepository interface {
 	CreateJob(ctx context.Context, orgID string, job *Job) error

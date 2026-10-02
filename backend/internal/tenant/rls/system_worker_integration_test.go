@@ -54,7 +54,7 @@ func TestSystemWorkersPerOrganization(t *testing.T) {
 	// Export jobs pending in both organizations.
 	jobs := export.NewPGJobRepository(f.App)
 	for _, org := range orgs {
-		if err := jobs.CreateJob(f.OrgCtx(org), org, &export.Job{Format: "csv", InitiatedBy: f.User}); err != nil {
+		if err := jobs.CreateJob(f.OrgCtx(org), org, &export.Job{Format: "csv", InitiatedBy: f.User, Scope: &export.JobScope{}}); err != nil {
 			t.Fatalf("create export job for %s: %v", org, err)
 		}
 	}

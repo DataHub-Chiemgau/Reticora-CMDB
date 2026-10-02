@@ -36,11 +36,12 @@ func TestExportScope(t *testing.T) {
 	}
 
 	jobs := export.NewPGJobRepository(f.App)
-	jobB := &export.Job{Format: "csv", InitiatedBy: f.User}
+	orgWide := database.OrgWideScope(f.OrgB, f.User)
+	jobB := &export.Job{Format: "csv", InitiatedBy: f.User, Scope: export.SnapshotScope(&orgWide)}
 	if err = jobs.CreateJob(f.OrgCtx(f.OrgB), f.OrgB, jobB); err != nil {
 		t.Fatalf("create organization B job: %v", err)
 	}
-	jobA := &export.Job{Format: "csv", InitiatedBy: f.User}
+	jobA := &export.Job{Format: "csv", InitiatedBy: f.User, Scope: &export.JobScope{Clients: []string{f.Client1}}}
 	if err = jobs.CreateJob(ctx, f.OrgA, jobA); err != nil {
 		t.Fatalf("create organization A job: %v", err)
 	}
