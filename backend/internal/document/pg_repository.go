@@ -7,6 +7,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -195,12 +196,14 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Document
 	return doc, nil
 }
 
-// Create inserts a new document.
+// Create inserts a new document. It has no stored content yet: the storage
+// key stays empty until SetStorage, whatever d.StorageKey holds.
 func (r *PGRepository) Create(ctx context.Context, d *Document) error {
 	return database.WithRequestTenant(ctx, r.pool, d.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if d.Tags == nil {
 			d.Tags = []string{}
 		}
+		d.StorageKey = ""
 		query := `
 			INSERT INTO document (
 				organization_id, title, description, file_name, file_size, mime_type,
@@ -295,9 +298,13 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 
 // SetStorage stores the blob location after an upload and returns the
 // updated document. The storage key is always server-generated
-// (documents/<org>/<id>/<version>) so a client can never point a document at
-// another tenant's object.
+// (org/<org>/documents/<id>/<version>) so a client can never point a document
+// at another tenant's object; keys outside the organization's prefix are
+// rejected here and by the CHECK constraint of migration 000066.
 func (r *PGRepository) SetStorage(ctx context.Context, orgID, id, storageKey, mimeType string, size int64) (*Document, error) {
+	if err := blob.CheckOrgKey(orgID, storageKey); err != nil {
+		return nil, err
+	}
 	var doc *Document
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
