@@ -110,3 +110,4 @@ TEN-05;[B];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-02
 OPS-05;[B];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-022
 MON-04;[P3];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-022
 AST-06;[P2];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-022
+TEN-06;[B];B;backend/internal/database/tenantguard_test.go;WP-041
