@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 )
 
 // conditionMet reports whether value satisfies the rule condition.
@@ -75,6 +76,7 @@ func (e *Evaluator) Run(ctx context.Context, interval time.Duration) {
 func (e *Evaluator) Evaluate(ctx context.Context) {
 	rules, err := e.alerts.ListEnabled(ctx)
 	if err != nil {
+		observability.WorkerErrors.WithLabelValues("alert_evaluator").Inc()
 		slog.Error("alert evaluation: list rules failed", "error", err)
 		return
 	}
@@ -83,7 +85,8 @@ func (e *Evaluator) Evaluate(ctx context.Context) {
 			return
 		}
 		if err := e.evaluateRule(ctx, rule); err != nil {
-			slog.Error("alert evaluation failed", "rule_id", rule.ID, "rule", rule.Name, "error", err)
+			observability.WorkerErrors.WithLabelValues("alert_evaluator").Inc()
+			slog.Error("alert evaluation failed", "rule_id", rule.ID, "organization_id", rule.OrgID, "rule", rule.Name, "error", err)
 		}
 	}
 }

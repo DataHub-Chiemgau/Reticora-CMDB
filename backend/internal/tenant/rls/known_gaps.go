@@ -85,13 +85,6 @@ const KnownGapsBaselineMigration = 57
 // applies to them; WP-025, WP-028 and WP-029 add the columns together with the
 // policies, after which client-scope and site-scope cover them automatically.
 var KnownGaps = []Gap{
-	// System policies (app.system) are writable instead of SELECT-only.
-	{"alert_rule", RuleSystemWrite, "WP-022"},
-	{"collector_enrollment_code", RuleSystemWrite, "WP-022"},
-	{"export_job", RuleSystemWrite, "WP-022"},
-	{"webhook_dead_letter", RuleSystemWrite, "WP-022"},
-	{"webhook_delivery", RuleSystemWrite, "WP-022"},
-
 	// Tables with site_id without site scope.
 	{"building", RuleSiteScope, "WP-027"},
 	{"ci", RuleSiteScope, "WP-027"},

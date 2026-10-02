@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -14,7 +15,8 @@ import (
 //
 // Tenant-scoped statements run with `app.org_id` so the regular RLS policy
 // applies. The dispatcher's cross-tenant claim query is the single exception:
-// it sets the `app.system` flag, which no request-scoped code path ever sets.
+// it reads with the `app.system` flag (database.WithSystem), which no
+// request-scoped code path ever sets and which cannot write.
 type PGDeliveryStore struct {
 	pool *pgxpool.Pool
 }
@@ -24,29 +26,19 @@ func NewPGDeliveryStore(pool *pgxpool.Pool) *PGDeliveryStore {
 	return &PGDeliveryStore{pool: pool}
 }
 
-func (s *PGDeliveryStore) inTx(ctx context.Context, setting, value string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	if _, err := tx.Exec(ctx, "SELECT set_config($1, $2, true)", setting, value); err != nil {
-		return fmt.Errorf("set session context: %w", err)
-	}
-
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
+// orgScope is the scope of delivery bookkeeping: deliveries belong to the
+// organization, not to the principal whose action raised the event, so they
+// are written org-wide on behalf of the organization (E-08).
+func orgScope(orgID string) *database.TenantScope {
+	scope := database.OrgWideScope(orgID, "")
+	return &scope
 }
 
 // Enqueue stores a new pending delivery for the tenant.
 func (s *PGDeliveryStore) Enqueue(ctx context.Context, rec DeliveryRecord) (DeliveryRecord, error) {
 	stored := rec
 
-	err := s.inTx(ctx, "app.org_id", rec.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithTenant(ctx, s.pool, orgScope(rec.OrganizationID), func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
 			INSERT INTO webhook_delivery (
 				organization_id, subscription_id, event, payload,
@@ -80,7 +72,7 @@ func (s *PGDeliveryStore) Enqueue(ctx context.Context, rec DeliveryRecord) (Deli
 
 // Update persists the outcome of a delivery attempt.
 func (s *PGDeliveryStore) Update(ctx context.Context, rec DeliveryRecord) error {
-	return s.inTx(ctx, "app.org_id", rec.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithTenant(ctx, s.pool, orgScope(rec.OrganizationID), func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
 			UPDATE webhook_delivery
 			SET status = $2,
@@ -113,10 +105,52 @@ func (s *PGDeliveryStore) Update(ctx context.Context, rec DeliveryRecord) error 
 }
 
 // ClaimDue leases due deliveries across all tenants for the dispatcher worker.
+// The system flag only finds the organizations with due deliveries; each
+// organization's deliveries are then leased in its own tenant transaction,
+// because the system flag cannot write (WP-022).
 func (s *PGDeliveryStore) ClaimDue(ctx context.Context, now time.Time, limit int, lease time.Duration) ([]DeliveryRecord, error) {
-	records := make([]DeliveryRecord, 0, limit)
+	var orgIDs []string
+	err := database.WithSystem(ctx, s.pool, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT DISTINCT organization_id::text
+			FROM webhook_delivery
+			WHERE status IN ('pending', 'retrying')
+			  AND next_retry_at IS NOT NULL
+			  AND next_retry_at <= $1`, now)
+		if err != nil {
+			return fmt.Errorf("find due webhook deliveries: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("scan organization: %w", err)
+			}
+			orgIDs = append(orgIDs, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
 
-	err := s.inTx(ctx, "app.system", "on", func(ctx context.Context, tx pgx.Tx) error {
+	records := make([]DeliveryRecord, 0, limit)
+	for _, orgID := range orgIDs {
+		if len(records) >= limit {
+			break
+		}
+		claimed, err := s.claimDueForOrg(ctx, orgID, now, limit-len(records), lease)
+		if err != nil {
+			return records, err
+		}
+		records = append(records, claimed...)
+	}
+	return records, nil
+}
+
+func (s *PGDeliveryStore) claimDueForOrg(ctx context.Context, orgID string, now time.Time, limit int, lease time.Duration) ([]DeliveryRecord, error) {
+	var records []DeliveryRecord
+	err := database.WithTenant(ctx, s.pool, orgScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			WITH due AS (
 				SELECT id
@@ -162,11 +196,7 @@ func (s *PGDeliveryStore) ClaimDue(ctx context.Context, now time.Time, limit int
 		}
 		return rows.Err()
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	return records, nil
+	return records, err
 }
 
 // ListBySubscription returns the delivery history of a subscription.
@@ -174,7 +204,7 @@ func (s *PGDeliveryStore) ListBySubscription(ctx context.Context, orgID, subscri
 	records := make([]DeliveryRecord, 0)
 	total := 0
 
-	err := s.inTx(ctx, "app.org_id", orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
 			"SELECT COUNT(*) FROM webhook_delivery WHERE subscription_id = $1", subscriptionID,
 		).Scan(&total); err != nil {
@@ -241,7 +271,7 @@ func (s *PGDeliveryStore) ListBySubscription(ctx context.Context, orgID, subscri
 // marks the delivery record dead, atomically. Repeating the move for the same
 // delivery is a no-op.
 func (s *PGDeliveryStore) MoveToDeadLetter(ctx context.Context, rec DeliveryRecord) error {
-	return s.inTx(ctx, "app.org_id", rec.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithTenant(ctx, s.pool, orgScope(rec.OrganizationID), func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO webhook_dead_letter (
 				delivery_id, organization_id, subscription_id, event, payload,
@@ -294,7 +324,7 @@ func (s *PGDeliveryStore) ListDeadLetters(ctx context.Context, orgID string, pag
 	letters := make([]DeadLetter, 0)
 	total := 0
 
-	err := s.inTx(ctx, "app.org_id", orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
 			"SELECT COUNT(*) FROM webhook_dead_letter WHERE organization_id = $1", orgID,
 		).Scan(&total); err != nil {

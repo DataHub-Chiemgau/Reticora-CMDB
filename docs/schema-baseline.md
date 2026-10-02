@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000059_global_rows_readonly
+Stand: Migration 000060_restrict_system_policies
 
 ## Prüfung
 
@@ -94,11 +94,6 @@ TestKnownGapsDocumented ./internal/tenant/rls/` neu.
 
 | Tabelle | Regel | Zuständiges WP |
 |---|---|---|
-| `alert_rule` | `system-write` | WP-022 |
-| `collector_enrollment_code` | `system-write` | WP-022 |
-| `export_job` | `system-write` | WP-022 |
-| `webhook_dead_letter` | `system-write` | WP-022 |
-| `webhook_delivery` | `system-write` | WP-022 |
 | `building` | `site-scope` | WP-027 |
 | `ci` | `site-scope` | WP-027 |
 | `location_node` | `site-scope` | WP-027 |
@@ -122,7 +117,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ai_chunk` | ja | ja | ai_chunk_tenant_isolation (ALL) |
 | `ai_conversation` | ja | ja | ai_conversation_tenant_isolation (ALL) |
 | `ai_message` | ja | ja | ai_message_tenant_isolation (ALL) |
-| `alert_rule` | ja | ja | alert_rule_isolation (ALL) |
+| `alert_rule` | ja | ja | alert_rule_isolation (ALL), alert_rule_system_select (SELECT) |
 | `api_key` | ja | ja | org_isolation (ALL) |
 | `app_user` | ja | ja | user_isolation (ALL) |
 | `asset` | ja | ja | asset_tenant_isolation (ALL) |
@@ -142,7 +137,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ci_type_attribute` | ja | ja | ci_type_attribute_isolation_delete (DELETE), ci_type_attribute_isolation_insert (INSERT), ci_type_attribute_isolation_select (SELECT), ci_type_attribute_isolation_update (UPDATE) |
 | `client` | ja | ja | client_isolation (ALL) |
 | `collector` | ja | ja | collector_isolation (ALL) |
-| `collector_enrollment_code` | ja | ja | collector_enrollment_code_isolation (ALL) |
+| `collector_enrollment_code` | ja | ja | collector_enrollment_code_isolation (ALL), collector_enrollment_code_system_select (SELECT) |
 | `compliance_result` | ja | ja | compliance_result_tenant_isolation (ALL) |
 | `compliance_rule` | ja | ja | compliance_rule_tenant_isolation (ALL) |
 | `composition` | ja | ja | composition_isolation (ALL) |
@@ -160,7 +155,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `endpoint_agent` | ja | ja | endpoint_agent_isolation (ALL) |
 | `entitlement` | ja | ja | entitlement_isolation (ALL) |
 | `entity_change` | ja | ja | entity_change_isolation (ALL) |
-| `export_job` | ja | ja | org_isolation (ALL) |
+| `export_job` | ja | ja | export_job_isolation (ALL), export_job_system_select (SELECT) |
 | `form_def` | ja | ja | form_def_tenant_isolation (ALL) |
 | `form_submission` | ja | ja | form_submission_tenant_isolation (ALL) |
 | `iga_access_request` | ja | ja | iga_access_request_tenant_isolation (ALL) |
@@ -186,7 +181,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |
 | `network_interface` | ja | ja | org_isolation (ALL) |
 | `org_dek` | ja | ja | org_dek_isolation (ALL) |
-| `organization` | ja | ja | org_isolation (ALL) |
+| `organization` | ja | ja | org_isolation (ALL), organization_system_select (SELECT) |
 | `permission` | nein | nein | – |
 | `privacy_retention_policy` | ja | ja | privacy_retention_isolation (ALL) |
 | `quantity_item` | ja | ja | quantity_item_isolation (ALL) |
@@ -219,8 +214,8 @@ SECURITY`), Policies mit ihrem Kommando.
 | `training_assignment` | ja | ja | training_assignment_isolation (ALL) |
 | `user_custom_role` | ja | ja | user_custom_role_isolation (ALL) |
 | `user_invitation` | ja | ja | org_isolation (ALL) |
-| `webhook_dead_letter` | ja | ja | webhook_dead_letter_isolation (ALL) |
-| `webhook_delivery` | ja | ja | webhook_delivery_isolation (ALL) |
+| `webhook_dead_letter` | ja | ja | webhook_dead_letter_isolation (ALL), webhook_dead_letter_system_select (SELECT) |
+| `webhook_delivery` | ja | ja | webhook_delivery_isolation (ALL), webhook_delivery_system_select (SELECT) |
 | `webhook_subscription` | ja | ja | webhook_sub_isolation (ALL) |
 | `workflow_def` | ja | ja | workflow_def_tenant_isolation (ALL) |
 | `workflow_run` | ja | ja | workflow_run_tenant_isolation (ALL) |

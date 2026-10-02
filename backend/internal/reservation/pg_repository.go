@@ -2,6 +2,7 @@ package reservation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -180,36 +181,34 @@ func (r *PGRepository) ActiveForItem(ctx context.Context, orgID, itemKind, itemI
 	return out, err
 }
 
-// ExpireDue marks overdue active reservations as expired.
+// ExpireDue marks overdue active reservations as expired. Expiry is a
+// cross-tenant batch job: it iterates the organizations and expires each
+// organization's reservations in its own tenant transaction (WP-022). A
+// failing organization does not stop the others; the errors are joined.
 func (r *PGRepository) ExpireDue(ctx context.Context, now time.Time) (int, error) {
-	// Expiry is a cross-tenant batch job: it runs with the system flag used
-	// by the webhook retry worker pattern. RLS on reservation has no system
-	// exception, so the sweeper iterates tenants instead.
-	var count int
-	tx, err := r.pool.Begin(ctx)
+	orgIDs, err := database.OrganizationIDs(ctx, r.pool)
 	if err != nil {
-		return 0, fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, `
-		UPDATE reservation SET state = 'expired', updated_at = now()
-		WHERE state = 'active' AND expires_at IS NOT NULL AND expires_at < $1
-		RETURNING organization_id::text`, now)
-	if err != nil {
-		return 0, fmt.Errorf("expire reservations: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var org string
-		if err := rows.Scan(&org); err != nil {
-			return 0, err
-		}
-		count++
-	}
-	if err := rows.Err(); err != nil {
 		return 0, err
 	}
-	return count, tx.Commit(ctx)
+	count := 0
+	var errs []error
+	for _, orgID := range orgIDs {
+		scope := database.OrgWideScope(orgID, "")
+		err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			tag, err := tx.Exec(ctx, `
+				UPDATE reservation SET state = 'expired', updated_at = now()
+				WHERE state = 'active' AND expires_at IS NOT NULL AND expires_at < $1`, now)
+			if err != nil {
+				return fmt.Errorf("expire reservations of organization %s: %w", orgID, err)
+			}
+			count += int(tag.RowsAffected())
+			return nil
+		})
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return count, errors.Join(errs...)
 }
 
 type scanner interface {

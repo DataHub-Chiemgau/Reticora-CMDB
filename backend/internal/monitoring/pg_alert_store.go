@@ -153,74 +153,66 @@ func (s *PGAlertStore) DeleteRule(ctx context.Context, orgID, id string) (bool, 
 }
 
 // ListEnabled returns every enabled rule across tenants; the evaluator needs
-// the system-wide view. It runs with the app.system flag so RLS lets it see
-// all rows.
+// the system-wide view. It reads with the system flag, which cannot write
+// (database.WithSystem); the evaluator changes a rule's state in the rule's
+// organization.
 func (s *PGAlertStore) ListEnabled(ctx context.Context) ([]AlertRule, error) {
 	rules := make([]AlertRule, 0)
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.system', 'on', true)"); err != nil {
-		return nil, fmt.Errorf("set system context: %w", err)
-	}
-	rows, err := tx.Query(ctx, "SELECT "+ruleColumns+" FROM alert_rule WHERE enabled ORDER BY organization_id, name")
-	if err != nil {
-		return nil, fmt.Errorf("list enabled alert rules: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		rule, err := scanRule(rows)
+	err := database.WithSystem(ctx, s.pool, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, "SELECT "+ruleColumns+" FROM alert_rule WHERE enabled ORDER BY organization_id, name")
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("list enabled alert rules: %w", err)
 		}
-		rules = append(rules, rule)
-	}
-	if err := rows.Err(); err != nil {
+		defer rows.Close()
+		for rows.Next() {
+			rule, err := scanRule(rows)
+			if err != nil {
+				return err
+			}
+			rules = append(rules, rule)
+		}
+		return rows.Err()
+	})
+	if err != nil {
 		return nil, err
 	}
-	return rules, tx.Commit(ctx)
+	return rules, nil
+}
+
+// updateRuleState changes the evaluation state of a rule in its
+// organization's tenant transaction (org-wide on behalf of the organization,
+// E-08).
+func (s *PGAlertStore) updateRuleState(ctx context.Context, orgID, ruleID, what, query string, args ...any) error {
+	scope := database.OrgWideScope(orgID, "")
+	return database.WithTenant(ctx, s.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("%s: %w", what, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("alert rule %s not found", ruleID)
+		}
+		return nil
+	})
 }
 
 // MarkPending records when the condition started being true.
 func (s *PGAlertStore) MarkPending(ctx context.Context, rule AlertRule, since time.Time) error {
-	tag, err := s.pool.Exec(ctx,
+	return s.updateRuleState(ctx, rule.OrgID, rule.ID, "mark alert rule pending",
 		"UPDATE alert_rule SET pending_since = $1 WHERE id = $2::uuid", since.UTC(), rule.ID)
-	if err != nil {
-		return fmt.Errorf("mark alert rule pending: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("alert rule %s not found", rule.ID)
-	}
-	return nil
 }
 
 // MarkFired records the firing and clears the pending marker.
 func (s *PGAlertStore) MarkFired(ctx context.Context, rule AlertRule, at time.Time) error {
-	tag, err := s.pool.Exec(ctx,
+	return s.updateRuleState(ctx, rule.OrgID, rule.ID, "mark alert rule fired",
 		"UPDATE alert_rule SET pending_since = NULL, last_fired_at = $1 WHERE id = $2::uuid", at.UTC(), rule.ID)
-	if err != nil {
-		return fmt.Errorf("mark alert rule fired: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("alert rule %s not found", rule.ID)
-	}
-	return nil
 }
 
 // ClearPending resets the duration tracking once the condition no longer
 // holds so a later breach starts a fresh duration window.
 func (s *PGAlertStore) ClearPending(ctx context.Context, rule AlertRule) error {
-	tag, err := s.pool.Exec(ctx,
+	return s.updateRuleState(ctx, rule.OrgID, rule.ID, "clear alert rule pending state",
 		"UPDATE alert_rule SET pending_since = NULL WHERE id = $1::uuid", rule.ID)
-	if err != nil {
-		return fmt.Errorf("clear alert rule pending state: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("alert rule %s not found", rule.ID)
-	}
-	return nil
 }
 
 func intervalLiteral(d time.Duration) string {

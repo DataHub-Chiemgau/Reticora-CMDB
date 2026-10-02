@@ -2,7 +2,10 @@ package reservation
 
 import (
 	"context"
+	"log/slog"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 )
 
 // Sweeper releases expired reservations on an interval and emits a
@@ -41,5 +44,9 @@ func (s *Sweeper) SweepOnce(ctx context.Context) {
 	if s.repo == nil {
 		return
 	}
-	_, _ = s.repo.ExpireDue(ctx, time.Now().UTC())
+	expired, err := s.repo.ExpireDue(ctx, time.Now().UTC())
+	if err != nil {
+		observability.WorkerErrors.WithLabelValues("reservation_sweeper").Inc()
+		slog.Error("reservation sweep failed", "expired", expired, "error", err)
+	}
 }

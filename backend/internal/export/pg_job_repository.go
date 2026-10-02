@@ -16,30 +16,15 @@ const jobColumns = `id::text, organization_id::text, COALESCE(initiated_by::text
 	COALESCE(object_key, ''), row_count, file_size_bytes, COALESCE(error_message, ''),
 	started_at, completed_at, expires_at, created_at, updated_at`
 
-// PGJobRepository implements JobRepository on PostgreSQL with RLS. The
-// worker's cross-tenant claim is the single exception and uses the
-// `app.system` flag, mirroring webhook.PGDeliveryStore.ClaimDue; request
-// paths run in database.WithTenant with the principal's scope.
+// PGJobRepository implements JobRepository on PostgreSQL with RLS. Request
+// paths run in database.WithTenant with the principal's scope; the worker
+// finds pending jobs with the read-only system flag and claims them per
+// organization, mirroring webhook.PGDeliveryStore.ClaimDue.
 type PGJobRepository struct{ pool *pgxpool.Pool }
 
 // NewPGJobRepository creates a PostgreSQL-backed export job repository.
 func NewPGJobRepository(pool *pgxpool.Pool) *PGJobRepository {
 	return &PGJobRepository{pool: pool}
-}
-
-func (r *PGJobRepository) inTx(ctx context.Context, setting, value string, fn func(context.Context, pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config($1, $2, true)", setting, value); err != nil {
-		return fmt.Errorf("set session context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
 }
 
 // workerScope is the scope of the export worker's state changes. The worker
@@ -178,12 +163,51 @@ func (r *PGJobRepository) FailJob(ctx context.Context, orgID, id, message string
 	})
 }
 
-// ClaimPending atomically marks up to limit pending jobs across all tenants
-// as running and returns them oldest first. It is the only method that
-// bypasses tenant scoping and is used exclusively by the export worker.
+// ClaimPending marks up to limit pending jobs across all tenants as running
+// and returns them oldest first; it is used exclusively by the export worker.
+// The system flag only finds the organizations with pending jobs; each
+// organization's jobs are claimed in its own tenant transaction, because the
+// system flag cannot write (WP-022).
 func (r *PGJobRepository) ClaimPending(ctx context.Context, limit int) ([]Job, error) {
+	var orgIDs []string
+	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT organization_id::text FROM export_job WHERE status = $1
+			GROUP BY organization_id ORDER BY min(created_at)`, JobStatusPending)
+		if err != nil {
+			return fmt.Errorf("find pending export jobs: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("scan organization: %w", err)
+			}
+			orgIDs = append(orgIDs, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	var out []Job
-	err := r.inTx(ctx, "app.system", "on", func(ctx context.Context, tx pgx.Tx) error {
+	for _, orgID := range orgIDs {
+		if len(out) >= limit {
+			break
+		}
+		claimed, err := r.claimPendingForOrg(ctx, orgID, limit-len(out))
+		if err != nil {
+			return out, err
+		}
+		out = append(out, claimed...)
+	}
+	return out, nil
+}
+
+func (r *PGJobRepository) claimPendingForOrg(ctx context.Context, orgID string, limit int) ([]Job, error) {
+	var out []Job
+	err := database.WithTenant(ctx, r.pool, workerScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			WITH due AS (
 				SELECT id AS job_id FROM export_job WHERE status = $1 ORDER BY created_at ASC, id ASC LIMIT $2

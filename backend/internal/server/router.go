@@ -43,6 +43,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/order"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
@@ -396,6 +397,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	registry.MustRegister(info)
 
 	registry.MustRegister(collectors.NewGoCollector())
+	observability.RegisterWorkerMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 

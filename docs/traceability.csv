@@ -105,3 +105,8 @@ TEN-06;[B];B;backend/internal/agent/agent_scope_integration_test.go;WP-021
 TEN-06;[B];B;backend/internal/ai/ai_scope_integration_test.go;WP-021
 TEN-06;[B];B;backend/internal/iga/iga_scope_integration_test.go;WP-021
 WFL-01;[P3];B;backend/internal/workflow/workflow_scope_integration_test.go;WP-021
+TEN-06;[B];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-022
+TEN-05;[B];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-022
+OPS-05;[B];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-022
+MON-04;[P3];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-022
+AST-06;[P2];B;backend/internal/tenant/rls/system_worker_integration_test.go;WP-022

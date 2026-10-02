@@ -575,50 +575,53 @@ func (r *PGRepository) CreateEnrollmentCode(ctx context.Context, code *Enrollmen
 	})
 }
 
-// RedeemEnrollmentCode atomically validates and consumes a code. Codes are
-// looked up by hash outside the tenant context (the collector is not yet
-// enrolled and has no tenant), then the org scope is enforced on the update.
+// RedeemEnrollmentCode validates and consumes a code. The collector is not
+// enrolled yet and has no tenant, so the code is looked up by its hash with
+// the read-only system flag (the hash is the credential); the code is then
+// consumed in its organization's tenant transaction. The consuming UPDATE
+// re-checks that the code is unused, so concurrent redemptions of one code
+// succeed at most once (WP-022).
 func (r *PGRepository) RedeemEnrollmentCode(ctx context.Context, rawCode, collectorID string) (string, error) {
 	hash := enrollmentCodeHash(rawCode)
-	// The code hash is globally unique, so the org lookup and the consume
-	// update run in a single statement. RLS is bypassed for this deliberately
-	// unauthenticated path by using the code_hash (the credential) as the
-	// lookup key; the org scope is enforced by the UPDATE's tenant context.
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return "", fmt.Errorf("begin redeem tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
 	var orgID string
-	// The code hash is the credential; the lookup runs under the dedicated
-	// app.system flag because there is no tenant context before enrollment.
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.system', 'on', true)"); err != nil {
-		return "", fmt.Errorf("set system context: %w", err)
-	}
-	err = tx.QueryRow(ctx, `
-		SELECT organization_id::text FROM collector_enrollment_code
-		WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
-	`, hash).Scan(&orgID)
-	if err == pgx.ErrNoRows {
-		return "", fmt.Errorf("enrollment code invalid, expired or already used")
-	}
+	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		lookupErr := tx.QueryRow(ctx, `
+			SELECT organization_id::text FROM collector_enrollment_code
+			WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
+		`, hash).Scan(&orgID)
+		if lookupErr == pgx.ErrNoRows {
+			return errEnrollmentCodeInvalid
+		}
+		if lookupErr != nil {
+			return fmt.Errorf("lookup enrollment code: %w", lookupErr)
+		}
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("lookup enrollment code: %w", err)
+		return "", err
 	}
 
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return "", fmt.Errorf("set tenant context: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE collector_enrollment_code
-		SET used_at = now(), used_by_collector_id = NULLIF($2, '')::uuid
-		WHERE code_hash = $1 AND used_at IS NULL
-	`, hash, collectorID); err != nil {
-		return "", fmt.Errorf("consume enrollment code: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return "", fmt.Errorf("commit redeem: %w", err)
+	scope := database.OrgWideScope(orgID, "")
+	err = database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		tag, execErr := tx.Exec(ctx, `
+			UPDATE collector_enrollment_code
+			SET used_at = now(), used_by_collector_id = NULLIF($2, '')::uuid
+			WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
+		`, hash, collectorID)
+		if execErr != nil {
+			return fmt.Errorf("consume enrollment code: %w", execErr)
+		}
+		if tag.RowsAffected() == 0 {
+			return errEnrollmentCodeInvalid
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
 	}
 	return orgID, nil
 }
+
+// errEnrollmentCodeInvalid is returned for unknown, expired and used codes
+// alike, so a caller learns nothing about which case applies.
+var errEnrollmentCodeInvalid = fmt.Errorf("enrollment code invalid, expired or already used")
