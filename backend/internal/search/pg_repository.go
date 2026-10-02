@@ -81,7 +81,7 @@ func buildPostgresQuery(q Query) (string, []any, error) {
 		snippet = fmt.Sprintf("ts_headline('simple', title || ' ' || summary, websearch_to_tsquery('simple', $%d), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=2')", 2)
 	}
 	args = append(args, limit, q.Offset)
-	query := fmt.Sprintf(`SELECT id::text, organization_id::text, entity_type, entity_id::text, title, summary, url, metadata, updated_at, %s AS score, %s AS snippet, COUNT(*) OVER() FROM search_document WHERE %s ORDER BY score DESC, updated_at DESC LIMIT $%d OFFSET $%d`, score, snippet, strings.Join(where, " AND "), pos, pos+1)
+	query := fmt.Sprintf(`SELECT id::text, organization_id::text, entity_type, entity_id::text, title, summary, url, metadata, COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), updated_at, %s AS score, %s AS snippet, COUNT(*) OVER() FROM search_document WHERE %s ORDER BY score DESC, updated_at DESC LIMIT $%d OFFSET $%d`, score, snippet, strings.Join(where, " AND "), pos, pos+1)
 	return query, args, nil
 }
 func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
@@ -104,7 +104,7 @@ func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
 			var h Hit
 			var meta []byte
 			var snippet string
-			if err := rows.Scan(&h.ID, &h.OrganizationID, &h.EntityType, &h.EntityID, &h.Title, &h.Summary, &h.URL, &meta, &h.UpdatedAt, &h.Score, &snippet, &res.Total); err != nil {
+			if err := rows.Scan(&h.ID, &h.OrganizationID, &h.EntityType, &h.EntityID, &h.Title, &h.Summary, &h.URL, &meta, &h.ClientID, &h.SiteID, &h.UpdatedAt, &h.Score, &snippet, &res.Total); err != nil {
 				return err
 			}
 			if err := json.Unmarshal(meta, &h.Metadata); err != nil {

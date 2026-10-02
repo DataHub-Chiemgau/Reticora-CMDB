@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 type OpenSearchConfig struct {
@@ -69,6 +71,8 @@ func indexTemplateBody(index string) map[string]any {
 			"mappings": map[string]any{
 				"properties": map[string]any{
 					"organization_id": map[string]any{"type": "keyword"},
+					"client_id":       map[string]any{"type": "keyword"},
+					"site_id":         map[string]any{"type": "keyword"},
 					"entity_type":     map[string]any{"type": "keyword"},
 					"entity_id":       map[string]any{"type": "keyword"},
 					"title": map[string]any{
@@ -150,13 +154,45 @@ func (b *OpenSearchBackend) ReindexTenant(ctx context.Context, orgID string) (Re
 	return ReindexResult{}, fmt.Errorf("opensearch reindex requires the PostgreSQL coordinator")
 }
 
-func buildOpenSearchQuery(q Query) (map[string]any, error) {
+// buildOpenSearchQuery builds the search request. The scope filters come
+// from the principal's tenant scope, never from the request: client and site
+// must match or be unset (E-09), and entity types whose visibility depends on
+// more than the indexed fields are left out for restricted principals
+// (documents: their links; tickets: the team).
+func buildOpenSearchQuery(q *Query, scope *database.TenantScope) (map[string]any, error) {
 	if err := validateQuery(q.Text); err != nil {
 		return nil, err
+	}
+	if scope == nil {
+		return nil, database.ErrNoTenantScope
+	}
+	if !strings.EqualFold(scope.OrgID, q.OrganizationID) {
+		return nil, database.ErrTenantMismatch
 	}
 	filters := []any{map[string]any{"term": map[string]any{"organization_id": q.OrganizationID}}}
 	if len(q.EntityTypes) > 0 {
 		filters = append(filters, map[string]any{"terms": map[string]any{"entity_type": q.EntityTypes}})
+	}
+	for _, dim := range []struct {
+		field string
+		set   database.ScopeSet
+	}{{"client_id", scope.Clients}, {"site_id", scope.Sites}} {
+		field, set := dim.field, dim.set
+		if set.IsAll() {
+			continue
+		}
+		filters = append(filters, map[string]any{"bool": map[string]any{
+			"should": []any{
+				map[string]any{"terms": map[string]any{field: nonNil(set.IDs())}},
+				map[string]any{"bool": map[string]any{"must_not": map[string]any{"exists": map[string]any{"field": field}}}},
+			},
+			"minimum_should_match": 1,
+		}})
+	}
+	if excluded := excludedTypes(scope); len(excluded) > 0 {
+		filters = append(filters, map[string]any{"bool": map[string]any{
+			"must_not": map[string]any{"terms": map[string]any{"entity_type": excluded}},
+		}})
 	}
 	must := []any{}
 	if strings.TrimSpace(q.Text) != "" {
@@ -176,7 +212,11 @@ func buildOpenSearchQuery(q Query) (map[string]any, error) {
 	return body, nil
 }
 func (b *OpenSearchBackend) Query(ctx context.Context, q Query) (Result, error) {
-	body, err := buildOpenSearchQuery(q)
+	scope, ok := database.TenantScopeFromContext(ctx)
+	if !ok {
+		return Result{}, database.ErrNoTenantScope
+	}
+	body, err := buildOpenSearchQuery(&q, &scope)
 	if err != nil {
 		return Result{}, err
 	}
@@ -225,6 +265,11 @@ func (b *OpenSearchBackend) Query(ctx context.Context, q Query) (Result, error) 
 		out.Total = int(v)
 	}
 	for _, item := range parsed.Hits.Hits {
+		// The filters run in OpenSearch; the check repeats them on the
+		// returned documents so a mapping error cannot leak hits.
+		if !visibleTo(&scope, q.OrganizationID, &item.Source) {
+			continue
+		}
 		h := Hit{Document: item.Source, Score: item.Score}
 		for _, vals := range item.Highlight {
 			h.Highlights = append(h.Highlights, vals...)
@@ -234,6 +279,53 @@ func (b *OpenSearchBackend) Query(ctx context.Context, q Query) (Result, error) 
 	out.HasMore = out.Offset+len(out.Data) < out.Total
 	return out, nil
 }
+// excludedTypes lists the entity types a restricted principal never gets from
+// a remote index.
+func excludedTypes(scope *database.TenantScope) []string {
+	var out []string
+	if !scope.Clients.IsAll() || !scope.Sites.IsAll() {
+		out = append(out, "document")
+	}
+	if !scope.Teams.IsAll() {
+		out = append(out, "ticket")
+	}
+	return out
+}
+
+// visibleTo applies the scope filters of buildOpenSearchQuery to one document.
+func visibleTo(scope *database.TenantScope, orgID string, doc *Document) bool {
+	if !strings.EqualFold(doc.OrganizationID, orgID) {
+		return false
+	}
+	inSet := func(set database.ScopeSet, id string) bool {
+		if set.IsAll() || id == "" {
+			return true
+		}
+		for _, allowed := range set.IDs() {
+			if strings.EqualFold(allowed, id) {
+				return true
+			}
+		}
+		return false
+	}
+	if !inSet(scope.Clients, doc.ClientID) || !inSet(scope.Sites, doc.SiteID) {
+		return false
+	}
+	for _, excluded := range excludedTypes(scope) {
+		if doc.EntityType == excluded {
+			return false
+		}
+	}
+	return true
+}
+
+func nonNil(ids []string) []string {
+	if ids == nil {
+		return []string{}
+	}
+	return ids
+}
+
 func (b *OpenSearchBackend) auth(req *http.Request) {
 	if b.cfg.Username != "" {
 		req.SetBasicAuth(b.cfg.Username, b.cfg.Password)

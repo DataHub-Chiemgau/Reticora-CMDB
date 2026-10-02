@@ -53,6 +53,8 @@ type Document struct {
 	Summary        string
 	URL            string
 	Metadata       map[string]string
+	ClientID       string
+	SiteID         string
 }
 
 // EntityTypeCI is the search entity type under which CIs are indexed.
@@ -68,6 +70,8 @@ func IndexDocumentFor(item *Item) Document {
 		Title:          item.Name,
 		Summary:        ciSummary(item),
 		URL:            "/cmdb/" + item.ID,
+		ClientID:       item.ClientID,
+		SiteID:         item.SiteID,
 	}
 }
 
