@@ -135,3 +135,4 @@ MGT-01;[P2];B;backend/internal/document/blob_isolation_test.go;WP-030
 TEN-06;[B];B;backend/internal/document/blob_isolation_test.go;WP-030
 IMP-07;[B];B;backend/internal/topology/scope_integration_test.go;WP-031
 CI-05;[B];B;backend/internal/topology/scope_integration_test.go;WP-031
+SRC-01;[B];B;backend/internal/search/scope_integration_test.go;WP-032

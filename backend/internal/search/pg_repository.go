@@ -36,10 +36,11 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, entityType, entityID s
 	})
 }
 
-// hitVisible restricts hits to entities visible under the transaction's
-// tenant scope: the entity tables' policies filter the subqueries, while
-// search_document carries no client or site column yet (WP-032 adds them).
-// Entity types without a scoped table stay organization-wide.
+// hitVisible restricts hits to entities that are visible under the
+// transaction's tenant scope and still exist. The policy of search_document
+// already filters by the client and site derived from the entity (migration
+// 000067); the subqueries add the entity's own policy, which covers documents
+// and tickets (links, teams) and index rows that are out of date.
 const hitVisible = `CASE search_document.entity_type
 	WHEN 'ci' THEN EXISTS (SELECT 1 FROM ci WHERE ci.id = search_document.entity_id)
 	WHEN 'asset' THEN EXISTS (SELECT 1 FROM asset WHERE asset.id = search_document.entity_id)

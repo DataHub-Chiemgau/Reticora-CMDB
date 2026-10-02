@@ -55,3 +55,16 @@ type Backend interface {
 	Query(ctx context.Context, q Query) (Result, error)
 	ReindexTenant(ctx context.Context, orgID string) (ReindexResult, error)
 }
+
+// ReadPermission maps each indexed entity type to the permission a caller
+// needs to see its hits. Types missing here are never returned.
+var ReadPermission = map[string]string{
+	"ci":          "ci:read",
+	"asset":       "asset:read",
+	"document":    "document:read",
+	"ticket":      "ticket:read",
+	"contact":     "contact:read",
+	"compliance":  "compliance:read",
+	"location":    "site:read",
+	"reservation": "asset:read",
+}
