@@ -83,3 +83,8 @@ TEN-06;[B];B;backend/internal/reservation/reservation_scope_integration_test.go;
 TEN-06;[B];B;backend/internal/composition/composition_scope_integration_test.go;WP-017
 AST-01;[P2];B;backend/internal/asset/asset_scope_integration_test.go;WP-017
 MGT-11;[P5];B;backend/internal/asset/asset_scope_integration_test.go;WP-017
+TEN-06;[B];B;backend/internal/movement/movement_scope_integration_test.go;WP-018
+TEN-06;[B];B;backend/internal/consumable/consumable_scope_integration_test.go;WP-018
+TEN-06;[B];B;backend/internal/order/order_scope_integration_test.go;WP-018
+TEN-06;[B];B;backend/internal/disposal/disposal_scope_integration_test.go;WP-018
+TEN-06;[B];B;backend/internal/stocktake/stocktake_scope_integration_test.go;WP-018
