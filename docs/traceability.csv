@@ -126,3 +126,8 @@ MGT-01;[P2];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-0
 TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-028
 MGT-04;[P3];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-028
 MGT-03;[P4];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-028
+MGT-05;[P4];B;backend/internal/tenant/rls/team_scope_integration_test.go;WP-029
+MGT-06;[P4];B;backend/internal/tenant/rls/team_scope_integration_test.go;WP-029
+MGT-07;[P4];B;backend/internal/tenant/rls/team_scope_integration_test.go;WP-029
+TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/tenant/rls/team_scope_integration_test.go;WP-029
+TEN-05;[B];B;backend/internal/tenant/rls/team_scope_integration_test.go;WP-029

@@ -85,9 +85,6 @@ const KnownGapsBaselineMigration = 57
 // applies to them; WP-025, WP-028 and WP-029 add the columns together with the
 // policies, after which client-scope and site-scope cover them automatically.
 var KnownGaps = []Gap{
-	// Tables with team_id without team scope.
-	{"ticket", RuleTeamScope, "WP-029"},
-
 	// Hypertable without row level security (TEC-06 spike WP-039 first).
 	{"metric_sample", RuleRLSEnabled, "WP-040"},
 	{"metric_sample", RuleRLSForced, "WP-040"},

@@ -3,14 +3,20 @@ package desk
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrAlreadyBooked reports an active booking of the desk that overlaps the
+// requested window.
+var ErrAlreadyBooked = errors.New("desk already booked in this time window")
 
 const deskCols = `id::text, organization_id::text, COALESCE(room_id::text,''), name, status, attributes, created_at, updated_at`
 
@@ -209,22 +215,13 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	})
 }
 
-// Book reserves a desk, rejecting overlapping active bookings.
+// Book reserves a desk. Overlapping active bookings of the same desk are
+// rejected by the exclusion constraint desk_booking_no_overlap (migration
+// 000065), which also holds for concurrent requests.
 func (r *PGRepository) Book(ctx context.Context, b *Booking) (*Booking, error) {
 	err := database.WithRequestTenant(ctx, r.pool, b.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if !b.EndsAt.After(b.StartsAt) {
 			return fmt.Errorf("ends_at must be after starts_at")
-		}
-		var conflicts int
-		if err := tx.QueryRow(ctx, `
-			SELECT COUNT(*) FROM desk_booking
-			WHERE organization_id = $1 AND desk_id = $2 AND status = 'active'
-			  AND starts_at < $4 AND ends_at > $3
-		`, b.OrganizationID, b.DeskID, b.StartsAt, b.EndsAt).Scan(&conflicts); err != nil {
-			return err
-		}
-		if conflicts > 0 {
-			return fmt.Errorf("desk already booked in this time window")
 		}
 		b.Status = "active"
 		if err := tx.QueryRow(ctx, `
@@ -233,6 +230,10 @@ func (r *PGRepository) Book(ctx context.Context, b *Booking) (*Booking, error) {
 			RETURNING id::text, created_at
 		`, b.OrganizationID, b.DeskID, b.UserID, b.StartsAt, b.EndsAt).
 			Scan(&b.ID, &b.CreatedAt); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23P01" { // exclusion_violation
+				return ErrAlreadyBooked
+			}
 			return err
 		}
 		return requireVisible(ctx, tx, "desk_booking", bookingVisible, b.ID)
