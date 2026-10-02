@@ -85,24 +85,6 @@ const KnownGapsBaselineMigration = 57
 // applies to them; WP-025, WP-028 and WP-029 add the columns together with the
 // policies, after which client-scope and site-scope cover them automatically.
 var KnownGaps = []Gap{
-	// Tables with site_id without site scope. The CI child tables carry the
-	// derived site_id since WP-025 (migration 000061); WP-027 adds the site
-	// predicate to all of them together with ci.
-	{"building", RuleSiteScope, "WP-027"},
-	{"ci", RuleSiteScope, "WP-027"},
-	{"ci_change", RuleSiteScope, "WP-027"},
-	{"ci_contact", RuleSiteScope, "WP-027"},
-	{"ci_field_value", RuleSiteScope, "WP-027"},
-	{"ci_instance_field_definition", RuleSiteScope, "WP-027"},
-	{"compliance_result", RuleSiteScope, "WP-027"},
-	{"discovery_result", RuleSiteScope, "WP-027"},
-	{"ip_address", RuleSiteScope, "WP-027"},
-	{"network_interface", RuleSiteScope, "WP-027"},
-	{"rack_mount", RuleSiteScope, "WP-027"},
-	{"security_finding", RuleSiteScope, "WP-027"},
-	{"location_node", RuleSiteScope, "WP-027"},
-	{"subnet", RuleSiteScope, "WP-027"},
-
 	// Tables with team_id without team scope.
 	{"ticket", RuleTeamScope, "WP-029"},
 

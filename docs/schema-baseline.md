@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000062_location_tree
+Stand: Migration 000063_site_scope_policies
 
 ## Prüfung
 
@@ -94,20 +94,6 @@ TestKnownGapsDocumented ./internal/tenant/rls/` neu.
 
 | Tabelle | Regel | Zuständiges WP |
 |---|---|---|
-| `building` | `site-scope` | WP-027 |
-| `ci` | `site-scope` | WP-027 |
-| `ci_change` | `site-scope` | WP-027 |
-| `ci_contact` | `site-scope` | WP-027 |
-| `ci_field_value` | `site-scope` | WP-027 |
-| `ci_instance_field_definition` | `site-scope` | WP-027 |
-| `compliance_result` | `site-scope` | WP-027 |
-| `discovery_result` | `site-scope` | WP-027 |
-| `ip_address` | `site-scope` | WP-027 |
-| `network_interface` | `site-scope` | WP-027 |
-| `rack_mount` | `site-scope` | WP-027 |
-| `security_finding` | `site-scope` | WP-027 |
-| `location_node` | `site-scope` | WP-027 |
-| `subnet` | `site-scope` | WP-027 |
 | `ticket` | `team-scope` | WP-029 |
 | `metric_sample` | `rls-enabled` | WP-040 |
 | `metric_sample` | `rls-forced` | WP-040 |
