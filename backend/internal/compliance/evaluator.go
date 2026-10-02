@@ -9,6 +9,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 type Evaluator struct {
@@ -19,7 +20,19 @@ type Evaluator struct {
 func NewEvaluator(repo Repository, cis ci.Repository) *Evaluator {
 	return &Evaluator{repo: repo, cis: cis}
 }
+
+// Evaluate checks every active rule against the organization's CIs and
+// replaces the stored results. The results cover the whole organization, so
+// the evaluation runs org-wide whoever triggers it; listing results stays
+// scoped to the caller (E-08).
 func (e *Evaluator) Evaluate(ctx context.Context, orgID string) (EvaluationResponse, error) {
+	if scope, ok := database.TenantScopeFromContext(ctx); ok {
+		if scope.OrgID != orgID {
+			return EvaluationResponse{}, database.ErrTenantMismatch
+		}
+		orgWide := database.OrgWideScope(orgID, scope.UserID)
+		ctx = database.ContextWithTenantScope(ctx, &orgWide)
+	}
 	rules, _, err := e.repo.ListRules(ctx, orgID, "", "", true, api.PaginationParams{Limit: 100})
 	if err != nil {
 		return EvaluationResponse{}, err

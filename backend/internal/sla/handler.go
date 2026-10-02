@@ -51,7 +51,7 @@ func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListPolicies(r.Context(), t.OrganizationID, r.URL.Query().Get("priority"), r.URL.Query().Get("client_id"), page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Policy]{Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+page.Limit < total})
@@ -87,7 +87,7 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	item := &Policy{OrganizationID: t.OrganizationID, ClientID: req.ClientID, Name: req.Name, Priority: req.Priority, ResponseTargetMinutes: req.ResponseTargetMinutes, ResolutionTargetMinutes: req.ResolutionTargetMinutes, BusinessCalendar: req.BusinessCalendar}
 	if err := h.repo.CreatePolicy(r.Context(), item); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, item)
@@ -169,7 +169,7 @@ func (h *Handler) ListBreaches(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListBreaches(r.Context(), t.OrganizationID, BreachFilter{Status: r.URL.Query().Get("status")}, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[TicketSLA]{Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+page.Limit < total})

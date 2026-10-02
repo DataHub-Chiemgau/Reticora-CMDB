@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -55,30 +56,35 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// withTenant executes fn within a transaction that has app.org_id set for RLS.
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
+// Tickets carry no client or site column yet (WP-028; team scope: WP-029). A
+// ticket is visible when its related CI and asset are visible under the
+// transaction's tenant scope, whose policies filter the subqueries; comments
+// follow their ticket.
+const (
+	ticketVisible = `(ticket.related_ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = ticket.related_ci_id))
+	AND (ticket.related_asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = ticket.related_asset_id))`
+	commentVisible = "EXISTS (SELECT 1 FROM ticket WHERE ticket.id = ticket_comment.ticket_id AND " + ticketVisible + ")"
+)
 
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
+// requireVisible fails with "not found" when the written row of table does not
+// satisfy visible, i.e. when a write pointed it at an object outside the
+// tenant scope; the transaction is then rolled back.
+func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
+	var ok bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
+		return fmt.Errorf("check %s visibility: %w", table, err)
 	}
-
-	if err := fn(ctx, tx); err != nil {
-		return err
+	if !ok {
+		return fmt.Errorf("not found")
 	}
-
-	return tx.Commit(ctx)
+	return nil
 }
 
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Ticket, int, error) {
 	items := make([]Ticket, 0)
 	var total int
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		whereParts := []string{"organization_id = $1"}
 		args := []any{orgID}
 		argPos := 2
@@ -105,7 +111,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 		}
 
 		whereClause := strings.Join(whereParts, " AND ")
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ticket WHERE "+whereClause, args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ticket WHERE "+ticketVisible+" AND "+whereClause, args...).Scan(&total); err != nil {
 			return fmt.Errorf("count tickets: %w", err)
 		}
 
@@ -128,14 +134,14 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 		if page.Cursor != nil {
 			listArgs = append(listArgs, page.Limit)
 			query = fmt.Sprintf(
-				"SELECT %s FROM ticket WHERE %s ORDER BY %s %s, id %s LIMIT $%d",
+				"SELECT %s FROM ticket WHERE "+ticketVisible+" AND %s ORDER BY %s %s, id %s LIMIT $%d",
 				ticketSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos,
 			)
 		} else {
 			listArgs = append(listArgs, page.Limit, page.Offset)
 			query = fmt.Sprintf(
-				"SELECT %s FROM ticket WHERE %s ORDER BY %s %s, id %s LIMIT $%d OFFSET $%d",
+				"SELECT %s FROM ticket WHERE "+ticketVisible+" AND %s ORDER BY %s %s, id %s LIMIT $%d OFFSET $%d",
 				ticketSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos, argPos+1,
 			)
@@ -165,8 +171,8 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Ticket, error) {
 	var item *Ticket
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf("SELECT %s FROM ticket WHERE id = $1 AND organization_id = $2", ticketSelectColumns)
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		query := fmt.Sprintf("SELECT %s FROM ticket WHERE "+ticketVisible+" AND id = $1 AND organization_id = $2", ticketSelectColumns)
 		var err error
 		item, err = scanTicket(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
@@ -184,7 +190,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Ticket, 
 }
 
 func (r *PGRepository) Create(ctx context.Context, t *Ticket) error {
-	return r.withTenant(ctx, t.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, t.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if t.Tags == nil {
 			t.Tags = []string{}
 		}
@@ -230,14 +236,14 @@ func (r *PGRepository) Create(ctx context.Context, t *Ticket) error {
 		).Scan(&t.ID, &t.TicketNumber, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return fmt.Errorf("create ticket: %w", err)
 		}
-		return nil
+		return requireVisible(ctx, tx, "ticket", ticketVisible, t.ID)
 	})
 }
 
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Ticket, error) {
 	var item *Ticket
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		setClauses := make([]string, 0, 12)
 		args := []any{id, orgID}
 		argPos := 3
@@ -286,7 +292,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		}
 
 		if len(setClauses) == 0 {
-			query := fmt.Sprintf("SELECT %s FROM ticket WHERE id = $1 AND organization_id = $2", ticketSelectColumns)
+			query := fmt.Sprintf("SELECT %s FROM ticket WHERE "+ticketVisible+" AND id = $1 AND organization_id = $2", ticketSelectColumns)
 			var err error
 			item, err = scanTicket(tx.QueryRow(ctx, query, id, orgID))
 			if err != nil {
@@ -300,7 +306,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 
 		setClauses = append(setClauses, "updated_at = NOW()")
 		query := fmt.Sprintf(
-			"UPDATE ticket SET %s WHERE id = $1 AND organization_id = $2 RETURNING %s",
+			"UPDATE ticket SET %s WHERE "+ticketVisible+" AND id = $1 AND organization_id = $2 RETURNING %s",
 			strings.Join(setClauses, ", "),
 			ticketSelectColumns,
 		)
@@ -312,15 +318,15 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			}
 			return fmt.Errorf("update ticket: %w", err)
 		}
-		return nil
+		return requireVisible(ctx, tx, "ticket", ticketVisible, id)
 	})
 
 	return item, err
 }
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmdTag, err := tx.Exec(ctx, "DELETE FROM ticket WHERE id = $1 AND organization_id = $2", id, orgID)
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		cmdTag, err := tx.Exec(ctx, "DELETE FROM ticket WHERE "+ticketVisible+" AND id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete ticket: %w", err)
 		}
@@ -332,9 +338,9 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 }
 
 func (r *PGRepository) AddComment(ctx context.Context, c *Comment) error {
-	return r.withTenant(ctx, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
-		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ticket WHERE id = $1 AND organization_id = $2)", c.TicketID, c.OrganizationID).Scan(&exists); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ticket WHERE "+ticketVisible+" AND id = $1 AND organization_id = $2)", c.TicketID, c.OrganizationID).Scan(&exists); err != nil {
 			return fmt.Errorf("check ticket for comment: %w", err)
 		}
 		if !exists {
@@ -368,14 +374,14 @@ func (r *PGRepository) ListComments(ctx context.Context, orgID, ticketID string,
 	items := make([]Comment, 0)
 	var total int
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		args := []any{orgID, ticketID}
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ticket_comment WHERE organization_id = $1 AND ticket_id = $2", args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ticket_comment WHERE "+commentVisible+" AND organization_id = $1 AND ticket_id = $2", args...).Scan(&total); err != nil {
 			return fmt.Errorf("count ticket comments: %w", err)
 		}
 
 		query := fmt.Sprintf(
-			"SELECT %s FROM ticket_comment WHERE organization_id = $1 AND ticket_id = $2 ORDER BY created_at ASC LIMIT $3 OFFSET $4",
+			"SELECT %s FROM ticket_comment WHERE "+commentVisible+" AND organization_id = $1 AND ticket_id = $2 ORDER BY created_at ASC LIMIT $3 OFFSET $4",
 			ticketCommentSelectColumns,
 		)
 		rows, err := tx.Query(ctx, query, orgID, ticketID, page.Limit, page.Offset)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,25 +23,17 @@ type PGRepository struct{ pool *pgxpool.Pool }
 // NewPGRepository creates a PostgreSQL SLA repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(context.Context, pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
+// ticketSLAVisible restricts SLA states to visible tickets; it mirrors the
+// ticket repository's visibility (related CI and asset) until WP-028 derives
+// client and site for tickets.
+const ticketSLAVisible = `EXISTS (SELECT 1 FROM ticket WHERE ticket.id = ticket_sla.ticket_id
+	AND (ticket.related_ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = ticket.related_ci_id))
+	AND (ticket.related_asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = ticket.related_asset_id)))`
 
 func (r *PGRepository) ListPolicies(ctx context.Context, orgID, priority, clientID string, page api.PaginationParams) ([]Policy, int, error) {
 	items := make([]Policy, 0)
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id = $1"}
 		args := []any{orgID}
 		pos := 2
@@ -78,7 +71,7 @@ func (r *PGRepository) ListPolicies(ctx context.Context, orgID, priority, client
 
 func (r *PGRepository) GetPolicy(ctx context.Context, orgID, id string) (*Policy, error) {
 	var item *Policy
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		item, err = scanPolicy(tx.QueryRow(ctx, "SELECT "+policyColumns+" FROM sla WHERE organization_id = $1 AND id = $2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -90,7 +83,7 @@ func (r *PGRepository) GetPolicy(ctx context.Context, orgID, id string) (*Policy
 }
 
 func (r *PGRepository) CreatePolicy(ctx context.Context, p *Policy) error {
-	return r.withTenant(ctx, p.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, p.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
 			INSERT INTO sla (organization_id, client_id, name, priority, response_target_minutes, resolution_target_minutes, business_calendar)
 			VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6, $7)
@@ -100,7 +93,7 @@ func (r *PGRepository) CreatePolicy(ctx context.Context, p *Policy) error {
 
 func (r *PGRepository) UpdatePolicy(ctx context.Context, orgID, id string, req UpdatePolicyRequest) (*Policy, error) {
 	var item *Policy
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		set := []string{}
 		args := []any{id, orgID}
 		pos := 3
@@ -154,7 +147,7 @@ func (r *PGRepository) UpdatePolicy(ctx context.Context, orgID, id string, req U
 }
 
 func (r *PGRepository) DeletePolicy(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx, "DELETE FROM sla WHERE organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
 			return fmt.Errorf("delete sla policy: %w", err)
@@ -168,7 +161,7 @@ func (r *PGRepository) DeletePolicy(ctx context.Context, orgID, id string) error
 
 func (r *PGRepository) ApplyForTicket(ctx context.Context, orgID string, t *ticket.Ticket, slaID string) (*TicketSLA, error) {
 	var state *TicketSLA
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		policyID := slaID
 		if policyID == "" {
 			if err := tx.QueryRow(ctx, `SELECT id::text FROM sla WHERE organization_id = $1 AND priority = $2 AND (client_id IS NULL OR client_id::text = $3) ORDER BY client_id NULLS LAST, created_at DESC LIMIT 1`, orgID, t.Priority, "").Scan(&policyID); err != nil {
@@ -214,9 +207,9 @@ func (r *PGRepository) ApplyForTicket(ctx context.Context, orgID string, t *tick
 
 func (r *PGRepository) GetForTicket(ctx context.Context, orgID, ticketID string) (*TicketSLA, error) {
 	var state *TicketSLA
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var id string
-		if err := tx.QueryRow(ctx, "SELECT id::text FROM ticket_sla WHERE organization_id = $1 AND ticket_id = $2", orgID, ticketID).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT id::text FROM ticket_sla WHERE "+ticketSLAVisible+" AND organization_id = $1 AND ticket_id = $2", orgID, ticketID).Scan(&id); err != nil {
 			if err == pgx.ErrNoRows {
 				return fmt.Errorf("ticket sla not found")
 			}
@@ -226,15 +219,15 @@ func (r *PGRepository) GetForTicket(ctx context.Context, orgID, ticketID string)
 			return err
 		}
 		var err error
-		state, err = scanTicketSLA(tx.QueryRow(ctx, "SELECT "+ticketSLAColumns+" FROM ticket_sla WHERE id = $1 AND organization_id = $2", id, orgID))
+		state, err = scanTicketSLA(tx.QueryRow(ctx, "SELECT "+ticketSLAColumns+" FROM ticket_sla WHERE "+ticketSLAVisible+" AND id = $1 AND organization_id = $2", id, orgID))
 		return err
 	})
 	return state, err
 }
 
 func (r *PGRepository) MarkFirstResponse(ctx context.Context, orgID, ticketID string, at time.Time) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE ticket_sla SET first_response_at = COALESCE(first_response_at, $3), updated_at = now() WHERE organization_id = $1 AND ticket_id = $2`, orgID, ticketID, at.UTC())
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE ticket_sla SET first_response_at = COALESCE(first_response_at, $3), updated_at = now() WHERE `+ticketSLAVisible+` AND organization_id = $1 AND ticket_id = $2`, orgID, ticketID, at.UTC())
 		if err != nil {
 			return fmt.Errorf("mark first response: %w", err)
 		}
@@ -243,8 +236,8 @@ func (r *PGRepository) MarkFirstResponse(ctx context.Context, orgID, ticketID st
 }
 
 func (r *PGRepository) MarkResolved(ctx context.Context, orgID, ticketID string, at time.Time) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE ticket_sla SET resolved_at = COALESCE(resolved_at, $3), updated_at = now() WHERE organization_id = $1 AND ticket_id = $2`, orgID, ticketID, at.UTC())
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE ticket_sla SET resolved_at = COALESCE(resolved_at, $3), updated_at = now() WHERE `+ticketSLAVisible+` AND organization_id = $1 AND ticket_id = $2`, orgID, ticketID, at.UTC())
 		if err != nil {
 			return fmt.Errorf("mark resolved: %w", err)
 		}
@@ -255,8 +248,8 @@ func (r *PGRepository) MarkResolved(ctx context.Context, orgID, ticketID string,
 func (r *PGRepository) ListBreaches(ctx context.Context, orgID string, filter BreachFilter, page api.PaginationParams) ([]TicketSLA, int, error) {
 	items := make([]TicketSLA, 0)
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE ticket_sla SET response_breached = CASE WHEN first_response_at IS NULL THEN now() > response_due_at ELSE first_response_at > response_due_at END, resolution_breached = CASE WHEN resolved_at IS NULL THEN now() > resolution_due_at ELSE resolved_at > resolution_due_at END, updated_at = now() WHERE organization_id = $1`, orgID); err != nil {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE ticket_sla SET response_breached = CASE WHEN first_response_at IS NULL THEN now() > response_due_at ELSE first_response_at > response_due_at END, resolution_breached = CASE WHEN resolved_at IS NULL THEN now() > resolution_due_at ELSE resolved_at > resolution_due_at END, updated_at = now() WHERE `+ticketSLAVisible+` AND organization_id = $1`, orgID); err != nil {
 			return err
 		}
 		where := "organization_id = $1"
@@ -266,10 +259,10 @@ func (r *PGRepository) ListBreaches(ctx context.Context, orgID string, filter Br
 		if filter.Status == "at_risk" {
 			where += " AND NOT (response_breached OR resolution_breached) AND ((first_response_at IS NULL AND response_due_at <= now() + interval '1 hour') OR (resolved_at IS NULL AND resolution_due_at <= now() + interval '1 hour'))"
 		}
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ticket_sla WHERE "+where, orgID).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ticket_sla WHERE "+ticketSLAVisible+" AND "+where, orgID).Scan(&total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, "SELECT "+ticketSLAColumns+" FROM ticket_sla WHERE "+where+" ORDER BY resolution_due_at ASC LIMIT $2 OFFSET $3", orgID, page.Limit, page.Offset)
+		rows, err := tx.Query(ctx, "SELECT "+ticketSLAColumns+" FROM ticket_sla WHERE "+ticketSLAVisible+" AND "+where+" ORDER BY resolution_due_at ASC LIMIT $2 OFFSET $3", orgID, page.Limit, page.Offset)
 		if err != nil {
 			return err
 		}
@@ -314,11 +307,11 @@ func scanTicketSLA(s scanner) (*TicketSLA, error) {
 }
 
 func refreshTicketSLA(ctx context.Context, tx pgx.Tx, id string) error {
-	_, err := tx.Exec(ctx, `UPDATE ticket_sla SET response_breached = CASE WHEN first_response_at IS NULL THEN now() > response_due_at ELSE first_response_at > response_due_at END, resolution_breached = CASE WHEN resolved_at IS NULL THEN now() > resolution_due_at ELSE resolved_at > resolution_due_at END, updated_at = now() WHERE id = $1`, id)
+	_, err := tx.Exec(ctx, `UPDATE ticket_sla SET response_breached = CASE WHEN first_response_at IS NULL THEN now() > response_due_at ELSE first_response_at > response_due_at END, resolution_breached = CASE WHEN resolved_at IS NULL THEN now() > resolution_due_at ELSE resolved_at > resolution_due_at END, updated_at = now() WHERE `+ticketSLAVisible+` AND id = $1`, id)
 	return err
 }
 
 func refreshTicketSLAByTicket(ctx context.Context, tx pgx.Tx, orgID, ticketID string) error {
-	_, err := tx.Exec(ctx, `UPDATE ticket_sla SET response_breached = CASE WHEN first_response_at IS NULL THEN now() > response_due_at ELSE first_response_at > response_due_at END, resolution_breached = CASE WHEN resolved_at IS NULL THEN now() > resolution_due_at ELSE resolved_at > resolution_due_at END, updated_at = now() WHERE organization_id = $1 AND ticket_id = $2`, orgID, ticketID)
+	_, err := tx.Exec(ctx, `UPDATE ticket_sla SET response_breached = CASE WHEN first_response_at IS NULL THEN now() > response_due_at ELSE first_response_at > response_due_at END, resolution_breached = CASE WHEN resolved_at IS NULL THEN now() > resolution_due_at ELSE resolved_at > resolution_due_at END, updated_at = now() WHERE `+ticketSLAVisible+` AND organization_id = $1 AND ticket_id = $2`, orgID, ticketID)
 	return err
 }

@@ -40,7 +40,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, FilterParams{Status: r.URL.Query().Get("status")}, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Window]{
@@ -103,7 +103,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		CIIDs:          req.CIIDs,
 	}
 	if err := h.repo.Create(r.Context(), win); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, win)
@@ -174,7 +174,7 @@ func (h *Handler) ListNotifications(w http.ResponseWriter, r *http.Request) {
 	}
 	notifications, err := h.repo.ListNotifications(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{"data": notifications})

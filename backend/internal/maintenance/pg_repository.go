@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -25,21 +26,6 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(context.Context, pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 func scanWindow(s pgx.Row) (*Window, error) {
 	w := &Window{}
 	if err := s.Scan(&w.ID, &w.OrganizationID, &w.Title, &w.Description, &w.StartsAt, &w.EndsAt, &w.Status, &w.CreatedBy, &w.CreatedAt, &w.UpdatedAt); err != nil {
@@ -48,8 +34,18 @@ func scanWindow(s pgx.Row) (*Window, error) {
 	return w, nil
 }
 
+// Maintenance windows carry no client or site column yet (WP-028). A window
+// CI is visible when its CI is visible under the transaction's tenant scope,
+// whose ci policy filters the subquery; a window is visible when it has no
+// CI or at least one visible CI.
+const (
+	windowCIVisible = "EXISTS (SELECT 1 FROM ci WHERE ci.id = maintenance_window_ci.ci_id)"
+	windowVisible   = "(NOT EXISTS (SELECT 1 FROM maintenance_window_ci WHERE maintenance_window_ci.maintenance_window_id = maintenance_window.id)" +
+		" OR EXISTS (SELECT 1 FROM maintenance_window_ci WHERE maintenance_window_ci.maintenance_window_id = maintenance_window.id AND " + windowCIVisible + "))"
+)
+
 func (r *PGRepository) ciIDsTx(ctx context.Context, tx pgx.Tx, orgID, windowID string) ([]string, error) {
-	rows, err := tx.Query(ctx, "SELECT ci_id::text FROM maintenance_window_ci WHERE organization_id = $1 AND maintenance_window_id = $2", orgID, windowID)
+	rows, err := tx.Query(ctx, "SELECT ci_id::text FROM maintenance_window_ci WHERE "+windowCIVisible+" AND organization_id = $1 AND maintenance_window_id = $2", orgID, windowID)
 	if err != nil {
 		return nil, err
 	}
@@ -68,17 +64,17 @@ func (r *PGRepository) ciIDsTx(ctx context.Context, tx pgx.Tx, orgID, windowID s
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Window, int, error) {
 	out := []Window{}
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := "organization_id = $1"
 		args := []any{orgID}
 		if filter.Status != "" {
 			where += " AND status = $2"
 			args = append(args, filter.Status)
 		}
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM maintenance_window WHERE "+where, args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM maintenance_window WHERE "+windowVisible+" AND "+where, args...).Scan(&total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, "SELECT "+windowCols+" FROM maintenance_window WHERE "+where+fmt.Sprintf(" ORDER BY starts_at ASC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), append(args, page.Limit, page.Offset)...)
+		rows, err := tx.Query(ctx, "SELECT "+windowCols+" FROM maintenance_window WHERE "+windowVisible+" AND "+where+fmt.Sprintf(" ORDER BY starts_at ASC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), append(args, page.Limit, page.Offset)...)
 		if err != nil {
 			return err
 		}
@@ -110,9 +106,9 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Window, error) {
 	var w *Window
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		w, err = scanWindow(tx.QueryRow(ctx, "SELECT "+windowCols+" FROM maintenance_window WHERE organization_id = $1 AND id = $2", orgID, id))
+		w, err = scanWindow(tx.QueryRow(ctx, "SELECT "+windowCols+" FROM maintenance_window WHERE "+windowVisible+" AND organization_id = $1 AND id = $2", orgID, id))
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("maintenance window not found")
 		}
@@ -126,7 +122,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Window, 
 }
 
 func (r *PGRepository) Create(ctx context.Context, w *Window) error {
-	return r.withTenant(ctx, w.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, w.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if w.Status == "" {
 			w.Status = "scheduled"
 		}
@@ -146,13 +142,23 @@ func (r *PGRepository) Create(ctx context.Context, w *Window) error {
 				return fmt.Errorf("link ci %s: %w", ciID, err)
 			}
 		}
+		// Every affected CI must be visible under the scope.
+		var hidden bool
+		if err := tx.QueryRow(ctx,
+			"SELECT EXISTS (SELECT 1 FROM maintenance_window_ci WHERE maintenance_window_id = $1 AND NOT "+windowCIVisible+")",
+			w.ID).Scan(&hidden); err != nil {
+			return fmt.Errorf("check window cis: %w", err)
+		}
+		if hidden {
+			return fmt.Errorf("not found")
+		}
 		return nil
 	})
 }
 
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateWindowRequest) (*Window, error) {
 	var w *Window
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -173,10 +179,10 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateW
 		}
 		var err error
 		if len(sets) == 0 {
-			w, err = scanWindow(tx.QueryRow(ctx, "SELECT "+windowCols+" FROM maintenance_window WHERE organization_id = $1 AND id = $2", orgID, id))
+			w, err = scanWindow(tx.QueryRow(ctx, "SELECT "+windowCols+" FROM maintenance_window WHERE "+windowVisible+" AND organization_id = $1 AND id = $2", orgID, id))
 		} else {
 			sets = append(sets, "updated_at = now()")
-			w, err = scanWindow(tx.QueryRow(ctx, "UPDATE maintenance_window SET "+strings.Join(sets, ", ")+" WHERE organization_id = $1 AND id = $2 RETURNING "+windowCols, args...))
+			w, err = scanWindow(tx.QueryRow(ctx, "UPDATE maintenance_window SET "+strings.Join(sets, ", ")+" WHERE "+windowVisible+" AND organization_id = $1 AND id = $2 RETURNING "+windowCols, args...))
 		}
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("maintenance window not found")
@@ -191,8 +197,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateW
 }
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "DELETE FROM maintenance_window WHERE organization_id = $1 AND id = $2", orgID, id)
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, "DELETE FROM maintenance_window WHERE "+windowVisible+" AND organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
 			return err
 		}
@@ -207,11 +213,12 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 // one sent notification per client.
 func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string) ([]Notification, error) {
 	out := []Notification{}
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT DISTINCT ci.client_id::text
 			FROM maintenance_window_ci mwc
 			JOIN ci ON ci.id = mwc.ci_id
+			JOIN maintenance_window ON maintenance_window.id = mwc.maintenance_window_id AND `+windowVisible+`
 			WHERE mwc.maintenance_window_id = $1 AND mwc.organization_id = $2
 			  AND ci.client_id IS NOT NULL
 		`, windowID, orgID)
@@ -250,7 +257,7 @@ func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string
 
 func (r *PGRepository) ListNotifications(ctx context.Context, orgID, windowID string) ([]Notification, error) {
 	out := []Notification{}
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, "SELECT "+notificationCols+" FROM maintenance_notification WHERE organization_id = $1 AND maintenance_window_id = $2 ORDER BY created_at ASC", orgID, windowID)
 		if err != nil {
 			return err

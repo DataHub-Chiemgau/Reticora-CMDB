@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -17,24 +18,16 @@ const resultCols = `id::text, organization_id::text, rule_id::text, ci_id::text,
 type PGRepository struct{ pool *pgxpool.Pool }
 
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(context.Context, pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id',$1,true)", orgID); err != nil {
-		return err
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
+
+// resultVisible restricts compliance results to CIs visible under the
+// transaction's tenant scope: the ci policy filters the subquery, while
+// compliance_result carries no client column yet (WP-025).
+const resultVisible = "EXISTS (SELECT 1 FROM ci WHERE ci.id = compliance_result.ci_id)"
+
 func (r *PGRepository) ListRules(ctx context.Context, orgID, ciTypeID, category string, activeOnly bool, page api.PaginationParams) ([]Rule, int, error) {
 	var out []Rule
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id=$1"}
 		args := []any{orgID}
 		pos := 2
@@ -73,7 +66,7 @@ func (r *PGRepository) ListRules(ctx context.Context, orgID, ciTypeID, category 
 }
 func (r *PGRepository) GetRule(ctx context.Context, orgID, id string) (*Rule, error) {
 	var rule *Rule
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		rule, err = scanRule(tx.QueryRow(ctx, "SELECT "+ruleCols+" FROM compliance_rule WHERE organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -84,7 +77,7 @@ func (r *PGRepository) GetRule(ctx context.Context, orgID, id string) (*Rule, er
 	return rule, err
 }
 func (r *PGRepository) CreateRule(ctx context.Context, rule *Rule) error {
-	return r.withTenant(ctx, rule.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, rule.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if rule.Expression == nil {
 			rule.Expression = JSONMap{}
 		}
@@ -93,7 +86,7 @@ func (r *PGRepository) CreateRule(ctx context.Context, rule *Rule) error {
 }
 func (r *PGRepository) UpdateRule(ctx context.Context, orgID, id string, req UpdateRuleRequest) (*Rule, error) {
 	var rule *Rule
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		set := []string{}
 		args := []any{id, orgID}
 		pos := 3
@@ -153,7 +146,7 @@ func (r *PGRepository) UpdateRule(ctx context.Context, orgID, id string, req Upd
 	return rule, err
 }
 func (r *PGRepository) DeleteRule(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx, "DELETE FROM compliance_rule WHERE organization_id=$1 AND id=$2", orgID, id)
 		if err != nil {
 			return err
@@ -165,7 +158,7 @@ func (r *PGRepository) DeleteRule(ctx context.Context, orgID, id string) error {
 	})
 }
 func (r *PGRepository) ReplaceResults(ctx context.Context, orgID string, results []Result) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "DELETE FROM compliance_result WHERE organization_id=$1", orgID); err != nil {
 			return err
 		}
@@ -181,7 +174,7 @@ func (r *PGRepository) ReplaceResults(ctx context.Context, orgID string, results
 func (r *PGRepository) ListResults(ctx context.Context, orgID, ciTypeID, status string, page api.PaginationParams) ([]Result, int, error) {
 	var out []Result
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id=$1"}
 		args := []any{orgID}
 		pos := 2
@@ -196,10 +189,10 @@ func (r *PGRepository) ListResults(ctx context.Context, orgID, ciTypeID, status 
 			pos++
 		}
 		clause := strings.Join(where, " AND ")
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM compliance_result WHERE "+clause, args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM compliance_result WHERE "+resultVisible+" AND "+clause, args...).Scan(&total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, fmt.Sprintf("SELECT %s FROM compliance_result WHERE %s ORDER BY evaluated_at DESC LIMIT $%d OFFSET $%d", resultCols, clause, pos, pos+1), append(args, page.Limit, page.Offset)...)
+		rows, err := tx.Query(ctx, fmt.Sprintf("SELECT %s FROM compliance_result WHERE "+resultVisible+" AND %s ORDER BY evaluated_at DESC LIMIT $%d OFFSET $%d", resultCols, clause, pos, pos+1), append(args, page.Limit, page.Offset)...)
 		if err != nil {
 			return err
 		}

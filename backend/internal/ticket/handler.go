@@ -74,7 +74,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -158,7 +158,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Create(r.Context(), ticket); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	if h.sla != nil {
@@ -271,7 +271,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 
 	comments, total, err := h.repo.ListComments(r.Context(), t.OrganizationID, ticketID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
