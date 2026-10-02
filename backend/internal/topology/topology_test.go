@@ -180,21 +180,21 @@ func TestTraversalCycleGuard(t *testing.T) {
 			OrganizationID: "org-1", SourceCIID: src, TargetCIID: dst, RelType: "connected_to", Source: "manual",
 		})
 	}
-	// Cycle a -> b -> c -> a, a self-loop on the root a, and a self-loop on b
-	// (self-loops away from the root are dropped by the traversal guard, which
-	// matches the recursive-CTE implementation).
+	// Cycle a -> b -> c -> a, a self-loop on the root a, and a self-loop on b.
+	// Every edge between reached nodes is reported once
+	// (relationship.SelectTraversal), self-loops included.
 	mkRel(a, b)
 	mkRel(b, c)
 	mkRel(c, a)
 	mkRel(a, a)
 	mkRel(b, b)
 
-	rels, err := relRepo.TraverseFrom(context.Background(), "org-1", a, maxDepth, maxFetch)
+	rels, err := relRepo.TraverseFrom(context.Background(), "org-1", a, maxDepth, relationship.MaxTraversalNodes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rels) != 4 {
-		t.Fatalf("expected 4 relationships in cyclic graph, got %d (%+v)", len(rels), rels)
+	if len(rels) != 5 {
+		t.Fatalf("expected 5 relationships in cyclic graph, got %d (%+v)", len(rels), rels)
 	}
 	seen := map[string]int{}
 	for _, rel := range rels {
@@ -225,7 +225,7 @@ func TestTraversalDepthLimit(t *testing.T) {
 		})
 	}
 
-	rels, err := relRepo.TraverseFrom(context.Background(), "org-1", ids[0], 2, maxFetch)
+	rels, err := relRepo.TraverseFrom(context.Background(), "org-1", ids[0], 2, relationship.MaxTraversalNodes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestTraversalDepthLimit(t *testing.T) {
 	}
 
 	// Cross-org relationships must never be traversed.
-	rels, err = relRepo.TraverseFrom(context.Background(), "org-2", ids[0], maxDepth, maxFetch)
+	rels, err = relRepo.TraverseFrom(context.Background(), "org-2", ids[0], maxDepth, relationship.MaxTraversalNodes)
 	if err != nil {
 		t.Fatal(err)
 	}

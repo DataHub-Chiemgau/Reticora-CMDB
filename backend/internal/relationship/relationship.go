@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -216,54 +217,89 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	return nil
 }
 
-// TraverseFrom walks the in-memory graph breadth-first from rootCIID. It
-// mirrors the recursive-CTE traversal of the PostgreSQL repository for tests
-// and the no-db development mode.
+// TraverseFrom walks the in-memory graph from rootCIID with the semantics of
+// SelectTraversal, like the recursive CTE of the PostgreSQL repository. The
+// memory repository has no CI table, so every endpoint counts as visible.
 func (r *MemoryRepository) TraverseFrom(_ context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if maxDepth < 1 || maxNodes < 1 {
-		return nil, nil
+	edges := make([]Relationship, 0, len(r.items))
+	for _, rel := range r.items {
+		if rel.OrganizationID == orgID {
+			edges = append(edges, *rel)
+		}
 	}
+	return SelectTraversal(rootCIID, edges, maxDepth, maxNodes), nil
+}
 
-	visited := map[string]bool{rootCIID: true}
-	frontier := []string{rootCIID}
+// MaxTraversalNodes is the node limit of every traversal (topology, impact):
+// the PostgreSQL and the memory repository receive the same value.
+const MaxTraversalNodes = 10000
+
+// SelectTraversal defines the result of TraverseFrom on a set of edges whose
+// endpoints are all visible: every node gets its hop distance from rootCIID
+// (at most maxDepth); the maxNodes nodes with the smallest distance (ties by
+// id) are kept, and the result holds each edge between kept nodes that leaves
+// a node closer than maxDepth, ordered by id.
+func SelectTraversal(rootCIID string, edges []Relationship, maxDepth, maxNodes int) []Relationship {
 	result := make([]Relationship, 0)
-	reported := map[string]bool{}
-
-	for depth := 0; depth < maxDepth && len(frontier) > 0 && len(visited) <= maxNodes; depth++ {
+	if maxDepth < 1 || maxNodes < 1 || rootCIID == "" {
+		return result
+	}
+	depth := map[string]int{rootCIID: 0}
+	frontier := []string{rootCIID}
+	for d := 1; d <= maxDepth && len(frontier) > 0; d++ {
 		var next []string
 		for _, id := range frontier {
-			for _, rel := range r.items {
-				if rel.OrganizationID != orgID {
-					continue
-				}
+			for i := range edges {
+				rel := &edges[i]
 				if rel.SourceCIID != id && rel.TargetCIID != id {
 					continue
 				}
-				neighborID := rel.TargetCIID
-				if neighborID == id {
-					neighborID = rel.SourceCIID
+				neighbor := rel.TargetCIID
+				if neighbor == id {
+					neighbor = rel.SourceCIID
 				}
-				// Mirror the recursive CTE: an edge is reported when it is
-				// first discovered; expansion continues only to endpoints
-				// that are not yet on the visited set. Self-loops are only
-				// reported when attached to the root (the CTE anchor).
-				if !reported[rel.ID] && (neighborID != id || id == rootCIID) {
-					reported[rel.ID] = true
-					result = append(result, *rel)
-				}
-				if neighborID == "" || neighborID == id || visited[neighborID] {
+				if _, seen := depth[neighbor]; seen || neighbor == "" {
 					continue
 				}
-				visited[neighborID] = true
-				next = append(next, neighborID)
+				depth[neighbor] = d
+				next = append(next, neighbor)
 			}
 		}
 		frontier = next
 	}
-	return result, nil
+
+	ids := make([]string, 0, len(depth))
+	for id := range depth {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		if depth[ids[i]] != depth[ids[j]] {
+			return depth[ids[i]] < depth[ids[j]]
+		}
+		return ids[i] < ids[j]
+	})
+	if len(ids) > maxNodes {
+		ids = ids[:maxNodes]
+	}
+	kept := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		kept[id] = true
+	}
+	for i := range edges {
+		rel := &edges[i]
+		if !kept[rel.SourceCIID] || !kept[rel.TargetCIID] {
+			continue
+		}
+		if min(depth[rel.SourceCIID], depth[rel.TargetCIID]) >= maxDepth {
+			continue
+		}
+		result = append(result, *rel)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
 }
 
 // TypeChecker validates a rel_type against the relationship_type metadata

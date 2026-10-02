@@ -229,58 +229,52 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	})
 }
 
-// TraverseFrom walks the configuration graph from rootCIID with a single
-// recursive CTE instead of hop-by-hop queries. The traversal follows
-// relationships in both directions, is limited to maxDepth hops, stops
-// expanding once maxNodes distinct CIs are on the frontier, and is
-// cycle-guarded by the visited set. The recursive term joins on the endpoint
-// reached in the previous step (target, falling back to source for the root's
-// own rows is unnecessary because the anchor records both directions), and
-// UNION (not UNION ALL) deduplicates relationship rows during recursion so
-// dense graphs cannot fan out combinatorially. Tenant isolation is enforced
-// twice: inside the query and by the RLS policy on ci_relationship.
+// TraverseFrom walks the configuration graph from rootCIID with one recursive
+// CTE under the caller's full tenant scope (RLS on ci and ci_relationship).
+// The walk only passes through CIs that are visible and not deleted: an edge
+// is followed only when both endpoints are such CIs, so an invisible or
+// deleted intermediate node never connects visible ones (IMP-07). The CTE
+// collects nodes (not paths) with their hop distance, which bounds the rows
+// by nodes × maxDepth; the result follows SelectTraversal, the semantics the
+// memory repository shares.
 func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error) {
 	items := make([]Relationship, 0)
+	if maxDepth < 1 || maxNodes < 1 {
+		return items, nil
+	}
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			WITH RECURSIVE walk AS (
-				SELECT
-					r.id,
-					r.source_ci_id,
-					r.target_ci_id,
-					r.rel_type,
-					r.source,
-					-- The endpoint the walk entered through; expansion
-					-- continues from the other endpoint.
-					CASE WHEN r.source_ci_id = $2 THEN r.target_ci_id ELSE r.source_ci_id END AS frontier_ci_id,
-					1 AS depth,
-					ARRAY[r.source_ci_id, r.target_ci_id] AS visited
-				FROM ci_relationship r
-				WHERE r.organization_id = $1
-				  AND (r.source_ci_id = $2 OR r.target_ci_id = $2)
+			WITH RECURSIVE reach (ci_id, depth) AS (
+				SELECT c.id, 0
+				FROM ci c
+				WHERE c.id = $2 AND c.organization_id = $1 AND c.deleted_at IS NULL
 
 				UNION
 
-				SELECT
-					r.id,
-					r.source_ci_id,
-					r.target_ci_id,
-					r.rel_type,
-					r.source,
-					CASE WHEN r.source_ci_id = w.frontier_ci_id THEN r.target_ci_id ELSE r.source_ci_id END,
-					w.depth + 1,
-					w.visited || r.source_ci_id || r.target_ci_id
-				FROM ci_relationship r
-				JOIN walk w
-				  ON (r.source_ci_id = w.frontier_ci_id OR r.target_ci_id = w.frontier_ci_id)
-				WHERE r.organization_id = $1
-				  AND w.depth < $3
-				  AND cardinality(w.visited) < $4
-				  AND NOT (r.source_ci_id = ANY (w.visited) AND r.target_ci_id = ANY (w.visited))
+				SELECT CASE WHEN r.source_ci_id = w.ci_id THEN r.target_ci_id ELSE r.source_ci_id END,
+				       w.depth + 1
+				FROM reach w
+				JOIN ci_relationship r
+				  ON r.organization_id = $1
+				 AND (r.source_ci_id = w.ci_id OR r.target_ci_id = w.ci_id)
+				JOIN ci s ON s.id = r.source_ci_id AND s.deleted_at IS NULL
+				JOIN ci t ON t.id = r.target_ci_id AND t.deleted_at IS NULL
+				WHERE w.depth < $3
+			),
+			nodes AS (
+				SELECT ci_id, min(depth) AS depth FROM reach GROUP BY ci_id
+			),
+			kept AS (
+				SELECT ci_id, depth FROM nodes ORDER BY depth, ci_id::text COLLATE "C" LIMIT $4
 			)
-			SELECT DISTINCT `+traversalSelectColumns+`
-			FROM walk
+			SELECT `+traversalSelectColumns+`
+			FROM ci_relationship r
+			JOIN kept a ON a.ci_id = r.source_ci_id
+			JOIN kept b ON b.ci_id = r.target_ci_id
+			WHERE r.organization_id = $1
+			  AND LEAST(a.depth, b.depth) < $3
+			ORDER BY r.id::text COLLATE "C"
 		`, orgID, rootCIID, maxDepth, maxNodes)
 		if err != nil {
 			return fmt.Errorf("traverse relationships: %w", err)
@@ -304,11 +298,11 @@ func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string,
 }
 
 const traversalSelectColumns = `
-	id::text,
-	source_ci_id::text,
-	target_ci_id::text,
-	rel_type,
-	source
+	r.id::text,
+	r.source_ci_id::text,
+	r.target_ci_id::text,
+	r.rel_type,
+	r.source
 `
 
 type relationshipScanner interface {

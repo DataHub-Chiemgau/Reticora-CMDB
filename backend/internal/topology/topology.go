@@ -288,7 +288,7 @@ func (h *Handler) buildFromRootViaTraversal(ctx context.Context, orgID, rootCIID
 		return Graph{}, err
 	}
 
-	rels, err := h.traverser.TraverseFrom(ctx, orgID, rootCIID, depth, maxFetch)
+	rels, err := h.traverser.TraverseFrom(ctx, orgID, rootCIID, depth, relationship.MaxTraversalNodes)
 	if err != nil {
 		return Graph{}, err
 	}
@@ -354,11 +354,14 @@ func (h *Handler) buildFromRootIterative(ctx context.Context, orgID, rootCIID st
 				if _, ok := nodes[neighborID]; !ok {
 					item, err := h.ciRepo.GetByID(ctx, orgID, neighborID)
 					if err != nil {
+						// Invisible or deleted: the walk must not pass
+						// through it (IMP-07); its edge dangles and is
+						// dropped by assembleGraph.
 						continue
 					}
 					nodes[neighborID] = nodeFromItem(*item)
 				}
-				if !visited[neighborID] {
+				if !visited[neighborID] && len(nodes) <= relationship.MaxTraversalNodes {
 					next = append(next, neighborID)
 				}
 			}

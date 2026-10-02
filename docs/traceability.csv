@@ -133,3 +133,5 @@ TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/
 TEN-05;[B];B;backend/internal/tenant/rls/team_scope_integration_test.go;WP-029
 MGT-01;[P2];B;backend/internal/document/blob_isolation_test.go;WP-030
 TEN-06;[B];B;backend/internal/document/blob_isolation_test.go;WP-030
+IMP-07;[B];B;backend/internal/topology/scope_integration_test.go;WP-031
+CI-05;[B];B;backend/internal/topology/scope_integration_test.go;WP-031
