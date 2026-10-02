@@ -265,7 +265,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithAssets(parentAssetLookup{repo: repos.Asset}),
 		override.NewHandler(repos.Override, opts.Dispatcher),
 		history.NewHandler(repos.History),
-		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery),
+		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission),
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
 		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),

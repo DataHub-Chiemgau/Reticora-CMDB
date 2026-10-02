@@ -127,23 +127,35 @@ func (f FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (stri
 		add(fmt.Sprintf(`NOT EXISTS (SELECT 1 FROM ci_relationship r WHERE r.rel_type = %s AND (r.source_ci_id = ci.id OR r.target_ci_id = ci.id))`, p), f.LacksRelationship)
 	}
 	if f.UpstreamOf != "" && table == "ci" {
-		// CIs upstream of X: sources of edges pointing (transitively) into X.
+		// CIs upstream of X: sources of edges pointing (transitively) into X,
+		// at most MaxRelationshipDepth hops away (SRC-04). The walk runs
+		// under RLS and only passes through visible, not deleted CIs.
 		p := next()
 		add(fmt.Sprintf(`ci.id IN (
-			WITH RECURSIVE up AS (
-				SELECT source_ci_id AS id FROM ci_relationship WHERE target_ci_id = %s::uuid
+			WITH RECURSIVE up (id, depth) AS (
+				SELECT r.source_ci_id, 1 FROM ci_relationship r
+				JOIN ci n ON n.id = r.source_ci_id AND n.deleted_at IS NULL
+				WHERE r.target_ci_id = %s::uuid
 				UNION
-				SELECT r.source_ci_id FROM ci_relationship r JOIN up ON r.target_ci_id = up.id
-			) SELECT id FROM up)`, p), f.UpstreamOf)
+				SELECT r.source_ci_id, up.depth + 1 FROM ci_relationship r
+				JOIN up ON r.target_ci_id = up.id
+				JOIN ci n ON n.id = r.source_ci_id AND n.deleted_at IS NULL
+				WHERE up.depth < %d
+			) SELECT id FROM up)`, p, MaxRelationshipDepth), f.UpstreamOf)
 	}
 	if f.DownstreamOf != "" && table == "ci" {
 		p := next()
 		add(fmt.Sprintf(`ci.id IN (
-			WITH RECURSIVE down AS (
-				SELECT target_ci_id AS id FROM ci_relationship WHERE source_ci_id = %s::uuid
+			WITH RECURSIVE down (id, depth) AS (
+				SELECT r.target_ci_id, 1 FROM ci_relationship r
+				JOIN ci n ON n.id = r.target_ci_id AND n.deleted_at IS NULL
+				WHERE r.source_ci_id = %s::uuid
 				UNION
-				SELECT r.target_ci_id FROM ci_relationship r JOIN down ON r.source_ci_id = down.id
-			) SELECT id FROM down)`, p), f.DownstreamOf)
+				SELECT r.target_ci_id, down.depth + 1 FROM ci_relationship r
+				JOIN down ON r.source_ci_id = down.id
+				JOIN ci n ON n.id = r.target_ci_id AND n.deleted_at IS NULL
+				WHERE down.depth < %d
+			) SELECT id FROM down)`, p, MaxRelationshipDepth), f.DownstreamOf)
 	}
 	if f.ReconciliationConflict && table == "ci" {
 		add(`EXISTS (SELECT 1 FROM ci_field_value fv WHERE fv.ci_id = ci.id
@@ -168,6 +180,9 @@ func (f FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (stri
 	}
 	return strings.Join(parts, " AND "), args, nil
 }
+
+// MaxRelationshipDepth bounds upstream_of and downstream_of (SRC-04).
+const MaxRelationshipDepth = 5
 
 // QueryResult is one row of a filter execution.
 type QueryResult struct {

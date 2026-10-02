@@ -1,6 +1,8 @@
 package savedview
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -9,10 +11,16 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// PermissionChecker answers whether a user holds a permission key.
+type PermissionChecker interface {
+	HasPermission(ctx context.Context, orgID, userID, key string) (bool, error)
+}
+
 // Handler provides HTTP handlers for saved views.
 type Handler struct {
-	repo  Repository
-	query QueryEngine
+	repo        Repository
+	query       QueryEngine
+	permissions PermissionChecker
 }
 
 // NewHandler creates a new saved view handler.
@@ -24,6 +32,14 @@ func NewHandler(repo Repository) *Handler {
 // one, the query endpoint returns 501.
 func (h *Handler) WithQueryEngine(engine QueryEngine) *Handler {
 	h.query = engine
+	return h
+}
+
+// WithPermissions attaches the permission check of the query endpoint: the
+// caller must hold the read permission of the queried entity kind (SRC-03).
+// Without a checker the endpoint answers 403 (fail closed).
+func (h *Handler) WithPermissions(permissions PermissionChecker) *Handler {
+	h.permissions = permissions
 	return h
 }
 
@@ -167,6 +183,15 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	key, ok := readPermissions[spec.entityKind()]
+	if !ok {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", fmt.Sprintf("unsupported entity_kind %q", spec.entityKind()))
+		return
+	}
+	if !h.mayRead(r.Context(), t, key) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "missing permission "+key)
+		return
+	}
 	page := api.ParsePagination(r)
 	items, total, err := h.query.Query(r.Context(), t.OrganizationID, spec, page)
 	if err != nil {
@@ -177,4 +202,20 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset,
 		HasMore: page.Offset+page.Limit < total,
 	})
+}
+
+// readPermissions maps each queryable entity kind to its read permission.
+var readPermissions = map[string]string{
+	"ci":    "ci:read",
+	"asset": "asset:read",
+}
+
+// mayRead reports whether the caller holds key; errors and a missing checker
+// or user deny.
+func (h *Handler) mayRead(ctx context.Context, t tenant.TenantInfo, key string) bool {
+	if h.permissions == nil || t.UserID == "" {
+		return false
+	}
+	ok, err := h.permissions.HasPermission(ctx, t.OrganizationID, t.UserID, key)
+	return err == nil && ok
 }

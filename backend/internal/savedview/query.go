@@ -25,8 +25,10 @@ func NewPGQueryEngine(pool *pgxpool.Pool) *PGQueryEngine {
 	return &PGQueryEngine{pool: pool}
 }
 
-// Query executes the filter spec. entity_kind selects the table: "ci" or
-// "asset". Unknown kinds are rejected.
+// Query executes the filter spec in WithRequestTenant, i.e. under RLS with
+// the principal's full scope (client, site, team). entity_kind selects the
+// table: "ci" or "asset". Unknown kinds are rejected; deleted CIs are never
+// returned.
 func (e *PGQueryEngine) Query(ctx context.Context, orgID string, spec FilterSpec, page api.PaginationParams) ([]QueryResult, int, error) {
 	table := "ci"
 	switch spec.entityKind() {
@@ -46,6 +48,9 @@ func (e *PGQueryEngine) Query(ctx context.Context, orgID string, spec FilterSpec
 			return err
 		}
 		baseWhere := fmt.Sprintf("%s.organization_id = $1 AND %s", table, where)
+		if table == "ci" {
+			baseWhere = "ci.deleted_at IS NULL AND " + baseWhere
+		}
 
 		if countErr := tx.QueryRow(ctx,
 			fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", table, baseWhere), args...).Scan(&total); countErr != nil {
