@@ -12,9 +12,11 @@ import (
 
 type PGRepository struct{ pool *pgxpool.Pool }
 
-// chunkVisible restricts RAG chunks to source objects visible under the
-// transaction's tenant scope: the entity tables' policies filter the
-// subqueries, while ai_chunk carries no client or site column yet (WP-037).
+// chunkVisible restricts RAG chunks to source objects that are visible under
+// the transaction's tenant scope and still exist. The policy of ai_chunk
+// already filters by the client and site derived from the source (migration
+// 000069); the subqueries add the source's own policy, which covers
+// documents and tickets (links, teams) and chunks that are out of date.
 const chunkVisible = `CASE ai_chunk.entity_type
 	WHEN 'ci' THEN EXISTS (SELECT 1 FROM ci WHERE ci.id = ai_chunk.entity_id)
 	WHEN 'asset' THEN EXISTS (SELECT 1 FROM asset WHERE asset.id = ai_chunk.entity_id)

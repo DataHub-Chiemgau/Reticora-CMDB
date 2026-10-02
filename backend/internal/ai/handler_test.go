@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
@@ -58,11 +57,13 @@ func ask(t *testing.T, mux chi.Router, question string) AskResponse {
 
 func jsonQuote(s string) string { b, _ := json.Marshal(s); return string(b) }
 
-func TestAskWithoutChunksReturnsUngroundedNoticeAndNoCitations(t *testing.T) {
+func TestAskWithoutChunksSkipsProviderAndCitesNothing(t *testing.T) {
 	mux := setupAsk(t, nil)
 	out := ask(t, mux, "Was ist der Status?")
-	if !strings.Contains(out.Answer, "keine passenden tenant-eigenen Daten") {
-		t.Fatalf("expected ungrounded notice, got %q", out.Answer)
+	// The stub provider reports one token per call: zero tokens prove that
+	// the provider was not asked (AI-01).
+	if out.Answer != noGroundingAnswer || out.PromptTokens != 0 || out.CompletionTokens != 0 {
+		t.Fatalf("expected the fixed no-grounding answer without provider call, got %q (%d/%d tokens)", out.Answer, out.PromptTokens, out.CompletionTokens)
 	}
 	if len(out.Citations) != 0 {
 		t.Fatalf("expected no citations without chunks, got %d", len(out.Citations))

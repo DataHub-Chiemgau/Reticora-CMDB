@@ -94,25 +94,30 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	prompt := buildPrompt(req.Question, chunks)
-	answer, pt, ct, err := h.provider.Chat([]Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: prompt}})
-	if err != nil {
-		api.WriteError(w, http.StatusBadGateway, "AI provider error", err.Error())
-		return
-	}
-	// Citation obligation: an answer may only be served with the citations that
-	// back it. When no tenant-owned chunks were retrieved, the answer is not
-	// grounded in CMDB data; return it with an explicit notice and no
-	// citations so callers can surface the limitation instead of hallucinated
-	// sources.
+	// Citation obligation (AI-01): without permitted source objects the
+	// provider is not called at all; the answer says so and cites nothing.
+	// Otherwise the answer is grounded in exactly the cited chunks.
+	var answer string
+	var pt, ct int
 	if len(chunks) == 0 {
-		answer = "Hinweis: Es wurden keine passenden tenant-eigenen Daten gefunden. Die folgende Antwort ist daher nicht durch die CMDB belegt.\n\n" + answer
+		answer = noGroundingAnswer
 		cites = nil
+	} else {
+		prompt := buildPrompt(req.Question, chunks)
+		answer, pt, ct, err = h.provider.Chat([]Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: prompt}})
+		if err != nil {
+			api.WriteError(w, http.StatusBadGateway, "AI provider error", err.Error())
+			return
+		}
 	}
 	_ = h.repo.AddMessage(r.Context(), t.OrganizationID, convID, "user", req.Question, 0, 0, nil)
 	_ = h.repo.AddMessage(r.Context(), t.OrganizationID, convID, "assistant", answer, pt, ct, cites)
 	api.WriteJSON(w, http.StatusOK, AskResponse{ConversationID: convID, Answer: answer, Citations: cites, PromptTokens: pt, CompletionTokens: ct})
 }
+
+// noGroundingAnswer is returned without a provider call when no source object
+// visible to the caller matches the question.
+const noGroundingAnswer = "Es wurden keine passenden Daten gefunden, die du sehen darfst. Ohne belegte Quellen erzeugt der Assistent keine Antwort."
 
 // systemPrompt enforces the RAG governance rules: answer only from the
 // supplied tenant-owned context, name uncertainty, and cite the sources.
