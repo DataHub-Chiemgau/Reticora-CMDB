@@ -2186,7 +2186,12 @@ paths:
     post:
       operationId: enrollAgent
       tags: [Agents]
-      summary: Register an endpoint agent (after edge enrollment authenticated it)
+      summary: Register an endpoint agent with a single-use enrollment token
+      description: >-
+        The enrollment token is consumed in the same transaction and binds the
+        agent to the token's client and, unless it is a roaming token, its site
+        (AGT-06). For roaming agents a site is suggested from `ip_address`
+        (subnet of the client) and must be confirmed manually.
       requestBody:
         required: true
         content:
@@ -2204,6 +2209,63 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/agents/enrollment-tokens:
+    post:
+      operationId: createAgentEnrollmentToken
+      tags: [Agents]
+      summary: Create a single-use agent enrollment token for a client and site
+      description: >-
+        The secret (`token`) is returned once and stored only as a hash.
+        Without `site_id` the token enrolls roaming devices: they keep the
+        client, their site is suggested from the network fingerprint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentEnrollmentTokenRequest'
+      responses:
+        '201':
+          description: Token created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentEnrollmentToken'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/agents/{id}/site:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: confirmAgentSite
+      tags: [Agents]
+      summary: Confirm the site of a roaming agent
+      description: The site must belong to the agent's client; the suggestion is cleared.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmAgentSiteRequest'
+      responses:
+        '200':
+          description: Agent with confirmed site
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/agents/telemetry:
     post:
@@ -9827,6 +9889,11 @@ components:
         os: { type: string }
         arch: { type: string }
         ci_id: { type: string }
+        client_id: { type: string, description: Client bound by the enrollment token. }
+        site_id: { type: string, description: Site from the token or a manual confirmation. }
+        suggested_site_id: { type: string, description: Site suggested from the network fingerprint; awaits confirmation. }
+        network_fingerprint: { type: string }
+        site_confirmed_at: { type: string, format: date-time }
         status: { type: string, enum: [online, offline, disabled] }
         last_heartbeat: { type: string, format: date-time }
         policy: { $ref: '#/components/schemas/AgentPolicy' }
@@ -9834,19 +9901,47 @@ components:
         updated_at: { type: string, format: date-time }
     AgentEnrollRequest:
       type: object
-      required: [agent_id, hostname]
+      required: [agent_id, hostname, enrollment_token]
       properties:
         agent_id: { type: string }
         hostname: { type: string }
         version: { type: string }
         os: { type: string }
         arch: { type: string }
+        enrollment_token: { type: string, description: Single-use secret from POST /api/v1/agents/enrollment-tokens. }
+        ip_address: { type: string, description: Network fingerprint used to suggest a site. }
+    AgentEnrollmentToken:
+      type: object
+      required: [id, client_id, expires_at, created_at]
+      properties:
+        id: { type: string }
+        client_id: { type: string }
+        site_id: { type: string }
+        description: { type: string }
+        expires_at: { type: string, format: date-time }
+        used_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        token: { type: string, description: The secret; only present in the creation response. }
+    CreateAgentEnrollmentTokenRequest:
+      type: object
+      required: [client_id]
+      properties:
+        client_id: { type: string }
+        site_id: { type: string, description: Omit for roaming devices. }
+        description: { type: string }
+        ttl_hours: { type: integer, description: Defaults to 24, at most 720. }
+    ConfirmAgentSiteRequest:
+      type: object
+      required: [site_id]
+      properties:
+        site_id: { type: string }
     AgentTelemetryPayload:
       type: object
       required: [agent_id]
       properties:
         agent_id: { type: string }
         hostname: { type: string }
+        ip_address: { type: string, description: Current network fingerprint; a differing site is suggested, never applied. }
         version: { type: string }
         os: { type: string }
         arch: { type: string }
