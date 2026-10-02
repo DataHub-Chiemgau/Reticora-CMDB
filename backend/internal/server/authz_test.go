@@ -138,3 +138,13 @@ func withPrincipal(r *http.Request, p identity.Principal) *http.Request {
 func replaceAll(s, old, new string) string {
 	return strings.ReplaceAll(s, old, new)
 }
+
+// TestGraphQLRouteRequiresAuthenticationOnly pins the GraphQL BFF mapping
+// (GQL-04): the route needs an authenticated principal but no blanket
+// permission; each resolver checks its own read permission.
+func TestGraphQLRouteRequiresAuthenticationOnly(t *testing.T) {
+	required, access := PermissionForRoute(http.MethodPost, "/api/v1/graphql")
+	if access != routeProtected || required != "" {
+		t.Fatalf("POST /api/v1/graphql: permission %q access %v, want authenticated-only", required, access)
+	}
+}
