@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
@@ -25,75 +24,19 @@ type idempotencyEntry struct {
 	Body        []byte `json:"body,omitempty"`
 }
 
-// idempotencyMemStore is a simple in-memory store for development.
-type idempotencyMemStore struct {
-	mu      sync.RWMutex
-	entries map[string]idempotencyEntry // key: org_id:idempotency_key
-}
-
-var globalIdempotencyStore = &idempotencyMemStore{
-	entries: make(map[string]idempotencyEntry),
-}
-
 const idempotencyTTL = 24 * time.Hour
 
-// Idempotency middleware handles POST request deduplication via the
-// Idempotency-Key header. Entries are scoped to the authenticated tenant so
-// keys can never collide or be poisoned across organizations. Uses an
-// in-memory store; for production use IdempotencyWithStore.
-func Idempotency(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			next.ServeHTTP(w, r)
-			return
-		}
+// idempotencyLockTTL bounds a reservation: a request that never stores its
+// result (crash, timeout) releases its key after this time.
+const idempotencyLockTTL = 2 * time.Minute
 
-		key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-		if key == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		storeKey := "idempotency:" + idempotencyScope(r) + ":" + key
-
-		// Read and hash the body (limit to 1MB for safety)
-		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-		if err != nil {
-			httpx.Internal(w, r, "failed to read request body")
-			return
-		}
-		r.Body = io.NopCloser(strings.NewReader(string(body)))
-
-		bodyHash := hashBody(body)
-
-		// Check for existing entry
-		globalIdempotencyStore.mu.RLock()
-		entry, exists := globalIdempotencyStore.entries[storeKey]
-		globalIdempotencyStore.mu.RUnlock()
-
-		if exists {
-			replayIdempotent(w, r, entry, bodyHash)
-			return
-		}
-
-		// Capture response
-		rec := newResponseRecorder(w)
-		next.ServeHTTP(rec, r)
-
-		// Store result
-		globalIdempotencyStore.mu.Lock()
-		globalIdempotencyStore.entries[storeKey] = idempotencyEntry{
-			StatusCode:  rec.status,
-			BodyHash:    bodyHash,
-			ContentType: rec.Header().Get("Content-Type"),
-			Body:        rec.body,
-		}
-		globalIdempotencyStore.mu.Unlock()
-	})
-}
-
-// IdempotencyWithStore returns middleware that uses a cache.Store (Redis) for
-// distributed idempotency tracking with 24h TTL per tenant.
+// IdempotencyWithStore returns middleware that deduplicates POST requests
+// with an Idempotency-Key for 24 hours (API-04). It runs per route after the
+// route authorization, so a request without the route's permission never
+// reaches a stored response. The key is bound to the principal, the method
+// and the path; the first request reserves it atomically (an INCR in the
+// shared store, the cache equivalent of INSERT … ON CONFLICT), and a
+// concurrent duplicate gets 409 instead of executing twice.
 func IdempotencyWithStore(store cache.Store) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -117,29 +60,29 @@ func IdempotencyWithStore(store cache.Store) func(http.Handler) http.Handler {
 				return
 			}
 			r.Body = io.NopCloser(strings.NewReader(string(body)))
-
 			bodyHash := hashBody(body)
 
-			// Check for existing entry in Redis
-			existing, found, err := store.Get(r.Context(), storeKey)
-			if err != nil {
-				// On cache errors, fall through and re-execute (fail-open).
-				// Losing deduplication during a cache outage is preferable to
-				// rejecting every POST; the tenant-scoped key still prevents
-				// cross-tenant poisoning once the store recovers.
-				slog.Warn("idempotency: cache lookup failed, re-executing", "error", err)
-				executeAndStore(r.Context(), store, storeKey, bodyHash, w, r, next)
+			if replayStored(w, r, store, storeKey, bodyHash) {
 				return
 			}
 
-			if found {
-				var entry idempotencyEntry
-				if jsonErr := json.Unmarshal([]byte(existing), &entry); jsonErr != nil {
-					slog.Warn("idempotency: failed to unmarshal cached entry, re-executing", "key", storeKey, "error", jsonErr)
-				} else {
-					replayIdempotent(w, r, entry, bodyHash)
+			reserved, err := store.Increment(r.Context(), storeKey+":lock", idempotencyLockTTL)
+			if err != nil {
+				// On cache errors, fall through and execute (fail-open):
+				// losing deduplication during a cache outage is preferable
+				// to rejecting every POST.
+				slog.Warn("idempotency: reservation failed, executing", "error", err)
+				executeAndStore(r.Context(), store, storeKey, bodyHash, w, r, next)
+				return
+			}
+			if reserved > 1 {
+				// Another request holds the key: replay its result when it
+				// has finished, otherwise report the conflict.
+				if replayStored(w, r, store, storeKey, bodyHash) {
 					return
 				}
+				httpx.Conflict(w, r, "a request with this Idempotency-Key is still in progress")
+				return
 			}
 
 			executeAndStore(r.Context(), store, storeKey, bodyHash, w, r, next)
@@ -147,16 +90,37 @@ func IdempotencyWithStore(store cache.Store) func(http.Handler) http.Handler {
 	}
 }
 
-// idempotencyScope derives the deduplication scope from the authenticated
-// principal. Client-supplied headers are never consulted: two tenants using
-// the same Idempotency-Key must never see each other's responses. Requests
-// without a principal (public endpoints) share an unscoped namespace so a
-// caller can only replay its own key, never a tenant's.
-func idempotencyScope(r *http.Request) string {
-	if principal, ok := PrincipalFromContext(r.Context()); ok && principal.OrganizationID != "" {
-		return principal.OrganizationID
+// replayStored replays a stored response for the key and reports whether it
+// did.
+func replayStored(w http.ResponseWriter, r *http.Request, store cache.Store, storeKey, bodyHash string) bool {
+	existing, found, err := store.Get(r.Context(), storeKey)
+	if err != nil {
+		slog.Warn("idempotency: cache lookup failed", "error", err)
+		return false
 	}
-	return "public"
+	if !found {
+		return false
+	}
+	var entry idempotencyEntry
+	if jsonErr := json.Unmarshal([]byte(existing), &entry); jsonErr != nil {
+		slog.Warn("idempotency: failed to unmarshal cached entry", "key", storeKey, "error", jsonErr)
+		return false
+	}
+	replayIdempotent(w, r, entry, bodyHash)
+	return true
+}
+
+// idempotencyScope binds a key to the authenticated principal (organization,
+// principal type and subject), the method and the path (API-04), so neither
+// another user of the organization nor another route can replay a response.
+// Client-supplied headers are never consulted. Requests without a principal
+// (public endpoints) share an unscoped namespace per path.
+func idempotencyScope(r *http.Request) string {
+	route := r.Method + ":" + r.URL.Path
+	if principal, ok := PrincipalFromContext(r.Context()); ok && principal.OrganizationID != "" {
+		return principal.OrganizationID + ":" + string(principal.Type) + ":" + principal.Subject + ":" + route
+	}
+	return "public:" + route
 }
 
 func replayIdempotent(w http.ResponseWriter, r *http.Request, entry idempotencyEntry, bodyHash string) {

@@ -242,3 +242,40 @@ func TestSpecialActionsRequireTheirOwnPermission(t *testing.T) {
 		}
 	}
 }
+
+// TestRouteMiddlewareRunsAfterAuthorization covers WP-050 (API-04): the
+// route middleware (validation, idempotency) runs only after the route's
+// authorization, in the given order, and never for a forbidden request.
+func TestRouteMiddlewareRunsAfterAuthorization(t *testing.T) {
+	var trace []string
+	step := func(name string) func(http.Handler) http.Handler {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				trace = append(trace, name)
+				next.ServeHTTP(w, r)
+			})
+		}
+	}
+	mux := chi.NewRouter()
+	router := authorizingRouter{Router: mux, after: []func(http.Handler) http.Handler{step("validation"), step("idempotency")}}
+	router.Route("/api/v1/orders", func(r chi.Router) {
+		r.Post("/{id}/approve", func(w http.ResponseWriter, _ *http.Request) {
+			trace = append(trace, "handler")
+			w.WriteHeader(http.StatusOK)
+		})
+	})
+	call := func(perms ...identity.Permission) int {
+		req := withPrincipal(httptest.NewRequest(http.MethodPost, "/api/v1/orders/o-1/approve", strings.NewReader(`not json`)),
+			identity.Principal{Subject: "u", OrganizationID: "org", Permissions: perms, Type: identity.PrincipalTypeUser})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	if code := call(identity.PermOrderWrite); code != http.StatusForbidden || len(trace) != 0 {
+		t.Fatalf("forbidden request: status %d, trace %v; want 403 before validation", code, trace)
+	}
+	if code := call(identity.PermOrderApprove); code != http.StatusOK || strings.Join(trace, ",") != "validation,idempotency,handler" {
+		t.Errorf("permitted request: status %d, trace %v", code, trace)
+	}
+}

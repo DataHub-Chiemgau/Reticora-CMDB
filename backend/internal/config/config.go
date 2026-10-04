@@ -84,6 +84,13 @@ type Config struct {
 	// stay blocked (SEC-08). Default off.
 	EgressAllowPrivate bool
 
+	// PreAuthRateLimitRPM is the budget of authentication attempts per
+	// client IP and minute (AUT-10, default 20).
+	PreAuthRateLimitRPM int
+	// TrustedProxies lists the reverse proxies (CIDRs) whose X-Real-IP
+	// header names the client for IP-based limits.
+	TrustedProxies string
+
 	// Rate Limiting
 	RateLimitRPM int // requests per minute per key/user (default 600)
 
@@ -144,9 +151,11 @@ func Load() *Config {
 		OTelEndpoint: l.str("RETICORA_OTEL_ENDPOINT", ""),
 		// Opt-in: the organization_id label multiplies the HTTP metric series
 		// by the tenant count. Default off; enable for bounded-tenant setups.
-		MetricsTenantLabel: l.boolean("RETICORA_METRICS_TENANT_LABEL", false),
-		RateLimitRPM:       l.integer("RETICORA_RATE_LIMIT_RPM", 600),
-		EgressAllowPrivate: l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
+		MetricsTenantLabel:  l.boolean("RETICORA_METRICS_TENANT_LABEL", false),
+		RateLimitRPM:        l.integer("RETICORA_RATE_LIMIT_RPM", 600),
+		EgressAllowPrivate:  l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
+		PreAuthRateLimitRPM: l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
+		TrustedProxies:      l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),
 
 		SearchBackend:      l.str("RETICORA_SEARCH_BACKEND", "postgres"),
 		OpenSearchURL:      l.str("RETICORA_OPENSEARCH_URL", ""),

@@ -160,3 +160,5 @@ RBA-02;[B];B;backend/internal/permission/role_matrix_integration_test.go;WP-046
 SEC-01;[B];B;backend/internal/credential/handler_test.go;WP-047
 COL-02;[B];B;backend/internal/credential/handler_test.go;WP-047
 SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-049
+API-04;[B];B;backend/internal/middleware/middleware_test.go;WP-050
+AUT-10;[B];B;backend/internal/middleware/middleware_test.go;WP-050

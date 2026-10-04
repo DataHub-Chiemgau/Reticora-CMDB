@@ -733,6 +733,8 @@ The server is configured via environment variables:
 - `RETICORA_OTEL_ENDPOINT` — OTLP HTTP collector endpoint for traces/metrics; empty (default) keeps no-op telemetry.
 - `RETICORA_METRICS_TENANT_LABEL` — set to `true` to add the `organization_id` label to HTTP request metrics (default `false`; multiplies series by tenant count).
 - `RETICORA_EGRESS_ALLOW_PRIVATE` — set to `true` to let webhooks and IGA connectors reach private, loopback and link-local destinations (on-premises installations; default `false`). Cloud metadata endpoints stay blocked; DNS pinning and the 3-redirect limit always apply (SEC-08).
+- `RETICORA_PREAUTH_RATE_LIMIT_RPM` — authentication attempts per client IP and minute before any credential check (default `20`, AUT-10): requests to `/auth/callback`, `/auth/refresh` and `/collectors/enroll` and every failed authentication count; once spent, the IP gets 429 until the minute is over.
+- `RETICORA_TRUSTED_PROXIES` — comma-separated CIDRs of reverse proxies whose `X-Real-IP` header names the client for IP-based limits (default loopback and private networks; empty trusts none).
 
 ### CI/CD
 

@@ -300,7 +300,11 @@ func main() {
 		AIProvider:           aiProvider,
 		Blobs:                blobStore,
 		Egress:               egressPolicy,
-		Readiness:            readiness,
+		RouteMiddleware: []func(http.Handler) http.Handler{
+			middleware.OpenAPIValidation,
+			middleware.IdempotencyWithStore(cacheStore),
+		},
+		Readiness: readiness,
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -343,23 +347,30 @@ func main() {
 		slog.Warn("INSECURE DEVELOPMENT MODE: bearer tokens are accepted without signature verification")
 	}
 
-	// Middleware chain per spec:
-	// RequestID/Tracing -> Panic-Recovery -> Security-Headers -> Auth ->
-	// Tenant -> Entitlement -> Rate-Limit -> POST-Idempotency -> Handler
-	// The HTTP metrics middleware sits just inside the tenant middleware so the
-	// organization_id label is populated from the request context.
+	if err := middleware.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		slog.Error("invalid RETICORA_TRUSTED_PROXIES", "error", err)
+		os.Exit(1)
+	}
+
+	// Middleware chain per API-04:
+	// RequestID/Tracing -> Recovery -> Security-Headers -> Pre-Auth-Limit
+	// (per IP, AUT-10) -> Auth -> Tenant -> Entitlement -> Rate-Limit ->
+	// [per route: Authz -> Validation -> Idempotency] -> Handler.
+	// Validation and idempotency are route middleware (server.Options), so
+	// they run after the route's authorization. The HTTP metrics middleware
+	// sits just inside the tenant middleware so the organization_id label is
+	// populated from the request context.
 	handler := middleware.Chain(
 		middleware.RequestID,
 		middleware.Recovery,
 		middleware.Logger,
 		middleware.SecurityHeaders,
-		middleware.OpenAPIValidation,
+		middleware.PreAuthRateLimiter(cfg.PreAuthRateLimitRPM, cacheStore),
 		authMiddleware,
 		middleware.TenantMiddleware,
 		httpMetrics,
 		entitlementSvc.Middleware,
 		middleware.RateLimiterWithStore(cfg.RateLimitRPM, cacheStore),
-		middleware.IdempotencyWithStore(cacheStore),
 	)(mux)
 
 	server := &http.Server{

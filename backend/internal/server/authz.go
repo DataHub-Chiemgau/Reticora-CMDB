@@ -367,10 +367,13 @@ func AuthorizeRoute(method, path string) func(http.Handler) http.Handler {
 type authorizingRouter struct {
 	chi.Router
 	prefix string
+	// after runs behind the route authorization, in order (API-04:
+	// Authz -> Validation -> Idempotency -> Handler).
+	after []func(http.Handler) http.Handler
 }
 
 func (a authorizingRouter) With(middlewares ...func(http.Handler) http.Handler) chi.Router {
-	return authorizingRouter{Router: a.Router.With(middlewares...), prefix: a.prefix}
+	return authorizingRouter{Router: a.Router.With(middlewares...), prefix: a.prefix, after: a.after}
 }
 
 func (a authorizingRouter) fullPattern(pattern string) string {
@@ -381,7 +384,8 @@ func (a authorizingRouter) fullPattern(pattern string) string {
 }
 
 func (a authorizingRouter) handle(method, pattern string, h http.Handler) {
-	a.Router.With(AuthorizeRoute(method, a.fullPattern(pattern))).Method(method, pattern, h)
+	chain := append([]func(http.Handler) http.Handler{AuthorizeRoute(method, a.fullPattern(pattern))}, a.after...)
+	a.Router.With(chain...).Method(method, pattern, h)
 }
 
 func (a authorizingRouter) Method(method, pattern string, h http.Handler) {
@@ -417,7 +421,7 @@ func (a authorizingRouter) Connect(pattern string, h http.HandlerFunc) {
 
 func (a authorizingRouter) Route(pattern string, fn func(r chi.Router)) chi.Router {
 	return a.Router.Route(pattern, func(r chi.Router) {
-		fn(authorizingRouter{Router: r, prefix: a.fullPattern(pattern)})
+		fn(authorizingRouter{Router: r, prefix: a.fullPattern(pattern), after: a.after})
 	})
 }
 

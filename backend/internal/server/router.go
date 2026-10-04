@@ -165,6 +165,9 @@ type Options struct {
 	// Egress is the destination policy of webhook and connector URLs
 	// (SEC-08); the zero value blocks every internal destination.
 	Egress egress.Options
+	// RouteMiddleware runs on every API route after its authorization, in
+	// order (API-04: validation, then idempotency).
+	RouteMiddleware []func(http.Handler) http.Handler
 	// Readiness lists the dependencies /readyz verifies (OPS-01).
 	Readiness []ReadinessCheck
 }
@@ -221,7 +224,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// attaches the permission middleware resolved from the route table.
 	// Routes without a mapping fail closed; the router test locks in that
 	// every route is mapped.
-	protected := authorizingRouter{Router: mux}
+	protected := authorizingRouter{Router: mux, after: opts.RouteMiddleware}
 
 	registrars := []registrar{
 		identity.NewHandler(opts.OIDC, opts.Sessions).
