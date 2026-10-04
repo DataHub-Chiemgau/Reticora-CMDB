@@ -23,7 +23,8 @@ func NewCIIndexer(backend Backend) *CIIndexer {
 	return &CIIndexer{Backend: backend}
 }
 
-// IndexDocument upserts a CI document into the search index.
+// IndexDocument upserts a CI document into the search index. Client and site
+// of the CI travel along so remote indexes can filter on them (TEC-12).
 func (a *CIIndexer) IndexDocument(ctx context.Context, doc ci.Document) error {
 	return a.Backend.IndexDocument(ctx, Document{
 		OrganizationID: doc.OrganizationID,
@@ -33,6 +34,8 @@ func (a *CIIndexer) IndexDocument(ctx context.Context, doc ci.Document) error {
 		Summary:        doc.Summary,
 		URL:            doc.URL,
 		Metadata:       doc.Metadata,
+		ClientID:       doc.ClientID,
+		SiteID:         doc.SiteID,
 	})
 }
 

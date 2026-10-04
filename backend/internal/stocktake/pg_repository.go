@@ -10,6 +10,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -58,26 +59,24 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// withTenant executes fn within a transaction that has the tenant setting set for RLS.
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
+// scanVisible restricts stocktake scans to those whose asset or CI is visible
+// under the transaction's tenant scope: their policies filter the
+// subqueries, while stock_scan carries no client column yet (WP-025).
+const scanVisible = `(stock_scan.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = stock_scan.asset_id))
+	AND (stock_scan.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = stock_scan.ci_id))`
 
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
+// requireVisible fails with ErrNotFound when the written row of table does not
+// satisfy visible, i.e. when a write pointed it at an object outside the
+// tenant scope; the transaction is then rolled back.
+func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
+	var ok bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
+		return fmt.Errorf("check %s visibility: %w", table, err)
 	}
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set legacy tenant context: %w", err)
+	if !ok {
+		return ErrNotFound
 	}
-
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
+	return nil
 }
 
 // List returns paginated stocktakes filtered by the given parameters.
@@ -85,7 +84,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 	var stocktakes []Stocktake
 	var total int
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		whereParts := []string{"true"}
 		args := make([]any, 0, 5)
 		argPos := 1
@@ -168,7 +167,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Stocktake, error) {
 	var stocktake *Stocktake
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM stocktake WHERE id = $1", stocktakeSelectColumns)
 		var err error
 		stocktake, err = scanStocktake(tx.QueryRow(ctx, query, id))
@@ -188,7 +187,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Stocktak
 
 // Create inserts a new stocktake.
 func (r *PGRepository) Create(ctx context.Context, s *Stocktake) error {
-	return r.withTenant(ctx, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		query := `
 			INSERT INTO stocktake (
 				organization_id, title, description, status, scope, started_by, started_at,
@@ -225,7 +224,7 @@ func (r *PGRepository) Create(ctx context.Context, s *Stocktake) error {
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Stocktake, error) {
 	var stocktake *Stocktake
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		setClauses := make([]string, 0, 7)
 		args := []any{id}
 		argPos := 2
@@ -293,7 +292,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 
 // Delete deletes a stocktake. The stocktake table has no deleted_at column, so this is a hard delete.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM stocktake WHERE id = $1", id)
 		if err != nil {
 			return fmt.Errorf("delete stocktake: %w", err)
@@ -307,7 +306,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 
 // AddScan records a stocktake scan and updates stocktake counters.
 func (r *PGRepository) AddScan(ctx context.Context, scan *StockScan) error {
-	return r.withTenant(ctx, scan.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, scan.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM stocktake WHERE id = $1)", scan.StocktakeID).Scan(&exists); err != nil {
 			return fmt.Errorf("check stocktake: %w", err)
@@ -340,6 +339,9 @@ func (r *PGRepository) AddScan(ctx context.Context, scan *StockScan) error {
 		if err != nil {
 			return fmt.Errorf("add stock scan: %w", err)
 		}
+		if err := requireVisible(ctx, tx, "stock_scan", scanVisible, created.ID); err != nil {
+			return err
+		}
 		*scan = *created
 
 		setClauses := []string{"total_scanned = total_scanned + 1", "updated_at = NOW()"}
@@ -361,11 +363,11 @@ func (r *PGRepository) ListScans(ctx context.Context, orgID, stocktakeID string,
 	var scans []StockScan
 	var total int
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM stock_scan WHERE stocktake_id = $1", stocktakeID).Scan(&total); err != nil {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM stock_scan WHERE "+scanVisible+" AND stocktake_id = $1", stocktakeID).Scan(&total); err != nil {
 			return fmt.Errorf("count stock scans: %w", err)
 		}
-		query := fmt.Sprintf("SELECT %s FROM stock_scan WHERE stocktake_id = $1 ORDER BY scanned_at DESC LIMIT $2 OFFSET $3", stockScanSelectColumns)
+		query := fmt.Sprintf("SELECT %s FROM stock_scan WHERE "+scanVisible+" AND stocktake_id = $1 ORDER BY scanned_at DESC LIMIT $2 OFFSET $3", stockScanSelectColumns)
 		rows, err := tx.Query(ctx, query, stocktakeID, page.Limit, page.Offset)
 		if err != nil {
 			return fmt.Errorf("list stock scans: %w", err)
@@ -393,7 +395,7 @@ func (r *PGRepository) Difference(ctx context.Context, orgID, stocktakeID string
 	entries := []DifferenceEntry{}
 	var total int
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM stocktake WHERE id = $1)", stocktakeID).Scan(&exists); err != nil {
 			return fmt.Errorf("check stocktake: %w", err)
@@ -404,7 +406,8 @@ func (r *PGRepository) Difference(ctx context.Context, orgID, stocktakeID string
 
 		if err := tx.QueryRow(ctx,
 			`SELECT COUNT(*) FROM stock_scan
-			 WHERE stocktake_id = $1 AND scan_result IN ('missing', 'surplus', 'damaged', 'wrong_location')`,
+			 WHERE stocktake_id = $1 AND scan_result IN ('missing', 'surplus', 'damaged', 'wrong_location')
+			   AND `+scanVisible,
 			stocktakeID).Scan(&total); err != nil {
 			return fmt.Errorf("count stocktake difference: %w", err)
 		}
@@ -419,6 +422,7 @@ func (r *PGRepository) Difference(ctx context.Context, orgID, stocktakeID string
 			LEFT JOIN asset a ON a.id = s.asset_id
 			WHERE s.stocktake_id = $1
 			  AND s.scan_result IN ('missing', 'surplus', 'damaged', 'wrong_location')
+			  AND EXISTS (SELECT 1 FROM stock_scan WHERE stock_scan.id = s.id AND `+scanVisible+`)
 			ORDER BY s.scanned_at ASC
 			LIMIT $2 OFFSET $3`, stocktakeID, page.Limit, page.Offset)
 		if err != nil {
@@ -466,7 +470,7 @@ func (r *PGRepository) Difference(ctx context.Context, orgID, stocktakeID string
 func (r *PGRepository) Complete(ctx context.Context, orgID, id string, applyCorrections bool) (*Completion, error) {
 	completion := &Completion{Corrections: []Correction{}}
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var status string
 		err := tx.QueryRow(ctx, "SELECT status FROM stocktake WHERE id = $1 FOR UPDATE", id).Scan(&status)
 		if err == pgx.ErrNoRows {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -19,29 +20,11 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
-}
-
 // List returns all entitlement rows stored for the organization.
 func (r *PGRepository) List(ctx context.Context, orgID string) ([]Entitlement, error) {
 	items := make([]Entitlement, 0)
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT organization_id::text, feature_key, plan, enabled, limit_value, expires_at, updated_at
 			FROM entitlement
@@ -73,7 +56,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string) ([]Entitlement, e
 func (r *PGRepository) Upsert(ctx context.Context, ent Entitlement) (Entitlement, error) {
 	var stored Entitlement
 
-	err := r.withTenant(ctx, ent.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, ent.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
 			INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limit_value, expires_at)
 			VALUES (current_setting('app.org_id')::uuid, $1, $2, $3, $4, $5)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -30,24 +31,6 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
-}
-
 const webhookSelectColumns = `id, organization_id, name, url, secret, events, is_active, headers, created_at, updated_at`
 
 // List returns paginated subscriptions.
@@ -55,7 +38,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, page api.Paginati
 	var subs []Subscription
 	var total int
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM webhook_subscription").Scan(&total); err != nil {
 			return fmt.Errorf("count webhooks: %w", err)
 		}
@@ -89,7 +72,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, page api.Paginati
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Subscription, error) {
 	var sub *Subscription
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM webhook_subscription WHERE id = $1", webhookSelectColumns)
 		var err error
 		sub, err = scanWebhook(tx.QueryRow(ctx, query, id))
@@ -109,7 +92,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Subscrip
 }
 
 func (r *PGRepository) Create(ctx context.Context, sub *Subscription) error {
-	return r.withTenant(ctx, sub.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, sub.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		headersJSON, err := json.Marshal(sub.Headers)
 		if err != nil {
 			return fmt.Errorf("marshal headers: %w", err)
@@ -142,7 +125,7 @@ func (r *PGRepository) Create(ctx context.Context, sub *Subscription) error {
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Subscription, error) {
 	var sub *Subscription
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		setClauses := make([]string, 0, 4)
 		args := []any{id}
 		argPos := 2
@@ -203,7 +186,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 }
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM webhook_subscription WHERE id = $1", id)
 		if err != nil {
 			return fmt.Errorf("delete webhook: %w", err)
@@ -219,7 +202,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 func (r *PGRepository) GetActiveForEvent(ctx context.Context, orgID, eventType string) ([]Subscription, error) {
 	var subs []Subscription
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf(
 			"SELECT %s FROM webhook_subscription WHERE is_active = true AND $1 = ANY(events)",
 			webhookSelectColumns,

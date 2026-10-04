@@ -126,6 +126,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Notes:          req.Notes,
 	}
 	if err := h.repo.Create(r.Context(), rec); err != nil {
+		if err.Error() == "not found" {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "asset or ci not found")
+			return
+		}
 		api.WriteRepoError(w, err)
 		return
 	}

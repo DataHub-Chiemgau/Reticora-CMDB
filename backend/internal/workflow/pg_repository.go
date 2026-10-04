@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -20,24 +21,10 @@ const stepCols = `id::text, organization_id::text, run_id::text, step_index, act
 type PGRepository struct{ pool *pgxpool.Pool }
 
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(context.Context, pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id',$1,true)", orgID); err != nil {
-		return err
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
 func (r *PGRepository) ListDefinitions(ctx context.Context, orgID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error) {
 	var out []Definition
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := "organization_id=$1"
 		if activeOnly {
 			where += " AND active=true"
@@ -63,7 +50,7 @@ func (r *PGRepository) ListDefinitions(ctx context.Context, orgID string, active
 }
 func (r *PGRepository) GetDefinition(ctx context.Context, orgID, id string) (*Definition, error) {
 	var d *Definition
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		d, err = scanDef(tx.QueryRow(ctx, "SELECT "+defCols+" FROM workflow_def WHERE organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -74,7 +61,7 @@ func (r *PGRepository) GetDefinition(ctx context.Context, orgID, id string) (*De
 	return d, err
 }
 func (r *PGRepository) CreateDefinition(ctx context.Context, d *Definition) error {
-	return r.withTenant(ctx, d.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, d.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if d.Trigger == nil {
 			d.Trigger = JSONMap{}
 		}
@@ -89,7 +76,7 @@ func (r *PGRepository) CreateDefinition(ctx context.Context, d *Definition) erro
 }
 func (r *PGRepository) UpdateDefinition(ctx context.Context, orgID, id string, req UpdateDefinitionRequest) (*Definition, error) {
 	var d *Definition
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		set := []string{}
 		args := []any{id, orgID}
 		pos := 3
@@ -139,7 +126,7 @@ func (r *PGRepository) UpdateDefinition(ctx context.Context, orgID, id string, r
 	return d, err
 }
 func (r *PGRepository) DeleteDefinition(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx, "DELETE FROM workflow_def WHERE organization_id=$1 AND id=$2", orgID, id)
 		if err != nil {
 			return err
@@ -153,7 +140,7 @@ func (r *PGRepository) DeleteDefinition(ctx context.Context, orgID, id string) e
 func (r *PGRepository) ListRuns(ctx context.Context, orgID, wid, status string, page api.PaginationParams) ([]Run, int, error) {
 	var out []Run
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id=$1"}
 		args := []any{orgID}
 		pos := 2
@@ -205,7 +192,7 @@ func (r *PGRepository) ListRuns(ctx context.Context, orgID, wid, status string, 
 }
 func (r *PGRepository) GetRun(ctx context.Context, orgID, id string) (*Run, error) {
 	var run *Run
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		run, err = scanRun(tx.QueryRow(ctx, "SELECT "+runCols+" FROM workflow_run WHERE organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -220,7 +207,7 @@ func (r *PGRepository) GetRun(ctx context.Context, orgID, id string) (*Run, erro
 	return run, err
 }
 func (r *PGRepository) CreateRun(ctx context.Context, run *Run) error {
-	return r.withTenant(ctx, run.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, run.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if run.Context == nil {
 			run.Context = JSONMap{}
 		}
@@ -232,7 +219,7 @@ func (r *PGRepository) CreateRun(ctx context.Context, run *Run) error {
 }
 func (r *PGRepository) UpdateRunStatus(ctx context.Context, orgID, id, status string, finished *time.Time, ctxm JSONMap) (*Run, error) {
 	var run *Run
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		run, err = scanRun(tx.QueryRow(ctx, "UPDATE workflow_run SET status=$3, finished_at=$4, context=COALESCE($5, context), updated_at=now() WHERE organization_id=$1 AND id=$2 RETURNING "+runCols, orgID, id, status, finished, ctxm))
 		if err != nil {
@@ -244,7 +231,7 @@ func (r *PGRepository) UpdateRunStatus(ctx context.Context, orgID, id, status st
 	return run, err
 }
 func (r *PGRepository) AppendStep(ctx context.Context, s *Step) error {
-	return r.withTenant(ctx, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if s.Input == nil {
 			s.Input = JSONMap{}
 		}
@@ -262,7 +249,7 @@ func (r *PGRepository) UpdateStep(ctx context.Context, orgID, id, status string,
 	if output == nil {
 		output = JSONMap{}
 	}
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		s, err = scanStep(tx.QueryRow(ctx, "UPDATE workflow_step SET status=$3, output=$4, error=$5, updated_at=now() WHERE organization_id=$1 AND id=$2 RETURNING "+stepCols, orgID, id, status, output, errText))
 		return err
@@ -271,7 +258,7 @@ func (r *PGRepository) UpdateStep(ctx context.Context, orgID, id, status string,
 }
 func (r *PGRepository) ListSteps(ctx context.Context, orgID, runID string) ([]Step, error) {
 	var out []Step
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		out, err = r.listStepsTx(ctx, tx, orgID, runID)
 		return err

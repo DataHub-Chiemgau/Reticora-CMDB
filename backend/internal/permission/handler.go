@@ -33,7 +33,7 @@ func Require(repo Repository, key string) func(http.Handler) http.Handler {
 			}
 			allowed, err := repo.HasPermission(r.Context(), t.OrganizationID, t.UserID, key)
 			if err != nil {
-				api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+				api.WriteRepoError(w, err)
 				return
 			}
 			if !allowed {
@@ -60,7 +60,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.repo.ListPermissions(r.Context())
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, items)
@@ -73,7 +73,7 @@ func (h *Handler) ListRole(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.repo.ListRolePermissions(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, items)
@@ -111,7 +111,7 @@ func (h *Handler) Effective(w http.ResponseWriter, r *http.Request) {
 	}
 	keys, err := h.repo.EffectivePermissions(r.Context(), t.OrganizationID, t.UserID)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, EffectivePermissionsResponse{UserID: t.UserID, Permissions: keys})

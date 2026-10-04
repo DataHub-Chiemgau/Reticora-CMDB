@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -19,27 +19,6 @@ type PGRepository struct {
 // NewPGRepository creates a new PostgreSQL-backed contact repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
-}
-
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-
-	if scope := tenant.ClientScope(ctx); scope != "" {
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.client_scope', $1, true)", scope); err != nil {
-			return fmt.Errorf("set client scope: %w", err)
-		}
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
 }
 
 const contactCols = `id::text, organization_id::text, COALESCE(client_id::text,''), display_name,
@@ -64,7 +43,7 @@ func scanContact(s scanner) (*Contact, error) {
 func (r *PGRepository) List(ctx context.Context, orgID, clientID string, page api.PaginationParams) ([]Contact, int, error) {
 	var out []Contact
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := "organization_id = $1"
 		args := []any{orgID}
 		if clientID != "" {
@@ -95,7 +74,7 @@ func (r *PGRepository) List(ctx context.Context, orgID, clientID string, page ap
 
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Contact, error) {
 	var c *Contact
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		c, err = scanContact(tx.QueryRow(ctx, "SELECT "+contactCols+" FROM contact WHERE organization_id = $1 AND id = $2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -107,7 +86,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Contact,
 }
 
 func (r *PGRepository) Create(ctx context.Context, c *Contact) error {
-	return r.withTenant(ctx, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
 			`INSERT INTO contact (organization_id, client_id, display_name, email, phone, role, department, notes)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id::text, created_at, updated_at`,
@@ -119,7 +98,7 @@ func (r *PGRepository) Create(ctx context.Context, c *Contact) error {
 
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateContactRequest) (*Contact, error) {
 	var c *Contact
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -162,7 +141,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateC
 // (case-insensitive, surrounding whitespace ignored).
 func (r *PGRepository) ListByEmail(ctx context.Context, orgID, email string) ([]Contact, error) {
 	var out []Contact
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
 			"SELECT "+contactCols+" FROM contact WHERE organization_id = $1 AND lower(trim(email)) = lower(trim($2)) AND email <> '' ORDER BY created_at",
 			orgID, email)
@@ -183,7 +162,7 @@ func (r *PGRepository) ListByEmail(ctx context.Context, orgID, email string) ([]
 }
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "DELETE FROM contact WHERE organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
 			return err
@@ -194,6 +173,13 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		return nil
 	})
 }
+
+// visibleLink restricts CI-contact links to those whose CI and contact are
+// both visible under the transaction's tenant scope: the ci and contact
+// policies filter the subqueries by client scope, while ci_contact carries no
+// client column yet (WP-025).
+const visibleLink = `EXISTS (SELECT 1 FROM ci WHERE ci.id = ci_contact.ci_id)
+	AND EXISTS (SELECT 1 FROM contact WHERE contact.id = ci_contact.contact_id)`
 
 const ciContactCols = `id::text, organization_id::text, ci_id::text, contact_id::text, relationship_type, created_at`
 
@@ -209,11 +195,11 @@ func scanCIContact(s scanner) (*CIContact, error) {
 func (r *PGRepository) ListForCI(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]CIContact, int, error) {
 	var out []CIContact
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ci_contact WHERE organization_id = $1 AND ci_id = $2", orgID, ciID).Scan(&total); err != nil {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ci_contact WHERE organization_id = $1 AND ci_id = $2 AND "+visibleLink, orgID, ciID).Scan(&total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, "SELECT "+ciContactCols+" FROM ci_contact WHERE organization_id = $1 AND ci_id = $2 ORDER BY created_at DESC LIMIT $3 OFFSET $4", orgID, ciID, page.Limit, page.Offset)
+		rows, err := tx.Query(ctx, "SELECT "+ciContactCols+" FROM ci_contact WHERE organization_id = $1 AND ci_id = $2 AND "+visibleLink+" ORDER BY created_at DESC LIMIT $3 OFFSET $4", orgID, ciID, page.Limit, page.Offset)
 		if err != nil {
 			return err
 		}
@@ -231,7 +217,17 @@ func (r *PGRepository) ListForCI(ctx context.Context, orgID, ciID string, page a
 }
 
 func (r *PGRepository) Link(ctx context.Context, link *CIContact) error {
-	return r.withTenant(ctx, link.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, link.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		var visible bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1) AND EXISTS (SELECT 1 FROM contact WHERE id = $2)`,
+			link.CIID, link.ContactID,
+		).Scan(&visible); err != nil {
+			return fmt.Errorf("check link visibility: %w", err)
+		}
+		if !visible {
+			return fmt.Errorf("not found")
+		}
 		return tx.QueryRow(ctx,
 			`INSERT INTO ci_contact (organization_id, ci_id, contact_id, relationship_type)
 			 VALUES ($1,$2,$3,$4) RETURNING id::text, created_at`,
@@ -241,8 +237,8 @@ func (r *PGRepository) Link(ctx context.Context, link *CIContact) error {
 }
 
 func (r *PGRepository) Unlink(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "DELETE FROM ci_contact WHERE organization_id = $1 AND id = $2", orgID, id)
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, "DELETE FROM ci_contact WHERE organization_id = $1 AND id = $2 AND "+visibleLink, orgID, id)
 		if err != nil {
 			return err
 		}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -15,20 +16,6 @@ type PGRepository struct{ pool *pgxpool.Pool }
 
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
 func (r *PGRepository) Ping(ctx context.Context) error { return r.pool.Ping(ctx) }
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(context.Context, pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return err
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
 func (r *PGRepository) IndexDocument(ctx context.Context, doc Document) error {
 	if doc.OrganizationID == "" || doc.EntityType == "" || doc.EntityID == "" {
 		return fmt.Errorf("organization_id, entity_type and entity_id are required")
@@ -37,17 +24,32 @@ func (r *PGRepository) IndexDocument(ctx context.Context, doc Document) error {
 	if err != nil {
 		return fmt.Errorf("marshal document metadata: %w", err)
 	}
-	return r.withTenant(ctx, doc.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, doc.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO search_document (organization_id, entity_type, entity_id, title, summary, url, metadata) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (organization_id, entity_type, entity_id) DO UPDATE SET title=EXCLUDED.title, summary=EXCLUDED.summary, url=EXCLUDED.url, metadata=EXCLUDED.metadata, updated_at=now()`, doc.OrganizationID, doc.EntityType, doc.EntityID, doc.Title, doc.Summary, doc.URL, meta)
 		return err
 	})
 }
 func (r *PGRepository) Delete(ctx context.Context, orgID, entityType, entityID string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `DELETE FROM search_document WHERE organization_id=$1 AND entity_type=$2 AND entity_id=$3`, orgID, entityType, entityID)
 		return err
 	})
 }
+
+// hitVisible restricts hits to entities that are visible under the
+// transaction's tenant scope and still exist. The policy of search_document
+// already filters by the client and site derived from the entity (migration
+// 000067); the subqueries add the entity's own policy, which covers documents
+// and tickets (links, teams) and index rows that are out of date.
+const hitVisible = `CASE search_document.entity_type
+	WHEN 'ci' THEN EXISTS (SELECT 1 FROM ci WHERE ci.id = search_document.entity_id)
+	WHEN 'asset' THEN EXISTS (SELECT 1 FROM asset WHERE asset.id = search_document.entity_id)
+	WHEN 'contact' THEN EXISTS (SELECT 1 FROM contact WHERE contact.id = search_document.entity_id)
+	WHEN 'location' THEN EXISTS (SELECT 1 FROM location_node WHERE location_node.id = search_document.entity_id)
+	WHEN 'document' THEN EXISTS (SELECT 1 FROM document WHERE document.id = search_document.entity_id)
+	WHEN 'ticket' THEN EXISTS (SELECT 1 FROM ticket WHERE ticket.id = search_document.entity_id)
+	WHEN 'reservation' THEN EXISTS (SELECT 1 FROM reservation WHERE reservation.id = search_document.entity_id)
+	ELSE true END`
 
 func buildPostgresQuery(q Query) (string, []any, error) {
 	if err := validateQuery(q.Text); err != nil {
@@ -57,7 +59,7 @@ func buildPostgresQuery(q Query) (string, []any, error) {
 	if limit <= 0 || limit > api.MaxPageLimit {
 		limit = api.DefaultPageLimit
 	}
-	where := []string{"organization_id = $1"}
+	where := []string{"organization_id = $1", hitVisible}
 	args := []any{q.OrganizationID}
 	pos := 2
 	if strings.TrimSpace(q.Text) != "" {
@@ -79,7 +81,7 @@ func buildPostgresQuery(q Query) (string, []any, error) {
 		snippet = fmt.Sprintf("ts_headline('simple', title || ' ' || summary, websearch_to_tsquery('simple', $%d), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=2')", 2)
 	}
 	args = append(args, limit, q.Offset)
-	query := fmt.Sprintf(`SELECT id::text, organization_id::text, entity_type, entity_id::text, title, summary, url, metadata, updated_at, %s AS score, %s AS snippet, COUNT(*) OVER() FROM search_document WHERE %s ORDER BY score DESC, updated_at DESC LIMIT $%d OFFSET $%d`, score, snippet, strings.Join(where, " AND "), pos, pos+1)
+	query := fmt.Sprintf(`SELECT id::text, organization_id::text, entity_type, entity_id::text, title, summary, url, metadata, COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), updated_at, %s AS score, %s AS snippet, COUNT(*) OVER() FROM search_document WHERE %s ORDER BY score DESC, updated_at DESC LIMIT $%d OFFSET $%d`, score, snippet, strings.Join(where, " AND "), pos, pos+1)
 	return query, args, nil
 }
 func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
@@ -88,7 +90,7 @@ func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
 		limit = api.DefaultPageLimit
 	}
 	var res Result
-	err := r.withTenant(ctx, q.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, q.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		sql, args, err := buildPostgresQuery(q)
 		if err != nil {
 			return err
@@ -102,7 +104,7 @@ func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
 			var h Hit
 			var meta []byte
 			var snippet string
-			if err := rows.Scan(&h.ID, &h.OrganizationID, &h.EntityType, &h.EntityID, &h.Title, &h.Summary, &h.URL, &meta, &h.UpdatedAt, &h.Score, &snippet, &res.Total); err != nil {
+			if err := rows.Scan(&h.ID, &h.OrganizationID, &h.EntityType, &h.EntityID, &h.Title, &h.Summary, &h.URL, &meta, &h.ClientID, &h.SiteID, &h.UpdatedAt, &h.Score, &snippet, &res.Total); err != nil {
 				return err
 			}
 			if err := json.Unmarshal(meta, &h.Metadata); err != nil {
@@ -119,9 +121,21 @@ func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
 	res.HasMore = q.Offset+len(res.Data) < res.Total
 	return res, err
 }
+
+// ReindexTenant rebuilds the index of the whole organization. The index must
+// stay complete for every principal, so the rebuild runs org-wide even when a
+// client-scoped administrator triggers it; it returns only a count (E-08).
 func (r *PGRepository) ReindexTenant(ctx context.Context, orgID string) (ReindexResult, error) {
 	var count int64
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	scope, ok := database.TenantScopeFromContext(ctx)
+	if !ok {
+		return ReindexResult{}, database.ErrNoTenantScope
+	}
+	if !strings.EqualFold(scope.OrgID, orgID) {
+		return ReindexResult{}, database.ErrTenantMismatch
+	}
+	orgWide := database.OrgWideScope(scope.OrgID, scope.UserID)
+	err := database.WithTenant(ctx, r.pool, &orgWide, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM search_document WHERE organization_id=$1`, orgID); err != nil {
 			return err
 		}

@@ -71,7 +71,6 @@ var readPermissionFor = map[string]identity.Permission{
 	"scim":    identity.PermIGARead,
 	"search":  identity.PermSearchRead,
 	"ai":      identity.PermAIRead,
-	"graphql": identity.PermCIRead,
 	// Enterprise CMDB + asset/inventory extension (spec §21). Read side;
 	// writes are derived from the read→write suffix or overridden below.
 	"ci-types":              identity.PermCIRead,
@@ -124,7 +123,6 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"topology": identity.PermTopologyRead,
 	"iga":      identity.PermIGAWrite,
 	"scim":     identity.PermIGAWrite,
-	"graphql":  identity.PermCIWrite,
 	"me":       identity.PermPermissionRead,
 	"ci-types": identity.PermCITypeManageNew,
 	"api-keys": identity.PermAPIKeyManage,
@@ -229,6 +227,11 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 		return identity.PermPermissionRead, routeProtected
 	case "auth":
 		// /auth/me requires authentication but no specific permission.
+		return "", routeProtected
+	case "graphql":
+		// The GraphQL BFF only reads; each resolver checks its own read
+		// permission and entitlement (GQL-04), so the route requires an
+		// authenticated principal only.
 		return "", routeProtected
 	}
 

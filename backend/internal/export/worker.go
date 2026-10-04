@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 )
 
@@ -93,8 +94,18 @@ func (w *JobWorker) ProcessOne(ctx context.Context) bool {
 }
 
 func (w *JobWorker) process(ctx context.Context, job Job) {
+	// The export runs with the scope its creator had when queueing it
+	// (EXP-01, TEN-06): the CI repository reads through database.WithTenant
+	// with exactly this scope. A job without a snapshot is refused rather
+	// than exported org-wide.
+	if job.Scope == nil {
+		w.fail(ctx, &job, fmt.Errorf("export job has no scope snapshot"))
+		return
+	}
+	scope := job.Scope.TenantScope(job.OrganizationID, job.InitiatedBy)
+	renderCtx := database.ContextWithTenantScope(ctx, &scope)
 	var buf bytes.Buffer
-	rowCount, err := RenderFormat(ctx, w.CIs, job.OrganizationID, job.Format, job.Filters, &buf)
+	rowCount, err := RenderFormat(renderCtx, w.CIs, job.OrganizationID, job.Format, job.Filters, &buf)
 	if err != nil {
 		w.fail(ctx, &job, err)
 		return

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -24,18 +25,97 @@ type Repository interface {
 	Heartbeat(ctx context.Context, orgID, agentID string) error
 	// SetCI links the agent to its CI (reconciled endpoint).
 	SetCI(ctx context.Context, orgID, agentID, ciID string) error
+
+	// CreateEnrollmentToken stores a token under the hash of its secret.
+	CreateEnrollmentToken(ctx context.Context, orgID string, tok *EnrollmentToken, tokenHash string) error
+	// Enroll consumes the token with tokenHash and registers the agent bound
+	// to the token's client and site, in one transaction (AGT-06). An
+	// unknown, used or expired token yields ErrInvalidEnrollmentToken.
+	Enroll(ctx context.Context, a *Agent, tokenHash, ipAddress string) error
+	// SuggestSite records the agent's network fingerprint and suggests the
+	// site whose subnet contains it when it differs from the confirmed one.
+	SuggestSite(ctx context.Context, orgID, agentID, ipAddress string) error
+	// ConfirmSite sets the agent's site manually; the site must belong to
+	// the agent's client.
+	ConfirmSite(ctx context.Context, orgID, id, siteID string) (*Agent, error)
 }
+
+// ErrInvalidEnrollmentToken reports an unknown, used or expired token.
+var ErrInvalidEnrollmentToken = errors.New("invalid, used or expired enrollment token")
+
+// ErrSiteNotOfClient reports a site outside the agent's client.
+var ErrSiteNotOfClient = errors.New("agent not found or site does not belong to its client")
 
 // MemoryRepository is the in-memory implementation (tests, --no-db).
 type MemoryRepository struct {
 	mu     sync.RWMutex
 	agents map[string]*Agent
+	tokens map[string]*memoryToken
 	seq    int
+}
+
+type memoryToken struct {
+	orgID string
+	tok   EnrollmentToken
 }
 
 // NewMemoryRepository creates an empty in-memory store.
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{agents: map[string]*Agent{}}
+	return &MemoryRepository{agents: map[string]*Agent{}, tokens: map[string]*memoryToken{}}
+}
+
+func (r *MemoryRepository) CreateEnrollmentToken(_ context.Context, orgID string, tok *EnrollmentToken, tokenHash string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seq++
+	tok.ID = fmt.Sprintf("token-%08d", r.seq)
+	tok.CreatedAt = time.Now().UTC()
+	stored := *tok
+	stored.Token = ""
+	r.tokens[tokenHash] = &memoryToken{orgID: orgID, tok: stored}
+	return nil
+}
+
+func (r *MemoryRepository) Enroll(ctx context.Context, a *Agent, tokenHash, ipAddress string) error {
+	r.mu.Lock()
+	mt, ok := r.tokens[tokenHash]
+	now := time.Now().UTC()
+	if !ok || mt.orgID != a.OrganizationID || mt.tok.UsedAt != nil || !mt.tok.ExpiresAt.After(now) {
+		r.mu.Unlock()
+		return ErrInvalidEnrollmentToken
+	}
+	mt.tok.UsedAt = &now
+	r.mu.Unlock()
+	a.ClientID, a.SiteID, a.NetworkFingerprint = mt.tok.ClientID, mt.tok.SiteID, ipAddress
+	if a.SiteID != "" {
+		a.SiteConfirmedAt = &now
+	}
+	return r.Register(ctx, a)
+}
+
+func (r *MemoryRepository) SuggestSite(_ context.Context, orgID, agentID, ipAddress string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, a := range r.agents {
+		if a.OrganizationID == orgID && a.AgentID == agentID {
+			a.NetworkFingerprint = ipAddress
+			return nil
+		}
+	}
+	return fmt.Errorf("agent not found")
+}
+
+func (r *MemoryRepository) ConfirmSite(_ context.Context, orgID, id, siteID string) (*Agent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a, ok := r.agents[id]
+	if !ok || a.OrganizationID != orgID || a.ClientID == "" {
+		return nil, ErrSiteNotOfClient
+	}
+	now := time.Now().UTC()
+	a.SiteID, a.SuggestedSiteID, a.SiteConfirmedAt = siteID, "", &now
+	cp := *a
+	return &cp, nil
 }
 
 func (r *MemoryRepository) List(_ context.Context, orgID string, page api.PaginationParams) ([]Agent, int, error) {
@@ -93,6 +173,8 @@ func (r *MemoryRepository) Register(_ context.Context, a *Agent) error {
 			existing.Version = a.Version
 			existing.OS = a.OS
 			existing.Arch = a.Arch
+			existing.ClientID, existing.SiteID = a.ClientID, a.SiteID
+			existing.NetworkFingerprint, existing.SiteConfirmedAt = a.NetworkFingerprint, a.SiteConfirmedAt
 			existing.Status = "online"
 			existing.UpdatedAt = time.Now().UTC()
 			now := existing.UpdatedAt

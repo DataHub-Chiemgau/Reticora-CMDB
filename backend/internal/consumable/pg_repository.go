@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -22,21 +23,6 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(context.Context, pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 func scanConsumable(s pgx.Row) (*Consumable, error) {
 	c := &Consumable{}
 	if err := s.Scan(&c.ID, &c.OrganizationID, &c.ClientID, &c.Name, &c.SKU, &c.Category, &c.Unit, &c.StockLevel, &c.MinLevel, &c.Location, &c.Notes, &c.CreatedAt, &c.UpdatedAt); err != nil {
@@ -45,10 +31,15 @@ func scanConsumable(s pgx.Row) (*Consumable, error) {
 	return c, nil
 }
 
+// stockMovementVisible restricts stock movements to visible consumables: the
+// consumable policy filters the subquery, while stock_movement carries no
+// client column yet (WP-025).
+const stockMovementVisible = "EXISTS (SELECT 1 FROM consumable WHERE consumable.id = stock_movement.consumable_id)"
+
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Consumable, int, error) {
 	out := []Consumable{}
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id = $1"}
 		args := []any{orgID}
 		pos := 2
@@ -93,7 +84,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Consumable, error) {
 	var c *Consumable
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		c, err = scanConsumable(tx.QueryRow(ctx, "SELECT "+consumableCols+" FROM consumable WHERE organization_id = $1 AND id = $2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -105,7 +96,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Consumab
 }
 
 func (r *PGRepository) Create(ctx context.Context, c *Consumable) error {
-	return r.withTenant(ctx, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if c.Category == "" {
 			c.Category = "general"
 		}
@@ -123,7 +114,7 @@ func (r *PGRepository) Create(ctx context.Context, c *Consumable) error {
 
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateConsumableRequest) (*Consumable, error) {
 	var c *Consumable
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -172,7 +163,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateC
 }
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "DELETE FROM consumable WHERE organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
 			return err
@@ -188,7 +179,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 // transaction, rejecting out-movements that would drive stock negative.
 func (r *PGRepository) AddMovement(ctx context.Context, m *Movement) (*Consumable, error) {
 	var c *Consumable
-	err := r.withTenant(ctx, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		c, err = scanConsumable(tx.QueryRow(ctx, "SELECT "+consumableCols+" FROM consumable WHERE organization_id = $1 AND id = $2 FOR UPDATE", m.OrganizationID, m.ConsumableID))
 		if err == pgx.ErrNoRows {
@@ -221,17 +212,17 @@ func (r *PGRepository) AddMovement(ctx context.Context, m *Movement) (*Consumabl
 func (r *PGRepository) ListMovements(ctx context.Context, orgID, consumableID string, page api.PaginationParams) ([]Movement, int, error) {
 	out := []Movement{}
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := "organization_id = $1"
 		args := []any{orgID}
 		if consumableID != "" {
 			where += " AND consumable_id = $2"
 			args = append(args, consumableID)
 		}
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM stock_movement WHERE "+where, args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM stock_movement WHERE "+stockMovementVisible+" AND "+where, args...).Scan(&total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT id::text, organization_id::text, consumable_id::text, direction, quantity, COALESCE(reason,''), COALESCE(reference,''), COALESCE(actor_id::text,''), created_at FROM stock_movement WHERE `+where+fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), append(args, page.Limit, page.Offset)...)
+		rows, err := tx.Query(ctx, `SELECT id::text, organization_id::text, consumable_id::text, direction, quantity, COALESCE(reason,''), COALESCE(reference,''), COALESCE(actor_id::text,''), created_at FROM stock_movement WHERE `+stockMovementVisible+` AND `+where+fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), append(args, page.Limit, page.Offset)...)
 		if err != nil {
 			return err
 		}

@@ -81,7 +81,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Type]{
@@ -313,7 +313,7 @@ func (h *Handler) ListGlobalFields(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.repo.ListGlobalFields(r.Context(), t.OrganizationID)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
@@ -365,7 +365,7 @@ func (h *Handler) ListInstanceFields(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.repo.ListInstanceFields(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})

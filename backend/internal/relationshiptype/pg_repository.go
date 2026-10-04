@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -28,26 +29,11 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 // List returns global system types plus tenant-specific types.
 func (r *PGRepository) List(ctx context.Context, orgID string, page api.PaginationParams) ([]Type, int, error) {
 	var out []Type
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM relationship_type").Scan(&total); err != nil {
 			return fmt.Errorf("count relationship types: %w", err)
 		}
@@ -73,7 +59,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, page api.Paginati
 // GetByKey resolves a key within the tenant scope (tenant shadows global).
 func (r *PGRepository) GetByKey(ctx context.Context, orgID, key string) (*Type, error) {
 	var out *Type
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, fmt.Sprintf(
 			"SELECT %s FROM relationship_type WHERE key = $1 ORDER BY organization_id NULLS LAST LIMIT 1",
 			selectColumns), key)
@@ -98,7 +84,7 @@ func (r *PGRepository) GetByKey(ctx context.Context, orgID, key string) (*Type, 
 
 // Create inserts a tenant-specific relationship type.
 func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
-	return r.withTenant(ctx, typ.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, typ.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		direction := typ.Direction
 		if direction == "" {
 			direction = "directed"
@@ -131,7 +117,7 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 // Update modifies a tenant-owned relationship type.
 func (r *PGRepository) Update(ctx context.Context, orgID, key string, req UpsertRequest) (*Type, error) {
 	var out *Type
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{key}
 		pos := 2
@@ -199,7 +185,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, key string, req Upsert
 
 // Delete removes a tenant-owned non-system relationship type.
 func (r *PGRepository) Delete(ctx context.Context, orgID, key string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx,
 			"DELETE FROM relationship_type WHERE key = $1 AND organization_id IS NOT NULL AND NOT is_system", key)
 		if err != nil {

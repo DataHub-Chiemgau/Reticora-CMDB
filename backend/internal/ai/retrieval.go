@@ -100,9 +100,11 @@ func (r *Retriever) Retrieve(ctx context.Context, orgID, userID, question string
 	}
 	return out, cites, nil
 }
+// allowed checks the read permission of a source object's entity type. It
+// fails closed: without a permission repository or user nothing is allowed.
 func (r *Retriever) allowed(ctx context.Context, orgID, userID, entity string) bool {
 	if r.permissions == nil || userID == "" {
-		return true
+		return false
 	}
 	key := searchPermission(entity)
 	if key == "" {
@@ -111,21 +113,8 @@ func (r *Retriever) allowed(ctx context.Context, orgID, userID, entity string) b
 	ok, err := r.permissions.HasPermission(ctx, orgID, userID, key)
 	return err == nil && ok
 }
+// searchPermission is the read permission of an entity type, shared with the
+// search handler (search.ReadPermission); "" for types never returned.
 func searchPermission(entity string) string {
-	switch entity {
-	case "ci":
-		return "ci:read"
-	case "asset":
-		return "asset:read"
-	case "document":
-		return "document:read"
-	case "ticket":
-		return "ticket:read"
-	case "contact":
-		return "contact:read"
-	case "compliance":
-		return "compliance:read"
-	default:
-		return ""
-	}
+	return search.ReadPermission[entity]
 }

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 )
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
@@ -17,41 +17,38 @@ type PGRepository struct{ pool *pgxpool.Pool }
 // NewPGRepository creates a PostgreSQL permission repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(context.Context, pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
+// ListPermissions reads the global permission catalogue (E-10) in the
+// caller's tenant transaction like every other request path.
 func (r *PGRepository) ListPermissions(ctx context.Context) ([]Permission, error) {
-	rows, err := r.pool.Query(ctx, "SELECT key, resource, action, description FROM permission ORDER BY resource, action, key")
-	if err != nil {
-		return nil, fmt.Errorf("list permissions: %w", err)
+	scope, ok := database.TenantScopeFromContext(ctx)
+	if !ok {
+		return nil, database.ErrNoTenantScope
 	}
-	defer rows.Close()
 	items := make([]Permission, 0)
-	for rows.Next() {
-		var item Permission
-		if err := rows.Scan(&item.Key, &item.Resource, &item.Action, &item.Description); err != nil {
-			return nil, fmt.Errorf("scan permission: %w", err)
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, "SELECT key, resource, action, description FROM permission ORDER BY resource, action, key")
+		if err != nil {
+			return fmt.Errorf("list permissions: %w", err)
 		}
-		items = append(items, item)
+		defer rows.Close()
+		for rows.Next() {
+			var item Permission
+			if err := rows.Scan(&item.Key, &item.Resource, &item.Action, &item.Description); err != nil {
+				return fmt.Errorf("scan permission: %w", err)
+			}
+			items = append(items, item)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return items, rows.Err()
+	return items, nil
 }
 
 func (r *PGRepository) ListRolePermissions(ctx context.Context, orgID, roleID string) ([]RolePermissionGrant, error) {
 	items := make([]RolePermissionGrant, 0)
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT organization_id::text, role_id::text, permission_key, granted_at, COALESCE(granted_by::text, '')
 			FROM role_permission
@@ -75,7 +72,7 @@ func (r *PGRepository) ListRolePermissions(ctx context.Context, orgID, roleID st
 
 func (r *PGRepository) ReplaceRolePermissions(ctx context.Context, orgID, roleID, grantedBy string, keys []string) ([]RolePermissionGrant, error) {
 	items := make([]RolePermissionGrant, 0)
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM role WHERE id = $1 AND organization_id = $2)", roleID, orgID).Scan(&exists); err != nil {
 			return fmt.Errorf("check role: %w", err)
@@ -116,7 +113,7 @@ func (r *PGRepository) ReplaceRolePermissions(ctx context.Context, orgID, roleID
 
 func (r *PGRepository) EffectivePermissions(ctx context.Context, orgID, userID string) ([]string, error) {
 	set := make(map[string]struct{})
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT DISTINCT key FROM (
 				SELECT rp.permission_key AS key
@@ -167,7 +164,11 @@ func (r *PGRepository) EffectivePermissions(ctx context.Context, orgID, userID s
 // nothing (fail-closed). Only permissions of the catalogue are returned.
 func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) ([]identity.Grant, error) {
 	grants := make([]identity.Grant, 0)
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	// Login and refresh resolve the scope here, so no principal scope exists
+	// yet: the user's own assignments are read org-wide on behalf of the
+	// organization the session names (E-08).
+	scope := database.OrgWideScope(orgID, userID)
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT client_id, site_id,
 			       ARRAY(SELECT DISTINCT k FROM unnest(keys) AS k WHERE k IN (SELECT key FROM permission) ORDER BY k)

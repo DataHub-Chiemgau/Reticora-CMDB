@@ -1,6 +1,7 @@
 package location
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -64,6 +65,10 @@ func (h *Handler) Record(w http.ResponseWriter, r *http.Request) {
 		e.RecordedAt = parsed
 	}
 	if err := h.repo.Record(r.Context(), e); err != nil {
+		if errors.Is(err, ErrAssetNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "asset not found")
+			return
+		}
 		api.WriteRepoError(w, err)
 		return
 	}

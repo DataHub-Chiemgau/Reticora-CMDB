@@ -6,15 +6,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// PGMetricStore implements MetricStore against the TimescaleDB hypertable
-// created by migration 000020. The table intentionally has no RLS (see the
-// migration comment), so every statement filters by organization_id
-// explicitly; callers always receive the tenant from the authenticated
-// context.
+// PGMetricStore implements MetricStore against the TimescaleDB metrics. As
+// decided in docs/decisions/0001-timescale-rls.md, the application role has
+// no privileges on the hypertable metric_sample or the continuous aggregate
+// metric_sample_1h; it reads and writes through the security-barrier views
+// metric_sample_v and metric_sample_1h_v (migration 000071), which restrict
+// every row to the transaction's organization. Statements run in the
+// caller's tenant transaction, and samples of a CI count only when the CI is
+// visible under the caller's scope.
 type PGMetricStore struct {
 	pool   *pgxpool.Pool
 	alerts *PGAlertStore
@@ -33,54 +37,75 @@ func NewPGMetricStore(pool *pgxpool.Pool) *PGMetricStore {
 // persistence for rules.
 func (s *PGMetricStore) AlertStore() AlertStore { return s.alerts }
 
-// Ingest inserts the samples into the metric_sample hypertable.
+// Ingest inserts the samples through metric_sample_v. Every sample
+// must belong to the caller's organization and name a CI visible under its
+// scope (or no CI).
 func (s *PGMetricStore) Ingest(ctx context.Context, metrics []Metric) error {
 	if len(metrics) == 0 {
 		return nil
 	}
-	batch := &pgx.Batch{}
-	for _, m := range metrics {
-		ts := m.Timestamp
-		if ts.IsZero() {
-			ts = time.Now().UTC()
+	orgID := metrics[0].OrgID
+	return database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		batch := &pgx.Batch{}
+		for _, m := range metrics {
+			if m.OrgID != orgID {
+				return fmt.Errorf("%w: %q", database.ErrTenantMismatch, m.OrgID)
+			}
+			ts := m.Timestamp
+			if ts.IsZero() {
+				ts = time.Now().UTC()
+			}
+			labels := m.Labels
+			if labels == nil {
+				labels = map[string]string{}
+			}
+			batch.Queue(
+				`INSERT INTO metric_sample_v (time, organization_id, ci_id, metric_name, value, labels)
+				 SELECT $1, $2, NULLIF($3, '')::uuid, $4, $5, $6
+				 WHERE $3 = '' OR EXISTS (SELECT 1 FROM ci WHERE ci.id = NULLIF($3, '')::uuid)`,
+				ts.UTC(), m.OrgID, m.CIID, m.Name, m.Value, labels,
+			)
 		}
-		labels := m.Labels
-		if labels == nil {
-			labels = map[string]string{}
+		results := tx.SendBatch(ctx, batch)
+		for _, m := range metrics {
+			tag, err := results.Exec()
+			if err != nil {
+				_ = results.Close()
+				return fmt.Errorf("ingest metric sample: %w", err)
+			}
+			if tag.RowsAffected() == 0 {
+				_ = results.Close()
+				return fmt.Errorf("ingest metric sample: ci %s not found", m.CIID)
+			}
 		}
-		batch.Queue(
-			`INSERT INTO metric_sample (time, organization_id, ci_id, metric_name, value, labels)
-			 VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, $6)`,
-			ts.UTC(), m.OrgID, m.CIID, m.Name, m.Value, labels,
-		)
-	}
-	results := s.pool.SendBatch(ctx, batch)
-	defer results.Close()
-	for range metrics {
-		if _, err := results.Exec(); err != nil {
-			return fmt.Errorf("ingest metric sample: %w", err)
-		}
-	}
-	return nil
+		return results.Close()
+	})
 }
 
 // Query returns raw samples in chronological order, or bucketed averages
 // when q.Step is set. Steps at or above HourlyThreshold are served from the
 // hourly continuous aggregate instead of scanning raw chunks.
 func (s *PGMetricStore) Query(ctx context.Context, q MetricQuery) ([]MetricPoint, error) {
-	if q.Step > 0 && s.HourlyThreshold > 0 && q.Step >= s.HourlyThreshold {
-		return s.queryHourly(ctx, q)
-	}
-	if q.Step > 0 {
-		return s.queryBucketed(ctx, q)
-	}
-	return s.queryRaw(ctx, q)
+	var points []MetricPoint
+	err := database.WithRequestTenant(ctx, s.pool, q.OrgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		switch {
+		case q.Step > 0 && s.HourlyThreshold > 0 && q.Step >= s.HourlyThreshold:
+			points, err = queryHourly(ctx, tx, &q)
+		case q.Step > 0:
+			points, err = queryBucketed(ctx, tx, &q)
+		default:
+			points, err = queryRaw(ctx, tx, &q)
+		}
+		return err
+	})
+	return points, err
 }
 
-func (s *PGMetricStore) queryRaw(ctx context.Context, q MetricQuery) ([]MetricPoint, error) {
-	where, args := metricWhere(q)
-	rows, err := s.pool.Query(ctx,
-		`SELECT time, value FROM metric_sample WHERE `+where+` ORDER BY time ASC`, args...)
+func queryRaw(ctx context.Context, tx pgx.Tx, q *MetricQuery) ([]MetricPoint, error) {
+	where, args := metricWhere(*q)
+	rows, err := tx.Query(ctx,
+		`SELECT time, value FROM metric_sample_v WHERE `+where+` ORDER BY time ASC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query metric samples: %w", err)
 	}
@@ -88,12 +113,12 @@ func (s *PGMetricStore) queryRaw(ctx context.Context, q MetricQuery) ([]MetricPo
 	return scanPoints(rows)
 }
 
-func (s *PGMetricStore) queryBucketed(ctx context.Context, q MetricQuery) ([]MetricPoint, error) {
-	where, args := metricWhere(q)
+func queryBucketed(ctx context.Context, tx pgx.Tx, q *MetricQuery) ([]MetricPoint, error) {
+	where, args := metricWhere(*q)
 	args = append(args, fmt.Sprintf("%f seconds", q.Step.Seconds()))
-	rows, err := s.pool.Query(ctx,
+	rows, err := tx.Query(ctx,
 		`SELECT time_bucket($`+fmt.Sprint(len(args))+`::interval, time) AS bucket, avg(value)
-		 FROM metric_sample WHERE `+where+`
+		 FROM metric_sample_v WHERE `+where+`
 		 GROUP BY bucket ORDER BY bucket ASC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query bucketed metric samples: %w", err)
@@ -102,16 +127,16 @@ func (s *PGMetricStore) queryBucketed(ctx context.Context, q MetricQuery) ([]Met
 	return scanPoints(rows)
 }
 
-// queryHourly reads the pre-aggregated hourly rollup. Long-range dashboards
-// therefore touch a fraction of the raw data.
-func (s *PGMetricStore) queryHourly(ctx context.Context, q MetricQuery) ([]MetricPoint, error) {
-	where, args := metricWhere(q)
+// queryHourly reads the pre-aggregated hourly rollup metric_sample_1h through
+// its view. Long-range dashboards therefore touch a fraction of the raw data.
+func queryHourly(ctx context.Context, tx pgx.Tx, q *MetricQuery) ([]MetricPoint, error) {
+	where, args := metricWhere(*q)
 	where = strings.ReplaceAll(where, "time", "bucket")
 	args = append(args, fmt.Sprintf("%f seconds", q.Step.Seconds()))
-	rows, err := s.pool.Query(ctx,
+	rows, err := tx.Query(ctx,
 		`SELECT time_bucket($`+fmt.Sprint(len(args))+`::interval, bucket) AS rollup,
 		        sum(avg_value * sample_count) / sum(sample_count) AS weighted_avg
-		 FROM metric_sample_hourly WHERE `+where+`
+		 FROM metric_sample_1h_v WHERE `+where+`
 		 GROUP BY rollup ORDER BY rollup ASC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query hourly metric rollup: %w", err)
@@ -121,7 +146,9 @@ func (s *PGMetricStore) queryHourly(ctx context.Context, q MetricQuery) ([]Metri
 }
 
 func metricWhere(q MetricQuery) (string, []any) {
-	where := []string{"organization_id = $1"}
+	// The ci policy filters the subquery, so samples of CIs outside the
+	// caller's scope drop out.
+	where := []string{"organization_id = $1", "(ci_id IS NULL OR ci_id IN (SELECT id FROM ci))"}
 	args := []any{q.OrgID}
 	pos := 2
 	if q.CIID != "" {

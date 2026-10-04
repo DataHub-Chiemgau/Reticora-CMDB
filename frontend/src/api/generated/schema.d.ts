@@ -506,16 +506,17 @@ export interface paths {
     };
     /**
      * List asynchronous export jobs
-     * @description Returns the tenant's export jobs newest first. Completed, unexpired jobs carry a time-limited signed download URL.
+     * @description Returns the caller's own export jobs newest first; jobs of other users are not listed. Completed, unexpired jobs carry a time-limited signed download URL.
      */
     get: operations['listExportJobs'];
     put?: never;
     /**
      * Queue an asynchronous CI export
-     * @description Queues an asynchronous export. A background worker renders the CI set
-     *     in the requested format into object storage; once the job is
-     *     `completed` it exposes a signed download URL until `expires_at`.
-     *     Requires blob storage to be configured — otherwise 503.
+     * @description Queues an asynchronous export. The job records the caller's tenant
+     *     scope (`scope`); a background worker renders the CI set visible in
+     *     exactly this scope in the requested format into object storage. Once
+     *     the job is `completed` it exposes a signed download URL until
+     *     `expires_at`. Requires blob storage to be configured — otherwise 503.
      */
     post: operations['createExportJob'];
     delete?: never;
@@ -534,7 +535,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get an export job */
+    /**
+     * Get an export job
+     * @description Only the job's creator reads it; for anyone else the job does not exist (404).
+     */
     get: operations['getExportJob'];
     put?: never;
     post?: never;
@@ -1286,8 +1290,54 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Register an endpoint agent (after edge enrollment authenticated it) */
+    /**
+     * Register an endpoint agent with a single-use enrollment token
+     * @description The enrollment token is consumed in the same transaction and binds the agent to the token's client and, unless it is a roaming token, its site (AGT-06). For roaming agents a site is suggested from `ip_address` (subnet of the client) and must be confirmed manually.
+     */
     post: operations['enrollAgent'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/agents/enrollment-tokens': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create a single-use agent enrollment token for a client and site
+     * @description The secret (`token`) is returned once and stored only as a hash. Without `site_id` the token enrolls roaming devices: they keep the client, their site is suggested from the network fingerprint.
+     */
+    post: operations['createAgentEnrollmentToken'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/agents/{id}/site': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Confirm the site of a roaming agent
+     * @description The site must belong to the agent's client; the suggestion is cleared.
+     */
+    post: operations['confirmAgentSite'];
     delete?: never;
     options?: never;
     head?: never;
@@ -5220,10 +5270,17 @@ export interface components {
       expires_at?: string;
       /** @description Time-limited signed URL; only present on completed, unexpired jobs. */
       download_url?: string;
+      scope?: components['schemas']['ExportJobScope'];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    /** @description Tenant scope of the job's creator at creation; the export contains only data visible in this scope. null grants the whole organization in that dimension, a list restricts it to the listed ids. */
+    ExportJobScope: {
+      clients: string[] | null;
+      sites: string[] | null;
+      teams: string[] | null;
     };
     ExportJobListResponse: {
       data: components['schemas']['ExportJob'][];
@@ -5394,7 +5451,8 @@ export interface components {
       file_name: string;
       file_size: number;
       mime_type: string;
-      storage_key: string;
+      /** @description Server-generated object key below org/<organization_id>/, set by PUT /api/v1/documents/{id}/content; empty until content is uploaded. */
+      readonly storage_key: string;
       version: number;
       category: string;
       tags: string[];
@@ -5410,7 +5468,11 @@ export interface components {
       file_name: string;
       file_size?: number;
       mime_type?: string;
-      storage_key: string;
+      /**
+       * @deprecated
+       * @description Ignored. The storage key is generated by the server when the content is uploaded (TEN-06).
+       */
+      storage_key?: string;
       category?: string;
       tags?: string[];
     };
@@ -5977,6 +6039,15 @@ export interface components {
       os?: string;
       arch?: string;
       ci_id?: string;
+      /** @description Client bound by the enrollment token. */
+      client_id?: string;
+      /** @description Site from the token or a manual confirmation. */
+      site_id?: string;
+      /** @description Site suggested from the network fingerprint; awaits confirmation. */
+      suggested_site_id?: string;
+      network_fingerprint?: string;
+      /** Format: date-time */
+      site_confirmed_at?: string;
       /** @enum {string} */
       status: 'online' | 'offline' | 'disabled';
       /** Format: date-time */
@@ -5993,10 +6064,41 @@ export interface components {
       version?: string;
       os?: string;
       arch?: string;
+      /** @description Single-use secret from POST /api/v1/agents/enrollment-tokens. */
+      enrollment_token: string;
+      /** @description Network fingerprint used to suggest a site. */
+      ip_address?: string;
+    };
+    AgentEnrollmentToken: {
+      id: string;
+      client_id: string;
+      site_id?: string;
+      description?: string;
+      /** Format: date-time */
+      expires_at: string;
+      /** Format: date-time */
+      used_at?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** @description The secret; only present in the creation response. */
+      token?: string;
+    };
+    CreateAgentEnrollmentTokenRequest: {
+      client_id: string;
+      /** @description Omit for roaming devices. */
+      site_id?: string;
+      description?: string;
+      /** @description Defaults to 24 */
+      ttl_hours?: number;
+    };
+    ConfirmAgentSiteRequest: {
+      site_id: string;
     };
     AgentTelemetryPayload: {
       agent_id: string;
       hostname?: string;
+      /** @description Current network fingerprint; a differing site is suggested */
+      ip_address?: string;
       version?: string;
       os?: string;
       arch?: string;
@@ -10168,6 +10270,63 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+    };
+  };
+  createAgentEnrollmentToken: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateAgentEnrollmentTokenRequest'];
+      };
+    };
+    responses: {
+      /** @description Token created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AgentEnrollmentToken'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  confirmAgentSite: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ConfirmAgentSiteRequest'];
+      };
+    };
+    responses: {
+      /** @description Agent with confirmed site */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Agent'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   ingestAgentTelemetry: {

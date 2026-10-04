@@ -2,6 +2,7 @@ package rls_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -44,7 +46,12 @@ type catalogTable struct {
 	org, client, site, team bool
 	// appWrite: reticora_app holds INSERT, UPDATE or DELETE on the table.
 	appWrite bool
-	policies []catalogPolicy
+	// appAccess: reticora_app holds any privilege on the table.
+	appAccess bool
+	// barrierView: the table's view of rls.ViewProtectedTables passes
+	// rls.RuleViewBarrier.
+	barrierView bool
+	policies    []catalogPolicy
 }
 
 var commands = []string{"SELECT", "INSERT", "UPDATE", "DELETE"}
@@ -138,7 +145,7 @@ func TestKnownGapsList(t *testing.T) {
 		rls.RuleUsing: true, rls.RuleWithCheck: true, rls.RuleOrgPredicate: true,
 		rls.RuleSystemWrite: true, rls.RuleGlobalRows: true, rls.RuleClientScope: true,
 		rls.RuleSiteScope: true, rls.RuleTeamScope: true, rls.RuleOrgColumn: true,
-		rls.RuleReadOnlyCatalog: true,
+		rls.RuleReadOnlyCatalog: true, rls.RuleViewBarrier: true,
 	}
 	plan, err := os.ReadFile(planPath)
 	if err != nil {
@@ -212,6 +219,14 @@ func gapsTable() string {
 
 // violations evaluates every catalog rule for one table.
 func violations(tbl *catalogTable) []rls.Rule {
+	if _, ok := rls.ViewProtectedTables[tbl.name]; ok {
+		// Documented exception (ADR 0001): no direct privilege for the
+		// application, access only through the security-barrier view.
+		if tbl.appAccess || !tbl.barrierView {
+			return []rls.Rule{rls.RuleViewBarrier}
+		}
+		return nil
+	}
 	if slices.Contains(rls.GlobalCatalogTables, tbl.name) {
 		// Documented exception (E-10): a global catalog without
 		// organization_id must be read-only for the application.
@@ -348,7 +363,8 @@ func loadCatalog(ctx context.Context, t *testing.T, pool *pgxpool.Pool) map[stri
 		SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
 		       bool_or(a.attname = 'organization_id'), bool_or(a.attname = 'client_id'),
 		       bool_or(a.attname = 'site_id'), bool_or(a.attname = 'team_id'),
-		       has_table_privilege('reticora_app', c.oid, 'INSERT, UPDATE, DELETE')
+		       has_table_privilege('reticora_app', c.oid, 'INSERT, UPDATE, DELETE'),
+		       has_table_privilege('reticora_app', c.oid, 'SELECT, INSERT, UPDATE, DELETE')
 		  FROM pg_class c
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
 		  JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
@@ -360,7 +376,7 @@ func loadCatalog(ctx context.Context, t *testing.T, pool *pgxpool.Pool) map[stri
 	}
 	for rows.Next() {
 		tbl := &catalogTable{}
-		if scanErr := rows.Scan(&tbl.name, &tbl.rls, &tbl.force, &tbl.org, &tbl.client, &tbl.site, &tbl.team, &tbl.appWrite); scanErr != nil {
+		if scanErr := rows.Scan(&tbl.name, &tbl.rls, &tbl.force, &tbl.org, &tbl.client, &tbl.site, &tbl.team, &tbl.appWrite, &tbl.appAccess); scanErr != nil {
 			t.Fatalf("scan table: %v", scanErr)
 		}
 		tables[tbl.name] = tbl
@@ -368,6 +384,26 @@ func loadCatalog(ctx context.Context, t *testing.T, pool *pgxpool.Pool) map[stri
 	rows.Close()
 	if err = rows.Err(); err != nil {
 		t.Fatalf("query tables: %v", err)
+	}
+
+	for table, view := range rls.ViewProtectedTables {
+		tbl, ok := tables[table]
+		if !ok {
+			continue
+		}
+		// The view must be a security barrier with the organization
+		// predicate and grant the application SELECT and INSERT only.
+		if err = pool.QueryRow(ctx, `
+			SELECT COALESCE('security_barrier=true' = ANY (v.reloptions), false)
+			       AND position($2 IN pg_get_viewdef(v.oid)) > 0
+			       AND has_table_privilege('reticora_app', v.oid, 'SELECT')
+			       AND has_table_privilege('reticora_app', v.oid, 'INSERT')
+			       AND NOT has_table_privilege('reticora_app', v.oid, 'UPDATE, DELETE')
+			  FROM pg_class v
+			  JOIN pg_namespace n ON n.oid = v.relnamespace
+			 WHERE n.nspname = 'public' AND v.relkind = 'v' AND v.relname = $1`, view, rls.OrgGUC).Scan(&tbl.barrierView); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("inspect view %s: %v", view, err)
+		}
 	}
 
 	rows, err = pool.Query(ctx, `

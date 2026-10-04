@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -46,34 +47,12 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// withTenant executes fn within a transaction that has the tenant setting set for RLS.
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set legacy tenant context: %w", err)
-	}
-
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
-}
-
 // List returns paginated assets filtered by the given parameters.
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Asset, int, error) {
 	var assets []Asset
 	var total int
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		whereParts := []string{"true"}
 		args := make([]any, 0, 5)
 		argPos := 1
@@ -161,7 +140,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Asset, error) {
 	var asset *Asset
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf("SELECT %s FROM asset WHERE id = $1 AND organization_id = $2", assetSelectColumns)
 		var err error
 		asset, err = scanAsset(tx.QueryRow(ctx, query, id, orgID))
@@ -181,7 +160,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Asset, e
 
 // Create inserts a new asset.
 func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
-	return r.withTenant(ctx, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if a.CustomFields == nil {
 			a.CustomFields = make(map[string]any)
 		}
@@ -231,7 +210,7 @@ func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Asset, error) {
 	var asset *Asset
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		setClauses := make([]string, 0, 14)
 		args := []any{id}
 		argPos := 2
@@ -311,7 +290,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 
 // Delete deletes an asset. The asset table has no deleted_at column, so this is a hard delete.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM asset WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete asset: %w", err)

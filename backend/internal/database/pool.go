@@ -185,3 +185,61 @@ func WithTenant(ctx context.Context, pool *pgxpool.Pool, scope *TenantScope, fn 
 
 	return tx.Commit(ctx)
 }
+
+// SystemGUC is the flag WithSystem sets. Only SELECT policies honor it
+// (migration 000060): a system transaction can find rows across tenants but
+// change none of them.
+const SystemGUC = "app.system"
+
+// WithSystem runs fn in a read-only transaction with the system flag and no
+// tenant: the organization and the client, site and team scope are the nil
+// UUID, which matches no row and keeps the strict ::uuid casts of the tenant
+// policies valid, so
+// only the SELECT-only system exceptions (organization, webhook_delivery,
+// webhook_dead_letter, export_job, alert_rule, collector_enrollment_code)
+// return rows. Workers use it to find due work and then change rows per
+// organization in WithTenant (E-08). Every caller is listed in the
+// allow-list of the architecture test (WP-041).
+func WithSystem(ctx context.Context, pool *pgxpool.Pool, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return fmt.Errorf("begin system transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT
+		set_config('`+SystemGUC+`', 'on', true),
+		set_config('`+OrgGUC+`', $1, true),
+		set_config('`+UserGUC+`', '', true),
+		set_config('`+ClientScopeGUC+`', $1, true),
+		set_config('`+SiteScopeGUC+`', $1, true),
+		set_config('`+TeamScopeGUC+`', $1, true)`, noAccessScope); err != nil {
+		return fmt.Errorf("set system context: %w", err)
+	}
+	if err := fn(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// OrganizationIDs lists the ids of all organizations for workers that iterate
+// tenants. It is a system read (WithSystem).
+func OrganizationIDs(ctx context.Context, pool *pgxpool.Pool) ([]string, error) {
+	var ids []string
+	err := WithSystem(ctx, pool, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text FROM organization ORDER BY id`)
+		if err != nil {
+			return fmt.Errorf("list organizations: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("scan organization: %w", err)
+			}
+			ids = append(ids, id)
+		}
+		return rows.Err()
+	})
+	return ids, err
+}

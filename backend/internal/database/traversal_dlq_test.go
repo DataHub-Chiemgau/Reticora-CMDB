@@ -74,32 +74,35 @@ func TestTopologyTraversalRecursiveCTE(t *testing.T) {
 
 	// Keep in sync with relationship.PGRepository.TraverseFrom.
 	const traversalQuery = `
-		WITH RECURSIVE walk AS (
-			SELECT
-				r.id, r.source_ci_id, r.target_ci_id,
-				CASE WHEN r.source_ci_id = $2 THEN r.target_ci_id ELSE r.source_ci_id END AS frontier_ci_id,
-				1 AS depth,
-				ARRAY[r.source_ci_id, r.target_ci_id] AS visited
-			FROM ci_relationship r
-			WHERE r.organization_id = $1
-			  AND (r.source_ci_id = $2 OR r.target_ci_id = $2)
+		WITH RECURSIVE reach (ci_id, depth) AS (
+			SELECT c.id, 0
+			FROM ci c
+			WHERE c.id = $2 AND c.organization_id = $1 AND c.deleted_at IS NULL
 
 			UNION
 
-			SELECT
-				r.id, r.source_ci_id, r.target_ci_id,
-				CASE WHEN r.source_ci_id = w.frontier_ci_id THEN r.target_ci_id ELSE r.source_ci_id END,
-				w.depth + 1,
-				w.visited || r.source_ci_id || r.target_ci_id
-			FROM ci_relationship r
-			JOIN walk w
-			  ON (r.source_ci_id = w.frontier_ci_id OR r.target_ci_id = w.frontier_ci_id)
-			WHERE r.organization_id = $1
-			  AND w.depth < $3
-			  AND cardinality(w.visited) < $4
-			  AND NOT (r.source_ci_id = ANY (w.visited) AND r.target_ci_id = ANY (w.visited))
+			SELECT CASE WHEN r.source_ci_id = w.ci_id THEN r.target_ci_id ELSE r.source_ci_id END,
+			       w.depth + 1
+			FROM reach w
+			JOIN ci_relationship r
+			  ON r.organization_id = $1
+			 AND (r.source_ci_id = w.ci_id OR r.target_ci_id = w.ci_id)
+			JOIN ci s ON s.id = r.source_ci_id AND s.deleted_at IS NULL
+			JOIN ci t ON t.id = r.target_ci_id AND t.deleted_at IS NULL
+			WHERE w.depth < $3
+		),
+		nodes AS (
+			SELECT ci_id, min(depth) AS depth FROM reach GROUP BY ci_id
+		),
+		kept AS (
+			SELECT ci_id, depth FROM nodes ORDER BY depth, ci_id::text COLLATE "C" LIMIT $4
 		)
-		SELECT COUNT(DISTINCT id) FROM walk
+		SELECT COUNT(*)
+		FROM ci_relationship r
+		JOIN kept a ON a.ci_id = r.source_ci_id
+		JOIN kept b ON b.ci_id = r.target_ci_id
+		WHERE r.organization_id = $1
+		  AND LEAST(a.depth, b.depth) < $3
 	`
 
 	count := func(tx *sql.Tx, root string, depth int) int {

@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Session variables (GUCs) WithTenant sets transaction-locally for the RLS
@@ -160,4 +163,28 @@ func ContextWithTenantScope(ctx context.Context, s *TenantScope) context.Context
 func TenantScopeFromContext(ctx context.Context) (TenantScope, bool) {
 	s, ok := ctx.Value(tenantScopeKey{}).(TenantScope)
 	return s, ok
+}
+
+// ErrNoTenantScope is returned by WithRequestTenant when the context carries
+// no tenant scope. A repository call outside a request or a system context
+// therefore fails closed instead of running org-wide (E-08).
+var ErrNoTenantScope = errors.New("no tenant scope in context")
+
+// ErrTenantMismatch is returned by WithRequestTenant when the organization of
+// a call differs from the organization of the context's scope.
+var ErrTenantMismatch = errors.New("organization does not match the tenant scope")
+
+// WithRequestTenant runs fn through WithTenant with the scope attached to ctx
+// (ContextWithTenantScope). Repositories that receive the organization as an
+// argument use it so the transaction carries the principal's complete scope;
+// orgID must be the scope's organization.
+func WithRequestTenant(ctx context.Context, pool *pgxpool.Pool, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	scope, ok := TenantScopeFromContext(ctx)
+	if !ok {
+		return ErrNoTenantScope
+	}
+	if !strings.EqualFold(scope.OrgID, orgID) {
+		return fmt.Errorf("%w: %q", ErrTenantMismatch, orgID)
+	}
+	return WithTenant(ctx, pool, &scope, fn)
 }

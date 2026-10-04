@@ -2,6 +2,12 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -65,6 +71,8 @@ func (h *Handler) WithFindings(f FindingRecorder) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/agents", h.List)
 	r.Post("/api/v1/agents/enroll", h.Enroll)
+	r.Post("/api/v1/agents/enrollment-tokens", h.CreateEnrollmentToken)
+	r.Post("/api/v1/agents/{id}/site", h.ConfirmSite)
 	r.Post("/api/v1/agents/telemetry", h.IngestTelemetry)
 	r.Post("/api/v1/agents/{id}/heartbeat", h.Heartbeat)
 	r.Patch("/api/v1/agents/{id}/policy", h.UpdatePolicy)
@@ -81,7 +89,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Agent]{
@@ -91,7 +99,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 // Enroll handles POST /api/v1/agents/enroll — registers an endpoint agent
-// (after the edge enrollment authenticated it) and returns its policy.
+// with a single-use enrollment token (AGT-06). The token binds the agent to
+// its client and, unless it is a roaming token, its site; for roaming agents
+// a site is suggested from the network fingerprint.
 func (h *Handler) Enroll(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -107,6 +117,10 @@ func (h *Handler) Enroll(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "agent_id is required")
 		return
 	}
+	if strings.TrimSpace(req.EnrollmentToken) == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "enrollment_token is required")
+		return
+	}
 	a := &Agent{
 		OrganizationID: t.OrganizationID,
 		AgentID:        req.AgentID,
@@ -116,11 +130,105 @@ func (h *Handler) Enroll(w http.ResponseWriter, r *http.Request) {
 		Arch:           req.Arch,
 		Policy:         DefaultPolicy(),
 	}
-	if err := h.repo.Register(r.Context(), a); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+	if err := h.repo.Enroll(r.Context(), a, hashEnrollmentToken(req.EnrollmentToken), req.IPAddress); err != nil {
+		if errors.Is(err, ErrInvalidEnrollmentToken) {
+			api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
+			return
+		}
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, a)
+}
+
+// maxEnrollmentTokenTTL caps the lifetime of an enrollment token.
+const maxEnrollmentTokenTTL = 30 * 24 * time.Hour
+
+// CreateEnrollmentToken handles POST /api/v1/agents/enrollment-tokens. The
+// secret is returned once and stored only as a hash.
+func (h *Handler) CreateEnrollmentToken(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	var req CreateEnrollmentTokenRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if strings.TrimSpace(req.ClientID) == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "client_id is required")
+		return
+	}
+	ttl := 24 * time.Hour
+	if req.TTLHours > 0 {
+		ttl = time.Duration(req.TTLHours) * time.Hour
+	}
+	if ttl > maxEnrollmentTokenTTL {
+		ttl = maxEnrollmentTokenTTL
+	}
+	secret, err := newEnrollmentSecret()
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "could not create a token")
+		return
+	}
+	tok := &EnrollmentToken{
+		ClientID:    req.ClientID,
+		SiteID:      req.SiteID,
+		Description: req.Description,
+		ExpiresAt:   time.Now().UTC().Add(ttl),
+	}
+	if err := h.repo.CreateEnrollmentToken(r.Context(), t.OrganizationID, tok, hashEnrollmentToken(secret)); err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	tok.Token = secret
+	api.WriteJSON(w, http.StatusCreated, tok)
+}
+
+// ConfirmSite handles POST /api/v1/agents/{id}/site — the manual confirmation
+// of a roaming agent's site (AGT-06).
+func (h *Handler) ConfirmSite(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	var req ConfirmSiteRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if strings.TrimSpace(req.SiteID) == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "site_id is required")
+		return
+	}
+	a, err := h.repo.ConfirmSite(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req.SiteID)
+	if err != nil {
+		if errors.Is(err, ErrSiteNotOfClient) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+			return
+		}
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, a)
+}
+
+// newEnrollmentSecret returns a random token secret.
+func newEnrollmentSecret() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return "agt_" + base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// hashEnrollmentToken is the stored form of a token secret.
+func hashEnrollmentToken(secret string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(secret)))
+	return hex.EncodeToString(sum[:])
 }
 
 // IngestTelemetry handles POST /api/v1/agents/telemetry. It reconciles the
@@ -156,11 +264,18 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 
 	ciID, err := h.reconcileCI(r.Context(), t.OrganizationID, ag, payload)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	if ciID != "" && ag.CIID != ciID {
 		_ = h.repo.SetCI(r.Context(), t.OrganizationID, ag.AgentID, ciID)
+	}
+	// A roaming device reports where it is; a differing site is only
+	// suggested and needs a manual confirmation (AGT-06).
+	if strings.TrimSpace(payload.IPAddress) != "" && payload.IPAddress != ag.NetworkFingerprint {
+		if err := h.repo.SuggestSite(r.Context(), t.OrganizationID, ag.AgentID, payload.IPAddress); err != nil {
+			slog.Warn("agent site suggestion failed", "agent", ag.AgentID, "error", err)
+		}
 	}
 	_ = h.repo.Heartbeat(r.Context(), t.OrganizationID, ag.AgentID)
 
@@ -188,7 +303,7 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		if err := h.metrics.Ingest(r.Context(), metrics); err != nil {
-			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			api.WriteRepoError(w, err)
 			return
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,6 +27,34 @@ const (
 	s3PresignTTL       = 15 * time.Minute
 	emptyPayloadSHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 )
+
+// ErrForeignKey reports an object key outside the organization's prefix.
+var ErrForeignKey = errors.New("blob: key outside the organization prefix")
+
+// OrgPrefix is the key prefix of all objects of an organization (TEN-06).
+func OrgPrefix(orgID string) string {
+	return "org/" + orgID + "/"
+}
+
+// OrgKey builds a server-side object key below the organization's prefix:
+// org/<orgID>/<parts joined by "/">. Keys must never come from a request.
+func OrgKey(orgID string, parts ...string) string {
+	return OrgPrefix(orgID) + strings.Join(parts, "/")
+}
+
+// CheckOrgKey verifies that key lies below the organization's prefix and
+// contains no path traversal or empty segments.
+func CheckOrgKey(orgID, key string) error {
+	if orgID == "" || !strings.HasPrefix(key, OrgPrefix(orgID)) {
+		return ErrForeignKey
+	}
+	for _, segment := range strings.Split(strings.TrimPrefix(key, OrgPrefix(orgID)), "/") {
+		if segment == "" || segment == "." || segment == ".." || strings.Contains(segment, "\\") {
+			return ErrForeignKey
+		}
+	}
+	return nil
+}
 
 // Store defines the interface for blob/object storage operations.
 type Store interface {

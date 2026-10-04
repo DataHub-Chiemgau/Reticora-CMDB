@@ -63,6 +63,9 @@ func TestTraverseFromProjectsRelTypePG(t *testing.T) {
 		}
 	}
 
+	// The repository takes the tenant scope from the request context.
+	scope := database.OrgWideScope(orgID, "")
+	ctx = database.ContextWithTenantScope(ctx, &scope)
 	repo := relationship.NewPGRepository(pool)
 	mk := func(src, dst, typ string) {
 		r := &relationship.Relationship{

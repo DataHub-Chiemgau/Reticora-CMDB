@@ -46,7 +46,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Desk]{
@@ -91,7 +91,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Attributes:     req.Attributes,
 	}
 	if err := h.repo.Create(r.Context(), d); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, d)
@@ -137,7 +137,7 @@ func (h *Handler) ListBookings(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.repo.ListBookings(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})

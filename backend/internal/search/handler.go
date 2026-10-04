@@ -57,45 +57,36 @@ func (h *Handler) Reindex(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.backend.ReindexTenant(r.Context(), t.OrganizationID)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusAccepted, out)
 }
+// filterAllowed keeps the hits whose entity type the caller may read
+// (SRC-01). It fails closed: without a permission repository or a user every
+// hit is dropped, as are hits of types without a read permission.
 func (h *Handler) filterAllowed(ctx context.Context, t tenant.TenantInfo, hits []Hit) []Hit {
-	if h.permissions == nil || t.UserID == "" {
-		return hits
-	}
 	out := hits[:0]
+	if h.permissions == nil || t.UserID == "" {
+		return out
+	}
+	allowed := map[string]bool{}
 	for _, hit := range hits {
-		key := permissionFor(hit.EntityType)
-		if key == "" {
+		key, ok := ReadPermission[hit.EntityType]
+		if !ok {
 			continue
 		}
-		ok, err := h.permissions.HasPermission(ctx, t.OrganizationID, t.UserID, key)
-		if err == nil && ok {
+		granted, seen := allowed[key]
+		if !seen {
+			ok, err := h.permissions.HasPermission(ctx, t.OrganizationID, t.UserID, key)
+			granted = err == nil && ok
+			allowed[key] = granted
+		}
+		if granted {
 			out = append(out, hit)
 		}
 	}
 	return out
-}
-func permissionFor(entity string) string {
-	switch entity {
-	case "ci":
-		return "ci:read"
-	case "asset":
-		return "asset:read"
-	case "document":
-		return "document:read"
-	case "ticket":
-		return "ticket:read"
-	case "contact":
-		return "contact:read"
-	case "compliance":
-		return "compliance:read"
-	default:
-		return ""
-	}
 }
 func splitTypes(raw string) []string {
 	var out []string

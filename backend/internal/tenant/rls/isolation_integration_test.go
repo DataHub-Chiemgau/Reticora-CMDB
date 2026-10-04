@@ -3,6 +3,7 @@ package rls_test
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -116,7 +117,13 @@ func seed(t *testing.T, ctx context.Context, dsn string) {
 // the given organization.
 func scoped(t *testing.T, ctx context.Context, dsn, orgID string) *pgxpool.Pool {
 	t.Helper()
-	pool, err := database.NewPool(ctx, dsn)
+	// The tenant GUC is set on the session below, so every query must run on
+	// that one connection: a second pooled connection would lack it.
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	pool, err := database.NewPool(ctx, dsn+sep+"pool_max_conns=1")
 	if err != nil {
 		t.Fatalf("pool for org %s: %v", orgID, err)
 	}

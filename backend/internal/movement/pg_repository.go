@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -21,21 +22,6 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 const movementSelectColumns = `
 	id::text, organization_id::text, item_kind, COALESCE(asset_id::text, ''),
 	COALESCE(quantity_item_id::text, ''), movement_type,
@@ -45,6 +31,26 @@ const movementSelectColumns = `
 	COALESCE(workflow_run_id::text, ''), COALESCE(document_id::text, ''),
 	COALESCE(notes, ''), created_at
 `
+
+// movementVisible restricts movements to those whose asset or quantity item
+// is visible under the transaction's tenant scope: their policies filter the
+// subqueries, while asset_movement carries no client column yet (WP-025).
+const movementVisible = `(asset_movement.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = asset_movement.asset_id))
+	AND (asset_movement.quantity_item_id IS NULL OR EXISTS (SELECT 1 FROM quantity_item WHERE quantity_item.id = asset_movement.quantity_item_id))`
+
+// requireVisible fails with "not found" when the written row of table does not
+// satisfy visible, i.e. when a write pointed it at an object outside the
+// tenant scope; the transaction is then rolled back.
+func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
+	var ok bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
+		return fmt.Errorf("check %s visibility: %w", table, err)
+	}
+	if !ok {
+		return fmt.Errorf("not found")
+	}
+	return nil
+}
 
 // Record appends a movement. The append-only trigger on asset_movement
 // rejects any later mutation; quantity items get their stock level adjusted
@@ -59,7 +65,7 @@ func (r *PGRepository) Record(ctx context.Context, m *Movement) error {
 	if m.AssetID == "" && m.QuantityItemID == "" {
 		return fmt.Errorf("asset_id or quantity_item_id is required")
 	}
-	return r.withTenant(ctx, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `
 			INSERT INTO asset_movement (
 				organization_id, item_kind, asset_id, quantity_item_id,
@@ -100,7 +106,7 @@ func (r *PGRepository) Record(ctx context.Context, m *Movement) error {
 				return fmt.Errorf("update asset location: %w", err)
 			}
 		}
-		return nil
+		return requireVisible(ctx, tx, "asset_movement", movementVisible, m.ID)
 	})
 }
 
@@ -108,7 +114,7 @@ func (r *PGRepository) Record(ctx context.Context, m *Movement) error {
 func (r *PGRepository) ListMovements(ctx context.Context, orgID string, filter MovementFilter, page api.PaginationParams) ([]Movement, int, error) {
 	var out []Movement
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id = $1"}
 		args := []any{orgID}
 		pos := 2
@@ -133,12 +139,12 @@ func (r *PGRepository) ListMovements(ctx context.Context, orgID string, filter M
 			pos++
 		}
 		clause := strings.Join(where, " AND ")
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM asset_movement WHERE "+clause, args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM asset_movement WHERE "+movementVisible+" AND "+clause, args...).Scan(&total); err != nil {
 			return fmt.Errorf("count movements: %w", err)
 		}
 		args = append(args, page.Limit, page.Offset)
 		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM asset_movement WHERE %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d",
+			"SELECT %s FROM asset_movement WHERE "+movementVisible+" AND %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d",
 			movementSelectColumns, clause, pos, pos+1), args...)
 		if err != nil {
 			return fmt.Errorf("list movements: %w", err)
@@ -167,7 +173,7 @@ const itemSelectColumns = `
 func (r *PGRepository) ListItems(ctx context.Context, orgID string, page api.PaginationParams) ([]QuantityItem, int, error) {
 	var out []QuantityItem
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
 			"SELECT COUNT(*) FROM quantity_item WHERE organization_id = $1", orgID).Scan(&total); err != nil {
 			return fmt.Errorf("count quantity items: %w", err)
@@ -194,7 +200,7 @@ func (r *PGRepository) ListItems(ctx context.Context, orgID string, page api.Pag
 // GetItem returns one quantity item.
 func (r *PGRepository) GetItem(ctx context.Context, orgID, id string) (*QuantityItem, error) {
 	var out *QuantityItem
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		item, err := scanItem(tx.QueryRow(ctx, fmt.Sprintf(
 			"SELECT %s FROM quantity_item WHERE id = $1 AND organization_id = $2",
 			itemSelectColumns), id, orgID))
@@ -212,7 +218,7 @@ func (r *PGRepository) GetItem(ctx context.Context, orgID, id string) (*Quantity
 
 // CreateItem inserts a quantity item.
 func (r *PGRepository) CreateItem(ctx context.Context, item *QuantityItem) error {
-	return r.withTenant(ctx, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if item.Attributes == nil {
 			item.Attributes = map[string]any{}
 		}
@@ -241,7 +247,7 @@ func (r *PGRepository) CreateItem(ctx context.Context, item *QuantityItem) error
 // movements so the level stays auditable).
 func (r *PGRepository) UpdateItem(ctx context.Context, orgID, id string, req UpdateItemRequest) (*QuantityItem, error) {
 	var out *QuantityItem
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{id, orgID}
 		pos := 3
@@ -310,7 +316,7 @@ func (r *PGRepository) UpdateItem(ctx context.Context, orgID, id string, req Upd
 
 // DeleteItem removes a quantity item.
 func (r *PGRepository) DeleteItem(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx,
 			"DELETE FROM quantity_item WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {

@@ -135,7 +135,7 @@ func TestJobRendersCorrectCSV(t *testing.T) {
 	blobs := blob.NewFileStore(t.TempDir())
 	worker := NewJobWorker(jobs, cis, blobs)
 
-	job := &Job{Format: "csv"}
+	job := &Job{Format: "csv", Scope: &JobScope{}}
 	if err := jobs.CreateJob(context.Background(), "org-1", job); err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestListJobsTenantIsolation(t *testing.T) {
 	jobs, _, _, mux := newJobEnv(t, cis)
 
 	for _, org := range []string{"org-1", "org-2"} {
-		if err := jobs.CreateJob(context.Background(), org, &Job{Format: "json"}); err != nil {
+		if err := jobs.CreateJob(context.Background(), org, &Job{Format: "json", InitiatedBy: "user-1", Scope: &JobScope{}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -258,7 +258,7 @@ func TestFailingRenderMarksJobFailed(t *testing.T) {
 	blobs := blob.NewFileStore(t.TempDir())
 	worker := NewJobWorker(jobs, failingCIRepo{}, blobs)
 
-	job := &Job{Format: "csv"}
+	job := &Job{Format: "csv", Scope: &JobScope{}}
 	if err := jobs.CreateJob(context.Background(), "org-1", job); err != nil {
 		t.Fatal(err)
 	}

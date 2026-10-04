@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -70,20 +71,27 @@ func (h *JobHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job := &Job{Format: req.Format, Filters: req.Filters}
+	// The job records its creator and the creator's scope; the worker
+	// exports with exactly this scope and only the creator reads the job.
+	scope, ok := database.TenantScopeFromContext(r.Context())
+	if !ok {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant scope")
+		return
+	}
+	job := &Job{Format: req.Format, Filters: req.Filters, InitiatedBy: scope.UserID, Scope: SnapshotScope(&scope)}
 	if principal, ok := identity.PrincipalFromContext(r.Context()); ok {
 		job.InitiatedBy = principal.Subject
 	}
 	if err := h.jobs.CreateJob(r.Context(), t.OrganizationID, job); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
 	api.WriteJSON(w, http.StatusAccepted, h.toResponse(r, job))
 }
 
-// ListJobs handles GET /api/v1/export/jobs and returns the tenant's export
-// jobs newest first.
+// ListJobs handles GET /api/v1/export/jobs and returns the caller's own
+// export jobs newest first.
 func (h *JobHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -94,7 +102,7 @@ func (h *JobHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	jobs, total, err := h.jobs.ListJobs(r.Context(), t.OrganizationID, page.Limit, page.Offset)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -111,8 +119,8 @@ func (h *JobHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetJob handles GET /api/v1/export/jobs/{id}. Completed, unexpired jobs
-// carry a time-limited signed download URL.
+// GetJob handles GET /api/v1/export/jobs/{id}. Only the creator reads a job;
+// completed, unexpired jobs carry a time-limited signed download URL.
 func (h *JobHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {

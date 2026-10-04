@@ -42,6 +42,9 @@ func TestCompleteAppliesCorrections(t *testing.T) {
 
 	orgID := "00000000-0000-0000-0000-000000000036"
 	userID := seedOrgAndUser(t, dsn, orgID)
+	// The repositories take the tenant scope from the request context.
+	scope := database.OrgWideScope(orgID, userID)
+	ctx = database.ContextWithTenantScope(ctx, &scope)
 
 	stRepo := stocktake.NewPGRepository(pool)
 	assetRepo := asset.NewPGRepository(pool)

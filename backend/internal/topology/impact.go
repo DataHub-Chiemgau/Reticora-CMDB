@@ -57,7 +57,7 @@ func (h *Handler) GetDependencies(w http.ResponseWriter, r *http.Request) {
 	}
 	graph, err := h.buildFromRoot(r.Context(), t.OrganizationID, id, depth, "")
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	var reachable map[string]struct{}
@@ -95,7 +95,7 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 	}
 	graph, err := h.buildFromRoot(r.Context(), t.OrganizationID, id, maxDepth, "")
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	impacted := computeImpact(id, graph.Edges, "")

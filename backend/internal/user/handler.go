@@ -104,7 +104,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 	items, total, err := h.repo.ListUsers(r.Context(), t.OrganizationID, search, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -166,7 +166,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.CreateUser(r.Context(), u); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -235,14 +235,14 @@ func (h *Handler) ExportData(w http.ResponseWriter, r *http.Request) {
 	if h.contacts != nil && u.Email != "" {
 		contacts, err = h.contacts.ListByEmail(r.Context(), t.OrganizationID, u.Email)
 		if err != nil {
-			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			api.WriteRepoError(w, err)
 			return
 		}
 	}
 
 	roles, err := h.repo.ListUserRoles(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	if roles == nil {
@@ -255,11 +255,11 @@ func (h *Handler) ExportData(w http.ResponseWriter, r *http.Request) {
 	assignedTickets := []ticket.Ticket{}
 	if h.tickets != nil {
 		if reported, _, err = h.tickets.List(r.Context(), t.OrganizationID, ticket.FilterParams{ReporterID: id}, all); err != nil {
-			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			api.WriteRepoError(w, err)
 			return
 		}
 		if assignedTickets, _, err = h.tickets.List(r.Context(), t.OrganizationID, ticket.FilterParams{AssigneeID: id}, all); err != nil {
-			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			api.WriteRepoError(w, err)
 			return
 		}
 	}
@@ -268,11 +268,11 @@ func (h *Handler) ExportData(w http.ResponseWriter, r *http.Request) {
 	issued := []assignment.Assignment{}
 	if h.assignments != nil {
 		if received, _, err = h.assignments.List(r.Context(), t.OrganizationID, assignment.FilterParams{AssignedTo: id}, all); err != nil {
-			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			api.WriteRepoError(w, err)
 			return
 		}
 		if issued, _, err = h.assignments.List(r.Context(), t.OrganizationID, assignment.FilterParams{AssignedBy: id}, all); err != nil {
-			api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+			api.WriteRepoError(w, err)
 			return
 		}
 	}
@@ -322,7 +322,7 @@ func (h *Handler) ListUserRoles(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
 	roles, err := h.repo.ListUserRoles(r.Context(), t.OrganizationID, userID)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -343,7 +343,7 @@ func (h *Handler) ListTeams(w http.ResponseWriter, r *http.Request) {
 
 	items, total, err := h.repo.ListTeams(r.Context(), t.OrganizationID, search, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -399,7 +399,7 @@ func (h *Handler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.CreateTeam(r.Context(), team); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -530,7 +530,7 @@ func (h *Handler) ListRoles(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.ListRoles(r.Context(), t.OrganizationID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -589,7 +589,7 @@ func (h *Handler) CreateRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.CreateRole(r.Context(), role); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 

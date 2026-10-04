@@ -47,7 +47,7 @@ func (h *Handler) GetRetention(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, policy)

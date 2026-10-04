@@ -78,8 +78,8 @@ func TestCompileSQLRelationshipPredicates(t *testing.T) {
 	if !strings.Contains(where, "NOT EXISTS (SELECT 1 FROM ci_relationship") {
 		t.Fatalf("expected lacks-relationship predicate, got %s", where)
 	}
-	if !strings.Contains(where, "WITH RECURSIVE up AS") {
-		t.Fatalf("expected upstream recursive predicate, got %s", where)
+	if !strings.Contains(where, "WITH RECURSIVE up (id, depth) AS") || !strings.Contains(where, "up.depth < 5") {
+		t.Fatalf("expected upstream recursive predicate bounded to depth 5, got %s", where)
 	}
 }
 

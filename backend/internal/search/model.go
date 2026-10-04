@@ -17,7 +17,12 @@ type Document struct {
 	Summary        string            `json:"summary,omitempty"`
 	URL            string            `json:"url"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
-	UpdatedAt      time.Time         `json:"updated_at"`
+	// ClientID and SiteID are the scope of the entity (empty: org-wide). The
+	// PostgreSQL index derives them itself; remote indexes store what the
+	// writer passes, and every query filters on them (CH11, CH25).
+	ClientID  string    `json:"client_id,omitempty"`
+	SiteID    string    `json:"site_id,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type Query struct {
@@ -54,4 +59,17 @@ type Backend interface {
 	Delete(ctx context.Context, orgID, entityType, entityID string) error
 	Query(ctx context.Context, q Query) (Result, error)
 	ReindexTenant(ctx context.Context, orgID string) (ReindexResult, error)
+}
+
+// ReadPermission maps each indexed entity type to the permission a caller
+// needs to see its hits. Types missing here are never returned.
+var ReadPermission = map[string]string{
+	"ci":          "ci:read",
+	"asset":       "asset:read",
+	"document":    "document:read",
+	"ticket":      "ticket:read",
+	"contact":     "contact:read",
+	"compliance":  "compliance:read",
+	"location":    "site:read",
+	"reservation": "asset:read",
 }

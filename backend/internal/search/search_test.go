@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 func TestPostgresQueryBuilderUsesParameters(t *testing.T) {
@@ -24,7 +26,8 @@ func TestPostgresQueryBuilderUsesParameters(t *testing.T) {
 }
 
 func TestOpenSearchQueryBuilderStructured(t *testing.T) {
-	body, err := buildOpenSearchQuery(Query{OrganizationID: "org", Text: "name:*)", EntityTypes: []string{"ticket"}, Limit: 5})
+	scope := database.OrgWideScope("org", "user")
+	body, err := buildOpenSearchQuery(&Query{OrganizationID: "org", Text: "name:*)", EntityTypes: []string{"ticket"}, Limit: 5}, &scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +38,8 @@ func TestOpenSearchQueryBuilderStructured(t *testing.T) {
 }
 
 func TestOpenSearchRejectsOversizedQuery(t *testing.T) {
-	_, err := buildOpenSearchQuery(Query{Text: string(make([]rune, MaxQueryLength+1))})
+	scope := database.OrgWideScope("org", "user")
+	_, err := buildOpenSearchQuery(&Query{OrganizationID: "org", Text: string(make([]rune, MaxQueryLength+1))}, &scope)
 	if err == nil {
 		t.Fatal("expected oversized query error")
 	}
@@ -51,11 +55,18 @@ func TestOpenSearchHTTPQuery(t *testing.T) {
 	}))
 	defer srv.Close()
 	b := NewOpenSearchBackend(OpenSearchConfig{URL: srv.URL, Index: "idx"}, srv.Client())
-	res, err := b.Query(context.Background(), Query{OrganizationID: "org", Text: "router"})
+	res, err := b.Query(orgWideContext("org"), Query{OrganizationID: "org", Text: "router"})
 	if err != nil || len(res.Data) != 1 {
 		t.Fatalf("res=%#v err=%v", res, err)
 	}
 }
+// orgWideContext carries an org-wide tenant scope, as the auth middleware
+// attaches it to every request.
+func orgWideContext(orgID string) context.Context {
+	scope := database.OrgWideScope(orgID, "user")
+	return database.ContextWithTenantScope(context.Background(), &scope)
+}
+
 func contains(s, sub string) bool {
 	return len(sub) == 0 || (len(s) >= len(sub) && (s == sub || contains(s[1:], sub) || s[:len(sub)] == sub))
 }
@@ -96,7 +107,7 @@ func TestOpenSearchQueryRoundTrip(t *testing.T) {
 	if err := b.Ping(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	res, err := b.Query(context.Background(), Query{OrganizationID: "org", Text: "switch", Limit: 10, Highlight: true})
+	res, err := b.Query(orgWideContext("org"), Query{OrganizationID: "org", Text: "switch", Limit: 10, Highlight: true})
 	if err != nil {
 		t.Fatal(err)
 	}

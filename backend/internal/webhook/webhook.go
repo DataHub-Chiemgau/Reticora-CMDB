@@ -244,7 +244,7 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 		"sent_at":         time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -277,7 +277,7 @@ func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", err.Error())
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -310,7 +310,7 @@ func (h *Handler) ListDeadLetters(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", err.Error())
 			return
 		}
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -334,7 +334,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	subs, total, err := h.repo.List(r.Context(), t.OrganizationID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -402,7 +402,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Create(r.Context(), sub); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 

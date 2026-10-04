@@ -42,7 +42,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	filter := FilterParams{Category: r.URL.Query().Get("category"), Search: r.URL.Query().Get("search")}
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Course]{
@@ -88,7 +88,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		ValidityMonths: req.ValidityMonths,
 	}
 	if err := h.repo.Create(r.Context(), c); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, c)
@@ -134,7 +134,7 @@ func (h *Handler) ListAssignments(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.repo.ListAssignments(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -19,25 +20,34 @@ type PGRepository struct{ pool *pgxpool.Pool }
 
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(context.Context, pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
+// submissionVisible restricts submissions to those whose form, CI and ticket
+// are visible under the transaction's tenant scope: their policies filter the
+// subqueries (tickets by their related CI and asset until WP-028), while
+// form_submission carries no client column yet (WP-025).
+const submissionVisible = `EXISTS (SELECT 1 FROM form_def WHERE form_def.id = form_submission.form_id)
+	AND (form_submission.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = form_submission.ci_id))
+	AND (form_submission.ticket_id IS NULL OR EXISTS (SELECT 1 FROM ticket WHERE ticket.id = form_submission.ticket_id
+		AND (ticket.related_ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = ticket.related_ci_id))
+		AND (ticket.related_asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = ticket.related_asset_id))))`
+
+// requireVisible fails with "not found" when the written row of table does not
+// satisfy visible, i.e. when a write pointed it at an object outside the
+// tenant scope; the transaction is then rolled back.
+func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
+	var ok bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
+		return fmt.Errorf("check %s visibility: %w", table, err)
 	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
+	if !ok {
+		return fmt.Errorf("not found")
 	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 func (r *PGRepository) ListDefinitions(ctx context.Context, orgID, clientID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error) {
 	var out []Definition
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id = $1"}
 		args := []any{orgID}
 		pos := 2
@@ -71,7 +81,7 @@ func (r *PGRepository) ListDefinitions(ctx context.Context, orgID, clientID stri
 }
 func (r *PGRepository) GetDefinition(ctx context.Context, orgID, id string) (*Definition, error) {
 	var item *Definition
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		item, err = scanDefinition(tx.QueryRow(ctx, "SELECT "+definitionColumns+" FROM form_def WHERE organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -82,7 +92,7 @@ func (r *PGRepository) GetDefinition(ctx context.Context, orgID, id string) (*De
 	return item, err
 }
 func (r *PGRepository) CreateDefinition(ctx context.Context, def *Definition) error {
-	return r.withTenant(ctx, def.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, def.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if def.Schema == nil {
 			def.Schema = JSONMap{}
 		}
@@ -94,7 +104,7 @@ func (r *PGRepository) CreateDefinition(ctx context.Context, def *Definition) er
 }
 func (r *PGRepository) UpdateDefinition(ctx context.Context, orgID, id string, req UpdateDefinitionRequest) (*Definition, error) {
 	var item *Definition
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		set := []string{}
 		args := []any{id, orgID}
 		pos := 3
@@ -144,7 +154,7 @@ func (r *PGRepository) UpdateDefinition(ctx context.Context, orgID, id string, r
 	return item, err
 }
 func (r *PGRepository) DeleteDefinition(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx, "DELETE FROM form_def WHERE organization_id=$1 AND id=$2", orgID, id)
 		if err != nil {
 			return err
@@ -158,7 +168,7 @@ func (r *PGRepository) DeleteDefinition(ctx context.Context, orgID, id string) e
 func (r *PGRepository) ListSubmissions(ctx context.Context, orgID string, filter SubmissionFilter, page api.PaginationParams) ([]Submission, int, error) {
 	var out []Submission
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id=$1"}
 		args := []any{orgID}
 		pos := 2
@@ -174,10 +184,10 @@ func (r *PGRepository) ListSubmissions(ctx context.Context, orgID string, filter
 		add("ticket_id", filter.TicketID)
 		add("ci_id", filter.CIID)
 		clause := strings.Join(where, " AND ")
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM form_submission WHERE "+clause, args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM form_submission WHERE "+submissionVisible+" AND "+clause, args...).Scan(&total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, fmt.Sprintf("SELECT %s FROM form_submission WHERE %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d", submissionColumns, clause, pos, pos+1), append(args, page.Limit, page.Offset)...)
+		rows, err := tx.Query(ctx, fmt.Sprintf("SELECT %s FROM form_submission WHERE "+submissionVisible+" AND %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d", submissionColumns, clause, pos, pos+1), append(args, page.Limit, page.Offset)...)
 		if err != nil {
 			return err
 		}
@@ -195,9 +205,9 @@ func (r *PGRepository) ListSubmissions(ctx context.Context, orgID string, filter
 }
 func (r *PGRepository) GetSubmission(ctx context.Context, orgID, id string) (*Submission, error) {
 	var item *Submission
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		item, err = scanSubmission(tx.QueryRow(ctx, "SELECT "+submissionColumns+" FROM form_submission WHERE organization_id=$1 AND id=$2", orgID, id))
+		item, err = scanSubmission(tx.QueryRow(ctx, "SELECT "+submissionColumns+" FROM form_submission WHERE "+submissionVisible+" AND organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("form submission not found")
 		}
@@ -206,14 +216,17 @@ func (r *PGRepository) GetSubmission(ctx context.Context, orgID, id string) (*Su
 	return item, err
 }
 func (r *PGRepository) CreateSubmission(ctx context.Context, sub *Submission) error {
-	return r.withTenant(ctx, sub.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, sub.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if sub.Values == nil {
 			sub.Values = JSONMap{}
 		}
 		if sub.Status == "" {
 			sub.Status = "submitted"
 		}
-		return tx.QueryRow(ctx, `INSERT INTO form_submission (organization_id, form_id, values, submitted_by, ci_id, ticket_id, status) VALUES ($1,$2,$3,NULLIF($4,'')::uuid,NULLIF($5,'')::uuid,NULLIF($6,'')::uuid,$7) RETURNING id::text, created_at, updated_at`, sub.OrganizationID, sub.FormID, sub.Values, sub.SubmittedBy, sub.CIID, sub.TicketID, sub.Status).Scan(&sub.ID, &sub.CreatedAt, &sub.UpdatedAt)
+		if err := tx.QueryRow(ctx, `INSERT INTO form_submission (organization_id, form_id, values, submitted_by, ci_id, ticket_id, status) VALUES ($1,$2,$3,NULLIF($4,'')::uuid,NULLIF($5,'')::uuid,NULLIF($6,'')::uuid,$7) RETURNING id::text, created_at, updated_at`, sub.OrganizationID, sub.FormID, sub.Values, sub.SubmittedBy, sub.CIID, sub.TicketID, sub.Status).Scan(&sub.ID, &sub.CreatedAt, &sub.UpdatedAt); err != nil {
+			return err
+		}
+		return requireVisible(ctx, tx, "form_submission", submissionVisible, sub.ID)
 	})
 }
 

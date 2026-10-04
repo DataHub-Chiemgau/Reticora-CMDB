@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -27,24 +28,24 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
+// visibleEntity hides the changes of a CI that is not visible under the
+// transaction's tenant scope: the ci policy filters the subquery by client
+// scope, while entity_change carries no client column yet (WP-025). Other
+// entity types follow with their packages' WithTenant migration.
+const visibleEntity = `(entity_type <> 'ci' OR EXISTS (SELECT 1 FROM ci WHERE ci.id = entity_change.entity_id))`
 
 // Record appends a change row to the entity_change trail.
 func (r *PGRepository) Record(ctx context.Context, change *Change) error {
-	return r.withTenant(ctx, change.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, change.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if change.EntityType == "ci" {
+			var visible bool
+			if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid)", change.EntityID).Scan(&visible); err != nil {
+				return fmt.Errorf("check ci visibility: %w", err)
+			}
+			if !visible {
+				return fmt.Errorf("not found")
+			}
+		}
 		return tx.QueryRow(ctx, `
 			INSERT INTO entity_change (
 				organization_id, entity_type, entity_id, actor_id,
@@ -63,15 +64,15 @@ func (r *PGRepository) Record(ctx context.Context, change *Change) error {
 func (r *PGRepository) List(ctx context.Context, orgID, entityType, entityID string, page api.PaginationParams) ([]Change, int, error) {
 	var out []Change
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
-			"SELECT COUNT(*) FROM entity_change WHERE organization_id = $1 AND entity_type = $2 AND entity_id = $3",
+			"SELECT COUNT(*) FROM entity_change WHERE organization_id = $1 AND entity_type = $2 AND entity_id = $3 AND "+visibleEntity,
 			orgID, entityType, entityID).Scan(&total); err != nil {
 			return fmt.Errorf("count entity changes: %w", err)
 		}
 		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM entity_change WHERE organization_id = $1 AND entity_type = $2 AND entity_id = $3 ORDER BY created_at DESC LIMIT $4 OFFSET $5",
-			selectColumns), orgID, entityType, entityID, page.Limit, page.Offset)
+			"SELECT %s FROM entity_change WHERE organization_id = $1 AND entity_type = $2 AND entity_id = $3 AND %s ORDER BY created_at DESC LIMIT $4 OFFSET $5",
+			selectColumns, visibleEntity), orgID, entityType, entityID, page.Limit, page.Offset)
 		if err != nil {
 			return fmt.Errorf("list entity changes: %w", err)
 		}
@@ -91,10 +92,10 @@ func (r *PGRepository) List(ctx context.Context, orgID, entityType, entityID str
 // TrailUpTo returns changes oldest-first for point-in-time replay.
 func (r *PGRepository) TrailUpTo(ctx context.Context, orgID, entityType, entityID string, at time.Time) ([]Change, error) {
 	var out []Change
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM entity_change WHERE organization_id = $1 AND entity_type = $2 AND entity_id = $3 AND created_at <= $4 ORDER BY created_at ASC",
-			selectColumns), orgID, entityType, entityID, at)
+			"SELECT %s FROM entity_change WHERE organization_id = $1 AND entity_type = $2 AND entity_id = $3 AND created_at <= $4 AND %s ORDER BY created_at ASC",
+			selectColumns, visibleEntity), orgID, entityType, entityID, at)
 		if err != nil {
 			return fmt.Errorf("list entity trail: %w", err)
 		}

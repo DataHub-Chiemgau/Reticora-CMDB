@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -28,25 +29,10 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 // List returns nodes filtered by the given parameters.
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams) ([]Node, error) {
 	var out []Node
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id = $1"}
 		args := []any{orgID}
 		pos := 2
@@ -99,7 +85,7 @@ func (r *PGRepository) Tree(ctx context.Context, orgID string) ([]Node, error) {
 // GetByID returns one node.
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Node, error) {
 	var out *Node
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		n, err := scanNode(tx.QueryRow(ctx, fmt.Sprintf(
 			"SELECT %s FROM location_node WHERE id = $1 AND organization_id = $2",
 			nodeSelectColumns), id, orgID))
@@ -120,7 +106,7 @@ func (r *PGRepository) Create(ctx context.Context, node *Node) error {
 	if !NodeTypes[node.NodeType] {
 		return fmt.Errorf("invalid node_type %q", node.NodeType)
 	}
-	return r.withTenant(ctx, node.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, node.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if node.Attributes == nil {
 			node.Attributes = map[string]any{}
 		}
@@ -141,7 +127,7 @@ func (r *PGRepository) Create(ctx context.Context, node *Node) error {
 // Update modifies a node; reparenting is cycle-guarded.
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Node, error) {
 	var out *Node
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if req.ParentID != nil && *req.ParentID != "" {
 			// Cycle guard: the new parent must not sit below the node.
 			var cycle bool
@@ -217,7 +203,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 
 // Delete removes a node without children.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var children bool
 		if err := tx.QueryRow(ctx,
 			"SELECT EXISTS (SELECT 1 FROM location_node WHERE parent_id = $1)", id).Scan(&children); err != nil {

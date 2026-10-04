@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -35,36 +35,39 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// withTenant executes fn within a transaction that has app.org_id set for RLS.
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
+// Discovery jobs, review items and suppressions carry no client column yet
+// (WP-025). They are visible only when the objects they reference are visible
+// under the transaction's tenant scope, whose policies filter the subqueries:
+// a job through its collector, a review item through all its candidate CIs, a
+// suppression through both CIs.
+const (
+	jobVisible    = "(discovery_job.collector_id IS NULL OR EXISTS (SELECT 1 FROM collector WHERE collector.id = discovery_job.collector_id))"
+	reviewVisible = `NOT EXISTS (
+		SELECT 1 FROM unnest(review_item.candidate_ci_ids) AS candidate(id)
+		WHERE NOT EXISTS (SELECT 1 FROM ci WHERE ci.id = candidate.id))`
+	suppressionVisible = `EXISTS (SELECT 1 FROM ci WHERE ci.id = relationship_suppression.source_ci_id)
+	AND EXISTS (SELECT 1 FROM ci WHERE ci.id = relationship_suppression.target_ci_id)`
+)
 
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
+// requireVisible fails with "not found" when the written row of table does not
+// satisfy visible, i.e. when it references an object outside the tenant
+// scope; the transaction is then rolled back.
+func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
+	var ok bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
+		return fmt.Errorf("check %s visibility: %w", table, err)
 	}
-
-	if scope := tenant.ClientScope(ctx); scope != "" {
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.client_scope', $1, true)", scope); err != nil {
-			return fmt.Errorf("set client scope: %w", err)
-		}
+	if !ok {
+		return fmt.Errorf("not found")
 	}
-
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
+	return nil
 }
 
 func (r *PGRepository) ListCollectors(ctx context.Context, orgID string, page api.PaginationParams) ([]Collector, int, error) {
 	items := make([]Collector, 0)
 	var total int
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM collector WHERE organization_id = $1", orgID).Scan(&total); err != nil {
 			return fmt.Errorf("count collectors: %w", err)
 		}
@@ -96,7 +99,7 @@ func (r *PGRepository) ListCollectors(ctx context.Context, orgID string, page ap
 }
 
 func (r *PGRepository) RegisterCollector(ctx context.Context, c *Collector) error {
-	return r.withTenant(ctx, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if c.Config == nil {
 			c.Config = make(map[string]any)
 		}
@@ -141,7 +144,7 @@ func (r *PGRepository) RegisterCollector(ctx context.Context, c *Collector) erro
 }
 
 func (r *PGRepository) Heartbeat(ctx context.Context, orgID, collectorID string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx,
 			"UPDATE collector SET status = 'online', last_heartbeat = NOW(), updated_at = NOW() WHERE id = $1 AND organization_id = $2",
 			collectorID,
@@ -217,8 +220,8 @@ func (r *PGRepository) ListJobs(ctx context.Context, orgID string, filter JobFil
 	items := make([]Job, 0)
 	var total int
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := "organization_id = $1"
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		where := "organization_id = $1 AND " + jobVisible
 		args := []any{orgID}
 		if filter.Status != "" {
 			args = append(args, filter.Status)
@@ -258,7 +261,7 @@ func (r *PGRepository) ListJobs(ctx context.Context, orgID string, filter JobFil
 }
 
 func (r *PGRepository) CreateJob(ctx context.Context, j *Job) error {
-	return r.withTenant(ctx, j.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, j.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if j.Config == nil {
 			j.Config = map[string]any{}
 		}
@@ -282,14 +285,14 @@ func (r *PGRepository) CreateJob(ctx context.Context, j *Job) error {
 			return fmt.Errorf("create discovery job: %w", err)
 		}
 		j.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
-		return nil
+		return requireVisible(ctx, tx, "discovery_job", jobVisible, j.ID)
 	})
 }
 
 func (r *PGRepository) GetJob(ctx context.Context, orgID, id string) (*Job, error) {
 	var job *Job
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf("SELECT %s FROM discovery_job WHERE id = $1 AND organization_id = $2", jobSelectColumns)
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		query := fmt.Sprintf("SELECT %s FROM discovery_job WHERE id = $1 AND organization_id = $2 AND %s", jobSelectColumns, jobVisible)
 		row := tx.QueryRow(ctx, query, id, orgID)
 		scanned, err := scanJob(row)
 		if err != nil {
@@ -356,8 +359,8 @@ func (r *PGRepository) ListReviewItems(ctx context.Context, orgID string, filter
 	items := make([]ReviewItem, 0)
 	var total int
 
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := "organization_id = $1"
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		where := "organization_id = $1 AND " + reviewVisible
 		args := []any{orgID}
 		if filter.Status != "" {
 			args = append(args, filter.Status)
@@ -397,7 +400,7 @@ func (r *PGRepository) ListReviewItems(ctx context.Context, orgID string, filter
 }
 
 func (r *PGRepository) CreateReviewItem(ctx context.Context, item *ReviewItem) error {
-	return r.withTenant(ctx, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if item.Payload == nil {
 			item.Payload = map[string]any{}
 		}
@@ -427,14 +430,14 @@ func (r *PGRepository) CreateReviewItem(ctx context.Context, item *ReviewItem) e
 		}
 		item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
-		return nil
+		return requireVisible(ctx, tx, "review_item", reviewVisible, item.ID)
 	})
 }
 
 func (r *PGRepository) GetReviewItem(ctx context.Context, orgID, id string) (*ReviewItem, error) {
 	var item *ReviewItem
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf("SELECT %s FROM review_item WHERE id = $1 AND organization_id = $2", reviewSelectColumns)
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		query := fmt.Sprintf("SELECT %s FROM review_item WHERE id = $1 AND organization_id = $2 AND %s", reviewSelectColumns, reviewVisible)
 		row := tx.QueryRow(ctx, query, id, orgID)
 		scanned, err := scanReviewItem(row)
 		if err != nil {
@@ -451,7 +454,7 @@ func (r *PGRepository) GetReviewItem(ctx context.Context, orgID, id string) (*Re
 
 func (r *PGRepository) ResolveReviewItem(ctx context.Context, orgID, id string, resolution Resolution) (*ReviewItem, error) {
 	var item *ReviewItem
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf(`
 			UPDATE review_item
 			SET status = $3,
@@ -459,9 +462,9 @@ func (r *PGRepository) ResolveReviewItem(ctx context.Context, orgID, id string, 
 			    resolved_by = NULLIF($5, '')::uuid,
 			    resolved_at = now(),
 			    updated_at = now()
-			WHERE id = $1 AND organization_id = $2
+			WHERE id = $1 AND organization_id = $2 AND %s
 			RETURNING %s
-		`, reviewSelectColumns)
+		`, reviewVisible, reviewSelectColumns)
 		row := tx.QueryRow(ctx, query, id, orgID, resolution.Status, resolution.Note, resolution.ResolvedBy)
 		scanned, err := scanReviewItem(row)
 		if err != nil {
@@ -515,9 +518,9 @@ func scanReviewItem(scanner collectorScanner) (*ReviewItem, error) {
 // organization, used to skip discovery-derived topology edges.
 func (r *PGRepository) SuppressedPairs(ctx context.Context, orgID string) (map[string]bool, error) {
 	pairs := make(map[string]bool)
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
-			"SELECT source_ci_id::text, target_ci_id::text FROM relationship_suppression WHERE organization_id = $1",
+			"SELECT source_ci_id::text, target_ci_id::text FROM relationship_suppression WHERE organization_id = $1 AND "+suppressionVisible,
 			orgID,
 		)
 		if err != nil {
@@ -545,7 +548,7 @@ func (r *PGRepository) SuppressedPairs(ctx context.Context, orgID string) (map[s
 // types are scoped to the requesting tenant by both the query and RLS.
 func (r *PGRepository) LookupCITypeID(ctx context.Context, orgID, nameOrID string) (string, error) {
 	var id string
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
 			SELECT id::text FROM ci_type
 			WHERE (key = $1 OR name = $1)
@@ -562,7 +565,7 @@ func (r *PGRepository) LookupCITypeID(ctx context.Context, orgID, nameOrID strin
 
 // CreateEnrollmentCode stores the hash of a new enrollment code.
 func (r *PGRepository) CreateEnrollmentCode(ctx context.Context, code *EnrollmentCode) error {
-	return r.withTenant(ctx, code.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, code.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
 			INSERT INTO collector_enrollment_code (organization_id, code_hash, label, expires_at)
 			VALUES ($1, $2, $3, $4)
@@ -572,50 +575,53 @@ func (r *PGRepository) CreateEnrollmentCode(ctx context.Context, code *Enrollmen
 	})
 }
 
-// RedeemEnrollmentCode atomically validates and consumes a code. Codes are
-// looked up by hash outside the tenant context (the collector is not yet
-// enrolled and has no tenant), then the org scope is enforced on the update.
+// RedeemEnrollmentCode validates and consumes a code. The collector is not
+// enrolled yet and has no tenant, so the code is looked up by its hash with
+// the read-only system flag (the hash is the credential); the code is then
+// consumed in its organization's tenant transaction. The consuming UPDATE
+// re-checks that the code is unused, so concurrent redemptions of one code
+// succeed at most once (WP-022).
 func (r *PGRepository) RedeemEnrollmentCode(ctx context.Context, rawCode, collectorID string) (string, error) {
 	hash := enrollmentCodeHash(rawCode)
-	// The code hash is globally unique, so the org lookup and the consume
-	// update run in a single statement. RLS is bypassed for this deliberately
-	// unauthenticated path by using the code_hash (the credential) as the
-	// lookup key; the org scope is enforced by the UPDATE's tenant context.
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return "", fmt.Errorf("begin redeem tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
 	var orgID string
-	// The code hash is the credential; the lookup runs under the dedicated
-	// app.system flag because there is no tenant context before enrollment.
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.system', 'on', true)"); err != nil {
-		return "", fmt.Errorf("set system context: %w", err)
-	}
-	err = tx.QueryRow(ctx, `
-		SELECT organization_id::text FROM collector_enrollment_code
-		WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
-	`, hash).Scan(&orgID)
-	if err == pgx.ErrNoRows {
-		return "", fmt.Errorf("enrollment code invalid, expired or already used")
-	}
+	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		lookupErr := tx.QueryRow(ctx, `
+			SELECT organization_id::text FROM collector_enrollment_code
+			WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
+		`, hash).Scan(&orgID)
+		if lookupErr == pgx.ErrNoRows {
+			return errEnrollmentCodeInvalid
+		}
+		if lookupErr != nil {
+			return fmt.Errorf("lookup enrollment code: %w", lookupErr)
+		}
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("lookup enrollment code: %w", err)
+		return "", err
 	}
 
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return "", fmt.Errorf("set tenant context: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE collector_enrollment_code
-		SET used_at = now(), used_by_collector_id = NULLIF($2, '')::uuid
-		WHERE code_hash = $1 AND used_at IS NULL
-	`, hash, collectorID); err != nil {
-		return "", fmt.Errorf("consume enrollment code: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return "", fmt.Errorf("commit redeem: %w", err)
+	scope := database.OrgWideScope(orgID, "")
+	err = database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		tag, execErr := tx.Exec(ctx, `
+			UPDATE collector_enrollment_code
+			SET used_at = now(), used_by_collector_id = NULLIF($2, '')::uuid
+			WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
+		`, hash, collectorID)
+		if execErr != nil {
+			return fmt.Errorf("consume enrollment code: %w", execErr)
+		}
+		if tag.RowsAffected() == 0 {
+			return errEnrollmentCodeInvalid
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
 	}
 	return orgID, nil
 }
+
+// errEnrollmentCodeInvalid is returned for unknown, expired and used codes
+// alike, so a caller learns nothing about which case applies.
+var errEnrollmentCodeInvalid = fmt.Errorf("enrollment code invalid, expired or already used")

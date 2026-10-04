@@ -56,7 +56,7 @@ func (h *Handler) ListForCI(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.repo.ListForCI(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
@@ -89,6 +89,13 @@ func (h *Handler) SetOverride(w http.ResponseWriter, r *http.Request) {
 	fv, err := h.repo.SetOverride(r.Context(), t.OrganizationID, chi.URLParam(r, "id"),
 		chi.URLParam(r, "name"), req.Value, author, req.Reason, protected)
 	if err != nil {
+		if err.Error() == "not found" {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
+			return
+		}
+		if api.WriteDBError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
@@ -123,7 +130,7 @@ func (h *Handler) Conflicts(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.Conflicts(r.Context(), t.OrganizationID, page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[FieldValue]{
@@ -141,7 +148,7 @@ func (h *Handler) GetPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	policy, err := h.repo.Policy(r.Context(), t.OrganizationID)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, policy)

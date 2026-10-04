@@ -41,7 +41,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	page := api.ParsePagination(r)
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, entityType, chi.URLParam(r, "id"), page)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Change]{
@@ -81,7 +81,7 @@ func (h *Handler) state(w http.ResponseWriter, r *http.Request, entityType strin
 	entityID := chi.URLParam(r, "id")
 	trail, err := h.repo.TrailUpTo(r.Context(), t.OrganizationID, entityType, entityID, at)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	snapshot := Replay(trail)

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -24,21 +25,6 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(context.Context, pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 func scanOrder(s pgx.Row) (*Order, error) {
 	o := &Order{}
 	if err := s.Scan(&o.ID, &o.OrganizationID, &o.ClientID, &o.OrderNumber, &o.Title, &o.Status, &o.RequestedBy, &o.ApprovedBy, &o.Supplier, &o.TotalCost, &o.Currency, &o.Notes, &o.CreatedAt, &o.UpdatedAt); err != nil {
@@ -55,8 +41,30 @@ func scanItem(s pgx.Row) (*Item, error) {
 	return it, nil
 }
 
+// itemVisible restricts order items to those whose order, consumable and
+// asset are visible under the transaction's tenant scope: their policies
+// filter the subqueries, while internal_order_item carries no client column
+// yet (WP-025).
+const itemVisible = `EXISTS (SELECT 1 FROM internal_order WHERE internal_order.id = internal_order_item.order_id)
+	AND (internal_order_item.consumable_id IS NULL OR EXISTS (SELECT 1 FROM consumable WHERE consumable.id = internal_order_item.consumable_id))
+	AND (internal_order_item.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = internal_order_item.asset_id))`
+
+// requireVisible fails with "not found" when the written row of table does not
+// satisfy visible, i.e. when a write pointed it at an object outside the
+// tenant scope; the transaction is then rolled back.
+func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
+	var ok bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
+		return fmt.Errorf("check %s visibility: %w", table, err)
+	}
+	if !ok {
+		return fmt.Errorf("not found")
+	}
+	return nil
+}
+
 func (r *PGRepository) listItemsTx(ctx context.Context, tx pgx.Tx, orgID, orderID string) ([]Item, error) {
-	rows, err := tx.Query(ctx, "SELECT "+itemCols+" FROM internal_order_item WHERE organization_id = $1 AND order_id = $2 ORDER BY created_at ASC", orgID, orderID)
+	rows, err := tx.Query(ctx, "SELECT "+itemCols+" FROM internal_order_item WHERE "+itemVisible+" AND organization_id = $1 AND order_id = $2 ORDER BY created_at ASC", orgID, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +83,7 @@ func (r *PGRepository) listItemsTx(ctx context.Context, tx pgx.Tx, orgID, orderI
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Order, int, error) {
 	out := []Order{}
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id = $1"}
 		args := []any{orgID}
 		pos := 2
@@ -130,7 +138,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Order, error) {
 	var o *Order
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		o, err = scanOrder(tx.QueryRow(ctx, "SELECT "+orderCols+" FROM internal_order WHERE organization_id = $1 AND id = $2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -146,7 +154,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Order, e
 }
 
 func (r *PGRepository) Create(ctx context.Context, o *Order) error {
-	return r.withTenant(ctx, o.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, o.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if o.Status == "" {
 			o.Status = "draft"
 		}
@@ -166,7 +174,7 @@ func (r *PGRepository) Create(ctx context.Context, o *Order) error {
 
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateOrderRequest) (*Order, error) {
 	var o *Order
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -213,7 +221,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateO
 }
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "DELETE FROM internal_order WHERE organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
 			return err
@@ -227,7 +235,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 
 func (r *PGRepository) SetStatus(ctx context.Context, orgID, id, status, actorID string) (*Order, error) {
 	var o *Order
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		approvedBy := any(nil)
 		if status == "approved" || status == "rejected" {
@@ -248,13 +256,16 @@ func (r *PGRepository) SetStatus(ctx context.Context, orgID, id, status, actorID
 
 func (r *PGRepository) AddItem(ctx context.Context, item *Item) (*Order, error) {
 	var o *Order
-	err := r.withTenant(ctx, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO internal_order_item (organization_id, order_id, description, quantity, unit_price, consumable_id, asset_id)
 			VALUES ($1, $2, $3, $4, $5, NULLIF($6,'')::uuid, NULLIF($7,'')::uuid)
 			RETURNING id::text, created_at
 		`, item.OrganizationID, item.OrderID, item.Description, item.Quantity, item.UnitPrice, item.ConsumableID, item.AssetID).
 			Scan(&item.ID, &item.CreatedAt); err != nil {
+			return err
+		}
+		if err := requireVisible(ctx, tx, "internal_order_item", itemVisible, item.ID); err != nil {
 			return err
 		}
 		var err error
@@ -273,7 +284,7 @@ func (r *PGRepository) AddItem(ctx context.Context, item *Item) (*Order, error) 
 
 func (r *PGRepository) ListItems(ctx context.Context, orgID, orderID string) ([]Item, error) {
 	var out []Item
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		out, err = r.listItemsTx(ctx, tx, orgID, orderID)
 		return err

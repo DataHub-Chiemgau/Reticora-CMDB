@@ -43,7 +43,19 @@ const (
 	// RuleReadOnlyCatalog: tables of GlobalCatalogTables grant reticora_app
 	// no INSERT, UPDATE or DELETE.
 	RuleReadOnlyCatalog Rule = "read-only-catalog"
+	// RuleViewBarrier: tables of ViewProtectedTables grant reticora_app no
+	// privilege at all; their view is a security barrier with the
+	// organization predicate and grants reticora_app SELECT and INSERT only.
+	RuleViewBarrier Rule = "view-barrier"
 )
+
+// ViewProtectedTables maps tables that cannot carry row level security to
+// the security-barrier view the application must use instead. TimescaleDB
+// refuses RLS on hypertables with compression and continuous aggregates
+// (docs/decisions/0001-timescale-rls.md, WP-040). This is a documented
+// exception to the RLS rules, not a gap: the catalog test checks
+// RuleViewBarrier for these tables instead.
+var ViewProtectedTables = map[string]string{"metric_sample": "metric_sample_v"}
 
 // GlobalCatalogTables are global catalogs without organization_id (E-10,
 // WP-024). They are maintained by migrations only; the application role may
@@ -84,25 +96,4 @@ const KnownGapsBaselineMigration = 57
 // tables, documents, tickets, desks) have no own scope column yet, so no rule
 // applies to them; WP-025, WP-028 and WP-029 add the columns together with the
 // policies, after which client-scope and site-scope cover them automatically.
-var KnownGaps = []Gap{
-	// System policies (app.system) are writable instead of SELECT-only.
-	{"alert_rule", RuleSystemWrite, "WP-022"},
-	{"collector_enrollment_code", RuleSystemWrite, "WP-022"},
-	{"export_job", RuleSystemWrite, "WP-022"},
-	{"webhook_dead_letter", RuleSystemWrite, "WP-022"},
-	{"webhook_delivery", RuleSystemWrite, "WP-022"},
-
-	// Tables with site_id without site scope.
-	{"building", RuleSiteScope, "WP-027"},
-	{"ci", RuleSiteScope, "WP-027"},
-	{"location_node", RuleSiteScope, "WP-027"},
-	{"subnet", RuleSiteScope, "WP-027"},
-
-	// Tables with team_id without team scope.
-	{"ticket", RuleTeamScope, "WP-029"},
-
-	// Hypertable without row level security (TEC-06 spike WP-039 first).
-	{"metric_sample", RuleRLSEnabled, "WP-040"},
-	{"metric_sample", RuleRLSForced, "WP-040"},
-	{"metric_sample", RuleCommands, "WP-040"},
-}
+var KnownGaps = []Gap{}

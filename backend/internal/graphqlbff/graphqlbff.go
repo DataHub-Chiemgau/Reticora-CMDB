@@ -13,6 +13,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -21,26 +22,45 @@ import (
 // QueryResolver resolves a top-level GraphQL query field.
 type QueryResolver func(ctx context.Context, args map[string]any) (any, error)
 
+// Field is a registered top-level query field. Permission is the read
+// permission the caller must hold ("" for fields about the caller itself);
+// Feature is the entitlement the organization needs ("" for the core).
+type Field struct {
+	Resolve    QueryResolver
+	Permission identity.Permission
+	Feature    string
+}
+
 // Schema holds registered top-level query resolvers.
 type Schema struct {
-	queries map[string]QueryResolver
+	queries map[string]Field
 }
 
 // NewSchema creates an empty schema.
 func NewSchema() *Schema {
-	return &Schema{queries: make(map[string]QueryResolver)}
+	return &Schema{queries: make(map[string]Field)}
 }
 
-// RegisterQuery registers a top-level query resolver.
-func (s *Schema) RegisterQuery(name string, resolver QueryResolver) {
-	s.queries[name] = resolver
+// RegisterQuery registers a top-level query resolver with its read
+// permission and entitlement (GQL-04).
+func (s *Schema) RegisterQuery(name string, field Field) {
+	s.queries[name] = field
 }
 
-// Handler serves the GraphQL BFF endpoint.
+// EntitlementChecker reports whether an organization may use a feature.
+type EntitlementChecker interface {
+	IsEnabled(ctx context.Context, orgID, featureKey string) bool
+}
+
+// Handler serves the GraphQL BFF endpoint. The route itself only requires an
+// authenticated principal; every resolver checks its own read permission and
+// entitlement and reads through the tenant-scoped repositories (RLS with the
+// principal's client, site and team scope).
 type Handler struct {
-	ciRepo  ci.Repository
-	relRepo relationship.Repository
-	schema  *Schema
+	ciRepo       ci.Repository
+	relRepo      relationship.Repository
+	schema       *Schema
+	entitlements EntitlementChecker
 }
 
 // User represents the current authenticated user in GraphQL responses.
@@ -86,10 +106,18 @@ type graphQLError struct {
 }
 
 type parsedOperation struct {
-	Type  string
-	Name  string
-	Field string
-	Args  map[string]any
+	Type      string
+	Name      string
+	Field     string
+	Args      map[string]any
+	Selection []selection
+}
+
+// selection is one requested field; Children is its nested selection set.
+type selection struct {
+	Name     string
+	Alias    string
+	Children []selection
 }
 
 var defaultHandler *Handler
@@ -103,6 +131,13 @@ func NewHandler(ciRepo ci.Repository, relRepo relationship.Repository) *Handler 
 	}
 	h.registerQueries()
 	defaultHandler = h
+	return h
+}
+
+// WithEntitlements attaches the entitlement check of feature-gated fields.
+// Without a checker, gated fields are refused.
+func (h *Handler) WithEntitlements(entitlements EntitlementChecker) *Handler {
+	h.entitlements = entitlements
 	return h
 }
 
@@ -144,10 +179,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) registerQueries() {
-	h.schema.RegisterQuery("cis", h.resolveCIs)
-	h.schema.RegisterQuery("ci", h.resolveCI)
-	h.schema.RegisterQuery("relationships", h.resolveRelationships)
-	h.schema.RegisterQuery("currentUser", h.resolveCurrentUser)
+	h.schema.RegisterQuery("cis", Field{Resolve: h.resolveCIs, Permission: identity.PermCIRead})
+	h.schema.RegisterQuery("ci", Field{Resolve: h.resolveCI, Permission: identity.PermCIRead})
+	h.schema.RegisterQuery("relationships", Field{Resolve: h.resolveRelationships, Permission: identity.PermRelationshipRead})
+	h.schema.RegisterQuery("currentUser", Field{Resolve: h.resolveCurrentUser})
 }
 
 func (h *Handler) execute(ctx context.Context, req graphQLRequest) (graphQLResponse, int) {
@@ -155,13 +190,22 @@ func (h *Handler) execute(ctx context.Context, req graphQLRequest) (graphQLRespo
 	if err != nil {
 		return graphQLResponse{Errors: []graphQLError{{Message: err.Error()}}}, http.StatusBadRequest
 	}
+	if op.Type != "query" {
+		return graphQLResponse{Errors: []graphQLError{{Message: fmt.Sprintf("%s operations are not supported", op.Type)}}}, http.StatusBadRequest
+	}
 
-	resolver, ok := h.schema.queries[op.Field]
+	field, ok := h.schema.queries[op.Field]
 	if !ok {
 		return graphQLResponse{Errors: []graphQLError{{Message: fmt.Sprintf("unsupported query field %q", op.Field)}}}, http.StatusBadRequest
 	}
+	if len(op.Selection) == 0 {
+		return graphQLResponse{Errors: []graphQLError{{Message: fmt.Sprintf("field %q requires a selection set", op.Field)}}}, http.StatusBadRequest
+	}
+	if status, authErr := h.authorize(ctx, &field); authErr != nil {
+		return graphQLResponse{Data: map[string]any{op.Field: nil}, Errors: []graphQLError{{Message: authErr.Error()}}}, status
+	}
 
-	result, err := resolver(ctx, op.Args)
+	result, err := field.Resolve(ctx, op.Args)
 	if err != nil {
 		return graphQLResponse{
 			Data:   map[string]any{op.Field: nil},
@@ -169,7 +213,74 @@ func (h *Handler) execute(ctx context.Context, req graphQLRequest) (graphQLRespo
 		}, http.StatusOK
 	}
 
-	return graphQLResponse{Data: map[string]any{op.Field: result}}, http.StatusOK
+	projected, err := project(result, op.Selection)
+	if err != nil {
+		return graphQLResponse{Data: map[string]any{op.Field: nil}, Errors: []graphQLError{{Message: err.Error()}}}, http.StatusOK
+	}
+	return graphQLResponse{Data: map[string]any{op.Field: projected}}, http.StatusOK
+}
+
+// authorize checks the field's read permission against the authenticated
+// principal and the organization's entitlement. It fails closed.
+func (h *Handler) authorize(ctx context.Context, field *Field) (int, error) {
+	principal, ok := identity.PrincipalFromContext(ctx)
+	if !ok {
+		return http.StatusUnauthorized, fmt.Errorf("missing authenticated principal")
+	}
+	if field.Permission != "" && !principal.Has(field.Permission) {
+		return http.StatusForbidden, fmt.Errorf("missing required permission: %s", field.Permission)
+	}
+	if field.Feature != "" {
+		orgID := tenant.FromContext(ctx).OrganizationID
+		if h.entitlements == nil || orgID == "" || !h.entitlements.IsEnabled(ctx, orgID, field.Feature) {
+			return http.StatusForbidden, fmt.Errorf("feature %q is not included in the plan", field.Feature)
+		}
+	}
+	return 0, nil
+}
+
+// project returns only the selected fields of result (GQL-04): the result is
+// converted to its JSON form and every object is reduced to the requested
+// keys, recursively; lists are projected element by element. Unknown fields
+// are omitted.
+func project(result any, sel []selection) (any, error) {
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("encode result: %w", err)
+	}
+	var generic any
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return nil, fmt.Errorf("decode result: %w", err)
+	}
+	return projectValue(generic, sel), nil
+}
+
+func projectValue(value any, sel []selection) any {
+	if len(sel) == 0 {
+		return value
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(sel))
+		for _, s := range sel {
+			key := s.Name
+			if s.Alias != "" {
+				key = s.Alias
+			}
+			if field, ok := v[s.Name]; ok {
+				out[key] = projectValue(field, s.Children)
+			}
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = projectValue(item, sel)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 func (h *Handler) resolveCIs(ctx context.Context, args map[string]any) (any, error) {
@@ -368,7 +479,67 @@ func parseOperation(query string, variables map[string]any) (*parsedOperation, e
 	}
 	op.Args = args
 
+	p.skipIgnored()
+	if p.peek() == '{' {
+		sel, err := p.parseSelectionSet()
+		if err != nil {
+			return nil, err
+		}
+		op.Selection = sel
+	}
+
 	return op, nil
+}
+
+// parseSelectionSet reads "{ a b: c d(arg: 1) { e } }". Arguments of nested
+// fields are skipped; fragments are not supported.
+func (p *parser) parseSelectionSet() ([]selection, error) {
+	if p.peek() != '{' {
+		return nil, fmt.Errorf("expected selection set")
+	}
+	p.pos++
+	var out []selection
+	for {
+		p.skipIgnored()
+		switch p.peek() {
+		case '}':
+			p.pos++
+			return out, nil
+		case 0:
+			return nil, fmt.Errorf("unterminated selection set")
+		case '.':
+			return nil, fmt.Errorf("fragments are not supported")
+		}
+		name := p.readName()
+		if name == "" {
+			return nil, fmt.Errorf("invalid selection near position %d", p.pos)
+		}
+		s := selection{Name: name}
+		p.skipIgnored()
+		if p.peek() == ':' {
+			p.pos++
+			p.skipIgnored()
+			s.Alias = name
+			if s.Name = p.readName(); s.Name == "" {
+				return nil, fmt.Errorf("invalid aliased selection %q", name)
+			}
+			p.skipIgnored()
+		}
+		if p.peek() == '(' {
+			if err := p.skipBalanced('(', ')'); err != nil {
+				return nil, err
+			}
+			p.skipIgnored()
+		}
+		if p.peek() == '{' {
+			children, err := p.parseSelectionSet()
+			if err != nil {
+				return nil, err
+			}
+			s.Children = children
+		}
+		out = append(out, s)
+	}
 }
 
 type parser struct {

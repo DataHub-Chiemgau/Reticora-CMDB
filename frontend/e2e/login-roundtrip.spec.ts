@@ -117,11 +117,20 @@ test.describe('login roundtrip (mocked IdP)', () => {
       }),
     );
 
-    // Seed a transaction by starting the flow, but block the redirect. The
-    // aborted navigation attempt throws in page.goto below unless we catch it.
-    await page.route('**/idp.example.com/**', (route) => route.abort());
+    // Seed a transaction by starting the flow. The mocked IdP answers with
+    // an empty page instead of redirecting back, and the test waits until
+    // that navigation has committed: an aborted IdP request would end in an
+    // error page navigation that races with (and interrupts) page.goto below.
+    await page.route('**/idp.example.com/**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: '<!doctype html><title>IdP</title>',
+      }),
+    );
     await page.goto('/login');
     await page.getByRole('button', { name: /sign in|log in|anmelden/i }).click();
+    await page.waitForURL(/idp\.example\.com/);
 
     // Now hit the callback with a foreign state — the app must refuse it
     // before calling the backend.
@@ -131,9 +140,7 @@ test.describe('login roundtrip (mocked IdP)', () => {
       return route.fulfill({ status: 400, body: '{"detail":"bad state"}' });
     });
 
-    // Remove the IdP abort so the SPA navigation to /auth/callback is not
-    // blocked (the callback is a same-origin route, but the aborted IdP route
-    // pattern also matches nothing here — unroute is just defensive hygiene).
+    // The IdP mock is no longer needed (defensive hygiene).
     await page.unroute('**/idp.example.com/**');
     await page.goto('/auth/callback?code=attacker-code&state=wrong-state');
     await expect(page.getByText(/invalid authentication state/i)).toBeVisible();

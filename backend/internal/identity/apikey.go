@@ -25,8 +25,8 @@ type APIKeyStore interface {
 	LookupByPrefix(ctx context.Context, prefix string) (*StoredAPIKey, error)
 	// Save persists a new API key record.
 	Save(ctx context.Context, key StoredAPIKey) error
-	// MarkUsed updates the last_used_at timestamp.
-	MarkUsed(ctx context.Context, id string) error
+	// MarkUsed updates the last_used_at timestamp of a key of orgID.
+	MarkUsed(ctx context.Context, orgID, id string) error
 }
 
 // StoredAPIKey represents a persisted API key record.
@@ -144,7 +144,7 @@ func (s *APIKeyService) Validate(ctx context.Context, rawKey string) (*APIKeyInf
 	}
 
 	// Update last used timestamp (best effort)
-	_ = s.store.MarkUsed(ctx, stored.ID)
+	_ = s.store.MarkUsed(ctx, stored.OrganizationID, stored.ID)
 
 	return &APIKeyInfo{
 		ID:             stored.KeyPrefix,

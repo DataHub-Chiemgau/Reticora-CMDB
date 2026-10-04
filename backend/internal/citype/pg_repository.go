@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -49,27 +50,12 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 // List returns CI types visible to the tenant: its own types plus the global
 // system types (organization_id NULL, exposed by the RLS policy).
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Type, int, error) {
 	var out []Type
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"true"}
 		args := []any{}
 		pos := 1
@@ -113,7 +99,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 // GetByID returns one type including its field definitions.
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Type, error) {
 	var out *Type
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		t, err := scanType(tx.QueryRow(ctx,
 			fmt.Sprintf("SELECT %s FROM ci_type WHERE id = $1", typeSelectColumns), id))
 		if err != nil {
@@ -135,7 +121,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Type, er
 
 // Create inserts a new type with its field definitions.
 func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
-	return r.withTenant(ctx, typ.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, typ.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if typ.Key == "" {
 			typ.Key = slugify(typ.Name)
 		}
@@ -175,7 +161,7 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 // Update applies the mutable metadata of a type in place.
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateTypeRequest) (*Type, error) {
 	var out *Type
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{id}
 		pos := 2
@@ -255,7 +241,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 // Clone copies a type row plus its field definitions under a new key/name.
 func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneRequest) (*Type, error) {
 	var out *Type
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		src, err := scanType(tx.QueryRow(ctx,
 			fmt.Sprintf("SELECT %s FROM ci_type WHERE id = $1", typeSelectColumns), id))
 		if err != nil {
@@ -316,7 +302,7 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 // SetActive toggles the active flag of a tenant-owned type.
 func (r *PGRepository) SetActive(ctx context.Context, orgID, id string, active bool) (*Type, error) {
 	var out *Type
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		t, err := scanType(tx.QueryRow(ctx, fmt.Sprintf(
 			"UPDATE ci_type SET is_active = $2 WHERE id = $1 AND organization_id IS NOT NULL RETURNING %s",
 			typeSelectColumns), id, active))
@@ -335,7 +321,7 @@ func (r *PGRepository) SetActive(ctx context.Context, orgID, id string, active b
 // Versions returns the lineage of a type: the root plus every clone.
 func (r *PGRepository) Versions(ctx context.Context, orgID, id string) ([]Type, error) {
 	var out []Type
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		root, err := scanType(tx.QueryRow(ctx,
 			fmt.Sprintf("SELECT %s FROM ci_type WHERE id = $1", typeSelectColumns), id))
 		if err != nil {
@@ -370,7 +356,7 @@ func (r *PGRepository) Versions(ctx context.Context, orgID, id string) ([]Type, 
 // ListFields returns the type-scope field definitions of a type.
 func (r *PGRepository) ListFields(ctx context.Context, orgID, typeID string) ([]Field, error) {
 	var out []Field
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		flds, err := listFieldsTx(ctx, tx, typeID)
 		if err != nil {
 			return err
@@ -385,7 +371,7 @@ func (r *PGRepository) ListFields(ctx context.Context, orgID, typeID string) ([]
 // Global definitions are stored on a per-organization synthetic carrier type.
 func (r *PGRepository) ListGlobalFields(ctx context.Context, orgID string) ([]Field, error) {
 	var out []Field
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		carrier, err := ensureGlobalCarrierTx(ctx, tx, orgID)
 		if err != nil {
 			return err
@@ -434,7 +420,7 @@ func (r *PGRepository) UpsertField(ctx context.Context, orgID, typeID string, re
 		scope = "type"
 	}
 	var out *Field
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		targetType := typeID
 		if scope == "global" {
 			carrier, err := ensureGlobalCarrierTx(ctx, tx, orgID)
@@ -513,7 +499,7 @@ func upsertFieldTx(ctx context.Context, tx pgx.Tx, typeID string, req UpsertFiel
 
 // DeleteField removes a field definition by name (type or global scope).
 func (r *PGRepository) DeleteField(ctx context.Context, orgID, typeID, name string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx,
 			"DELETE FROM ci_type_attribute WHERE ci_type_id = $1 AND name = $2", typeID, name)
 		if err != nil {
@@ -627,12 +613,18 @@ const instanceFieldSelectColumns = `
 	created_at, updated_at
 `
 
+// visibleCI restricts instance field rows to CIs visible under the
+// transaction's tenant scope: the ci policy filters the subquery by client
+// scope, while ci_instance_field_definition carries no client column yet
+// (WP-025).
+const visibleCI = "EXISTS (SELECT 1 FROM ci WHERE ci.id = ci_instance_field_definition.ci_id)"
+
 // ListInstanceFields returns the field definitions of a single CI instance.
 func (r *PGRepository) ListInstanceFields(ctx context.Context, orgID, ciID string) ([]InstanceField, error) {
 	var out []InstanceField
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM ci_instance_field_definition WHERE ci_id = $1 AND organization_id = $2 ORDER BY sort_order ASC, name ASC",
+			"SELECT %s FROM ci_instance_field_definition WHERE ci_id = $1 AND organization_id = $2 AND "+visibleCI+" ORDER BY sort_order ASC, name ASC",
 			instanceFieldSelectColumns), ciID, orgID)
 		if err != nil {
 			return fmt.Errorf("list instance fields: %w", err)
@@ -672,13 +664,16 @@ func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID stri
 		conditional = req.Conditional
 	}
 	var out *InstanceField
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, fmt.Sprintf(`
 			INSERT INTO ci_instance_field_definition (
 				organization_id, ci_id, name, label, description, data_type,
 				required, default_value, enum_values, ui_group, sort_order,
 				validation, conditional, reference_target
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13,$14)
+			)
+			SELECT $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::text, $7::boolean,
+				$8::text, $9::jsonb, $10::text, $11::integer, $12::jsonb, $13::jsonb, $14::text
+			WHERE EXISTS (SELECT 1 FROM ci WHERE ci.id = $2)
 			ON CONFLICT (ci_id, name) DO UPDATE SET
 				label = EXCLUDED.label,
 				description = EXCLUDED.description,
@@ -717,9 +712,9 @@ func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID stri
 
 // DeleteInstanceField removes an instance field definition by name.
 func (r *PGRepository) DeleteInstanceField(ctx context.Context, orgID, ciID, name string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx,
-			"DELETE FROM ci_instance_field_definition WHERE ci_id = $1 AND name = $2", ciID, name)
+			"DELETE FROM ci_instance_field_definition WHERE ci_id = $1 AND name = $2 AND "+visibleCI, ciID, name)
 		if err != nil {
 			return fmt.Errorf("delete instance field: %w", err)
 		}

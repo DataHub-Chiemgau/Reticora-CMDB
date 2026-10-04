@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -20,27 +20,6 @@ type PGRepository struct {
 // NewPGRepository creates a new PostgreSQL-backed IPAM repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
-}
-
-func (r *PGRepository) withTenant(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-
-	if scope := tenant.ClientScope(ctx); scope != "" {
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.client_scope', $1, true)", scope); err != nil {
-			return fmt.Errorf("set client scope: %w", err)
-		}
-	}
-	if err := fn(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
 }
 
 type scanner interface {
@@ -71,10 +50,36 @@ func dnsServersArg(dns []string) any {
 	return dns
 }
 
+// IP addresses and interfaces carry no client column yet (WP-025). They are
+// visible only when the objects they hang off are visible under the
+// transaction's tenant scope, whose policies filter the subqueries: an
+// address through its subnet and its interface, an interface through its CI.
+const (
+	nicVisible = "EXISTS (SELECT 1 FROM ci WHERE ci.id = network_interface.ci_id)"
+	ipVisible  = `(ip_address.subnet_id IS NULL OR EXISTS (SELECT 1 FROM subnet WHERE subnet.id = ip_address.subnet_id))
+	AND (ip_address.interface_id IS NULL OR EXISTS (
+		SELECT 1 FROM network_interface JOIN ci ON ci.id = network_interface.ci_id
+		WHERE network_interface.id = ip_address.interface_id))`
+)
+
+// requireVisible fails with ErrNotFound when the written row of table does not
+// satisfy visible, i.e. when a write pointed it at an object outside the
+// tenant scope; the transaction is then rolled back.
+func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
+	var ok bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
+		return fmt.Errorf("check %s visibility: %w", table, err)
+	}
+	if !ok {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *PGRepository) ListSubnets(ctx context.Context, orgID string, f SubnetFilter, page api.PaginationParams) ([]Subnet, int, error) {
 	var out []Subnet
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := "organization_id = $1"
 		args := []any{orgID}
 		pos := 2
@@ -112,7 +117,7 @@ func (r *PGRepository) ListSubnets(ctx context.Context, orgID string, f SubnetFi
 
 func (r *PGRepository) GetSubnet(ctx context.Context, orgID, id string) (*Subnet, error) {
 	var sn *Subnet
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		sn, err = scanSubnet(tx.QueryRow(ctx, "SELECT "+subnetCols+" FROM subnet WHERE organization_id = $1 AND id = $2", orgID, id))
 		if err == pgx.ErrNoRows {
@@ -124,7 +129,7 @@ func (r *PGRepository) GetSubnet(ctx context.Context, orgID, id string) (*Subnet
 }
 
 func (r *PGRepository) CreateSubnet(ctx context.Context, s *Subnet) error {
-	return r.withTenant(ctx, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, r.pool, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
 			`INSERT INTO subnet (organization_id, client_id, site_id, cidr, name, vlan_id, gateway, dns_servers, description, is_management)
 			 VALUES ($1,$2,$3,$4::cidr,$5,$6,$7::inet,$8::inet[],$9,$10) RETURNING id::text, created_at, updated_at`,
@@ -136,7 +141,7 @@ func (r *PGRepository) CreateSubnet(ctx context.Context, s *Subnet) error {
 
 func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req UpdateSubnetRequest) (*Subnet, error) {
 	var sn *Subnet
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -197,12 +202,13 @@ func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req U
 }
 
 func (r *PGRepository) DeleteSubnet(ctx context.Context, orgID, id string) error {
-	return r.deleteByID(ctx, orgID, "subnet", id)
+	return r.deleteByID(ctx, orgID, "subnet", "true", id)
 }
 
-func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, id string) error {
-	return r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE organization_id = $1 AND id = $2", orgID, id)
+// deleteByID deletes a row of table that is visible under visible.
+func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, visible, id string) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE organization_id = $1 AND id = $2 AND "+visible, orgID, id)
 		if err != nil {
 			return err
 		}
@@ -237,8 +243,8 @@ func scanIP(s scanner) (*IPAddress, error) {
 func (r *PGRepository) ListIPAddresses(ctx context.Context, orgID, subnetID string, page api.PaginationParams) ([]IPAddress, int, error) {
 	var out []IPAddress
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := "organization_id = $1"
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		where := "organization_id = $1 AND " + ipVisible
 		args := []any{orgID}
 		if subnetID != "" {
 			where += " AND subnet_id = $2"
@@ -268,9 +274,9 @@ func (r *PGRepository) ListIPAddresses(ctx context.Context, orgID, subnetID stri
 
 func (r *PGRepository) GetIPAddress(ctx context.Context, orgID, id string) (*IPAddress, error) {
 	var a *IPAddress
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		a, err = scanIP(tx.QueryRow(ctx, "SELECT "+ipCols+" FROM ip_address WHERE organization_id = $1 AND id = $2", orgID, id))
+		a, err = scanIP(tx.QueryRow(ctx, "SELECT "+ipCols+" FROM ip_address WHERE organization_id = $1 AND id = $2 AND "+ipVisible, orgID, id))
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
@@ -280,19 +286,22 @@ func (r *PGRepository) GetIPAddress(ctx context.Context, orgID, id string) (*IPA
 }
 
 func (r *PGRepository) CreateIPAddress(ctx context.Context, a *IPAddress) error {
-	return r.withTenant(ctx, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx,
+	return database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx,
 			`INSERT INTO ip_address (organization_id, subnet_id, interface_id, address, status, dns_name, description)
 			 VALUES ($1,$2,$3,$4::inet,$5,$6,$7) RETURNING id::text, created_at, updated_at`,
 			a.OrganizationID, nilIfEmpty(a.SubnetID), nilIfEmpty(a.InterfaceID), a.Address, a.Status,
 			nilIfEmpty(a.DNSName), nilIfEmpty(a.Description),
-		).Scan(&a.ID, &a.CreatedAt, &a.UpdatedAt)
+		).Scan(&a.ID, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			return err
+		}
+		return requireVisible(ctx, tx, "ip_address", ipVisible, a.ID)
 	})
 }
 
 func (r *PGRepository) UpdateIPAddress(ctx context.Context, orgID, id string, req UpdateIPAddressRequest) (*IPAddress, error) {
 	var a *IPAddress
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -323,22 +332,26 @@ func (r *PGRepository) UpdateIPAddress(ctx context.Context, orgID, id string, re
 		}
 		var err error
 		if len(sets) == 0 {
-			a, err = scanIP(tx.QueryRow(ctx, "SELECT "+ipCols+" FROM ip_address WHERE organization_id = $1 AND id = $2", orgID, id))
+			a, err = scanIP(tx.QueryRow(ctx, "SELECT "+ipCols+" FROM ip_address WHERE organization_id = $1 AND id = $2 AND "+ipVisible, orgID, id))
 		} else {
 			sets = append(sets, "updated_at = NOW()")
-			q := "UPDATE ip_address SET " + strings.Join(sets, ", ") + " WHERE organization_id = $1 AND id = $2 RETURNING " + ipCols
+			q := "UPDATE ip_address SET " + strings.Join(sets, ", ") + " WHERE organization_id = $1 AND id = $2 AND " + ipVisible + " RETURNING " + ipCols
 			a, err = scanIP(tx.QueryRow(ctx, q, args...))
 		}
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		// The update may point the address at another subnet or interface.
+		return requireVisible(ctx, tx, "ip_address", ipVisible, id)
 	})
 	return a, err
 }
 
 func (r *PGRepository) DeleteIPAddress(ctx context.Context, orgID, id string) error {
-	return r.deleteByID(ctx, orgID, "ip_address", id)
+	return r.deleteByID(ctx, orgID, "ip_address", ipVisible, id)
 }
 
 // --- Network Interfaces ---
@@ -361,11 +374,11 @@ func scanNIC(s scanner) (*NetworkInterface, error) {
 func (r *PGRepository) ListInterfacesForCI(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]NetworkInterface, int, error) {
 	var out []NetworkInterface
 	var total int
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM network_interface WHERE organization_id = $1 AND ci_id = $2", orgID, ciID).Scan(&total); err != nil {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM network_interface WHERE organization_id = $1 AND ci_id = $2 AND "+nicVisible, orgID, ciID).Scan(&total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, "SELECT "+nicCols+" FROM network_interface WHERE organization_id = $1 AND ci_id = $2 ORDER BY created_at DESC LIMIT $3 OFFSET $4", orgID, ciID, page.Limit, page.Offset)
+		rows, err := tx.Query(ctx, "SELECT "+nicCols+" FROM network_interface WHERE organization_id = $1 AND ci_id = $2 AND "+nicVisible+" ORDER BY created_at DESC LIMIT $3 OFFSET $4", orgID, ciID, page.Limit, page.Offset)
 		if err != nil {
 			return err
 		}
@@ -384,9 +397,9 @@ func (r *PGRepository) ListInterfacesForCI(ctx context.Context, orgID, ciID stri
 
 func (r *PGRepository) GetInterface(ctx context.Context, orgID, id string) (*NetworkInterface, error) {
 	var ni *NetworkInterface
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		ni, err = scanNIC(tx.QueryRow(ctx, "SELECT "+nicCols+" FROM network_interface WHERE organization_id = $1 AND id = $2", orgID, id))
+		ni, err = scanNIC(tx.QueryRow(ctx, "SELECT "+nicCols+" FROM network_interface WHERE organization_id = $1 AND id = $2 AND "+nicVisible, orgID, id))
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
@@ -396,19 +409,22 @@ func (r *PGRepository) GetInterface(ctx context.Context, orgID, id string) (*Net
 }
 
 func (r *PGRepository) CreateInterface(ctx context.Context, ni *NetworkInterface) error {
-	return r.withTenant(ctx, ni.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx,
+	return database.WithRequestTenant(ctx, r.pool, ni.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx,
 			`INSERT INTO network_interface (organization_id, ci_id, name, mac_address, interface_type, speed_mbps, is_management, is_uplink, admin_status, oper_status, description)
 			 VALUES ($1,$2,$3,$4::macaddr,$5,$6,$7,$8,$9,$10,$11) RETURNING id::text, created_at, updated_at`,
 			ni.OrganizationID, ni.CIID, ni.Name, nilIfEmpty(ni.MACAddress), ni.InterfaceType, ni.SpeedMbps,
 			ni.IsManagement, ni.IsUplink, ni.AdminStatus, ni.OperStatus, nilIfEmpty(ni.Description),
-		).Scan(&ni.ID, &ni.CreatedAt, &ni.UpdatedAt)
+		).Scan(&ni.ID, &ni.CreatedAt, &ni.UpdatedAt); err != nil {
+			return err
+		}
+		return requireVisible(ctx, tx, "network_interface", nicVisible, ni.ID)
 	})
 }
 
 func (r *PGRepository) UpdateInterface(ctx context.Context, orgID, id string, req UpdateInterfaceRequest) (*NetworkInterface, error) {
 	var ni *NetworkInterface
-	err := r.withTenant(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -459,20 +475,23 @@ func (r *PGRepository) UpdateInterface(ctx context.Context, orgID, id string, re
 		}
 		var err error
 		if len(sets) == 0 {
-			ni, err = scanNIC(tx.QueryRow(ctx, "SELECT "+nicCols+" FROM network_interface WHERE organization_id = $1 AND id = $2", orgID, id))
+			ni, err = scanNIC(tx.QueryRow(ctx, "SELECT "+nicCols+" FROM network_interface WHERE organization_id = $1 AND id = $2 AND "+nicVisible, orgID, id))
 		} else {
 			sets = append(sets, "updated_at = NOW()")
-			q := "UPDATE network_interface SET " + strings.Join(sets, ", ") + " WHERE organization_id = $1 AND id = $2 RETURNING " + nicCols
+			q := "UPDATE network_interface SET " + strings.Join(sets, ", ") + " WHERE organization_id = $1 AND id = $2 AND " + nicVisible + " RETURNING " + nicCols
 			ni, err = scanNIC(tx.QueryRow(ctx, q, args...))
 		}
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		return requireVisible(ctx, tx, "network_interface", nicVisible, id)
 	})
 	return ni, err
 }
 
 func (r *PGRepository) DeleteInterface(ctx context.Context, orgID, id string) error {
-	return r.deleteByID(ctx, orgID, "network_interface", id)
+	return r.deleteByID(ctx, orgID, "network_interface", nicVisible, id)
 }

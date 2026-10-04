@@ -43,6 +43,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/order"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
@@ -252,7 +253,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		contact.NewHandler(repos.Contact),
 		ipam.NewHandler(repos.IPAM),
 		monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)),
-		graphqlbff.NewHandler(repos.CI, repos.Relationship),
+		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements),
 		relationshiptype.NewHandler(repos.RelationshipType),
 		citype.NewHandler(repos.CIType, opts.Dispatcher),
 		lifecycle.NewHandler(repos.Lifecycle,
@@ -264,7 +265,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithAssets(parentAssetLookup{repo: repos.Asset}),
 		override.NewHandler(repos.Override, opts.Dispatcher),
 		history.NewHandler(repos.History),
-		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery),
+		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission),
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
 		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),
@@ -396,6 +397,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	registry.MustRegister(info)
 
 	registry.MustRegister(collectors.NewGoCollector())
+	observability.RegisterWorkerMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 
