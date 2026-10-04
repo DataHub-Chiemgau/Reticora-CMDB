@@ -35,14 +35,14 @@ func TestDeactivationEndsAccess(t *testing.T) {
 	f := scopetest.Seed(t, "53")
 	bg := context.Background()
 	users := user.NewPGRepository(f.App)
-	admin := f.AppUser(t, f.OrgA, "deact-admin")
 
-	// First login provisions the user.
+	// First login provisions the user (first user of the organization).
 	subject := "deact-oidc-subject-53"
 	userID, err := users.EnsureUser(bg, f.OrgA, subject, "deact@example.invalid", "Deact")
 	if err != nil {
 		t.Fatalf("first login: %v", err)
 	}
+	admin := f.AppUser(t, f.OrgA, "deact-admin")
 
 	// A role granting ci:read and an API key of the user.
 	roleID := f.ID()

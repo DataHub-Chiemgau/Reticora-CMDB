@@ -149,3 +149,5 @@ TEC-06;[B], [Q] Spike;B;backend/internal/monitoring/pg_store_integration_test.go
 TLC-04;[B];B;backend/internal/identity/deactivation_integration_test.go;WP-042
 AUT-02;[B];B;backend/internal/identity/deactivation_integration_test.go;WP-042
 AUT-01;[B];B;backend/internal/identity/deactivation_integration_test.go;WP-042
+AUT-01;[B];B;backend/internal/identity/oidc_test.go;WP-043
+AUT-09;[B];B;backend/internal/identity/oidc_test.go;WP-043

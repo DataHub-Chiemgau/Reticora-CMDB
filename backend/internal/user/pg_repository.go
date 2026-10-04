@@ -1039,41 +1039,152 @@ func loginScope(orgID string) *database.TenantScope {
 	return &scope
 }
 
-// EnsureUser returns the app_user id for the given OIDC subject, creating the
-// record on first login. The oidc_subject unique constraint makes the
-// read-then-create race safe: on conflict the existing row is returned. A
-// login never reactivates a deactivated user (TLC-04): it fails with
+// EnsureUser resolves the app_user of an OIDC login (AUT-01). A known
+// subject of the organization is the returning user; otherwise the user is
+// resolved by organization and e-mail and admitted only
+//
+//   - as an account an administrator or SCIM created without a subject,
+//     which the login links to the subject,
+//   - with a pending, unexpired invitation, which the login accepts: the user
+//     is created with the invited role and scope, or
+//   - as the first user of an organization without any user (bootstrap of a
+//     new installation).
+//
+// Every other first login fails with identity.ErrFirstLoginNotPermitted; an
+// empty e-mail (not verified by the IdP) admits nothing. A login never
+// reactivates a deactivated user (TLC-04): it fails with
 // identity.ErrUserInactive.
 func (r *PGRepository) EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName string) (string, error) {
-	if email == "" {
-		email = oidcSubject + "@oidc.local"
-	}
+	email = strings.TrimSpace(email)
 	if displayName == "" {
 		displayName = email
 	}
+	var id string
+	err := database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		id, err = resolveLogin(ctx, tx, orgID, oidcSubject, email, displayName)
+		return err
+	})
+	if errors.Is(err, identity.ErrUserInactive) || errors.Is(err, identity.ErrFirstLoginNotPermitted) {
+		return "", err
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		// The subject belongs to a user of another organization.
+		return "", identity.ErrFirstLoginNotPermitted
+	}
+	if err != nil {
+		return "", fmt.Errorf("ensure oidc user: %w", err)
+	}
+	return id, nil
+}
+
+// resolveLogin implements EnsureUser inside the login transaction.
+func resolveLogin(ctx context.Context, tx pgx.Tx, orgID, subject, email, displayName string) (string, error) {
 	var (
 		id     string
 		active bool
 	)
-	err := database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
-		// On conflict (returning user) refresh profile fields so an email/name
-		// change in the IdP propagates; the subject and the status never
-		// change on login.
-		return tx.QueryRow(ctx, `
-			INSERT INTO app_user (organization_id, oidc_subject, email, display_name, is_active)
-			VALUES ($1, $2, $3, $4, true)
-			ON CONFLICT (oidc_subject) DO UPDATE SET
-				email = EXCLUDED.email,
-				display_name = EXCLUDED.display_name,
-				updated_at = now()
-			RETURNING id::text, is_active
-		`, orgID, oidcSubject, email, displayName).Scan(&id, &active)
-	})
-	if err != nil {
-		return "", fmt.Errorf("ensure oidc user: %w", err)
+	// Returning user: refresh the profile; the status never changes on login.
+	err := tx.QueryRow(ctx, `
+		UPDATE app_user SET
+			email = COALESCE(NULLIF($3, ''), email),
+			display_name = COALESCE(NULLIF($4, ''), display_name),
+			last_login = now(),
+			updated_at = now()
+		WHERE organization_id = $1 AND oidc_subject = $2
+		RETURNING id::text, is_active
+	`, orgID, subject, email, displayName).Scan(&id, &active)
+	if err == nil {
+		if !active {
+			return "", identity.ErrUserInactive
+		}
+		return id, nil
 	}
-	if !active {
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("read user of subject: %w", err)
+	}
+	if email == "" {
+		return "", identity.ErrFirstLoginNotPermitted
+	}
+
+	// An account created by an administrator or SCIM: link the subject. An
+	// account of the address that is linked to another subject is not taken
+	// over.
+	var linked bool
+	err = tx.QueryRow(ctx, `
+		SELECT id::text, is_active, oidc_subject IS NOT NULL FROM app_user
+		WHERE organization_id = $1 AND lower(email) = lower($2)
+		ORDER BY created_at LIMIT 1 FOR UPDATE
+	`, orgID, email).Scan(&id, &active, &linked)
+	switch {
+	case err == nil && linked:
+		return "", identity.ErrFirstLoginNotPermitted
+	case err == nil && !active:
 		return "", identity.ErrUserInactive
+	case err == nil:
+		if _, err = tx.Exec(ctx, `UPDATE app_user SET oidc_subject = $2, display_name = $3, last_login = now(), updated_at = now() WHERE id = $1`,
+			id, subject, displayName); err != nil {
+			return "", fmt.Errorf("link subject: %w", err)
+		}
+		return id, nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return "", fmt.Errorf("read user of e-mail: %w", err)
+	}
+
+	// A pending invitation: accept it and grant the invited role.
+	var (
+		invitationID, roleID, scopeType string
+		scopeID                         *string
+	)
+	err = tx.QueryRow(ctx, `
+		SELECT id::text, role_id::text, scope_type, scope_id::text FROM user_invitation
+		WHERE organization_id = $1 AND lower(email) = lower($2) AND accepted_at IS NULL AND expires_at > now()
+		ORDER BY created_at DESC LIMIT 1 FOR UPDATE
+	`, orgID, email).Scan(&invitationID, &roleID, &scopeType, &scopeID)
+	invited := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("read invitation: %w", err)
+	}
+	if !invited {
+		var users int
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM app_user WHERE organization_id = $1`, orgID).Scan(&users); err != nil {
+			return "", fmt.Errorf("count users: %w", err)
+		}
+		if users > 0 {
+			return "", identity.ErrFirstLoginNotPermitted
+		}
+	}
+
+	if insertErr := tx.QueryRow(ctx, `
+		INSERT INTO app_user (organization_id, oidc_subject, email, display_name, is_active, last_login)
+		VALUES ($1, $2, $3, $4, true, now())
+		RETURNING id::text
+	`, orgID, subject, email, displayName).Scan(&id); insertErr != nil {
+		return "", insertErr
+	}
+	if !invited {
+		return id, nil
+	}
+	if _, err = tx.Exec(ctx, `UPDATE user_invitation SET accepted_at = now() WHERE id = $1`, invitationID); err != nil {
+		return "", fmt.Errorf("accept invitation: %w", err)
+	}
+	var clientScope, siteScope *string
+	switch scopeType {
+	case "client":
+		clientScope = scopeID
+	case "site":
+		siteScope = scopeID
+	}
+	if (scopeType == "client" || scopeType == "site") && scopeID == nil {
+		// A scoped invitation without scope grants nothing (fail closed).
+		return id, nil
+	}
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO role_assignment (organization_id, user_id, role_id, scope_client_id, scope_site_id)
+		VALUES ($1, $2, $3, $4, $5)
+	`, orgID, id, roleID, clientScope, siteScope); err != nil {
+		return "", fmt.Errorf("assign invited role: %w", err)
 	}
 	return id, nil
 }

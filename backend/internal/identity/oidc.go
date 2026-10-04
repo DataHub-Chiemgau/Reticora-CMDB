@@ -42,9 +42,15 @@ type TokenSet struct {
 type IDTokenClaims struct {
 	Subject string
 	Email   string
-	Name    string
-	Groups  []string
-	Nonce   string
+	// EmailVerified is the email_verified claim; an unverified address is
+	// never used to resolve or create an app_user (AUT-01).
+	EmailVerified bool
+	Name          string
+	// OrganizationID is the organization_id user attribute of the realm
+	// (CH26, AUT-09); empty when the token carries none.
+	OrganizationID string
+	Groups         []string
+	Nonce          string
 }
 
 // oidcHTTPClient is the default HTTP client for provider requests. Unlike
@@ -88,8 +94,8 @@ func (p *OIDCProvider) PublicConfig() PublicConfig {
 		Issuer:      issuer,
 		ClientID:    strings.TrimSpace(p.config.ClientID),
 		RedirectURI: strings.TrimSpace(p.config.RedirectURL),
-		// The realm emits the organization group via a groups claim mapper, so
-		// no dedicated "groups" scope is requested (Keycloak rejects unknown
+		// The realm emits the organization attribute and the groups via
+		// client mappers, so no dedicated "groups" scope is requested (Keycloak rejects unknown
 		// scopes with invalid_scope).
 		Scopes:                []string{"openid", "profile", "email"},
 		AuthorizationEndpoint: issuer + "/protocol/openid-connect/auth",
@@ -252,7 +258,9 @@ func (p *OIDCProvider) ValidateIDTokenWithNonce(ctx context.Context, rawToken, e
 		Issuer          string          `json:"iss"`
 		Sub             string          `json:"sub"`
 		Email           string          `json:"email"`
+		EmailVerified   bool            `json:"email_verified"`
 		Name            string          `json:"name"`
+		Organization    json.RawMessage `json:"organization_id"`
 		Groups          json.RawMessage `json:"groups"`
 		Audience        json.RawMessage `json:"aud,omitempty"`
 		AuthorizedParty string          `json:"azp,omitempty"`
@@ -300,12 +308,19 @@ func (p *OIDCProvider) ValidateIDTokenWithNonce(ctx context.Context, rawToken, e
 		return nil, err
 	}
 
+	organization, err := decodeOrganization(tokenClaims.Organization)
+	if err != nil {
+		return nil, err
+	}
+
 	return &IDTokenClaims{
-		Subject: tokenClaims.Sub,
-		Email:   tokenClaims.Email,
-		Name:    tokenClaims.Name,
-		Groups:  groups,
-		Nonce:   tokenClaims.Nonce,
+		Subject:        tokenClaims.Sub,
+		Email:          tokenClaims.Email,
+		EmailVerified:  tokenClaims.EmailVerified,
+		Name:           tokenClaims.Name,
+		OrganizationID: organization,
+		Groups:         groups,
+		Nonce:          tokenClaims.Nonce,
 	}, nil
 }
 
@@ -362,6 +377,28 @@ func decodeAudience(raw json.RawMessage) ([]string, error) {
 		return []string{single}, nil
 	}
 	return nil, errors.New("identity: aud claim must be a string array or string")
+}
+
+// decodeOrganization reads the organization_id attribute claim. Keycloak
+// emits a single-valued attribute as a string and a multivalued one as an
+// array; an array must hold exactly one value and the value must be a UUID.
+func decodeOrganization(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		var values []string
+		if arrErr := json.Unmarshal(raw, &values); arrErr != nil || len(values) != 1 {
+			return "", errors.New("identity: organization attribute must be a single value")
+		}
+		value = values[0]
+	}
+	value = strings.TrimSpace(value)
+	if !isUUID(value) {
+		return "", errors.New("identity: organization attribute is not a UUID")
+	}
+	return value, nil
 }
 
 func decodeGroups(raw json.RawMessage) ([]string, error) {

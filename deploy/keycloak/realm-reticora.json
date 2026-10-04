@@ -111,10 +111,6 @@
   ],
   "groups": [
     {
-      "name": "00000000-0000-0000-0000-000000000001",
-      "path": "/00000000-0000-0000-0000-000000000001"
-    },
-    {
       "name": "reticora-admin",
       "path": "/reticora-admin"
     }
@@ -129,11 +125,10 @@
       "lastName": "Admin",
       "attributes": {
         "organization_id": [
-          "reticora-demo"
+          "00000000-0000-0000-0000-000000000001"
         ]
       },
       "groups": [
-        "/00000000-0000-0000-0000-000000000001",
         "/reticora-admin"
       ],
       "credentials": [

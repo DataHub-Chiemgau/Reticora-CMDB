@@ -107,14 +107,16 @@ func (f *fakeOIDCServer) idToken(overrides map[string]any) string {
 	f.t.Helper()
 
 	claims := map[string]any{
-		"iss":    f.issuer(),
-		"sub":    "user-123",
-		"aud":    "reticora-app",
-		"email":  "user@example.com",
-		"name":   "User Example",
-		"groups": []string{"123e4567-e89b-12d3-a456-426614174000"},
-		"iat":    time.Now().Unix(),
-		"exp":    time.Now().Add(5 * time.Minute).Unix(),
+		"iss":             f.issuer(),
+		"sub":             "user-123",
+		"aud":             "reticora-app",
+		"email":           "user@example.com",
+		"email_verified":  true,
+		"name":            "User Example",
+		"organization_id": "123e4567-e89b-12d3-a456-426614174000",
+		"groups":          []string{"reticora-viewer"},
+		"iat":             time.Now().Unix(),
+		"exp":             time.Now().Add(5 * time.Minute).Unix(),
 	}
 	if f.mutateClaims != nil {
 		f.mutateClaims(claims)
@@ -570,5 +572,58 @@ func TestValidateRejectsRevokedSessions(t *testing.T) {
 	}
 	if _, err := issuer.Validate(other); err == nil {
 		t.Error("unreadable revocation entry accepted the token")
+	}
+}
+
+// recordingProvisioner records the e-mail it is asked to resolve.
+type recordingProvisioner struct{ email *string }
+
+func (p recordingProvisioner) EnsureUser(_ context.Context, _, subject, email, _ string) (string, error) {
+	*p.email = email
+	return subject, nil
+}
+
+func (p recordingProvisioner) EnsureRole(context.Context, string, string, string) error { return nil }
+
+// TestCallbackTakesOrganizationFromAttribute covers WP-043 (AUT-01, AUT-09):
+// a token without organization attribute is rejected even when a group is
+// named like an organization, and an unverified e-mail is not passed on to
+// resolve the user.
+func TestCallbackTakesOrganizationFromAttribute(t *testing.T) {
+	orgID := "123e4567-e89b-12d3-a456-426614174000"
+	callback := func(mutate func(map[string]any), provisioner UserProvisioner) *httptest.ResponseRecorder {
+		t.Helper()
+		fake := newFakeOIDCServer(t)
+		fake.mutateClaims = mutate
+		handler := NewHandler(NewOIDCProvider(OIDCConfig{
+			IssuerURL:    fake.issuer(),
+			ClientID:     "reticora-app",
+			ClientSecret: "top-secret",
+			RedirectURL:  "https://app.example.com/callback",
+		}), testSessionIssuer(t)).WithProvisioning(provisioner, "")
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/callback",
+			strings.NewReader(`{"code":"auth-code","state":"nonce","code_verifier":"verifier-123"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.Callback(w, req)
+		return w
+	}
+
+	var email string
+	w := callback(func(c map[string]any) {
+		delete(c, "organization_id")
+		c["groups"] = []string{orgID, "reticora-admin"}
+	}, recordingProvisioner{email: &email})
+	if w.Code != http.StatusUnauthorized || strings.Contains(w.Body.String(), `"token"`) {
+		t.Errorf("login without organization attribute: status %d body %s, want 401", w.Code, w.Body.String())
+	}
+
+	w = callback(func(c map[string]any) { c["email_verified"] = false }, recordingProvisioner{email: &email})
+	if w.Code != http.StatusOK || email != "" {
+		t.Errorf("unverified e-mail: status %d, provisioner got %q, want empty", w.Code, email)
+	}
+	w = callback(nil, recordingProvisioner{email: &email})
+	if w.Code != http.StatusOK || email != "user@example.com" {
+		t.Errorf("verified e-mail: status %d, provisioner got %q", w.Code, email)
 	}
 }

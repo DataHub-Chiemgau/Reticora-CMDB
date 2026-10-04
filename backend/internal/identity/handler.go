@@ -44,6 +44,11 @@ type AccessResolver interface {
 // session. A login never reactivates a deactivated account (TLC-04).
 var ErrUserInactive = errors.New("identity: user is deactivated")
 
+// ErrFirstLoginNotPermitted is returned when an unknown user logs in without
+// an admission for organization and e-mail: a pending invitation or an
+// account created by an administrator or SCIM (AUT-01).
+var ErrFirstLoginNotPermitted = errors.New("identity: first login requires an invitation for this organization and e-mail")
+
 // UserStatusChecker reports whether an app_user may hold a session. A
 // provisioner implementing it makes refresh check the user status; a user
 // that no longer exists is not active.
@@ -53,9 +58,11 @@ type UserStatusChecker interface {
 
 // UserProvisioner upserts the authenticated OIDC subject into app_user.
 type UserProvisioner interface {
-	// EnsureUser returns the app_user id for the OIDC subject, creating the
-	// record with the given display data when it does not exist yet. It
-	// returns ErrUserInactive for a deactivated user.
+	// EnsureUser resolves the app_user of the OIDC subject in the
+	// organization, or on first login by organization and verified e-mail
+	// (empty when unverified). It creates or links a user only with an
+	// admission and returns ErrFirstLoginNotPermitted otherwise, and
+	// ErrUserInactive for a deactivated user.
 	EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName string) (string, error)
 	// EnsureRole assigns the named standard role when the user has none yet.
 	EnsureRole(ctx context.Context, orgID, userID, roleName string) error
@@ -294,9 +301,11 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 		return "", time.Time{}, authResult{}, errors.New("identity: ID token subject is required")
 	}
 
-	orgID := firstUUIDGroup(idToken.Groups)
+	// The organization is the realm's user attribute (CH26, AUT-09), never a
+	// group name the user could be added to.
+	orgID := idToken.OrganizationID
 	if orgID == "" {
-		return "", time.Time{}, authResult{}, errors.New("identity: no organization group found in ID token")
+		return "", time.Time{}, authResult{}, errors.New("identity: no organization attribute in ID token")
 	}
 
 	// Provision the app_user for the OIDC subject on first login so FK-bound
@@ -305,12 +314,16 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 	// database identity aligned.
 	subject := idToken.Subject
 	if h.provisioner != nil {
-		userID, err := h.provisioner.EnsureUser(ctx, orgID, idToken.Subject, idToken.Email, idToken.Name)
-		if errors.Is(err, ErrUserInactive) {
-			return "", time.Time{}, authResult{}, ErrUserInactive
+		email := ""
+		if idToken.EmailVerified {
+			email = idToken.Email
 		}
-		if err != nil {
-			return "", time.Time{}, authResult{}, fmt.Errorf("identity: provision user: %w", err)
+		userID, provisionErr := h.provisioner.EnsureUser(ctx, orgID, idToken.Subject, email, idToken.Name)
+		if errors.Is(provisionErr, ErrUserInactive) || errors.Is(provisionErr, ErrFirstLoginNotPermitted) {
+			return "", time.Time{}, authResult{}, provisionErr
+		}
+		if provisionErr != nil {
+			return "", time.Time{}, authResult{}, fmt.Errorf("identity: provision user: %w", provisionErr)
 		}
 		if h.defaultRole != "" {
 			// Best effort: role assignment must not block login.
@@ -462,16 +475,6 @@ func editorPermissions() []Permission {
 	}
 }
 
-func firstUUIDGroup(groups []string) string {
-	for _, group := range groups {
-		candidate := strings.TrimSpace(group)
-		if isUUID(candidate) {
-			return candidate
-		}
-	}
-	return ""
-}
-
 func isUUID(value string) bool {
 	if len(value) != 36 {
 		return false
@@ -519,14 +522,14 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 		return
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		writeContextError(w, err)
-	case errors.Is(err, ErrUserInactive):
+	case errors.Is(err, ErrUserInactive), errors.Is(err, ErrFirstLoginNotPermitted):
 		api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
 	case strings.Contains(err.Error(), "authorization code is required"),
 		strings.Contains(err.Error(), "PKCE code verifier is required"),
 		strings.Contains(err.Error(), "ID token is required"),
 		strings.Contains(err.Error(), "groups claim"):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
-	case strings.Contains(err.Error(), "organization group"),
+	case strings.Contains(err.Error(), "organization attribute"),
 		strings.Contains(err.Error(), "unexpected ID token issuer"),
 		strings.Contains(err.Error(), "ID token is expired"),
 		strings.Contains(err.Error(), "ID token subject is required"),
