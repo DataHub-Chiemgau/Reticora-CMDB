@@ -57,9 +57,12 @@ administrator alone.
   pending invitation for the organization and the verified e-mail, an account
   created by an administrator or SCIM, or as the first user of an organization
   without users. Every other first login is answered with 403.
-- The group `reticora-admin` maps to the full permission set in the backend
-  (any group whose name contains `admin`/`owner`). Create additional groups
-  such as `reticora-editor` or `reticora-viewer` for write / read-only users.
+- IdP groups and roles map to the standard roles of the organization by an
+  exact mapping (RBA-02): `reticora-admin`/`org_admin` → org_admin,
+  `reticora-engineer`/`engineer` → engineer, `reticora-viewer`/`viewer` →
+  viewer. The session receives the permissions those roles hold in the
+  database; other group names grant nothing. `client_technician` is valid only
+  in a client scope and is assigned in Reticora, not through the IdP.
 - `uma_authorization` is intentionally **not** listed as a default role: on a
   fresh Keycloak import that role does not exist yet at role-resolution time
   and the server aborts with "Unable to find composite realm role".

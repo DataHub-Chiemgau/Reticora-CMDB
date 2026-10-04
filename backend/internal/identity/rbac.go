@@ -3,6 +3,8 @@ package identity
 import (
 	"context"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
@@ -62,4 +64,39 @@ func RequirePermission(required Permission) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// oidcRoleMapping is the defined mapping of IdP role and group names to the
+// standard roles of the database (RBA-02, WP-046). Matching is exact and
+// case-insensitive after removing a leading "/" of a group path; any other
+// name grants nothing. client_technician has no IdP mapping: it is valid
+// only in a client scope, which needs a client-scoped role assignment.
+var oidcRoleMapping = map[string]string{
+	"org_admin":         "org_admin",
+	"reticora-admin":    "org_admin",
+	"engineer":          "engineer",
+	"reticora-engineer": "engineer",
+	"viewer":            "viewer",
+	"reticora-viewer":   "viewer",
+}
+
+// StandardRolesForGroups maps IdP roles and groups to standard role names,
+// sorted and without duplicates.
+func StandardRolesForGroups(groups []string) []string {
+	seen := map[string]struct{}{}
+	roles := make([]string, 0, len(groups))
+	for _, group := range groups {
+		name := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(group), "/"))
+		role, ok := oidcRoleMapping[name]
+		if !ok {
+			continue
+		}
+		if _, dup := seen[role]; dup {
+			continue
+		}
+		seen[role] = struct{}{}
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	return roles
 }

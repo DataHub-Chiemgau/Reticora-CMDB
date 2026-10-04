@@ -35,9 +35,14 @@ type Handler struct {
 }
 
 // AccessResolver loads the role grants of a user: every role assignment and
-// custom role assignment with its permissions and scope.
+// custom role assignment with its permissions and scope, and the org-wide
+// grants of the standard roles the IdP roles map to (RBA-02).
 type AccessResolver interface {
 	AccessGrants(ctx context.Context, orgID, userID string) ([]Grant, error)
+	// RoleGrants returns one org-wide grant per named standard role of the
+	// organization, with the role's permissions from the database. Roles
+	// valid only in a client scope grant nothing here.
+	RoleGrants(ctx context.Context, orgID string, roleNames []string) ([]Grant, error)
 }
 
 // ErrUserInactive is returned when a deactivated user logs in or refreshes a
@@ -355,26 +360,30 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 	}, nil
 }
 
-// applyAccess sets permissions and scopes of the session from the IdP groups
-// and the role assignments in the database. IdP group roles are org-wide
-// grants; database assignments carry their client and site scope. A failing
-// lookup fails the login or refresh instead of issuing an unscoped session.
+// applyAccess sets permissions and scopes of the session from the database
+// only (RBA-02): the role assignments of the user and the standard roles its
+// IdP roles map to (StandardRolesForGroups), both read from the roles of the
+// organization. IdP roles are org-wide grants; database assignments carry
+// their client and site scope. A failing lookup fails the login or refresh
+// instead of issuing an unscoped session. Without a resolver (tests) the
+// token's access stays unchanged.
 func (h *Handler) applyAccess(ctx context.Context, claims *SessionClaims) error {
-	if h.access == nil && len(claims.Groups) == 0 {
-		// Nothing to resolve from: keep the token's access unchanged.
+	if h.access == nil {
 		return nil
 	}
 	grants := make([]Grant, 0, 4)
-	if groupPermissions := permissionsFromGroups(claims.Groups); len(groupPermissions) > 0 {
-		grants = append(grants, OrgWideGrant(groupPermissions))
-	}
-	if h.access != nil {
-		stored, err := h.access.AccessGrants(ctx, claims.OrganizationID, claims.Subject)
+	if roles := StandardRolesForGroups(claims.Groups); len(roles) > 0 {
+		mapped, err := h.access.RoleGrants(ctx, claims.OrganizationID, roles)
 		if err != nil {
 			return err
 		}
-		grants = append(grants, stored...)
+		grants = append(grants, mapped...)
 	}
+	stored, err := h.access.AccessGrants(ctx, claims.OrganizationID, claims.Subject)
+	if err != nil {
+		return err
+	}
+	grants = append(grants, stored...)
 	access := ResolveAccess(grants)
 	scope := access.Scope
 	claims.Permissions = access.Permissions
@@ -398,83 +407,6 @@ func bearerTokenFromRequest(r *http.Request) (string, error) {
 	return strings.TrimSpace(parts[1]), nil
 }
 
-func permissionsFromGroups(groups []string) []Permission {
-	all := allPermissions()
-	permissions := make([]Permission, 0)
-	for _, group := range groups {
-		normalized := normalizeGroup(group)
-		switch {
-		case strings.Contains(normalized, "admin"), strings.Contains(normalized, "owner"):
-			permissions = append(permissions, all...)
-			continue
-		case strings.Contains(normalized, "editor"), strings.Contains(normalized, "writer"):
-			permissions = append(permissions, editorPermissions()...)
-		case strings.Contains(normalized, "viewer"), strings.Contains(normalized, "reader"), strings.Contains(normalized, "readonly"), strings.Contains(normalized, "read only"):
-			permissions = append(permissions, readerPermissions()...)
-		}
-
-		for _, permission := range all {
-			token := normalizeGroup(string(permission))
-			if token != "" && strings.Contains(normalized, token) {
-				permissions = append(permissions, permission)
-			}
-		}
-	}
-	return MergePermissions(permissions)
-}
-
-func readerPermissions() []Permission {
-	readers := make([]Permission, 0)
-	for _, permission := range allPermissions() {
-		if strings.HasSuffix(string(permission), ":read") {
-			readers = append(readers, permission)
-		}
-	}
-	return readers
-}
-
-func editorPermissions() []Permission {
-	return []Permission{
-		PermCIRead,
-		PermCIWrite,
-		PermCIDelete,
-		PermSiteRead,
-		PermSiteWrite,
-		PermRackRead,
-		PermRackWrite,
-		PermRelationshipRead,
-		PermRelationshipWrite,
-		PermContactRead,
-		PermContactWrite,
-		PermTopologyRead,
-		PermDiscoveryRead,
-		PermDiscoveryWrite,
-		PermDiscoveryIngest,
-		PermAssetRead,
-		PermAssetWrite,
-		PermAssignmentRead,
-		PermAssignmentWrite,
-		PermDocumentRead,
-		PermDocumentWrite,
-		PermStocktakeRead,
-		PermStocktakeWrite,
-		PermTicketRead,
-		PermTicketWrite,
-		PermSLARead,
-		PermIPAMRead,
-		PermIPAMWrite,
-		PermFormRead,
-		PermFormWrite,
-		PermWorkflowRead,
-		PermWorkflowWrite,
-		PermComplianceRead,
-		PermMonitoringRead,
-		PermSearchRead,
-		PermAIRead,
-		PermExportRun,
-	}
-}
-
 func isUUID(value string) bool {
 	if len(value) != 36 {
 		return false
@@ -492,11 +424,6 @@ func isUUID(value string) bool {
 		}
 	}
 	return true
-}
-
-func normalizeGroup(value string) string {
-	replacer := strings.NewReplacer(":", " ", "-", " ", "_", " ", "/", " ", ".", " ")
-	return strings.Join(strings.Fields(strings.ToLower(replacer.Replace(value))), " ")
 }
 
 func cloneSessionClaims(claims *SessionClaims) SessionClaims {

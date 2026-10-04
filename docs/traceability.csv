@@ -156,3 +156,4 @@ RBA-04;[B];B;backend/internal/server/authz_test.go;WP-045
 RBA-06;[P2];B;backend/internal/server/authz_test.go;WP-045
 MET-14;P2/G2;B;backend/internal/server/authz_test.go;WP-045
 CI-10;[B];B;backend/internal/server/authz_test.go;WP-045
+RBA-02;[B];B;backend/internal/permission/role_matrix_integration_test.go;WP-046

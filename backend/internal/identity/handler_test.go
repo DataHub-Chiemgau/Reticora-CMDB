@@ -183,7 +183,7 @@ func TestCallbackIssuesSession(t *testing.T) {
 		ClientID:     "reticora-app",
 		ClientSecret: "top-secret",
 		RedirectURL:  "https://app.example.com/callback",
-	}), sessionIssuer)
+	}), sessionIssuer).WithAccessResolver(standardRoleResolver{"org_admin": allPermissions()})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/callback",
 		strings.NewReader(`{"code":"auth-code","state":"nonce","code_verifier":"verifier-123"}`))
@@ -625,5 +625,88 @@ func TestCallbackTakesOrganizationFromAttribute(t *testing.T) {
 	w = callback(nil, recordingProvisioner{email: &email})
 	if w.Code != http.StatusOK || email != "user@example.com" {
 		t.Errorf("verified e-mail: status %d, provisioner got %q", w.Code, email)
+	}
+}
+
+// standardRoleResolver grants the permissions of the listed standard roles
+// and holds no role assignments.
+type standardRoleResolver map[string][]Permission
+
+func (r standardRoleResolver) AccessGrants(context.Context, string, string) ([]Grant, error) {
+	return nil, nil
+}
+
+func (r standardRoleResolver) RoleGrants(_ context.Context, _ string, roleNames []string) ([]Grant, error) {
+	grants := make([]Grant, 0, len(roleNames))
+	for _, name := range roleNames {
+		if perms, ok := r[name]; ok {
+			grants = append(grants, OrgWideGrant(perms))
+		}
+	}
+	return grants, nil
+}
+
+// TestIdPRolesMapToStandardRoles covers WP-046 (RBA-02): IdP roles and groups
+// map to standard roles by an exact, defined mapping; names that only
+// resemble a role, and client_technician, grant nothing.
+func TestIdPRolesMapToStandardRoles(t *testing.T) {
+	for _, c := range []struct {
+		groups []string
+		want   string
+	}{
+		{[]string{"reticora-admin"}, "org_admin"},
+		{[]string{"/org_admin", "ORG_ADMIN"}, "org_admin"},
+		{[]string{"reticora-engineer", "viewer"}, "engineer,viewer"},
+		{[]string{"engineer"}, "engineer"},
+		{[]string{"client_technician"}, ""},
+		{[]string{"superadmin", "owners", "reticora-editor", "ci:delete", "readonly"}, ""},
+		{[]string{"123e4567-e89b-12d3-a456-426614174000"}, ""},
+	} {
+		if got := strings.Join(StandardRolesForGroups(c.groups), ","); got != c.want {
+			t.Errorf("StandardRolesForGroups(%v) = %q, want %q", c.groups, got, c.want)
+		}
+	}
+}
+
+// TestSessionPermissionsComeFromDatabaseRoles covers WP-046 (RBA-02): the
+// session holds the database permissions of the mapped standard role, not a
+// permission set derived from the group name.
+func TestSessionPermissionsComeFromDatabaseRoles(t *testing.T) {
+	sessionIssuer := testSessionIssuer(t)
+	resolver := standardRoleResolver{"viewer": {PermCIRead, PermSiteRead}}
+	token, err := sessionIssuer.Issue(SessionClaims{
+		Subject:        "user-123",
+		OrganizationID: "123e4567-e89b-12d3-a456-426614174000",
+		Permissions:    []Permission{PermCredentialRead, PermCredentialDecrypt},
+		Groups:         []string{"reticora-viewer", "credential-admins"},
+		IssuedAt:       time.Now().UTC(),
+		ExpiresAt:      time.Now().UTC().Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"token":"`+token+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	NewHandler(nil, sessionIssuer).WithAccessResolver(resolver).Refresh(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("refresh: status %d: %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		Token string `json:"token"`
+	}
+	if err = json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	claims, err := sessionIssuer.Validate(out.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[Permission]bool{}
+	for _, p := range claims.Permissions {
+		got[p] = true
+	}
+	if len(got) != 2 || !got[PermCIRead] || !got[PermSiteRead] {
+		t.Errorf("session permissions %v, want exactly the viewer role's ci:read and site:read", claims.Permissions)
 	}
 }

@@ -111,6 +111,21 @@ type fakeAccessResolver struct {
 	grants []Grant
 	err    error
 	calls  int
+	// roles maps standard role names to their permissions for RoleGrants.
+	roles map[string][]Permission
+	// requestedRoles records the role names RoleGrants was asked for.
+	requestedRoles []string
+}
+
+func (f *fakeAccessResolver) RoleGrants(_ context.Context, _ string, roleNames []string) ([]Grant, error) {
+	f.requestedRoles = append(f.requestedRoles, roleNames...)
+	grants := make([]Grant, 0, len(roleNames))
+	for _, name := range roleNames {
+		if perms, ok := f.roles[name]; ok {
+			grants = append(grants, OrgWideGrant(perms))
+		}
+	}
+	return grants, f.err
 }
 
 func (f *fakeAccessResolver) AccessGrants(_ context.Context, orgID, userID string) ([]Grant, error) {

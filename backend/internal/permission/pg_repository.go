@@ -183,6 +183,10 @@ func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) (
 				FROM role_assignment ra
 				JOIN role ro ON ro.id = ra.role_id AND ro.organization_id = ra.organization_id
 				WHERE ra.organization_id = $1 AND ra.user_id = $2
+				  -- A client-scope role (C of RBA-02) grants only within an
+				  -- assigned client, a site-scope role only within a site.
+				  AND (ro.scope <> 'client' OR ra.scope_client_id IS NOT NULL)
+				  AND (ro.scope <> 'site' OR ra.scope_site_id IS NOT NULL)
 				UNION ALL
 				SELECT CASE WHEN ucr.scope_type = 'client' THEN ucr.scope_id::text END,
 				       CASE WHEN ucr.scope_type = 'site' THEN ucr.scope_id::text END,
@@ -210,6 +214,49 @@ func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) (
 				grant.Sites = []string{*siteID}
 			}
 			grants = append(grants, grant)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return grants, nil
+}
+
+// RoleGrants reads the permissions of the named standard roles of the
+// organization (role_permission and role.permissions, limited to the
+// catalogue) as one org-wide grant per role. It resolves the IdP roles of a
+// session (RBA-02); roles valid only in a client or site scope are skipped.
+func (r *PGRepository) RoleGrants(ctx context.Context, orgID string, roleNames []string) ([]identity.Grant, error) {
+	grants := make([]identity.Grant, 0, len(roleNames))
+	if len(roleNames) == 0 {
+		return grants, nil
+	}
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT ARRAY(
+				SELECT DISTINCT k FROM (
+					SELECT rp.permission_key AS k FROM role_permission rp
+					WHERE rp.role_id = ro.id AND rp.organization_id = ro.organization_id
+					UNION
+					SELECT jsonb_array_elements_text(COALESCE(ro.permissions, '[]'::jsonb))
+				) keys
+				WHERE k IN (SELECT key FROM permission)
+				ORDER BY k)
+			FROM role ro
+			WHERE ro.organization_id = $1 AND ro.is_builtin AND ro.scope = 'org' AND ro.name = ANY($2)
+			ORDER BY ro.name`, orgID, roleNames)
+		if err != nil {
+			return fmt.Errorf("read standard roles: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var keys []string
+			if err := rows.Scan(&keys); err != nil {
+				return fmt.Errorf("scan standard role: %w", err)
+			}
+			grants = append(grants, identity.OrgWideGrant(toPermissions(keys)))
 		}
 		return rows.Err()
 	})

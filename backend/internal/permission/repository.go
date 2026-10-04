@@ -21,6 +21,10 @@ type Repository interface {
 	// with its permissions and scope (RBA-03). It is the source of the
 	// session's permissions and tenant scope (identity.ResolveAccess).
 	AccessGrants(ctx context.Context, orgID, userID string) ([]identity.Grant, error)
+	// RoleGrants returns an org-wide grant for each named standard role the
+	// IdP roles of a session map to (RBA-02); client-scope roles grant
+	// nothing without a client.
+	RoleGrants(ctx context.Context, orgID string, roleNames []string) ([]identity.Grant, error)
 }
 
 var _ identity.AccessResolver = Repository(nil)
@@ -127,6 +131,22 @@ func (r *MemoryRepository) AccessGrants(_ context.Context, orgID, userID string)
 			Clients:     append([]string(nil), a.clients...),
 			Sites:       append([]string(nil), a.sites...),
 		})
+	}
+	return grants, nil
+}
+
+// RoleGrants grants the target matrix of the named org-scope standard roles
+// (StandardRoles); the memory repository holds no per-organization roles.
+func (r *MemoryRepository) RoleGrants(_ context.Context, _ string, roleNames []string) ([]identity.Grant, error) {
+	grants := make([]identity.Grant, 0, len(roleNames))
+	for _, name := range roleNames {
+		for _, role := range StandardRoles {
+			if role.Name != name || role.Scope != "org" {
+				continue
+			}
+			keys, _ := StandardRolePermissions(name)
+			grants = append(grants, identity.OrgWideGrant(toPermissions(keys)))
+		}
 	}
 	return grants, nil
 }
