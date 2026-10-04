@@ -58,9 +58,12 @@ func seed(t *testing.T, ctx context.Context, dsn string) {
 	// asset.organization_id is NO ACTION rather than ON DELETE CASCADE, so the
 	// fixture tears its rows down explicitly, child tables first.
 	// The append-only guards on audit_log and asset_movement deliberately block
-	// deletion. Teardown runs under session_replication_role = replica, which
-	// skips triggers for this session only and therefore cannot race with other
-	// packages sharing the database.
+	// deletion, so their rows are removed under session_replication_role =
+	// replica, which skips triggers for this session only and therefore cannot
+	// race with other packages sharing the database. Everything else is
+	// deleted with triggers active: replica mode also skips the ON DELETE
+	// CASCADE of the organization and would leave orphaned rows (roles seeded
+	// for the organization) behind.
 	cleanup := func() {
 		conn, err := admin.Acquire(ctx)
 		if err != nil {
@@ -72,10 +75,18 @@ func seed(t *testing.T, ctx context.Context, dsn string) {
 			t.Errorf("lift append-only guards: %v", err)
 			return
 		}
-		defer conn.Exec(ctx, `SET session_replication_role = origin`)
+		for _, table := range []string{"asset_movement", "audit_log"} {
+			if _, err := conn.Exec(ctx,
+				`DELETE FROM `+table+` WHERE organization_id IN ($1::uuid, $2::uuid)`, orgA, orgB); err != nil {
+				t.Errorf("cleanup %s: %v", table, err)
+			}
+		}
+		if _, err := conn.Exec(ctx, `SET session_replication_role = origin`); err != nil {
+			t.Errorf("restore append-only guards: %v", err)
+			return
+		}
 		for _, table := range []string{
-			"asset_movement", "audit_log", "ci_relationship", "composition",
-			"asset", "ci", "ci_type", "relationship_type", "organization",
+			"ci_relationship", "composition", "asset", "ci", "ci_type", "relationship_type", "organization",
 		} {
 			column := "organization_id"
 			if table == "organization" {
