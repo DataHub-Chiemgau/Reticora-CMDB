@@ -14,6 +14,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -49,6 +50,52 @@ type Handler struct {
 	cis         CIUpserter
 	typeResolve CITypeResolver
 	findings    FindingRecorder
+	tokens      TokenIssuer
+}
+
+// TokenIssuer signs the agent credential (implemented by
+// identity.SessionIssuer).
+type TokenIssuer interface {
+	Issue(claims identity.SessionClaims) (string, error)
+}
+
+// AgentTokenLifetime is the validity of an agent credential; an agent is
+// re-enrolled to renew it, and the kill-switch disables it at any time.
+const AgentTokenLifetime = 365 * 24 * time.Hour
+
+// agentSubjectPrefix marks the session subject of an agent credential.
+const agentSubjectPrefix = "agent:"
+
+// AgentSubject is the session subject of the agent's credential.
+func AgentSubject(agentID string) string { return agentSubjectPrefix + agentID }
+
+// WithAgentTokens makes enrollment return a signed agent credential.
+func (h *Handler) WithAgentTokens(issuer TokenIssuer) *Handler {
+	h.tokens = issuer
+	return h
+}
+
+// issueAgentToken signs the credential of an enrolled agent: subject
+// agent:<agent_id>, permission agent:ingest only, scope the agent's client.
+func (h *Handler) issueAgentToken(a *Agent) (string, error) {
+	scope := identity.Scope{
+		Clients: identity.ScopeSet{All: true},
+		Sites:   identity.ScopeSet{All: true},
+		Teams:   identity.ScopeSet{All: true},
+	}
+	if a.ClientID != "" {
+		scope.Clients = identity.ScopeSet{IDs: []string{a.ClientID}}
+	}
+	now := time.Now().UTC()
+	return h.tokens.Issue(identity.SessionClaims{
+		Subject:        AgentSubject(a.AgentID),
+		OrganizationID: a.OrganizationID,
+		ClientScope:    scope.LegacyClientScope(),
+		Permissions:    []identity.Permission{identity.PermAgentIngest},
+		Scope:          &scope,
+		IssuedAt:       now,
+		ExpiresAt:      now.Add(AgentTokenLifetime),
+	})
 }
 
 // NewHandler creates a new agent handler. metrics, cis and findings may be
@@ -137,6 +184,14 @@ func (h *Handler) Enroll(w http.ResponseWriter, r *http.Request) {
 		}
 		api.WriteRepoError(w, err)
 		return
+	}
+	if h.tokens != nil {
+		token, err := h.issueAgentToken(a)
+		if err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", "issue agent credential")
+			return
+		}
+		a.Token = token
 	}
 	api.WriteJSON(w, http.StatusCreated, a)
 }
@@ -248,6 +303,12 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(payload.AgentID) == "" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "agent_id is required")
+		return
+	}
+	// An agent credential reports for its own agent only.
+	if principal, ok := identity.PrincipalFromContext(r.Context()); ok && strings.HasPrefix(principal.Subject, agentSubjectPrefix) &&
+		principal.Subject != AgentSubject(payload.AgentID) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "agent credential does not match agent_id")
 		return
 	}
 

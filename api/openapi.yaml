@@ -9873,6 +9873,12 @@ components:
         os: { type: string }
         arch: { type: string }
         ci_id: { type: string }
+        agent_token:
+          type: string
+          description: >-
+            Agent credential, returned only by the enrollment: a signed bearer
+            token for the TLS telemetry channel (agent:ingest for this agent
+            only, AGT-03). Store it on the agent; it is never shown again.
         client_id: { type: string, description: Client bound by the enrollment token. }
         site_id: { type: string, description: Site from the token or a manual confirmation. }
         suggested_site_id: { type: string, description: Site suggested from the network fingerprint; awaits confirmation. }

@@ -4,22 +4,28 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/transport"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"runtime"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/transport"
 )
 
 const agentVersion = "0.1.0"
@@ -39,19 +45,10 @@ type agentConfig struct {
 	// CredentialsPath is the keystore written by edge enrollment.
 	CredentialsPath string
 	TLSServerName   string
-}
-
-// TelemetryPayload is the data the agent reports on each cycle.
-type TelemetryPayload struct {
-	AgentID        string            `json:"agent_id"`
-	OrganizationID string            `json:"organization_id"`
-	Hostname       string            `json:"hostname"`
-	Version        string            `json:"version"`
-	OS             string            `json:"os"`
-	Arch           string            `json:"arch"`
-	Timestamp      time.Time         `json:"timestamp"`
-	Metrics        map[string]any    `json:"metrics,omitempty"`
-	SystemInfo     map[string]string `json:"system_info,omitempty"`
+	// Token is the agent credential returned by the enrollment
+	// (RETICORA_AGENT_TOKEN or the file RETICORA_AGENT_TOKEN_FILE). Every
+	// report carries it; without it the agent sends nothing (AGT-03).
+	Token string
 }
 
 func main() {
@@ -83,14 +80,29 @@ func main() {
 func loadAgentConfig() agentConfig {
 	hostname, _ := os.Hostname()
 	cfg := agentConfig{
-		CollectorRelay:  envOrDefault("RETICORA_COLLECTOR_RELAY", "localhost:9443"),
-		ServerURL:       envOrDefault("RETICORA_SERVER_URL", "http://localhost:8080"),
+		CollectorRelay:  os.Getenv("RETICORA_COLLECTOR_RELAY"),
+		ServerURL:       os.Getenv("RETICORA_SERVER_URL"),
 		OrganizationID:  os.Getenv("RETICORA_ORGANIZATION_ID"),
 		AgentID:         envOrDefault("RETICORA_AGENT_ID", hostname),
 		Hostname:        hostname,
 		Interval:        durationEnvOrDefault("RETICORA_AGENT_INTERVAL", 60*time.Second),
 		CredentialsPath: os.Getenv("RETICORA_CREDENTIALS_PATH"),
 		TLSServerName:   os.Getenv("RETICORA_TLS_SERVER_NAME"),
+		Token:           strings.TrimSpace(os.Getenv("RETICORA_AGENT_TOKEN")),
+	}
+	if path := os.Getenv("RETICORA_AGENT_TOKEN_FILE"); cfg.Token == "" && path != "" {
+		if data, err := os.ReadFile(path); err == nil {
+			cfg.Token = strings.TrimSpace(string(data))
+		} else {
+			slog.Error("failed to read agent token", "path", path, "error", err)
+		}
+	}
+	if path := os.Getenv("RETICORA_TLS_CA_FILE"); len(cfg.CAPEM) == 0 && path != "" {
+		if data, err := os.ReadFile(path); err == nil {
+			cfg.CAPEM = data
+		} else {
+			slog.Error("failed to read CA bundle", "path", path, "error", err)
+		}
 	}
 
 	// Load the enrolled client identity from the keystore (edge enrollment
@@ -108,9 +120,31 @@ func loadAgentConfig() agentConfig {
 	return cfg
 }
 
-// httpClientFor returns an mTLS client when enrolled material is available,
-// otherwise a plain client (pre-enrollment / relay-only deployments).
-func httpClientFor(cfg agentConfig) *http.Client {
+// tlsConfig is the client TLS configuration of both channels: the enrolled
+// CA (or the system roots) and, when enrolled, the client certificate. There
+// is no plaintext fallback (AGT-03).
+func tlsConfig(cfg agentConfig) (*tls.Config, error) {
+	conf := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: cfg.TLSServerName}
+	if len(cfg.CAPEM) > 0 {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(cfg.CAPEM) {
+			return nil, errors.New("CA bundle contains no certificate")
+		}
+		conf.RootCAs = pool
+	}
+	if len(cfg.CertPEM) > 0 && len(cfg.KeyPEM) > 0 {
+		cert, err := tls.X509KeyPair(cfg.CertPEM, cfg.KeyPEM)
+		if err != nil {
+			return nil, fmt.Errorf("client certificate: %w", err)
+		}
+		conf.Certificates = []tls.Certificate{cert}
+	}
+	return conf, nil
+}
+
+// httpClientFor returns the TLS client of the direct channel: mTLS when
+// enrolled material is available, otherwise server-authenticated TLS.
+func httpClientFor(cfg agentConfig) (*http.Client, error) {
 	if len(cfg.CertPEM) > 0 && len(cfg.KeyPEM) > 0 {
 		mtlsTransport, err := transport.NewMTLS(transport.Config{
 			ServerName:    cfg.TLSServerName,
@@ -119,12 +153,16 @@ func httpClientFor(cfg agentConfig) *http.Client {
 			ClientKeyPEM:  cfg.KeyPEM,
 			Timeout:       15 * time.Second,
 		})
-		if err == nil {
-			return mtlsTransport.HTTPClient()
+		if err != nil {
+			return nil, fmt.Errorf("mTLS setup: %w", err)
 		}
-		slog.Warn("mTLS setup failed, falling back to plain client", "error", err)
+		return mtlsTransport.HTTPClient(), nil
 	}
-	return &http.Client{Timeout: 15 * time.Second}
+	conf, err := tlsConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{TLSClientConfig: conf, Proxy: http.ProxyFromEnvironment}}, nil
 }
 
 // runTelemetryLoop collects and sends system telemetry at configured intervals.
@@ -142,87 +180,112 @@ func runTelemetryLoop(ctx context.Context, cfg agentConfig) {
 	}
 }
 
-// collectAndSend gathers telemetry and sends it to the collector relay or directly to backend.
-func collectAndSend(ctx context.Context, cfg agentConfig) {
-	payload := TelemetryPayload{
-		AgentID:        cfg.AgentID,
-		OrganizationID: cfg.OrganizationID,
-		Hostname:       cfg.Hostname,
-		Version:        agentVersion,
-		OS:             runtime.GOOS,
-		Arch:           runtime.GOARCH,
-		Timestamp:      time.Now().UTC(),
-		Metrics:        collectMetrics(),
-		SystemInfo:     collectSystemInfo(),
-	}
-
-	data, err := json.Marshal(payload)
-	if err != nil {
-		slog.Error("failed to marshal telemetry", "error", err)
-		return
-	}
-
-	// Try collector relay first (preferred path), fall back to direct HTTP
-	if cfg.CollectorRelay != "" {
-		if err := sendViaRelay(ctx, cfg.CollectorRelay, data); err != nil {
-			slog.Debug("relay send failed, trying direct", "error", err)
-			if err := sendDirect(ctx, cfg, data); err != nil {
-				slog.Error("telemetry send failed", "error", err)
-			}
-		}
-	} else {
-		if err := sendDirect(ctx, cfg, data); err != nil {
-			slog.Error("telemetry send failed", "error", err)
-		}
+// buildTelemetry assembles the report in the backend's contract
+// (agent.TelemetryPayload, POST /api/v1/agents/telemetry).
+func buildTelemetry(cfg agentConfig) agent.TelemetryPayload {
+	return agent.TelemetryPayload{
+		AgentID:     cfg.AgentID,
+		Hostname:    cfg.Hostname,
+		Version:     agentVersion,
+		OS:          runtime.GOOS,
+		Arch:        runtime.GOARCH,
+		Metrics:     collectMetrics(),
+		SystemInfo:  collectSystemInfo(),
+		IPAddress:   outboundIP(),
+		CollectedAt: time.Now().UTC(),
 	}
 }
 
-// sendViaRelay sends telemetry over a TCP connection to the collector relay.
-func sendViaRelay(ctx context.Context, addr string, data []byte) error {
-	d := net.Dialer{Timeout: 10 * time.Second}
-	conn, err := d.DialContext(ctx, "tcp", addr)
+// collectAndSend sends the telemetry through the collector relay (preferred)
+// or directly to the backend; both channels are TLS only.
+func collectAndSend(ctx context.Context, cfg agentConfig) {
+	if cfg.Token == "" {
+		slog.Error("no agent credential configured (RETICORA_AGENT_TOKEN or RETICORA_AGENT_TOKEN_FILE); telemetry not sent")
+		return
+	}
+	payload := buildTelemetry(cfg)
+	if cfg.CollectorRelay != "" {
+		err := sendViaRelay(ctx, cfg, payload)
+		if err == nil {
+			return
+		}
+		if cfg.ServerURL == "" {
+			slog.Error("telemetry send via relay failed", "error", err)
+			return
+		}
+		slog.Warn("relay send failed, trying direct", "error", err)
+	}
+	if err := sendDirect(ctx, cfg, payload); err != nil {
+		slog.Error("telemetry send failed", "error", err)
+	}
+}
+
+// sendViaRelay sends one relay message over TLS to the collector relay and
+// waits for its acknowledgement.
+func sendViaRelay(ctx context.Context, cfg agentConfig, payload agent.TelemetryPayload) error {
+	conf, err := tlsConfig(cfg)
+	if err != nil {
+		return err
+	}
+	if conf.ServerName == "" {
+		host, _, splitErr := net.SplitHostPort(cfg.CollectorRelay)
+		if splitErr != nil {
+			return fmt.Errorf("relay address: %w", splitErr)
+		}
+		conf.ServerName = host
+	}
+	dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 10 * time.Second}, Config: conf}
+	conn, err := dialer.DialContext(ctx, "tcp", cfg.CollectorRelay)
 	if err != nil {
 		return fmt.Errorf("connect to relay: %w", err)
 	}
 	defer conn.Close()
 
-	if err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+	data, err := json.Marshal(agent.RelayMessage{Token: cfg.Token, Telemetry: payload})
+	if err != nil {
+		return fmt.Errorf("marshal relay message: %w", err)
+	}
+	if err = conn.SetDeadline(time.Now().Add(15 * time.Second)); err != nil {
 		return err
 	}
-	data = append(data, '\n')
-	if _, err := conn.Write(data); err != nil {
+	if _, err = conn.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("write to relay: %w", err)
 	}
-
-	// Read acknowledgement
-	buf := make([]byte, 256)
-	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		return err
-	}
-	n, err := conn.Read(buf)
+	ack, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
 		return fmt.Errorf("read relay ack: %w", err)
 	}
-	slog.Debug("relay ack received", "response", string(buf[:n]))
+	if !strings.Contains(ack, `"ok"`) {
+		return fmt.Errorf("relay rejected the telemetry: %s", strings.TrimSpace(ack))
+	}
 	return nil
 }
 
-// sendDirect sends telemetry directly to the backend via HTTP POST.
-func sendDirect(ctx context.Context, cfg agentConfig, data []byte) error {
+// sendDirect posts the telemetry to the backend over HTTPS with the agent
+// credential. A plain http:// server URL is refused.
+func sendDirect(ctx context.Context, cfg agentConfig, payload agent.TelemetryPayload) error {
 	if cfg.ServerURL == "" {
 		return fmt.Errorf("no server URL configured")
 	}
-
+	u, err := url.Parse(cfg.ServerURL)
+	if err != nil || u.Scheme != "https" {
+		return fmt.Errorf("server URL %q is not https; the agent never sends telemetry unencrypted", cfg.ServerURL)
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal telemetry: %w", err)
+	}
 	endpoint := strings.TrimRight(cfg.ServerURL, "/") + "/api/v1/agents/telemetry"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// Identity comes from the mTLS client certificate (enrolled). No spoofable
-	// X-Organization-ID/X-Agent-ID headers are set; the agent_id inside the
-	// payload links the telemetry to the enrolled agent record.
-	client := httpClientFor(cfg)
+	req.Header.Set("Authorization", "Bearer "+cfg.Token)
+	client, err := httpClientFor(cfg)
+	if err != nil {
+		return err
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("send telemetry: %w", err)
@@ -233,6 +296,20 @@ func sendDirect(ctx context.Context, cfg agentConfig, data []byte) error {
 		return fmt.Errorf("telemetry rejected: status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// outboundIP is the local address of the default route, the agent's network
+// fingerprint for the site suggestion (AGT-06). No packet is sent.
+func outboundIP() string {
+	conn, err := net.Dial("udp", "192.0.2.1:9")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	if addr, ok := conn.LocalAddr().(*net.UDPAddr); ok {
+		return addr.IP.String()
+	}
+	return ""
 }
 
 // runHeartbeat sends periodic heartbeat signals.
@@ -250,16 +327,17 @@ func runHeartbeat(ctx context.Context, cfg agentConfig) {
 	}
 }
 
-// collectMetrics gathers basic system metrics.
-func collectMetrics() map[string]any {
+// collectMetrics gathers basic system metrics as numbers (the backend
+// stores them as time series).
+func collectMetrics() map[string]float64 {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	return map[string]any{
-		"goroutines": runtime.NumGoroutine(),
-		"heap_alloc": m.HeapAlloc,
-		"sys_memory": m.Sys,
-		"num_gc":     m.NumGC,
-		"num_cpu":    runtime.NumCPU(),
+	return map[string]float64{
+		"goroutines": float64(runtime.NumGoroutine()),
+		"heap_alloc": float64(m.HeapAlloc),
+		"sys_memory": float64(m.Sys),
+		"num_gc":     float64(m.NumGC),
+		"num_cpu":    float64(runtime.NumCPU()),
 	}
 }
 

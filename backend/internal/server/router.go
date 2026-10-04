@@ -192,6 +192,16 @@ func agentTypeResolver(repos Repositories) agent.CITypeResolver {
 	return r
 }
 
+// agentHandler builds the agent handler; with a session issuer, enrollment
+// returns the agent's signed credential (AGT-03).
+func agentHandler(repos *Repositories, sessions *identity.SessionIssuer) *agent.Handler {
+	h := agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(*repos)).WithFindings(repos.Security)
+	if sessions != nil {
+		h.WithAgentTokens(sessions)
+	}
+	return h
+}
+
 // userHandler builds the user handler; with a session blacklist, deactivation
 // ends the user's sessions immediately (TLC-04).
 func userHandler(repos *Repositories, sessions *identity.SessionIssuer) *user.Handler {
@@ -253,7 +263,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		training.NewHandler(repos.Training),
 		desk.NewHandler(repos.Desk),
 		location.NewHandler(repos.Location),
-		agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(repos)).WithFindings(repos.Security),
+		agentHandler(&repos, opts.Sessions),
 		security.NewHandler(repos.Security),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
 		userHandler(&repos, opts.Sessions),

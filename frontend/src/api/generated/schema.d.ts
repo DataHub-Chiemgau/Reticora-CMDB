@@ -6020,6 +6020,8 @@ export interface components {
       os?: string;
       arch?: string;
       ci_id?: string;
+      /** @description Agent credential, returned only by the enrollment: a signed bearer token for the TLS telemetry channel (agent:ingest for this agent only, AGT-03). Store it on the agent; it is never shown again. */
+      agent_token?: string;
       /** @description Client bound by the enrollment token. */
       client_id?: string;
       /** @description Site from the token or a manual confirmation. */
