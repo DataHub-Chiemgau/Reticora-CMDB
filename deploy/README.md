@@ -87,15 +87,21 @@ It then:
    `backend/migrations/` (via `golang-migrate` when installed, otherwise via
    `psql` inside the postgres container; applied versions are tracked in the
    `reticora_schema_migrations` table so re-runs are no-ops),
-7. starts Keycloak, the API server and the frontend,
+7. starts Keycloak, removes the demo administrator of earlier releases and
+   creates the individual initial administrator (`RETICORA_INITIAL_ADMIN_EMAIL`)
+   with a random temporary password, then starts the API server and the
+   frontend,
 8. when a TLS domain is configured: requests the Let's Encrypt certificate
    with Certbot (webroot challenge served by nginx) and reloads nginx,
 9. verifies `/healthz` on the API,
 10. optionally garbage-collects superseded container images (keeps the newest
     `RETICORA_GC_KEEP_IMAGES`, default 3, per image).
 
-Afterwards the web UI is reachable at the configured base URL. The initial
-login is `admin@reticora.local` / `admin123` — **change it immediately**.
+Afterwards the web UI is reachable at the configured base URL. The installer
+prints the initial administrator's temporary password **once**; the first
+login requires a new password and the setup of a one-time-password app
+(TOTP). Re-runs keep the existing administrator and do not show the password
+again.
 
 Non-interactive (CI) usage: `./install-cloud.sh --non-interactive` uses the
 existing `.env` values, generated defaults and never prompts.

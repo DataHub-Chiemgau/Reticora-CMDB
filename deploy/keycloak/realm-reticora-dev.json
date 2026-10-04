@@ -1,7 +1,7 @@
 {
   "realm": "reticora",
   "enabled": true,
-  "displayName": "Reticora",
+  "displayName": "Reticora (development)",
   "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername(undefined) and notEmail(undefined) and passwordHistory(5)",
   "bruteForceProtected": true,
   "permanentLockout": false,
@@ -154,7 +154,6 @@
       "path": "/reticora-admin"
     }
   ],
-  "users": [],
   "authenticationFlows": [
     {
       "alias": "browser-mfa",
@@ -255,5 +254,33 @@
         }
       }
     ]
-  }
+  },
+  "users": [
+    {
+      "username": "admin@reticora.local",
+      "enabled": true,
+      "email": "admin@reticora.local",
+      "emailVerified": true,
+      "firstName": "Reticora",
+      "lastName": "Admin",
+      "attributes": {
+        "organization_id": [
+          "00000000-0000-0000-0000-000000000001"
+        ]
+      },
+      "groups": [
+        "/reticora-admin"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Admin-Dev-2024!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "viewer"
+      ]
+    }
+  ]
 }

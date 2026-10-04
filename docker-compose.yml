@@ -64,7 +64,10 @@ services:
     ports:
       - "8180:8080"
     volumes:
-      - ./deploy/keycloak:/opt/keycloak/data/import
+      # Development only: the dev realm adds the demo user to the production
+      # realm (deploy/keycloak/README.md); production imports
+      # realm-reticora.json without any user.
+      - ./deploy/keycloak/realm-reticora-dev.json:/opt/keycloak/data/import/realm-reticora-dev.json:ro
     depends_on:
       - postgres
 

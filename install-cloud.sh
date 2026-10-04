@@ -372,6 +372,12 @@ valid_email() {
     printf '%s' "$1" | grep -qE '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'
 }
 
+# The initial administrator must not reuse the demo account of earlier
+# releases, whose password is publicly known; that account is removed.
+valid_initial_admin_email() {
+    valid_email "$1" && [ "$1" != "$LEGACY_DEMO_ADMIN" ]
+}
+
 # Optional variants: empty input keeps the feature disabled.
 valid_optional_domain() { [ -z "$1" ] || valid_domain "$1"; }
 valid_optional_email()  { [ -z "$1" ] || valid_email "$1"; }
@@ -404,6 +410,7 @@ RETICORA_S3_SECRET_KEY=$RETICORA_S3_SECRET_KEY
 KEYCLOAK_ADMIN=$KEYCLOAK_ADMIN
 KEYCLOAK_ADMIN_PASSWORD=$KEYCLOAK_ADMIN_PASSWORD
 KEYCLOAK_DB_PASSWORD=$KEYCLOAK_DB_PASSWORD
+RETICORA_INITIAL_ADMIN_EMAIL=$RETICORA_INITIAL_ADMIN_EMAIL
 RETICORA_OIDC_CLIENT_SECRET=$RETICORA_OIDC_CLIENT_SECRET
 
 # Credential envelope encryption (32-byte key, base64-encoded)
@@ -499,6 +506,13 @@ collect_config() {
     ask KEYCLOAK_ADMIN "Keycloak admin user" "${def_kc_admin:-admin}"
     ask_validated KEYCLOAK_ADMIN_PASSWORD "Keycloak admin password" "$def_kc_pw" valid_password
     ask_validated KEYCLOAK_DB_PASSWORD "Keycloak database password" "$def_kc_db_pw" valid_password
+
+    # The individual administrator of the first organization (AUT-09). The
+    # realm ships without any user; the installer creates this one with a
+    # random temporary password that is shown once.
+    local def_initial_admin
+    def_initial_admin="$(env_get RETICORA_INITIAL_ADMIN_EMAIL || true)"
+    ask_validated RETICORA_INITIAL_ADMIN_EMAIL "E-mail of the initial Reticora administrator" "${def_initial_admin:-admin@reticora.example}" valid_initial_admin_email
 
     local def_client_id
     def_client_id="$(env_get RETICORA_OIDC_CLIENT_ID || true)"
@@ -1198,6 +1212,7 @@ start_stack() {
         die "Keycloak failed to start — see the log output above."
     }
     validate_keycloak_bootstrap
+    create_initial_admin
 
     info "Starting the Reticora server and frontend …"
     compose_cmd up -d server frontend
@@ -1278,6 +1293,79 @@ seed_default_organization() {
     success "Default organization is present"
 }
 
+# ─── Initial administrator ────────────────────────────────────────────────────
+# Organization the first administrator belongs to (seed_default_organization).
+DEFAULT_ORGANIZATION_ID="00000000-0000-0000-0000-000000000001"
+# Demo account of earlier releases, whose password is publicly known.
+LEGACY_DEMO_ADMIN="admin@reticora.local"
+# Set by create_initial_admin when it created the administrator; shown once
+# by print_summary and never written to disk.
+INITIAL_ADMIN_PASSWORD=""
+
+# generate_initial_password — 24 random alphanumeric characters plus one
+# character of each class the realm password policy requires.
+generate_initial_password() {
+    local core
+    core="$(openssl rand -base64 64 | tr -dc 'A-Za-z0-9' | head -c 24)"
+    [ "${#core}" -eq 24 ] || return 1
+    printf '%sAa1-' "$core"
+}
+
+# kcadm <args…> — runs the Keycloak admin CLI inside the keycloak container.
+kcadm() {
+    compose_cmd exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"
+}
+
+# kc_user_id <username> — prints the id of the realm user, empty if absent.
+kc_user_id() {
+    kcadm get users -r reticora -q username="$1" -q exact=true --fields id --format csv --noquotes 2>/dev/null | head -n 1
+}
+
+# create_initial_admin — removes the demo administrator of earlier releases
+# and creates the individual administrator once: org_admin (MFA required),
+# member of reticora-admin, organization attribute of the default
+# organization, random temporary password and mandatory password change and
+# OTP setup at first login. Re-runs leave an existing administrator alone.
+create_initial_admin() {
+    INITIAL_ADMIN_PASSWORD=""
+    info "Ensuring the initial administrator exists …"
+    kcadm config credentials --server http://localhost:8080 --realm master \
+        --user "$KEYCLOAK_ADMIN" --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null \
+        || die "Could not log in to the Keycloak admin API as $KEYCLOAK_ADMIN."
+
+    local legacy_id
+    legacy_id="$(kc_user_id "$LEGACY_DEMO_ADMIN")"
+    if [ -n "$legacy_id" ]; then
+        kcadm delete "users/$legacy_id" -r reticora \
+            || die "Could not remove the demo administrator $LEGACY_DEMO_ADMIN (known password)."
+        warn "Removed the demo administrator $LEGACY_DEMO_ADMIN of an earlier release (known password)."
+    fi
+
+    local email="$RETICORA_INITIAL_ADMIN_EMAIL" user_id group_id password
+    if [ -n "$(kc_user_id "$email")" ]; then
+        success "Initial administrator $email already exists"
+        return 0
+    fi
+    password="$(generate_initial_password)" || die "Could not generate a password for the initial administrator."
+    kcadm create users -r reticora \
+        -s username="$email" -s email="$email" -s emailVerified=true -s enabled=true \
+        -s "attributes.organization_id=[\"$DEFAULT_ORGANIZATION_ID\"]" \
+        -s 'requiredActions=["UPDATE_PASSWORD","CONFIGURE_TOTP"]' >/dev/null \
+        || die "Could not create the initial administrator $email."
+    user_id="$(kc_user_id "$email")"
+    [ -n "$user_id" ] || die "The initial administrator $email was not found after creation."
+    kcadm set-password -r reticora --username "$email" --new-password "$password" --temporary \
+        || die "Could not set the temporary password of $email."
+    kcadm add-roles -r reticora --uusername "$email" --rolename org_admin \
+        || die "Could not grant org_admin to $email."
+    group_id="$(kcadm get groups -r reticora -q search=reticora-admin --fields id --format csv --noquotes 2>/dev/null | head -n 1)"
+    [ -n "$group_id" ] || die "The reticora-admin group is missing in the realm."
+    kcadm update "users/$user_id/groups/$group_id" -r reticora -s realm=reticora -s userId="$user_id" -s groupId="$group_id" -n \
+        || die "Could not add $email to reticora-admin."
+    INITIAL_ADMIN_PASSWORD="$password"
+    success "Initial administrator $email created"
+}
+
 # ─── Health verification ──────────────────────────────────────────────────────
 verify_stack() {
     info "Verifying the installation …"
@@ -1318,6 +1406,16 @@ gc_images() {
 }
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
+# initial_login_line — the temporary password is shown exactly once, by the
+# run that created the administrator.
+initial_login_line() {
+    if [ -n "$INITIAL_ADMIN_PASSWORD" ]; then
+        printf '  Initial login:     %s / %s\n' "$RETICORA_INITIAL_ADMIN_EMAIL" "$INITIAL_ADMIN_PASSWORD"
+        printf '                     temporary — shown only now; password change and OTP setup are required at first login'
+    else
+        printf '  Initial login:     %s (created by an earlier run; password not shown again)' "$RETICORA_INITIAL_ADMIN_EMAIL"
+    fi
+}
 print_summary() {
     echo
     printf '%s%sInstallation complete%s\n' "$C_BOLD" "$C_GREEN" "$C_RESET"
@@ -1337,7 +1435,7 @@ print_summary() {
   Web UI:            $ui_url  (host port $RETICORA_FRONTEND_PORT)
   REST API:          http://localhost:$RETICORA_SERVER_PORT  (health: /healthz)
   Keycloak console:  http://localhost:$RETICORA_KEYCLOAK_PORT  (user: $KEYCLOAK_ADMIN)
-  Initial login:     admin@reticora.local / admin123  (change immediately!)
+$(initial_login_line)
 ${tls_note:+$tls_note
 }
   Configuration:     $ENV_FILE
