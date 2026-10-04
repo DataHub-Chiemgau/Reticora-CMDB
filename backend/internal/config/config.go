@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -277,4 +279,32 @@ func (l *loader) boolean(key string, defaultValue bool) bool {
 		return defaultValue
 	}
 	return b
+}
+
+// dsnKeyValueSecret matches the password of a key=value connection string
+// (libpq: password=secret, password='with spaces'), case-insensitively.
+var dsnKeyValueSecret = regexp.MustCompile(`(?i)\b(password|passwd|pwd|sslpassword)\s*=\s*('(?:[^'\\]|\\.)*'|[^\s;&]*)`)
+
+// MaskDSN hides the password of a connection string for logs (SEC-01). It
+// covers the URL form (scheme://user:password@host/db, including a
+// password=… query parameter) and the key=value form (host=… password=…),
+// and never returns the input unchanged when it carries a password.
+func MaskDSN(dsn string) string {
+	masked := dsnKeyValueSecret.ReplaceAllString(dsn, "${1}=***")
+	if u, err := url.Parse(masked); err == nil && u.Scheme != "" && u.Host != "" {
+		if _, hasPassword := u.User.Password(); hasPassword {
+			u.User = url.UserPassword(u.User.Username(), "***")
+		}
+		return strings.ReplaceAll(u.String(), "%2A%2A%2A", "***")
+	}
+	// Not a parseable URL: cut any userinfo password before the last "@".
+	if scheme := strings.Index(masked, "://"); scheme >= 0 {
+		rest := masked[scheme+3:]
+		if at := strings.LastIndex(rest, "@"); at >= 0 {
+			if colon := strings.Index(rest[:at], ":"); colon >= 0 {
+				return masked[:scheme+3] + rest[:colon+1] + "***" + rest[at:]
+			}
+		}
+	}
+	return masked
 }

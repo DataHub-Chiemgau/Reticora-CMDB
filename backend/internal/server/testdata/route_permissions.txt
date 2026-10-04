@@ -100,7 +100,6 @@ GET /api/v1/contacts contact:read
 GET /api/v1/contacts/{id} contact:read
 GET /api/v1/credentials/ credential:read
 GET /api/v1/credentials/{id} credential:read
-GET /api/v1/credentials/{id}/decrypt credential:decrypt
 GET /api/v1/desks desk:read
 GET /api/v1/desks/{id} desk:read
 GET /api/v1/desks/{id}/bookings desk:read

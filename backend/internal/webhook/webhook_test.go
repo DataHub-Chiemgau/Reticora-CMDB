@@ -269,3 +269,41 @@ func TestHandler_Test_UnknownSubscription(t *testing.T) {
 		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+// TestHandler_HeadersAreWriteOnly covers WP-047 (SEC-01): custom header
+// values (authentication) are masked in create, get and list responses, while
+// the stored subscription keeps them for delivery.
+func TestHandler_HeadersAreWriteOnly(t *testing.T) {
+	repo := NewMemoryRepository()
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+
+	body := `{"name":"Hook","url":"https://example.com/hook","secret":"s","events":["ci.created"],"headers":{"Authorization":"Bearer hdr-s3cret"}}`
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("POST", "/api/v1/webhooks", bytes.NewBufferString(body))))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var created Subscription
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	responses := []string{w.Body.String()}
+	for _, path := range []string{"/api/v1/webhooks", "/api/v1/webhooks/" + created.ID} {
+		w = httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("GET", path, nil)))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d", path, w.Code)
+		}
+		responses = append(responses, w.Body.String())
+	}
+	for _, out := range responses {
+		if bytes.Contains([]byte(out), []byte("hdr-s3cret")) || !bytes.Contains([]byte(out), []byte(`"Authorization":"***"`)) {
+			t.Errorf("response does not mask the header: %s", out)
+		}
+	}
+	stored, err := repo.GetByID(context.Background(), "org-1", created.ID)
+	if err != nil || stored.Headers["Authorization"] != "Bearer hdr-s3cret" {
+		t.Errorf("stored header %v, %v; want the real value for delivery", stored, err)
+	}
+}

@@ -139,3 +139,26 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 		})
 	}
 }
+
+// TestMaskDSN covers WP-047 (SEC-01): the password of URL and key=value
+// connection strings never survives masking.
+func TestMaskDSN(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"postgres://reticora:s3cret@db:5432/reticora?sslmode=disable", "postgres://reticora:***@db:5432/reticora?sslmode=disable"},
+		{"postgresql://user:p%40ss@db/x", "postgresql://user:***@db/x"},
+		{"postgres://db/x?user=app&password=s3cret&sslmode=require", "postgres://db/x?user=app&password=***&sslmode=require"},
+		{"host=db port=5432 user=app password=s3cret dbname=x", "host=db port=5432 user=app password=*** dbname=x"},
+		{"host=db PASSWORD='s3c ret' dbname=x", "host=db PASSWORD=*** dbname=x"},
+		{"redis://:s3cret@cache:6379/0", "redis://:***@cache:6379/0"},
+		{"postgres://app@db/x", "postgres://app@db/x"},
+		{"host=db dbname=x", "host=db dbname=x"},
+	} {
+		got := MaskDSN(c.in)
+		if got != c.want {
+			t.Errorf("MaskDSN(%q) = %q, want %q", c.in, got, c.want)
+		}
+		if strings.Contains(got, "s3c") || strings.Contains(got, "p%40ss") {
+			t.Errorf("MaskDSN(%q) leaks the password: %q", c.in, got)
+		}
+	}
+}

@@ -2673,29 +2673,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/credentials/{id}/decrypt': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    /**
-     * Decrypt and return a credential secret
-     * @description Decrypts the stored credential and returns the plaintext secret as a JSON object. **This is the only endpoint that exposes secret material;** callers must be strongly authorized. The organization is derived from the authenticated tenant, so a caller can only decrypt secrets belonging to their own organization.
-     */
-    get: operations['decryptCredential'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/v1/credentials/rotate-keys': {
     parameters: {
       query?: never;
@@ -5130,6 +5107,7 @@ export interface components {
       url: string;
       events: components['schemas']['WebhookEvent'][];
       is_active: boolean;
+      /** @description Custom request headers. Values are write-only: responses return each header name with the value "***" (SEC-01). */
       headers?: {
         [key: string]: string;
       };
@@ -7214,10 +7192,6 @@ export interface components {
       secret: {
         [key: string]: unknown;
       };
-    };
-    /** @description Decrypted plaintext secret material returned only by the credential decrypt endpoint. Field names depend on the credential kind. */
-    CredentialSecret: {
-      [key: string]: unknown;
     };
     DocumentLink: {
       id: string;
@@ -13768,32 +13742,6 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
-      };
-      401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['InternalServerError'];
-    };
-  };
-  decryptCredential: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Decrypted credential secret */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['CredentialSecret'];
-        };
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];

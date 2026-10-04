@@ -219,7 +219,6 @@ func TestSpecialActionsRequireTheirOwnPermission(t *testing.T) {
 	}{
 		{http.MethodDelete, "/api/v1/cis/{id}", identity.PermCIDelete},
 		{http.MethodPatch, "/api/v1/cis/{id}", identity.PermCIWrite},
-		{http.MethodGet, "/api/v1/credentials/{id}/decrypt", identity.PermCredentialDecrypt},
 		{http.MethodGet, "/api/v1/credentials/{id}", identity.PermCredentialRead},
 		{http.MethodPost, "/api/v1/orders/{id}/approve", identity.PermOrderApprove},
 		{http.MethodPost, "/api/v1/orders/{id}/reject", identity.PermOrderApprove},

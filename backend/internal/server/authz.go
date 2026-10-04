@@ -187,8 +187,6 @@ var routeRules = []routeRule{
 	{http.MethodGet, "cis/*/relationships", identity.PermRelationshipRead},
 	{http.MethodGet, "cis/*/dependencies", identity.PermTopologyRead},
 	{http.MethodGet, "cis/*/blast-radius", identity.PermTopologyRead},
-	// Decrypting a secret is not reading credential metadata.
-	{http.MethodGet, "credentials/*/decrypt", identity.PermCredentialDecrypt},
 	// Approving or rejecting an order is not editing it.
 	{http.MethodPost, "orders/*/approve", identity.PermOrderApprove},
 	{http.MethodPost, "orders/*/reject", identity.PermOrderApprove},

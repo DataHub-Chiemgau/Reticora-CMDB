@@ -251,6 +251,7 @@
     "active": "Active",
     "inactive": "Inactive",
     "secret": "Secret (HMAC signature)",
+    "secretWriteOnly": "The secret and header values are write-only: they are never shown again after saving.",
     "loading": "Loading webhooks",
     "errorTitle": "Webhooks could not be loaded",
     "createSubscription": "Create webhook subscription",

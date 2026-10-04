@@ -4961,33 +4961,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /api/v1/credentials/{id}/decrypt:
-    parameters:
-      - $ref: '#/components/parameters/ResourceID'
-    get:
-      operationId: decryptCredential
-      tags: [Credentials]
-      summary: Decrypt and return a credential secret
-      description: >-
-        Decrypts the stored credential and returns the plaintext secret as a
-        JSON object. **This is the only endpoint that exposes secret material;**
-        callers must be strongly authorized. The organization is derived from
-        the authenticated tenant, so a caller can only decrypt secrets belonging
-        to their own organization.
-      responses:
-        '200':
-          description: Decrypted credential secret
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CredentialSecret'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
   /api/v1/credentials/rotate-keys:
     post:
       operationId: rotateCredentialKeys
@@ -8328,6 +8301,9 @@ components:
           type: boolean
         headers:
           type: object
+          description: >-
+            Custom request headers. Values are write-only: responses return
+            each header name with the value "***" (SEC-01).
           additionalProperties:
             type: string
         created_at:
@@ -11826,13 +11802,6 @@ components:
           type: object
           description: Plaintext secret data, encrypted at rest before storage.
           additionalProperties: true
-
-    CredentialSecret:
-      type: object
-      description: >-
-        Decrypted plaintext secret material returned only by the credential
-        decrypt endpoint. Field names depend on the credential kind.
-      additionalProperties: true
 
     DocumentLink:
       type: object

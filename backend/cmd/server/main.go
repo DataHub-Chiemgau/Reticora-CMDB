@@ -31,6 +31,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
@@ -50,7 +51,9 @@ func main() {
 
 	cfg := config.Load()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	// Every record passes the redaction handler: secret attributes and URL
+	// passwords never reach the log (SEC-01).
+	logger := slog.New(httpx.NewRedactingHandler(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel})))
 	slog.SetDefault(logger)
 
 	// Fail-closed start (OPS-01): missing or invalid settings stop the server
@@ -174,12 +177,12 @@ func main() {
 		}
 		pool, err := database.NewPool(context.Background(), cfg.DatabaseURL)
 		if err != nil {
-			slog.Error("failed to connect to database", "error", err, "url", maskDSN(cfg.DatabaseURL))
+			slog.Error("failed to connect to database", "error", err, "url", config.MaskDSN(cfg.DatabaseURL))
 			os.Exit(1)
 		}
 		defer pool.Close()
 
-		slog.Info("connected to PostgreSQL", "url", maskDSN(cfg.DatabaseURL))
+		slog.Info("connected to PostgreSQL", "url", config.MaskDSN(cfg.DatabaseURL))
 		dbCheck := server.DatabaseReadiness(pool, server.RequiredExtensions)
 		if err := dbCheck.Check(context.Background()); err != nil {
 			slog.Error("database is not ready", "error", err)
@@ -425,27 +428,6 @@ func loadSessionIssuer(cfg *config.Config) (*identity.SessionIssuer, error) {
 		return nil, fmt.Errorf("parse session key %q: %w", cfg.SessionKeyPath, err)
 	}
 	return issuer, nil
-}
-
-// maskDSN hides password from database URL for logging.
-func maskDSN(dsn string) string {
-	// Mask the password portion of user:password@host/db
-	atIdx := strings.Index(dsn, "@")
-	if atIdx < 0 {
-		return dsn
-	}
-	colonIdx := strings.Index(dsn, "://")
-	if colonIdx < 0 {
-		return "***"
-	}
-	prefix := dsn[:colonIdx+3]
-	rest := dsn[colonIdx+3:]
-	passStart := strings.Index(rest, ":")
-	passEnd := strings.Index(rest, "@")
-	if passStart < 0 || passEnd < 0 || passStart >= passEnd {
-		return dsn
-	}
-	return prefix + rest[:passStart+1] + "***" + rest[passEnd:]
 }
 
 // setupObjectStorage connects the S3-compatible store and creates the buckets

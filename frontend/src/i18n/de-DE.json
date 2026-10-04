@@ -251,6 +251,7 @@
     "active": "Aktiv",
     "inactive": "Inaktiv",
     "secret": "Geheimnis (HMAC-Signatur)",
+    "secretWriteOnly": "Geheimnis und Header-Werte sind nur schreibbar: Sie werden nach dem Speichern nie wieder angezeigt.",
     "loading": "Webhooks werden geladen",
     "errorTitle": "Webhooks konnten nicht geladen werden",
     "createSubscription": "Webhook-Abonnement erstellen",

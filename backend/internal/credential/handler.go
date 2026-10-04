@@ -25,7 +25,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Get("/", h.list)
 		r.Post("/rotate-keys", h.rotateKeys)
 		r.Get("/{id}", h.get)
-		r.Get("/{id}/decrypt", h.decrypt)
+		// There is deliberately no decrypt route: plaintext secrets never
+		// leave the server through the API (SEC-01, COL-02). They are only
+		// decrypted in server memory for delivery to collectors and
+		// connectors (Service.Decrypt).
 		r.Delete("/{id}", h.delete)
 	})
 }
@@ -120,27 +123,6 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(cred)
-}
-
-func (h *Handler) decrypt(w http.ResponseWriter, r *http.Request) {
-	orgID, ok := organizationID(w, r)
-	if !ok {
-		return
-	}
-	id := chi.URLParam(r, "id")
-
-	secret, err := h.svc.Decrypt(r.Context(), orgID, id)
-	if err == ErrNotFound {
-		writeError(w, http.StatusNotFound, "credential not found")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to decrypt credential")
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(secret)
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {

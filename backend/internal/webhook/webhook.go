@@ -28,6 +28,23 @@ type Subscription struct {
 	UpdatedAt      string            `json:"updated_at"`
 }
 
+// MaskedHeaderValue replaces every custom header value in API responses.
+const MaskedHeaderValue = "***"
+
+// redacted returns the subscription as the API shows it: custom header values
+// often carry authentication (Authorization, API keys), so they are
+// write-only and masked; only the header names are returned (SEC-01).
+func (s *Subscription) redacted() Subscription {
+	out := *s
+	if len(s.Headers) > 0 {
+		out.Headers = make(map[string]string, len(s.Headers))
+		for name := range s.Headers {
+			out.Headers[name] = MaskedHeaderValue
+		}
+	}
+	return out
+}
+
 // CreateRequest is the payload for creating a webhook subscription.
 type CreateRequest struct {
 	Name    string            `json:"name"`
@@ -338,8 +355,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	shown := make([]Subscription, 0, len(subs))
+	for i := range subs {
+		shown = append(shown, subs[i].redacted())
+	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Subscription]{
-		Data:    subs,
+		Data:    shown,
 		Total:   total,
 		Limit:   page.Limit,
 		Offset:  page.Offset,
@@ -362,7 +383,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.WriteJSON(w, http.StatusOK, sub)
+	api.WriteJSON(w, http.StatusOK, sub.redacted())
 }
 
 // Create handles POST /api/v1/webhooks
@@ -406,7 +427,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.WriteJSON(w, http.StatusCreated, sub)
+	api.WriteJSON(w, http.StatusCreated, sub.redacted())
 }
 
 // Delete handles DELETE /api/v1/webhooks/{id}

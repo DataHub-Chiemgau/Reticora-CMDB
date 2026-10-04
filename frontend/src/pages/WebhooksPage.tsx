@@ -107,6 +107,7 @@ export function WebhooksPage() {
               onChange={(event) => setForm({ ...form, secret: event.target.value })}
             />
           </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{t('webhook.secretWriteOnly')}</p>
           <fieldset>
             <legend className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
               {t('webhook.events')}
