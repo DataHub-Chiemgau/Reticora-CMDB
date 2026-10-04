@@ -98,4 +98,8 @@ var Catalogue = []Permission{
 	{Key: "override:write", Resource: "override", Action: "write", Description: "Create and clear manual field overrides"},
 	{Key: "saved_view:read", Resource: "saved_view", Action: "read", Description: "Read saved views"},
 	{Key: "saved_view:write", Resource: "saved_view", Action: "write", Description: "Manage saved views"},
+	// Special actions with their own permission (RBA-06, migration 000072).
+	{Key: "credential:decrypt", Resource: "credential", Action: "decrypt", Description: "Decrypt stored credential secrets"},
+	{Key: "lifecycle:transition", Resource: "lifecycle", Action: "transition", Description: "Execute lifecycle transitions of CIs and assets"},
+	{Key: "reconciliation:manage", Resource: "reconciliation", Action: "manage", Description: "Manage reconciliation settings (source policy)"},
 }

@@ -152,3 +152,7 @@ AUT-01;[B];B;backend/internal/identity/deactivation_integration_test.go;WP-042
 AUT-01;[B];B;backend/internal/identity/oidc_test.go;WP-043
 AUT-09;[B];B;backend/internal/identity/oidc_test.go;WP-043
 AUT-09;[B];B;tests/install-cloud-helpers.test.sh;WP-044
+RBA-04;[B];B;backend/internal/server/authz_test.go;WP-045
+RBA-06;[P2];B;backend/internal/server/authz_test.go;WP-045
+MET-14;P2/G2;B;backend/internal/server/authz_test.go;WP-045
+CI-10;[B];B;backend/internal/server/authz_test.go;WP-045

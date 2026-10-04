@@ -156,6 +156,71 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"privacy": identity.PermUserManage,
 }
 
+// routeRule maps one operation to its permission ahead of the resource
+// tables. Path segments of pattern are literals or "*" for a path parameter;
+// method "*" matches every method. Rules cover actions and nested
+// sub-resources whose permission differs from the one of the first path
+// segment (RBA-04, RBA-06), so a nested route cannot borrow the broader right
+// of its parent resource.
+type routeRule struct {
+	method     string
+	pattern    string
+	permission identity.Permission
+}
+
+// routeRules are checked in order; the first match wins.
+var routeRules = []routeRule{
+	// Deleting a CI is its own right; ci:write does not delete.
+	{http.MethodDelete, "cis/*", identity.PermCIDelete},
+	// Instance attributes (MET-14, CI-10) and manual overrides (CI-10).
+	{http.MethodPut, "cis/*/field-definitions", identity.PermCIInstanceAttributeManage},
+	{http.MethodDelete, "cis/*/field-definitions/*", identity.PermCIInstanceAttributeManage},
+	{"*", "cis/*/fields/*/override", identity.PermOverrideWrite},
+	// Lifecycle transitions of CIs and assets (RBA-06).
+	{http.MethodPost, "cis/*/lifecycle-transitions", identity.PermLifecycleTransition},
+	{http.MethodPost, "assets/*/lifecycle-transitions", identity.PermLifecycleTransition},
+	// Nested sub-resources are protected by their own resource's rights.
+	{http.MethodGet, "cis/*/contacts", identity.PermContactRead},
+	{http.MethodPost, "cis/*/contacts", identity.PermContactWrite},
+	{http.MethodGet, "cis/*/interfaces", identity.PermIPAMRead},
+	{http.MethodPost, "cis/*/interfaces", identity.PermIPAMWrite},
+	{http.MethodGet, "cis/*/relationships", identity.PermRelationshipRead},
+	{http.MethodGet, "cis/*/dependencies", identity.PermTopologyRead},
+	{http.MethodGet, "cis/*/blast-radius", identity.PermTopologyRead},
+	// Decrypting a secret is not reading credential metadata.
+	{http.MethodGet, "credentials/*/decrypt", identity.PermCredentialDecrypt},
+	// Approving or rejecting an order is not editing it.
+	{http.MethodPost, "orders/*/approve", identity.PermOrderApprove},
+	{http.MethodPost, "orders/*/reject", identity.PermOrderApprove},
+	// Reconciliation settings (RBA-06); reading them stays discovery:read.
+	{http.MethodPut, "reconciliation/source-policy", identity.PermReconciliationManage},
+}
+
+// matchRouteRule returns the permission of the first rule matching the
+// method and the path segments below /api/v1/.
+func matchRouteRule(method string, segments []string) (identity.Permission, bool) {
+	for _, rule := range routeRules {
+		if rule.method != "*" && rule.method != method {
+			continue
+		}
+		parts := strings.Split(rule.pattern, "/")
+		if len(parts) != len(segments) {
+			continue
+		}
+		matched := true
+		for i, part := range parts {
+			if part != "*" && part != segments[i] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return rule.permission, true
+		}
+	}
+	return "", false
+}
+
 // routeAccess describes how a route participates in authorization.
 type routeAccess int
 
@@ -203,6 +268,10 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 	segments := strings.Split(strings.Trim(rest, "/"), "/")
 	if len(segments) == 0 || segments[0] == "" {
 		return "", routeUnmapped
+	}
+
+	if permission, ok := matchRouteRule(method, segments); ok {
+		return permission, routeProtected
 	}
 
 	resource := segments[0]

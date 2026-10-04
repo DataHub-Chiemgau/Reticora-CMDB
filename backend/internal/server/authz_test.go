@@ -1,8 +1,11 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"sort"
 	"strings"
 	"testing"
 
@@ -146,5 +149,97 @@ func TestGraphQLRouteRequiresAuthenticationOnly(t *testing.T) {
 	required, access := PermissionForRoute(http.MethodPost, "/api/v1/graphql")
 	if access != routeProtected || required != "" {
 		t.Fatalf("POST /api/v1/graphql: permission %q access %v, want authenticated-only", required, access)
+	}
+}
+
+// routePermissionsFile is the reviewed table of the required permission of
+// every operation (RBA-04). Regenerate it with
+// RETICORA_UPDATE_ROUTE_PERMISSIONS=1 and review the diff: every changed line
+// changes who may call an operation.
+const routePermissionsFile = "testdata/route_permissions.txt"
+
+// TestEveryOperationRequiresItsExpectedPermission covers WP-045 (RBA-04): the
+// permission of every registered operation equals the reviewed table, so a
+// route cannot silently fall back to the right of its first path segment.
+func TestEveryOperationRequiresItsExpectedPermission(t *testing.T) {
+	var b strings.Builder
+	for _, op := range routeTable(t, testRouter(t)) {
+		if !strings.HasPrefix(op.Path, "/api/") && !strings.HasPrefix(op.Path, "/scim/") {
+			continue
+		}
+		required, access := PermissionForRoute(op.Method, op.Path)
+		value := string(required)
+		switch {
+		case access == routePublic:
+			value = "public"
+		case access == routeProtected && required == "":
+			value = "authenticated"
+		case access == routeUnmapped:
+			value = "UNMAPPED"
+		}
+		fmt.Fprintf(&b, "%s %s %s\n", op.Method, op.Path, value)
+	}
+	lines := strings.Split(strings.TrimSpace(b.String()), "\n")
+	sort.Strings(lines)
+	got := strings.Join(lines, "\n") + "\n"
+
+	if os.Getenv("RETICORA_UPDATE_ROUTE_PERMISSIONS") == "1" {
+		if err := os.WriteFile(routePermissionsFile, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(routePermissionsFile)
+	if err != nil {
+		t.Fatalf("read %s: %v", routePermissionsFile, err)
+	}
+	if got != string(want) {
+		wantLines := map[string]bool{}
+		for _, l := range strings.Split(strings.TrimSpace(string(want)), "\n") {
+			wantLines[l] = true
+		}
+		for _, l := range lines {
+			if !wantLines[l] {
+				t.Errorf("operation not in the reviewed table (or with another permission): %s", l)
+			}
+			delete(wantLines, l)
+		}
+		for l := range wantLines {
+			t.Errorf("reviewed operation missing or changed: %s", l)
+		}
+	}
+}
+
+// TestSpecialActionsRequireTheirOwnPermission pins the corrections of WP-045
+// (RBA-04, RBA-06, MET-14, CI-10).
+func TestSpecialActionsRequireTheirOwnPermission(t *testing.T) {
+	for _, c := range []struct {
+		method, path string
+		want         identity.Permission
+	}{
+		{http.MethodDelete, "/api/v1/cis/{id}", identity.PermCIDelete},
+		{http.MethodPatch, "/api/v1/cis/{id}", identity.PermCIWrite},
+		{http.MethodGet, "/api/v1/credentials/{id}/decrypt", identity.PermCredentialDecrypt},
+		{http.MethodGet, "/api/v1/credentials/{id}", identity.PermCredentialRead},
+		{http.MethodPost, "/api/v1/orders/{id}/approve", identity.PermOrderApprove},
+		{http.MethodPost, "/api/v1/orders/{id}/reject", identity.PermOrderApprove},
+		{http.MethodPost, "/api/v1/orders/{id}/submit", identity.PermOrderWrite},
+		{http.MethodPut, "/api/v1/cis/{id}/field-definitions", identity.PermCIInstanceAttributeManage},
+		{http.MethodDelete, "/api/v1/cis/{id}/field-definitions/{name}", identity.PermCIInstanceAttributeManage},
+		{http.MethodGet, "/api/v1/cis/{id}/field-definitions", identity.PermCIRead},
+		{http.MethodPut, "/api/v1/cis/{id}/fields/{name}/override", identity.PermOverrideWrite},
+		{http.MethodDelete, "/api/v1/cis/{id}/fields/{name}/override", identity.PermOverrideWrite},
+		{http.MethodPost, "/api/v1/cis/{id}/lifecycle-transitions", identity.PermLifecycleTransition},
+		{http.MethodPost, "/api/v1/assets/{id}/lifecycle-transitions", identity.PermLifecycleTransition},
+		{http.MethodPut, "/api/v1/reconciliation/source-policy", identity.PermReconciliationManage},
+		{http.MethodGet, "/api/v1/reconciliation/source-policy", identity.PermDiscoveryRead},
+		{http.MethodPost, "/api/v1/cis/{id}/contacts", identity.PermContactWrite},
+		{http.MethodPost, "/api/v1/cis/{id}/interfaces", identity.PermIPAMWrite},
+		{http.MethodGet, "/api/v1/cis/{id}/relationships", identity.PermRelationshipRead},
+	} {
+		got, access := PermissionForRoute(c.method, c.path)
+		if access != routeProtected || got != c.want {
+			t.Errorf("%s %s: %q (access %v), want %q", c.method, c.path, got, access, c.want)
+		}
 	}
 }

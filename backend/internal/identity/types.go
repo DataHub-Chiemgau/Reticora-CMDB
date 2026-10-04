@@ -107,6 +107,10 @@ const (
 	PermOverrideWrite             Permission = "override:write"
 	PermSavedViewRead             Permission = "saved_view:read"
 	PermSavedViewWrite            Permission = "saved_view:write"
+	// Special actions with their own permission (RBA-06, WP-045).
+	PermCredentialDecrypt    Permission = "credential:decrypt"
+	PermLifecycleTransition  Permission = "lifecycle:transition"
+	PermReconciliationManage Permission = "reconciliation:manage"
 )
 
 // AllPermissions returns the full set of permissions the identity layer can
@@ -209,6 +213,9 @@ func allPermissions() []Permission {
 		PermOverrideWrite,
 		PermSavedViewRead,
 		PermSavedViewWrite,
+		PermCredentialDecrypt,
+		PermLifecycleTransition,
+		PermReconciliationManage,
 	}
 }
 
