@@ -79,6 +79,11 @@ type Config struct {
 	// is opt-in for bounded-tenant deployments.
 	MetricsTenantLabel bool
 
+	// EgressAllowPrivate permits webhook and connector destinations in
+	// private networks (on-premises installations); cloud metadata endpoints
+	// stay blocked (SEC-08). Default off.
+	EgressAllowPrivate bool
+
 	// Rate Limiting
 	RateLimitRPM int // requests per minute per key/user (default 600)
 
@@ -141,6 +146,7 @@ func Load() *Config {
 		// by the tenant count. Default off; enable for bounded-tenant setups.
 		MetricsTenantLabel: l.boolean("RETICORA_METRICS_TENANT_LABEL", false),
 		RateLimitRPM:       l.integer("RETICORA_RATE_LIMIT_RPM", 600),
+		EgressAllowPrivate: l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
 
 		SearchBackend:      l.str("RETICORA_SEARCH_BACKEND", "postgres"),
 		OpenSearchURL:      l.str("RETICORA_OPENSEARCH_URL", ""),

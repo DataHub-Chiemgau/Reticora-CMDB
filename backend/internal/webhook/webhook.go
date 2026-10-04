@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -205,6 +206,15 @@ type Handler struct {
 	deliverer   TestDeliverer
 	deliveries  DeliveryLister
 	deadLetters DeadLetterLister
+	// egress validates subscriber URLs when they are stored (SEC-08).
+	egress egress.Options
+}
+
+// WithEgress sets the destination policy subscriber URLs are validated
+// against; the default blocks every internal destination.
+func (h *Handler) WithEgress(opts egress.Options) *Handler {
+	h.egress = opts
+	return h
 }
 
 // NewHandler creates a new webhook handler. An optional TestDeliverer enables
@@ -402,6 +412,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if req.Name == "" || req.URL == "" || req.Secret == "" || len(req.Events) == 0 {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name, url, secret, and events are required")
+		return
+	}
+
+	if err := h.egress.ValidateURL(req.URL); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 

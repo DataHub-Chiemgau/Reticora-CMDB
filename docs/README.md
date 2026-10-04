@@ -732,6 +732,7 @@ The server is configured via environment variables:
 - `RETICORA_BLOB_DIR` — filesystem blob storage used by export jobs in `--no-db` development mode (defaults to a temp directory).
 - `RETICORA_OTEL_ENDPOINT` — OTLP HTTP collector endpoint for traces/metrics; empty (default) keeps no-op telemetry.
 - `RETICORA_METRICS_TENANT_LABEL` — set to `true` to add the `organization_id` label to HTTP request metrics (default `false`; multiplies series by tenant count).
+- `RETICORA_EGRESS_ALLOW_PRIVATE` — set to `true` to let webhooks and IGA connectors reach private, loopback and link-local destinations (on-premises installations; default `false`). Cloud metadata endpoints stay blocked; DNS pinning and the 3-redirect limit always apply (SEC-08).
 
 ### CI/CD
 

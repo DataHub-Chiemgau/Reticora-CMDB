@@ -16,6 +16,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
 
 const (
@@ -88,7 +89,9 @@ type Dispatcher struct {
 // NewDispatcher creates a dispatcher with a background worker.
 func NewDispatcher(repo Repository, client *http.Client, opts ...DispatcherOptions) *Dispatcher {
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		// Subscriber URLs are user input: deliveries go through the egress
+		// client, which blocks internal destinations (SEC-08).
+		client = egress.NewClient(egress.Options{})
 	}
 
 	options := DispatcherOptions{}

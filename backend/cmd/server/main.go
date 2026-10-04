@@ -31,6 +31,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
@@ -269,7 +270,10 @@ func main() {
 	slog.Info("entitlement enforcement configured",
 		"default_plan", cfg.DefaultPlan, "enforced", cfg.EntitlementEnforcement)
 
-	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, nil, webhook.DispatcherOptions{
+	// Webhook and connector destinations are user input: every outbound call
+	// goes through the egress client (SEC-08).
+	egressPolicy := egress.Options{AllowPrivate: cfg.EgressAllowPrivate}
+	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, egress.NewClient(egressPolicy), webhook.DispatcherOptions{
 		Deliveries: repos.WebhookDeliveries,
 	})
 	defer func() {
@@ -295,6 +299,7 @@ func main() {
 		AuditPool:            auditPool,
 		AIProvider:           aiProvider,
 		Blobs:                blobStore,
+		Egress:               egressPolicy,
 		Readiness:            readiness,
 	})
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
@@ -36,6 +37,12 @@ func NewHandler(repo Repository, users user.Repository, creds *credential.Servic
 	}
 	return &Handler{repo: repo, users: users, credentials: creds, registry: registry, lifecycle: NewLifecycleService(repo), runner: NewTaskRunner(repo, registry, decrypt), drift: NewDriftDetector(repo, registry, decrypt), workflows: workflows}
 }
+// WithEgress sets the destination policy of connector URLs (SEC-08).
+func (h *Handler) WithEgress(opts egress.Options) *Handler {
+	h.registry.WithEgress(opts)
+	return h
+}
+
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/iga/connectors", h.ListConnectors)
 	r.Post("/api/v1/iga/connectors", h.CreateConnector)
@@ -127,11 +134,9 @@ func (h *Handler) CreateConnector(w http.ResponseWriter, r *http.Request) {
 	if c.Capabilities == (ConnectorCapabilities{}) {
 		c.Capabilities = DefaultCapabilities(c.Type)
 	}
-	if c.Type == ConnectorTypeSCIM {
-		if _, err := NewSCIMConnector(c.BaseURL, "", nil); err != nil {
-			api.WriteError(w, 400, "Bad Request", err.Error())
-			return
-		}
+	if err := h.registry.ValidateBaseURL(c.Type, c.BaseURL); err != nil {
+		api.WriteError(w, 400, "Bad Request", err.Error())
+		return
 	}
 	if err := h.repo.CreateConnector(r.Context(), c); err != nil {
 		api.WriteError(w, 500, "Internal Error", err.Error())
@@ -181,9 +186,7 @@ func (h *Handler) TestConnector(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 404, "Not Found", "connector not found")
 		return
 	}
-	if c.Type == ConnectorTypeSCIM {
-		_, err = NewSCIMConnector(c.BaseURL, "", nil)
-	}
+	err = h.registry.ValidateBaseURL(c.Type, c.BaseURL)
 	if err != nil {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
