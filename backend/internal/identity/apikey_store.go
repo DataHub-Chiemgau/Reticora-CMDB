@@ -110,3 +110,18 @@ func (s *PGAPIKeyStore) MarkUsed(ctx context.Context, orgID, id string) error {
 		return nil
 	})
 }
+
+// RevokeUserAPIKeys revokes every active API key the user created, inside the
+// caller's transaction, so a deactivation and the revocation of the user's
+// service tokens commit together (TLC-04). It returns the number of keys
+// revoked.
+func RevokeUserAPIKeys(ctx context.Context, tx pgx.Tx, orgID, userID string) (int64, error) {
+	tag, err := tx.Exec(ctx, `
+		UPDATE api_key SET revoked_at = now(), updated_at = now()
+		WHERE organization_id = $1 AND created_by = $2 AND revoked_at IS NULL
+	`, orgID, userID)
+	if err != nil {
+		return 0, fmt.Errorf("revoke api keys of user: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}

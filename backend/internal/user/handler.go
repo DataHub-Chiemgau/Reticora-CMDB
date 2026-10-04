@@ -2,6 +2,8 @@ package user
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -31,12 +33,19 @@ type AssignmentLister interface {
 	List(ctx context.Context, orgID string, filter assignment.FilterParams, page api.PaginationParams) ([]assignment.Assignment, int, error)
 }
 
+// SessionRevoker ends every session of a user issued up to the given time
+// (implemented by identity.SessionRevocations).
+type SessionRevoker interface {
+	RevokeUser(ctx context.Context, userID string, at time.Time) error
+}
+
 // Handler provides HTTP handlers for user, team, and role endpoints.
 type Handler struct {
 	repo        Repository
 	contacts    ContactLister
 	tickets     TicketActivityLister
 	assignments AssignmentLister
+	sessions    SessionRevoker
 }
 
 // NewHandler creates a new user/team/role handler. contacts may be nil; the
@@ -56,6 +65,23 @@ func (h *Handler) WithPrivacySources(tickets TicketActivityLister, assignments A
 	h.tickets = tickets
 	h.assignments = assignments
 	return h
+}
+
+// WithSessionRevoker makes deactivation and anonymization end the sessions
+// and refresh tokens of the user immediately (TLC-04, AUT-02).
+func (h *Handler) WithSessionRevoker(sessions SessionRevoker) *Handler {
+	h.sessions = sessions
+	return h
+}
+
+// revokeSessions blacklists the sessions of the user. It is called before the
+// deactivation commits, so a failure leaves the user unchanged, and again
+// afterwards to cover tokens refreshed in between.
+func (h *Handler) revokeSessions(ctx context.Context, userID string) error {
+	if h.sessions == nil {
+		return nil
+	}
+	return h.sessions.RevokeUser(ctx, userID, time.Now().UTC())
 }
 
 // RegisterRoutes registers user/team/role routes on the given mux.
@@ -187,10 +213,22 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	deactivate := req.Status != nil && !statusIsActive(*req.Status)
+	if deactivate {
+		if err := h.revokeSessions(r.Context(), id); err != nil {
+			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "sessions could not be revoked; the user was not deactivated")
+			return
+		}
+	}
 	item, err := h.repo.UpdateUser(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
 		return
+	}
+	if deactivate {
+		if err := h.revokeSessions(r.Context(), id); err != nil {
+			slog.Warn("second session revocation after deactivation failed", "user_id", id, "error", err)
+		}
 	}
 
 	api.WriteJSON(w, http.StatusOK, item)
@@ -205,7 +243,12 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 
 	id := chi.URLParam(r, "id")
 	if err := h.repo.DeleteUser(r.Context(), t.OrganizationID, id); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
+		switch {
+		case errors.Is(err, ErrUserOwnsOpenObjects), errors.Is(err, ErrUserReferenced):
+			api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		default:
+			api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
+		}
 		return
 	}
 
@@ -304,10 +347,17 @@ func (h *Handler) Anonymize(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "you cannot anonymize your own account")
 		return
 	}
+	if err := h.revokeSessions(r.Context(), id); err != nil {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "sessions could not be revoked; the user was not anonymized")
+		return
+	}
 	u, err := h.repo.AnonymizeUser(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
 		return
+	}
+	if err := h.revokeSessions(r.Context(), id); err != nil {
+		slog.Warn("second session revocation after anonymization failed", "user_id", id, "error", err)
 	}
 	api.WriteJSON(w, http.StatusOK, u)
 }

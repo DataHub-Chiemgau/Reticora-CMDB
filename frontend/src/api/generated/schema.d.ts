@@ -1761,7 +1761,10 @@ export interface paths {
     get: operations['getUser'];
     put?: never;
     post?: never;
-    /** Delete a user */
+    /**
+     * Delete a user
+     * @description A user who owns open objects (open tickets, active assignments, keys not returned) or is referenced by closed records cannot be deleted; hand the objects over, or deactivate or anonymize the user (TLC-04).
+     */
     delete: operations['deleteUser'];
     options?: never;
     head?: never;
@@ -11396,6 +11399,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   updateUser: {
@@ -11426,6 +11430,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   queryMetrics: {

@@ -40,10 +40,22 @@ type AccessResolver interface {
 	AccessGrants(ctx context.Context, orgID, userID string) ([]Grant, error)
 }
 
+// ErrUserInactive is returned when a deactivated user logs in or refreshes a
+// session. A login never reactivates a deactivated account (TLC-04).
+var ErrUserInactive = errors.New("identity: user is deactivated")
+
+// UserStatusChecker reports whether an app_user may hold a session. A
+// provisioner implementing it makes refresh check the user status; a user
+// that no longer exists is not active.
+type UserStatusChecker interface {
+	UserActive(ctx context.Context, orgID, userID string) (bool, error)
+}
+
 // UserProvisioner upserts the authenticated OIDC subject into app_user.
 type UserProvisioner interface {
 	// EnsureUser returns the app_user id for the OIDC subject, creating the
-	// record with the given display data when it does not exist yet.
+	// record with the given display data when it does not exist yet. It
+	// returns ErrUserInactive for a deactivated user.
 	EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName string) (string, error)
 	// EnsureRole assigns the named standard role when the user has none yet.
 	EnsureRole(ctx context.Context, orgID, userID, roleName string) error
@@ -185,6 +197,20 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A deactivated or deleted user gets no new token, even when the
+	// blacklist entry of the deactivation has expired or was never written.
+	if checker, ok := h.provisioner.(UserStatusChecker); ok {
+		active, statusErr := checker.UserActive(r.Context(), claims.OrganizationID, claims.Subject)
+		if statusErr != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", "check user status")
+			return
+		}
+		if !active {
+			api.WriteError(w, http.StatusUnauthorized, "Unauthorized", ErrUserInactive.Error())
+			return
+		}
+	}
+
 	refreshedClaims := cloneSessionClaims(claims)
 	// Roles and scopes are re-read on every refresh so revoked or narrowed
 	// assignments take effect without a new login.
@@ -280,6 +306,9 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 	subject := idToken.Subject
 	if h.provisioner != nil {
 		userID, err := h.provisioner.EnsureUser(ctx, orgID, idToken.Subject, idToken.Email, idToken.Name)
+		if errors.Is(err, ErrUserInactive) {
+			return "", time.Time{}, authResult{}, ErrUserInactive
+		}
 		if err != nil {
 			return "", time.Time{}, authResult{}, fmt.Errorf("identity: provision user: %w", err)
 		}
@@ -490,6 +519,8 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 		return
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		writeContextError(w, err)
+	case errors.Is(err, ErrUserInactive):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
 	case strings.Contains(err.Error(), "authorization code is required"),
 		strings.Contains(err.Error(), "PKCE code verifier is required"),
 		strings.Contains(err.Error(), "ID token is required"),

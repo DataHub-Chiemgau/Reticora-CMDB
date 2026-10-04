@@ -4,13 +4,18 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -190,7 +195,14 @@ func (r *PGRepository) UpdateUser(ctx context.Context, orgID, id string, req Upd
 		}
 		addStringField("display_name", req.DisplayName)
 		addStringField("avatar_url", req.AvatarURL)
+		wasActive := false
 		if req.Status != nil {
+			if err := tx.QueryRow(ctx, `SELECT is_active FROM app_user WHERE id = $1 AND organization_id = $2 FOR UPDATE`, id, orgID).Scan(&wasActive); err != nil {
+				if err == pgx.ErrNoRows {
+					return fmt.Errorf("user not found")
+				}
+				return fmt.Errorf("lock user for update: %w", err)
+			}
 			setClauses = append(setClauses, fmt.Sprintf("is_active = $%d", argPos))
 			args = append(args, statusIsActive(*req.Status))
 			argPos++
@@ -223,14 +235,82 @@ func (r *PGRepository) UpdateUser(ctx context.Context, orgID, id string, req Upd
 			}
 			return fmt.Errorf("update user: %w", err)
 		}
-		return nil
+		if req.Status == nil || wasActive == statusIsActive(*req.Status) {
+			return nil
+		}
+		if wasActive {
+			return deactivateInTx(ctx, tx, orgID, id, "user.deactivated")
+		}
+		return recordUserAudit(ctx, tx, orgID, id, "user.reactivated", nil)
 	})
 	return item, err
 }
 
+// deactivateInTx revokes the API keys of a user that was just deactivated and
+// records the deactivation, in the transaction of the status change (TLC-04).
+// Sessions and refresh tokens end through the session blacklist written by the
+// handler and the status check of every refresh.
+func deactivateInTx(ctx context.Context, tx pgx.Tx, orgID, id, action string) error {
+	revoked, err := identity.RevokeUserAPIKeys(ctx, tx, orgID, id)
+	if err != nil {
+		return err
+	}
+	return recordUserAudit(ctx, tx, orgID, id, action, map[string]interface{}{
+		"is_active":        false,
+		"api_keys_revoked": revoked,
+		"sessions_revoked": true,
+	})
+}
+
+// recordUserAudit appends an audit entry for a change of the user account,
+// attributed to the acting principal.
+func recordUserAudit(ctx context.Context, tx pgx.Tx, orgID, id, action string, changes map[string]interface{}) error {
+	actor := tenant.FromContext(ctx).UserID
+	actorType := "user"
+	if actor == "" {
+		actorType = "system"
+	}
+	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+		OrganizationID: orgID,
+		ActorID:        actor,
+		ActorType:      actorType,
+		Action:         action,
+		ResourceType:   "user",
+		ResourceID:     id,
+		Changes:        changes,
+	}); err != nil {
+		return fmt.Errorf("audit %s: %w", action, err)
+	}
+	return nil
+}
+
+// openOwnershipQuery counts the open objects a user is responsible for: open
+// tickets assigned to them, active asset/CI assignments and keys not returned.
+const openOwnershipQuery = `
+	SELECT
+		(SELECT count(*) FROM ticket WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed')) +
+		(SELECT count(*) FROM assignment WHERE assigned_to = $1 AND status IN ('active', 'overdue')) +
+		(SELECT count(*) FROM key_assignment WHERE assigned_to = $1 AND returned_at IS NULL)
+`
+
+// DeleteUser removes a user that owns no open objects (TLC-04): open objects
+// must be handed over first. Users referenced by closed records cannot be
+// removed either; they are deactivated or anonymized instead, so the
+// references stay intact.
 func (r *PGRepository) DeleteUser(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var open int
+		if err := tx.QueryRow(ctx, openOwnershipQuery, id).Scan(&open); err != nil {
+			return fmt.Errorf("check open objects of user: %w", err)
+		}
+		if open > 0 {
+			return fmt.Errorf("%w: %d open objects", ErrUserOwnsOpenObjects, open)
+		}
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM app_user WHERE id = $1 AND organization_id = $2", id, orgID)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return ErrUserReferenced
+		}
 		if err != nil {
 			return fmt.Errorf("delete user: %w", err)
 		}
@@ -264,7 +344,10 @@ func (r *PGRepository) AnonymizeUser(ctx context.Context, orgID, id string) (*Us
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("user not found")
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		return deactivateInTx(ctx, tx, orgID, id, "user.anonymized")
 	})
 	return item, err
 }
@@ -958,7 +1041,9 @@ func loginScope(orgID string) *database.TenantScope {
 
 // EnsureUser returns the app_user id for the given OIDC subject, creating the
 // record on first login. The oidc_subject unique constraint makes the
-// read-then-create race safe: on conflict the existing row is returned.
+// read-then-create race safe: on conflict the existing row is returned. A
+// login never reactivates a deactivated user (TLC-04): it fails with
+// identity.ErrUserInactive.
 func (r *PGRepository) EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName string) (string, error) {
 	if email == "" {
 		email = oidcSubject + "@oidc.local"
@@ -966,25 +1051,47 @@ func (r *PGRepository) EnsureUser(ctx context.Context, orgID, oidcSubject, email
 	if displayName == "" {
 		displayName = email
 	}
-	var id string
+	var (
+		id     string
+		active bool
+	)
 	err := database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
 		// On conflict (returning user) refresh profile fields so an email/name
-		// change in the IdP propagates; the subject itself never changes.
+		// change in the IdP propagates; the subject and the status never
+		// change on login.
 		return tx.QueryRow(ctx, `
 			INSERT INTO app_user (organization_id, oidc_subject, email, display_name, is_active)
 			VALUES ($1, $2, $3, $4, true)
 			ON CONFLICT (oidc_subject) DO UPDATE SET
 				email = EXCLUDED.email,
 				display_name = EXCLUDED.display_name,
-				is_active = true,
 				updated_at = now()
-			RETURNING id::text
-		`, orgID, oidcSubject, email, displayName).Scan(&id)
+			RETURNING id::text, is_active
+		`, orgID, oidcSubject, email, displayName).Scan(&id, &active)
 	})
 	if err != nil {
 		return "", fmt.Errorf("ensure oidc user: %w", err)
 	}
+	if !active {
+		return "", identity.ErrUserInactive
+	}
 	return id, nil
+}
+
+// UserActive reports whether the user exists in the organization and is
+// active; refresh calls it before issuing a new session token.
+func (r *PGRepository) UserActive(ctx context.Context, orgID, userID string) (bool, error) {
+	var active bool
+	err := database.WithTenant(ctx, r.pool, loginScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT is_active FROM app_user WHERE id::text = $1 AND organization_id = $2`, userID, orgID).Scan(&active)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read user status: %w", err)
+	}
+	return active, nil
 }
 
 // EnsureRole assigns the named standard role to the user when they hold no

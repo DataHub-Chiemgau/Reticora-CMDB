@@ -146,3 +146,6 @@ AI-01;[A];B;backend/internal/ai/scope_integration_test.go;WP-037
 AGT-06;[P4];B;backend/internal/agent/enroll_integration_test.go;WP-038
 MON-01;[B];B;backend/internal/monitoring/pg_store_integration_test.go;WP-040
 TEC-06;[B], [Q] Spike;B;backend/internal/monitoring/pg_store_integration_test.go;WP-040
+TLC-04;[B];B;backend/internal/identity/deactivation_integration_test.go;WP-042
+AUT-02;[B];B;backend/internal/identity/deactivation_integration_test.go;WP-042
+AUT-01;[B];B;backend/internal/identity/deactivation_integration_test.go;WP-042

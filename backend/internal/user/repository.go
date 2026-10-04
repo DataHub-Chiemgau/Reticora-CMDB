@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -9,6 +10,14 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
+
+// ErrUserOwnsOpenObjects rejects deleting a user that still owns open
+// objects; they must be handed over first (TLC-04).
+var ErrUserOwnsOpenObjects = errors.New("user owns open objects; hand them over first")
+
+// ErrUserReferenced rejects deleting a user that closed records still
+// reference; deactivate or anonymize the user instead (TLC-04).
+var ErrUserReferenced = errors.New("user is referenced by existing records; deactivate or anonymize instead")
 
 // Repository defines persistence operations for users, teams, and roles.
 type Repository interface {

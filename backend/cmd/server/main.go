@@ -139,6 +139,11 @@ func main() {
 		slog.Error("failed to connect to Redis", "error", err)
 		os.Exit(1)
 	}
+	// Deactivation ends sessions immediately through the blacklist in the
+	// shared cache store (AUT-02, TLC-04).
+	if sessionIssuer != nil {
+		sessionIssuer.WithRevocations(identity.NewSessionRevocations(cacheStore))
+	}
 
 	// Repositories. PostgreSQL is the only supported production backend; the
 	// in-memory implementations are reserved for tests and the explicit --no-db

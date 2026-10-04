@@ -3091,10 +3091,16 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
     delete:
       operationId: deleteUser
       tags: [Users]
       summary: Delete a user
+      description: >-
+        A user who owns open objects (open tickets, active assignments, keys
+        not returned) or is referenced by closed records cannot be deleted;
+        hand the objects over, or deactivate or anonymize the user (TLC-04).
       responses:
         '204':
           description: User deleted
@@ -3102,6 +3108,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/monitoring/metrics:
     get:

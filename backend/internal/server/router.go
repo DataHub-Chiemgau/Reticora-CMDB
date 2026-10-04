@@ -185,6 +185,16 @@ func agentTypeResolver(repos Repositories) agent.CITypeResolver {
 	return r
 }
 
+// userHandler builds the user handler; with a session blacklist, deactivation
+// ends the user's sessions immediately (TLC-04).
+func userHandler(repos *Repositories, sessions *identity.SessionIssuer) *user.Handler {
+	h := user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment)
+	if revocations := sessions.Revocations(); revocations != nil {
+		h.WithSessionRevoker(revocations)
+	}
+	return h
+}
+
 func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) http.Handler, error) {
 	if err := validate(repos, opts); err != nil {
 		return nil, nil, err
@@ -239,7 +249,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(repos)).WithFindings(repos.Security),
 		security.NewHandler(repos.Security),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
-		user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment),
+		userHandler(&repos, opts.Sessions),
 		permission.NewHandler(repos.Permission),
 		search.NewHandler(repos.Search, repos.Permission),
 		sla.NewHandler(repos.SLA, repos.Ticket),
