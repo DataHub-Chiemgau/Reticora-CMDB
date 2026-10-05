@@ -426,6 +426,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 
 	registry.MustRegister(collectors.NewGoCollector())
 	observability.RegisterWorkerMetrics(registry)
+	override.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 

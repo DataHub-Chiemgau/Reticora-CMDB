@@ -102,8 +102,8 @@ func (a overrideProvenance) RecordDiscovered(ctx context.Context, orgID, ciID, f
 	return &discovery.FieldProvenance{Diverged: fv.Diverged}, nil
 }
 
-func (a overrideProvenance) IsProtected(ctx context.Context, orgID, ciID, fieldName string) (bool, error) {
-	return override.IsProtected(ctx, a.repo, orgID, ciID, fieldName)
+func (a overrideProvenance) Decide(ctx context.Context, w *override.Write) override.Decision {
+	return override.DecideAutomatedWrite(ctx, a.repo, w)
 }
 
 // ciLookup adapts ci.Repository to the asset.CILookup port (spec §4: the

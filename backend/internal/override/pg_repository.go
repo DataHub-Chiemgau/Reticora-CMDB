@@ -116,7 +116,7 @@ func (r *PGRepository) Get(ctx context.Context, orgID, ciID, fieldName string) (
 			selectColumns), ciID, fieldName))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get field value: %w", err)
 		}

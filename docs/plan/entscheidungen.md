@@ -10,6 +10,8 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Nachtrag vom 2026-10-01 (Lieferung A-01):** Die Katalogteile 02, 04, 05 und 06 liegen in `docs/spec/katalog-v3/` vor. Damit sind [E-01](#e-01) und [E-23](#e-23) entschieden; [E-32](#e-32) bleibt offen, weil die gelieferte REC-03-Rangtabelle IPMI nicht nennt. Stand jetzt: 24 entschieden, 4 vorläufig entschieden, 8 offen.
 
+**Nachtrag vom 2026-10-05:** [E-32](#e-32) ist entschieden (IPMI erhält den Rang von Redfish, 90). Stand jetzt: 25 entschieden, 4 vorläufig entschieden, 7 offen.
+
 | Nr. | Thema | Status | Sperrt / betrifft | WPs mit Verweis |
 |---|---|---|---|---:|
 | [E-01](#e-01) | Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 | entschieden | Keine Sperre mehr; WPs mit Verweis prüfen ihre Kriterien gegen den Text. | 130 |
@@ -43,7 +45,7 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 | [E-29](#e-29) | OPS-04: Werkzeug für WAL-Archivierung und Basisbackups | offen | WP-100 (`a-backup`), WP-101 (`a-restore`). | 1 |
 | [E-30](#e-30) | Traceability-Prüfung: ab wann blockierend? | entschieden | WP-005 (`trace`), WP-213 (`g1-gate`). | 2 |
 | [E-31](#e-31) | Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest | entschieden | WP-004 (`dep-scan`), WP-102 (`a-release`), WP-204 (`lt-harness`), WP-209 (`sr-review`). | 4 |
-| [E-32](#e-32) | REC-03: Rang der Quelle IPMI | offen | WP-058 (`rec-decide`), WP-220 (`m-srcpolicy`). | 2 |
+| [E-32](#e-32) | REC-03: Rang der Quelle IPMI | entschieden | WP-058 (`rec-decide`), WP-220 (`m-srcpolicy`). | 2 |
 | [E-33](#e-33) | TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte | offen | WP-111 (`b-signup`), WP-112 (`b-signup-protect`). | 2 |
 | [E-34](#e-34) | ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan | vorläufig entschieden | Folgeänderung zu WP-071 (`ent-model`), WP-203 (`lt-seed`). | 2 |
 | [E-35](#e-35) | NFR-09: Inhalt der Subprozessorenliste | offen | WP-105 (`a-reference`). | 1 |
@@ -848,9 +850,9 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 
 **Thema:** REC-03: Rang der Quelle IPMI
 
-**Status:** offen (2026-10-01)
+**Status:** entschieden (2026-10-05, Auftraggeber)
 
-**Festlegung:** Laut Empfehlung ist der Text nachzuliefern (E-01); eine vorläufige Regel ist nicht vorgesehen.
+**Festlegung:** Option 2. IPMI erhält den Rang von Redfish (90); beide sind BMC-Schnittstellen. Umgesetzt in `override.SourceRanks` (WP-058).
 
 **Aufgabe:** REC-03-Rangtabelle (IPMI) mit den Texten aus E-01 nachliefern. Zuständig: Auftraggeber/Product Owner. Termin: vor WP-058 (`rec-decide`).
 

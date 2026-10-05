@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -143,41 +142,69 @@ func TestReconcileNoValueConflictsWhenIncomingEmpty(t *testing.T) {
 	}
 }
 
-func TestSourceTrustRanking(t *testing.T) {
-	if SourceTrust(ci.SourceRedfish) <= SourceTrust(ci.SourceSNMP) {
-		t.Error("redfish must outrank snmp")
+// TestIngestFollowsRankTable covers WP-058 (REC-03, REC-05): discovery
+// writes a field of an existing CI only through the central decision, so a
+// lower-ranked source cannot replace a value of a higher-ranked one, an
+// equal rank can, and an empty value is filled by any source.
+func TestIngestFollowsRankTable(t *testing.T) {
+	discoveryRepo := NewMemoryRepository()
+	discoveryRepo.SeedCIType("server", "server")
+	ciRepo := ci.NewMemoryRepository()
+	existing := &ci.Item{OrganizationID: "org-1", CITypeID: "server", Name: "srv", SerialNumber: "RK-1",
+		Model: "R750", DiscoverySource: ci.SourceRedfish, Attributes: map[string]any{"bios": "2.1"}}
+	if err := ciRepo.Create(context.Background(), existing); err != nil {
+		t.Fatal(err)
 	}
-	if SourceTrust(ci.SourceSNMP) <= SourceTrust(ci.SourceSweep) {
-		t.Error("snmp must outrank sweep")
+	h := NewHandler(discoveryRepo, ciRepo)
+	get := func() *ci.Item {
+		t.Helper()
+		item, err := ciRepo.GetByID(context.Background(), "org-1", existing.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return item
 	}
-	if SourceTrust("does-not-exist") != SourceTrust("") {
-		t.Error("unknown sources must rank like unset")
+
+	// SNMP (80) and sweep (20) rank below Redfish (90): no change, but an
+	// empty field is filled and the CI keeps its source.
+	for _, source := range []string{ci.SourceSNMP, ci.SourceSweep} {
+		ingest(t, h, `{"collector_id":"c","items":[{"ci_type_name":"server","name":"srv","serial_number":"RK-1","source":"`+source+`",
+			"model":"generic","manufacturer":"Dell","attributes":{"bios":"1.0"}}]}`)
+		got := get()
+		if got.Model != "R750" || got.Attributes["bios"] != "2.1" || got.Manufacturer != "Dell" || got.DiscoverySource != ci.SourceRedfish {
+			t.Errorf("after %s: model %q bios %v manufacturer %q source %q", source, got.Model, got.Attributes["bios"], got.Manufacturer, got.DiscoverySource)
+		}
+	}
+	// IPMI ranks like Redfish (E-32) and replaces the value.
+	ingest(t, h, `{"collector_id":"c","items":[{"ci_type_name":"server","name":"srv","serial_number":"RK-1","source":"ipmi",
+		"model":"R750xs","attributes":{"bios":"2.2"}}]}`)
+	if got := get(); got.Model != "R750xs" || got.Attributes["bios"] != "2.2" {
+		t.Errorf("after ipmi: model %q bios %v", got.Model, got.Attributes["bios"])
 	}
 }
 
-func TestShouldApplyAttribute(t *testing.T) {
-	now := time.Now().UTC()
-	recent := now.Add(-time.Hour)
-	stale := now.Add(-30 * 24 * time.Hour)
-
-	// Equal or higher trust always applies.
-	if !ShouldApplyAttribute(ci.SourceSweep, ci.SourceSNMP, recent, now, 7*24*time.Hour) {
-		t.Error("higher-trust source must overwrite fresh data")
+// TestIngestQueuesOverrideConflictOnce covers REC-12: a value differing from
+// a manual override is not written; one override_conflict review per field
+// is opened, however often the source reports it.
+func TestIngestQueuesOverrideConflictOnce(t *testing.T) {
+	discoveryRepo := NewMemoryRepository()
+	discoveryRepo.SeedCIType("server", "server")
+	ciRepo := ci.NewMemoryRepository()
+	existing := &ci.Item{OrganizationID: "org-1", CITypeID: "server", Name: "manual-name", SerialNumber: "OC-1", Attributes: map[string]any{}}
+	if err := ciRepo.Create(context.Background(), existing); err != nil {
+		t.Fatal(err)
 	}
-	if !ShouldApplyAttribute(ci.SourceSNMP, ci.SourceSNMP, recent, now, 7*24*time.Hour) {
-		t.Error("equal-trust source must overwrite")
+	prov := &stubProvenance{protected: map[string]bool{existing.ID + "/name": true}}
+	h := NewHandler(discoveryRepo, ciRepo).WithProvenance(prov)
+	for range 2 {
+		ingest(t, h, `{"collector_id":"c","items":[{"ci_type_name":"server","name":"discovered","serial_number":"OC-1","source":"redfish"}]}`)
 	}
-	// Lower trust is rejected while the stored value is fresh.
-	if ShouldApplyAttribute(ci.SourceSNMP, ci.SourceSweep, recent, now, 7*24*time.Hour) {
-		t.Error("lower-trust source must not overwrite fresh data")
+	items, _, err := discoveryRepo.ListReviewItems(context.Background(), "org-1", ReviewFilter{Kind: ReviewKindOverrideConflict}, api.PaginationParams{Limit: 10})
+	if err != nil || len(items) != 1 || items[0].Payload["field"] != "name" || items[0].Payload["observed_value"] != "discovered" {
+		t.Fatalf("override_conflict reviews: %+v, %v; want one for name", items, err)
 	}
-	// Lower trust applies once the stored value is stale.
-	if !ShouldApplyAttribute(ci.SourceSNMP, ci.SourceSweep, stale, now, 7*24*time.Hour) {
-		t.Error("lower-trust source must overwrite stale data")
-	}
-	// Without a staleness threshold lower trust never applies.
-	if ShouldApplyAttribute(ci.SourceSNMP, ci.SourceSweep, stale, now, 0) {
-		t.Error("staleness threshold 0 must reject lower-trust overwrites")
+	if got, _ := ciRepo.GetByID(context.Background(), "org-1", existing.ID); got.Name != "manual-name" {
+		t.Errorf("override overwritten: %q", got.Name)
 	}
 }
 

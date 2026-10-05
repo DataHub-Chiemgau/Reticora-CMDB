@@ -29,8 +29,8 @@ func (p provenance) RecordDiscovered(ctx context.Context, orgID, ciID, fieldName
 	return &discovery.FieldProvenance{Diverged: fv.Diverged}, nil
 }
 
-func (p provenance) IsProtected(ctx context.Context, orgID, ciID, fieldName string) (bool, error) {
-	return override.IsProtected(ctx, p.repo, orgID, ciID, fieldName)
+func (p provenance) Decide(ctx context.Context, w *override.Write) override.Decision {
+	return override.DecideAutomatedWrite(ctx, p.repo, w)
 }
 
 // TestManualPatchCreatesOverridesDiscoveryKeeps covers WP-057 (CI-04,
@@ -127,5 +127,31 @@ func TestManualPatchCreatesOverridesDiscoveryKeeps(t *testing.T) {
 	}
 	if _, ok := item.Attributes["rack"]; ok {
 		t.Errorf("manually removed attribute rack was restored by discovery: %v", item.Attributes["rack"])
+	}
+
+	// Each differing value under an override is one override_conflict
+	// review (REC-12, WP-058); a repeated report opens no second one.
+	for range 2 {
+		if w = serve(ingest.RegisterRoutes, http.MethodPost, "/api/v1/ingest/bulk", `{"collector_id":"col-1","items":[{"ci_type_name":"server",
+			"name":"mo-discovered","serial_number":"MO-SN-1","attributes":{"rack":"R9"}}]}`); w.Code != http.StatusAccepted {
+			t.Fatalf("repeated ingest: %d", w.Code)
+		}
+	}
+	rows, err := f.Admin.Query(bg, `SELECT payload->>'field' FROM review_item WHERE organization_id = $1 AND kind = 'override_conflict'
+		AND status = 'open' AND payload->>'ci_id' = $2 ORDER BY 1`, f.OrgA, ciID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var fields []string
+	for rows.Next() {
+		var field string
+		if err = rows.Scan(&field); err != nil {
+			t.Fatal(err)
+		}
+		fields = append(fields, field)
+	}
+	if want := []string{"name", "net", "owner", "rack"}; !reflect.DeepEqual(fields, want) {
+		t.Errorf("open override_conflict reviews: %v, want %v", fields, want)
 	}
 }

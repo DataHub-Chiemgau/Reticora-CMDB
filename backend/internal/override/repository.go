@@ -2,6 +2,7 @@ package override
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -32,9 +33,12 @@ type Repository interface {
 // without depending on the concrete repository (spec §13).
 func IsProtected(ctx context.Context, repo Repository, orgID, ciID, fieldName string) (bool, error) {
 	fv, err := repo.Get(ctx, orgID, ciID, fieldName)
-	if err != nil {
-		// No provenance row yet: nothing is protected.
+	if errors.Is(err, ErrNotFound) {
 		return false, nil
+	}
+	if err != nil {
+		// Fail closed: an unreadable override counts as protected (REC-03).
+		return true, err
 	}
 	// override_at marks an override even when its value is null: a manually
 	// removed field stays removed (OVR-01).
@@ -90,7 +94,7 @@ func (r *MemoryRepository) Get(_ context.Context, orgID, ciID, fieldName string)
 	defer r.mu.RUnlock()
 	fv, ok := r.values[key(orgID, ciID, fieldName)]
 	if !ok {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
 	return r.withEffective(fv), nil
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 )
@@ -33,33 +32,6 @@ type ReconcileResult struct {
 	ValueConflicts []string `json:"value_conflicts,omitempty"`
 }
 
-// sourceTrust ranks discovery sources by how much their identity data is
-// trusted (spec §5.3: Konfliktlösung nach Quellenvertrauen + Aktualität).
-// Higher wins. Hardware-level sources (IPMI/Redfish) read identity directly
-// from the BMC and outrank OS-level sources (WMI/SSH), which outrank SNMP;
-// unauthenticated sweeps and manual entries are the least trustworthy.
-var sourceTrust = map[string]int{
-	ci.SourceIPMI:    90,
-	ci.SourceRedfish: 90,
-	ci.SourceAPI:     80,
-	ci.SourceAgent:   70,
-	ci.SourceWMI:     60,
-	ci.SourceSSH:     60,
-	ci.SourceSNMP:    50,
-	ci.SourceSweep:   30,
-	ci.SourceManual:  20,
-	"":               10, // unknown/unset source
-}
-
-// SourceTrust returns the trust rank of a discovery source; unknown sources
-// rank below every known source.
-func SourceTrust(source string) int {
-	if rank, ok := sourceTrust[source]; ok {
-		return rank
-	}
-	return 10
-}
-
 // Reconcile matches an incoming discovery item against existing CIs using the
 // configured identity priority order (spec §5.3):
 //
@@ -69,9 +41,9 @@ func SourceTrust(source string) int {
 //  4. Management-IP + sysObjectID/CI-Typ
 //  5. Hostname/FQDN
 //
-// On a match, FieldConflicts reports identity fields where the incoming item
-// contradicts the stored CI; whether the incoming value should be applied is
-// decided by ShouldApplyAttribute (Quellenvertrauen + Aktualität).
+// On a match, ValueConflicts reports identity fields where the incoming item
+// contradicts the stored CI; whether an incoming value is written is decided
+// per field by override.DecideAutomatedWrite (REC-03).
 func Reconcile(existing []ci.Item, incoming IngestItem) ReconcileResult {
 	criteria := []struct {
 		name  string
@@ -132,22 +104,6 @@ func Reconcile(existing []ci.Item, incoming IngestItem) ReconcileResult {
 	}
 
 	return ReconcileResult{Action: ReconcileCreated}
-}
-
-// ShouldApplyAttribute decides whether an incoming attribute value discovered
-// from source may overwrite the value the CI currently carries, following the
-// spec rule "Quellenvertrauen + Aktualität" (§5.3): data from an equal or
-// more trusted source is always applied; data from a less trusted source is
-// only applied when the CI has not been seen for longer than
-// stalenessThreshold (the stored value is considered outdated by then).
-func ShouldApplyAttribute(existingSource, incomingSource string, existingLastSeen, incomingSeenAt time.Time, stalenessThreshold time.Duration) bool {
-	if SourceTrust(incomingSource) >= SourceTrust(existingSource) {
-		return true
-	}
-	if stalenessThreshold <= 0 {
-		return false
-	}
-	return incomingSeenAt.Sub(existingLastSeen) > stalenessThreshold
 }
 
 // identityConflicts compares the strong identity fields of a matched CI with
