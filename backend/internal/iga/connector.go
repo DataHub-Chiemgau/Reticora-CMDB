@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
 
 const maxSCIMResponseBytes int64 = 1 << 20
@@ -38,13 +38,38 @@ type Connector interface {
 type Registry struct {
 	discovery discovery.Repository
 	client    *http.Client
+	// egress is the destination policy of connector URLs (SEC-08).
+	egress egress.Options
 }
 
+// NewRegistry builds connectors. Without a client the connectors use the
+// egress client, which blocks internal destinations (SEC-08); tests inject
+// their own client.
 func NewRegistry(discoveryRepo discovery.Repository, client *http.Client) *Registry {
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = egress.NewClient(egress.Options{})
 	}
 	return &Registry{discovery: discoveryRepo, client: client}
+}
+
+// WithEgress sets the destination policy: connector URLs are validated
+// against it when stored and every connection goes through the egress client.
+func (r *Registry) WithEgress(opts egress.Options) *Registry {
+	r.egress = opts
+	r.client = egress.NewClient(opts)
+	return r
+}
+
+// ValidateBaseURL checks a connector base URL when it is stored: the SCIM
+// rules of NewSCIMConnector and the egress destination policy.
+func (r *Registry) ValidateBaseURL(connectorType, baseURL string) error {
+	if connectorType != ConnectorTypeSCIM {
+		return nil
+	}
+	if _, err := NewSCIMConnector(baseURL, "", r.client); err != nil {
+		return err
+	}
+	return r.egress.ValidateURL(baseURL)
 }
 
 func (r *Registry) Build(cfg ConnectorConfig, secret JSONMap) (Connector, error) {
@@ -85,7 +110,7 @@ func NewSCIMConnector(baseURL, token string, client *http.Client) (*SCIMConnecto
 		return nil, fmt.Errorf("SCIM connector requires an https base_url")
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = egress.NewClient(egress.Options{})
 	}
 	return &SCIMConnector{baseURL: parsed.String(), token: token, client: client}, nil
 }

@@ -25,6 +25,11 @@ func TestRoutePermissionsExistInCatalog(t *testing.T) {
 	}
 	check("readPermissionFor", readPermissionFor)
 	check("writePermissionOverrides", writePermissionOverrides)
+	rules := make(map[string]identity.Permission, len(routeRules))
+	for _, rule := range routeRules {
+		rules[rule.method+" "+rule.pattern] = rule.permission
+	}
+	check("routeRules", rules)
 
 	// Derived write permissions must exist too for resources that use the
 	// read→write suffix convention (resources with an override are checked
@@ -59,6 +64,9 @@ func TestIdentityCatalogCoversRoutePermissions(t *testing.T) {
 	}
 	for _, key := range writePermissionOverrides {
 		seen[key] = struct{}{}
+	}
+	for _, rule := range routeRules {
+		seen[rule.permission] = struct{}{}
 	}
 	for resource, read := range readPermissionFor {
 		if _, ok := writePermissionOverrides[resource]; !ok {

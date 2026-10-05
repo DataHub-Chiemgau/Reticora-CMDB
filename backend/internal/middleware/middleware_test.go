@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -261,5 +262,92 @@ func TestTenantMiddlewareIgnoresHeaderWhenTokenCarriesOrganization(t *testing.T)
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", w.Code)
+	}
+}
+
+// TestPreAuthLimitCountsFailedAuthentication covers WP-050 (AUT-10, API-04):
+// the pre-auth limit sits in front of authentication, counts pre-auth
+// endpoints and failed authentications (invalid API keys) per client IP, and
+// once the budget is spent even a valid key from that IP is refused; other
+// IPs keep their own budget.
+func TestPreAuthLimitCountsFailedAuthentication(t *testing.T) {
+	store := cache.NewMemoryStore()
+	keys := fakeAPIKeys{keys: map[string]*identity.APIKeyInfo{
+		"valid": {ID: "key-1", OrganizationID: "org-1", Scopes: []identity.Permission{identity.PermCIRead}},
+	}}
+	handler := Chain(
+		PreAuthRateLimiter(5, store),
+		AuthMiddlewareWithAPIKeys(nil, keys),
+		TenantMiddleware,
+	)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+
+	call := func(ip, path, apiKey string) int {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.RemoteAddr = ip + ":40000"
+		if apiKey != "" {
+			req.Header.Set("X-API-Key", apiKey)
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	if code := call("203.0.113.1", "/api/v1/cis", "valid"); code != http.StatusOK {
+		t.Fatalf("valid key: %d", code)
+	}
+	for i := 0; i < 5; i++ {
+		if code := call("203.0.113.1", "/api/v1/cis", "guess"); code != http.StatusUnauthorized {
+			t.Fatalf("invalid key attempt %d: %d, want 401", i, code)
+		}
+	}
+	if code := call("203.0.113.1", "/api/v1/cis", "guess"); code != http.StatusTooManyRequests {
+		t.Errorf("attempt beyond the budget: %d, want 429", code)
+	}
+	if code := call("203.0.113.1", "/api/v1/cis", "valid"); code != http.StatusTooManyRequests {
+		t.Errorf("valid key from the blocked IP: %d, want 429", code)
+	}
+	if code := call("203.0.113.2", "/api/v1/cis", "valid"); code != http.StatusOK {
+		t.Errorf("valid key from another IP: %d, want 200", code)
+	}
+	// Successful requests do not consume the budget.
+	for i := 0; i < 10; i++ {
+		if code := call("203.0.113.3", "/api/v1/cis", "valid"); code != http.StatusOK {
+			t.Fatalf("valid request %d: %d", i, code)
+		}
+	}
+	// Pre-auth endpoints count every request; public configuration none.
+	for i := 0; i < 5; i++ {
+		call("203.0.113.4", "/api/v1/auth/refresh", "")
+	}
+	if code := call("203.0.113.4", "/api/v1/auth/callback", ""); code != http.StatusTooManyRequests {
+		t.Errorf("sixth pre-auth request: %d, want 429", code)
+	}
+	if code := call("203.0.113.4", "/api/v1/auth/config", ""); code == http.StatusTooManyRequests {
+		t.Error("public configuration endpoint was limited")
+	}
+}
+
+// TestClientIPTrustsOnlyConfiguredProxies: X-Real-IP names the client only
+// when the peer is a trusted proxy.
+func TestClientIPTrustsOnlyConfiguredProxies(t *testing.T) {
+	defer func() { _ = SetTrustedProxies("127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7") }()
+	if err := SetTrustedProxies("10.0.0.0/8"); err != nil {
+		t.Fatal(err)
+	}
+	ip := func(peer, real string) string {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = peer + ":1234"
+		req.Header.Set("X-Real-IP", real)
+		return clientIP(req)
+	}
+	if got := ip("10.0.0.7", "198.51.100.9"); got != "198.51.100.9" {
+		t.Errorf("trusted proxy: %s", got)
+	}
+	if got := ip("203.0.113.5", "198.51.100.9"); got != "203.0.113.5" {
+		t.Errorf("untrusted peer spoofing X-Real-IP: %s", got)
+	}
+	if err := SetTrustedProxies("not-a-cidr"); err == nil {
+		t.Error("invalid CIDR accepted")
 	}
 }

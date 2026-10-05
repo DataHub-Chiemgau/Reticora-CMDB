@@ -6,14 +6,17 @@
 package collectorcmd
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -86,6 +89,12 @@ type collectorConfig struct {
 	TLSCAFile       string
 	TLSServerName   string
 	CredentialsPath string
+	// AgentRelayAddr, AgentRelayCertFile and AgentRelayKeyFile configure the
+	// agent relay (AGT-03). It runs over TLS only: without a server
+	// certificate the relay stays off.
+	AgentRelayAddr     string
+	AgentRelayCertFile string
+	AgentRelayKeyFile  string
 }
 
 // pluginRegistry maps protocol names to plugin instances.
@@ -139,7 +148,7 @@ func Main() {
 
 	go runDiscoveryLoop(ctx, collectorCfg, uploader)
 	go runHeartbeatLoop(ctx, collectorCfg, uploader)
-	go runAgentRelay(ctx, uploader)
+	go runAgentRelay(ctx, collectorCfg, uploader)
 	if collectorCfg.TrapListenAddr != "" {
 		go runTrapReceiver(ctx, collectorCfg, uploader)
 	}
@@ -459,7 +468,7 @@ func (u *uploader) postPayload(ctx context.Context, payload []byte) error {
 
 // postAgentTelemetry forwards an endpoint-agent telemetry payload to the
 // backend's agent surface (not the discovery ingest used for device results).
-func (u *uploader) postAgentTelemetry(ctx context.Context, payload []byte) error {
+func (u *uploader) postAgentTelemetry(ctx context.Context, token string, payload []byte) error {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(payload); err != nil {
@@ -476,6 +485,8 @@ func (u *uploader) postAgentTelemetry(ctx context.Context, payload []byte) error
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
+	// The agent's own credential authenticates the telemetry (AGT-03).
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := u.client.Do(req)
 	if err != nil {
@@ -483,11 +494,18 @@ func (u *uploader) postAgentTelemetry(ctx context.Context, payload []byte) error
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
+	switch {
+	case resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests:
 		return fmt.Errorf("telemetry upload failed with status %d", resp.StatusCode)
+	case resp.StatusCode >= 400:
+		return fmt.Errorf("%w: status %d", errTelemetryRejected, resp.StatusCode)
 	}
 	return nil
 }
+
+// errTelemetryRejected marks a 4xx answer: the backend refused the agent
+// credential or payload, so the telemetry is not spooled for a retry.
+var errTelemetryRejected = errors.New("agent telemetry rejected")
 
 // spoolResults persists an undeliverable batch to the disk buffer. A full
 // spool returns buffer.ErrSpoolFull; the loss is counted and reported by the
@@ -553,10 +571,16 @@ func (u *uploader) flushSpool(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			if msg.Topic != spoolTopic {
+			var deliver func() error
+			switch msg.Topic {
+			case spoolTopic:
+				deliver = func() error { return u.postPayload(ctx, msg.Payload) }
+			case agentTelemetryTopic:
+				deliver = func() error { return u.replayAgentTelemetry(ctx, msg.Payload) }
+			default:
 				continue
 			}
-			if err := u.postPayload(ctx, msg.Payload); err != nil {
+			if err := deliver(); err != nil {
 				slog.Warn("spool flush postponed; backend still unreachable", "message_id", msg.ID, "error", err)
 				return
 			}
@@ -572,6 +596,23 @@ func (u *uploader) flushSpool(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// replayAgentTelemetry delivers a spooled relay message to the agent
+// telemetry endpoint. A message the backend rejects (4xx) is dropped instead
+// of blocking the spool.
+func (u *uploader) replayAgentTelemetry(ctx context.Context, message []byte) error {
+	var msg relayMessage
+	if err := json.Unmarshal(message, &msg); err != nil {
+		slog.Error("spooled agent telemetry unreadable; dropped", "error", err)
+		return nil
+	}
+	err := u.postAgentTelemetry(ctx, msg.Token, msg.Telemetry)
+	if errors.Is(err, errTelemetryRejected) {
+		slog.Warn("spooled agent telemetry rejected; dropped", "error", err)
+		return nil
+	}
+	return err
 }
 
 // backpressure reports whether collection has to pause because the spool is
@@ -821,19 +862,53 @@ func (u *uploader) uploadTrapEvent(ctx context.Context, ev snmp.TrapEvent) error
 	return u.postMetricsPayload(ctx, payload)
 }
 
-func runAgentRelay(ctx context.Context, up *uploader) {
-	slog.Info("agent relay started")
+// agentTelemetryTopic is the spool topic of relayed agent telemetry; it is
+// replayed to the agent telemetry endpoint, never to discovery (AGT-03).
+const agentTelemetryTopic = "agent-telemetry"
 
-	// The agent relay accepts incoming connections from endpoint agents
-	// and forwards telemetry/results to the backend.
-	listener, err := net.Listen("tcp", ":9443")
+// maxRelayMessage bounds one relay message.
+const maxRelayMessage = 1 << 20
+
+// relayMessage mirrors agent.RelayMessage of the backend: the agent's bearer
+// credential and its telemetry in the backend contract.
+type relayMessage struct {
+	Token     string          `json:"token"`
+	Telemetry json.RawMessage `json:"telemetry"`
+}
+
+// agentRelayTLS loads the relay's server certificate. Without one the relay
+// does not start: agents talk TLS only (AGT-03).
+func agentRelayTLS(cfg collectorConfig) (*tls.Config, error) {
+	if cfg.AgentRelayCertFile == "" || cfg.AgentRelayKeyFile == "" {
+		return nil, errors.New("RETICORA_AGENT_RELAY_TLS_CERT_FILE and RETICORA_AGENT_RELAY_TLS_KEY_FILE are not set")
+	}
+	cert, err := tls.LoadX509KeyPair(cfg.AgentRelayCertFile, cfg.AgentRelayKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load agent relay certificate: %w", err)
+	}
+	return &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}, nil
+}
+
+// runAgentRelay accepts endpoint agents over TLS and forwards their telemetry
+// to the backend's agent telemetry endpoint.
+func runAgentRelay(ctx context.Context, cfg collectorConfig, up *uploader) {
+	tlsConf, err := agentRelayTLS(cfg)
+	if err != nil {
+		slog.Warn("agent relay disabled", "reason", err)
+		return
+	}
+	listener, err := tls.Listen("tcp", cfg.AgentRelayAddr, tlsConf)
 	if err != nil {
 		slog.Error("agent relay listen failed", "error", err)
 		return
 	}
-	defer listener.Close()
+	serveAgentRelay(ctx, listener, up)
+}
 
-	slog.Info("agent relay listening", "addr", listener.Addr().String())
+// serveAgentRelay serves agent connections on listener until ctx ends.
+func serveAgentRelay(ctx context.Context, listener net.Listener, up *uploader) {
+	defer listener.Close()
+	slog.Info("agent relay listening (TLS)", "addr", listener.Addr().String())
 
 	go func() {
 		<-ctx.Done()
@@ -854,48 +929,58 @@ func runAgentRelay(ctx context.Context, up *uploader) {
 	}
 }
 
-// handleAgentConnection processes a single agent connection, reading telemetry data
-// and forwarding it to the backend through the collector's (mTLS) upload path.
+// handleAgentConnection reads one relay message and forwards the telemetry
+// with the agent's credential, falling back to the disk spool when the cloud
+// is unreachable. The agent gets an ack only once the telemetry is durably
+// accepted (uploaded or spooled).
 func handleAgentConnection(ctx context.Context, up *uploader, conn net.Conn) {
 	defer conn.Close()
-
 	remoteAddr := conn.RemoteAddr().String()
-	slog.Debug("agent connected", "remote", remoteAddr)
 
-	// Set read deadline to prevent stale connections
 	if err := conn.SetDeadline(time.Now().Add(60 * time.Second)); err != nil {
 		slog.Error("set deadline failed", "error", err)
 		return
 	}
-
-	// Read the agent telemetry payload (JSON newline-delimited)
-	buf := make([]byte, 65536)
-	n, err := conn.Read(buf)
-	if err != nil {
+	line, err := bufio.NewReader(io.LimitReader(conn, maxRelayMessage)).ReadBytes('\n')
+	if err != nil && len(line) == 0 {
 		slog.Debug("agent read error", "remote", remoteAddr, "error", err)
 		return
 	}
+	var msg relayMessage
+	if err := json.Unmarshal(line, &msg); err != nil || strings.TrimSpace(msg.Token) == "" || len(msg.Telemetry) == 0 {
+		slog.Warn("agent relay message rejected", "remote", remoteAddr)
+		_, _ = conn.Write([]byte(`{"status":"error","reason":"invalid message"}` + "\n"))
+		return
+	}
 
-	slog.Debug("agent data received", "remote", remoteAddr, "bytes", n)
-
-	// Forward the telemetry payload to the backend's agent-telemetry endpoint
-	// via the collector's (mTLS-authenticated) upload path, falling back to the
-	// disk spool when the cloud is unreachable. The agent gets an ack only once
-	// the payload is durably accepted (uploaded or spooled).
-	payload := buf[:n]
 	if up != nil {
-		if err := up.postAgentTelemetry(ctx, payload); err != nil {
+		if err := up.postAgentTelemetry(ctx, msg.Token, msg.Telemetry); err != nil {
+			if errors.Is(err, errTelemetryRejected) {
+				// The backend refused the credential or the payload;
+				// spooling would only replay the refusal.
+				slog.Warn("agent telemetry rejected", "remote", remoteAddr, "error", err)
+				_, _ = conn.Write([]byte(`{"status":"error","reason":"rejected"}` + "\n"))
+				return
+			}
 			slog.Warn("agent telemetry upload failed, spooling", "remote", remoteAddr, "error", err)
-			if serr := up.spoolResults(ctx, payload, time.Now()); serr != nil {
+			if serr := up.spoolAgentTelemetry(ctx, line); serr != nil {
 				slog.Error("agent telemetry spool failed", "remote", remoteAddr, "error", serr)
 				_, _ = conn.Write([]byte(`{"status":"error"}` + "\n"))
 				return
 			}
 		}
 	}
-
-	// Acknowledge receipt
 	_, _ = conn.Write([]byte(`{"status":"ok"}` + "\n"))
+}
+
+// spoolAgentTelemetry persists an undeliverable relay message under the agent
+// telemetry topic.
+func (u *uploader) spoolAgentTelemetry(ctx context.Context, message []byte) error {
+	if u.spool == nil {
+		return errors.New("no spool configured")
+	}
+	_, err := u.spool.Enqueue(ctx, buffer.Message{Topic: agentTelemetryTopic, Payload: message, CreatedAt: time.Now().UTC()})
+	return err
 }
 
 func loadCollectorConfig() collectorConfig {
@@ -909,29 +994,32 @@ func loadCollectorConfig() collectorConfig {
 	}
 
 	return collectorConfig{
-		ServerURL:         envOrDefault("RETICORA_SERVER_URL", "http://localhost:8080"),
-		OrganizationID:    os.Getenv("RETICORA_ORGANIZATION_ID"),
-		CollectorID:       os.Getenv("RETICORA_COLLECTOR_ID"),
-		ScanSubnets:       csvEnvOrDefault("RETICORA_SCAN_SUBNETS", []string{"127.0.0.1/32"}),
-		Protocols:         csvEnvOrDefault("RETICORA_DISCOVERY_PROTOCOLS", []string{"sweep", "snmp", "ssh"}),
-		DiscoveryInterval: durationEnvOrDefault("RETICORA_DISCOVERY_INTERVAL", 15*time.Minute),
-		HeartbeatInterval: durationEnvOrDefault("RETICORA_HEARTBEAT_INTERVAL", time.Minute),
-		Credentials:       creds,
-		RedfishTLSScopes:  tlsScopes,
-		SpoolDir:          envOrDefault("RETICORA_SPOOL_DIR", "/var/lib/reticora-collector/spool"),
-		SpoolMaxBytes:     int64EnvOrDefault("RETICORA_SPOOL_MAX_BYTES", 1<<30), // 1 GiB default cap
-		SpoolMaxAge:       durationEnvOrDefault("RETICORA_SPOOL_MAX_AGE", 72*time.Hour),
-		TrapListenAddr:    os.Getenv("RETICORA_SNMP_TRAP_LISTEN"),
-		MetricsInterval:   durationEnvOrDefault("RETICORA_METRICS_INTERVAL", 0),
-		PollMetrics:       pollMetricsFromEnv(os.Getenv("RETICORA_SNMP_POLL_METRICS")),
-		TLSCertPEM:        []byte(os.Getenv("RETICORA_TLS_CLIENT_CERT")),
-		TLSKeyPEM:         []byte(os.Getenv("RETICORA_TLS_CLIENT_KEY")),
-		TLSCAPEM:          []byte(os.Getenv("RETICORA_TLS_CA")),
-		TLSCertFile:       os.Getenv("RETICORA_TLS_CLIENT_CERT_FILE"),
-		TLSKeyFile:        os.Getenv("RETICORA_TLS_CLIENT_KEY_FILE"),
-		TLSCAFile:         os.Getenv("RETICORA_TLS_CA_FILE"),
-		TLSServerName:     os.Getenv("RETICORA_TLS_SERVER_NAME"),
-		CredentialsPath:   envOrDefault("RETICORA_CREDENTIALS_PATH", "/var/lib/reticora-collector/credentials.json"),
+		ServerURL:          envOrDefault("RETICORA_SERVER_URL", "http://localhost:8080"),
+		OrganizationID:     os.Getenv("RETICORA_ORGANIZATION_ID"),
+		CollectorID:        os.Getenv("RETICORA_COLLECTOR_ID"),
+		ScanSubnets:        csvEnvOrDefault("RETICORA_SCAN_SUBNETS", []string{"127.0.0.1/32"}),
+		Protocols:          csvEnvOrDefault("RETICORA_DISCOVERY_PROTOCOLS", []string{"sweep", "snmp", "ssh"}),
+		DiscoveryInterval:  durationEnvOrDefault("RETICORA_DISCOVERY_INTERVAL", 15*time.Minute),
+		HeartbeatInterval:  durationEnvOrDefault("RETICORA_HEARTBEAT_INTERVAL", time.Minute),
+		Credentials:        creds,
+		RedfishTLSScopes:   tlsScopes,
+		SpoolDir:           envOrDefault("RETICORA_SPOOL_DIR", "/var/lib/reticora-collector/spool"),
+		SpoolMaxBytes:      int64EnvOrDefault("RETICORA_SPOOL_MAX_BYTES", 1<<30), // 1 GiB default cap
+		SpoolMaxAge:        durationEnvOrDefault("RETICORA_SPOOL_MAX_AGE", 72*time.Hour),
+		TrapListenAddr:     os.Getenv("RETICORA_SNMP_TRAP_LISTEN"),
+		MetricsInterval:    durationEnvOrDefault("RETICORA_METRICS_INTERVAL", 0),
+		PollMetrics:        pollMetricsFromEnv(os.Getenv("RETICORA_SNMP_POLL_METRICS")),
+		TLSCertPEM:         []byte(os.Getenv("RETICORA_TLS_CLIENT_CERT")),
+		TLSKeyPEM:          []byte(os.Getenv("RETICORA_TLS_CLIENT_KEY")),
+		TLSCAPEM:           []byte(os.Getenv("RETICORA_TLS_CA")),
+		TLSCertFile:        os.Getenv("RETICORA_TLS_CLIENT_CERT_FILE"),
+		TLSKeyFile:         os.Getenv("RETICORA_TLS_CLIENT_KEY_FILE"),
+		TLSCAFile:          os.Getenv("RETICORA_TLS_CA_FILE"),
+		TLSServerName:      os.Getenv("RETICORA_TLS_SERVER_NAME"),
+		AgentRelayAddr:     envOrDefault("RETICORA_AGENT_RELAY_ADDR", ":9443"),
+		AgentRelayCertFile: os.Getenv("RETICORA_AGENT_RELAY_TLS_CERT_FILE"),
+		AgentRelayKeyFile:  os.Getenv("RETICORA_AGENT_RELAY_TLS_KEY_FILE"),
+		CredentialsPath:    envOrDefault("RETICORA_CREDENTIALS_PATH", "/var/lib/reticora-collector/credentials.json"),
 	}
 }
 

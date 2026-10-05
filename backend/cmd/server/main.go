@@ -31,6 +31,8 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
@@ -50,7 +52,9 @@ func main() {
 
 	cfg := config.Load()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	// Every record passes the redaction handler: secret attributes and URL
+	// passwords never reach the log (SEC-01).
+	logger := slog.New(httpx.NewRedactingHandler(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel})))
 	slog.SetDefault(logger)
 
 	// Fail-closed start (OPS-01): missing or invalid settings stop the server
@@ -139,6 +143,11 @@ func main() {
 		slog.Error("failed to connect to Redis", "error", err)
 		os.Exit(1)
 	}
+	// Deactivation ends sessions immediately through the blacklist in the
+	// shared cache store (AUT-02, TLC-04).
+	if sessionIssuer != nil {
+		sessionIssuer.WithRevocations(identity.NewSessionRevocations(cacheStore))
+	}
 
 	// Repositories. PostgreSQL is the only supported production backend; the
 	// in-memory implementations are reserved for tests and the explicit --no-db
@@ -169,12 +178,12 @@ func main() {
 		}
 		pool, err := database.NewPool(context.Background(), cfg.DatabaseURL)
 		if err != nil {
-			slog.Error("failed to connect to database", "error", err, "url", maskDSN(cfg.DatabaseURL))
+			slog.Error("failed to connect to database", "error", err, "url", config.MaskDSN(cfg.DatabaseURL))
 			os.Exit(1)
 		}
 		defer pool.Close()
 
-		slog.Info("connected to PostgreSQL", "url", maskDSN(cfg.DatabaseURL))
+		slog.Info("connected to PostgreSQL", "url", config.MaskDSN(cfg.DatabaseURL))
 		dbCheck := server.DatabaseReadiness(pool, server.RequiredExtensions)
 		if err := dbCheck.Check(context.Background()); err != nil {
 			slog.Error("database is not ready", "error", err)
@@ -261,7 +270,10 @@ func main() {
 	slog.Info("entitlement enforcement configured",
 		"default_plan", cfg.DefaultPlan, "enforced", cfg.EntitlementEnforcement)
 
-	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, nil, webhook.DispatcherOptions{
+	// Webhook and connector destinations are user input: every outbound call
+	// goes through the egress client (SEC-08).
+	egressPolicy := egress.Options{AllowPrivate: cfg.EgressAllowPrivate}
+	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, egress.NewClient(egressPolicy), webhook.DispatcherOptions{
 		Deliveries: repos.WebhookDeliveries,
 	})
 	defer func() {
@@ -287,7 +299,12 @@ func main() {
 		AuditPool:            auditPool,
 		AIProvider:           aiProvider,
 		Blobs:                blobStore,
-		Readiness:            readiness,
+		Egress:               egressPolicy,
+		RouteMiddleware: []func(http.Handler) http.Handler{
+			middleware.OpenAPIValidation,
+			middleware.IdempotencyWithStore(cacheStore),
+		},
+		Readiness: readiness,
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -330,23 +347,30 @@ func main() {
 		slog.Warn("INSECURE DEVELOPMENT MODE: bearer tokens are accepted without signature verification")
 	}
 
-	// Middleware chain per spec:
-	// RequestID/Tracing -> Panic-Recovery -> Security-Headers -> Auth ->
-	// Tenant -> Entitlement -> Rate-Limit -> POST-Idempotency -> Handler
-	// The HTTP metrics middleware sits just inside the tenant middleware so the
-	// organization_id label is populated from the request context.
+	if err := middleware.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		slog.Error("invalid RETICORA_TRUSTED_PROXIES", "error", err)
+		os.Exit(1)
+	}
+
+	// Middleware chain per API-04:
+	// RequestID/Tracing -> Recovery -> Security-Headers -> Pre-Auth-Limit
+	// (per IP, AUT-10) -> Auth -> Tenant -> Entitlement -> Rate-Limit ->
+	// [per route: Authz -> Validation -> Idempotency] -> Handler.
+	// Validation and idempotency are route middleware (server.Options), so
+	// they run after the route's authorization. The HTTP metrics middleware
+	// sits just inside the tenant middleware so the organization_id label is
+	// populated from the request context.
 	handler := middleware.Chain(
 		middleware.RequestID,
 		middleware.Recovery,
 		middleware.Logger,
 		middleware.SecurityHeaders,
-		middleware.OpenAPIValidation,
+		middleware.PreAuthRateLimiter(cfg.PreAuthRateLimitRPM, cacheStore),
 		authMiddleware,
 		middleware.TenantMiddleware,
 		httpMetrics,
 		entitlementSvc.Middleware,
 		middleware.RateLimiterWithStore(cfg.RateLimitRPM, cacheStore),
-		middleware.IdempotencyWithStore(cacheStore),
 	)(mux)
 
 	server := &http.Server{
@@ -420,27 +444,6 @@ func loadSessionIssuer(cfg *config.Config) (*identity.SessionIssuer, error) {
 		return nil, fmt.Errorf("parse session key %q: %w", cfg.SessionKeyPath, err)
 	}
 	return issuer, nil
-}
-
-// maskDSN hides password from database URL for logging.
-func maskDSN(dsn string) string {
-	// Mask the password portion of user:password@host/db
-	atIdx := strings.Index(dsn, "@")
-	if atIdx < 0 {
-		return dsn
-	}
-	colonIdx := strings.Index(dsn, "://")
-	if colonIdx < 0 {
-		return "***"
-	}
-	prefix := dsn[:colonIdx+3]
-	rest := dsn[colonIdx+3:]
-	passStart := strings.Index(rest, ":")
-	passEnd := strings.Index(rest, "@")
-	if passStart < 0 || passEnd < 0 || passStart >= passEnd {
-		return dsn
-	}
-	return prefix + rest[:passStart+1] + "***" + rest[passEnd:]
 }
 
 // setupObjectStorage connects the S3-compatible store and creates the buckets

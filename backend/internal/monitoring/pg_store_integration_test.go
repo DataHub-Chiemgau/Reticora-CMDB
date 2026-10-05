@@ -37,7 +37,9 @@ func TestMetricStoreUsesBarrierViews(t *testing.T) {
 	store := monitoring.NewPGMetricStore(f.App)
 
 	// Two hours, two days ago: hour 1 has the samples 10 and 20, hour 2 has 40.
-	base := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Hour)
+	// base starts a two-hour bucket so the two-hour step below spans both
+	// hours whatever the time of day.
+	base := time.Now().UTC().Add(-48 * time.Hour).Truncate(2 * time.Hour)
 	samples := []monitoring.Metric{
 		{OrgID: f.OrgA, CIID: own, Name: "cpu", Value: 10, Timestamp: base.Add(10 * time.Minute)},
 		{OrgID: f.OrgA, CIID: own, Name: "cpu", Value: 20, Timestamp: base.Add(20 * time.Minute)},

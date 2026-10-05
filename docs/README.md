@@ -732,6 +732,10 @@ The server is configured via environment variables:
 - `RETICORA_BLOB_DIR` — filesystem blob storage used by export jobs in `--no-db` development mode (defaults to a temp directory).
 - `RETICORA_OTEL_ENDPOINT` — OTLP HTTP collector endpoint for traces/metrics; empty (default) keeps no-op telemetry.
 - `RETICORA_METRICS_TENANT_LABEL` — set to `true` to add the `organization_id` label to HTTP request metrics (default `false`; multiplies series by tenant count).
+- `RETICORA_EGRESS_ALLOW_PRIVATE` — set to `true` to let webhooks and IGA connectors reach private, loopback and link-local destinations (on-premises installations; default `false`). Cloud metadata endpoints stay blocked; DNS pinning and the 3-redirect limit always apply (SEC-08).
+- `RETICORA_PREAUTH_RATE_LIMIT_RPM` — authentication attempts per client IP and minute before any credential check (default `20`, AUT-10): requests to `/auth/callback`, `/auth/refresh` and `/collectors/enroll` and every failed authentication count; once spent, the IP gets 429 until the minute is over.
+- `RETICORA_TRUSTED_PROXIES` — comma-separated CIDRs of reverse proxies whose `X-Real-IP` header names the client for IP-based limits (default loopback and private networks; empty trusts none).
+- Endpoint agent channel (AGT-03): the agent sends telemetry only over TLS — to the collector relay (`RETICORA_COLLECTOR_RELAY`, host:port) or directly to an `https://` `RETICORA_SERVER_URL`; there is no plaintext fallback. It authenticates with the `agent_token` returned once by `POST /api/v1/agents/enroll` (`RETICORA_AGENT_TOKEN` or `RETICORA_AGENT_TOKEN_FILE`); `RETICORA_TLS_CA_FILE` adds a private CA. The collector relay listens on `RETICORA_AGENT_RELAY_ADDR` (default `:9443`) only when `RETICORA_AGENT_RELAY_TLS_CERT_FILE` and `RETICORA_AGENT_RELAY_TLS_KEY_FILE` are set, and forwards each message with the agent's token to `/api/v1/agents/telemetry`.
 
 ### CI/CD
 

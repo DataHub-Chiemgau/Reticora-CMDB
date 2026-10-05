@@ -11,7 +11,9 @@
 package locations
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -89,10 +91,33 @@ type Location struct {
 // CreateRequest creates a node. ClientID is required for a site and ignored
 // otherwise, because every other node inherits the client of its site.
 type CreateRequest struct {
-	Kind     Kind
+	Kind     Kind   `json:"kind"`
+	ParentID string `json:"parent_id,omitempty"`
+	ClientID string `json:"client_id,omitempty"`
+	Name     string `json:"name"`
+}
+
+// UpdateRequest renames and/or moves a node; nil fields stay unchanged.
+type UpdateRequest struct {
+	Name     *string `json:"name,omitempty"`
+	ParentID *string `json:"parent_id,omitempty"`
+}
+
+// Filter narrows a listing.
+type Filter struct {
 	ParentID string
-	ClientID string
-	Name     string
+	Kind     Kind
+	RootOnly bool
+	Search   string
+}
+
+// Repository reads and writes the location tree.
+type Repository interface {
+	List(ctx context.Context, orgID string, filter Filter) ([]Location, error)
+	Create(ctx context.Context, orgID string, req CreateRequest) (*Location, error)
+	Get(ctx context.Context, orgID, id string) (*Location, error)
+	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Location, error)
+	Delete(ctx context.Context, orgID, id string) error
 }
 
 // Errors of the repository.
@@ -102,28 +127,62 @@ var (
 	ErrInvalidParent = errors.New("parent location not allowed")
 	ErrCycle         = errors.New("location move would create a cycle")
 	ErrInvalidInput  = errors.New("invalid location input")
+	ErrHasChildren   = errors.New("location has child locations")
+	ErrInUse         = errors.New("location is still referenced")
 )
+
+// FieldError names the request field a validation error is about, for the
+// RFC 7807 response. It wraps one of the repository errors.
+type FieldError struct {
+	Field   string
+	Message string
+	Err     error
+}
+
+func (e *FieldError) Error() string { return fmt.Sprintf("%s: %s", e.Field, e.Message) }
+
+// Unwrap returns the repository error.
+func (e *FieldError) Unwrap() error { return e.Err }
+
+func fieldError(field string, err error, format string, args ...any) error {
+	return &FieldError{Field: field, Message: fmt.Sprintf(format, args...), Err: err}
+}
+
+// withField attaches field to err unless it already names one or is not a
+// validation error.
+func withField(field string, err error) error {
+	var fe *FieldError
+	if err == nil || errors.As(err, &fe) {
+		return err
+	}
+	if errors.Is(err, ErrInvalidParent) || errors.Is(err, ErrCycle) || errors.Is(err, ErrInvalidInput) || errors.Is(err, ErrInvalidKind) {
+		return &FieldError{Field: field, Message: err.Error(), Err: err}
+	}
+	return err
+}
 
 // Validate checks the request against the parent matrix as far as possible
 // without the database.
+// The error is a *FieldError naming the offending field.
 func (r CreateRequest) Validate() error {
 	if !r.Kind.Valid() {
-		return ErrInvalidKind
+		return fieldError("kind", ErrInvalidKind, "unknown kind %q (site, building, room, rack, warehouse, zone, shelf or bin)", r.Kind)
 	}
 	if r.Name == "" {
-		return ErrInvalidInput
+		return fieldError("name", ErrInvalidInput, "name is required")
 	}
 	if r.Kind == KindSite {
 		if r.ParentID != "" {
-			return ErrInvalidParent
+			return fieldError("parent_id", ErrInvalidParent, "a site is a root and has no parent")
 		}
 		if r.ClientID == "" {
-			return ErrInvalidInput
+			return fieldError("client_id", ErrInvalidInput, "client_id is required for a site")
 		}
 		return nil
 	}
 	if r.ParentID == "" {
-		return ErrInvalidParent
+		parent, _ := r.Kind.ParentKind()
+		return fieldError("parent_id", ErrInvalidParent, "a %s needs a parent of kind %s", r.Kind, parent)
 	}
 	return nil
 }

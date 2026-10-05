@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -26,6 +27,23 @@ type Subscription struct {
 	Headers        map[string]string `json:"headers,omitempty"`
 	CreatedAt      string            `json:"created_at"`
 	UpdatedAt      string            `json:"updated_at"`
+}
+
+// MaskedHeaderValue replaces every custom header value in API responses.
+const MaskedHeaderValue = "***"
+
+// redacted returns the subscription as the API shows it: custom header values
+// often carry authentication (Authorization, API keys), so they are
+// write-only and masked; only the header names are returned (SEC-01).
+func (s *Subscription) redacted() Subscription {
+	out := *s
+	if len(s.Headers) > 0 {
+		out.Headers = make(map[string]string, len(s.Headers))
+		for name := range s.Headers {
+			out.Headers[name] = MaskedHeaderValue
+		}
+	}
+	return out
 }
 
 // CreateRequest is the payload for creating a webhook subscription.
@@ -188,6 +206,15 @@ type Handler struct {
 	deliverer   TestDeliverer
 	deliveries  DeliveryLister
 	deadLetters DeadLetterLister
+	// egress validates subscriber URLs when they are stored (SEC-08).
+	egress egress.Options
+}
+
+// WithEgress sets the destination policy subscriber URLs are validated
+// against; the default blocks every internal destination.
+func (h *Handler) WithEgress(opts egress.Options) *Handler {
+	h.egress = opts
+	return h
 }
 
 // NewHandler creates a new webhook handler. An optional TestDeliverer enables
@@ -338,8 +365,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	shown := make([]Subscription, 0, len(subs))
+	for i := range subs {
+		shown = append(shown, subs[i].redacted())
+	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Subscription]{
-		Data:    subs,
+		Data:    shown,
 		Total:   total,
 		Limit:   page.Limit,
 		Offset:  page.Offset,
@@ -362,7 +393,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.WriteJSON(w, http.StatusOK, sub)
+	api.WriteJSON(w, http.StatusOK, sub.redacted())
 }
 
 // Create handles POST /api/v1/webhooks
@@ -381,6 +412,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if req.Name == "" || req.URL == "" || req.Secret == "" || len(req.Events) == 0 {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name, url, secret, and events are required")
+		return
+	}
+
+	if err := h.egress.ValidateURL(req.URL); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -406,7 +442,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.WriteJSON(w, http.StatusCreated, sub)
+	api.WriteJSON(w, http.StatusCreated, sub.redacted())
 }
 
 // Delete handles DELETE /api/v1/webhooks/{id}

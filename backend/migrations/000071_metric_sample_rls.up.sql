@@ -51,9 +51,14 @@ BEGIN
                 UNION SELECT compressed_hypertable_id FROM _timescaledb_catalog.hypertable WHERE table_name = 'metric_sample'
                 UNION SELECT mat_hypertable_id FROM _timescaledb_catalog.continuous_agg WHERE user_view_name = 'metric_sample_1h')
         UNION ALL
-        SELECT format('%I.%I', c.schema_name, c.table_name)
-          FROM _timescaledb_catalog.chunk c
-         WHERE c.hypertable_id IN (
+        -- Chunks are found through inheritance: the chunk catalog changed
+        -- between TimescaleDB versions (schema/table name columns until 2.2x,
+        -- relid since), inheritance did not.
+        SELECT i.inhrelid::regclass::text
+          FROM pg_inherits i
+          JOIN _timescaledb_catalog.hypertable h
+            ON i.inhparent = format('%I.%I', h.schema_name, h.table_name)::regclass
+         WHERE h.id IN (
                 SELECT id FROM _timescaledb_catalog.hypertable WHERE table_name = 'metric_sample'
                 UNION SELECT compressed_hypertable_id FROM _timescaledb_catalog.hypertable WHERE table_name = 'metric_sample'
                 UNION SELECT mat_hypertable_id FROM _timescaledb_catalog.continuous_agg WHERE user_view_name = 'metric_sample_1h')

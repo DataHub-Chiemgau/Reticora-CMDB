@@ -35,15 +35,39 @@ type Handler struct {
 }
 
 // AccessResolver loads the role grants of a user: every role assignment and
-// custom role assignment with its permissions and scope.
+// custom role assignment with its permissions and scope, and the org-wide
+// grants of the standard roles the IdP roles map to (RBA-02).
 type AccessResolver interface {
 	AccessGrants(ctx context.Context, orgID, userID string) ([]Grant, error)
+	// RoleGrants returns one org-wide grant per named standard role of the
+	// organization, with the role's permissions from the database. Roles
+	// valid only in a client scope grant nothing here.
+	RoleGrants(ctx context.Context, orgID string, roleNames []string) ([]Grant, error)
+}
+
+// ErrUserInactive is returned when a deactivated user logs in or refreshes a
+// session. A login never reactivates a deactivated account (TLC-04).
+var ErrUserInactive = errors.New("identity: user is deactivated")
+
+// ErrFirstLoginNotPermitted is returned when an unknown user logs in without
+// an admission for organization and e-mail: a pending invitation or an
+// account created by an administrator or SCIM (AUT-01).
+var ErrFirstLoginNotPermitted = errors.New("identity: first login requires an invitation for this organization and e-mail")
+
+// UserStatusChecker reports whether an app_user may hold a session. A
+// provisioner implementing it makes refresh check the user status; a user
+// that no longer exists is not active.
+type UserStatusChecker interface {
+	UserActive(ctx context.Context, orgID, userID string) (bool, error)
 }
 
 // UserProvisioner upserts the authenticated OIDC subject into app_user.
 type UserProvisioner interface {
-	// EnsureUser returns the app_user id for the OIDC subject, creating the
-	// record with the given display data when it does not exist yet.
+	// EnsureUser resolves the app_user of the OIDC subject in the
+	// organization, or on first login by organization and verified e-mail
+	// (empty when unverified). It creates or links a user only with an
+	// admission and returns ErrFirstLoginNotPermitted otherwise, and
+	// ErrUserInactive for a deactivated user.
 	EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName string) (string, error)
 	// EnsureRole assigns the named standard role when the user has none yet.
 	EnsureRole(ctx context.Context, orgID, userID, roleName string) error
@@ -185,6 +209,20 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A deactivated or deleted user gets no new token, even when the
+	// blacklist entry of the deactivation has expired or was never written.
+	if checker, ok := h.provisioner.(UserStatusChecker); ok {
+		active, statusErr := checker.UserActive(r.Context(), claims.OrganizationID, claims.Subject)
+		if statusErr != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", "check user status")
+			return
+		}
+		if !active {
+			api.WriteError(w, http.StatusUnauthorized, "Unauthorized", ErrUserInactive.Error())
+			return
+		}
+	}
+
 	refreshedClaims := cloneSessionClaims(claims)
 	// Roles and scopes are re-read on every refresh so revoked or narrowed
 	// assignments take effect without a new login.
@@ -268,9 +306,11 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 		return "", time.Time{}, authResult{}, errors.New("identity: ID token subject is required")
 	}
 
-	orgID := firstUUIDGroup(idToken.Groups)
+	// The organization is the realm's user attribute (CH26, AUT-09), never a
+	// group name the user could be added to.
+	orgID := idToken.OrganizationID
 	if orgID == "" {
-		return "", time.Time{}, authResult{}, errors.New("identity: no organization group found in ID token")
+		return "", time.Time{}, authResult{}, errors.New("identity: no organization attribute in ID token")
 	}
 
 	// Provision the app_user for the OIDC subject on first login so FK-bound
@@ -279,9 +319,16 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 	// database identity aligned.
 	subject := idToken.Subject
 	if h.provisioner != nil {
-		userID, err := h.provisioner.EnsureUser(ctx, orgID, idToken.Subject, idToken.Email, idToken.Name)
-		if err != nil {
-			return "", time.Time{}, authResult{}, fmt.Errorf("identity: provision user: %w", err)
+		email := ""
+		if idToken.EmailVerified {
+			email = idToken.Email
+		}
+		userID, provisionErr := h.provisioner.EnsureUser(ctx, orgID, idToken.Subject, email, idToken.Name)
+		if errors.Is(provisionErr, ErrUserInactive) || errors.Is(provisionErr, ErrFirstLoginNotPermitted) {
+			return "", time.Time{}, authResult{}, provisionErr
+		}
+		if provisionErr != nil {
+			return "", time.Time{}, authResult{}, fmt.Errorf("identity: provision user: %w", provisionErr)
 		}
 		if h.defaultRole != "" {
 			// Best effort: role assignment must not block login.
@@ -313,26 +360,30 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 	}, nil
 }
 
-// applyAccess sets permissions and scopes of the session from the IdP groups
-// and the role assignments in the database. IdP group roles are org-wide
-// grants; database assignments carry their client and site scope. A failing
-// lookup fails the login or refresh instead of issuing an unscoped session.
+// applyAccess sets permissions and scopes of the session from the database
+// only (RBA-02): the role assignments of the user and the standard roles its
+// IdP roles map to (StandardRolesForGroups), both read from the roles of the
+// organization. IdP roles are org-wide grants; database assignments carry
+// their client and site scope. A failing lookup fails the login or refresh
+// instead of issuing an unscoped session. Without a resolver (tests) the
+// token's access stays unchanged.
 func (h *Handler) applyAccess(ctx context.Context, claims *SessionClaims) error {
-	if h.access == nil && len(claims.Groups) == 0 {
-		// Nothing to resolve from: keep the token's access unchanged.
+	if h.access == nil {
 		return nil
 	}
 	grants := make([]Grant, 0, 4)
-	if groupPermissions := permissionsFromGroups(claims.Groups); len(groupPermissions) > 0 {
-		grants = append(grants, OrgWideGrant(groupPermissions))
-	}
-	if h.access != nil {
-		stored, err := h.access.AccessGrants(ctx, claims.OrganizationID, claims.Subject)
+	if roles := StandardRolesForGroups(claims.Groups); len(roles) > 0 {
+		mapped, err := h.access.RoleGrants(ctx, claims.OrganizationID, roles)
 		if err != nil {
 			return err
 		}
-		grants = append(grants, stored...)
+		grants = append(grants, mapped...)
 	}
+	stored, err := h.access.AccessGrants(ctx, claims.OrganizationID, claims.Subject)
+	if err != nil {
+		return err
+	}
+	grants = append(grants, stored...)
 	access := ResolveAccess(grants)
 	scope := access.Scope
 	claims.Permissions = access.Permissions
@@ -356,93 +407,6 @@ func bearerTokenFromRequest(r *http.Request) (string, error) {
 	return strings.TrimSpace(parts[1]), nil
 }
 
-func permissionsFromGroups(groups []string) []Permission {
-	all := allPermissions()
-	permissions := make([]Permission, 0)
-	for _, group := range groups {
-		normalized := normalizeGroup(group)
-		switch {
-		case strings.Contains(normalized, "admin"), strings.Contains(normalized, "owner"):
-			permissions = append(permissions, all...)
-			continue
-		case strings.Contains(normalized, "editor"), strings.Contains(normalized, "writer"):
-			permissions = append(permissions, editorPermissions()...)
-		case strings.Contains(normalized, "viewer"), strings.Contains(normalized, "reader"), strings.Contains(normalized, "readonly"), strings.Contains(normalized, "read only"):
-			permissions = append(permissions, readerPermissions()...)
-		}
-
-		for _, permission := range all {
-			token := normalizeGroup(string(permission))
-			if token != "" && strings.Contains(normalized, token) {
-				permissions = append(permissions, permission)
-			}
-		}
-	}
-	return MergePermissions(permissions)
-}
-
-func readerPermissions() []Permission {
-	readers := make([]Permission, 0)
-	for _, permission := range allPermissions() {
-		if strings.HasSuffix(string(permission), ":read") {
-			readers = append(readers, permission)
-		}
-	}
-	return readers
-}
-
-func editorPermissions() []Permission {
-	return []Permission{
-		PermCIRead,
-		PermCIWrite,
-		PermCIDelete,
-		PermSiteRead,
-		PermSiteWrite,
-		PermRackRead,
-		PermRackWrite,
-		PermRelationshipRead,
-		PermRelationshipWrite,
-		PermContactRead,
-		PermContactWrite,
-		PermTopologyRead,
-		PermDiscoveryRead,
-		PermDiscoveryWrite,
-		PermDiscoveryIngest,
-		PermAssetRead,
-		PermAssetWrite,
-		PermAssignmentRead,
-		PermAssignmentWrite,
-		PermDocumentRead,
-		PermDocumentWrite,
-		PermStocktakeRead,
-		PermStocktakeWrite,
-		PermTicketRead,
-		PermTicketWrite,
-		PermSLARead,
-		PermIPAMRead,
-		PermIPAMWrite,
-		PermFormRead,
-		PermFormWrite,
-		PermWorkflowRead,
-		PermWorkflowWrite,
-		PermComplianceRead,
-		PermMonitoringRead,
-		PermSearchRead,
-		PermAIRead,
-		PermExportRun,
-	}
-}
-
-func firstUUIDGroup(groups []string) string {
-	for _, group := range groups {
-		candidate := strings.TrimSpace(group)
-		if isUUID(candidate) {
-			return candidate
-		}
-	}
-	return ""
-}
-
 func isUUID(value string) bool {
 	if len(value) != 36 {
 		return false
@@ -460,11 +424,6 @@ func isUUID(value string) bool {
 		}
 	}
 	return true
-}
-
-func normalizeGroup(value string) string {
-	replacer := strings.NewReplacer(":", " ", "-", " ", "_", " ", "/", " ", ".", " ")
-	return strings.Join(strings.Fields(strings.ToLower(replacer.Replace(value))), " ")
 }
 
 func cloneSessionClaims(claims *SessionClaims) SessionClaims {
@@ -490,12 +449,14 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 		return
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		writeContextError(w, err)
+	case errors.Is(err, ErrUserInactive), errors.Is(err, ErrFirstLoginNotPermitted):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
 	case strings.Contains(err.Error(), "authorization code is required"),
 		strings.Contains(err.Error(), "PKCE code verifier is required"),
 		strings.Contains(err.Error(), "ID token is required"),
 		strings.Contains(err.Error(), "groups claim"):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
-	case strings.Contains(err.Error(), "organization group"),
+	case strings.Contains(err.Error(), "organization attribute"),
 		strings.Contains(err.Error(), "unexpected ID token issuer"),
 		strings.Contains(err.Error(), "ID token is expired"),
 		strings.Contains(err.Error(), "ID token subject is required"),

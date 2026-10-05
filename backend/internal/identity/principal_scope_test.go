@@ -111,6 +111,21 @@ type fakeAccessResolver struct {
 	grants []Grant
 	err    error
 	calls  int
+	// roles maps standard role names to their permissions for RoleGrants.
+	roles map[string][]Permission
+	// requestedRoles records the role names RoleGrants was asked for.
+	requestedRoles []string
+}
+
+func (f *fakeAccessResolver) RoleGrants(_ context.Context, _ string, roleNames []string) ([]Grant, error) {
+	f.requestedRoles = append(f.requestedRoles, roleNames...)
+	grants := make([]Grant, 0, len(roleNames))
+	for _, name := range roleNames {
+		if perms, ok := f.roles[name]; ok {
+			grants = append(grants, OrgWideGrant(perms))
+		}
+	}
+	return grants, f.err
 }
 
 func (f *fakeAccessResolver) AccessGrants(_ context.Context, orgID, userID string) ([]Grant, error) {
@@ -185,7 +200,8 @@ func TestCallbackCombinesGroupsAndRoleAssignments(t *testing.T) {
 	sessionIssuer := testSessionIssuer(t)
 	fake := newFakeOIDCServer(t)
 	fake.mutateClaims = func(claims map[string]any) {
-		claims["groups"] = []string{scopeOrg}
+		claims["organization_id"] = scopeOrg
+		claims["groups"] = []string{"reticora-staff"}
 	}
 	resolver := &fakeAccessResolver{grants: []Grant{{Permissions: []Permission{PermCIWrite}, Clients: []string{scopeClientB}}}}
 	handler := NewHandler(NewOIDCProvider(OIDCConfig{
@@ -213,11 +229,11 @@ func TestCallbackCombinesGroupsAndRoleAssignments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The org group carries no role, so only the client assignment counts.
+	// The group carries no role, so only the client assignment counts.
 	if claims.Scope == nil || claims.Scope.Clients.All || len(claims.Scope.Clients.IDs) != 1 || claims.Scope.Clients.IDs[0] != scopeClientB {
 		t.Fatalf("scope = %+v, want client B only", claims.Scope)
 	}
-	if len(claims.Groups) != 1 || claims.Groups[0] != scopeOrg {
+	if len(claims.Groups) != 1 || claims.Groups[0] != "reticora-staff" {
 		t.Fatalf("groups must be kept for refresh, got %v", claims.Groups)
 	}
 }

@@ -1,0 +1,286 @@
+{
+  "realm": "reticora",
+  "enabled": true,
+  "displayName": "Reticora (development)",
+  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername(undefined) and notEmail(undefined) and passwordHistory(5)",
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "otpPolicyLookAheadWindow": 1,
+  "browserFlow": "browser-mfa",
+  "defaultRoles": [
+    "default-roles-reticora",
+    "offline_access"
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "default-roles-reticora",
+        "description": "Default roles for the reticora realm",
+        "composite": true,
+        "composites": {
+          "realm": [
+            "offline_access"
+          ]
+        },
+        "clientRole": false,
+        "containerId": "reticora"
+      },
+      {
+        "name": "mfa_required",
+        "description": "Marker: the browser login requires a second factor (OTP). Contained in org_admin and operator; assign it to further users or groups per organization policy (AUT-09, CH26).",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "reticora"
+      },
+      {
+        "name": "org_admin",
+        "description": "Organization administrator",
+        "composite": true,
+        "clientRole": false,
+        "containerId": "reticora",
+        "composites": {
+          "realm": [
+            "mfa_required"
+          ]
+        }
+      },
+      {
+        "name": "operator",
+        "description": "Platform operator",
+        "composite": true,
+        "composites": {
+          "realm": [
+            "mfa_required"
+          ]
+        },
+        "clientRole": false,
+        "containerId": "reticora"
+      },
+      {
+        "name": "engineer",
+        "description": "Engineering user",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "reticora"
+      },
+      {
+        "name": "viewer",
+        "description": "Read-only user",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "reticora"
+      },
+      {
+        "name": "client_technician",
+        "description": "Client-scoped technician",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "reticora"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "reticora-app",
+      "name": "Reticora App",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "RETICORA_OIDC_CLIENT_SECRET_PLACEHOLDER",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "RETICORA_OIDC_REDIRECT_URL_PLACEHOLDER",
+        "RETICORA_OIDC_REDIRECT_ORIGIN_PLACEHOLDER/*",
+        "http://localhost:5173/*",
+        "http://localhost:8080/*"
+      ],
+      "webOrigins": [
+        "RETICORA_OIDC_REDIRECT_ORIGIN_PLACEHOLDER",
+        "RETICORA_OIDC_ISSUER_ORIGIN_PLACEHOLDER",
+        "http://localhost:5173"
+      ],
+      "defaultClientScopes": [
+        "profile",
+        "email"
+      ],
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.group.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups",
+            "multivalued": "true",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "organization_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "organization_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "organization_id",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "name": "reticora-admin",
+      "path": "/reticora-admin"
+    }
+  ],
+  "authenticationFlows": [
+    {
+      "alias": "browser-mfa",
+      "description": "Browser login; a second factor (OTP) is mandatory for users holding mfa_required (AUT-09, CH26)",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "auth-cookie",
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 10,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "identity-provider-redirector",
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 25,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "ALTERNATIVE",
+          "priority": 30,
+          "flowAlias": "browser-mfa forms",
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "browser-mfa forms",
+      "description": "Username and password, then OTP when required",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "auth-username-password-form",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 20,
+          "flowAlias": "browser-mfa otp",
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "browser-mfa otp",
+      "description": "OTP for users holding mfa_required; users without OTP must set it up",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorConfig": "mfa-required-role",
+          "authenticator": "conditional-user-role",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "auth-otp-form",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "userSetupAllowed": false
+        }
+      ]
+    }
+  ],
+  "authenticatorConfig": [
+    {
+      "alias": "mfa-required-role",
+      "config": {
+        "condUserRole": "mfa_required",
+        "negate": "false"
+      }
+    }
+  ],
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\":[{\"name\":\"username\",\"displayName\":\"${username}\",\"validations\":{\"length\":{\"min\":3,\"max\":255},\"username-prohibited-characters\":{},\"up-username-not-idn-homograph\":{}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"email\",\"displayName\":\"${email}\",\"validations\":{\"email\":{},\"length\":{\"max\":255}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"firstName\",\"displayName\":\"${firstName}\",\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"lastName\",\"displayName\":\"${lastName}\",\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"organization_id\",\"displayName\":\"Organization\",\"validations\":{\"pattern\":{\"pattern\":\"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$\",\"error-message\":\"organization_id must be a UUID\"}},\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false}],\"groups\":[{\"name\":\"user-metadata\",\"displayHeader\":\"User metadata\",\"displayDescription\":\"Attributes, which refer to user metadata\"}]}"
+          ]
+        }
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "admin@reticora.local",
+      "enabled": true,
+      "email": "admin@reticora.local",
+      "emailVerified": true,
+      "firstName": "Reticora",
+      "lastName": "Admin",
+      "attributes": {
+        "organization_id": [
+          "00000000-0000-0000-0000-000000000001"
+        ]
+      },
+      "groups": [
+        "/reticora-admin"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Admin-Dev-2024!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "viewer"
+      ]
+    }
+  ]
+}

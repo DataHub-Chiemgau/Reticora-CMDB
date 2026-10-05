@@ -53,6 +53,19 @@ type Agent struct {
 	Policy             Policy     `json:"policy"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
+	// Token is the agent credential, present only in the enrollment
+	// response: a server-signed bearer token for the telemetry channel
+	// (AGT-03), valid for the agent only and only for agent:ingest.
+	Token string `json:"agent_token,omitempty"`
+}
+
+// RelayMessage is one newline-delimited JSON message of the agent→collector
+// relay protocol, which runs over TLS only (AGT-03). The collector forwards
+// Telemetry to POST /api/v1/agents/telemetry with Token as bearer
+// credential.
+type RelayMessage struct {
+	Token     string           `json:"token"`
+	Telemetry TelemetryPayload `json:"telemetry"`
 }
 
 // Policy is the central config pushed to the agent (interval, telemetry on/off).

@@ -79,7 +79,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"relationship-types":    identity.PermRelationshipRead,
 	"lifecycle-definitions": identity.PermAssetRead,
 	"lifecycle-transitions": identity.PermAssetRead,
-	"locations":             identity.PermAssetRead,
+	"locations":             identity.PermSiteRead,
 	"stock-movements":       identity.PermAssetRead,
 	"inventory":             identity.PermAssetRead,
 	"movements":             identity.PermAssetRead,
@@ -133,7 +133,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"relationship-types":    identity.PermRelationshipTypeManage,
 	"lifecycle-definitions": identity.PermLifecycleManage,
 	"lifecycle-transitions": identity.PermLifecycleManage,
-	"locations":             identity.PermInventoryManage,
+	"locations":             identity.PermSiteWrite,
 	"stock-movements":       identity.PermAssetMove,
 	"inventory":             identity.PermInventoryManage,
 	"movements":             identity.PermAssetMove,
@@ -154,6 +154,69 @@ var writePermissionOverrides = map[string]identity.Permission{
 	// Privacy/DSGVO: retention configuration and the erasure workflow act on
 	// other people's personal data, so every method requires user:manage.
 	"privacy": identity.PermUserManage,
+}
+
+// routeRule maps one operation to its permission ahead of the resource
+// tables. Path segments of pattern are literals or "*" for a path parameter;
+// method "*" matches every method. Rules cover actions and nested
+// sub-resources whose permission differs from the one of the first path
+// segment (RBA-04, RBA-06), so a nested route cannot borrow the broader right
+// of its parent resource.
+type routeRule struct {
+	method     string
+	pattern    string
+	permission identity.Permission
+}
+
+// routeRules are checked in order; the first match wins.
+var routeRules = []routeRule{
+	// Deleting a CI is its own right; ci:write does not delete.
+	{http.MethodDelete, "cis/*", identity.PermCIDelete},
+	// Instance attributes (MET-14, CI-10) and manual overrides (CI-10).
+	{http.MethodPut, "cis/*/field-definitions", identity.PermCIInstanceAttributeManage},
+	{http.MethodDelete, "cis/*/field-definitions/*", identity.PermCIInstanceAttributeManage},
+	{"*", "cis/*/fields/*/override", identity.PermOverrideWrite},
+	// Lifecycle transitions of CIs and assets (RBA-06).
+	{http.MethodPost, "cis/*/lifecycle-transitions", identity.PermLifecycleTransition},
+	{http.MethodPost, "assets/*/lifecycle-transitions", identity.PermLifecycleTransition},
+	// Nested sub-resources are protected by their own resource's rights.
+	{http.MethodGet, "cis/*/contacts", identity.PermContactRead},
+	{http.MethodPost, "cis/*/contacts", identity.PermContactWrite},
+	{http.MethodGet, "cis/*/interfaces", identity.PermIPAMRead},
+	{http.MethodPost, "cis/*/interfaces", identity.PermIPAMWrite},
+	{http.MethodGet, "cis/*/relationships", identity.PermRelationshipRead},
+	{http.MethodGet, "cis/*/dependencies", identity.PermTopologyRead},
+	{http.MethodGet, "cis/*/blast-radius", identity.PermTopologyRead},
+	// Approving or rejecting an order is not editing it.
+	{http.MethodPost, "orders/*/approve", identity.PermOrderApprove},
+	{http.MethodPost, "orders/*/reject", identity.PermOrderApprove},
+	// Reconciliation settings (RBA-06); reading them stays discovery:read.
+	{http.MethodPut, "reconciliation/source-policy", identity.PermReconciliationManage},
+}
+
+// matchRouteRule returns the permission of the first rule matching the
+// method and the path segments below /api/v1/.
+func matchRouteRule(method string, segments []string) (identity.Permission, bool) {
+	for _, rule := range routeRules {
+		if rule.method != "*" && rule.method != method {
+			continue
+		}
+		parts := strings.Split(rule.pattern, "/")
+		if len(parts) != len(segments) {
+			continue
+		}
+		matched := true
+		for i, part := range parts {
+			if part != "*" && part != segments[i] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return rule.permission, true
+		}
+	}
+	return "", false
 }
 
 // routeAccess describes how a route participates in authorization.
@@ -203,6 +266,10 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 	segments := strings.Split(strings.Trim(rest, "/"), "/")
 	if len(segments) == 0 || segments[0] == "" {
 		return "", routeUnmapped
+	}
+
+	if permission, ok := matchRouteRule(method, segments); ok {
+		return permission, routeProtected
 	}
 
 	resource := segments[0]
@@ -300,10 +367,13 @@ func AuthorizeRoute(method, path string) func(http.Handler) http.Handler {
 type authorizingRouter struct {
 	chi.Router
 	prefix string
+	// after runs behind the route authorization, in order (API-04:
+	// Authz -> Validation -> Idempotency -> Handler).
+	after []func(http.Handler) http.Handler
 }
 
 func (a authorizingRouter) With(middlewares ...func(http.Handler) http.Handler) chi.Router {
-	return authorizingRouter{Router: a.Router.With(middlewares...), prefix: a.prefix}
+	return authorizingRouter{Router: a.Router.With(middlewares...), prefix: a.prefix, after: a.after}
 }
 
 func (a authorizingRouter) fullPattern(pattern string) string {
@@ -314,7 +384,8 @@ func (a authorizingRouter) fullPattern(pattern string) string {
 }
 
 func (a authorizingRouter) handle(method, pattern string, h http.Handler) {
-	a.Router.With(AuthorizeRoute(method, a.fullPattern(pattern))).Method(method, pattern, h)
+	chain := append([]func(http.Handler) http.Handler{AuthorizeRoute(method, a.fullPattern(pattern))}, a.after...)
+	a.Router.With(chain...).Method(method, pattern, h)
 }
 
 func (a authorizingRouter) Method(method, pattern string, h http.Handler) {
@@ -350,7 +421,7 @@ func (a authorizingRouter) Connect(pattern string, h http.HandlerFunc) {
 
 func (a authorizingRouter) Route(pattern string, fn func(r chi.Router)) chi.Router {
 	return a.Router.Route(pattern, func(r chi.Router) {
-		fn(authorizingRouter{Router: r, prefix: a.fullPattern(pattern)})
+		fn(authorizingRouter{Router: r, prefix: a.fullPattern(pattern), after: a.after})
 	})
 }
 

@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -16,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 )
 
 // fakeOIDCServer is a minimal authorization server test double exposing the
@@ -104,14 +107,16 @@ func (f *fakeOIDCServer) idToken(overrides map[string]any) string {
 	f.t.Helper()
 
 	claims := map[string]any{
-		"iss":    f.issuer(),
-		"sub":    "user-123",
-		"aud":    "reticora-app",
-		"email":  "user@example.com",
-		"name":   "User Example",
-		"groups": []string{"123e4567-e89b-12d3-a456-426614174000"},
-		"iat":    time.Now().Unix(),
-		"exp":    time.Now().Add(5 * time.Minute).Unix(),
+		"iss":             f.issuer(),
+		"sub":             "user-123",
+		"aud":             "reticora-app",
+		"email":           "user@example.com",
+		"email_verified":  true,
+		"name":            "User Example",
+		"organization_id": "123e4567-e89b-12d3-a456-426614174000",
+		"groups":          []string{"reticora-viewer"},
+		"iat":             time.Now().Unix(),
+		"exp":             time.Now().Add(5 * time.Minute).Unix(),
 	}
 	if f.mutateClaims != nil {
 		f.mutateClaims(claims)
@@ -178,7 +183,7 @@ func TestCallbackIssuesSession(t *testing.T) {
 		ClientID:     "reticora-app",
 		ClientSecret: "top-secret",
 		RedirectURL:  "https://app.example.com/callback",
-	}), sessionIssuer)
+	}), sessionIssuer).WithAccessResolver(standardRoleResolver{"org_admin": allPermissions()})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/callback",
 		strings.NewReader(`{"code":"auth-code","state":"nonce","code_verifier":"verifier-123"}`))
@@ -450,5 +455,258 @@ func TestCallbackForwardsPKCEVerifier(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// statusProvisioner is a UserProvisioner and UserStatusChecker whose users
+// are active unless listed as deactivated.
+type statusProvisioner struct {
+	deactivated map[string]bool
+}
+
+func (p statusProvisioner) EnsureUser(_ context.Context, _, oidcSubject, _, _ string) (string, error) {
+	if p.deactivated[oidcSubject] {
+		return "", ErrUserInactive
+	}
+	return oidcSubject, nil
+}
+
+func (p statusProvisioner) EnsureRole(context.Context, string, string, string) error { return nil }
+
+func (p statusProvisioner) UserActive(_ context.Context, _, userID string) (bool, error) {
+	return !p.deactivated[userID], nil
+}
+
+// TestCallbackRejectsDeactivatedUser covers WP-042 (TLC-04, AUT-01): a login
+// of a deactivated user issues no session.
+func TestCallbackRejectsDeactivatedUser(t *testing.T) {
+	orgID := "123e4567-e89b-12d3-a456-426614174000"
+	fake := newFakeOIDCServer(t)
+	fake.mutateClaims = func(claims map[string]any) {
+		claims["groups"] = []string{orgID, "reticora-admin"}
+	}
+	handler := NewHandler(NewOIDCProvider(OIDCConfig{
+		IssuerURL:    fake.issuer(),
+		ClientID:     "reticora-app",
+		ClientSecret: "top-secret",
+		RedirectURL:  "https://app.example.com/callback",
+	}), testSessionIssuer(t)).WithProvisioning(statusProvisioner{deactivated: map[string]bool{"user-123": true}}, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/callback",
+		strings.NewReader(`{"code":"auth-code","state":"nonce","code_verifier":"verifier-123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.Callback(w, req)
+
+	if w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), `"token"`) {
+		t.Fatalf("login of a deactivated user: status %d body %s, want 403 without token", w.Code, w.Body.String())
+	}
+}
+
+// TestRefreshChecksUserStatus covers WP-042 (AUT-02): refresh issues no new
+// token for a deactivated user.
+func TestRefreshChecksUserStatus(t *testing.T) {
+	sessionIssuer := testSessionIssuer(t)
+	now := time.Now().UTC()
+	refresh := func(provisioner UserProvisioner, subject string) int {
+		t.Helper()
+		token, err := sessionIssuer.Issue(SessionClaims{
+			Subject:        subject,
+			OrganizationID: "123e4567-e89b-12d3-a456-426614174000",
+			IssuedAt:       now.Add(-time.Minute),
+			ExpiresAt:      now.Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"token":"`+token+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		NewHandler(nil, sessionIssuer).WithProvisioning(provisioner, "").Refresh(w, req)
+		return w.Code
+	}
+	provisioner := statusProvisioner{deactivated: map[string]bool{"locked": true}}
+	if code := refresh(provisioner, "active"); code != http.StatusOK {
+		t.Errorf("refresh of an active user: status %d, want 200", code)
+	}
+	if code := refresh(provisioner, "locked"); code != http.StatusUnauthorized {
+		t.Errorf("refresh of a deactivated user: status %d, want 401", code)
+	}
+}
+
+// TestValidateRejectsRevokedSessions covers WP-042 (AUT-02): after a
+// revocation every earlier token of the user is rejected, later tokens and
+// tokens of other users stay valid, and an unreadable blacklist fails closed.
+func TestValidateRejectsRevokedSessions(t *testing.T) {
+	store := cache.NewMemoryStore()
+	revocations := NewSessionRevocations(store)
+	issuer := testSessionIssuer(t).WithRevocations(revocations)
+	issue := func(subject string, at time.Time) string {
+		t.Helper()
+		token, err := issuer.Issue(SessionClaims{Subject: subject, OrganizationID: "org", IssuedAt: at, ExpiresAt: at.Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	revokedAt := time.Now().UTC()
+	before := issue("u1", revokedAt.Add(-time.Minute))
+	same := issue("u1", revokedAt)
+	after := issue("u1", revokedAt.Add(time.Second))
+	other := issue("u2", revokedAt.Add(-time.Minute))
+	if err := revocations.RevokeUser(context.Background(), "u1", revokedAt); err != nil {
+		t.Fatal(err)
+	}
+	for name, token := range map[string]string{"before": before, "same instant": same} {
+		if _, err := issuer.Validate(token); err != ErrSessionRevoked {
+			t.Errorf("token issued %s the revocation: %v, want ErrSessionRevoked", name, err)
+		}
+	}
+	for name, token := range map[string]string{"after": after, "other user": other} {
+		if _, err := issuer.Validate(token); err != nil {
+			t.Errorf("%s: %v, want valid", name, err)
+		}
+	}
+	if err := store.Set(context.Background(), revocationKey("u2"), "garbage", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := issuer.Validate(other); err == nil {
+		t.Error("unreadable revocation entry accepted the token")
+	}
+}
+
+// recordingProvisioner records the e-mail it is asked to resolve.
+type recordingProvisioner struct{ email *string }
+
+func (p recordingProvisioner) EnsureUser(_ context.Context, _, subject, email, _ string) (string, error) {
+	*p.email = email
+	return subject, nil
+}
+
+func (p recordingProvisioner) EnsureRole(context.Context, string, string, string) error { return nil }
+
+// TestCallbackTakesOrganizationFromAttribute covers WP-043 (AUT-01, AUT-09):
+// a token without organization attribute is rejected even when a group is
+// named like an organization, and an unverified e-mail is not passed on to
+// resolve the user.
+func TestCallbackTakesOrganizationFromAttribute(t *testing.T) {
+	orgID := "123e4567-e89b-12d3-a456-426614174000"
+	callback := func(mutate func(map[string]any), provisioner UserProvisioner) *httptest.ResponseRecorder {
+		t.Helper()
+		fake := newFakeOIDCServer(t)
+		fake.mutateClaims = mutate
+		handler := NewHandler(NewOIDCProvider(OIDCConfig{
+			IssuerURL:    fake.issuer(),
+			ClientID:     "reticora-app",
+			ClientSecret: "top-secret",
+			RedirectURL:  "https://app.example.com/callback",
+		}), testSessionIssuer(t)).WithProvisioning(provisioner, "")
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/callback",
+			strings.NewReader(`{"code":"auth-code","state":"nonce","code_verifier":"verifier-123"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.Callback(w, req)
+		return w
+	}
+
+	var email string
+	w := callback(func(c map[string]any) {
+		delete(c, "organization_id")
+		c["groups"] = []string{orgID, "reticora-admin"}
+	}, recordingProvisioner{email: &email})
+	if w.Code != http.StatusUnauthorized || strings.Contains(w.Body.String(), `"token"`) {
+		t.Errorf("login without organization attribute: status %d body %s, want 401", w.Code, w.Body.String())
+	}
+
+	w = callback(func(c map[string]any) { c["email_verified"] = false }, recordingProvisioner{email: &email})
+	if w.Code != http.StatusOK || email != "" {
+		t.Errorf("unverified e-mail: status %d, provisioner got %q, want empty", w.Code, email)
+	}
+	w = callback(nil, recordingProvisioner{email: &email})
+	if w.Code != http.StatusOK || email != "user@example.com" {
+		t.Errorf("verified e-mail: status %d, provisioner got %q", w.Code, email)
+	}
+}
+
+// standardRoleResolver grants the permissions of the listed standard roles
+// and holds no role assignments.
+type standardRoleResolver map[string][]Permission
+
+func (r standardRoleResolver) AccessGrants(context.Context, string, string) ([]Grant, error) {
+	return nil, nil
+}
+
+func (r standardRoleResolver) RoleGrants(_ context.Context, _ string, roleNames []string) ([]Grant, error) {
+	grants := make([]Grant, 0, len(roleNames))
+	for _, name := range roleNames {
+		if perms, ok := r[name]; ok {
+			grants = append(grants, OrgWideGrant(perms))
+		}
+	}
+	return grants, nil
+}
+
+// TestIdPRolesMapToStandardRoles covers WP-046 (RBA-02): IdP roles and groups
+// map to standard roles by an exact, defined mapping; names that only
+// resemble a role, and client_technician, grant nothing.
+func TestIdPRolesMapToStandardRoles(t *testing.T) {
+	for _, c := range []struct {
+		groups []string
+		want   string
+	}{
+		{[]string{"reticora-admin"}, "org_admin"},
+		{[]string{"/org_admin", "ORG_ADMIN"}, "org_admin"},
+		{[]string{"reticora-engineer", "viewer"}, "engineer,viewer"},
+		{[]string{"engineer"}, "engineer"},
+		{[]string{"client_technician"}, ""},
+		{[]string{"superadmin", "owners", "reticora-editor", "ci:delete", "readonly"}, ""},
+		{[]string{"123e4567-e89b-12d3-a456-426614174000"}, ""},
+	} {
+		if got := strings.Join(StandardRolesForGroups(c.groups), ","); got != c.want {
+			t.Errorf("StandardRolesForGroups(%v) = %q, want %q", c.groups, got, c.want)
+		}
+	}
+}
+
+// TestSessionPermissionsComeFromDatabaseRoles covers WP-046 (RBA-02): the
+// session holds the database permissions of the mapped standard role, not a
+// permission set derived from the group name.
+func TestSessionPermissionsComeFromDatabaseRoles(t *testing.T) {
+	sessionIssuer := testSessionIssuer(t)
+	resolver := standardRoleResolver{"viewer": {PermCIRead, PermSiteRead}}
+	token, err := sessionIssuer.Issue(SessionClaims{
+		Subject:        "user-123",
+		OrganizationID: "123e4567-e89b-12d3-a456-426614174000",
+		Permissions:    []Permission{PermCredentialRead, PermCredentialDecrypt},
+		Groups:         []string{"reticora-viewer", "credential-admins"},
+		IssuedAt:       time.Now().UTC(),
+		ExpiresAt:      time.Now().UTC().Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"token":"`+token+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	NewHandler(nil, sessionIssuer).WithAccessResolver(resolver).Refresh(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("refresh: status %d: %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		Token string `json:"token"`
+	}
+	if err = json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	claims, err := sessionIssuer.Validate(out.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[Permission]bool{}
+	for _, p := range claims.Permissions {
+		got[p] = true
+	}
+	if len(got) != 2 || !got[PermCIRead] || !got[PermSiteRead] {
+		t.Errorf("session permissions %v, want exactly the viewer role's ci:read and site:read", claims.Permissions)
 	}
 }

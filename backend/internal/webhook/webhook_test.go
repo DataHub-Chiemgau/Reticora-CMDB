@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -267,5 +268,74 @@ func TestHandler_Test_UnknownSubscription(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestHandler_HeadersAreWriteOnly covers WP-047 (SEC-01): custom header
+// values (authentication) are masked in create, get and list responses, while
+// the stored subscription keeps them for delivery.
+func TestHandler_HeadersAreWriteOnly(t *testing.T) {
+	repo := NewMemoryRepository()
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+
+	body := `{"name":"Hook","url":"https://example.com/hook","secret":"s","events":["ci.created"],"headers":{"Authorization":"Bearer hdr-s3cret"}}`
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("POST", "/api/v1/webhooks", bytes.NewBufferString(body))))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var created Subscription
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	responses := []string{w.Body.String()}
+	for _, path := range []string{"/api/v1/webhooks", "/api/v1/webhooks/" + created.ID} {
+		w = httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("GET", path, nil)))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d", path, w.Code)
+		}
+		responses = append(responses, w.Body.String())
+	}
+	for _, out := range responses {
+		if bytes.Contains([]byte(out), []byte("hdr-s3cret")) || !bytes.Contains([]byte(out), []byte(`"Authorization":"***"`)) {
+			t.Errorf("response does not mask the header: %s", out)
+		}
+	}
+	stored, err := repo.GetByID(context.Background(), "org-1", created.ID)
+	if err != nil || stored.Headers["Authorization"] != "Bearer hdr-s3cret" {
+		t.Errorf("stored header %v, %v; want the real value for delivery", stored, err)
+	}
+}
+
+// TestHandler_RejectsInternalDestinations covers WP-049 (SEC-08): subscriber
+// URLs are validated when stored; the on-premises policy admits private
+// targets but never metadata endpoints.
+func TestHandler_RejectsInternalDestinations(t *testing.T) {
+	create := func(h *Handler, url string) int {
+		t.Helper()
+		mux := chi.NewRouter()
+		h.RegisterRoutes(mux)
+		body := `{"name":"Hook","url":"` + url + `","secret":"s","events":["ci.created"]}`
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("POST", "/api/v1/webhooks", bytes.NewBufferString(body))))
+		return w.Code
+	}
+	strict := NewHandler(NewMemoryRepository())
+	for _, url := range []string{"http://127.0.0.1:8080/hook", "http://169.254.169.254/latest/", "http://localhost/hook", "ftp://example.com/x", "http://[::1]/"} {
+		if code := create(strict, url); code != http.StatusBadRequest {
+			t.Errorf("create %s: status %d, want 400", url, code)
+		}
+	}
+	if code := create(strict, "https://hooks.example.com/x"); code != http.StatusCreated {
+		t.Errorf("public destination: status %d, want 201", code)
+	}
+	onPrem := NewHandler(NewMemoryRepository()).WithEgress(egress.Options{AllowPrivate: true})
+	if code := create(onPrem, "http://10.0.0.5/hook"); code != http.StatusCreated {
+		t.Errorf("on-prem private destination: status %d, want 201", code)
+	}
+	if code := create(onPrem, "http://169.254.169.254/latest/"); code != http.StatusBadRequest {
+		t.Errorf("on-prem metadata destination: status %d, want 400", code)
 	}
 }

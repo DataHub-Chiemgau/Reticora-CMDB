@@ -1,9 +1,18 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { useLocationTree, useCreateLocation } from '../api/cmdbHooks';
-import { locationApi, type LocationNode } from '../api/cmdb';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  useClients,
+  useCreateLocation,
+  useDeleteLocation,
+  useLocationTree,
+} from '../api/cmdbHooks';
+import {
+  LOCATION_CHILD_KINDS,
+  type LocationKind,
+  type LocationTreeNode as TreeNode,
+} from '../api/cmdb';
+import { ApiError } from '../api/client';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -13,63 +22,54 @@ import { Modal } from '../components/ui/Modal';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
 
-const NODE_TYPES = [
-  'site',
-  'building',
-  'floor',
-  'room',
-  'warehouse',
-  'zone',
-  'shelf',
-  'bin',
-  'rack',
-  'desk',
-  'vehicle',
-  'customer',
-  'logical',
-  'custom',
-];
-
-const TYPE_ICONS: Record<string, string> = {
+const KIND_ICONS: Record<LocationKind, string> = {
   site: '🏢',
   building: '🏗️',
-  floor: '🛗',
   room: '🚪',
+  rack: '🗼',
   warehouse: '🏭',
   zone: '▦',
   shelf: '🗄️',
   bin: '🧺',
-  rack: '🗼',
-  desk: '🖥️',
-  vehicle: '🚚',
-  customer: '👤',
-  logical: '☁️',
-  custom: '📦',
 };
 
+/**
+ * LocationTreePage shows and edits the canonical location tree (LOC-10):
+ * sites are the roots, and each node offers only the child kinds the parent
+ * matrix allows. Field violations of the API are shown on the inputs.
+ */
 export function LocationTreePage() {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
   const { data, isLoading, error, refetch } = useLocationTree();
   const create = useCreateLocation();
-  const remove = useMutation({
-    mutationFn: (id: string) => locationApi.delete(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['locations'] }),
-  });
+  const remove = useDeleteLocation();
 
   const [showCreate, setShowCreate] = useState(false);
-  const [parent, setParent] = useState<LocationNode | undefined>();
-  const [draft, setDraft] = useState({ name: '', node_type: 'room', barcode: '' });
+  const [parent, setParent] = useState<TreeNode | undefined>();
+  const [draft, setDraft] = useState<{ name: string; kind: LocationKind; client_id: string }>({
+    name: '',
+    kind: 'site',
+    client_id: '',
+  });
+  const clients = useClients(showCreate && !parent);
 
-  const openCreate = (parentNode?: LocationNode) => {
+  const openCreate = (parentNode?: TreeNode) => {
     setParent(parentNode);
+    create.reset();
     setDraft({
       name: '',
-      node_type: parentNode ? childTypeHint(parentNode.node_type) : 'site',
-      barcode: '',
+      kind: parentNode ? (LOCATION_CHILD_KINDS[parentNode.kind][0] ?? 'site') : 'site',
+      client_id: '',
     });
     setShowCreate(true);
   };
+
+  const violations = create.error instanceof ApiError ? create.error.violationsByField() : {};
+  const generalError =
+    create.error && Object.keys(violations).length === 0 ? create.error.message : undefined;
+  const kindLabel = (kind: LocationKind) => t(`locations.kinds.${kind}`, kind);
+  const childKinds = parent ? LOCATION_CHILD_KINDS[parent.kind] : [];
+  const clientOptions = (clients.data?.data ?? []).map((c) => ({ value: c.id, label: c.name }));
 
   return (
     <div className="space-y-4">
@@ -81,12 +81,12 @@ export function LocationTreePage() {
           <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
             {t(
               'locations.subtitle',
-              'Einheitliche Hierarchie: Standort → Gebäude → Raum → Rack und Lager → Zone → Regal → Fach.',
+              'Einheitliche Hierarchie: Standort → Gebäude → Raum → Rack und Standort → Lager → Zone → Regal → Fach.',
             )}
           </p>
         </div>
         <Button size="sm" onClick={() => openCreate(undefined)}>
-          {t('locations.createRoot', 'Wurzel anlegen')}
+          {t('locations.createRoot', 'Standort anlegen')}
         </Button>
       </div>
 
@@ -98,24 +98,27 @@ export function LocationTreePage() {
           onRetry={() => void refetch()}
         />
       ) : null}
+      {remove.error ? (
+        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          {t('locations.deleteFailed', 'Löschen nicht möglich')}: {remove.error.message}
+        </p>
+      ) : null}
 
       <Card>
         {(data?.data ?? []).length === 0 && !isLoading ? (
           <p className="text-sm text-gray-500">
-            {t(
-              'locations.empty',
-              'Noch keine Standorte. Legen Sie eine Wurzel an (z. B. Standort oder Lager).',
-            )}
+            {t('locations.empty', 'Noch keine Standorte. Legen Sie zuerst einen Standort an.')}
           </p>
         ) : (
           <ul className="space-y-1">
             {(data?.data ?? []).map((node) => (
-              <LocationTreeNode
+              <LocationTreeItem
                 key={node.id}
                 node={node}
                 depth={0}
                 onAddChild={openCreate}
                 onDelete={(id) => remove.mutate(id)}
+                kindLabel={kindLabel}
                 t={t}
               />
             ))}
@@ -128,8 +131,11 @@ export function LocationTreePage() {
         onOpenChange={setShowCreate}
         title={
           parent
-            ? t('locations.createChild', `Unterpunkt in ${parent.name}`)
-            : t('locations.createRoot', 'Wurzel anlegen')
+            ? t('locations.createChild', {
+                name: parent.name,
+                defaultValue: 'Unterpunkt in {{name}}',
+              })
+            : t('locations.createRoot', 'Standort anlegen')
         }
       >
         <form
@@ -137,12 +143,9 @@ export function LocationTreePage() {
           onSubmit={(e) => {
             e.preventDefault();
             create.mutate(
-              {
-                name: draft.name,
-                node_type: draft.node_type,
-                barcode: draft.barcode || undefined,
-                parent_id: parent?.id,
-              },
+              parent
+                ? { kind: draft.kind, name: draft.name, parent_id: parent.id }
+                : { kind: 'site', name: draft.name, client_id: draft.client_id },
               { onSuccess: () => setShowCreate(false) },
             );
           }}
@@ -151,22 +154,35 @@ export function LocationTreePage() {
             label={t('locations.name', 'Name')}
             value={draft.name}
             required
+            error={violations.name}
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
           />
-          <Select
-            label={t('locations.type', 'Typ')}
-            options={NODE_TYPES.map((nt) => ({
-              value: nt,
-              label: `${TYPE_ICONS[nt] ?? ''} ${nt}`,
-            }))}
-            value={draft.node_type}
-            onChange={(e) => setDraft({ ...draft, node_type: e.target.value })}
-          />
-          <Input
-            label={t('locations.barcode', 'Barcode/RFID (optional)')}
-            value={draft.barcode}
-            onChange={(e) => setDraft({ ...draft, barcode: e.target.value })}
-          />
+          {parent ? (
+            <Select
+              label={t('locations.type', 'Typ')}
+              options={childKinds.map((kind) => ({
+                value: kind,
+                label: `${KIND_ICONS[kind]} ${kindLabel(kind)}`,
+              }))}
+              value={draft.kind}
+              error={violations.kind ?? violations.parent_id}
+              onChange={(e) => setDraft({ ...draft, kind: e.target.value as LocationKind })}
+            />
+          ) : (
+            <Select
+              label={t('locations.client', 'Mandant')}
+              options={[{ value: '', label: '—' }, ...clientOptions]}
+              value={draft.client_id}
+              required
+              error={violations.client_id}
+              onChange={(e) => setDraft({ ...draft, client_id: e.target.value })}
+            />
+          )}
+          {generalError ? (
+            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+              {generalError}
+            </p>
+          ) : null}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setShowCreate(false)}>
               {t('common.cancel', 'Abbrechen')}
@@ -181,35 +197,24 @@ export function LocationTreePage() {
   );
 }
 
-function childTypeHint(parentType: string): string {
-  const order: Record<string, string> = {
-    site: 'building',
-    building: 'floor',
-    floor: 'room',
-    room: 'rack',
-    warehouse: 'zone',
-    zone: 'shelf',
-    shelf: 'bin',
-    rack: 'custom',
-  };
-  return order[parentType] ?? 'custom';
-}
-
-function LocationTreeNode({
+function LocationTreeItem({
   node,
   depth,
   onAddChild,
   onDelete,
+  kindLabel,
   t,
 }: {
-  node: LocationNode;
+  node: TreeNode;
   depth: number;
-  onAddChild: (parent: LocationNode) => void;
+  onAddChild: (parent: TreeNode) => void;
   onDelete: (id: string) => void;
+  kindLabel: (kind: LocationKind) => string;
   t: TFunction;
 }) {
   const [open, setOpen] = useState(depth < 2);
-  const children = node.children ?? [];
+  const children = node.children;
+  const canHaveChildren = LOCATION_CHILD_KINDS[node.kind].length > 0;
   return (
     <li>
       <div
@@ -220,6 +225,7 @@ function LocationTreeNode({
           <button
             onClick={() => setOpen(!open)}
             aria-label={open ? 'collapse' : 'expand'}
+            aria-expanded={open}
             className="w-4 text-gray-400"
           >
             {open ? '▾' : '▸'}
@@ -227,14 +233,18 @@ function LocationTreeNode({
         ) : (
           <span className="w-4" />
         )}
-        <span aria-hidden>{TYPE_ICONS[node.node_type] ?? '📦'}</span>
+        <span aria-hidden>{KIND_ICONS[node.kind]}</span>
         <span className="font-medium text-gray-900 dark:text-gray-100">{node.name}</span>
-        <Badge variant="neutral">{node.node_type}</Badge>
-        {node.barcode ? <span className="text-xs text-gray-400">⌗{node.barcode}</span> : null}
+        <Badge variant="neutral">{kindLabel(node.kind)}</Badge>
         <span className="ml-auto flex gap-2">
-          <button className="text-xs text-primary hover:underline" onClick={() => onAddChild(node)}>
-            + {t('locations.addChild', 'Unterpunkt')}
-          </button>
+          {canHaveChildren ? (
+            <button
+              className="text-xs text-primary hover:underline"
+              onClick={() => onAddChild(node)}
+            >
+              + {t('locations.addChild', 'Unterpunkt')}
+            </button>
+          ) : null}
           <button
             className="text-xs text-red-600 hover:underline"
             onClick={() => onDelete(node.id)}
@@ -246,12 +256,13 @@ function LocationTreeNode({
       {open && children.length > 0 ? (
         <ul>
           {children.map((child) => (
-            <LocationTreeNode
+            <LocationTreeItem
               key={child.id}
               node={child}
               depth={depth + 1}
               onAddChild={onAddChild}
               onDelete={onDelete}
+              kindLabel={kindLabel}
               t={t}
             />
           ))}

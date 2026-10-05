@@ -38,7 +38,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locationnode"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
@@ -48,6 +48,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
@@ -116,7 +117,7 @@ type Repositories struct {
 	CIType            citype.Repository
 	RelationshipType  relationshiptype.Repository
 	Lifecycle         lifecycle.Repository
-	LocationNode      locationnode.Repository
+	LocationTree      locations.Repository
 	Movement          movement.Repository
 	Reservation       reservation.Repository
 	Composition       composition.Repository
@@ -161,6 +162,12 @@ type Options struct {
 	// Blobs persists asynchronous export results; nil disables export-job
 	// creation (the streaming export endpoint stays available).
 	Blobs blob.Store
+	// Egress is the destination policy of webhook and connector URLs
+	// (SEC-08); the zero value blocks every internal destination.
+	Egress egress.Options
+	// RouteMiddleware runs on every API route after its authorization, in
+	// order (API-04: validation, then idempotency).
+	RouteMiddleware []func(http.Handler) http.Handler
 	// Readiness lists the dependencies /readyz verifies (OPS-01).
 	Readiness []ReadinessCheck
 }
@@ -185,6 +192,26 @@ func agentTypeResolver(repos Repositories) agent.CITypeResolver {
 	return r
 }
 
+// agentHandler builds the agent handler; with a session issuer, enrollment
+// returns the agent's signed credential (AGT-03).
+func agentHandler(repos *Repositories, sessions *identity.SessionIssuer) *agent.Handler {
+	h := agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(*repos)).WithFindings(repos.Security)
+	if sessions != nil {
+		h.WithAgentTokens(sessions)
+	}
+	return h
+}
+
+// userHandler builds the user handler; with a session blacklist, deactivation
+// ends the user's sessions immediately (TLC-04).
+func userHandler(repos *Repositories, sessions *identity.SessionIssuer) *user.Handler {
+	h := user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment)
+	if revocations := sessions.Revocations(); revocations != nil {
+		h.WithSessionRevoker(revocations)
+	}
+	return h
+}
+
 func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) http.Handler, error) {
 	if err := validate(repos, opts); err != nil {
 		return nil, nil, err
@@ -207,7 +234,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// attaches the permission middleware resolved from the route table.
 	// Routes without a mapping fail closed; the router test locks in that
 	// every route is mapped.
-	protected := authorizingRouter{Router: mux}
+	protected := authorizingRouter{Router: mux, after: opts.RouteMiddleware}
 
 	registrars := []registrar{
 		identity.NewHandler(opts.OIDC, opts.Sessions).
@@ -216,7 +243,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		entitlement.NewHandler(opts.Entitlements),
 		ci.NewHandler(opts.CIService, opts.Dispatcher),
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
-		webhook.NewHandler(repos.Webhook, opts.Dispatcher),
+		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
 		discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
 			WithProvenance(overrideProvenance{repo: repos.Override}),
 		topology.NewHandler(repos.CI, repos.Relationship),
@@ -236,10 +263,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		training.NewHandler(repos.Training),
 		desk.NewHandler(repos.Desk),
 		location.NewHandler(repos.Location),
-		agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(repos)).WithFindings(repos.Security),
+		agentHandler(&repos, opts.Sessions),
 		security.NewHandler(repos.Security),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
-		user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment),
+		userHandler(&repos, opts.Sessions),
 		permission.NewHandler(repos.Permission),
 		search.NewHandler(repos.Search, repos.Permission),
 		sla.NewHandler(repos.SLA, repos.Ticket),
@@ -247,7 +274,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		workflow.NewHandler(repos.Workflow, workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher)),
 		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)).
 			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(opts), entitlementLister{svc: opts.Entitlements})),
-		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow),
+		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow).WithEgress(opts.Egress),
 		tenantapi.NewHandler(repos.TenantHierarchy),
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
@@ -258,7 +285,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		citype.NewHandler(repos.CIType, opts.Dispatcher),
 		lifecycle.NewHandler(repos.Lifecycle,
 			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, nil), repos.LifecycleResolver),
-		locationnode.NewHandler(repos.LocationNode),
+		locations.NewHandler(repos.LocationTree),
 		movement.NewHandler(repos.Movement, opts.Dispatcher).WithAssets(assetCreator{repo: repos.Asset}),
 		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
 		composition.NewHandler(repos.Composition, opts.Dispatcher).
@@ -337,8 +364,8 @@ func validate(repos Repositories, opts Options) error {
 		return fmt.Errorf("server: relationship type repository is required")
 	case repos.Lifecycle == nil:
 		return fmt.Errorf("server: lifecycle repository is required")
-	case repos.LocationNode == nil:
-		return fmt.Errorf("server: location node repository is required")
+	case repos.LocationTree == nil:
+		return fmt.Errorf("server: location repository is required")
 	case repos.Movement == nil:
 		return fmt.Errorf("server: movement repository is required")
 	case repos.Reservation == nil:

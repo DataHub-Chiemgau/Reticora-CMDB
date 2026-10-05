@@ -26,7 +26,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locationnode"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
@@ -77,7 +77,7 @@ func MemoryRepositories() Repositories {
 		CIType:            citype.NewMemoryRepository(),
 		RelationshipType:  relationshiptype.NewMemoryRepository(),
 		Lifecycle:         lifecycle.NewMemoryRepository(),
-		LocationNode:      locationnode.NewMemoryRepository(),
+		LocationTree:      locations.NewMemoryRepository(),
 		Movement:          movement.NewMemoryRepository(),
 		Reservation:       reservation.NewMemoryRepository(),
 		Composition:       composition.NewMemoryRepository(),
@@ -169,7 +169,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		CIType:            citype.NewPGRepository(pool),
 		RelationshipType:  relationshiptype.NewPGRepository(pool),
 		Lifecycle:         lifecycle.NewPGRepository(pool),
-		LocationNode:      locationnode.NewPGRepository(pool),
+		LocationTree:      locations.NewPGRepository(pool),
 		Movement:          movement.NewPGRepository(pool),
 		Reservation:       reservation.NewPGRepository(pool),
 		Composition:       composition.NewPGRepository(pool),

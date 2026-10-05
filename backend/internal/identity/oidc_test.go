@@ -229,3 +229,40 @@ func TestValidateIDTokenFailsClosedWithoutJWKS(t *testing.T) {
 		t.Fatal("expected validation to fail when JWKS cannot be retrieved")
 	}
 }
+
+// TestValidateIDTokenReadsOrganizationAttribute covers WP-043 (AUT-09, CH26):
+// the organization is the organization_id user attribute, as a string or a
+// single-valued array; several values or a non-UUID are rejected, and a token
+// without the attribute carries no organization.
+func TestValidateIDTokenReadsOrganizationAttribute(t *testing.T) {
+	fake := newFakeOIDCServer(t)
+	provider := fake.provider("reticora-app")
+	org := "123e4567-e89b-12d3-a456-426614174000"
+	for _, c := range []struct {
+		name    string
+		value   any
+		want    string
+		wantErr bool
+	}{
+		{"string", org, org, false},
+		{"single-valued array", []string{org}, org, false},
+		{"absent", nil, "", false},
+		{"two values", []string{org, "223e4567-e89b-12d3-a456-426614174000"}, "", true},
+		{"not a UUID", "reticora-demo", "", true},
+	} {
+		claims, err := provider.ValidateIDToken(context.Background(), fake.idToken(map[string]any{"organization_id": c.value}))
+		if c.wantErr {
+			if err == nil {
+				t.Errorf("%s: accepted, want an error", c.name)
+			}
+			continue
+		}
+		if err != nil || claims.OrganizationID != c.want {
+			t.Errorf("%s: organization %q, %v; want %q", c.name, claims.OrganizationID, err, c.want)
+		}
+	}
+	claims, err := provider.ValidateIDToken(context.Background(), fake.idToken(map[string]any{"email_verified": false}))
+	if err != nil || claims.EmailVerified {
+		t.Errorf("email_verified=false: %+v, %v", claims, err)
+	}
+}

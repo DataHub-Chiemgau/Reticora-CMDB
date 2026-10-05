@@ -3,8 +3,10 @@ package webhook
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -205,4 +207,29 @@ func subscriptionID(t *testing.T, repo *MemoryRepository) string {
 		t.Fatalf("expected exactly one subscription, got %d", len(subs))
 	}
 	return subs[0].ID
+}
+
+// TestDispatcherDefaultClientBlocksInternalDestinations covers WP-049
+// (SEC-08): without an injected client the dispatcher uses the egress
+// client, so a subscriber in the internal network is never reached.
+func TestDispatcherDefaultClientBlocksInternalDestinations(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	dispatcher := NewDispatcher(NewMemoryRepository(), nil)
+	defer func() { _ = dispatcher.Shutdown(context.Background()) }()
+	delivery, err := dispatcher.DeliverOnce(Subscription{ID: "s", OrganizationID: "org-1", URL: server.URL, Secret: "k", Events: []string{"ci.created"}, IsActive: true}, "ci.created", map[string]string{"x": "y"})
+	if err == nil && delivery.Success {
+		t.Fatalf("delivery to a loopback subscriber succeeded: %+v", delivery)
+	}
+	if hits.Load() != 0 {
+		t.Fatal("the internal subscriber was reached")
+	}
+	if !strings.Contains(delivery.Error+fmt.Sprint(err), "not allowed") {
+		t.Errorf("delivery error %q / %v does not name the blocked destination", delivery.Error, err)
+	}
 }
