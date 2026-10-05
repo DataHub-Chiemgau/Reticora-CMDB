@@ -303,7 +303,8 @@ func (e *Executor) setCIField(ctx context.Context, orgID string, action JSONMap)
 	if err != nil {
 		return nil, false, err
 	}
-	req := ci.UpdateRequest{}
+	// Workflow writes rank 92 and raise the CI version (API-07).
+	req := ci.UpdateRequest{Authoritative: true}
 	var current any
 	switch field {
 	case "status":

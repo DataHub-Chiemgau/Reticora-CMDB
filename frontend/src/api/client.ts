@@ -23,6 +23,8 @@ export interface CI {
   client_id?: string;
   /** Node of the location tree; site_id and room_id are derived from it. */
   location_id?: string;
+  /** CI version, sent back as If-Match when editing (API-07). */
+  version?: number;
   site_id?: string;
   room_id?: string;
   ci_type_id: string;
@@ -314,10 +316,16 @@ export const ciApi = {
     });
   },
 
-  update(id: string, data: CIUpdateRequest): Promise<CI> {
+  /**
+   * update patches a CI. With `version` (the CI version the editor read) the
+   * request carries If-Match, so a concurrent change of the same fields is
+   * refused with 409 instead of being overwritten (API-07).
+   */
+  update(id: string, data: CIUpdateRequest, version?: number): Promise<CI> {
     return fetchAPI(`/cis/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
+      headers: version !== undefined ? { 'If-Match': `"${version}"` } : undefined,
     });
   },
 

@@ -281,6 +281,10 @@ paths:
       responses:
         '200':
           description: Configuration item details
+          headers:
+            ETag:
+              description: The CI version (API-07); send it as If-Match with a PATCH.
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -293,7 +297,19 @@ paths:
       operationId: updateCI
       tags: [CIs]
       summary: Update a configuration item
-      requestBody:
+      description: >-
+        Optimistic concurrency (API-07): If-Match names the version the editor
+        read. A stale version is refused with 409 only when a field of the
+        request was changed since by a write of rank >= 92 (manual, import,
+        workflow); observed discovery updates do not change the version.
+        An organization can require If-Match (settings.require_if_match);
+        then a request without it is 412, like an unknown version.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
         required: true
         content:
           application/json:
@@ -302,6 +318,10 @@ paths:
       responses:
         '200':
           description: Configuration item updated
+          headers:
+            ETag:
+              description: The new CI version.
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -312,6 +332,16 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: Fields of the request changed since the If-Match version
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/VersionConflictProblem' }
+        '412':
+          description: If-Match missing although required, or not a version of the CI
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
     delete:
       operationId: deleteCI
       tags: [CIs]
@@ -8064,6 +8094,11 @@ components:
           type: string
         client_id:
           type: string
+        version:
+          type: integer
+          format: int64
+          readOnly: true
+          description: CI version, also the ETag (API-07).
         location_id:
           type: string
           description: Node of the canonical location tree (DB-05); site_id and room_id are derived from it.
@@ -10343,6 +10378,16 @@ components:
         value: { description: New value; null removes an attribute }
         reason: { type: string, minLength: 1 }
         protected: { type: boolean, default: true }
+    VersionConflictProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - type: object
+          required: [fields, current_version]
+          properties:
+            fields:
+              type: array
+              items: { type: string }
+            current_version: { type: integer, format: int64 }
     ViolationProblem:
       allOf:
         - $ref: '#/components/schemas/ProblemDetail'

@@ -181,3 +181,5 @@ WFL-02;[P3];D;backend/internal/workflow/executor_test.go;WP-059
 AGT-05;[P4];D;backend/internal/workflow/executor_test.go;WP-059
 OVR-01;[B];D;backend/internal/ci/effective_view_integration_test.go;WP-060
 CI-10;[B];D;backend/internal/ci/effective_view_integration_test.go;WP-060
+API-07;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-061
+API-03;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-061

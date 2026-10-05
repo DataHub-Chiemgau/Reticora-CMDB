@@ -49,7 +49,8 @@ const ciSelectColumns = `
 	is_manual,
 	created_at,
 	updated_at,
-	deleted_at
+	deleted_at,
+	version
 `
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
@@ -237,7 +238,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				$16, $17, $18, $19, $20,
 				$21, $22, $23
 			)
-			RETURNING id::text, COALESCE(site_id::text, ''), COALESCE(room_id::text, ''), created_at, updated_at
+			RETURNING id::text, COALESCE(site_id::text, ''), COALESCE(room_id::text, ''), version, created_at, updated_at
 		`
 
 		var createdAt time.Time
@@ -266,13 +267,13 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 			item.FirstSeenAt,
 			item.LastSeenAt,
 			item.IsManual,
-		).Scan(&item.ID, &item.SiteID, &item.RoomID, &createdAt, &updatedAt); err != nil {
+		).Scan(&item.ID, &item.SiteID, &item.RoomID, &item.Version, &createdAt, &updatedAt); err != nil {
 			return locationError(fmt.Errorf("create ci: %w", err))
 		}
 
 		item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
-		if err := r.recordCIChange(ctx, tx, item.OrganizationID, item.ID, "create", "", nil, item); err != nil {
+		if err := r.recordCIChange(ctx, tx, item.OrganizationID, item.ID, item.Version, "create", "", nil, item); err != nil {
 			return err
 		}
 		if err := r.recordAudit(ctx, tx, "ci.created", item, map[string]interface{}{"after": item}); err != nil {
@@ -295,6 +296,11 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 				return fmt.Errorf("not found")
 			}
 			return fmt.Errorf("get ci before update: %w", err)
+		}
+		if req.Manual != nil {
+			if preErr := checkPrecondition(ctx, tx, orgID, before, &req); preErr != nil {
+				return preErr
+			}
 		}
 
 		setClauses := make([]string, 0, 18)
@@ -351,6 +357,10 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		}
 
 		setClauses = append(setClauses, "updated_at = NOW()")
+		if req.Manual != nil || req.Authoritative {
+			// Rank >= 92 writes raise the version (API-07).
+			setClauses = append(setClauses, "version = version + 1")
+		}
 		// The tenant predicate is redundant with row-level security but is kept
 		// as defense in depth: a missing or wrong app.org_id must never allow a
 		// cross-tenant write.
@@ -390,7 +400,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			if change.Field == "status" {
 				fieldChangeType = "status_change"
 			}
-			if err := r.recordCIChange(ctx, tx, orgID, id, fieldChangeType, change.Field, change.Old, change.New); err != nil {
+			if err := r.recordCIChange(ctx, tx, orgID, id, item.Version, fieldChangeType, change.Field, change.Old, change.New); err != nil {
 				return err
 			}
 		}
@@ -422,7 +432,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		if cmdTag.RowsAffected() == 0 {
 			return fmt.Errorf("not found")
 		}
-		if err := r.recordCIChange(ctx, tx, orgID, id, "delete", "", before, nil); err != nil {
+		if err := r.recordCIChange(ctx, tx, orgID, id, before.Version, "delete", "", before, nil); err != nil {
 			return err
 		}
 		if err := r.recordAudit(ctx, tx, "ci.deleted", before, map[string]interface{}{"before": before}); err != nil {
@@ -543,6 +553,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		&createdAt,
 		&updatedAt,
 		&deletedAt,
+		&item.Version,
 	); err != nil {
 		return nil, err
 	}
@@ -597,7 +608,7 @@ func (r *PGRepository) recordAudit(ctx context.Context, tx pgx.Tx, action string
 	return nil
 }
 
-func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciID, changeType, fieldName string, oldValue, newValue any) error {
+func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciID string, version int64, changeType, fieldName string, oldValue, newValue any) error {
 	oldJSON, err := marshalJSONValue(oldValue)
 	if err != nil {
 		return fmt.Errorf("marshal old ci change value: %w", err)
@@ -615,9 +626,10 @@ func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciI
 			change_type,
 			field_name,
 			old_value,
-			new_value
-		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
-	`, orgID, ciID, actorID, changeType, nilIfEmpty(fieldName), oldJSON, newJSON)
+			new_value,
+			ci_version
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)
+	`, orgID, ciID, actorID, changeType, nilIfEmpty(fieldName), oldJSON, newJSON, version)
 	if err != nil {
 		return fmt.Errorf("record ci change: %w", err)
 	}
@@ -813,4 +825,62 @@ func applyOverride(item *Item, field string, value any) {
 		item.Attributes = map[string]any{}
 	}
 	item.Attributes[field] = value
+}
+
+// checkPrecondition enforces If-Match on a manual change (API-07, API-03):
+// a missing If-Match fails when the organization requires one (412); an
+// older version fails only when a field of the request changed since by a
+// write of rank >= 92 (409, field-granular); a version the CI never had
+// fails (412). Attributes count as one field.
+func checkPrecondition(ctx context.Context, tx pgx.Tx, orgID string, before *Item, req *UpdateRequest) error {
+	if req.IfMatch == nil {
+		var required bool
+		if err := tx.QueryRow(ctx, `SELECT COALESCE((settings->>'require_if_match')::boolean, false) FROM organization WHERE id = $1`,
+			orgID).Scan(&required); err != nil {
+			return fmt.Errorf("read if-match setting: %w", err)
+		}
+		if required {
+			return ErrPreconditionRequired
+		}
+		return nil
+	}
+	switch {
+	case *req.IfMatch == before.Version, *req.IfMatch == api.IfMatchAny:
+		return nil
+	case *req.IfMatch > before.Version || *req.IfMatch < 1:
+		return ErrPreconditionFailed
+	}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT field_name FROM ci_change
+		WHERE ci_id = $1 AND ci_version > $2 AND field_name = ANY($3) ORDER BY field_name`,
+		before.ID, *req.IfMatch, requestedFields(req))
+	if err != nil {
+		return fmt.Errorf("read changes since if-match: %w", err)
+	}
+	fields, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("read changes since if-match: %w", err)
+	}
+	if len(fields) > 0 {
+		return &ConflictError{Fields: fields, Current: before.Version}
+	}
+	return nil
+}
+
+// requestedFields lists the ci_change field names a PATCH writes.
+func requestedFields(req *UpdateRequest) []string {
+	var out []string
+	for name, set := range map[string]bool{
+		"name": req.Name != nil, "status": req.Status != nil, "client_id": req.ClientID != nil,
+		"location_id": req.LocationID != nil, "manufacturer": req.Manufacturer != nil, "model": req.Model != nil,
+		"serial_number": req.SerialNumber != nil, "hardware_uuid": req.HardwareUUID != nil,
+		"management_ip": req.ManagementIP != nil, "primary_mac": req.PrimaryMAC != nil, "hostname": req.Hostname != nil,
+		"fqdn": req.FQDN != nil, "os_name": req.OSName != nil, "os_version": req.OSVersion != nil,
+		"firmware_version": req.FirmwareVersion != nil, "sys_object_id": req.SysObjectID != nil,
+		"attributes": req.Attributes != nil, "discovery_source": req.DiscoverySource != nil,
+	} {
+		if set {
+			out = append(out, name)
+		}
+	}
+	return out
 }
