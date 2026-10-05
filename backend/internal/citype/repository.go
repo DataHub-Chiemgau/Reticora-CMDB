@@ -33,6 +33,9 @@ type Repository interface {
 	DeleteField(ctx context.Context, orgID, typeID, name string) error
 
 	ListInstanceFields(ctx context.Context, orgID, ciID string) ([]InstanceField, error)
+	// InstanceFieldNames lists the names of the instance attributes of a CI;
+	// discovery must not write them (MET-14).
+	InstanceFieldNames(ctx context.Context, orgID, ciID string) ([]string, error)
 	UpsertInstanceField(ctx context.Context, orgID, ciID string, req UpsertInstanceFieldRequest) (*InstanceField, error)
 	DeleteInstanceField(ctx context.Context, orgID, ciID, name string) error
 
@@ -369,6 +372,12 @@ func (r *MemoryRepository) ListInstanceFields(_ context.Context, orgID, ciID str
 	return out, nil
 }
 
+// InstanceFieldNames lists the names of the instance attributes of a CI.
+func (r *MemoryRepository) InstanceFieldNames(ctx context.Context, orgID, ciID string) ([]string, error) {
+	fields, err := r.ListInstanceFields(ctx, orgID, ciID)
+	return fieldNames(fields), err
+}
+
 func (r *MemoryRepository) UpsertInstanceField(_ context.Context, orgID, ciID string, req UpsertInstanceFieldRequest) (*InstanceField, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -486,4 +495,12 @@ func slugify(name string) string {
 		}
 	}
 	return strings.Trim(b.String(), "_")
+}
+
+func fieldNames(fields []InstanceField) []string {
+	out := make([]string, 0, len(fields))
+	for i := range fields {
+		out = append(out, fields[i].Name)
+	}
+	return out
 }

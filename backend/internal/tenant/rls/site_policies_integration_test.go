@@ -30,7 +30,7 @@ func TestSitePoliciesRestrictSiteScopedPrincipals(t *testing.T) {
 	ciAt := func(name, site string) string {
 		id := f.CI(t, f.OrgA, f.Client1, name)
 		if site != "" {
-			if _, err := f.Admin.Exec(bg, `UPDATE ci SET site_id = $2 WHERE id = $1`, id, site); err != nil {
+			if _, err := f.Admin.Exec(bg, `UPDATE ci SET location_id = $2 WHERE id = $1`, id, site); err != nil {
 				t.Fatalf("place ci %s: %v", name, err)
 			}
 		}
@@ -104,10 +104,10 @@ func TestSitePoliciesRestrictSiteScopedPrincipals(t *testing.T) {
 		args []any
 		ok   bool
 	}{
-		{"ci at site 1", `INSERT INTO ci (organization_id, client_id, site_id, ci_type_id, name, status) SELECT $1, $2, $3, ci_type_id, 'new', 'active' FROM ci WHERE id = $4`, []any{f.OrgA, f.Client1, site1, ci1}, true},
-		{"ci at site 2", `INSERT INTO ci (organization_id, client_id, site_id, ci_type_id, name, status) SELECT $1, $2, $3, ci_type_id, 'new', 'active' FROM ci WHERE id = $4`, []any{f.OrgA, f.Client1, site2, ci1}, false},
+		{"ci at site 1", `INSERT INTO ci (organization_id, client_id, location_id, ci_type_id, name, status) SELECT $1, $2, $3, ci_type_id, 'new', 'active' FROM ci WHERE id = $4`, []any{f.OrgA, f.Client1, site1, ci1}, true},
+		{"ci at site 2", `INSERT INTO ci (organization_id, client_id, location_id, ci_type_id, name, status) SELECT $1, $2, $3, ci_type_id, 'new', 'active' FROM ci WHERE id = $4`, []any{f.OrgA, f.Client1, site2, ci1}, false},
 		{"ci without site", `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status) SELECT $1, $2, ci_type_id, 'new', 'active' FROM ci WHERE id = $3`, []any{f.OrgA, f.Client1, ci1}, false},
-		{"move ci to site 2", `UPDATE ci SET site_id = $2 WHERE id = $1`, []any{ci1, site2}, false},
+		{"move ci to site 2", `UPDATE ci SET location_id = $2 WHERE id = $1`, []any{ci1, site2}, false},
 		{"building at site 2", `INSERT INTO building (organization_id, site_id, name) VALUES ($1, $2, 'x')`, []any{f.OrgA, site2}, false},
 		{"subnet without site", `INSERT INTO subnet (organization_id, client_id, cidr) VALUES ($1, $2, '10.47.9.0/24')`, []any{f.OrgA, f.Client1}, false},
 		{"site", `INSERT INTO site (organization_id, client_id, name) VALUES ($1, $2, 'new site')`, []any{f.OrgA, f.Client1}, false},

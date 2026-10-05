@@ -8,6 +8,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -182,12 +183,20 @@ func (r *PGRepository) UpdateRack(ctx context.Context, orgID, id string, req Upd
 
 func (r *PGRepository) DeleteRack(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "DELETE FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, orgID, id)
-		if err != nil {
+		var found bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM rack WHERE organization_id = $1 AND id::text = $2 AND "+rackVisible+")",
+			orgID, id).Scan(&found); err != nil {
 			return err
 		}
-		if tag.RowsAffected() == 0 {
+		if !found {
 			return ErrNotFound
+		}
+		// Mounted CIs keep the rack (LOC-11): no cascade to rack_mount.
+		if err := locations.CheckDeletable(ctx, tx, id, true); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "DELETE FROM rack WHERE organization_id = $1 AND id = $2", orgID, id); err != nil {
+			return locations.DeleteError(err)
 		}
 		return nil
 	})

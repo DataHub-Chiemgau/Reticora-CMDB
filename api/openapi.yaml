@@ -3643,6 +3643,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/LocationInUse'
 
   /api/v1/buildings:
     get:
@@ -3743,6 +3745,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/LocationInUse'
 
   /api/v1/rooms:
     get:
@@ -3843,6 +3847,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/LocationInUse'
 
   /api/v1/racks:
     get:
@@ -3943,6 +3949,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/LocationInUse'
 
   /api/v1/racks/{id}/mounts:
     parameters:
@@ -7403,12 +7411,17 @@ paths:
       operationId: deleteLocation
       tags: [Locations]
       summary: Delete a leaf node
+      description: >-
+        Refused with 409 while the node has child locations or CIs, assets,
+        stock items, movements, rack mounts or role assignments reference it
+        (LOC-11). Deleting a site, building, room or rack through its own
+        endpoint checks the whole subtree.
       responses:
         '204':
           description: Deleted
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
+        '409': { $ref: '#/components/responses/LocationInUse' }
 
   /api/v1/reconciliation/conflicts:
     get:
@@ -7752,6 +7765,12 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/ProblemDetail'
+    LocationInUse:
+      description: The location or its subtree is still referenced; dependencies lists the kinds of referencing objects
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/DependencyProblem'
     LocationViolation:
       description: The request violates the parent matrix or a field rule; violations name the field
       content:
@@ -8000,10 +8019,17 @@ components:
           type: string
         client_id:
           type: string
+        location_id:
+          type: string
+          description: Node of the canonical location tree (DB-05); site_id and room_id are derived from it.
         site_id:
           type: string
+          readOnly: true
+          description: Site of location_id, derived by the server.
         room_id:
           type: string
+          readOnly: true
+          description: Room of location_id (the location or its nearest room ancestor), derived by the server.
         ci_type_id:
           type: string
         name:
@@ -8071,10 +8097,9 @@ components:
           type: string
         client_id:
           type: string
-        site_id:
+        location_id:
           type: string
-        room_id:
-          type: string
+          description: Node of the location tree; site and room of the CI follow from it.
         name:
           type: string
         status:
@@ -8118,10 +8143,9 @@ components:
           $ref: '#/components/schemas/CIStatus'
         client_id:
           type: string
-        site_id:
+        location_id:
           type: string
-        room_id:
-          type: string
+          description: Node of the location tree; site and room of the CI follow from it.
         manufacturer:
           type: string
         model:
@@ -8803,6 +8827,10 @@ components:
           type: string
         location:
           type: string
+        location_id:
+          type: string
+          readOnly: true
+          description: Node of the canonical location tree; changed through stock movements.
         notes:
           type: string
         custom_fields:
@@ -10250,6 +10278,17 @@ components:
                 properties:
                   field: { type: string }
                   detail: { type: string }
+    DependencyProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - type: object
+          required: [dependencies]
+          properties:
+            dependencies:
+              type: array
+              items:
+                type: string
+                enum: [location, ci, asset, quantity_item, asset_movement, rack_mount, role_assignment]
     LocationKind:
       type: string
       enum: [site, building, room, rack, warehouse, zone, shelf, bin]

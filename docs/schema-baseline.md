@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000073_role_matrix_alignment
+Stand: Migration 000075_location_delete_rules
 
 ## Prüfung
 
@@ -167,7 +167,9 @@ SECURITY`), Policies mit ihrem Kommando.
 | `lifecycle_state` | ja | ja | lifecycle_state_isolation_delete (DELETE), lifecycle_state_isolation_insert (INSERT), lifecycle_state_isolation_select (SELECT), lifecycle_state_isolation_update (UPDATE) |
 | `lifecycle_transition` | ja | ja | lifecycle_transition_isolation_delete (DELETE), lifecycle_transition_isolation_insert (INSERT), lifecycle_transition_isolation_select (SELECT), lifecycle_transition_isolation_update (UPDATE) |
 | `location` | ja | ja | location_isolation (ALL) |
-| `location_node` | ja | ja | location_node_isolation (ALL) |
+| `location_change` | ja | ja | location_change_isolation (ALL) |
+| `location_node_retired` | ja | ja | location_node_retired_isolation (ALL) |
+| `location_ref_migration` | ja | ja | location_ref_migration_isolation (ALL) |
 | `maintenance_notification` | ja | ja | maintenance_notification_isolation (ALL) |
 | `maintenance_window` | ja | ja | maintenance_window_isolation (ALL) |
 | `maintenance_window_ci` | ja | ja | maintenance_window_ci_isolation (ALL) |

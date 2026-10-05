@@ -32,7 +32,7 @@ func TestTraversalStaysInsideScope(t *testing.T) {
 	ciAt := func(name, client, site string) string {
 		id := f.CI(t, f.OrgA, client, name)
 		if site != "" {
-			if _, err := f.Admin.Exec(bg, `UPDATE ci SET site_id = $2 WHERE id = $1`, id, site); err != nil {
+			if _, err := f.Admin.Exec(bg, `UPDATE ci SET location_id = $2 WHERE id = $1`, id, site); err != nil {
 				t.Fatalf("place %s: %v", name, err)
 			}
 		}

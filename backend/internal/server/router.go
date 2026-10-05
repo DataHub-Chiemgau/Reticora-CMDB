@@ -245,7 +245,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
 		discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
-			WithProvenance(overrideProvenance{repo: repos.Override}),
+			WithProvenance(overrideProvenance{repo: repos.Override}).
+			WithInstanceFields(repos.CIType),
 		topology.NewHandler(repos.CI, repos.Relationship),
 		export.NewHandler(repos.CI),
 		export.NewJobHandler(repos.ExportJobs, export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs), opts.Blobs),

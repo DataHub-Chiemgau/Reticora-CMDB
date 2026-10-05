@@ -1,7 +1,6 @@
 package locations
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -149,12 +148,9 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.As(err, &fe):
 		writeFieldProblem(w, r, fe)
+	case WriteDependencyConflict(w, r, err):
 	case errors.Is(err, ErrNotFound):
 		httpx.NotFound(w, r, "location not found")
-	case errors.Is(err, ErrHasChildren):
-		httpx.Conflict(w, r, "the location has child locations; move or delete them first")
-	case errors.Is(err, ErrInUse):
-		httpx.Conflict(w, r, "the location is still referenced")
 	case errors.Is(err, ErrInvalidKind):
 		writeFieldProblem(w, r, &FieldError{Field: "kind", Message: err.Error(), Err: err})
 	case errors.Is(err, ErrInvalidParent), errors.Is(err, ErrCycle):
@@ -182,9 +178,7 @@ type violation struct {
 // writeFieldProblem writes a 422 problem naming the field; a cycle is
 // reported the same way, as its field is parent_id.
 func writeFieldProblem(w http.ResponseWriter, r *http.Request, fe *FieldError) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(http.StatusUnprocessableEntity)
-	_ = json.NewEncoder(w).Encode(violationProblem{
+	respondProblem(w, http.StatusUnprocessableEntity, violationProblem{
 		ProblemDetail: httpx.ProblemDetail{
 			Type:     httpx.TypeValidationError,
 			Title:    "Validation Error",

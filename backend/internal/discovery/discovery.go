@@ -92,8 +92,11 @@ type BulkIngestResponse struct {
 	Relationships int `json:"relationships"`
 	// ProtectedOverrides counts matched CIs whose protected manual overrides
 	// suppressed one or more discovered writes (spec §13).
-	ProtectedOverrides int    `json:"protected_overrides,omitempty"`
-	JobID              string `json:"job_id,omitempty"`
+	ProtectedOverrides int `json:"protected_overrides,omitempty"`
+	// ProtectedInstanceFields counts matched CIs where discovered values for
+	// instance attributes were not written (MET-14).
+	ProtectedInstanceFields int    `json:"protected_instance_fields,omitempty"`
+	JobID                   string `json:"job_id,omitempty"`
 }
 
 // Repository defines persistence operations for collectors, discovery jobs and
@@ -304,6 +307,7 @@ type Handler struct {
 	relRepo    relationship.Repository
 	typeLookup CITypeLookup
 	provenance ProvenanceRecorder
+	instance   InstanceFieldSource
 }
 
 // CITypeLookup resolves a CI type name or UUID to the canonical ci_type id.
@@ -332,6 +336,39 @@ func NewHandler(repo Repository, ciRepo ci.Repository, relRepo ...relationship.R
 func (h *Handler) WithProvenance(recorder ProvenanceRecorder) *Handler {
 	h.provenance = recorder
 	return h
+}
+
+// WithInstanceFields attaches the source of the CIs' instance attribute
+// definitions (MET-14). With it, ingest never writes an instance attribute;
+// when the definitions cannot be read, no custom attribute is written at all.
+func (h *Handler) WithInstanceFields(source InstanceFieldSource) *Handler {
+	h.instance = source
+	return h
+}
+
+// stripInstanceFields removes the instance attributes of ciID from
+// attributes and reports whether any discovered value was withheld. It fails
+// closed: without the definitions every discovered custom attribute is
+// withheld; the fingerprint and raw data of the ingest stay.
+func (h *Handler) stripInstanceFields(ctx context.Context, orgID, ciID string, attributes, discovered map[string]any) bool {
+	if h.instance == nil {
+		return false
+	}
+	names, err := h.instance.InstanceFieldNames(ctx, orgID, ciID)
+	if err != nil {
+		withheld := false
+		for k := range discovered {
+			if k == "fingerprint" || k == "raw_data" {
+				continue
+			}
+			if _, ok := attributes[k]; ok {
+				delete(attributes, k)
+				withheld = true
+			}
+		}
+		return withheld
+	}
+	return len(WithoutInstanceFields(attributes, names)) > 0
 }
 
 // recordDiscovered fields the provenance of one applied field. It never
@@ -810,6 +847,10 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			// Never merge a discovered value over a protected custom attribute.
 			for k := range protected {
 				delete(attributes, k)
+			}
+			// Nor over an instance attribute of this CI (MET-14).
+			if h.stripInstanceFields(r.Context(), t.OrganizationID, result.MatchedCIID, attributes, item.Attributes) {
+				resp.ProtectedInstanceFields++
 			}
 			update := ci.UpdateRequest{
 				Attributes:      attributes,

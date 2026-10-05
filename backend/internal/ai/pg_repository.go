@@ -23,7 +23,7 @@ const chunkVisible = `CASE ai_chunk.entity_type
 	WHEN 'contact' THEN EXISTS (SELECT 1 FROM contact WHERE contact.id = ai_chunk.entity_id)
 	WHEN 'document' THEN EXISTS (SELECT 1 FROM document WHERE document.id = ai_chunk.entity_id)
 	WHEN 'ticket' THEN EXISTS (SELECT 1 FROM ticket WHERE ticket.id = ai_chunk.entity_id)
-	WHEN 'location' THEN EXISTS (SELECT 1 FROM location_node WHERE location_node.id = ai_chunk.entity_id)
+	WHEN 'location' THEN EXISTS (SELECT 1 FROM location WHERE location.id = ai_chunk.entity_id)
 	ELSE true END`
 
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }

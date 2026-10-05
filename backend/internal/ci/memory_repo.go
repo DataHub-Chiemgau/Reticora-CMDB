@@ -149,6 +149,10 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 	if req.FirmwareVersion != nil {
 		item.FirmwareVersion = *req.FirmwareVersion
 	}
+	if req.LocationID != nil {
+		// Without the location tree, site and room cannot be derived.
+		item.LocationID, item.SiteID, item.RoomID = *req.LocationID, "", ""
+	}
 	if req.Attributes != nil {
 		if item.Attributes == nil {
 			item.Attributes = make(map[string]any)

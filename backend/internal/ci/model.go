@@ -5,9 +5,13 @@ import "time"
 
 // Item represents a Configuration Item instance.
 type Item struct {
-	ID              string         `json:"id"`
-	OrganizationID  string         `json:"organization_id"`
-	ClientID        string         `json:"client_id,omitempty"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	ClientID       string `json:"client_id,omitempty"`
+	// LocationID is the location of the CI in the canonical location tree
+	// (DB-05). SiteID and RoomID are derived from it by the database and are
+	// read-only.
+	LocationID      string         `json:"location_id,omitempty"`
 	SiteID          string         `json:"site_id,omitempty"`
 	RoomID          string         `json:"room_id,omitempty"`
 	CITypeID        string         `json:"ci_type_id"`
@@ -39,8 +43,7 @@ type Item struct {
 type CreateRequest struct {
 	CITypeID        string         `json:"ci_type_id"`
 	ClientID        string         `json:"client_id,omitempty"`
-	SiteID          string         `json:"site_id,omitempty"`
-	RoomID          string         `json:"room_id,omitempty"`
+	LocationID      string         `json:"location_id,omitempty"`
 	Name            string         `json:"name"`
 	Status          string         `json:"status,omitempty"`
 	Manufacturer    string         `json:"manufacturer,omitempty"`
@@ -64,8 +67,7 @@ type UpdateRequest struct {
 	Name            *string        `json:"name,omitempty"`
 	Status          *string        `json:"status,omitempty"`
 	ClientID        *string        `json:"client_id,omitempty"`
-	SiteID          *string        `json:"site_id,omitempty"`
-	RoomID          *string        `json:"room_id,omitempty"`
+	LocationID      *string        `json:"location_id,omitempty"`
 	Manufacturer    *string        `json:"manufacturer,omitempty"`
 	Model           *string        `json:"model,omitempty"`
 	SerialNumber    *string        `json:"serial_number,omitempty"`

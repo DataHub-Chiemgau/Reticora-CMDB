@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -242,6 +243,9 @@ func (h *Handler) DeleteSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.DeleteSite(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
+		if locations.WriteDependencyConflict(w, r, err) {
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "site not found")
 		return
 	}
@@ -334,6 +338,9 @@ func (h *Handler) DeleteBuilding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.DeleteBuilding(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
+		if locations.WriteDependencyConflict(w, r, err) {
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "building not found")
 		return
 	}
@@ -426,6 +433,9 @@ func (h *Handler) DeleteRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.DeleteRoom(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
+		if locations.WriteDependencyConflict(w, r, err) {
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "room not found")
 		return
 	}

@@ -138,7 +138,7 @@ func (m *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	}
 	for _, c := range m.nodes {
 		if c.ParentID == id {
-			return ErrHasChildren
+			return &DependencyError{Kinds: []string{DependencyLocation}}
 		}
 	}
 	delete(m.nodes, id)

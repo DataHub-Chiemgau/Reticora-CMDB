@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -172,6 +173,9 @@ func (h *Handler) DeleteRack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.DeleteRack(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
+		if locations.WriteDependencyConflict(w, r, err) {
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "rack not found")
 		return
 	}

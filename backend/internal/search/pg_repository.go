@@ -45,7 +45,7 @@ const hitVisible = `CASE search_document.entity_type
 	WHEN 'ci' THEN EXISTS (SELECT 1 FROM ci WHERE ci.id = search_document.entity_id)
 	WHEN 'asset' THEN EXISTS (SELECT 1 FROM asset WHERE asset.id = search_document.entity_id)
 	WHEN 'contact' THEN EXISTS (SELECT 1 FROM contact WHERE contact.id = search_document.entity_id)
-	WHEN 'location' THEN EXISTS (SELECT 1 FROM location_node WHERE location_node.id = search_document.entity_id)
+	WHEN 'location' THEN EXISTS (SELECT 1 FROM location WHERE location.id = search_document.entity_id)
 	WHEN 'document' THEN EXISTS (SELECT 1 FROM document WHERE document.id = search_document.entity_id)
 	WHEN 'ticket' THEN EXISTS (SELECT 1 FROM ticket WHERE ticket.id = search_document.entity_id)
 	WHEN 'reservation' THEN EXISTS (SELECT 1 FROM reservation WHERE reservation.id = search_document.entity_id)
@@ -145,7 +145,7 @@ UNION ALL SELECT organization_id,'asset',id,name,concat_ws(' ',asset_tag,categor
 UNION ALL SELECT organization_id,'document',id,title,concat_ws(' ',description,file_name,category,array_to_string(tags,' ')),'/documents','{}'::jsonb FROM document WHERE organization_id=$1
 UNION ALL SELECT organization_id,'ticket',id,title,concat_ws(' ',description,status,priority,category,array_to_string(tags,' ')),'/tickets','{}'::jsonb FROM ticket WHERE organization_id=$1
 UNION ALL SELECT organization_id,'contact',id,display_name,concat_ws(' ',email,phone,role,department,notes),'/contacts','{}'::jsonb FROM contact WHERE organization_id=$1
-UNION ALL SELECT organization_id,'location',id,name,concat_ws(' ',node_type,barcode),'/locations','{}'::jsonb FROM location_node WHERE organization_id=$1
+UNION ALL SELECT organization_id,'location',id,name,kind,'/locations','{}'::jsonb FROM location WHERE organization_id=$1
 UNION ALL SELECT organization_id,'reservation',id,COALESCE(project_ref, reason, 'reservation'),concat_ws(' ',state, reason, project_ref),'/reservations','{}'::jsonb FROM reservation WHERE organization_id=$1`, orgID)
 		count = cmd.RowsAffected()
 		return err
