@@ -9,6 +9,7 @@ import {
   relationshipTypeApi,
   lifecycleApi,
   locationApi,
+  clientApi,
   inventoryApi,
   reservationApi,
   compositionApi,
@@ -155,6 +156,18 @@ export function useCreateLocation() {
     mutationFn: locationApi.create,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['locations'] }),
   });
+}
+
+export function useDeleteLocation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => locationApi.delete(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['locations'] }),
+  });
+}
+
+export function useClients(enabled = true) {
+  return useQuery({ queryKey: ['clients'], queryFn: () => clientApi.list(), enabled });
 }
 
 // Inventory movements + items

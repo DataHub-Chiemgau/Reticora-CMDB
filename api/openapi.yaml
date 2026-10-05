@@ -81,6 +81,8 @@ tags:
     description: Tenant-scoped full-text search
   - name: AI
     description: Governed LLM/RAG assistant
+  - name: Locations
+    description: Canonical location tree (sites, buildings, rooms, racks, warehouses, zones, shelves, bins)
 
 paths:
   /healthz:
@@ -7302,56 +7304,111 @@ paths:
   /api/v1/locations:
     get:
       operationId: listLocations
-      summary: Manage the generalized location hierarchy
+      tags: [Locations]
+      summary: List nodes of the location tree
+      description: >-
+        Nodes of the canonical location tree (LOC-10) visible in the caller's
+        scope, parents first.
+      parameters:
+        - { name: parent_id, in: query, schema: { type: string }, description: Only direct children of this node }
+        - { name: kind, in: query, schema: { $ref: '#/components/schemas/LocationKind' } }
+        - { name: root_only, in: query, schema: { type: boolean }, description: Only sites }
+        - { name: search, in: query, schema: { type: string }, description: Case-insensitive part of the name }
       responses:
         '200':
-          description: Manage the generalized location hierarchy
-        '401':
-          description: Unauthorized
+          description: Location nodes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocationListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/LocationViolation' }
     post:
-      operationId: createLocations
-      summary: Manage the generalized location hierarchy
+      operationId: createLocation
+      tags: [Locations]
+      summary: Create a node of the location tree
+      description: >-
+        The parent must be of the kind the parent matrix allows (site >
+        building > room > rack, site > warehouse > zone > shelf > bin). A site
+        is a root and needs client_id; every other node inherits client and
+        site from its parent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LocationCreateRequest' }
       responses:
         '201':
-          description: Manage the generalized location hierarchy
-        '401':
-          description: Unauthorized
+          description: Created node
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Location' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/LocationViolation' }
 
   /api/v1/locations/tree:
     get:
-      operationId: listLocationsTree
-      summary: Read the location hierarchy as a tree
+      operationId: getLocationTree
+      tags: [Locations]
+      summary: Read the location tree
+      description: >-
+        All visible nodes as a forest; a node whose parent is outside the
+        caller's scope is a root.
       responses:
         '200':
-          description: Read the location hierarchy as a tree
-        '401':
-          description: Unauthorized
+          description: Location forest
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocationTreeResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /api/v1/locations/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
     get:
-      operationId: getLocationsId
-      summary: Read, update or delete a location node
+      operationId: getLocation
+      tags: [Locations]
+      summary: Read a node of the location tree
       responses:
         '200':
-          description: Read, update or delete a location node
-        '401':
-          description: Unauthorized
+          description: Location node
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Location' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
     patch:
-      operationId: updateLocationsId
-      summary: Read, update or delete a location node
+      operationId: updateLocation
+      tags: [Locations]
+      summary: Rename and/or move a node
+      description: >-
+        Moving re-derives path, site and client of the node and its subtree.
+        Sites cannot be moved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LocationUpdateRequest' }
       responses:
         '200':
-          description: Read, update or delete a location node
-        '401':
-          description: Unauthorized
+          description: Updated node
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Location' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/LocationViolation' }
     delete:
-      operationId: deleteLocationsId
-      summary: Read, update or delete a location node
+      operationId: deleteLocation
+      tags: [Locations]
+      summary: Delete a leaf node
       responses:
         '204':
-          description: Read, update or delete a location node
-        '401':
-          description: Unauthorized
+          description: Deleted
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /api/v1/reconciliation/conflicts:
     get:
@@ -7695,6 +7752,12 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/ProblemDetail'
+    LocationViolation:
+      description: The request violates the parent matrix or a field rule; violations name the field
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ViolationProblem'
     InternalServerError:
       description: Internal server error
       content:
@@ -10173,6 +10236,76 @@ components:
         ci_id: { type: string }
         ticket_id: { type: string }
         status: { type: string }
+    ViolationProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - type: object
+          required: [violations]
+          properties:
+            violations:
+              type: array
+              items:
+                type: object
+                required: [field, detail]
+                properties:
+                  field: { type: string }
+                  detail: { type: string }
+    LocationKind:
+      type: string
+      enum: [site, building, room, rack, warehouse, zone, shelf, bin]
+    Location:
+      type: object
+      required: [id, organization_id, client_id, site_id, kind, name, path, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        client_id: { type: string }
+        site_id: { type: string }
+        parent_id: { type: string }
+        kind: { $ref: '#/components/schemas/LocationKind' }
+        name: { type: string }
+        path: { type: string, description: ltree path of the node ids from the site }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    LocationTreeNode:
+      allOf:
+        - $ref: '#/components/schemas/Location'
+        - type: object
+          required: [children]
+          properties:
+            children:
+              type: array
+              items: { $ref: '#/components/schemas/LocationTreeNode' }
+    LocationCreateRequest:
+      type: object
+      required: [kind, name]
+      additionalProperties: false
+      properties:
+        kind: { $ref: '#/components/schemas/LocationKind' }
+        name: { type: string, minLength: 1 }
+        parent_id: { type: string, description: Required for every kind but site }
+        client_id: { type: string, description: Required for a site, ignored otherwise }
+    LocationUpdateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1 }
+        parent_id: { type: string }
+    LocationListResponse:
+      type: object
+      required: [data, total]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Location' }
+        total: { type: integer }
+    LocationTreeResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/LocationTreeNode' }
     ValidationProblem:
       allOf:
         - $ref: '#/components/schemas/ProblemDetail'

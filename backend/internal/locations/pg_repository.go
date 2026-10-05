@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
@@ -51,13 +52,19 @@ func (r *PGRepository) Create(ctx context.Context, orgID string, req CreateReque
 				orgID, req.Kind, req.ParentID, req.Name).Scan(&id)
 		}
 		if err != nil {
-			return mapError(fmt.Errorf("create %s: %w", req.Kind, err))
+			field := "parent_id"
+			if req.Kind == KindSite {
+				field = "client_id"
+			}
+			return withField(field, mapError(fmt.Errorf("create %s: %w", req.Kind, err)))
 		}
 		out, err = get(ctx, tx, id)
 		return err
 	})
 	return out, err
 }
+
+var _ Repository = (*PGRepository)(nil)
 
 // Get returns one node.
 func (r *PGRepository) Get(ctx context.Context, orgID, id string) (*Location, error) {
@@ -103,8 +110,18 @@ func (r *PGRepository) Subtree(ctx context.Context, orgID, id string) ([]Locatio
 // Move re-parents a node; the database re-derives path, site and client of
 // the node and its subtree. Specialist kinds move through their table.
 func (r *PGRepository) Move(ctx context.Context, orgID, id, parentID string) (*Location, error) {
-	if parentID == "" {
-		return nil, ErrInvalidParent
+	return r.Update(ctx, orgID, id, UpdateRequest{ParentID: &parentID})
+}
+
+// Update renames and/or moves a node in one transaction. Specialist kinds
+// are changed through their table, whose trigger keeps the location row in
+// step.
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Location, error) {
+	if req.Name != nil && strings.TrimSpace(*req.Name) == "" {
+		return nil, fieldError("name", ErrInvalidInput, "name must not be empty")
+	}
+	if req.ParentID != nil && *req.ParentID == "" {
+		return nil, fieldError("parent_id", ErrInvalidParent, "a node can only be moved below another node")
 	}
 	var out *Location
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -112,21 +129,26 @@ func (r *PGRepository) Move(ctx context.Context, orgID, id, parentID string) (*L
 		if err != nil {
 			return err
 		}
-		var tag pgconn.CommandTag
-		switch {
-		case cur.Kind == KindSite:
-			return ErrInvalidParent
-		case cur.Kind.HasSpecialistTable():
-			tag, err = tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET %s = $2 WHERE id = $1`,
-				cur.Kind, specialistParentColumns[cur.Kind]), id, parentID)
-		default:
-			tag, err = tx.Exec(ctx, `UPDATE location SET parent_id = $2 WHERE id = $1`, id, parentID)
+		table := "location"
+		if cur.Kind.HasSpecialistTable() {
+			table = string(cur.Kind)
 		}
-		if err != nil {
-			return mapError(fmt.Errorf("move location: %w", err))
+		if req.Name != nil {
+			if err = exec(ctx, tx, fmt.Sprintf(`UPDATE %s SET name = $2 WHERE id = $1`, table), id, *req.Name); err != nil {
+				return withField("name", mapError(fmt.Errorf("rename location: %w", err)))
+			}
 		}
-		if tag.RowsAffected() == 0 {
-			return ErrNotFound
+		if req.ParentID != nil {
+			column := "parent_id"
+			switch {
+			case cur.Kind == KindSite:
+				return fieldError("parent_id", ErrInvalidParent, "a site is a root and cannot be moved")
+			case cur.Kind.HasSpecialistTable():
+				column = specialistParentColumns[cur.Kind]
+			}
+			if err = exec(ctx, tx, fmt.Sprintf(`UPDATE %s SET %s = $2 WHERE id = $1`, table, column), id, *req.ParentID); err != nil {
+				return withField("parent_id", mapError(fmt.Errorf("move location: %w", err)))
+			}
 		}
 		out, err = get(ctx, tx, id)
 		return err
@@ -134,9 +156,87 @@ func (r *PGRepository) Move(ctx context.Context, orgID, id, parentID string) (*L
 	return out, err
 }
 
+// List returns the visible nodes, parents first.
+func (r *PGRepository) List(ctx context.Context, orgID string, filter Filter) ([]Location, error) {
+	where := []string{"TRUE"}
+	var args []any
+	add := func(cond string, arg any) {
+		args = append(args, arg)
+		where = append(where, fmt.Sprintf(cond, len(args)))
+	}
+	if filter.RootOnly {
+		where = append(where, "parent_id IS NULL")
+	}
+	if filter.ParentID != "" {
+		add("parent_id::text = $%d", filter.ParentID)
+	}
+	if filter.Kind != "" {
+		add("kind = $%d", string(filter.Kind))
+	}
+	if filter.Search != "" {
+		add("name ILIKE $%d", "%"+filter.Search+"%")
+	}
+	out := []Location{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+selectColumns+` FROM location WHERE `+strings.Join(where, " AND ")+`
+			ORDER BY nlevel(path), name, id`, args...)
+		if err != nil {
+			return fmt.Errorf("list locations: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			loc, scanErr := scan(rows)
+			if scanErr != nil {
+				return fmt.Errorf("scan location: %w", scanErr)
+			}
+			out = append(out, *loc)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// Delete removes a leaf node; a node with children is refused with
+// ErrHasChildren and one still referenced elsewhere with ErrInUse. The
+// specialist row goes with the location row (ON DELETE CASCADE).
+func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := get(ctx, tx, id); err != nil {
+			return err
+		}
+		var children bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM location WHERE parent_id = $1)`, id).Scan(&children); err != nil {
+			return fmt.Errorf("location children: %w", err)
+		}
+		if children {
+			return ErrHasChildren
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM location WHERE id = $1`, id); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+				return fmt.Errorf("%w: %s", ErrInUse, pgErr.Message)
+			}
+			return fmt.Errorf("delete location: %w", err)
+		}
+		return nil
+	})
+}
+
+func exec(ctx context.Context, tx pgx.Tx, sql string, args ...any) error {
+	tag, err := tx.Exec(ctx, sql, args...)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func get(ctx context.Context, tx pgx.Tx, id string) (*Location, error) {
 	loc, err := scan(tx.QueryRow(ctx, `SELECT `+selectColumns+` FROM location WHERE id = $1`, id))
-	if errors.Is(err, pgx.ErrNoRows) {
+	var pgErr *pgconn.PgError
+	if errors.Is(err, pgx.ErrNoRows) || (errors.As(err, &pgErr) && pgErr.Code == "22P02") {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -166,12 +266,14 @@ func mapError(err error) error {
 	case pgErr.ConstraintName == "location_no_cycle":
 		return fmt.Errorf("%w: %s", ErrCycle, pgErr.Message)
 	case pgErr.ConstraintName == "location_parent_matrix",
-		pgErr.ConstraintName == "location_root_is_site",
-		pgErr.Code == "23503", // parent missing or invisible
-		pgErr.Code == "42501": // row-level security
+		pgErr.ConstraintName == "location_root_is_site":
 		return fmt.Errorf("%w: %s", ErrInvalidParent, pgErr.Message)
+	case pgErr.Code == "23503", // parent missing or invisible
+		pgErr.Code == "42501": // row-level security
+		// No detail: it would tell a foreign parent from a missing one.
+		return fmt.Errorf("%w: not found", ErrInvalidParent)
 	case pgErr.Code == "22P02": // malformed uuid
-		return fmt.Errorf("%w: %s", ErrInvalidInput, pgErr.Message)
+		return fmt.Errorf("%w: malformed id", ErrInvalidInput)
 	}
 	return err
 }

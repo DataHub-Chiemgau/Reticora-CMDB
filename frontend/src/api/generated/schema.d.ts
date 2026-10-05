@@ -4479,11 +4479,17 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage the generalized location hierarchy */
+    /**
+     * List nodes of the location tree
+     * @description Nodes of the canonical location tree (LOC-10) visible in the caller's scope, parents first.
+     */
     get: operations['listLocations'];
     put?: never;
-    /** Manage the generalized location hierarchy */
-    post: operations['createLocations'];
+    /**
+     * Create a node of the location tree
+     * @description The parent must be of the kind the parent matrix allows (site > building > room > rack, site > warehouse > zone > shelf > bin). A site is a root and needs client_id; every other node inherits client and site from its parent.
+     */
+    post: operations['createLocation'];
     delete?: never;
     options?: never;
     head?: never;
@@ -4497,8 +4503,11 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read the location hierarchy as a tree */
-    get: operations['listLocationsTree'];
+    /**
+     * Read the location tree
+     * @description All visible nodes as a forest; a node whose parent is outside the caller's scope is a root.
+     */
+    get: operations['getLocationTree'];
     put?: never;
     post?: never;
     delete?: never;
@@ -4511,19 +4520,24 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        id: string;
+      };
       cookie?: never;
     };
-    /** Read, update or delete a location node */
-    get: operations['getLocationsId'];
+    /** Read a node of the location tree */
+    get: operations['getLocation'];
     put?: never;
     post?: never;
-    /** Read, update or delete a location node */
-    delete: operations['deleteLocationsId'];
+    /** Delete a leaf node */
+    delete: operations['deleteLocation'];
     options?: never;
     head?: never;
-    /** Read, update or delete a location node */
-    patch: operations['updateLocationsId'];
+    /**
+     * Rename and/or move a node
+     * @description Moving re-derives path, site and client of the node and its subtree. Sites cannot be moved.
+     */
+    patch: operations['updateLocation'];
     trace?: never;
   };
   '/api/v1/reconciliation/conflicts': {
@@ -6252,6 +6266,51 @@ export interface components {
       ticket_id?: string;
       status?: string;
     };
+    ViolationProblem: components['schemas']['ProblemDetail'] & {
+      violations: {
+        field: string;
+        detail: string;
+      }[];
+    };
+    /** @enum {string} */
+    LocationKind: 'site' | 'building' | 'room' | 'rack' | 'warehouse' | 'zone' | 'shelf' | 'bin';
+    Location: {
+      id: string;
+      organization_id: string;
+      client_id: string;
+      site_id: string;
+      parent_id?: string;
+      kind: components['schemas']['LocationKind'];
+      name: string;
+      /** @description ltree path of the node ids from the site */
+      path: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    LocationTreeNode: components['schemas']['Location'] & {
+      children: components['schemas']['LocationTreeNode'][];
+    };
+    LocationCreateRequest: {
+      kind: components['schemas']['LocationKind'];
+      name: string;
+      /** @description Required for every kind but site */
+      parent_id?: string;
+      /** @description Required for a site */
+      client_id?: string;
+    };
+    LocationUpdateRequest: {
+      name?: string;
+      parent_id?: string;
+    };
+    LocationListResponse: {
+      data: components['schemas']['Location'][];
+      total: number;
+    };
+    LocationTreeResponse: {
+      data: components['schemas']['LocationTreeNode'][];
+    };
     ValidationProblem: components['schemas']['ProblemDetail'] & {
       fields?: {
         field: string;
@@ -7413,6 +7472,15 @@ export interface components {
       };
       content: {
         'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description The request violates the parent matrix or a field rule; violations name the field */
+    LocationViolation: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ViolationProblem'];
       };
     };
     /** @description Internal server error */
@@ -18643,55 +18711,62 @@ export interface operations {
   };
   listLocations: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Only direct children of this node */
+        parent_id?: string;
+        kind?: components['schemas']['LocationKind'];
+        /** @description Only sites */
+        root_only?: boolean;
+        /** @description Case-insensitive part of the name */
+        search?: string;
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Manage the generalized location hierarchy */
+      /** @description Location nodes */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['LocationListResponse'];
         };
-        content?: never;
       };
+      401: components['responses']['Unauthorized'];
+      422: components['responses']['LocationViolation'];
     };
   };
-  createLocations: {
+  createLocation: {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LocationCreateRequest'];
+      };
+    };
     responses: {
-      /** @description Manage the generalized location hierarchy */
+      /** @description Created node */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['Location'];
         };
-        content?: never;
       };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      422: components['responses']['LocationViolation'];
     };
   };
-  listLocationsTree: {
+  getLocationTree: {
     parameters: {
       query?: never;
       header?: never;
@@ -18700,95 +18775,93 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Read the location hierarchy as a tree */
+      /** @description Location forest */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['LocationTreeResponse'];
         };
-        content?: never;
       };
+      401: components['responses']['Unauthorized'];
     };
   };
-  getLocationsId: {
+  getLocation: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        id: string;
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Read, update or delete a location node */
+      /** @description Location node */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['Location'];
         };
-        content?: never;
       };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
-  deleteLocationsId: {
+  deleteLocation: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        id: string;
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Read, update or delete a location node */
+      /** @description Deleted */
       204: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
       };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
-  updateLocationsId: {
+  updateLocation: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        id: string;
+      };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LocationUpdateRequest'];
+      };
+    };
     responses: {
-      /** @description Read, update or delete a location node */
+      /** @description Updated node */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['Location'];
         };
-        content?: never;
       };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['LocationViolation'];
     };
   };
   listReconciliationConflicts: {

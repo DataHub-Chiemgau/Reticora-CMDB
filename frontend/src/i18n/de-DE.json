@@ -830,15 +830,26 @@
     "readOnly": "schreibgeschützt"
   },
   "locations": {
-    "createChild": "Unterpunkt in",
+    "createChild": "Unterpunkt in {{name}}",
     "name": "Name",
     "type": "Typ",
-    "subtitle": "Einheitliche Hierarchie: Standort → Gebäude → Raum → Rack und Lager → Zone → Regal → Fach.",
+    "subtitle": "Einheitliche Hierarchie: Standort → Gebäude → Raum → Rack und Standort → Lager → Zone → Regal → Fach.",
     "addChild": "Unterpunkt",
-    "createRoot": "Wurzel anlegen",
-    "empty": "Noch keine Standorte. Legen Sie eine Wurzel an (z. B. Standort oder Lager).",
-    "barcode": "Barcode/RFID (optional)",
-    "title": "Standorte & Lager"
+    "createRoot": "Standort anlegen",
+    "empty": "Noch keine Standorte. Legen Sie zuerst einen Standort an.",
+    "client": "Mandant",
+    "deleteFailed": "Löschen nicht möglich",
+    "title": "Standorte & Lager",
+    "kinds": {
+      "site": "Standort",
+      "building": "Gebäude",
+      "room": "Raum",
+      "rack": "Rack",
+      "warehouse": "Lager",
+      "zone": "Zone",
+      "shelf": "Regal",
+      "bin": "Fach"
+    }
   },
   "savedviews": {
     "title": "Gespeicherte Ansichten",

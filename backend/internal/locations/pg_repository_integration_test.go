@@ -214,6 +214,24 @@ func TestLocationTreeScope(t *testing.T) {
 	if _, err := repo.Move(c1, f.OrgA, a.zone.ID, b.warehouse.ID); err == nil {
 		t.Error("client 1 moves zone below foreign warehouse: want error")
 	}
+	if list, err := repo.List(c1, f.OrgA, locations.Filter{}); err != nil || len(list) != 8 {
+		t.Errorf("client 1 list: %d nodes, %v; want its 8", len(list), err)
+	} else {
+		for _, n := range list {
+			if n.ClientID != f.Client1 {
+				t.Errorf("client 1 lists foreign node %s", n.ID)
+			}
+		}
+	}
+	if err := repo.Delete(c1, f.OrgA, b.bin.ID); !errors.Is(err, locations.ErrNotFound) {
+		t.Errorf("client 1 deletes foreign bin: got %v, want ErrNotFound", err)
+	}
+	if _, err := repo.Get(f.OrgCtx(f.OrgA), f.OrgA, b.bin.ID); err != nil {
+		t.Errorf("foreign bin after delete attempt: %v", err)
+	}
+	if _, err := repo.List(context.Background(), f.OrgA, locations.Filter{}); !errors.Is(err, database.ErrNoTenantScope) {
+		t.Errorf("list without scope: got %v, want ErrNoTenantScope", err)
+	}
 
 	// Site scope: a principal restricted to site a sees nothing of site b,
 	// even within its own client.
@@ -284,5 +302,69 @@ func TestLocationImportNodes(t *testing.T) {
 	// A second run imports nothing new.
 	if err := f.Admin.QueryRow(ctx, `SELECT location_import_nodes($1)`, f.OrgA).Scan(&skipped); err != nil || skipped != 2 {
 		t.Errorf("second import: skipped %d, %v", skipped, err)
+	}
+}
+
+// TestLocationTreeUpdateAndDelete covers WP-053: rename through the
+// specialist table, rename and move in one call, field errors of the parent
+// matrix, and delete of leaves only.
+func TestLocationTreeUpdateAndDelete(t *testing.T) {
+	f := scopetest.Seed(t, "56")
+	repo := locations.NewPGRepository(f.App)
+	ctx := f.OrgCtx(f.OrgA)
+	tr := buildTree(t, repo, ctx, f.OrgA, f.Client1, "u")
+
+	name := "u-room-renamed"
+	room, err := repo.Update(ctx, f.OrgA, tr.room.ID, locations.UpdateRequest{Name: &name})
+	if err != nil || room.Name != name {
+		t.Fatalf("rename room: %+v, %v", room, err)
+	}
+	var specialist string
+	if err = f.Admin.QueryRow(context.Background(), `SELECT name FROM room WHERE id = $1`, tr.room.ID).Scan(&specialist); err != nil || specialist != name {
+		t.Errorf("room table name %q, %v; want %q", specialist, err, name)
+	}
+
+	b2 := mustCreate(t, repo, ctx, f.OrgA, locations.CreateRequest{Kind: locations.KindBuilding, ParentID: tr.site.ID, Name: "u-b2"})
+	name = "u-room-moved"
+	room, err = repo.Update(ctx, f.OrgA, tr.room.ID, locations.UpdateRequest{Name: &name, ParentID: &b2.ID})
+	if err != nil || room.Name != name || room.ParentID != b2.ID || room.Path != b2.Path+"."+label(room.ID) {
+		t.Fatalf("rename and move room: %+v, %v", room, err)
+	}
+
+	var fe *locations.FieldError
+	for _, c := range []struct {
+		req   locations.CreateRequest
+		field string
+	}{
+		{locations.CreateRequest{Kind: locations.KindBuilding, ParentID: tr.warehouse.ID, Name: "x"}, "parent_id"},
+		{locations.CreateRequest{Kind: locations.KindZone, ParentID: f.ID(), Name: "x"}, "parent_id"},
+		{locations.CreateRequest{Kind: locations.KindSite, ClientID: f.ID(), Name: "x"}, "client_id"},
+	} {
+		if _, err = repo.Create(ctx, f.OrgA, c.req); !errors.As(err, &fe) || fe.Field != c.field {
+			t.Errorf("create %s below %s: %v, want field %s", c.req.Kind, c.req.ParentID, err, c.field)
+		}
+	}
+	if _, err = repo.Update(ctx, f.OrgA, tr.warehouse.ID, locations.UpdateRequest{ParentID: &tr.bin.ID}); !errors.As(err, &fe) || fe.Field != "parent_id" {
+		t.Errorf("move warehouse below its bin: %v, want parent_id field error", err)
+	}
+
+	if err = repo.Delete(ctx, f.OrgA, tr.shelf.ID); !errors.Is(err, locations.ErrHasChildren) {
+		t.Errorf("delete shelf with bin: %v, want ErrHasChildren", err)
+	}
+	if err = repo.Delete(ctx, f.OrgA, tr.rack.ID); err != nil {
+		t.Errorf("delete rack: %v", err)
+	}
+	var racks int
+	if err = f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM rack WHERE id = $1`, tr.rack.ID).Scan(&racks); err != nil || racks != 0 {
+		t.Errorf("rack row after delete: %d, %v", racks, err)
+	}
+	if err = repo.Delete(ctx, f.OrgA, "not-a-uuid"); !errors.Is(err, locations.ErrNotFound) {
+		t.Errorf("delete malformed id: %v, want ErrNotFound", err)
+	}
+	if list, listErr := repo.List(ctx, f.OrgA, locations.Filter{ParentID: tr.site.ID}); listErr != nil || len(list) != 3 {
+		t.Errorf("children of the site: %d, %v; want 3", len(list), listErr)
+	}
+	if list, listErr := repo.List(ctx, f.OrgA, locations.Filter{Kind: locations.KindBin, Search: "U-N"}); listErr != nil || len(list) != 1 {
+		t.Errorf("bins matching u-n: %d, %v; want 1", len(list), listErr)
 	}
 }

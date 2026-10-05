@@ -6,6 +6,7 @@
  */
 import { fetchAPI, type PaginatedResponse } from './client';
 import type { FieldDefinition } from '../lib/fieldmeta';
+import type { components } from './generated/schema';
 
 function qs(params: Record<string, string | number | boolean | undefined> = {}): string {
   const q = new URLSearchParams();
@@ -238,45 +239,65 @@ export const lifecycleApi = {
 
 // ─── Locations (§7) ──────────────────────────────────────────────────────────
 
-export interface LocationNode {
-  id: string;
-  organization_id: string;
-  client_id?: string;
-  parent_id?: string;
-  node_type: string;
-  name: string;
-  barcode?: string;
-  attributes: Record<string, unknown>;
-  sort_order: number;
-  children?: LocationNode[];
-  created_at: string;
-  updated_at: string;
-}
+// The canonical location tree (LOC-10); the types come from the OpenAPI
+// specification (npm run generate:api).
+export type LocationKind = components['schemas']['LocationKind'];
+export type Location = components['schemas']['Location'];
+export type LocationTreeNode = components['schemas']['LocationTreeNode'];
+export type LocationCreateRequest = components['schemas']['LocationCreateRequest'];
+export type LocationUpdateRequest = components['schemas']['LocationUpdateRequest'];
+
+/** LOCATION_KINDS lists the kinds of the tree in hierarchy order. */
+export const LOCATION_KINDS: LocationKind[] = [
+  'site',
+  'building',
+  'room',
+  'rack',
+  'warehouse',
+  'zone',
+  'shelf',
+  'bin',
+];
+
+/** LOCATION_CHILD_KINDS is the parent matrix: the kinds allowed below a kind. */
+export const LOCATION_CHILD_KINDS: Record<LocationKind, LocationKind[]> = {
+  site: ['building', 'warehouse'],
+  building: ['room'],
+  room: ['rack'],
+  rack: [],
+  warehouse: ['zone'],
+  zone: ['shelf'],
+  shelf: ['bin'],
+  bin: [],
+};
+
+/** clientApi lists the clients a site can belong to. */
+export const clientApi = {
+  list() {
+    return fetchAPI<components['schemas']['ClientListResponse']>('/clients?limit=200');
+  },
+};
 
 export const locationApi = {
   list(
-    params: { parent_id?: string; node_type?: string; root_only?: boolean; search?: string } = {},
+    params: { parent_id?: string; kind?: LocationKind; root_only?: boolean; search?: string } = {},
   ) {
-    return fetchAPI<{ data: LocationNode[] }>(`/locations${qs(params)}`);
+    return fetchAPI<components['schemas']['LocationListResponse']>(`/locations${qs(params)}`);
   },
-  tree(): Promise<{ data: LocationNode[] }> {
-    return fetchAPI('/locations/tree');
+  tree() {
+    return fetchAPI<components['schemas']['LocationTreeResponse']>('/locations/tree');
   },
-  get(id: string): Promise<LocationNode> {
-    return fetchAPI(`/locations/${id}`);
+  get(id: string) {
+    return fetchAPI<Location>(`/locations/${id}`);
   },
-  create(data: {
-    parent_id?: string;
-    node_type: string;
-    name: string;
-    barcode?: string;
-    client_id?: string;
-    attributes?: Record<string, unknown>;
-  }) {
-    return fetchAPI('/locations', { method: 'POST', body: JSON.stringify(data) });
+  create(data: LocationCreateRequest) {
+    return fetchAPI<Location>('/locations', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: Partial<LocationNode>) {
-    return fetchAPI(`/locations/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  update(id: string, data: LocationUpdateRequest) {
+    return fetchAPI<Location>(`/locations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/locations/${id}`, { method: 'DELETE' });

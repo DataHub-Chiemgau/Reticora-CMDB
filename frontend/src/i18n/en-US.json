@@ -830,15 +830,26 @@
     "readOnly": "read-only"
   },
   "locations": {
-    "createChild": "Create child in",
+    "createChild": "Create child in {{name}}",
     "name": "Name",
     "type": "Type",
-    "subtitle": "Unified hierarchy: Site → Building → Room → Rack and Warehouse → Zone → Shelf → Bin.",
+    "subtitle": "Unified hierarchy: Site → Building → Room → Rack and Site → Warehouse → Zone → Shelf → Bin.",
     "addChild": "child",
-    "createRoot": "Create root",
-    "empty": "No locations yet. Create a root (e.g. site or warehouse).",
-    "barcode": "Barcode/RFID (optional)",
-    "title": "Sites & Warehouses"
+    "createRoot": "Create site",
+    "empty": "No locations yet. Create a site first.",
+    "client": "Client",
+    "deleteFailed": "Cannot delete",
+    "title": "Sites & Warehouses",
+    "kinds": {
+      "site": "Site",
+      "building": "Building",
+      "room": "Room",
+      "rack": "Rack",
+      "warehouse": "Warehouse",
+      "zone": "Zone",
+      "shelf": "Shelf",
+      "bin": "Bin"
+    }
   },
   "savedviews": {
     "title": "Saved views",

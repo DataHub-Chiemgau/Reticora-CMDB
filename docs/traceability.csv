@@ -69,7 +69,7 @@ TEN-06;[B];B;backend/internal/discovery/discovery_scope_integration_test.go;WP-0
 TEN-06;[B];B;backend/internal/ipam/ipam_scope_integration_test.go;WP-013
 TEN-06;[B];B;backend/internal/rack/rack_scope_integration_test.go;WP-014
 TEN-06;[B];B;backend/internal/tenantapi/tenantapi_scope_integration_test.go;WP-014
-TEN-06;[B];B;backend/internal/locationnode/locationnode_scope_integration_test.go;WP-014
+TEN-06;[B];B;backend/internal/locations/pg_repository_integration_test.go;WP-014
 TEN-06;[B];B;backend/internal/location/location_scope_integration_test.go;WP-014
 TEN-06;[B];B;backend/internal/search/search_scope_integration_test.go;WP-015
 TEN-06;[B];B;backend/internal/savedview/savedview_scope_integration_test.go;WP-015
@@ -163,3 +163,5 @@ SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-049
 API-04;[B];B;backend/internal/middleware/middleware_test.go;WP-050
 AUT-10;[B];B;backend/internal/middleware/middleware_test.go;WP-050
 AGT-03;[P4];B;backend/internal/agent/transport_test.go;WP-051
+LOC-10;B/G1;B;backend/internal/locations/tree_test.go;WP-053
+LOC-07;B/G1;B;backend/internal/locations/tree_test.go;WP-053

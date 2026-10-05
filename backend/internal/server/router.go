@@ -38,7 +38,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locationnode"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
@@ -117,7 +117,7 @@ type Repositories struct {
 	CIType            citype.Repository
 	RelationshipType  relationshiptype.Repository
 	Lifecycle         lifecycle.Repository
-	LocationNode      locationnode.Repository
+	LocationTree      locations.Repository
 	Movement          movement.Repository
 	Reservation       reservation.Repository
 	Composition       composition.Repository
@@ -285,7 +285,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		citype.NewHandler(repos.CIType, opts.Dispatcher),
 		lifecycle.NewHandler(repos.Lifecycle,
 			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, nil), repos.LifecycleResolver),
-		locationnode.NewHandler(repos.LocationNode),
+		locations.NewHandler(repos.LocationTree),
 		movement.NewHandler(repos.Movement, opts.Dispatcher).WithAssets(assetCreator{repo: repos.Asset}),
 		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
 		composition.NewHandler(repos.Composition, opts.Dispatcher).
@@ -364,8 +364,8 @@ func validate(repos Repositories, opts Options) error {
 		return fmt.Errorf("server: relationship type repository is required")
 	case repos.Lifecycle == nil:
 		return fmt.Errorf("server: lifecycle repository is required")
-	case repos.LocationNode == nil:
-		return fmt.Errorf("server: location node repository is required")
+	case repos.LocationTree == nil:
+		return fmt.Errorf("server: location repository is required")
 	case repos.Movement == nil:
 		return fmt.Errorf("server: movement repository is required")
 	case repos.Reservation == nil:

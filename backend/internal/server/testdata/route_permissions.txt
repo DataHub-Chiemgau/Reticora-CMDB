@@ -22,7 +22,7 @@ DELETE /api/v1/inventory/items/{id} inventory:manage
 DELETE /api/v1/ip-addresses/{id} ipam:write
 DELETE /api/v1/keys/{id} key:write
 DELETE /api/v1/lifecycle-definitions/{id} lifecycle:manage
-DELETE /api/v1/locations/{id} inventory:manage
+DELETE /api/v1/locations/{id} site:write
 DELETE /api/v1/maintenance-windows/{id} maintenance:write
 DELETE /api/v1/monitoring/alerts/{id} monitoring:write
 DELETE /api/v1/network-interfaces/{id} ipam:write
@@ -142,9 +142,9 @@ GET /api/v1/keys/{id} key:read
 GET /api/v1/keys/{id}/assignments key:read
 GET /api/v1/lifecycle-definitions asset:read
 GET /api/v1/lifecycle-definitions/{id} asset:read
-GET /api/v1/locations asset:read
-GET /api/v1/locations/tree asset:read
-GET /api/v1/locations/{id} asset:read
+GET /api/v1/locations site:read
+GET /api/v1/locations/tree site:read
+GET /api/v1/locations/{id} site:read
 GET /api/v1/maintenance-windows maintenance:read
 GET /api/v1/maintenance-windows/{id} maintenance:read
 GET /api/v1/maintenance-windows/{id}/notifications maintenance:read
@@ -240,7 +240,7 @@ PATCH /api/v1/iga/connectors/{id} iga:write
 PATCH /api/v1/inventory/items/{id} inventory:manage
 PATCH /api/v1/ip-addresses/{id} ipam:write
 PATCH /api/v1/keys/{id} key:write
-PATCH /api/v1/locations/{id} inventory:manage
+PATCH /api/v1/locations/{id} site:write
 PATCH /api/v1/maintenance-windows/{id} maintenance:write
 PATCH /api/v1/monitoring/alerts/{id} monitoring:write
 PATCH /api/v1/network-interfaces/{id} ipam:write
@@ -340,7 +340,7 @@ POST /api/v1/keys key:write
 POST /api/v1/keys/{id}/issue key:write
 POST /api/v1/keys/{id}/return key:write
 POST /api/v1/lifecycle-definitions lifecycle:manage
-POST /api/v1/locations inventory:manage
+POST /api/v1/locations site:write
 POST /api/v1/maintenance-windows maintenance:write
 POST /api/v1/maintenance-windows/{id}/notify maintenance:write
 POST /api/v1/monitoring/alerts monitoring:write
