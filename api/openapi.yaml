@@ -8135,8 +8135,15 @@ components:
           $ref: '#/components/schemas/CIDiscoverySource'
 
     UpdateCIRequest:
+      description: >-
+        A manual change. attributes is an RFC 7396 merge patch (nested objects
+        merge, null removes a member). Every changed field gets a protected
+        override that discovery does not overwrite.
       type: object
       properties:
+        change_reason:
+          type: string
+          description: Reason stored with the overrides of this change.
         name:
           type: string
         status:

@@ -169,3 +169,5 @@ LOC-10;B/G1;B;backend/internal/ci/location_integration_test.go;WP-054
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/location_integration_test.go;WP-054
 LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-055
 MET-14;P2/G2;B;backend/internal/discovery/instance_field_test.go;WP-056
+CI-04;[B];D;backend/internal/ci/mergepatch_test.go;WP-057
+OVR-01;[B];D;backend/internal/ci/mergepatch_test.go;WP-057

@@ -128,13 +128,13 @@ func TestValidateAttributesReadOnly(t *testing.T) {
 	}
 	existing := map[string]any{"state": "disposed", "asset_tag": "A-1"}
 	patch := map[string]any{"asset_tag": "A-2"}
-	values := mergeAttributes(existing, patch)
+	values := MergePatch(existing, patch)
 	if got := fieldsOf(validateAttributes(defs, values, patch, existing)); len(got) != 1 || got[0] != "asset_tag" {
 		t.Fatalf("expected asset_tag read-only violation, got %v", got)
 	}
 	// Re-sending the identical value is not a change and must be accepted.
 	patch = map[string]any{"asset_tag": "A-1"}
-	if err := validateAttributes(defs, mergeAttributes(existing, patch), patch, existing); err != nil {
+	if err := validateAttributes(defs, MergePatch(existing, patch), patch, existing); err != nil {
 		t.Fatalf("unchanged read-only value must pass, got %v", err)
 	}
 }

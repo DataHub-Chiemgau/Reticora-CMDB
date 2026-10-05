@@ -189,6 +189,50 @@ func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName s
 	return out, err
 }
 
+// SetOverrideTx records a manual override of a field inside the caller's
+// transaction, so a manual write and its override commit together (OVR-01).
+// author is stored when it is a user id; value nil records the removal of
+// the field, which stays protected like any other override.
+func SetOverrideTx(ctx context.Context, tx pgx.Tx, orgID, ciID, fieldName string, value any, author, reason string, protected bool) error {
+	if reason == "" {
+		return fmt.Errorf("override reason is required")
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO ci_field_value (
+			organization_id, ci_id, field_name, override_value,
+			override_author, override_reason, override_at, protected
+		) VALUES ($1, $2, $3, $4, $5, $6, now(), $7)
+		ON CONFLICT (ci_id, field_name) DO UPDATE SET
+			override_value = EXCLUDED.override_value,
+			override_author = EXCLUDED.override_author,
+			override_reason = EXCLUDED.override_reason,
+			override_at = EXCLUDED.override_at,
+			protected = EXCLUDED.protected`,
+		orgID, ciID, fieldName, jsonValue(value), userID(author), reason, protected); err != nil {
+		return fmt.Errorf("set override %s: %w", fieldName, err)
+	}
+	return nil
+}
+
+// userID returns author when it is a UUID (an app_user id), else nil: the
+// override_author column holds user ids only.
+func userID(author string) any {
+	if len(author) != 36 {
+		return nil
+	}
+	for i, c := range author {
+		switch {
+		case i == 8 || i == 13 || i == 18 || i == 23:
+			if c != '-' {
+				return nil
+			}
+		case (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F'):
+			return nil
+		}
+	}
+	return author
+}
+
 // ClearOverride removes the manual override of a field.
 func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error) {
 	var out *FieldValue

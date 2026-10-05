@@ -194,6 +194,9 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	// A PATCH through the API is a manual change: its fields get protected
+	// overrides (OVR-01).
+	req.Manual = &ManualChange{Author: t.UserID}
 
 	item, err := h.svc.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {

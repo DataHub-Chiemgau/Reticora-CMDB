@@ -154,12 +154,7 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 		item.LocationID, item.SiteID, item.RoomID = *req.LocationID, "", ""
 	}
 	if req.Attributes != nil {
-		if item.Attributes == nil {
-			item.Attributes = make(map[string]any)
-		}
-		for k, v := range req.Attributes {
-			item.Attributes[k] = v
-		}
+		item.Attributes = MergePatch(item.Attributes, req.Attributes)
 	}
 	if req.DiscoverySource != nil {
 		item.DiscoverySource = *req.DiscoverySource

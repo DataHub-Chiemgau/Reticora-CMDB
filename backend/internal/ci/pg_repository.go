@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -282,7 +283,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	var item *Item
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		beforeQuery := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL", ciSelectColumns)
+		// FOR UPDATE: the merge patch is computed from this state.
+		beforeQuery := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
 		before, err := scanCI(tx.QueryRow(ctx, beforeQuery, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -323,8 +325,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		addStringField("discovery_source", req.DiscoverySource)
 
 		if req.Attributes != nil {
-			setClauses = append(setClauses, fmt.Sprintf("attributes = COALESCE(attributes, '{}'::jsonb) || $%d", argPos))
-			args = append(args, req.Attributes)
+			// RFC 7396: nested objects merge, null removes a member (CI-04).
+			setClauses = append(setClauses, fmt.Sprintf("attributes = $%d", argPos))
+			args = append(args, MergePatch(before.Attributes, req.Attributes))
 			argPos++
 		}
 
@@ -366,6 +369,11 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		changes := diffCI(before, item)
 		if len(changes) == 0 {
 			return nil
+		}
+		if req.Manual != nil {
+			if err := recordManualOverrides(ctx, tx, orgID, before, item, &req); err != nil {
+				return err
+			}
 		}
 		changeType := "update"
 		action := "ci.updated"
@@ -692,4 +700,32 @@ func locationError(err error) error {
 		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: "the location belongs to another client"}}}
 	}
 	return err
+}
+
+// derivedFields are set by the database, not by the writer of a change.
+var derivedFields = map[string]bool{"site_id": true, "room_id": true, "attributes": true}
+
+// recordManualOverrides gives every field a manual change touched a
+// protected override, so discovery never overwrites it (OVR-01, CH9): the
+// changed CI columns by name, the attributes per changed top-level member
+// (a removed member is recorded with a null value).
+func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before, after *Item, req *UpdateRequest) error {
+	reason := strings.TrimSpace(req.ChangeReason)
+	if reason == "" {
+		reason = DefaultChangeReason
+	}
+	for _, change := range diffCI(before, after) {
+		if derivedFields[change.Field] {
+			continue
+		}
+		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, change.Field, change.New, req.Manual.Author, reason, true); err != nil {
+			return err
+		}
+	}
+	for _, key := range changedKeys(before.Attributes, after.Attributes) {
+		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, key, after.Attributes[key], req.Manual.Author, reason, true); err != nil {
+			return err
+		}
+	}
+	return nil
 }

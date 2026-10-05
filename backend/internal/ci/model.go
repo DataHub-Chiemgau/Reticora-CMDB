@@ -83,7 +83,21 @@ type UpdateRequest struct {
 	Attributes      map[string]any `json:"attributes,omitempty"`
 	DiscoverySource *string        `json:"discovery_source,omitempty"`
 	LastSeenAt      *string        `json:"last_seen_at,omitempty"`
+	// ChangeReason is stored with the overrides a manual change creates.
+	ChangeReason string `json:"change_reason,omitempty"`
+	// Manual marks a change made by a person through the API (not by
+	// discovery or automation): every changed field gets a protected
+	// override in the same transaction (OVR-01). Set by the handler only.
+	Manual *ManualChange `json:"-"`
 }
+
+// ManualChange identifies the author of a manual CI change.
+type ManualChange struct {
+	Author string
+}
+
+// DefaultChangeReason is the override reason of a manual change without one.
+const DefaultChangeReason = "manual change"
 
 // FilterParams holds query filter parameters for listing CIs.
 type FilterParams struct {

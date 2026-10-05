@@ -36,7 +36,9 @@ func IsProtected(ctx context.Context, repo Repository, orgID, ciID, fieldName st
 		// No provenance row yet: nothing is protected.
 		return false, nil
 	}
-	return fv.Protected && fv.OverrideValue != nil, nil
+	// override_at marks an override even when its value is null: a manually
+	// removed field stays removed (OVR-01).
+	return fv.Protected && fv.OverrideAt != nil, nil
 }
 
 // MemoryRepository is an in-memory implementation (tests, --no-db).

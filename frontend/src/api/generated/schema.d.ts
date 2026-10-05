@@ -4980,7 +4980,10 @@ export interface components {
       };
       discovery_source?: components['schemas']['CIDiscoverySource'];
     };
+    /** @description A manual change. attributes is an RFC 7396 merge patch (nested objects merge, null removes a member). Every changed field gets a protected override that discovery does not overwrite. */
     UpdateCIRequest: {
+      /** @description Reason stored with the overrides of this change. */
+      change_reason?: string;
       name?: string;
       status?: components['schemas']['CIStatus'];
       client_id?: string;
