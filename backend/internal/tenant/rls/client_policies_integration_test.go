@@ -189,7 +189,14 @@ func TestClientPoliciesEnforceClientScope(t *testing.T) {
 				}
 				rejected(t, client1, "moving an own row to a foreign client", `UPDATE `+tbl.name+` SET client_id = $2 WHERE id = $1`, ids[cpClient1], cpClient2)
 				rejected(t, client1, "clearing the client of an own row (E-09)", `UPDATE `+tbl.name+` SET client_id = NULL WHERE id = $1`, ids[cpClient1])
-				rejected(t, client1, "updating a shared row without client (E-09)", `UPDATE `+tbl.name+` SET client_id = NULL WHERE id = $1`, ids[""])
+				// Shared rows are visible but not writable: since migration
+				// 000079 an UPDATE does not even select them.
+				if n := affected(t, client1, `UPDATE `+tbl.name+` SET client_id = NULL WHERE id = $1`, ids[""]); n != 0 {
+					t.Fatalf("update of a shared row without client (E-09) affected %d rows", n)
+				}
+				if n := affected(t, client1, `UPDATE `+tbl.name+` SET client_id = $2 WHERE id = $1`, ids[""], cpClient1); n != 0 {
+					t.Fatalf("claiming a shared row for the own client affected %d rows", n)
+				}
 				if n := affected(t, client1, `UPDATE `+tbl.name+` SET client_id = client_id WHERE id = $1`, ids[cpClient1]); n != 1 {
 					t.Fatalf("update of an own row affected %d rows, want 1", n)
 				}
@@ -197,6 +204,9 @@ func TestClientPoliciesEnforceClientScope(t *testing.T) {
 			t.Run("delete", func(t *testing.T) {
 				if n := affected(t, client1, `DELETE FROM `+tbl.name+` WHERE id = $1`, ids[cpClient2]); n != 0 {
 					t.Fatalf("delete of a foreign client row affected %d rows", n)
+				}
+				if n := affected(t, client1, `DELETE FROM `+tbl.name+` WHERE id = $1`, ids[""]); n != 0 {
+					t.Fatalf("delete of a shared row without client affected %d rows", n)
 				}
 			})
 		})

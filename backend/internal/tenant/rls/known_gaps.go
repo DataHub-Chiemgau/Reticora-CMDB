@@ -90,6 +90,10 @@ type Gap struct {
 // version: new tables have to meet all rules and must not be added here.
 const KnownGapsBaselineMigration = 57
 
+// The list is empty (WP-065): every rule holds for every tenant table, and
+// the behavioral matrix (matrix_integration_test.go) confirms the policies
+// with real statements of the application role per scope and command.
+//
 // KnownGaps lists every rule violation of the migrated schema at
 // KnownGapsBaselineMigration. The catalog test fails for violations missing
 // here and for entries that no longer occur, so the list only shrinks: the
