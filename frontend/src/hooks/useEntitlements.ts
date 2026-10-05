@@ -76,7 +76,7 @@ export const navFeatureFor: Record<string, string | undefined> = {
   workflows: 'workflow_forms',
   compliance: 'compliance',
   iga: 'iga',
-  assistant: 'ai_assistant',
+  assistant: 'ai',
   webhooks: 'webhooks',
   export: 'export_csv',
   monitoring: 'monitoring',

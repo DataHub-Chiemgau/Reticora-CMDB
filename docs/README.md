@@ -319,8 +319,13 @@ Plan matrix (ENT-06):
 |------|----------|
 | essential | cmdb_core, discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email, inventory |
 | standard | + documents, stocktake, ticketing |
-| pro | + monitoring, workflow_forms, ai_assistant |
-| enterprise | + iga, endpoint_agent, compliance |
+| pro | + monitoring, workflow_forms |
+| enterprise | + endpoint_agent, compliance |
+
+IGA (`iga`) and AI (`ai`) are add-ons (CH14): no plan includes them, only
+their own entitlement row unlocks them. The proposed matrix and quotas of
+ENT-06 (V) have no gate effect until confirmed (E-34): a quota only gates
+when it is stored in the limits of a row.
 
 
 **Permissions and SLA:** migration 0026 turns permissions into data instead of
@@ -579,7 +584,7 @@ restarts neither re-notify nor lose ongoing durations. Fired alerts are
 logged as structured warnings via the default notifier.
 
 **AI/RAG governance:** `/api/v1/ai/conversations` and `/api/v1/ai/ask` are
-gated by the Pro/Enterprise `ai_assistant` entitlement. If no
+gated by the `ai` add-on entitlement (CH14). If no
 OpenAI-compatible provider is configured, the handler returns HTTP 503 with a
 problem document. Retrieval first asks the search backend for tenant-owned
 candidates, applies the same permission checks, then ranks matching `ai_chunk`

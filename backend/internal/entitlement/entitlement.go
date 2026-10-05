@@ -60,12 +60,20 @@ const (
 	FeatureStocktake     = "stocktake"
 	FeatureTicketing     = "ticketing"
 	FeatureMonitoring    = "monitoring"
-	FeatureIGA           = "iga"
 	FeatureEndpointAgent = "endpoint_agent"
 	FeatureWorkflowForms = "workflow_forms"
 	FeatureCompliance    = "compliance"
-	FeatureAIAssistant   = "ai_assistant"
 )
+
+// Add-ons (CH14, ENT-06): IGA and AI are no part of any plan; they are
+// unlocked only by their own entitlement row.
+const (
+	FeatureIGA = "iga"
+	FeatureAI  = "ai"
+)
+
+// Addons are the add-on feature keys of CH14.
+var Addons = []string{FeatureIGA, FeatureAI}
 
 // Quotas of ENT-02, stored in limits.
 const (
@@ -88,20 +96,14 @@ var QuotaFeature = map[string]string{
 	LimitMaxAPIKeys:    FeatureAPIAccess,
 }
 
-// planQuotas are the default quotas per plan (ENT-06, V); a missing quota is
-// unlimited.
-var planQuotas = map[Plan]map[string]int64{
-	PlanEssential:  {LimitMaxCIs: 500, LimitMaxCollectors: 2, LimitMaxUsers: 5},
-	PlanStandard:   {LimitMaxCIs: 2500, LimitMaxCollectors: 5, LimitMaxUsers: 25},
-	PlanPro:        {LimitMaxCIs: 10000, LimitMaxCollectors: 20, LimitMaxUsers: 100},
-	PlanEnterprise: {LimitMaxCIs: 50000},
-}
-
 // Sources of an entitlement row (ENT-01).
 var Sources = []string{"manual", "selfsignup", "billing", "reseller"}
 
-// planFeatures maps a plan to the features it includes. Every plan includes
-// the phase-1 features; higher plans add modules.
+// planFeatures maps a plan to the features it includes (the current plans,
+// E-34): every plan includes the phase-1 features, higher plans add modules.
+// No plan includes an add-on (CH14). The proposed matrix and quotas of
+// ENT-06 (V) have no gate effect until confirmed (E-34): quotas only gate
+// when stored in the limits of a row.
 var planFeatures = map[Plan][]string{
 	PlanEssential: append(slices.Clone(Phase1Features),
 		FeatureInventory),
@@ -109,25 +111,16 @@ var planFeatures = map[Plan][]string{
 		FeatureInventory, FeatureDocuments, FeatureStocktake, FeatureTicketing),
 	PlanPro: append(slices.Clone(Phase1Features),
 		FeatureInventory, FeatureDocuments, FeatureStocktake, FeatureTicketing,
-		FeatureMonitoring, FeatureWorkflowForms, FeatureAIAssistant),
+		FeatureMonitoring, FeatureWorkflowForms),
 	PlanEnterprise: append(slices.Clone(Phase1Features),
 		FeatureInventory, FeatureDocuments, FeatureStocktake, FeatureTicketing,
-		FeatureMonitoring, FeatureIGA, FeatureEndpointAgent, FeatureWorkflowForms,
-		FeatureCompliance, FeatureAIAssistant),
+		FeatureMonitoring, FeatureEndpointAgent, FeatureWorkflowForms,
+		FeatureCompliance),
 }
 
 // PlanFeatures returns the feature keys included in the given plan.
 func PlanFeatures(plan Plan) []string {
 	return slices.Clone(planFeatures[normalizePlan(plan)])
-}
-
-// PlanQuotas returns the default quotas of the plan.
-func PlanQuotas(plan Plan) map[string]int64 {
-	out := map[string]int64{}
-	for k, v := range planQuotas[normalizePlan(plan)] {
-		out[k] = v
-	}
-	return out
 }
 
 func normalizePlan(plan Plan) Plan {
@@ -368,7 +361,7 @@ func (s *Service) Check(ctx context.Context, orgID, featureKey string) (Entitlem
 	return ent, status == StatusActive, nil
 }
 
-// Provision stores the features and default quotas of the plan for an
+// Provision stores the features of the plan (no add-ons, no quotas) for an
 // organization that has no entitlement rows yet. Since a missing row means
 // not entitled, every organization is provisioned once (at startup and on
 // creation). It reports whether rows were written.
@@ -384,11 +377,6 @@ func (s *Service) Provision(ctx context.Context, orgID string, plan Plan) (bool,
 	for _, feature := range PlanFeatures(plan) {
 		ent := Entitlement{OrganizationID: orgID, FeatureKey: feature, Plan: plan, Enabled: true,
 			Limits: map[string]int64{}, Source: "manual"}
-		for quota, owner := range QuotaFeature {
-			if v, ok := planQuotas[plan][quota]; ok && owner == feature {
-				ent.Limits[quota] = v
-			}
-		}
 		if _, err = s.Grant(ctx, ent); err != nil {
 			return false, fmt.Errorf("provision %s for %s: %w", feature, orgID, err)
 		}
@@ -426,7 +414,7 @@ func (s *Service) IsEnabled(ctx context.Context, orgID, featureKey string) bool 
 }
 
 // Quota returns the quota of the organization: the value stored in the
-// limits of the quota's feature, else the plan default; nil is unlimited.
+// limits of the quota's feature; nil is unlimited (no plan default, E-34).
 func (s *Service) Quota(ctx context.Context, orgID, quota string) (*int64, error) {
 	feature, ok := QuotaFeature[quota]
 	if !ok {
@@ -437,9 +425,6 @@ func (s *Service) Quota(ctx context.Context, orgID, quota string) (*int64, error
 		return nil, err
 	}
 	if v, ok := ent.Limits[quota]; ok {
-		return &v, nil
-	}
-	if v, ok := planQuotas[normalizePlan(ent.Plan)][quota]; ok {
 		return &v, nil
 	}
 	return nil, nil

@@ -39,8 +39,8 @@ func TestEntitlementModel(t *testing.T) {
 	if q, _ := svc.Quota(ctx, f.OrgA, entitlement.LimitMaxCollectors); q == nil || *q != 7 {
 		t.Errorf("quota max_collectors %v, want 7", q)
 	}
-	if q, _ := svc.Quota(ctx, f.OrgA, entitlement.LimitMaxCIs); q == nil || *q != 500 {
-		t.Errorf("quota max_cis %v, want the essential default 500", q)
+	if q, _ := svc.Quota(ctx, f.OrgA, entitlement.LimitMaxCIs); q != nil {
+		t.Errorf("quota max_cis %v, want unlimited without a stored limit (E-34)", *q)
 	}
 
 	for name, stmt := range map[string]string{

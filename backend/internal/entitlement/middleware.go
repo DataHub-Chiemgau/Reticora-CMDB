@@ -53,7 +53,7 @@ var gatedRoutes = []struct {
 	{"/api/v1/compliance", FeatureCompliance},
 	{"/api/v1/iga", FeatureIGA},
 	{"/scim/v2", FeatureIGA},
-	{"/api/v1/ai", FeatureAIAssistant},
+	{"/api/v1/ai", FeatureAI},
 }
 
 // gatedSuffixes gate sub-resources of core resources (/api/v1/cis/{id}/...).

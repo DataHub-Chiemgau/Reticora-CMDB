@@ -14,7 +14,7 @@ describe('navFeatureFor', () => {
     expect(navFeatureFor.monitoring).toBe('monitoring');
     expect(navFeatureFor.workflows).toBe('workflow_forms');
     expect(navFeatureFor.forms).toBe('workflow_forms');
-    expect(navFeatureFor.assistant).toBe('ai_assistant');
+    expect(navFeatureFor.assistant).toBe('ai');
     expect(navFeatureFor.export).toBe('export_csv');
   });
 

@@ -209,3 +209,10 @@ ENT-03;[B];B;backend/internal/entitlement/unlicensed_integration_test.go;WP-073
 ENT-08;[B];B;backend/internal/entitlement/unlicensed_integration_test.go;WP-073
 ENT-04;[B];B;backend/internal/operator/entitlements_test.go;WP-074
 API-05;[B];B;backend/internal/operator/entitlements_test.go;WP-074
+ENT-06;(V), [B–P4], [A];B;backend/internal/entitlement/addon_test.go;WP-075
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/entitlement/addon_test.go;WP-075
+IGA-01;[A];B;backend/internal/entitlement/addon_test.go;WP-075
+IGA-02;[A];B;backend/internal/entitlement/addon_test.go;WP-075
+IGA-03;[A];B;backend/internal/entitlement/addon_test.go;WP-075
+IGA-04;[A];B;backend/internal/entitlement/addon_test.go;WP-075
+AI-02;[A];B;backend/internal/entitlement/addon_test.go;WP-075

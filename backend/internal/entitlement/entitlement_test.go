@@ -192,8 +192,7 @@ func asLimitError(err error, target **LimitExceededError) bool {
 }
 
 // TestPhase1FeaturesAndQuotas covers WP-071 (ENT-01, ENT-02): every plan
-// includes the eight phase-1 features; the quotas default to the plan values
-// of ENT-06 and stored limits replace them; cmdb_core cannot be disabled or
+// includes the eight phase-1 features; stored limits gate the quotas; cmdb_core cannot be disabled or
 // limited in time and stays active; sources are restricted to ENT-01.
 func TestPhase1FeaturesAndQuotas(t *testing.T) {
 	ctx := context.Background()
@@ -210,15 +209,16 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 		t.Errorf("quotas %v", Quotas)
 	}
 
+	// The proposed quotas of ENT-06 (V) have no gate effect (E-34, WP-075):
+	// without a stored limit a quota is unlimited.
 	svc := testService(t, PlanStandard)
-	for quota, want := range map[string]*int64{LimitMaxCIs: ptr(2500), LimitMaxCollectors: ptr(5), LimitMaxUsers: ptr(25), LimitMaxAPIKeys: nil} {
-		got, err := svc.Quota(ctx, "org-1", quota)
-		if err != nil || (got == nil) != (want == nil) || (got != nil && *got != *want) {
-			t.Errorf("default quota %s = %v, %v; want %v", quota, deref(got), err, deref(want))
+	for _, quota := range Quotas {
+		if got, err := svc.Quota(ctx, "org-1", quota); err != nil || got != nil {
+			t.Errorf("default quota %s = %v, %v; want unlimited", quota, deref(got), err)
 		}
 	}
-	if err := svc.AllowCreate(ctx, "org-1", LimitMaxCollectors, 5); err == nil {
-		t.Error("sixth collector of the standard plan allowed")
+	if err := svc.AllowCreate(ctx, "org-1", LimitMaxCollectors, 1000); err != nil {
+		t.Errorf("collector without a stored limit refused: %v", err)
 	}
 	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureDiscovery, Plan: PlanStandard, Enabled: true,
 		Limits: map[string]int64{LimitMaxCollectors: 8}, Source: "billing"}); err != nil {
@@ -247,8 +247,6 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 		t.Error("cmdb_core not active")
 	}
 }
-
-func ptr(v int64) *int64 { return &v }
 
 func deref(v *int64) any {
 	if v == nil {
