@@ -183,3 +183,6 @@ OVR-01;[B];D;backend/internal/ci/effective_view_integration_test.go;WP-060
 CI-10;[B];D;backend/internal/ci/effective_view_integration_test.go;WP-060
 API-07;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-061
 API-03;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-061
+NFR-04;[B], Teilumfang [P5];D;backend/internal/maintenance/status_test.go;WP-063
+MGT-04;[P3];D;backend/internal/maintenance/status_test.go;WP-063
+NTF-05;[B], Zusätze [P2], [P3];D;backend/internal/maintenance/status_test.go;WP-063

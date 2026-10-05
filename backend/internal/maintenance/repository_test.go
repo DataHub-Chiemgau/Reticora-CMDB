@@ -27,8 +27,8 @@ func TestMaintenanceWindowNotifyDerivesClients(t *testing.T) {
 	clients := map[string]bool{}
 	for _, n := range notifs {
 		clients[n.ClientID] = true
-		if n.Status != "sent" {
-			t.Errorf("expected sent, got %s", n.Status)
+		if n.Status != NotificationPending || n.SentAt != nil {
+			t.Errorf("expected pending without sent_at, got %s %v", n.Status, n.SentAt)
 		}
 	}
 	if !clients["client-a"] || !clients["client-b"] {

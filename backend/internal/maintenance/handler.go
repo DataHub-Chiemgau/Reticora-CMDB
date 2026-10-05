@@ -162,7 +162,17 @@ func (h *Handler) Notify(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "maintenance window not found")
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"notified": len(notifications), "notifications": notifications})
+	// notified counts deliveries; queued counts notifications that wait for
+	// the notification chain (pending).
+	sent := 0
+	for i := range notifications {
+		if notifications[i].Status == NotificationSent {
+			sent++
+		}
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]any{
+		"notified": sent, "queued": len(notifications) - sent, "notifications": notifications,
+	})
 }
 
 // ListNotifications handles GET /api/v1/maintenance-windows/{id}/notifications.

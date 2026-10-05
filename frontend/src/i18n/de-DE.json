@@ -695,7 +695,9 @@
     "notified": "{{count}} Kunden benachrichtigt",
     "affectedCIs": "betroffene CIs",
     "startsAt": "Beginn",
-    "endsAt": "Ende"
+    "endsAt": "Ende",
+    "queued": "{{count}} Benachrichtigungen vorgemerkt – Versand ausstehend",
+    "noClients": "Keine betroffenen Kunden"
   },
   "disposal": {
     "summary": "Revisionssichere Entsorgungsdokumentation (append-only, BSI/ISO).",

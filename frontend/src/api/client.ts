@@ -1987,7 +1987,15 @@ export const maintenanceApi = {
   update(id: string, data: { status?: string }): Promise<MaintenanceWindow> {
     return fetchAPI(`/maintenance-windows/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
-  notify(id: string): Promise<{ notified: number }> {
+  /**
+   * notify queues one notification per affected client. `notified` counts
+   * delivered notifications, `queued` those still pending (WP-063).
+   */
+  notify(id: string): Promise<{
+    notified: number;
+    queued: number;
+    notifications: { client_id?: string; status: string; sent_at?: string }[];
+  }> {
     return fetchAPI(`/maintenance-windows/${id}/notify`, { method: 'POST', body: '{}' });
   },
   delete(id: string): Promise<void> {

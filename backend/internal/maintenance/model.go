@@ -21,6 +21,15 @@ type Window struct {
 }
 
 // Notification is a per-client customer notification for a window.
+// Notification statuses. A notification is sent only once a channel has
+// delivered it; until the notification chain exists (Epic B) it stays
+// pending (MGT-04, NTF-05, NFR-04).
+const (
+	NotificationPending = "pending"
+	NotificationSent    = "sent"
+	NotificationFailed  = "failed"
+)
+
 type Notification struct {
 	ID             string     `json:"id"`
 	OrganizationID string     `json:"organization_id"`

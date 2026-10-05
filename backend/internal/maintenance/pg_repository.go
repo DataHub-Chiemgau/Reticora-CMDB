@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -238,14 +237,15 @@ func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		now := time.Now().UTC()
+		// Queued, not sent: no channel delivers yet, so neither status nor
+		// sent_at may claim a delivery.
 		for _, clientID := range clientIDs {
-			n := Notification{OrganizationID: orgID, WindowID: windowID, ClientID: clientID, Channel: "webhook", Status: "sent", SentAt: &now, CreatedAt: now}
+			n := Notification{OrganizationID: orgID, WindowID: windowID, ClientID: clientID, Channel: "webhook", Status: NotificationPending}
 			if err := tx.QueryRow(ctx, `
-				INSERT INTO maintenance_notification (organization_id, maintenance_window_id, client_id, channel, status, sent_at)
-				VALUES ($1, $2, $3::uuid, 'webhook', 'sent', now())
-				RETURNING id::text
-			`, orgID, windowID, clientID).Scan(&n.ID); err != nil {
+				INSERT INTO maintenance_notification (organization_id, maintenance_window_id, client_id, channel, status)
+				VALUES ($1, $2, $3::uuid, 'webhook', $4)
+				RETURNING id::text, created_at
+			`, orgID, windowID, clientID, NotificationPending).Scan(&n.ID, &n.CreatedAt); err != nil {
 				return err
 			}
 			out = append(out, n)
