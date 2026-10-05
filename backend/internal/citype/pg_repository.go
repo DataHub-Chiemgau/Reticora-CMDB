@@ -3,13 +3,16 @@ package citype
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -642,7 +645,14 @@ func (r *PGRepository) ListInstanceFields(ctx context.Context, orgID, ciID strin
 	return out, err
 }
 
-// UpsertInstanceField creates or updates an instance field definition.
+// InstanceFieldNames lists the names of the instance attributes of a CI.
+func (r *PGRepository) InstanceFieldNames(ctx context.Context, orgID, ciID string) ([]string, error) {
+	fields, err := r.ListInstanceFields(ctx, orgID, ciID)
+	return fieldNames(fields), err
+}
+
+// UpsertInstanceField creates or updates an instance field definition and
+// records the change in the audit log (MET-14).
 func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID string, req UpsertInstanceFieldRequest) (*InstanceField, error) {
 	if err := fieldmeta.ValidateDefinition(instanceFieldFromUpsert(req)); err != nil {
 		return nil, err
@@ -665,6 +675,10 @@ func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID stri
 	}
 	var out *InstanceField
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		before, err := getInstanceField(ctx, tx, ciID, req.Name)
+		if err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, fmt.Sprintf(`
 			INSERT INTO ci_instance_field_definition (
 				organization_id, ci_id, name, label, description, data_type,
@@ -694,15 +708,23 @@ func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID stri
 		if err != nil {
 			return fmt.Errorf("upsert instance field: %w", err)
 		}
-		defer rows.Close()
 		if rows.Next() {
-			f, err := scanInstanceField(rows)
-			if err != nil {
-				return err
+			f, scanErr := scanInstanceField(rows)
+			if scanErr != nil {
+				rows.Close()
+				return scanErr
 			}
 			out = f
 		}
-		return rows.Err()
+		rows.Close()
+		if err = rows.Err(); err != nil || out == nil {
+			return err
+		}
+		action, changes := "ci_instance_field.created", map[string]any{"after": out}
+		if before != nil {
+			action, changes = "ci_instance_field.updated", map[string]any{"before": before, "after": out}
+		}
+		return recordInstanceFieldAudit(ctx, tx, action, out, changes)
 	})
 	if out == nil && err == nil {
 		return nil, fmt.Errorf("not found")
@@ -713,16 +735,57 @@ func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID stri
 // DeleteInstanceField removes an instance field definition by name.
 func (r *PGRepository) DeleteInstanceField(ctx context.Context, orgID, ciID, name string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmd, err := tx.Exec(ctx,
-			"DELETE FROM ci_instance_field_definition WHERE ci_id = $1 AND name = $2 AND "+visibleCI, ciID, name)
+		before, err := getInstanceField(ctx, tx, ciID, name)
 		if err != nil {
-			return fmt.Errorf("delete instance field: %w", err)
+			return err
 		}
-		if cmd.RowsAffected() == 0 {
+		if before == nil {
 			return fmt.Errorf("not found")
 		}
-		return nil
+		if _, err = tx.Exec(ctx,
+			"DELETE FROM ci_instance_field_definition WHERE ci_id = $1 AND name = $2 AND "+visibleCI, ciID, name); err != nil {
+			return fmt.Errorf("delete instance field: %w", err)
+		}
+		return recordInstanceFieldAudit(ctx, tx, "ci_instance_field.deleted", before, map[string]any{"before": before})
 	})
+}
+
+// getInstanceField returns the visible instance field ciID/name or nil.
+func getInstanceField(ctx context.Context, tx pgx.Tx, ciID, name string) (*InstanceField, error) {
+	f, err := scanInstanceField(tx.QueryRow(ctx, fmt.Sprintf(
+		"SELECT %s FROM ci_instance_field_definition WHERE ci_id::text = $1 AND name = $2 AND "+visibleCI,
+		instanceFieldSelectColumns), ciID, name))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get instance field: %w", err)
+	}
+	return f, nil
+}
+
+// recordInstanceFieldAudit writes the audit entry of an instance field
+// definition change in the same transaction (MET-14). The resource is the
+// CI, so the entry appears with the CI's other changes.
+func recordInstanceFieldAudit(ctx context.Context, tx pgx.Tx, action string, f *InstanceField, changes map[string]any) error {
+	actor := strings.TrimSpace(tenant.FromContext(ctx).UserID)
+	actorType := "system"
+	if actor != "" {
+		actorType = "user"
+	}
+	changes["field"] = f.Name
+	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+		OrganizationID: f.OrganizationID,
+		ActorID:        actor,
+		ActorType:      actorType,
+		Action:         action,
+		ResourceType:   "ci",
+		ResourceID:     f.CIID,
+		Changes:        changes,
+	}); err != nil {
+		return fmt.Errorf("record audit: %w", err)
+	}
+	return nil
 }
 
 type instanceFieldScanner interface {

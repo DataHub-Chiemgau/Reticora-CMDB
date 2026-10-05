@@ -1,7 +1,9 @@
 package discovery
 
 import (
+	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -307,4 +309,26 @@ func macAddressOverlap(existing, incoming []string) bool {
 		}
 	}
 	return false
+}
+
+// InstanceFieldSource lists the names of the instance attributes defined for
+// a single CI (MET-14). Satisfied by the CI type repository.
+type InstanceFieldSource interface {
+	InstanceFieldNames(ctx context.Context, orgID, ciID string) ([]string, error)
+}
+
+// WithoutInstanceFields removes from attributes every attribute defined as an
+// instance attribute of the CI and returns the removed names, sorted.
+// Instance attributes are maintained by hand for this one CI; discovery and
+// ingest never write them (MET-14).
+func WithoutInstanceFields(attributes map[string]any, instance []string) []string {
+	var removed []string
+	for _, name := range instance {
+		if _, ok := attributes[name]; ok {
+			delete(attributes, name)
+			removed = append(removed, name)
+		}
+	}
+	sort.Strings(removed)
+	return removed
 }
