@@ -64,39 +64,16 @@ var DefaultPriorities = []string{
 	"wmi", "ssh", "snmp", "sweep", "manual", "import",
 }
 
-// ResolveEffective computes the effective value of a field under a policy: a
-// protected manual override wins; an unprotected override wins over discovery
-// only when the policy ranks manual_override above the discovered source.
-func ResolveEffective(fv *FieldValue, priorities []string) any {
-	if len(priorities) == 0 {
-		priorities = DefaultPriorities
-	}
-	rank := map[string]int{}
-	for i, source := range priorities {
-		rank[source] = i
-	}
-	rankOf := func(source string) int {
-		if r, ok := rank[source]; ok {
-			return r
-		}
-		return len(priorities) // unknown sources rank lowest
-	}
-	hasOverride := fv.OverrideValue != nil
-	hasDiscovered := fv.DiscoveredValue != nil
-	switch {
-	case hasOverride && fv.Protected:
+// ResolveEffective computes the effective value of a field: a manual
+// override, protected or not, before the observed value. Manual ranks 100
+// in REC-03 and stays 100 under a per-attribute policy (REC-04), so the
+// policy cannot rank a source above it; the central write decision and the
+// CI view use the same rule (OVR-01, CI-10).
+func ResolveEffective(fv *FieldValue, _ []string) any {
+	if fv.OverrideAt != nil || fv.OverrideValue != nil {
 		return fv.OverrideValue
-	case hasOverride && !hasDiscovered:
-		return fv.OverrideValue
-	case hasOverride && hasDiscovered:
-		if rankOf("manual_override") <= rankOf(fv.DiscoveredSource) {
-			return fv.OverrideValue
-		}
-		return fv.DiscoveredValue
-	case hasDiscovered:
-		return fv.DiscoveredValue
 	}
-	return nil
+	return fv.DiscoveredValue
 }
 
 // IsDiverged reports whether discovered and effective values differ.

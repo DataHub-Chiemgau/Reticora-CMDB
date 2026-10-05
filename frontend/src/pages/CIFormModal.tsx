@@ -166,7 +166,11 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
     try {
       const saved =
         isEditMode && ci
-          ? await updateMutation.mutateAsync({ id: ci.id, data: updatePayload })
+          ? await updateMutation.mutateAsync({
+              id: ci.id,
+              data: updatePayload,
+              version: ci.version,
+            })
           : await createMutation.mutateAsync(createPayload);
       onSuccess?.(saved);
       onOpenChange(false);

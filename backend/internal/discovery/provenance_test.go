@@ -11,6 +11,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -31,10 +32,16 @@ func (s *stubProvenance) RecordDiscovered(_ context.Context, orgID, ciID, fieldN
 	return &FieldProvenance{}, nil
 }
 
-func (s *stubProvenance) IsProtected(_ context.Context, orgID, ciID, fieldName string) (bool, error) {
+// Decide treats configured fields as protected overrides and otherwise
+// applies the rank table.
+func (s *stubProvenance) Decide(ctx context.Context, w *override.Write) override.Decision {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.protected[ciID+"/"+fieldName], nil
+	protected := s.protected[w.CIID+"/"+w.Field]
+	s.mu.Unlock()
+	if protected {
+		return override.Decision{Conflict: true, Reason: override.ReasonOverrideConflict}
+	}
+	return override.DecideAutomatedWrite(ctx, nil, w)
 }
 
 func ingest(t *testing.T, h *Handler, payload string) BulkIngestResponse {

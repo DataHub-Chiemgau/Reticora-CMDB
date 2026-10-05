@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -48,7 +49,8 @@ const ciSelectColumns = `
 	is_manual,
 	created_at,
 	updated_at,
-	deleted_at
+	deleted_at,
+	version
 `
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
@@ -163,8 +165,12 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("iterate cis: %w", err)
 		}
-
-		return nil
+		rows.Close()
+		ptrs := make([]*Item, len(items))
+		for i := range items {
+			ptrs[i] = &items[i]
+		}
+		return overlayOverrides(ctx, tx, ptrs)
 	})
 
 	return items, total, err
@@ -184,7 +190,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, er
 			}
 			return fmt.Errorf("get ci by id: %w", err)
 		}
-		return nil
+		return overlayOverrides(ctx, tx, []*Item{item})
 	})
 	if err != nil {
 		return nil, err
@@ -232,7 +238,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				$16, $17, $18, $19, $20,
 				$21, $22, $23
 			)
-			RETURNING id::text, COALESCE(site_id::text, ''), COALESCE(room_id::text, ''), created_at, updated_at
+			RETURNING id::text, COALESCE(site_id::text, ''), COALESCE(room_id::text, ''), version, created_at, updated_at
 		`
 
 		var createdAt time.Time
@@ -261,13 +267,13 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 			item.FirstSeenAt,
 			item.LastSeenAt,
 			item.IsManual,
-		).Scan(&item.ID, &item.SiteID, &item.RoomID, &createdAt, &updatedAt); err != nil {
+		).Scan(&item.ID, &item.SiteID, &item.RoomID, &item.Version, &createdAt, &updatedAt); err != nil {
 			return locationError(fmt.Errorf("create ci: %w", err))
 		}
 
 		item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
-		if err := r.recordCIChange(ctx, tx, item.OrganizationID, item.ID, "create", "", nil, item); err != nil {
+		if err := r.recordCIChange(ctx, tx, item.OrganizationID, item.ID, item.Version, "create", "", nil, item); err != nil {
 			return err
 		}
 		if err := r.recordAudit(ctx, tx, "ci.created", item, map[string]interface{}{"after": item}); err != nil {
@@ -282,13 +288,19 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	var item *Item
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		beforeQuery := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL", ciSelectColumns)
+		// FOR UPDATE: the merge patch is computed from this state.
+		beforeQuery := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
 		before, err := scanCI(tx.QueryRow(ctx, beforeQuery, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
 				return fmt.Errorf("not found")
 			}
 			return fmt.Errorf("get ci before update: %w", err)
+		}
+		if req.Manual != nil {
+			if preErr := checkPrecondition(ctx, tx, orgID, before, &req); preErr != nil {
+				return preErr
+			}
 		}
 
 		setClauses := make([]string, 0, 18)
@@ -323,8 +335,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		addStringField("discovery_source", req.DiscoverySource)
 
 		if req.Attributes != nil {
-			setClauses = append(setClauses, fmt.Sprintf("attributes = COALESCE(attributes, '{}'::jsonb) || $%d", argPos))
-			args = append(args, req.Attributes)
+			// RFC 7396: nested objects merge, null removes a member (CI-04).
+			setClauses = append(setClauses, fmt.Sprintf("attributes = $%d", argPos))
+			args = append(args, MergePatch(before.Attributes, req.Attributes))
 			argPos++
 		}
 
@@ -344,6 +357,10 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		}
 
 		setClauses = append(setClauses, "updated_at = NOW()")
+		if req.Manual != nil || req.Authoritative {
+			// Rank >= 92 writes raise the version (API-07).
+			setClauses = append(setClauses, "version = version + 1")
+		}
 		// The tenant predicate is redundant with row-level security but is kept
 		// as defense in depth: a missing or wrong app.org_id must never allow a
 		// cross-tenant write.
@@ -367,6 +384,11 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if len(changes) == 0 {
 			return nil
 		}
+		if req.Manual != nil {
+			if err := recordManualOverrides(ctx, tx, orgID, before, item, &req); err != nil {
+				return err
+			}
+		}
 		changeType := "update"
 		action := "ci.updated"
 		if len(changes) == 1 && changes[0].Field == "status" {
@@ -378,7 +400,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			if change.Field == "status" {
 				fieldChangeType = "status_change"
 			}
-			if err := r.recordCIChange(ctx, tx, orgID, id, fieldChangeType, change.Field, change.Old, change.New); err != nil {
+			if err := r.recordCIChange(ctx, tx, orgID, id, item.Version, fieldChangeType, change.Field, change.Old, change.New); err != nil {
 				return err
 			}
 		}
@@ -410,7 +432,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		if cmdTag.RowsAffected() == 0 {
 			return fmt.Errorf("not found")
 		}
-		if err := r.recordCIChange(ctx, tx, orgID, id, "delete", "", before, nil); err != nil {
+		if err := r.recordCIChange(ctx, tx, orgID, id, before.Version, "delete", "", before, nil); err != nil {
 			return err
 		}
 		if err := r.recordAudit(ctx, tx, "ci.deleted", before, map[string]interface{}{"before": before}); err != nil {
@@ -531,6 +553,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		&createdAt,
 		&updatedAt,
 		&deletedAt,
+		&item.Version,
 	); err != nil {
 		return nil, err
 	}
@@ -585,7 +608,7 @@ func (r *PGRepository) recordAudit(ctx context.Context, tx pgx.Tx, action string
 	return nil
 }
 
-func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciID, changeType, fieldName string, oldValue, newValue any) error {
+func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciID string, version int64, changeType, fieldName string, oldValue, newValue any) error {
 	oldJSON, err := marshalJSONValue(oldValue)
 	if err != nil {
 		return fmt.Errorf("marshal old ci change value: %w", err)
@@ -603,9 +626,10 @@ func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciI
 			change_type,
 			field_name,
 			old_value,
-			new_value
-		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
-	`, orgID, ciID, actorID, changeType, nilIfEmpty(fieldName), oldJSON, newJSON)
+			new_value,
+			ci_version
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)
+	`, orgID, ciID, actorID, changeType, nilIfEmpty(fieldName), oldJSON, newJSON, version)
 	if err != nil {
 		return fmt.Errorf("record ci change: %w", err)
 	}
@@ -692,4 +716,171 @@ func locationError(err error) error {
 		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: "the location belongs to another client"}}}
 	}
 	return err
+}
+
+// derivedFields are set by the database, not by the writer of a change.
+var derivedFields = map[string]bool{"site_id": true, "room_id": true, "attributes": true}
+
+// recordManualOverrides gives every field a manual change touched a
+// protected override, so discovery never overwrites it (OVR-01, CH9): the
+// changed CI columns by name, the attributes per changed top-level member
+// (a removed member is recorded with a null value).
+func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before, after *Item, req *UpdateRequest) error {
+	reason := strings.TrimSpace(req.ChangeReason)
+	if reason == "" {
+		reason = DefaultChangeReason
+	}
+	for _, change := range diffCI(before, after) {
+		if derivedFields[change.Field] {
+			continue
+		}
+		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, change.Field, change.New, req.Manual.Author, reason, true); err != nil {
+			return err
+		}
+	}
+	for _, key := range changedKeys(before.Attributes, after.Attributes) {
+		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, key, after.Attributes[key], req.Manual.Author, reason, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// overrideColumns are CI columns a manual override replaces in the effective
+// view; structuralFields are CI columns that are not overridden there.
+// Every other field name is an attribute.
+var (
+	overrideColumns = map[string]func(*Item, string){
+		"name":             func(i *Item, v string) { i.Name = v },
+		"status":           func(i *Item, v string) { i.Status = v },
+		"manufacturer":     func(i *Item, v string) { i.Manufacturer = v },
+		"model":            func(i *Item, v string) { i.Model = v },
+		"serial_number":    func(i *Item, v string) { i.SerialNumber = v },
+		"hardware_uuid":    func(i *Item, v string) { i.HardwareUUID = v },
+		"management_ip":    func(i *Item, v string) { i.ManagementIP = v },
+		"primary_mac":      func(i *Item, v string) { i.PrimaryMAC = v },
+		"hostname":         func(i *Item, v string) { i.Hostname = v },
+		"fqdn":             func(i *Item, v string) { i.FQDN = v },
+		"os_name":          func(i *Item, v string) { i.OSName = v },
+		"os_version":       func(i *Item, v string) { i.OSVersion = v },
+		"firmware_version": func(i *Item, v string) { i.FirmwareVersion = v },
+		"sys_object_id":    func(i *Item, v string) { i.SysObjectID = v },
+	}
+	structuralFields = map[string]bool{
+		"id": true, "organization_id": true, "client_id": true, "location_id": true, "site_id": true,
+		"room_id": true, "ci_type_id": true, "attributes": true, "discovery_source": true, "is_manual": true,
+		"first_seen_at": true, "last_seen_at": true, "created_at": true, "updated_at": true, "deleted_at": true,
+	}
+)
+
+// overlayOverrides applies the manual overrides of the CIs, so every read
+// returns the effective value: an override before the observed value
+// (OVR-01, CI-10). The CI rows normally carry it already (manual writes
+// and override changes update them); the overlay keeps reads consistent
+// for rows written before.
+func overlayOverrides(ctx context.Context, tx pgx.Tx, items []*Item) error {
+	if len(items) == 0 {
+		return nil
+	}
+	byID := make(map[string]*Item, len(items))
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		byID[item.ID] = item
+		ids = append(ids, item.ID)
+	}
+	rows, err := tx.Query(ctx, `SELECT ci_id::text, field_name, override_value FROM ci_field_value
+		WHERE ci_id = ANY($1::uuid[]) AND override_at IS NOT NULL`, ids)
+	if err != nil {
+		return fmt.Errorf("read overrides: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ciID, field string
+		var value any
+		if err = rows.Scan(&ciID, &field, &value); err != nil {
+			return fmt.Errorf("scan override: %w", err)
+		}
+		applyOverride(byID[ciID], field, value)
+	}
+	return rows.Err()
+}
+
+func applyOverride(item *Item, field string, value any) {
+	if item == nil || structuralFields[field] {
+		return
+	}
+	if set, ok := overrideColumns[field]; ok {
+		text := ""
+		if value != nil {
+			text = fmt.Sprint(value)
+		}
+		set(item, text)
+		return
+	}
+	if value == nil {
+		delete(item.Attributes, field)
+		return
+	}
+	if item.Attributes == nil {
+		item.Attributes = map[string]any{}
+	}
+	item.Attributes[field] = value
+}
+
+// checkPrecondition enforces If-Match on a manual change (API-07, API-03):
+// a missing If-Match fails when the organization requires one (412); an
+// older version fails only when a field of the request changed since by a
+// write of rank >= 92 (409, field-granular); a version the CI never had
+// fails (412). Attributes count as one field.
+func checkPrecondition(ctx context.Context, tx pgx.Tx, orgID string, before *Item, req *UpdateRequest) error {
+	if req.IfMatch == nil {
+		var required bool
+		if err := tx.QueryRow(ctx, `SELECT COALESCE((settings->>'require_if_match')::boolean, false) FROM organization WHERE id = $1`,
+			orgID).Scan(&required); err != nil {
+			return fmt.Errorf("read if-match setting: %w", err)
+		}
+		if required {
+			return ErrPreconditionRequired
+		}
+		return nil
+	}
+	switch {
+	case *req.IfMatch == before.Version, *req.IfMatch == api.IfMatchAny:
+		return nil
+	case *req.IfMatch > before.Version || *req.IfMatch < 1:
+		return ErrPreconditionFailed
+	}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT field_name FROM ci_change
+		WHERE ci_id = $1 AND ci_version > $2 AND field_name = ANY($3) ORDER BY field_name`,
+		before.ID, *req.IfMatch, requestedFields(req))
+	if err != nil {
+		return fmt.Errorf("read changes since if-match: %w", err)
+	}
+	fields, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("read changes since if-match: %w", err)
+	}
+	if len(fields) > 0 {
+		return &ConflictError{Fields: fields, Current: before.Version}
+	}
+	return nil
+}
+
+// requestedFields lists the ci_change field names a PATCH writes.
+func requestedFields(req *UpdateRequest) []string {
+	var out []string
+	for name, set := range map[string]bool{
+		"name": req.Name != nil, "status": req.Status != nil, "client_id": req.ClientID != nil,
+		"location_id": req.LocationID != nil, "manufacturer": req.Manufacturer != nil, "model": req.Model != nil,
+		"serial_number": req.SerialNumber != nil, "hardware_uuid": req.HardwareUUID != nil,
+		"management_ip": req.ManagementIP != nil, "primary_mac": req.PrimaryMAC != nil, "hostname": req.Hostname != nil,
+		"fqdn": req.FQDN != nil, "os_name": req.OSName != nil, "os_version": req.OSVersion != nil,
+		"firmware_version": req.FirmwareVersion != nil, "sys_object_id": req.SysObjectID != nil,
+		"attributes": req.Attributes != nil, "discovery_source": req.DiscoverySource != nil,
+	} {
+		if set {
+			out = append(out, name)
+		}
+	}
+	return out
 }

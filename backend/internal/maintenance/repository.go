@@ -146,16 +146,14 @@ func (r *MemoryRepository) NotifyClients(_ context.Context, orgID, windowID stri
 			continue
 		}
 		seen[clientID] = true
-		now := time.Now().UTC()
 		n := &Notification{
 			ID:             r.nextID("mn"),
 			OrganizationID: orgID,
 			WindowID:       windowID,
 			ClientID:       clientID,
 			Channel:        "webhook",
-			Status:         "sent",
-			SentAt:         &now,
-			CreatedAt:      now,
+			Status:         NotificationPending,
+			CreatedAt:      time.Now().UTC(),
 		}
 		r.notif[windowID] = append(r.notif[windowID], n)
 		out = append(out, *n)

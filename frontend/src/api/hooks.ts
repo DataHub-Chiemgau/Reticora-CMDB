@@ -201,7 +201,8 @@ export function useCreateCI() {
 export function useUpdateCI() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: CIUpdateRequest }) => ciApi.update(id, data),
+    mutationFn: ({ id, data, version }: { id: string; data: CIUpdateRequest; version?: number }) =>
+      ciApi.update(id, data, version),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['cis'] });
       queryClient.invalidateQueries({ queryKey: ['ci', variables.id] });

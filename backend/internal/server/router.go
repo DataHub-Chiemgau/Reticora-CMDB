@@ -195,7 +195,8 @@ func agentTypeResolver(repos Repositories) agent.CITypeResolver {
 // agentHandler builds the agent handler; with a session issuer, enrollment
 // returns the agent's signed credential (AGT-03).
 func agentHandler(repos *Repositories, sessions *identity.SessionIssuer) *agent.Handler {
-	h := agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(*repos)).WithFindings(repos.Security)
+	h := agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(*repos)).WithFindings(repos.Security).
+		WithFieldGuard(override.NewGuard(repos.Override))
 	if sessions != nil {
 		h.WithAgentTokens(sessions)
 	}
@@ -272,7 +273,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		search.NewHandler(repos.Search, repos.Permission),
 		sla.NewHandler(repos.SLA, repos.Ticket),
 		form.NewHandler(repos.Form),
-		workflow.NewHandler(repos.Workflow, workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher)),
+		workflow.NewHandler(repos.Workflow, workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
+			WithFieldGuard(override.NewGuard(repos.Override))),
 		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)).
 			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(opts), entitlementLister{svc: opts.Entitlements})),
 		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow).WithEgress(opts.Egress),
@@ -426,6 +428,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 
 	registry.MustRegister(collectors.NewGoCollector())
 	observability.RegisterWorkerMetrics(registry)
+	override.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 

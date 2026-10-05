@@ -124,7 +124,7 @@ func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, ex
 	if err != nil {
 		return err
 	}
-	return validateAttributes(defs, mergeAttributes(existing, patch), patch, existing)
+	return validateAttributes(defs, MergePatch(existing, patch), patch, existing)
 }
 
 // List returns paginated CIs filtered by the given parameters.

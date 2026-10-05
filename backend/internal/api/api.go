@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // DefaultPageLimit is used when a request does not specify a limit.
@@ -96,4 +97,45 @@ func ReadJSON(r *http.Request, v any) error {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	return dec.Decode(v)
+}
+
+// IfMatchAny is the If-Match value "*": any current version matches.
+const IfMatchAny int64 = 0
+
+// ETag formats a resource version as a strong entity tag.
+func ETag(version int64) string {
+	return fmt.Sprintf("%q", strconv.FormatInt(version, 10))
+}
+
+// ParseIfMatch reads the If-Match header: ok is false when there is none;
+// "*" yields IfMatchAny; a weak tag (W/) is accepted like a strong one. A
+// value that is not a version is an error (412 for the caller).
+func ParseIfMatch(r *http.Request) (version int64, ok bool, err error) {
+	raw := strings.TrimSpace(r.Header.Get("If-Match"))
+	if raw == "" {
+		return 0, false, nil
+	}
+	if raw == "*" {
+		return IfMatchAny, true, nil
+	}
+	raw = strings.TrimPrefix(raw, "W/")
+	unquoted, uerr := strconv.Unquote(raw)
+	if uerr != nil {
+		unquoted = raw
+	}
+	version, err = strconv.ParseInt(unquoted, 10, 64)
+	if err != nil || version < 1 {
+		return 0, true, fmt.Errorf("If-Match %q is not a version", r.Header.Get("If-Match"))
+	}
+	return version, true, nil
+}
+
+// WritePreconditionFailed writes the 412 problem of API-03.
+func WritePreconditionFailed(w http.ResponseWriter, detail string) {
+	WriteJSON(w, http.StatusPreconditionFailed, ProblemDetail{
+		Type:   "urn:reticora:problem:precondition-failed",
+		Title:  "Precondition Failed",
+		Status: http.StatusPreconditionFailed,
+		Detail: detail,
+	})
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
@@ -21,10 +22,18 @@ type Executor struct {
 	cis        ci.Repository
 	forms      form.Repository
 	dispatcher *webhook.Dispatcher
+	guard      *override.Guard
 }
 
 func NewExecutor(repo Repository, tickets ticket.Repository, cis ci.Repository, forms form.Repository, dispatcher *webhook.Dispatcher) *Executor {
 	return &Executor{repo: repo, tickets: tickets, cis: cis, forms: forms, dispatcher: dispatcher}
+}
+
+// WithFieldGuard sets the central write decision for set_ci_field
+// (OVR-02). Without one the rank table alone decides.
+func (e *Executor) WithFieldGuard(g *override.Guard) *Executor {
+	e.guard = g
+	return e
 }
 
 func (e *Executor) Trigger(ctx context.Context, orgID string, def *Definition, trigger string, payload JSONMap) (*Run, error) {
@@ -195,25 +204,7 @@ func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, ac
 		if e.cis == nil {
 			return nil, false, fmt.Errorf("ci repository unavailable")
 		}
-		ciID := str(action, "ci_id", "")
-		field := str(action, "field", "")
-		value := action["value"]
-		req := ci.UpdateRequest{}
-		switch field {
-		case "status":
-			v := fmt.Sprint(value)
-			req.Status = &v
-		case "name":
-			v := fmt.Sprint(value)
-			req.Name = &v
-		default:
-			req.Attributes = map[string]any{field: value}
-		}
-		item, err := e.cis.Update(ctx, orgID, ciID, req)
-		if err != nil {
-			return nil, false, err
-		}
-		return JSONMap{"ci_id": item.ID, "field": field}, false, nil
+		return e.setCIField(ctx, orgID, action)
 	case "require_approval":
 		return JSONMap{"message": str(action, "message", "Approval required")}, true, nil
 	case "submit_form":
@@ -296,3 +287,56 @@ func str(m map[string]any, key, fallback string) string {
 	}
 	return fallback
 }
+
+// setCIField writes one CI field as source workflow (rank 92) through the
+// central decision (OVR-02, WFL-02): a manual override is never replaced,
+// a refused write is reported in the action output, and an unreadable
+// override state fails the action.
+func (e *Executor) setCIField(ctx context.Context, orgID string, action JSONMap) (JSONMap, bool, error) {
+	ciID := str(action, "ci_id", "")
+	field := str(action, "field", "")
+	value := action["value"]
+	if field == "" {
+		return nil, false, fmt.Errorf("set_ci_field needs a field")
+	}
+	item, err := e.cis.GetByID(ctx, orgID, ciID)
+	if err != nil {
+		return nil, false, err
+	}
+	// Workflow writes rank 92 and raise the CI version (API-07).
+	req := ci.UpdateRequest{Authoritative: true}
+	var current any
+	switch field {
+	case "status":
+		v := fmt.Sprint(value)
+		value, current, req.Status = v, item.Status, &v
+	case "name":
+		v := fmt.Sprint(value)
+		value, current, req.Name = v, item.Name, &v
+	default:
+		current = item.Attributes[field]
+		req.Attributes = map[string]any{field: value}
+	}
+	w := &override.Write{
+		OrganizationID: orgID, CIID: item.ID, Field: field, Value: value, Source: sourceWorkflow,
+		ObservedAt: time.Now().UTC(), Current: current, FallbackSource: item.DiscoverySource,
+	}
+	d := e.guard.Decide(ctx, w)
+	if d.Reason == override.ReasonError {
+		return nil, false, fmt.Errorf("set_ci_field %s: override state unreadable, nothing written", field)
+	}
+	if d.Write {
+		if _, err = e.cis.Update(ctx, orgID, item.ID, req); err != nil {
+			return nil, false, err
+		}
+	}
+	if d.Write || d.Conflict || d.Reason == override.ReasonOverride {
+		if err = e.guard.Record(ctx, w); err != nil {
+			return nil, false, fmt.Errorf("record provenance: %w", err)
+		}
+	}
+	return JSONMap{"ci_id": item.ID, "field": field, "written": d.Write, "reason": d.Reason}, false, nil
+}
+
+// sourceWorkflow is the automation source of workflow writes (REC-03 rank 92).
+const sourceWorkflow = "workflow"

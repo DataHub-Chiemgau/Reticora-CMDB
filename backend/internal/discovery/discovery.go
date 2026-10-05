@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/wire"
@@ -289,9 +291,10 @@ func enrollmentCodeHash(raw string) string {
 // overwrites protected manual overrides.
 type ProvenanceRecorder interface {
 	RecordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string) (*FieldProvenance, error)
-	// IsProtected reports whether the field carries a protected manual
-	// override that discovery must not overwrite.
-	IsProtected(ctx context.Context, orgID, ciID, fieldName string) (bool, error)
+	// Decide is the central, fail-closed write decision for automation
+	// sources (override.DecideAutomatedWrite, REC-03): discovery writes a
+	// field of an existing CI only when it permits.
+	Decide(ctx context.Context, w *override.Write) override.Decision
 }
 
 // FieldProvenance is the subset of the override.FieldValue the ingest path
@@ -380,21 +383,40 @@ func (h *Handler) recordDiscovered(ctx context.Context, orgID, ciID, fieldName s
 	_, _ = h.provenance.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source)
 }
 
-// protectedFields returns the set of field names whose protected manual
-// override forbids discovery writes (spec §13: discovery never silently
-// overwrites a protected manual override).
-func (h *Handler) protectedFields(ctx context.Context, orgID, ciID string, names []string) map[string]bool {
-	protected := map[string]bool{}
-	if h.provenance == nil || ciID == "" {
-		return protected
+// decide applies the central write decision; without a provenance store
+// (--no-db smoke tests) the rank table alone decides.
+func (h *Handler) decide(ctx context.Context, w *override.Write) override.Decision {
+	if h.provenance == nil {
+		return override.DecideAutomatedWrite(ctx, nil, w)
 	}
-	for _, name := range names {
-		ok, err := h.provenance.IsProtected(ctx, orgID, ciID, name)
-		if err == nil && ok {
-			protected[name] = true
+	return h.provenance.Decide(ctx, w)
+}
+
+// queueOverrideConflict opens an override_conflict review for a field unless
+// one is open already (REC-12, deduplicated per field). A failure does not
+// fail the ingest: the override stays in place either way.
+func (h *Handler) queueOverrideConflict(ctx context.Context, orgID, ciID, field string, value any, source string) bool {
+	open, _, err := h.repo.ListReviewItems(ctx, orgID, ReviewFilter{Status: ReviewStatusOpen, Kind: ReviewKindOverrideConflict},
+		api.PaginationParams{Limit: 1000})
+	if err == nil {
+		for k := range open {
+			if open[k].Payload["ci_id"] == ciID && open[k].Payload["field"] == field {
+				return false
+			}
 		}
 	}
-	return protected
+	item := &ReviewItem{
+		OrganizationID: orgID,
+		Kind:           ReviewKindOverrideConflict,
+		Status:         ReviewStatusOpen,
+		Payload:        map[string]any{"ci_id": ciID, "field": field, "observed_value": value, "source": source},
+		CandidateCIIDs: []string{ciID},
+	}
+	if err = h.repo.CreateReviewItem(ctx, item); err != nil {
+		slog.WarnContext(ctx, "override conflict review not created", "ci_id", ciID, "field", field, "error", err)
+		return false
+	}
+	return true
 }
 
 // isUUID reports whether value looks like a canonical UUID.
@@ -833,61 +855,81 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			}
 		case ReconcileMatched:
 			matched := findCI(existing, result.MatchedCIID)
-			if matched != nil {
-				applySourceTrust(matched, &item, source, attributes)
+			if matched == nil {
+				matched = &ci.Item{ID: result.MatchedCIID}
 			}
-			// Protected manual overrides win over discovery (spec §13): the
-			// field keeps its overridden value, the discovered value is still
-			// recorded as provenance, and the divergence is reviewable.
-			guarded := []string{"name", "manufacturer", "model", "serial_number", "management_ip"}
-			for k := range item.Attributes {
-				guarded = append(guarded, k)
+			observedAt := time.Now().UTC()
+			// Every field goes through the central write decision (REC-03):
+			// overrides are never overwritten, ranks and observation times
+			// decide the rest, unreadable state writes nothing.
+			conflict := false
+			decide := func(field string, value, current any) bool {
+				d := h.decide(r.Context(), &override.Write{
+					OrganizationID: t.OrganizationID, CIID: matched.ID, Field: field, Value: value,
+					Source: source, ObservedAt: observedAt, Current: current, FallbackSource: matched.DiscoverySource,
+				})
+				if d.Write || d.Conflict || d.Reason == override.ReasonOverride {
+					// Observed under an override or written: the provenance
+					// keeps the reported value (REC-12, REC-10).
+					h.recordDiscovered(r.Context(), t.OrganizationID, matched.ID, field, value, source)
+				}
+				if d.Conflict {
+					conflict = true
+					if h.queueOverrideConflict(r.Context(), t.OrganizationID, matched.ID, field, value, source) {
+						resp.ReviewItems++
+					}
+				}
+				return d.Write
 			}
-			protected := h.protectedFields(r.Context(), t.OrganizationID, result.MatchedCIID, guarded)
-			// Never merge a discovered value over a protected custom attribute.
-			for k := range protected {
-				delete(attributes, k)
+			update := ci.UpdateRequest{LastSeenAt: &now}
+			if override.SourceRank(source) >= override.SourceRank(matched.DiscoverySource) {
+				update.DiscoverySource = &source
 			}
-			// Nor over an instance attribute of this CI (MET-14).
-			if h.stripInstanceFields(r.Context(), t.OrganizationID, result.MatchedCIID, attributes, item.Attributes) {
+			for _, f := range []struct {
+				name           string
+				value, current string
+				target         **string
+			}{
+				{"name", item.Name, matched.Name, &update.Name},
+				{"manufacturer", item.Manufacturer, matched.Manufacturer, &update.Manufacturer},
+				{"model", item.Model, matched.Model, &update.Model},
+				{"serial_number", item.SerialNumber, matched.SerialNumber, &update.SerialNumber},
+				{"management_ip", item.ManagementIP, matched.ManagementIP, &update.ManagementIP},
+			} {
+				if f.value == "" || f.value == f.current {
+					continue
+				}
+				if decide(f.name, f.value, f.current) {
+					*f.target = stringPtr(f.value)
+				}
+			}
+			writes := map[string]any{
+				"fingerprint": mergeFingerprint(existingFingerprintMap(*matched), item.Fingerprint,
+					override.SourceRank(source) >= override.SourceRank(matched.DiscoverySource)),
+				"raw_data": item.RawData,
+			}
+			for k, v := range attributes {
+				if k == "fingerprint" || k == "raw_data" {
+					continue
+				}
+				if current, ok := matched.Attributes[k]; ok && reflect.DeepEqual(current, v) {
+					continue
+				}
+				if decide(k, v, matched.Attributes[k]) {
+					writes[k] = v
+				}
+			}
+			// Instance attributes of this CI are never written (MET-14).
+			if h.stripInstanceFields(r.Context(), t.OrganizationID, matched.ID, writes, item.Attributes) {
 				resp.ProtectedInstanceFields++
 			}
-			update := ci.UpdateRequest{
-				Attributes:      attributes,
-				DiscoverySource: &source,
-				LastSeenAt:      &now,
-			}
-			if !protected["name"] {
-				update.Name = stringPtr(item.Name)
-			}
-			if !protected["manufacturer"] {
-				update.Manufacturer = stringPtr(item.Manufacturer)
-			}
-			if !protected["model"] {
-				update.Model = stringPtr(item.Model)
-			}
-			if !protected["serial_number"] {
-				update.SerialNumber = stringPtr(item.SerialNumber)
-			}
-			if !protected["management_ip"] {
-				update.ManagementIP = stringPtr(item.ManagementIP)
-			}
+			update.Attributes = writes
 			updated, err := h.ciRepo.Update(r.Context(), t.OrganizationID, result.MatchedCIID, update)
 			if err != nil {
 				api.WriteRepoError(w, err)
 				return
 			}
-			// Record provenance for every discovered field, protected or not:
-			// drift stays visible (spec §13).
-			h.recordDiscovered(r.Context(), t.OrganizationID, updated.ID, "name", item.Name, source)
-			h.recordDiscovered(r.Context(), t.OrganizationID, updated.ID, "manufacturer", item.Manufacturer, source)
-			h.recordDiscovered(r.Context(), t.OrganizationID, updated.ID, "model", item.Model, source)
-			h.recordDiscovered(r.Context(), t.OrganizationID, updated.ID, "serial_number", item.SerialNumber, source)
-			h.recordDiscovered(r.Context(), t.OrganizationID, updated.ID, "management_ip", item.ManagementIP, source)
-			for k, v := range item.Attributes {
-				h.recordDiscovered(r.Context(), t.OrganizationID, updated.ID, k, v, source)
-			}
-			if len(protected) > 0 {
+			if conflict {
 				resp.ProtectedOverrides++
 			}
 			for j := range existing {
@@ -934,11 +976,6 @@ func stringPtr(value string) *string {
 	return &value
 }
 
-// defaultStalenessThreshold is the age after which a stored attribute from a
-// more trusted source is considered outdated and may be overwritten by a less
-// trusted one (spec §5.3: Konfliktlösung nach Quellenvertrauen + Aktualität).
-const defaultStalenessThreshold = 7 * 24 * time.Hour
-
 // findCI returns the CI with the given id from the cached list, or nil.
 func findCI(existing []ci.Item, id string) *ci.Item {
 	for j := range existing {
@@ -949,53 +986,21 @@ func findCI(existing []ci.Item, id string) *ci.Item {
 	return nil
 }
 
-// applySourceTrust enforces the source-trust rule of spec §5.3 on a matched
-// CI before the update is persisted: when the incoming item originates from
-// a less trusted source than the one that populated the CI, and the stored
-// values are still fresh, the incoming identity attributes are dropped from
-// the update so a low-trust sweep cannot clobber BMC-grade data. LastSeenAt
-// and the merged attributes are always refreshed so the sighting itself is
-// recorded.
-func applySourceTrust(matched *ci.Item, item *IngestItem, incomingSource string, attributes map[string]any) {
-	nowTime := time.Now().UTC()
-	existingLastSeen := nowTime
-	if matched.LastSeenAt != nil {
-		existingLastSeen = *matched.LastSeenAt
-	}
-	if ShouldApplyAttribute(matched.DiscoverySource, incomingSource, existingLastSeen, nowTime, defaultStalenessThreshold) {
-		return
-	}
-	// Less trusted and still fresh: keep the stored identity values.
-	item.Name = firstNonEmpty(matched.Name, item.Name)
-	item.Manufacturer = firstNonEmpty(matched.Manufacturer, item.Manufacturer)
-	item.Model = firstNonEmpty(matched.Model, item.Model)
-	item.SerialNumber = firstNonEmpty(matched.SerialNumber, item.SerialNumber)
-	item.ManagementIP = firstNonEmpty(matched.ManagementIP, item.ManagementIP)
-	// A less trusted source may still contribute attributes the CI does not
-	// have yet, but it must not overwrite values a more trusted source
-	// reported recently.
-	for k := range attributes {
-		if k == "fingerprint" || k == "raw_data" {
-			continue
-		}
-		if stored, ok := matched.Attributes[k]; ok {
-			attributes[k] = stored
-		}
-	}
-	// Keep the stored fingerprint dominant by re-merging it over the incoming
-	// one; new keys from the incoming sighting are still added.
+// mergeFingerprint combines the stored and the incoming fingerprint. New
+// keys are always added; for known keys the incoming value wins only when
+// the source ranks at least as high as the CI's source, so a low-rank sweep
+// cannot rewrite BMC-grade identity data used for matching.
+func mergeFingerprint(stored, incoming map[string]any, incomingWins bool) map[string]any {
 	merged := map[string]any{}
-	for k, v := range item.Fingerprint {
+	for k, v := range stored {
 		merged[k] = v
 	}
-	for k, v := range existingFingerprintMap(*matched) {
-		if _, known := merged[k]; !known {
-			merged[k] = v
-		} else if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+	for k, v := range incoming {
+		if _, known := merged[k]; !known || incomingWins {
 			merged[k] = v
 		}
 	}
-	attributes["fingerprint"] = merged
+	return merged
 }
 
 // existingFingerprintMap extracts the stored fingerprint map of a CI,

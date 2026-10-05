@@ -59,9 +59,26 @@ export function MaintenancePage() {
   });
   const notifyMutation = useMutation({
     mutationFn: (id: string) => maintenanceApi.notify(id),
+    // Show the real delivery status: notifications stay pending until the
+    // notification chain has delivered them (WP-063).
     onSuccess: (res) =>
       setNotifyResult(
-        t('maintenance.notified', '{{count}} Kunden benachrichtigt', { count: res.notified }),
+        [
+          res.notified > 0
+            ? t('maintenance.notified', '{{count}} Kunden benachrichtigt', { count: res.notified })
+            : null,
+          res.queued > 0
+            ? t(
+                'maintenance.queued',
+                '{{count}} Benachrichtigungen vorgemerkt – Versand ausstehend',
+                {
+                  count: res.queued,
+                },
+              )
+            : null,
+        ]
+          .filter(Boolean)
+          .join(' · ') || t('maintenance.noClients', 'Keine betroffenen Kunden'),
       ),
   });
 
@@ -82,8 +99,10 @@ export function MaintenancePage() {
       </div>
 
       {notifyResult ? (
-        <Card className="border-green-300 bg-green-50 dark:bg-green-950">
-          <p className="text-sm text-green-800 dark:text-green-200">{notifyResult}</p>
+        <Card className="border-amber-300 bg-amber-50 dark:bg-amber-950">
+          <p role="status" className="text-sm text-amber-900 dark:text-amber-100">
+            {notifyResult}
+          </p>
         </Card>
       ) : null}
       {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}

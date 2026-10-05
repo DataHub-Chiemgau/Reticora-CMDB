@@ -2,6 +2,7 @@ package override
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -91,6 +92,10 @@ func (h *Handler) SetOverride(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if err.Error() == "not found" {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
+			return
+		}
+		if errors.Is(err, ErrNotOverridable) {
+			api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
 			return
 		}
 		if api.WriteDBError(w, err) {

@@ -695,7 +695,9 @@
     "notified": "{{count}} customers notified",
     "affectedCIs": "affected CIs",
     "startsAt": "Starts",
-    "endsAt": "Ends"
+    "endsAt": "Ends",
+    "queued": "{{count}} notifications queued – delivery pending",
+    "noClients": "No affected customers"
   },
   "disposal": {
     "summary": "Revision-safe disposal documentation (append-only, BSI/ISO).",

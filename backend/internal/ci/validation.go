@@ -152,16 +152,3 @@ func allowedValue(allowed []string, value any) bool {
 	}
 	return check(value)
 }
-
-// mergeAttributes returns the effective attribute map after applying patch on
-// top of base, mirroring the `attributes || $n` merge the repository performs.
-func mergeAttributes(base, patch map[string]any) map[string]any {
-	out := make(map[string]any, len(base)+len(patch))
-	for k, v := range base {
-		out[k] = v
-	}
-	for k, v := range patch {
-		out[k] = v
-	}
-	return out
-}

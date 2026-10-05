@@ -110,6 +110,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("ETag", api.ETag(item.Version))
 	api.WriteJSON(w, http.StatusOK, item)
 }
 
@@ -194,9 +195,23 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	// A PATCH through the API is a manual change: its fields get protected
+	// overrides (OVR-01) and its If-Match is checked (API-07).
+	req.Manual = &ManualChange{Author: t.UserID}
+	version, present, err := api.ParseIfMatch(r)
+	if err != nil {
+		api.WritePreconditionFailed(w, err.Error())
+		return
+	}
+	if present {
+		req.IfMatch = &version
+	}
 
 	item, err := h.svc.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
+		if writeConcurrencyError(w, err) {
+			return
+		}
 		if writeValidationError(w, err) {
 			return
 		}
@@ -210,6 +225,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		h.dispatcher.Dispatch(r.Context(), t.OrganizationID, "ci.updated", item)
 	}
 
+	w.Header().Set("ETag", api.ETag(item.Version))
 	api.WriteJSON(w, http.StatusOK, item)
 }
 
@@ -280,5 +296,32 @@ func writeValidationError(w http.ResponseWriter, err error) bool {
 		},
 		Violations: ve.Violations,
 	})
+	return true
+}
+
+// writeConcurrencyError maps the If-Match outcomes of API-07/API-03: 412
+// for a missing (when required) or unknown version, 409 with the fields
+// changed since. It reports whether err was one of them.
+func writeConcurrencyError(w http.ResponseWriter, err error) bool {
+	var conflict *ConflictError
+	switch {
+	case errors.Is(err, ErrPreconditionRequired), errors.Is(err, ErrPreconditionFailed):
+		api.WritePreconditionFailed(w, err.Error())
+	case errors.As(err, &conflict):
+		w.Header().Set("ETag", api.ETag(conflict.Current))
+		api.WriteJSON(w, http.StatusConflict, struct {
+			api.ProblemDetail
+			Fields         []string `json:"fields"`
+			CurrentVersion int64    `json:"current_version"`
+		}{
+			ProblemDetail: api.ProblemDetail{
+				Type: "urn:reticora:problem:conflict", Title: "Conflict", Status: http.StatusConflict,
+				Detail: conflict.Error(),
+			},
+			Fields: conflict.Fields, CurrentVersion: conflict.Current,
+		})
+	default:
+		return false
+	}
 	return true
 }

@@ -148,7 +148,10 @@ export interface paths {
     delete: operations['deleteCI'];
     options?: never;
     head?: never;
-    /** Update a configuration item */
+    /**
+     * Update a configuration item
+     * @description Optimistic concurrency (API-07): If-Match names the version the editor read. A stale version is refused with 409 only when a field of the request was changed since by a write of rank >= 92 (manual, import, workflow); observed discovery updates do not change the version. An organization can require If-Match (settings.require_if_match); then a request without it is 412, like an unknown version.
+     */
     patch: operations['updateCI'];
     trace?: never;
   };
@@ -4246,10 +4249,15 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        id: string;
+      };
       cookie?: never;
     };
-    /** List field provenance (discovered/override/effective) of a CI */
+    /**
+     * List field provenance (discovered/override/effective) of a CI
+     * @description Per field the observed value with source and time, the manual override with author, reason and time, and the effective value: the override when there is one, otherwise the observed value (OVR-01). GET /cis/{id} and the CI list return the same effective values.
+     */
     get: operations['listCisIdFields'];
     put?: never;
     post?: never;
@@ -4263,14 +4271,24 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        id: string;
+        /** @description CI column or attribute name */
+        name: string;
+      };
       cookie?: never;
     };
     get?: never;
-    /** Set or clear a manual field override */
+    /**
+     * Set a manual field override
+     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden.
+     */
     put: operations['putCisIdFieldsNameOverride'];
     post?: never;
-    /** Set or clear a manual field override */
+    /**
+     * Clear a manual field override
+     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited.
+     */
     delete: operations['deleteCisIdFieldsNameOverride'];
     options?: never;
     head?: never;
@@ -4915,6 +4933,11 @@ export interface components {
       id: string;
       organization_id: string;
       client_id?: string;
+      /**
+       * Format: int64
+       * @description CI version, also the ETag (API-07).
+       */
+      readonly version?: number;
       /** @description Node of the canonical location tree (DB-05); site_id and room_id are derived from it. */
       location_id?: string;
       /** @description Site of location_id, derived by the server. */
@@ -4980,7 +5003,10 @@ export interface components {
       };
       discovery_source?: components['schemas']['CIDiscoverySource'];
     };
+    /** @description A manual change. attributes is an RFC 7396 merge patch (nested objects merge, null removes a member). Every changed field gets a protected override that discovery does not overwrite. */
     UpdateCIRequest: {
+      /** @description Reason stored with the overrides of this change. */
+      change_reason?: string;
       name?: string;
       status?: components['schemas']['CIStatus'];
       client_id?: string;
@@ -6274,6 +6300,44 @@ export interface components {
       ci_id?: string;
       ticket_id?: string;
       status?: string;
+    };
+    FieldProvenance: {
+      id: string;
+      organization_id: string;
+      ci_id: string;
+      field_name: string;
+      /** @description Last value an automation source reported and that was written or observed under an override */
+      discovered_value?: unknown;
+      discovered_source?: string;
+      /** Format: date-time */
+      discovered_at?: string;
+      /** @description Manual value; null with override_at set records a removed field */
+      override_value?: unknown;
+      override_author?: string;
+      override_reason?: string;
+      /** Format: date-time */
+      override_at?: string;
+      protected: boolean;
+      /** @description Override when set */
+      effective_value?: unknown;
+      /** @description Observed and effective value differ */
+      diverged: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    SetOverrideRequest: {
+      /** @description New value; null removes an attribute */
+      value?: unknown;
+      reason: string;
+      /** @default true */
+      protected: boolean;
+    };
+    VersionConflictProblem: components['schemas']['ProblemDetail'] & {
+      fields: string[];
+      /** Format: int64 */
+      current_version: number;
     };
     ViolationProblem: components['schemas']['ProblemDetail'] & {
       violations: {
@@ -7793,6 +7857,8 @@ export interface operations {
       /** @description Configuration item details */
       200: {
         headers: {
+          /** @description The CI version (API-07); send it as If-Match with a PATCH. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -7829,7 +7895,10 @@ export interface operations {
   updateCI: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
@@ -7845,6 +7914,8 @@ export interface operations {
       /** @description Configuration item updated */
       200: {
         headers: {
+          /** @description The new CI version. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -7854,6 +7925,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description Fields of the request changed since the If-Match version */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['VersionConflictProblem'];
+        };
+      };
+      /** @description If-Match missing although required, or not a version of the CI */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listCIChanges: {
@@ -18189,49 +18278,64 @@ export interface operations {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        id: string;
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description List field provenance (discovered/override/effective) of a CI */
+      /** @description Field provenance of the CI */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': {
+            data: components['schemas']['FieldProvenance'][];
+          };
         };
-        content?: never;
       };
+      401: components['responses']['Unauthorized'];
     };
   };
   putCisIdFieldsNameOverride: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        id: string;
+        /** @description CI column or attribute name */
+        name: string;
+      };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SetOverrideRequest'];
+      };
+    };
     responses: {
-      /** @description Set or clear a manual field override */
+      /** @description Field provenance after the change */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['FieldProvenance'];
+        };
       };
-      /** @description Unauthorized */
-      401: {
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description The field cannot be overridden */
+      422: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };
@@ -18239,25 +18343,26 @@ export interface operations {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        id: string;
+        /** @description CI column or attribute name */
+        name: string;
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Set or clear a manual field override */
-      204: {
+      /** @description Field provenance after the change */
+      200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['FieldProvenance'];
         };
-        content?: never;
       };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   createCisIdLifecycleTransitions: {

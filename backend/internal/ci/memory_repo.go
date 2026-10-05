@@ -115,6 +115,7 @@ func (r *MemoryRepository) Create(ctx context.Context, item *Item) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	item.CreatedAt = now
 	item.UpdatedAt = now
+	item.Version = 1
 	r.items[item.ID] = item
 	return nil
 }
@@ -154,12 +155,7 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 		item.LocationID, item.SiteID, item.RoomID = *req.LocationID, "", ""
 	}
 	if req.Attributes != nil {
-		if item.Attributes == nil {
-			item.Attributes = make(map[string]any)
-		}
-		for k, v := range req.Attributes {
-			item.Attributes[k] = v
-		}
+		item.Attributes = MergePatch(item.Attributes, req.Attributes)
 	}
 	if req.DiscoverySource != nil {
 		item.DiscoverySource = *req.DiscoverySource
@@ -169,6 +165,9 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 		if err == nil {
 			item.LastSeenAt = &t
 		}
+	}
+	if req.Manual != nil || req.Authoritative {
+		item.Version++
 	}
 	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	return item, nil

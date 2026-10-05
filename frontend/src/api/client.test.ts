@@ -60,3 +60,39 @@ describe('fetchAPI authentication', () => {
     expect(useAuthStore.getState().token).toBe('new-token');
   });
 });
+
+describe('ciApi.update optimistic concurrency', () => {
+  it('sends the CI version as If-Match and surfaces a 409 conflict', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'ci-1', version: 4 }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            title: 'Conflict',
+            detail: 'fields changed since the If-Match version: name',
+            fields: ['name'],
+          },
+          409,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: 'ci-1', version: 5 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await importClientWithSession();
+    const { ciApi, ApiError } = await import('./client');
+
+    await expect(ciApi.update('ci-1', { name: 'a' }, 3)).resolves.toEqual({
+      id: 'ci-1',
+      version: 4,
+    });
+    expect((fetchMock.mock.calls[0]?.[1]?.headers as Headers).get('If-Match')).toBe('"3"');
+
+    const conflict = await ciApi.update('ci-1', { name: 'b' }, 3).catch((err: unknown) => err);
+    expect(conflict).toBeInstanceOf(ApiError);
+    expect((conflict as InstanceType<typeof ApiError>).status).toBe(409);
+
+    // Without a version no If-Match is sent.
+    await ciApi.update('ci-1', { name: 'c' });
+    expect((fetchMock.mock.calls[2]?.[1]?.headers as Headers).has('If-Match')).toBe(false);
+  });
+});

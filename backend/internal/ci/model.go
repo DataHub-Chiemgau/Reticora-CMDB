@@ -1,7 +1,12 @@
 // Package ci provides the CI domain model, repository, and HTTP handler for Reticora CMDB.
 package ci
 
-import "time"
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+)
 
 // Item represents a Configuration Item instance.
 type Item struct {
@@ -34,9 +39,12 @@ type Item struct {
 	FirstSeenAt     *time.Time     `json:"first_seen_at,omitempty"`
 	LastSeenAt      *time.Time     `json:"last_seen_at,omitempty"`
 	IsManual        bool           `json:"is_manual"`
-	DeletedAt       *time.Time     `json:"deleted_at,omitempty"`
-	CreatedAt       string         `json:"created_at"`
-	UpdatedAt       string         `json:"updated_at"`
+	// Version is the CI's ETag; it rises only with writes of rank >= 92
+	// (manual, import, workflow), not with observed updates (API-07).
+	Version   int64      `json:"version"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	CreatedAt string     `json:"created_at"`
+	UpdatedAt string     `json:"updated_at"`
 }
 
 // CreateRequest is the payload for creating a CI.
@@ -83,7 +91,28 @@ type UpdateRequest struct {
 	Attributes      map[string]any `json:"attributes,omitempty"`
 	DiscoverySource *string        `json:"discovery_source,omitempty"`
 	LastSeenAt      *string        `json:"last_seen_at,omitempty"`
+	// ChangeReason is stored with the overrides a manual change creates.
+	ChangeReason string `json:"change_reason,omitempty"`
+	// IfMatch is the version the writer last read (If-Match); nil when the
+	// request carried none, api.IfMatchAny for "*". Checked for manual
+	// changes only.
+	IfMatch *int64 `json:"-"`
+	// Authoritative marks an automated write of rank >= 92 (workflow,
+	// import), which raises the version like a manual change does.
+	Authoritative bool `json:"-"`
+	// Manual marks a change made by a person through the API (not by
+	// discovery or automation): every changed field gets a protected
+	// override in the same transaction (OVR-01). Set by the handler only.
+	Manual *ManualChange `json:"-"`
 }
+
+// ManualChange identifies the author of a manual CI change.
+type ManualChange struct {
+	Author string
+}
+
+// DefaultChangeReason is the override reason of a manual change without one.
+const DefaultChangeReason = "manual change"
 
 // FilterParams holds query filter parameters for listing CIs.
 type FilterParams struct {
@@ -109,4 +138,24 @@ type Change struct {
 	NewValue       any       `json:"new_value,omitempty"`
 	Comment        string    `json:"comment,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
+}
+
+// Errors of the optimistic concurrency check (API-07, API-03).
+var (
+	// ErrPreconditionRequired: the organization requires If-Match and the
+	// request carried none (412).
+	ErrPreconditionRequired = errors.New("If-Match is required for CI changes")
+	// ErrPreconditionFailed: the If-Match version is unknown (412).
+	ErrPreconditionFailed = errors.New("If-Match does not name a version of the CI")
+)
+
+// ConflictError reports fields of a PATCH that were changed by a manual or
+// other rank >= 92 write since the If-Match version (409).
+type ConflictError struct {
+	Fields  []string
+	Current int64
+}
+
+func (e *ConflictError) Error() string {
+	return fmt.Sprintf("fields changed since the If-Match version: %s", strings.Join(e.Fields, ", "))
 }
