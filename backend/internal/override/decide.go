@@ -163,3 +163,33 @@ func isEmpty(v any) bool {
 	}
 	return false
 }
+
+// Guard applies the central decision for one automation path and keeps the
+// provenance of what it writes (REC-10). A nil Guard decides by the rank
+// table alone and records nothing.
+type Guard struct {
+	repo Repository
+}
+
+// NewGuard returns the guard over the override repository.
+func NewGuard(repo Repository) *Guard {
+	return &Guard{repo: repo}
+}
+
+// Decide returns the decision for w.
+func (g *Guard) Decide(ctx context.Context, w *Write) Decision {
+	if g == nil || g.repo == nil {
+		return DecideAutomatedWrite(ctx, nil, w)
+	}
+	return DecideAutomatedWrite(ctx, g.repo, w)
+}
+
+// Record stores the value of w as the field's provenance once it is written
+// or observed under an override.
+func (g *Guard) Record(ctx context.Context, w *Write) error {
+	if g == nil || g.repo == nil {
+		return nil
+	}
+	_, err := g.repo.RecordDiscovered(ctx, w.OrganizationID, w.CIID, w.Field, w.Value, w.Source)
+	return err
+}

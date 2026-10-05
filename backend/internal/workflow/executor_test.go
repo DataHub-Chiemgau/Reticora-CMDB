@@ -6,6 +6,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"testing"
 	"time"
@@ -178,5 +179,78 @@ func TestExecutorSubmitFormInvalidValues(t *testing.T) {
 	}
 	if len(steps) != 1 || steps[0].Status != StatusFailed || steps[0].Error == "" {
 		t.Fatalf("expected failed step with error message, got %+v", steps)
+	}
+}
+
+// failingOverrides makes every read of the override state fail.
+type failingOverrides struct{ *override.MemoryRepository }
+
+func (failingOverrides) Get(context.Context, string, string, string) (*override.FieldValue, error) {
+	return nil, errors.New("database down")
+}
+
+// TestSetCIFieldRespectsOverrides covers WP-059 (OVR-02, WFL-02): the
+// workflow action writes as source workflow through the central decision,
+// keeps a manual override, records the provenance of what it writes and
+// fails when the override state cannot be read.
+func TestSetCIFieldRespectsOverrides(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+	cis := ci.NewMemoryRepository()
+	item := &ci.Item{OrganizationID: "org-1", CITypeID: "server", Name: "srv", DiscoverySource: ci.SourceSNMP,
+		Attributes: map[string]any{"owner": "ops", "rack": "R1"}}
+	if err := cis.Create(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	overrides := override.NewMemoryRepository()
+	if _, err := overrides.SetOverride(ctx, "org-1", item.ID, "owner", "ops", "", "assigned by hand", true); err != nil {
+		t.Fatal(err)
+	}
+	run := func(guard *override.Guard, field string, value any) (*Run, []Step) {
+		t.Helper()
+		exec := NewExecutor(repo, ticket.NewMemoryRepository(), cis, form.NewMemoryRepository(), nil).WithFieldGuard(guard)
+		def := &Definition{OrganizationID: "org-1", Name: "set", Trigger: JSONMap{"type": "manual"}, Active: true,
+			Actions: []JSONMap{{"type": "set_ci_field", "ci_id": item.ID, "field": field, "value": value}}}
+		if err := repo.CreateDefinition(ctx, def); err != nil {
+			t.Fatal(err)
+		}
+		r, err := exec.Trigger(ctx, "org-1", def, "manual", JSONMap{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		steps, err := repo.ListSteps(ctx, "org-1", r.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r, steps
+	}
+	guard := override.NewGuard(overrides)
+
+	r, steps := run(guard, "owner", "workflow-team")
+	if r.Status != StatusSucceeded || steps[0].Output["written"] != false || steps[0].Output["reason"] != override.ReasonOverrideConflict {
+		t.Errorf("set an overridden field: run %s output %v", r.Status, steps[0].Output)
+	}
+	r, steps = run(guard, "rack", "R2")
+	if r.Status != StatusSucceeded || steps[0].Output["written"] != true {
+		t.Errorf("set a field without override: run %s output %v", r.Status, steps[0].Output)
+	}
+	got, err := cis.GetByID(ctx, "org-1", item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Attributes["owner"] != "ops" || got.Attributes["rack"] != "R2" {
+		t.Errorf("attributes after the workflow: %v", got.Attributes)
+	}
+	if fv, err := overrides.Get(ctx, "org-1", item.ID, "rack"); err != nil || fv.DiscoveredSource != "workflow" || fv.DiscoveredValue != "R2" {
+		t.Errorf("provenance of the written field: %+v, %v", fv, err)
+	}
+
+	// Unreadable override state: nothing written, the run fails.
+	r, _ = run(override.NewGuard(failingOverrides{overrides}), "rack", "R3")
+	if r.Status != StatusFailed {
+		t.Errorf("run with unreadable overrides: %s, want failed", r.Status)
+	}
+	if got, _ = cis.GetByID(ctx, "org-1", item.ID); got.Attributes["rack"] != "R2" {
+		t.Errorf("rack after a refused write: %v", got.Attributes["rack"])
 	}
 }

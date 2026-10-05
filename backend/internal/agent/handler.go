@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -28,6 +30,7 @@ type MetricStore interface {
 
 // CIUpserter reconciles the endpoint into a CI (source "agent").
 type CIUpserter interface {
+	GetByID(ctx context.Context, orgID, id string) (*ci.Item, error)
 	List(ctx context.Context, orgID string, filter ci.FilterParams, page api.PaginationParams) ([]ci.Item, int, error)
 	Create(ctx context.Context, item *ci.Item) error
 	Update(ctx context.Context, orgID, id string, req ci.UpdateRequest) (*ci.Item, error)
@@ -51,6 +54,7 @@ type Handler struct {
 	typeResolve CITypeResolver
 	findings    FindingRecorder
 	tokens      TokenIssuer
+	guard       *override.Guard
 }
 
 // TokenIssuer signs the agent credential (implemented by
@@ -105,6 +109,13 @@ func NewHandler(repo Repository, metrics MetricStore, cis CIUpserter, typeResolv
 	if len(typeResolve) > 0 {
 		h.typeResolve = typeResolve[0]
 	}
+	return h
+}
+
+// WithFieldGuard sets the central write decision for agent updates
+// (AGT-05). Without one the rank table alone decides.
+func (h *Handler) WithFieldGuard(g *override.Guard) *Handler {
+	h.guard = g
 	return h
 }
 
@@ -373,20 +384,18 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 }
 
 // reconcileCI finds or creates the endpoint CI for the agent (source "agent")
-// and stores the software inventory in the CI attributes.
+// and stores the software inventory in the CI attributes. The CI linked to
+// the agent is the anchor; only an unlinked agent is matched by hostname,
+// and only when exactly one CI carries it (AGT-05). Every attribute of an
+// existing CI goes through the central write decision with rank 85.
 func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payload TelemetryPayload) (string, error) {
 	if h.cis == nil {
 		return "", nil
 	}
-	// Match an existing endpoint CI by hostname (the agent's stable identity).
-	existing, _, err := h.cis.List(ctx, orgID, ci.FilterParams{Search: ag.Hostname}, api.PaginationParams{Limit: 50})
-	if err != nil {
-		return "", err
-	}
 	attrs := map[string]any{
-		"agent_id":    ag.AgentID,
-		"os":          payload.OS,
-		"arch":        payload.Arch,
+		"agent_id":      ag.AgentID,
+		"os":            payload.OS,
+		"arch":          payload.Arch,
 		"agent_version": payload.Version,
 	}
 	if payload.SystemInfo != nil {
@@ -395,13 +404,23 @@ func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payl
 	if len(payload.Software) > 0 && ag.Policy.InventoryEnabled {
 		attrs["software_inventory"] = payload.Software
 	}
-	for _, item := range existing {
-		if strings.EqualFold(item.Hostname, ag.Hostname) || strings.EqualFold(item.Name, ag.Hostname) {
-			updated, err := h.cis.Update(ctx, orgID, item.ID, ci.UpdateRequest{Attributes: attrs})
-			if err != nil {
-				return "", err
-			}
-			return updated.ID, nil
+	target, err := h.anchorCI(ctx, orgID, ag)
+	if err != nil {
+		return "", err
+	}
+	if target != nil {
+		return target.ID, h.updateCI(ctx, orgID, target, attrs, payload.CollectedAt)
+	}
+	if ag.CIID == "" {
+		ambiguous, err := h.hostnameMatches(ctx, orgID, ag.Hostname)
+		if err != nil {
+			return "", err
+		}
+		if ambiguous > 1 {
+			// Several CIs carry the hostname: linking one would be a guess
+			// (CH29); the agent stays unlinked until an operator links it.
+			slog.WarnContext(ctx, "agent not linked: hostname matches several CIs", "agent", ag.AgentID, "hostname", ag.Hostname)
+			return "", nil
 		}
 	}
 	// No match: create the endpoint CI. The ci_type key resolves to the UUID
@@ -429,6 +448,85 @@ func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payl
 		return "", err
 	}
 	return item.ID, nil
+}
+
+// anchorCI returns the CI linked to the agent, or for an unlinked agent the
+// only CI carrying its hostname; nil when there is none.
+func (h *Handler) anchorCI(ctx context.Context, orgID string, ag *Agent) (*ci.Item, error) {
+	if ag.CIID != "" {
+		item, err := h.cis.GetByID(ctx, orgID, ag.CIID)
+		if err == nil {
+			return item, nil
+		}
+		// The linked CI is gone: the agent is reconciled afresh.
+		slog.WarnContext(ctx, "linked CI of the agent not found", "agent", ag.AgentID, "ci_id", ag.CIID, "error", err)
+		return nil, nil
+	}
+	matches, err := h.exactHostname(ctx, orgID, ag.Hostname)
+	if err != nil || len(matches) != 1 {
+		return nil, err
+	}
+	return &matches[0], nil
+}
+
+func (h *Handler) hostnameMatches(ctx context.Context, orgID, hostname string) (int, error) {
+	matches, err := h.exactHostname(ctx, orgID, hostname)
+	return len(matches), err
+}
+
+func (h *Handler) exactHostname(ctx context.Context, orgID, hostname string) ([]ci.Item, error) {
+	existing, _, err := h.cis.List(ctx, orgID, ci.FilterParams{Search: hostname}, api.PaginationParams{Limit: 50})
+	if err != nil {
+		return nil, err
+	}
+	var out []ci.Item
+	for i := range existing {
+		if strings.EqualFold(existing[i].Hostname, hostname) || strings.EqualFold(existing[i].Name, hostname) {
+			out = append(out, existing[i])
+		}
+	}
+	return out, nil
+}
+
+// updateCI writes the agent's attributes to an existing CI, each through
+// the central decision (source agent, rank 85); overrides and values of
+// higher-ranked sources stay. Unreadable override state writes nothing.
+func (h *Handler) updateCI(ctx context.Context, orgID string, item *ci.Item, attrs map[string]any, observedAt time.Time) error {
+	if observedAt.IsZero() {
+		observedAt = time.Now().UTC()
+	}
+	writes := map[string]any{}
+	var written []*override.Write
+	for k, v := range attrs {
+		if current, ok := item.Attributes[k]; ok && reflect.DeepEqual(current, v) {
+			continue
+		}
+		w := &override.Write{
+			OrganizationID: orgID, CIID: item.ID, Field: k, Value: v, Source: ci.SourceAgent,
+			ObservedAt: observedAt, Current: item.Attributes[k], FallbackSource: item.DiscoverySource,
+		}
+		d := h.guard.Decide(ctx, w)
+		if d.Write {
+			writes[k] = v
+		}
+		if d.Write || d.Conflict || d.Reason == override.ReasonOverride {
+			written = append(written, w)
+		}
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	req := ci.UpdateRequest{LastSeenAt: &now}
+	if len(writes) > 0 {
+		req.Attributes = writes
+	}
+	if _, err := h.cis.Update(ctx, orgID, item.ID, req); err != nil {
+		return err
+	}
+	for _, w := range written {
+		if err := h.guard.Record(ctx, w); err != nil {
+			slog.WarnContext(ctx, "agent provenance not recorded", "ci_id", item.ID, "field", w.Field, "error", err)
+		}
+	}
+	return nil
 }
 
 // recordFindings turns software inventory entries that are marked vulnerable
