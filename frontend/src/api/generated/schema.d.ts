@@ -4529,7 +4529,10 @@ export interface paths {
     get: operations['getLocation'];
     put?: never;
     post?: never;
-    /** Delete a leaf node */
+    /**
+     * Delete a leaf node
+     * @description Refused with 409 while the node has child locations or CIs, assets, stock items, movements, rack mounts or role assignments reference it (LOC-11). Deleting a site, building, room or rack through its own endpoint checks the whole subtree.
+     */
     delete: operations['deleteLocation'];
     options?: never;
     head?: never;
@@ -6278,6 +6281,17 @@ export interface components {
         detail: string;
       }[];
     };
+    DependencyProblem: components['schemas']['ProblemDetail'] & {
+      dependencies: (
+        | 'location'
+        | 'ci'
+        | 'asset'
+        | 'quantity_item'
+        | 'asset_movement'
+        | 'rack_mount'
+        | 'role_assignment'
+      )[];
+    };
     /** @enum {string} */
     LocationKind: 'site' | 'building' | 'room' | 'rack' | 'warehouse' | 'zone' | 'shelf' | 'bin';
     Location: {
@@ -7478,6 +7492,15 @@ export interface components {
       };
       content: {
         'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description The location or its subtree is still referenced; dependencies lists the kinds of referencing objects */
+    LocationInUse: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['DependencyProblem'];
       };
     };
     /** @description The request violates the parent matrix or a field rule; violations name the field */
@@ -12066,6 +12089,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['LocationInUse'];
     };
   };
   updateSite: {
@@ -12202,6 +12226,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['LocationInUse'];
     };
   };
   updateBuilding: {
@@ -12338,6 +12363,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['LocationInUse'];
     };
   };
   updateRoom: {
@@ -12474,6 +12500,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['LocationInUse'];
     };
   };
   updateRack: {
@@ -18837,7 +18864,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
+      409: components['responses']['LocationInUse'];
     };
   };
   updateLocation: {

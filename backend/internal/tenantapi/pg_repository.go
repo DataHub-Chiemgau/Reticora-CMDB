@@ -8,6 +8,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -171,6 +172,29 @@ func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, visible, id
 	})
 }
 
+// deleteLocation deletes a site, building or room row, which cascades to
+// its subtree of the location tree. Objects that reference the subtree keep
+// it: the delete is refused with a *locations.DependencyError (LOC-11).
+func (r *PGRepository) deleteLocation(ctx context.Context, orgID, table, visible, id string) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var found bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE organization_id = $1 AND id::text = $2 AND "+visible+")",
+			orgID, id).Scan(&found); err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("not found")
+		}
+		if err := locations.CheckDeletable(ctx, tx, id, true); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE organization_id = $1 AND id = $2", orgID, id); err != nil {
+			return locations.DeleteError(err)
+		}
+		return nil
+	})
+}
+
 // --- Sites ---
 
 const siteCols = `id::text, organization_id::text, client_id::text, name, COALESCE(address,''), geo_lat, geo_lon, COALESCE(notes,''), created_at, updated_at`
@@ -288,7 +312,7 @@ func (r *PGRepository) UpdateSite(ctx context.Context, orgID, id string, req Upd
 }
 
 func (r *PGRepository) DeleteSite(ctx context.Context, orgID, id string) error {
-	return r.deleteByID(ctx, orgID, "site", "true", id)
+	return r.deleteLocation(ctx, orgID, "site", "true", id)
 }
 
 // --- Buildings ---
@@ -405,7 +429,7 @@ func (r *PGRepository) UpdateBuilding(ctx context.Context, orgID, id string, req
 }
 
 func (r *PGRepository) DeleteBuilding(ctx context.Context, orgID, id string) error {
-	return r.deleteByID(ctx, orgID, "building", buildingVisible, id)
+	return r.deleteLocation(ctx, orgID, "building", buildingVisible, id)
 }
 
 // --- Rooms ---
@@ -540,5 +564,5 @@ func (r *PGRepository) UpdateRoom(ctx context.Context, orgID, id string, req Upd
 }
 
 func (r *PGRepository) DeleteRoom(ctx context.Context, orgID, id string) error {
-	return r.deleteByID(ctx, orgID, "room", roomVisible, id)
+	return r.deleteLocation(ctx, orgID, "room", roomVisible, id)
 }

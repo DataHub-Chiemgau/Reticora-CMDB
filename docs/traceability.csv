@@ -167,3 +167,4 @@ LOC-10;B/G1;B;backend/internal/locations/tree_test.go;WP-053
 LOC-07;B/G1;B;backend/internal/locations/tree_test.go;WP-053
 LOC-10;B/G1;B;backend/internal/ci/location_integration_test.go;WP-054
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/location_integration_test.go;WP-054
+LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-055

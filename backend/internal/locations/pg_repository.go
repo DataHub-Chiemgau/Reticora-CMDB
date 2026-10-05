@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -58,8 +60,10 @@ func (r *PGRepository) Create(ctx context.Context, orgID string, req CreateReque
 			}
 			return withField(field, mapError(fmt.Errorf("create %s: %w", req.Kind, err)))
 		}
-		out, err = get(ctx, tx, id)
-		return err
+		if out, err = get(ctx, tx, id); err != nil {
+			return err
+		}
+		return recordAudit(ctx, tx, "location.created", out, map[string]any{"after": out})
 	})
 	return out, err
 }
@@ -133,12 +137,16 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if cur.Kind.HasSpecialistTable() {
 			table = string(cur.Kind)
 		}
-		if req.Name != nil {
+		if req.Name != nil && *req.Name != cur.Name {
 			if err = exec(ctx, tx, fmt.Sprintf(`UPDATE %s SET name = $2 WHERE id = $1`, table), id, *req.Name); err != nil {
 				return withField("name", mapError(fmt.Errorf("rename location: %w", err)))
 			}
+			if auditErr := recordAudit(ctx, tx, "location.renamed", cur, map[string]any{"name": map[string]any{"old": cur.Name, "new": *req.Name}}); auditErr != nil {
+				return auditErr
+			}
 		}
-		if req.ParentID != nil {
+		moved := req.ParentID != nil && *req.ParentID != cur.ParentID
+		if moved {
 			column := "parent_id"
 			switch {
 			case cur.Kind == KindSite:
@@ -150,8 +158,18 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 				return withField("parent_id", mapError(fmt.Errorf("move location: %w", err)))
 			}
 		}
-		out, err = get(ctx, tx, id)
-		return err
+		if out, err = get(ctx, tx, id); err != nil {
+			return err
+		}
+		if moved {
+			// The database rewrote the paths of the subtree and recorded the
+			// move in location_change (migration 000075).
+			return recordAudit(ctx, tx, "location.moved", out, map[string]any{
+				"parent_id": map[string]any{"old": cur.ParentID, "new": out.ParentID},
+				"path":      map[string]any{"old": cur.Path, "new": out.Path},
+			})
+		}
+		return nil
 	})
 	return out, err
 }
@@ -201,24 +219,20 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter Filter) ([
 // specialist row goes with the location row (ON DELETE CASCADE).
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := get(ctx, tx, id); err != nil {
+		cur, err := get(ctx, tx, id)
+		if err != nil {
 			return err
 		}
-		var children bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM location WHERE parent_id = $1)`, id).Scan(&children); err != nil {
-			return fmt.Errorf("location children: %w", err)
+		if depErr := CheckDeletable(ctx, tx, id, false); depErr != nil {
+			return depErr
 		}
-		if children {
-			return ErrHasChildren
-		}
-		if _, err := tx.Exec(ctx, `DELETE FROM location WHERE id = $1`, id); err != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-				return fmt.Errorf("%w: %s", ErrInUse, pgErr.Message)
+		if _, err = tx.Exec(ctx, `DELETE FROM location WHERE id = $1`, id); err != nil {
+			if mapped := DeleteError(err); mapped != err {
+				return mapped
 			}
 			return fmt.Errorf("delete location: %w", err)
 		}
-		return nil
+		return recordAudit(ctx, tx, "location.deleted", cur, map[string]any{"before": cur})
 	})
 }
 
@@ -276,4 +290,26 @@ func mapError(err error) error {
 		return fmt.Errorf("%w: malformed id", ErrInvalidInput)
 	}
 	return err
+}
+
+// recordAudit writes the audit entry of a location change in the same
+// transaction (DOD-01).
+func recordAudit(ctx context.Context, tx pgx.Tx, action string, loc *Location, changes map[string]any) error {
+	actor := strings.TrimSpace(tenant.FromContext(ctx).UserID)
+	actorType := "system"
+	if actor != "" {
+		actorType = "user"
+	}
+	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+		OrganizationID: loc.OrganizationID,
+		ActorID:        actor,
+		ActorType:      actorType,
+		Action:         action,
+		ResourceType:   "location",
+		ResourceID:     loc.ID,
+		Changes:        changes,
+	}); err != nil {
+		return fmt.Errorf("record audit: %w", err)
+	}
+	return nil
 }
