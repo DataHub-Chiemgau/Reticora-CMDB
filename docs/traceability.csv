@@ -186,3 +186,7 @@ API-03;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-061
 NFR-04;[B], Teilumfang [P5];D;backend/internal/maintenance/status_test.go;WP-063
 MGT-04;[P3];D;backend/internal/maintenance/status_test.go;WP-063
 NTF-05;[B], Zusätze [P2], [P3];D;backend/internal/maintenance/status_test.go;WP-063
+TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-064
+DB-04;nicht geliefert;B;backend/internal/database/role_check_integration_test.go;WP-064
+TEN-09;[Q];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-065
+TST-02;[B];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-065

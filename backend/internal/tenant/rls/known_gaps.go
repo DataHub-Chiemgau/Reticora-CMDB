@@ -11,6 +11,9 @@ const (
 	// RuleRLSEnabled: ENABLE ROW LEVEL SECURITY (pg_class.relrowsecurity).
 	RuleRLSEnabled Rule = "rls-enabled"
 	// RuleRLSForced: FORCE ROW LEVEL SECURITY (pg_class.relforcerowsecurity).
+	// The tables belong to reticora_owner, which reticora_app may SET ROLE to
+	// for runtime index DDL (migration 000078); FORCE binds the owner to the
+	// policies as well. database.VerifyRoleContract checks the same at startup.
 	RuleRLSForced Rule = "rls-forced"
 	// RuleCommands: SELECT, INSERT, UPDATE and DELETE are each covered by a
 	// permissive policy.
@@ -87,6 +90,10 @@ type Gap struct {
 // version: new tables have to meet all rules and must not be added here.
 const KnownGapsBaselineMigration = 57
 
+// The list is empty (WP-065): every rule holds for every tenant table, and
+// the behavioral matrix (matrix_integration_test.go) confirms the policies
+// with real statements of the application role per scope and command.
+//
 // KnownGaps lists every rule violation of the migrated schema at
 // KnownGapsBaselineMigration. The catalog test fails for violations missing
 // here and for entries that no longer occur, so the list only shrinks: the
