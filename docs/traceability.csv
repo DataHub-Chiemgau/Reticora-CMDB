@@ -199,3 +199,5 @@ RBA-08;[B];B;backend/internal/user/service_account_integration_test.go;WP-069
 API-05;[B];B;backend/internal/user/service_account_integration_test.go;WP-069
 SEC-07;[B];B;backend/internal/operator/operator_test.go;WP-070
 API-05;[B];B;backend/internal/operator/operator_test.go;WP-070
+ENT-01;[B];B;backend/internal/entitlement/entitlement_test.go;WP-071
+ENT-02;[B];B;backend/internal/entitlement/entitlement_test.go;WP-071

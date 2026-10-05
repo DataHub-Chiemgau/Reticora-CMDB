@@ -37,7 +37,7 @@ var gatedRoutes = []struct {
 	{"/api/v1/desk-bookings", FeatureInventory},
 	{"/api/v1/tickets", FeatureTicketing},
 	{"/api/v1/webhooks", FeatureWebhooks},
-	{"/api/v1/exports", FeatureExport},
+	{"/api/v1/exports", FeatureExportCSV},
 	{"/api/v1/monitoring", FeatureMonitoring},
 	{"/api/v1/metrics", FeatureMonitoring},
 	{"/api/v1/forms", FeatureWorkflowForms},

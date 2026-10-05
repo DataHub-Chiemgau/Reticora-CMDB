@@ -5583,29 +5583,49 @@ export interface components {
     };
     /** @enum {string} */
     EntitlementPlan: 'essential' | 'standard' | 'pro' | 'enterprise';
+    /** @description Entitlement of a feature (ENT-01). Phase-1 feature keys (ENT-02): cmdb_core (always active), discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email. */
     Entitlement: {
       organization_id: string;
       feature_key: string;
       plan: components['schemas']['EntitlementPlan'];
-      /** @description Maximum number of records for the feature. 0 means unlimited. */
-      limit?: number;
       enabled: boolean;
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys. A missing quota uses the plan default. */
+      limits: {
+        [key: string]: number;
+      };
       /** Format: date-time */
-      expires_at?: string;
+      valid_until?: string;
+      /** @enum {string} */
+      source: 'manual' | 'selfsignup' | 'billing' | 'reseller';
     };
     EntitlementCheckResponse: {
       feature: string;
       plan: components['schemas']['EntitlementPlan'];
       enabled: boolean;
-      limit?: number;
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys. A missing quota uses the plan default. */
+      limits?: {
+        [key: string]: number;
+      };
     };
     GrantEntitlementRequest: {
       feature_key: string;
       plan?: components['schemas']['EntitlementPlan'];
+      /** @description cmdb_core cannot be disabled (422). */
       enabled?: boolean;
-      limit?: number;
-      /** Format: date-time */
-      expires_at?: string;
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys. A missing quota uses the plan default. */
+      limits?: {
+        [key: string]: number;
+      };
+      /**
+       * Format: date-time
+       * @description Not allowed for cmdb_core (422).
+       */
+      valid_until?: string;
+      /**
+       * @default manual
+       * @enum {string}
+       */
+      source: 'manual' | 'selfsignup' | 'billing' | 'reseller';
     };
     EntitlementListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Entitlement'][];
@@ -9240,6 +9260,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description cmdb_core disabled or limited in time, unknown source or negative limit */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   checkEntitlement: {

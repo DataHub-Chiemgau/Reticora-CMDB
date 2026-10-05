@@ -1,6 +1,7 @@
 package entitlement
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -50,11 +51,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 type grantRequest struct {
-	FeatureKey string     `json:"feature_key"`
-	Plan       Plan       `json:"plan"`
-	Enabled    *bool      `json:"enabled,omitempty"`
-	Limit      *int64     `json:"limit,omitempty"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	FeatureKey string           `json:"feature_key"`
+	Plan       Plan             `json:"plan"`
+	Enabled    *bool            `json:"enabled,omitempty"`
+	Limits     map[string]int64 `json:"limits,omitempty"`
+	ValidUntil *time.Time       `json:"valid_until,omitempty"`
+	Source     string           `json:"source,omitempty"`
 }
 
 // Grant handles POST /api/v1/entitlements.
@@ -88,9 +90,15 @@ func (h *Handler) Grant(w http.ResponseWriter, r *http.Request) {
 		FeatureKey:     req.FeatureKey,
 		Plan:           req.Plan,
 		Enabled:        enabled,
-		Limit:          req.Limit,
-		ExpiresAt:      req.ExpiresAt,
+		Limits:         req.Limits,
+		ValidUntil:     req.ValidUntil,
+		Source:         req.Source,
 	})
+	var validation *ValidationError
+	if errors.As(err, &validation) {
+		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", validation.Error())
+		return
+	}
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -123,6 +131,6 @@ func (h *Handler) Check(w http.ResponseWriter, r *http.Request) {
 		"feature": feature,
 		"enabled": enabled,
 		"plan":    ent.Plan,
-		"limit":   ent.Limit,
+		"limits":  ent.Limits,
 	})
 }

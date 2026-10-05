@@ -2,6 +2,7 @@ package entitlement
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -66,7 +67,7 @@ func TestDisabledAndExpiredEntitlementsDeny(t *testing.T) {
 		FeatureKey:     FeatureIGA,
 		Plan:           PlanEnterprise,
 		Enabled:        true,
-		ExpiresAt:      &expired,
+		ValidUntil:     &expired,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -82,19 +83,19 @@ func TestAllowCreateEnforcesLimit(t *testing.T) {
 	limit := int64(2)
 	if _, err := svc.Grant(ctx, Entitlement{
 		OrganizationID: "org-1",
-		FeatureKey:     FeatureCMDB,
+		FeatureKey:     FeatureCMDBCore,
 		Plan:           PlanEssential,
 		Enabled:        true,
-		Limit:          &limit,
+		Limits:         map[string]int64{LimitMaxCIs: limit},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := svc.AllowCreate(ctx, "org-1", FeatureCMDB, 1); err != nil {
+	if err := svc.AllowCreate(ctx, "org-1", LimitMaxCIs, 1); err != nil {
 		t.Fatalf("expected creation below the limit to be allowed: %v", err)
 	}
 
-	err := svc.AllowCreate(ctx, "org-1", FeatureCMDB, 2)
+	err := svc.AllowCreate(ctx, "org-1", LimitMaxCIs, 2)
 	if err == nil {
 		t.Fatal("expected the limit to be enforced")
 	}
@@ -114,7 +115,7 @@ func TestEnforcementDisabledAllowsEverything(t *testing.T) {
 	if !svc.IsEnabled(ctx, "org-1", FeatureIGA) {
 		t.Error("expected all features to be available when enforcement is off")
 	}
-	if err := svc.AllowCreate(ctx, "org-1", FeatureCMDB, 1_000_000); err != nil {
+	if err := svc.AllowCreate(ctx, "org-1", LimitMaxCIs, 1_000_000); err != nil {
 		t.Errorf("expected limits to be ignored when enforcement is off: %v", err)
 	}
 }
@@ -147,4 +148,70 @@ func asLimitError(err error, target **LimitExceededError) bool {
 		*target = limitErr
 	}
 	return ok
+}
+
+// TestPhase1FeaturesAndQuotas covers WP-071 (ENT-01, ENT-02): every plan
+// includes the eight phase-1 features; the quotas default to the plan values
+// of ENT-06 and stored limits replace them; cmdb_core cannot be disabled or
+// limited in time and stays active; sources are restricted to ENT-01.
+func TestPhase1FeaturesAndQuotas(t *testing.T) {
+	ctx := context.Background()
+	want := []string{"cmdb_core", "discovery", "topology", "rack_view", "export_csv", "webhooks", "api_access", "notifications_email"}
+	for _, plan := range []Plan{PlanEssential, PlanStandard, PlanPro, PlanEnterprise} {
+		svc := testService(t, plan)
+		for _, f := range want {
+			if !svc.IsEnabled(ctx, "org-1", f) {
+				t.Errorf("plan %s lacks the phase-1 feature %s", plan, f)
+			}
+		}
+	}
+	if len(Quotas) != 4 || Quotas[0] != "max_cis" || Quotas[1] != "max_collectors" || Quotas[2] != "max_users" || Quotas[3] != "max_api_keys" {
+		t.Errorf("quotas %v", Quotas)
+	}
+
+	svc := testService(t, PlanStandard)
+	for quota, want := range map[string]*int64{LimitMaxCIs: ptr(2500), LimitMaxCollectors: ptr(5), LimitMaxUsers: ptr(25), LimitMaxAPIKeys: nil} {
+		got, err := svc.Quota(ctx, "org-1", quota)
+		if err != nil || (got == nil) != (want == nil) || (got != nil && *got != *want) {
+			t.Errorf("default quota %s = %v, %v; want %v", quota, deref(got), err, deref(want))
+		}
+	}
+	if err := svc.AllowCreate(ctx, "org-1", LimitMaxCollectors, 5); err == nil {
+		t.Error("sixth collector of the standard plan allowed")
+	}
+	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureDiscovery, Plan: PlanStandard, Enabled: true,
+		Limits: map[string]int64{LimitMaxCollectors: 8}, Source: "billing"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.Quota(ctx, "org-1", LimitMaxCollectors); got == nil || *got != 8 {
+		t.Errorf("stored quota %v, want 8", deref(got))
+	}
+	if err := svc.AllowCreate(ctx, "org-1", "max_unknown", 0); err == nil {
+		t.Error("unknown quota accepted")
+	}
+
+	expired := time.Now().Add(-time.Hour)
+	for name, ent := range map[string]Entitlement{
+		"disabled core": {OrganizationID: "org-1", FeatureKey: FeatureCMDBCore, Enabled: false},
+		"expiring core": {OrganizationID: "org-1", FeatureKey: FeatureCMDBCore, Enabled: true, ValidUntil: &expired},
+		"bad source":    {OrganizationID: "org-1", FeatureKey: FeatureWebhooks, Enabled: true, Source: "gift"},
+		"negative":      {OrganizationID: "org-1", FeatureKey: FeatureWebhooks, Enabled: true, Limits: map[string]int64{"limit": -1}},
+	} {
+		var validation *ValidationError
+		if _, err := svc.Grant(ctx, ent); !errors.As(err, &validation) {
+			t.Errorf("%s: %v, want a validation error", name, err)
+		}
+	}
+	if !svc.IsEnabled(ctx, "org-1", FeatureCMDBCore) {
+		t.Error("cmdb_core not active")
+	}
+}
+
+func ptr(v int64) *int64 { return &v }
+
+func deref(v *int64) any {
+	if v == nil {
+		return "unlimited"
+	}
+	return *v
 }

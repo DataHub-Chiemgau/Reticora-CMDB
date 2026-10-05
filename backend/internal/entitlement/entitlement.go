@@ -1,15 +1,18 @@
 // Package entitlement provides the entitlement/licensing service.
 // It controls which modules and feature limits are available per tenant.
 //
-// Entitlements are stored per organization in the `entitlement` table. Tenants
-// without any stored rows fall back to the configured default plan, so a fresh
-// organization is always usable while still being restricted to the feature set
-// of its plan.
+// Entitlements are stored per organization in the `entitlement` table
+// (ENT-01): one row per feature with enabled, limits (named quotas),
+// valid_until and source. Tenants without stored rows fall back to the
+// configured default plan, so a fresh organization is always usable while
+// still being restricted to the feature set and quotas of its plan.
 package entitlement
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -25,17 +28,32 @@ const (
 	PlanEnterprise Plan = "enterprise"
 )
 
-// Feature keys gated by the entitlement service. They mirror the product
-// modules described in the README (section 13).
+// Feature keys of phase 1 (ENT-02). cmdb_core is always active.
 const (
-	FeatureCMDB          = "cmdb"
-	FeatureDiscovery     = "discovery"
+	FeatureCMDBCore           = "cmdb_core"
+	FeatureDiscovery          = "discovery"
+	FeatureTopology           = "topology"
+	FeatureRackView           = "rack_view"
+	FeatureExportCSV          = "export_csv"
+	FeatureWebhooks           = "webhooks"
+	FeatureAPIAccess          = "api_access"
+	FeatureNotificationsEmail = "notifications_email"
+)
+
+// Phase1Features are the feature keys of ENT-02; every plan includes them
+// (ENT-06).
+var Phase1Features = []string{
+	FeatureCMDBCore, FeatureDiscovery, FeatureTopology, FeatureRackView,
+	FeatureExportCSV, FeatureWebhooks, FeatureAPIAccess, FeatureNotificationsEmail,
+}
+
+// Module feature keys of later phases (RBA-05, ENT-06); they gate the modules
+// already present in the code.
+const (
 	FeatureInventory     = "inventory"
 	FeatureDocuments     = "documents"
 	FeatureStocktake     = "stocktake"
 	FeatureTicketing     = "ticketing"
-	FeatureWebhooks      = "webhooks"
-	FeatureExport        = "export"
 	FeatureMonitoring    = "monitoring"
 	FeatureIGA           = "iga"
 	FeatureEndpointAgent = "endpoint_agent"
@@ -44,60 +62,66 @@ const (
 	FeatureAIAssistant   = "ai_assistant"
 )
 
-// planFeatures maps a plan to the features it includes. Higher plans are
-// supersets of the lower ones.
+// Quotas of ENT-02, stored in limits.
+const (
+	LimitMaxCIs        = "max_cis"
+	LimitMaxCollectors = "max_collectors"
+	LimitMaxUsers      = "max_users"
+	LimitMaxAPIKeys    = "max_api_keys"
+)
+
+// Quotas are the quota keys of ENT-02.
+var Quotas = []string{LimitMaxCIs, LimitMaxCollectors, LimitMaxUsers, LimitMaxAPIKeys}
+
+// QuotaFeature is the feature a quota belongs to: the quota is stored in the
+// limits of that feature's row, and a quota of a feature the organization is
+// not entitled to allows nothing.
+var QuotaFeature = map[string]string{
+	LimitMaxCIs:        FeatureCMDBCore,
+	LimitMaxCollectors: FeatureDiscovery,
+	LimitMaxUsers:      FeatureCMDBCore,
+	LimitMaxAPIKeys:    FeatureAPIAccess,
+}
+
+// planQuotas are the default quotas per plan (ENT-06, V); a missing quota is
+// unlimited.
+var planQuotas = map[Plan]map[string]int64{
+	PlanEssential:  {LimitMaxCIs: 500, LimitMaxCollectors: 2, LimitMaxUsers: 5},
+	PlanStandard:   {LimitMaxCIs: 2500, LimitMaxCollectors: 5, LimitMaxUsers: 25},
+	PlanPro:        {LimitMaxCIs: 10000, LimitMaxCollectors: 20, LimitMaxUsers: 100},
+	PlanEnterprise: {LimitMaxCIs: 50000},
+}
+
+// Sources of an entitlement row (ENT-01).
+var Sources = []string{"manual", "selfsignup", "billing", "reseller"}
+
+// planFeatures maps a plan to the features it includes. Every plan includes
+// the phase-1 features; higher plans add modules.
 var planFeatures = map[Plan][]string{
-	PlanEssential: {
-		FeatureCMDB,
-		FeatureDiscovery,
-		FeatureInventory,
-	},
-	PlanStandard: {
-		FeatureCMDB,
-		FeatureDiscovery,
-		FeatureInventory,
-		FeatureDocuments,
-		FeatureStocktake,
-		FeatureTicketing,
-		FeatureExport,
-		FeatureWebhooks,
-	},
-	PlanPro: {
-		FeatureCMDB,
-		FeatureDiscovery,
-		FeatureInventory,
-		FeatureDocuments,
-		FeatureStocktake,
-		FeatureTicketing,
-		FeatureExport,
-		FeatureWebhooks,
-		FeatureMonitoring,
-		FeatureWorkflowForms,
-		FeatureAIAssistant,
-	},
-	PlanEnterprise: {
-		FeatureCMDB,
-		FeatureDiscovery,
-		FeatureInventory,
-		FeatureDocuments,
-		FeatureStocktake,
-		FeatureTicketing,
-		FeatureExport,
-		FeatureWebhooks,
-		FeatureMonitoring,
-		FeatureIGA,
-		FeatureEndpointAgent,
-		FeatureWorkflowForms,
-		FeatureCompliance,
-		FeatureAIAssistant,
-	},
+	PlanEssential: append(slices.Clone(Phase1Features),
+		FeatureInventory),
+	PlanStandard: append(slices.Clone(Phase1Features),
+		FeatureInventory, FeatureDocuments, FeatureStocktake, FeatureTicketing),
+	PlanPro: append(slices.Clone(Phase1Features),
+		FeatureInventory, FeatureDocuments, FeatureStocktake, FeatureTicketing,
+		FeatureMonitoring, FeatureWorkflowForms, FeatureAIAssistant),
+	PlanEnterprise: append(slices.Clone(Phase1Features),
+		FeatureInventory, FeatureDocuments, FeatureStocktake, FeatureTicketing,
+		FeatureMonitoring, FeatureIGA, FeatureEndpointAgent, FeatureWorkflowForms,
+		FeatureCompliance, FeatureAIAssistant),
 }
 
 // PlanFeatures returns the feature keys included in the given plan.
 func PlanFeatures(plan Plan) []string {
-	features := planFeatures[normalizePlan(plan)]
-	out := make([]string, len(features))
-	copy(out, features)
+	return slices.Clone(planFeatures[normalizePlan(plan)])
+}
+
+// PlanQuotas returns the default quotas of the plan.
+func PlanQuotas(plan Plan) map[string]int64 {
+	out := map[string]int64{}
+	for k, v := range planQuotas[normalizePlan(plan)] {
+		out[k] = v
+	}
 	return out
 }
 
@@ -114,26 +138,68 @@ func normalizePlan(plan Plan) Plan {
 	}
 }
 
-// Entitlement represents a feature entitlement for a tenant.
+// Entitlement represents a feature entitlement for a tenant (ENT-01).
 type Entitlement struct {
-	OrganizationID string     `json:"organization_id"`
-	FeatureKey     string     `json:"feature_key"`
-	Plan           Plan       `json:"plan"`
-	Limit          *int64     `json:"limit,omitempty"` // nil = unlimited
-	Enabled        bool       `json:"enabled"`
-	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
-	UpdatedAt      time.Time  `json:"updated_at,omitempty"`
+	OrganizationID string `json:"organization_id"`
+	FeatureKey     string `json:"feature_key"`
+	Plan           Plan   `json:"plan"`
+	Enabled        bool   `json:"enabled"`
+	// Limits are named quotas (max_cis, ...); a missing quota falls back to
+	// the plan default.
+	Limits     map[string]int64 `json:"limits"`
+	ValidUntil *time.Time       `json:"valid_until,omitempty"`
+	// Source is manual, selfsignup, billing or reseller.
+	Source    string    `json:"source"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
 // active reports whether the entitlement grants access at the given time.
-func (e Entitlement) active(now time.Time) bool {
+// cmdb_core is always active (ENT-02).
+func (e *Entitlement) active(now time.Time) bool {
+	if e.FeatureKey == FeatureCMDBCore {
+		return true
+	}
 	if !e.Enabled {
 		return false
 	}
-	if e.ExpiresAt != nil && !now.Before(*e.ExpiresAt) {
+	if e.ValidUntil != nil && !now.Before(*e.ValidUntil) {
 		return false
 	}
 	return true
+}
+
+// ErrCoreNotDeactivatable is returned when cmdb_core would be disabled or
+// limited in time.
+var ErrCoreNotDeactivatable = errors.New("cmdb_core is always active and cannot be disabled or expire")
+
+// ValidationError is an entitlement that cannot be stored as given.
+type ValidationError struct{ err error }
+
+func (e *ValidationError) Error() string { return e.err.Error() }
+func (e *ValidationError) Unwrap() error { return e.err }
+
+func invalid(err error) error { return &ValidationError{err: err} }
+
+// Validate checks an entitlement before it is stored.
+func (e *Entitlement) Validate() error {
+	if strings.TrimSpace(e.FeatureKey) == "" {
+		return invalid(errors.New("feature_key is required"))
+	}
+	if e.FeatureKey == FeatureCMDBCore && (!e.Enabled || e.ValidUntil != nil) {
+		return invalid(ErrCoreNotDeactivatable)
+	}
+	if e.Source == "" {
+		e.Source = "manual"
+	}
+	if !slices.Contains(Sources, e.Source) {
+		return invalid(fmt.Errorf("source must be one of %s", strings.Join(Sources, ", ")))
+	}
+	for k, v := range e.Limits {
+		if v < 0 {
+			return invalid(fmt.Errorf("limit %s must not be negative", k))
+		}
+	}
+	return nil
 }
 
 // LimitExceededError is returned when a tenant exceeds a licensed limit.
@@ -228,7 +294,8 @@ func (s *Service) Check(ctx context.Context, orgID, featureKey string) (Entitlem
 	}
 
 	now := s.now()
-	for _, ent := range stored {
+	for i := range stored {
+		ent := stored[i]
 		if ent.FeatureKey != featureKey {
 			continue
 		}
@@ -238,17 +305,33 @@ func (s *Service) Check(ctx context.Context, orgID, featureKey string) (Entitlem
 		return ent, ent.active(now), nil
 	}
 
-	implied := Entitlement{
-		OrganizationID: orgID,
-		FeatureKey:     featureKey,
-		Plan:           s.opts.DefaultPlan,
-		Enabled:        planIncludes(s.opts.DefaultPlan, featureKey),
-	}
+	implied := s.implied(orgID, featureKey)
 	if !s.opts.Enforce {
 		implied.Enabled = true
 		return implied, true, nil
 	}
 	return implied, implied.Enabled, nil
+}
+
+// implied is the entitlement the default plan gives a feature.
+func (s *Service) implied(orgID, featureKey string) Entitlement {
+	ent := Entitlement{
+		OrganizationID: orgID,
+		FeatureKey:     featureKey,
+		Plan:           s.opts.DefaultPlan,
+		Enabled:        featureKey == FeatureCMDBCore || planIncludes(s.opts.DefaultPlan, featureKey),
+		Limits:         map[string]int64{},
+		Source:         "manual",
+	}
+	for quota, feature := range QuotaFeature {
+		if feature != featureKey {
+			continue
+		}
+		if v, ok := planQuotas[s.opts.DefaultPlan][quota]; ok {
+			ent.Limits[quota] = v
+		}
+	}
+	return ent
 }
 
 // IsEnabled reports whether a feature is available for the organization.
@@ -262,24 +345,50 @@ func (s *Service) IsEnabled(ctx context.Context, orgID, featureKey string) bool 
 	return ok
 }
 
-// AllowCreate enforces the numeric limit of a feature before another resource is
-// created. current is the number of resources already stored.
-func (s *Service) AllowCreate(ctx context.Context, orgID, featureKey string, current int64) error {
-	ent, ok, err := s.Check(ctx, orgID, featureKey)
+// Quota returns the quota of the organization: the value stored in the
+// limits of the quota's feature, else the plan default; nil is unlimited.
+func (s *Service) Quota(ctx context.Context, orgID, quota string) (*int64, error) {
+	feature, ok := QuotaFeature[quota]
+	if !ok {
+		return nil, fmt.Errorf("unknown quota %q", quota)
+	}
+	ent, _, err := s.Check(ctx, orgID, feature)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if v, ok := ent.Limits[quota]; ok {
+		return &v, nil
+	}
+	if v, ok := planQuotas[normalizePlan(ent.Plan)][quota]; ok {
+		return &v, nil
+	}
+	return nil, nil
+}
+
+// AllowCreate enforces a quota (max_cis, max_collectors, max_users,
+// max_api_keys) before another resource is created. current is the number
+// of resources already stored.
+func (s *Service) AllowCreate(ctx context.Context, orgID, quota string, current int64) error {
+	feature, ok := QuotaFeature[quota]
+	if !ok {
+		return fmt.Errorf("unknown quota %q", quota)
 	}
 	if !s.opts.Enforce {
 		return nil
 	}
-	if !ok {
-		return &FeatureNotEntitledError{FeatureKey: featureKey}
+	_, entitled, err := s.Check(ctx, orgID, feature)
+	if err != nil {
+		return err
 	}
-	if ent.Limit == nil {
-		return nil
+	if !entitled {
+		return &FeatureNotEntitledError{FeatureKey: feature}
 	}
-	if current >= *ent.Limit {
-		return &LimitExceededError{FeatureKey: featureKey, Limit: *ent.Limit, Current: current}
+	limit, err := s.Quota(ctx, orgID, quota)
+	if err != nil {
+		return err
+	}
+	if limit != nil && current >= *limit {
+		return &LimitExceededError{FeatureKey: quota, Limit: *limit, Current: current}
 	}
 	return nil
 }
@@ -289,8 +398,11 @@ func (s *Service) Grant(ctx context.Context, ent Entitlement) (Entitlement, erro
 	if ent.OrganizationID == "" {
 		return Entitlement{}, fmt.Errorf("organization is required")
 	}
-	if strings.TrimSpace(ent.FeatureKey) == "" {
-		return Entitlement{}, fmt.Errorf("feature_key is required")
+	if err := ent.Validate(); err != nil {
+		return Entitlement{}, err
+	}
+	if ent.Limits == nil {
+		ent.Limits = map[string]int64{}
 	}
 	ent.Plan = normalizePlan(ent.Plan)
 	ent.UpdatedAt = s.now()
@@ -339,7 +451,8 @@ func (s *Service) effective(orgID string, stored []Entitlement) []Entitlement {
 	seen := make(map[string]bool, len(stored))
 	out := make([]Entitlement, 0, len(stored))
 
-	for _, ent := range stored {
+	for i := range stored {
+		ent := stored[i]
 		seen[ent.FeatureKey] = true
 		if s.opts.Enforce {
 			ent.Enabled = ent.active(now)
@@ -353,22 +466,14 @@ func (s *Service) effective(orgID string, stored []Entitlement) []Entitlement {
 		if seen[feature] {
 			continue
 		}
-		out = append(out, Entitlement{
-			OrganizationID: orgID,
-			FeatureKey:     feature,
-			Plan:           s.opts.DefaultPlan,
-			Enabled:        true,
-		})
+		ent := s.implied(orgID, feature)
+		ent.Enabled = true
+		out = append(out, ent)
 	}
 
 	return out
 }
 
 func planIncludes(plan Plan, featureKey string) bool {
-	for _, feature := range planFeatures[normalizePlan(plan)] {
-		if feature == featureKey {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(planFeatures[normalizePlan(plan)], featureKey)
 }

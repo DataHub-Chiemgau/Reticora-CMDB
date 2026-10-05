@@ -26,7 +26,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string) ([]Entitlement, e
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT organization_id::text, feature_key, plan, enabled, limit_value, expires_at, updated_at
+			SELECT organization_id::text, feature_key, plan, enabled, limits, valid_until, source, updated_at
 			FROM entitlement
 			ORDER BY feature_key
 		`)
@@ -55,19 +55,26 @@ func (r *PGRepository) List(ctx context.Context, orgID string) ([]Entitlement, e
 // (organization, feature) pair.
 func (r *PGRepository) Upsert(ctx context.Context, ent Entitlement) (Entitlement, error) {
 	var stored Entitlement
+	if ent.Limits == nil {
+		ent.Limits = map[string]int64{}
+	}
+	if ent.Source == "" {
+		ent.Source = "manual"
+	}
 
 	err := database.WithRequestTenant(ctx, r.pool, ent.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
-			INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limit_value, expires_at)
-			VALUES (current_setting('app.org_id')::uuid, $1, $2, $3, $4, $5)
+			INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limits, valid_until, source)
+			VALUES (current_setting('app.org_id')::uuid, $1, $2, $3, $4, $5, $6)
 			ON CONFLICT (organization_id, feature_key) DO UPDATE
 			SET plan = EXCLUDED.plan,
 			    enabled = EXCLUDED.enabled,
-			    limit_value = EXCLUDED.limit_value,
-			    expires_at = EXCLUDED.expires_at,
+			    limits = EXCLUDED.limits,
+			    valid_until = EXCLUDED.valid_until,
+			    source = EXCLUDED.source,
 			    updated_at = now()
-			RETURNING organization_id::text, feature_key, plan, enabled, limit_value, expires_at, updated_at
-		`, ent.FeatureKey, string(ent.Plan), ent.Enabled, ent.Limit, ent.ExpiresAt)
+			RETURNING organization_id::text, feature_key, plan, enabled, limits, valid_until, source, updated_at
+		`, ent.FeatureKey, string(ent.Plan), ent.Enabled, ent.Limits, ent.ValidUntil, ent.Source)
 
 		var err error
 		stored, err = scanEntitlement(row)
@@ -86,11 +93,10 @@ type entitlementScanner interface {
 
 func scanEntitlement(scanner entitlementScanner) (Entitlement, error) {
 	var (
-		ent       Entitlement
-		plan      string
-		limit     *int64
-		expiresAt *time.Time
-		updatedAt time.Time
+		ent        Entitlement
+		plan       string
+		validUntil *time.Time
+		updatedAt  time.Time
 	)
 
 	if err := scanner.Scan(
@@ -98,18 +104,21 @@ func scanEntitlement(scanner entitlementScanner) (Entitlement, error) {
 		&ent.FeatureKey,
 		&plan,
 		&ent.Enabled,
-		&limit,
-		&expiresAt,
+		&ent.Limits,
+		&validUntil,
+		&ent.Source,
 		&updatedAt,
 	); err != nil {
 		return Entitlement{}, err
 	}
 
 	ent.Plan = Plan(plan)
-	ent.Limit = limit
-	if expiresAt != nil {
-		utc := expiresAt.UTC()
-		ent.ExpiresAt = &utc
+	if ent.Limits == nil {
+		ent.Limits = map[string]int64{}
+	}
+	if validUntil != nil {
+		utc := validUntil.UTC()
+		ent.ValidUntil = &utc
 	}
 	ent.UpdatedAt = updatedAt.UTC()
 

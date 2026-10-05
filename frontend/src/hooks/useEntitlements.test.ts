@@ -3,16 +3,7 @@ import { navFeatureFor } from './useEntitlements';
 
 describe('navFeatureFor', () => {
   it('leaves core CMDB surface ungated', () => {
-    for (const page of [
-      'dashboard',
-      'cmdb',
-      'topology',
-      'racks',
-      'users',
-      'permissions',
-      'audit',
-      'security',
-    ]) {
+    for (const page of ['dashboard', 'cmdb', 'users', 'permissions', 'audit', 'security']) {
       expect(navFeatureFor[page], page).toBeUndefined();
     }
   });
@@ -24,7 +15,13 @@ describe('navFeatureFor', () => {
     expect(navFeatureFor.workflows).toBe('workflow_forms');
     expect(navFeatureFor.forms).toBe('workflow_forms');
     expect(navFeatureFor.assistant).toBe('ai_assistant');
-    expect(navFeatureFor.export).toBe('export');
+    expect(navFeatureFor.export).toBe('export_csv');
+  });
+
+  it('uses the phase-1 feature keys of ENT-02', () => {
+    expect(navFeatureFor.topology).toBe('topology');
+    expect(navFeatureFor.racks).toBe('rack_view');
+    expect(navFeatureFor.roomplan).toBe('rack_view');
     expect(navFeatureFor.webhooks).toBe('webhooks');
     expect(navFeatureFor.compliance).toBe('compliance');
   });

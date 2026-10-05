@@ -1143,6 +1143,11 @@ paths:
                 $ref: '#/components/schemas/Entitlement'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '422':
+          description: cmdb_core disabled or limited in time, unknown source or negative limit
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -9289,7 +9294,11 @@ components:
 
     Entitlement:
       type: object
-      required: [organization_id, feature_key, plan, enabled]
+      description: >-
+        Entitlement of a feature (ENT-01). Phase-1 feature keys (ENT-02):
+        cmdb_core (always active), discovery, topology, rack_view, export_csv,
+        webhooks, api_access, notifications_email.
+      required: [organization_id, feature_key, plan, enabled, limits, source]
       properties:
         organization_id:
           type: string
@@ -9297,14 +9306,23 @@ components:
           type: string
         plan:
           $ref: '#/components/schemas/EntitlementPlan'
-        limit:
-          type: integer
-          description: Maximum number of records for the feature. 0 means unlimited.
         enabled:
           type: boolean
-        expires_at:
+        limits:
+          type: object
+          description: >-
+            Named quotas (ENT-02): max_cis, max_collectors, max_users,
+            max_api_keys. A missing quota uses the plan default.
+          additionalProperties:
+            type: integer
+            format: int64
+            minimum: 0
+        valid_until:
           type: string
           format: date-time
+        source:
+          type: string
+          enum: [manual, selfsignup, billing, reseller]
 
     EntitlementCheckResponse:
       type: object
@@ -9316,8 +9334,15 @@ components:
           $ref: '#/components/schemas/EntitlementPlan'
         enabled:
           type: boolean
-        limit:
-          type: integer
+        limits:
+          type: object
+          description: >-
+            Named quotas (ENT-02): max_cis, max_collectors, max_users,
+            max_api_keys. A missing quota uses the plan default.
+          additionalProperties:
+            type: integer
+            format: int64
+            minimum: 0
 
     GrantEntitlementRequest:
       type: object
@@ -9329,11 +9354,24 @@ components:
           $ref: '#/components/schemas/EntitlementPlan'
         enabled:
           type: boolean
-        limit:
-          type: integer
-        expires_at:
+          description: cmdb_core cannot be disabled (422).
+        limits:
+          type: object
+          description: >-
+            Named quotas (ENT-02): max_cis, max_collectors, max_users,
+            max_api_keys. A missing quota uses the plan default.
+          additionalProperties:
+            type: integer
+            format: int64
+            minimum: 0
+        valid_until:
           type: string
           format: date-time
+          description: Not allowed for cmdb_core (422).
+        source:
+          type: string
+          enum: [manual, selfsignup, billing, reseller]
+          default: manual
 
     EntitlementListResponse:
       allOf:
