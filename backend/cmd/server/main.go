@@ -256,14 +256,12 @@ func main() {
 	// failing search backend never breaks CI persistence, and the index can
 	// always be rebuilt via POST /api/v1/search/reindex.
 	repos.CI = ci.NewIndexingRepository(repos.CI, search.NewCIIndexer(repos.Search))
-	aiProvider := ai.NewOpenAIProvider(ai.ProviderConfig{
+	// In the air-gapped profile no external AI call is made at all (AI-02).
+	aiProvider := ai.NewProvider(&ai.ProviderConfig{
 		BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, ChatModel: cfg.LLMChatModel, EmbeddingModel: cfg.LLMEmbeddingModel,
-	}, nil)
-	// Mirror CI mutations into the retrieval chunk store so the governed RAG
-	// assistant has tenant-owned content to ground its answers. Chunks are
-	// embedded when an embedding model is configured and fall back to lexical
-	// scoring otherwise.
-	repos.CI = ci.NewIndexingRepository(repos.CI, ai.NewCIChunkIndexer(repos.AI, aiProvider))
+	}, cfg.AirGapped, nil)
+	slog.Info("AI provider configured", "air_gapped", cfg.AirGapped,
+		"chat_enabled", aiProvider.Enabled(), "embeddings_enabled", aiProvider.EmbeddingsEnabled())
 
 	// The entitlement cache lives in the shared store (Redis), so a change
 	// invalidates every instance (ENT-03).
@@ -279,6 +277,14 @@ func main() {
 	}
 	slog.Info("entitlement enforcement configured",
 		"default_plan", cfg.DefaultPlan, "enforced", cfg.EntitlementEnforcement)
+
+	// Mirror CI mutations into the retrieval chunk store so the governed RAG
+	// assistant has tenant-owned content to ground its answers. Chunks are
+	// embedded only for organizations that opted in and hold the ai add-on
+	// (AI-02); otherwise they stay lexical.
+	aiOptIn, _ := repos.AI.(ai.OptInSource)
+	repos.CI = ci.NewIndexingRepository(repos.CI, ai.NewCIChunkIndexer(repos.AI, aiProvider).
+		WithConsent(ai.OrgConsent{OptIn: aiOptIn, Entitlements: entitlementSvc}))
 
 	// Webhook and connector destinations are user input: every outbound call
 	// goes through the egress client (SEC-08).

@@ -73,3 +73,67 @@ func TestCIChunkIndexerDelete(t *testing.T) {
 		t.Fatalf("expected chunks to be deleted, got %d", len(chunks))
 	}
 }
+
+// countingProvider records embedding calls.
+type countingProvider struct {
+	DisabledProvider
+	embeds int
+}
+
+func (p *countingProvider) EmbeddingsEnabled() bool { return true }
+func (p *countingProvider) Embed(string) ([]float64, error) {
+	p.embeds++
+	return []float64{1, 0}, nil
+}
+
+type optIns map[string]bool
+
+func (o optIns) AIOptIn(_ context.Context, orgID string) (bool, error) { return o[orgID], nil }
+
+type addons map[string]bool
+
+func (a addons) IsEnabled(_ context.Context, orgID, feature string) bool {
+	return feature == FeatureAI && a[orgID]
+}
+
+// TestCIChunkIndexerEmbedsOnlyWithOptInAndAddon covers WP-076 (AI-02): the
+// embedding provider is called only for organizations that opted in and
+// hold the ai add-on; without consent the chunk stays lexical; the
+// air-gapped profile disables the provider entirely.
+func TestCIChunkIndexerEmbedsOnlyWithOptInAndAddon(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+	provider := &countingProvider{}
+	consent := OrgConsent{OptIn: optIns{"opted": true, "opted-no-addon": true}, Entitlements: addons{"opted": true, "addon-only": true}}
+	idx := NewCIChunkIndexer(repo, provider).WithConsent(consent)
+	for _, org := range []string{"opted", "opted-no-addon", "addon-only", "neither"} {
+		if err := idx.IndexDocument(ctx, ci.Document{OrganizationID: org, EntityType: "ci", EntityID: "c-" + org, Title: org}); err != nil {
+			t.Fatal(err)
+		}
+		chunks, _ := repo.CandidateChunks(ctx, org, []string{"ci"}, []string{"c-" + org}, 1)
+		embedded := len(chunks) == 1 && len(chunks[0].Embedding) > 0
+		if want := org == "opted"; embedded != want || len(chunks) != 1 {
+			t.Errorf("%s: %d chunks, embedded %v, want embedded %v", org, len(chunks), embedded, want)
+		}
+	}
+	if provider.embeds != 1 {
+		t.Errorf("provider called %d times, want 1 (only the opted-in organization with the add-on)", provider.embeds)
+	}
+
+	// Without a consent no embedding is requested at all.
+	provider.embeds = 0
+	if err := NewCIChunkIndexer(repo, provider).IndexDocument(ctx, ci.Document{OrganizationID: "opted", EntityType: "ci", EntityID: "c-x"}); err != nil {
+		t.Fatal(err)
+	}
+	if provider.embeds != 0 {
+		t.Errorf("provider called without consent: %d", provider.embeds)
+	}
+
+	airGapped := NewProvider(&ProviderConfig{BaseURL: "https://llm.example", ChatModel: "m", EmbeddingModel: "e"}, true, nil)
+	if airGapped.Enabled() || airGapped.EmbeddingsEnabled() {
+		t.Error("air-gapped provider is enabled")
+	}
+	if p := NewProvider(&ProviderConfig{BaseURL: "https://llm.example", ChatModel: "m", EmbeddingModel: "e"}, false, nil); !p.EmbeddingsEnabled() {
+		t.Error("configured provider disabled outside the air-gapped profile")
+	}
+}

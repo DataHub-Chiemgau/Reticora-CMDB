@@ -18,6 +18,52 @@ import (
 type CIChunkIndexer struct {
 	repo     Repository
 	provider Provider
+	consent  Consent
+}
+
+// Consent decides whether an organization's data may be sent to the
+// external AI provider (AI-02): the organization opted in and holds the ai
+// add-on.
+type Consent interface {
+	AllowsExternalAI(ctx context.Context, orgID string) bool
+}
+
+// WithConsent attaches the per-organization consent. Without one, no
+// embedding is requested (fail-closed); chunks stay lexical.
+func (x *CIChunkIndexer) WithConsent(consent Consent) *CIChunkIndexer {
+	if x != nil {
+		x.consent = consent
+	}
+	return x
+}
+
+// OptInSource reports an organization's AI opt-in.
+type OptInSource interface {
+	AIOptIn(ctx context.Context, orgID string) (bool, error)
+}
+
+// EntitlementChecker reports whether an organization holds a feature.
+type EntitlementChecker interface {
+	IsEnabled(ctx context.Context, orgID, featureKey string) bool
+}
+
+// FeatureAI is the AI add-on entitlement (CH14).
+const FeatureAI = "ai"
+
+// OrgConsent grants external AI processing to organizations that opted in
+// and hold the ai add-on; a failing lookup denies.
+type OrgConsent struct {
+	OptIn        OptInSource
+	Entitlements EntitlementChecker
+}
+
+// AllowsExternalAI implements Consent.
+func (c OrgConsent) AllowsExternalAI(ctx context.Context, orgID string) bool {
+	if c.OptIn == nil || c.Entitlements == nil || !c.Entitlements.IsEnabled(ctx, orgID, FeatureAI) {
+		return false
+	}
+	ok, err := c.OptIn.AIOptIn(ctx, orgID)
+	return err == nil && ok
 }
 
 // NewCIChunkIndexer wraps the AI repository for use with
@@ -40,7 +86,10 @@ func (x *CIChunkIndexer) IndexDocument(ctx context.Context, doc ci.Document) err
 		Content:        doc.Summary,
 		URL:            doc.URL,
 	}
-	if x.provider != nil && x.provider.EmbeddingsEnabled() {
+	// The provider is called only for organizations that opted in and hold
+	// the ai add-on (AI-02).
+	if x.provider != nil && x.provider.EmbeddingsEnabled() && x.consent != nil &&
+		x.consent.AllowsExternalAI(ctx, doc.OrganizationID) {
 		// Embedding failures degrade gracefully to lexical scoring; the chunk
 		// is still upserted without a vector so retrieval keeps working.
 		if emb, err := x.provider.Embed(doc.Title + " " + doc.Summary); err == nil {

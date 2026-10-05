@@ -216,3 +216,4 @@ IGA-02;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 IGA-03;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 IGA-04;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 AI-02;[A];B;backend/internal/entitlement/addon_test.go;WP-075
+AI-02;[A];B;backend/internal/ai/ci_indexer_test.go;WP-076

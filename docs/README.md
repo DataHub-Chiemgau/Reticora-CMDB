@@ -606,8 +606,11 @@ answers remain auditable.
 `ai.NewCIChunkIndexer`, a second decorator on the CI repository next to the
 search indexer, so every write path (REST, collector ingest, workflow) feeds
 the assistant. Chunks store the CI title and summary as lexical content and
-an embedding vector when `RETICORA_LLM_EMBEDDING_MODEL` is configured;
-embedding failures degrade gracefully to lexical scoring and never block the
+an embedding vector when `RETICORA_LLM_EMBEDDING_MODEL` is configured and
+the organization opted in (`organization.ai_opt_in`) and holds the `ai`
+add-on (AI-02); otherwise the provider is not called and the chunk stays
+lexical. `RETICORA_AIR_GAPPED=true` disables every external AI call (chat and
+embeddings); the start log reports the state. Embedding failures degrade gracefully to lexical scoring and never block the
 CI write. Chunks for CIs created before the pipeline existed are backfilled
 by `POST /api/v1/search/reindex`, which rebuilds the tenant's search index
 (and thereby its chunks) from PostgreSQL as the source of truth.
@@ -791,6 +794,7 @@ The server is configured via environment variables:
 - `RETICORA_SEARCH_BACKEND` — `postgres` (default) or `opensearch`.
 - `RETICORA_OPENSEARCH_URL`, `RETICORA_OPENSEARCH_USERNAME`, `RETICORA_OPENSEARCH_PASSWORD`, `RETICORA_OPENSEARCH_INDEX` — OpenSearch connection settings.
 - `RETICORA_LLM_BASE_URL`, `RETICORA_LLM_API_KEY`, `RETICORA_LLM_CHAT_MODEL`, `RETICORA_LLM_EMBEDDING_MODEL` — OpenAI-compatible chat and embedding provider settings.
+- `RETICORA_AIR_GAPPED` — `true` disables every external AI call (air-gapped profile, AI-02; default `false`).
 - `RETICORA_S3_ENDPOINT`, `RETICORA_S3_BUCKET`, `RETICORA_S3_ACCESS_KEY`, `RETICORA_S3_SECRET_KEY`, `RETICORA_S3_USE_SSL` — object storage for asynchronous export jobs (MinIO/S3).
 - `RETICORA_BLOB_DIR` — filesystem blob storage used by export jobs in `--no-db` development mode (defaults to a temp directory).
 - `RETICORA_OTEL_ENDPOINT` — OTLP HTTP collector endpoint for traces/metrics; empty (default) keeps no-op telemetry.

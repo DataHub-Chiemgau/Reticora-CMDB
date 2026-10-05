@@ -118,6 +118,8 @@ type Config struct {
 	LLMAPIKey         string
 	LLMChatModel      string
 	LLMEmbeddingModel string
+	// AirGapped disables every external AI call (AI-02, air-gapped profile).
+	AirGapped bool
 
 	// explicit records the RETICORA_* variables that were set; invalid
 	// lists variables whose value could not be parsed.
@@ -183,6 +185,7 @@ func Load() *Config {
 		LLMAPIKey:         l.str("RETICORA_LLM_API_KEY", ""),
 		LLMChatModel:      l.str("RETICORA_LLM_CHAT_MODEL", ""),
 		LLMEmbeddingModel: l.str("RETICORA_LLM_EMBEDDING_MODEL", ""),
+		AirGapped:         l.boolean("RETICORA_AIR_GAPPED", false),
 
 		LogLevel: slog.LevelInfo,
 	}
