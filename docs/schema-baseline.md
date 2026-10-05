@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000080_api_key_rotation
+Stand: Migration 000081_permission_catalog_rba01
 
 ## Prüfung
 

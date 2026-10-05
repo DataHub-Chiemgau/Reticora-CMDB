@@ -13,7 +13,8 @@ type StandardRole struct {
 	Permissions []string
 }
 
-// StandardRoles is the target role matrix (RBA-02, E-13). The database seed
+// StandardRoles is the target role matrix (RBA-02, E-13), with the exact
+// RBA-01 keys since migration 000081. The database seed
 // must match it exactly; permission/role_matrix_integration_test.go compares
 // both, and the RBA-02 rows of the catalogue text are checked there too.
 var StandardRoles = []StandardRole{
@@ -22,44 +23,45 @@ var StandardRoles = []StandardRole{
 		"agent:manage", "agent:read", "ai:read", "asset:assign",
 		"asset:move", "asset:read", "asset:reserve", "asset:write",
 		"assignment:read", "assignment:write", "ci:delete", "ci:read",
-		"ci:write", "ci_instance_attribute:manage", "compliance:read", "compliance:write",
-		"consumable:read", "consumable:write", "contact:read", "contact:write",
-		"credential:decrypt", "credential:manage", "credential:read", "credential:write",
-		"desk:read", "desk:write", "discovery:ingest", "discovery:read",
-		"discovery:write", "disposal:read", "disposal:write", "document:read",
-		"document:write", "entitlement:read", "export:run", "form:read",
-		"form:write", "iga:read", "ipam:read", "ipam:write",
-		"key:read", "key:write", "lifecycle:transition", "maintenance:read",
+		"ci:write", "ci_instance_attribute:manage", "collector:manage", "compliance:read",
+		"compliance:write", "consumable:read", "consumable:write", "contact:read",
+		"contact:write", "credential:decrypt", "credential:manage", "credential:read",
+		"credential:write", "desk:read", "desk:write", "discovery:ingest",
+		"discovery:manage", "discovery:read", "disposal:read", "disposal:write",
+		"document:read", "document:write", "entitlement:read", "export:run",
+		"form:read", "form:write", "iga:read", "ipam:read",
+		"ipam:write", "job:read", "key:read", "key:write",
+		"lifecycle:transition", "location:read", "location:write", "maintenance:read",
 		"maintenance:write", "monitoring:read", "monitoring:write", "order:read",
 		"order:write", "override:write", "permission:read", "rack:read",
-		"rack:write", "reconciliation:manage", "reconciliation:resolve", "relationship:read",
-		"relationship:write", "role:read", "saved_view:read", "saved_view:write",
+		"rack:write", "reconciliation:manage", "relationship:read", "relationship:write",
+		"review:resolve", "role:read", "saved_view:read", "saved_view:write",
 		"search:read", "search:write", "security:read", "security:write",
-		"site:read", "site:write", "sla:read", "stocktake:read",
-		"stocktake:write", "ticket:read", "ticket:write", "topology:read",
-		"training:read", "training:write", "user:read", "webhook:read",
-		"workflow:read", "workflow:write",
+		"sla:read", "stocktake:read", "stocktake:write", "ticket:read",
+		"ticket:write", "topology:read", "training:read", "training:write",
+		"user:read", "vrf:manage", "webhook:read", "workflow:read",
+		"workflow:write",
 	}},
 	{Name: "viewer", Scope: "org", Permissions: []string{
 		"agent:read", "asset:read", "assignment:read", "ci:read",
 		"compliance:read", "consumable:read", "contact:read", "desk:read",
 		"discovery:read", "disposal:read", "document:read", "entitlement:read",
 		"form:read", "iga:read", "ipam:read", "key:read",
-		"maintenance:read", "monitoring:read", "order:read", "permission:read",
-		"rack:read", "relationship:read", "role:read", "saved_view:read",
-		"search:read", "security:read", "site:read", "sla:read",
+		"location:read", "maintenance:read", "monitoring:read", "order:read",
+		"permission:read", "rack:read", "relationship:read", "role:read",
+		"saved_view:read", "search:read", "security:read", "sla:read",
 		"stocktake:read", "ticket:read", "topology:read", "training:read",
 		"user:read", "webhook:read", "workflow:read",
 	}},
 	{Name: "client_technician", Scope: "client", Permissions: []string{
 		"asset:read", "assignment:read", "ci:read", "ci:write",
 		"consumable:read", "contact:read", "contact:write", "desk:read",
-		"document:read", "export:run", "ipam:read", "key:read",
-		"maintenance:read", "monitoring:read", "order:read", "rack:read",
-		"rack:write", "reconciliation:resolve", "relationship:read", "relationship:write",
-		"saved_view:read", "search:read", "site:read", "stocktake:read",
-		"stocktake:write", "ticket:read", "ticket:write", "topology:read",
-		"training:read",
+		"document:read", "export:run", "ipam:read", "job:read",
+		"key:read", "location:read", "maintenance:read", "monitoring:read",
+		"order:read", "rack:read", "rack:write", "relationship:read",
+		"relationship:write", "review:resolve", "saved_view:read", "search:read",
+		"stocktake:read", "stocktake:write", "ticket:read", "ticket:write",
+		"topology:read", "training:read",
 	}},
 }
 

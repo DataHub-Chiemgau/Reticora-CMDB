@@ -194,3 +194,4 @@ AUT-02;[B];B;backend/internal/identity/session_test.go;WP-066
 SEC-06;[B];B;backend/internal/identity/session_test.go;WP-066
 AUT-04;[B];B;backend/internal/identity/apikey_integration_test.go;WP-067
 API-05;[B];B;backend/internal/identity/apikey_integration_test.go;WP-067
+RBA-01;[B];B;backend/internal/server/authz_catalog_test.go;WP-068

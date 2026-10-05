@@ -13,33 +13,39 @@ type Permission string
 // Defined permissions. Route-level authorization is driven by this catalog:
 // every protected route must map to one of these keys.
 const (
-	PermCIRead            Permission = "ci:read"
-	PermCIWrite           Permission = "ci:write"
-	PermCIDelete          Permission = "ci:delete"
-	PermCITypeManage      Permission = "citype:manage"
-	PermSiteRead          Permission = "site:read"
-	PermSiteWrite         Permission = "site:write"
-	PermRackRead          Permission = "rack:read"
-	PermRackWrite         Permission = "rack:write"
-	PermRelationshipRead  Permission = "relationship:read"
-	PermRelationshipWrite Permission = "relationship:write"
-	PermContactRead       Permission = "contact:read"
-	PermContactWrite      Permission = "contact:write"
-	PermTopologyRead      Permission = "topology:read"
-	PermDiscoveryRead     Permission = "discovery:read"
-	PermDiscoveryWrite    Permission = "discovery:write"
-	PermDiscoveryIngest   Permission = "discovery:ingest"
-	PermCollectorManage   Permission = "collector:manage"
-	PermCredentialRead    Permission = "credential:read"
-	PermCredentialManage  Permission = "credential:manage"
-	PermWebhookRead       Permission = "webhook:read"
-	PermWebhookManage     Permission = "webhook:manage"
-	PermExportRun         Permission = "export:run"
-	PermUserRead          Permission = "user:read"
-	PermUserManage        Permission = "user:manage"
-	PermRoleRead          Permission = "role:read"
-	PermRoleManage        Permission = "role:manage"
-	PermPermissionRead    Permission = "permission:read"
+	PermCIRead       Permission = "ci:read"
+	PermCIWrite      Permission = "ci:write"
+	PermCIDelete     Permission = "ci:delete"
+	PermCITypeManage Permission = "citype:manage"
+	// RBA-01: location:* replaces site:* of v2.
+	PermLocationRead       Permission = "location:read"
+	PermLocationWrite      Permission = "location:write"
+	PermRackRead           Permission = "rack:read"
+	PermRackWrite          Permission = "rack:write"
+	PermRelationshipRead   Permission = "relationship:read"
+	PermRelationshipWrite  Permission = "relationship:write"
+	PermContactRead        Permission = "contact:read"
+	PermContactWrite       Permission = "contact:write"
+	PermTopologyRead       Permission = "topology:read"
+	PermDiscoveryRead      Permission = "discovery:read"
+	PermDiscoveryManage    Permission = "discovery:manage"
+	PermDiscoveryIngest    Permission = "discovery:ingest"
+	PermCollectorManage    Permission = "collector:manage"
+	PermVRFManage          Permission = "vrf:manage"
+	PermReviewResolve      Permission = "review:resolve"
+	PermJobRead            Permission = "job:read"
+	PermNotificationManage Permission = "notification:manage"
+	PermTeamManage         Permission = "team:manage"
+	PermCredentialRead     Permission = "credential:read"
+	PermCredentialManage   Permission = "credential:manage"
+	PermWebhookRead        Permission = "webhook:read"
+	PermWebhookManage      Permission = "webhook:manage"
+	PermExportRun          Permission = "export:run"
+	PermUserRead           Permission = "user:read"
+	PermUserManage         Permission = "user:manage"
+	PermRoleRead           Permission = "role:read"
+	PermRoleManage         Permission = "role:manage"
+	PermPermissionRead     Permission = "permission:read"
 	// PermPermissionManage grants permission-grant administration. The value
 	// follows the canonical catalog key ("permission:write"), not the
 	// constant name, for backwards compatibility with stored role grants.
@@ -107,7 +113,6 @@ const (
 	PermAssetReserve              Permission = "asset:reserve"
 	PermInventoryManage           Permission = "inventory:manage"
 	PermLifecycleManage           Permission = "lifecycle:manage"
-	PermReconciliationResolve     Permission = "reconciliation:resolve"
 	PermOverrideWrite             Permission = "override:write"
 	PermSavedViewRead             Permission = "saved_view:read"
 	PermSavedViewWrite            Permission = "saved_view:write"
@@ -129,8 +134,8 @@ func allPermissions() []Permission {
 		PermCIWrite,
 		PermCIDelete,
 		PermCITypeManage,
-		PermSiteRead,
-		PermSiteWrite,
+		PermLocationRead,
+		PermLocationWrite,
 		PermRackRead,
 		PermRackWrite,
 		PermRelationshipRead,
@@ -139,9 +144,14 @@ func allPermissions() []Permission {
 		PermContactWrite,
 		PermTopologyRead,
 		PermDiscoveryRead,
-		PermDiscoveryWrite,
+		PermDiscoveryManage,
 		PermDiscoveryIngest,
 		PermCollectorManage,
+		PermVRFManage,
+		PermReviewResolve,
+		PermJobRead,
+		PermNotificationManage,
+		PermTeamManage,
 		PermCredentialRead,
 		PermCredentialManage,
 		PermWebhookRead,
@@ -213,7 +223,6 @@ func allPermissions() []Permission {
 		PermAssetReserve,
 		PermInventoryManage,
 		PermLifecycleManage,
-		PermReconciliationResolve,
 		PermOverrideWrite,
 		PermSavedViewRead,
 		PermSavedViewWrite,
