@@ -303,8 +303,13 @@ and new scans answer 403 `license-expired` (counter
 `reticora_ingest_refused_license_expired_total`), reading, editing, export and
 every other feature stay available; the heartbeat response carries
 `Reticora-License-Status` and the collector pauses without spooling until the
-license is renewed. Repository errors deny access (fail-closed). Plan matrix
-(ENT-06):
+license is renewed. Over `max_cis` discovery keeps updating existing CIs,
+but a new device becomes a review item `unlicensed_ci` holding the full device
+record (once per device, counter `reticora_unlicensed_ci_total`) instead of a
+CI; raising the limit adopts the waiting items as CIs, `create` adopts one
+within the limit and `dismiss` discards it, both audited. A downgrade deletes
+no data: only new CIs are blocked (REST) or held (ingest). Repository errors
+deny access (fail-closed). Plan matrix (ENT-06):
 
 | Plan | Features |
 |------|----------|

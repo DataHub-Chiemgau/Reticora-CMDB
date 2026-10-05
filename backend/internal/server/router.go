@@ -256,6 +256,13 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.RefreshSessions != nil {
 		identityHandler.WithRefreshSessions(opts.RefreshSessions)
 	}
+	// New discovered CIs respect max_cis; over the limit they are held as
+	// unlicensed_ci and adopted once the limit is raised (ENT-03, CH21).
+	discoveryHandler := discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
+		WithProvenance(overrideProvenance{repo: repos.Override}).
+		WithInstanceFields(repos.CIType).
+		WithLimits(opts.Entitlements)
+	opts.Entitlements.WithUnlicensed(discoveryHandler)
 	registrars := []registrar{
 		identityHandler,
 		operator.NewHandler(opts.Operator, opts.OIDC, opts.Sessions, operator.NewAuditor(opts.OperatorPool), opts.OperatorPool),
@@ -265,9 +272,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		ci.NewHandler(opts.CIService, opts.Dispatcher),
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
-		discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
-			WithProvenance(overrideProvenance{repo: repos.Override}).
-			WithInstanceFields(repos.CIType),
+		discoveryHandler,
 		topology.NewHandler(repos.CI, repos.Relationship),
 		export.NewHandler(repos.CI),
 		export.NewJobHandler(repos.ExportJobs, export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs), opts.Blobs),
@@ -451,6 +456,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	override.RegisterMetrics(registry)
 	operator.RegisterMetrics(registry)
 	entitlement.RegisterMetrics(registry)
+	discovery.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 

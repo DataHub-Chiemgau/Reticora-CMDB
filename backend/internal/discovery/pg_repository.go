@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -471,7 +472,20 @@ func (r *PGRepository) ResolveReviewItem(ctx context.Context, orgID, id string, 
 			return err
 		}
 		item = scanned
-		return nil
+		if item.Kind != ReviewKindUnlicensedCI {
+			return nil
+		}
+		// Adopting or discarding a held device is audited (ENT-03).
+		actorType := "user"
+		if resolution.ResolvedBy == "" {
+			actorType = "system"
+		}
+		_, err = audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+			OrganizationID: orgID, ActorID: resolution.ResolvedBy, ActorType: actorType,
+			Action: "unlicensed_ci." + item.Status, ResourceType: "review_item", ResourceID: item.ID,
+			Changes: map[string]any{"resolution": item.Resolution, "device_key": item.Payload["device_key"]},
+		})
+		return err
 	})
 	if err != nil {
 		return nil, err

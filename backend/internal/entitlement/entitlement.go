@@ -297,10 +297,11 @@ func cacheKey(orgID string) string { return "entitlements:" + orgID }
 // rows (ENT-05): a missing row means not entitled, only cmdb_core is always
 // active.
 type Service struct {
-	repo  Repository
-	opts  Options
-	cache cache.Store
-	now   func() time.Time
+	repo    Repository
+	opts    Options
+	cache   cache.Store
+	now     func() time.Time
+	adopter UnlicensedAdopter
 }
 
 // NewService creates an entitlement service backed by the given repository.
@@ -492,6 +493,7 @@ func (s *Service) Grant(ctx context.Context, ent Entitlement) (Entitlement, erro
 	}
 
 	s.invalidate(ctx, ent.OrganizationID)
+	s.adoptAfterGrant(ctx, &stored)
 	return stored, nil
 }
 

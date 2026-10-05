@@ -3606,7 +3606,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [ambiguous_identity, conflicting_values, unclassified_device]
+            enum: [ambiguous_identity, conflicting_values, unclassified_device, override_conflict, unlicensed_ci]
       responses:
         '200':
           description: Paginated list of review items
@@ -3626,6 +3626,11 @@ paths:
       operationId: resolveReviewItem
       tags: [Discovery]
       summary: Resolve a reconciliation review item
+      description: >-
+        An unlicensed_ci item (a discovered device held because max_cis is
+        reached, ENT-03) is resolved with create, which adopts the device as a
+        CI within max_cis (403 entitlement-limit otherwise), or with dismiss,
+        which discards it; both are audited.
       requestBody:
         required: true
         content:
@@ -3643,6 +3648,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -9166,6 +9173,11 @@ components:
           type: integer
         conflicts:
           type: integer
+        unlicensed:
+          type: integer
+          description: >-
+            New devices held as unlicensed_ci review items because max_cis is
+            reached (ENT-03, CH21).
         job_id:
           type: string
 
@@ -11826,7 +11838,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [ambiguous_identity, conflicting_values, unclassified_device]
+          enum: [ambiguous_identity, conflicting_values, unclassified_device, override_conflict, unlicensed_ci]
         status:
           type: string
           enum: [open, resolved, dismissed]

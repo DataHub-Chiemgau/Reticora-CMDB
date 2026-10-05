@@ -2067,7 +2067,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Resolve a reconciliation review item */
+    /**
+     * Resolve a reconciliation review item
+     * @description An unlicensed_ci item (a discovered device held because max_cis is reached, ENT-03) is resolved with create, which adopts the device as a CI within max_cis (403 entitlement-limit otherwise), or with dismiss, which discards it; both are audited.
+     */
     post: operations['resolveReviewItem'];
     delete?: never;
     options?: never;
@@ -5516,6 +5519,8 @@ export interface components {
       created: number;
       updated: number;
       conflicts: number;
+      /** @description New devices held as unlicensed_ci review items because max_cis is reached (ENT-03, CH21). */
+      unlicensed?: number;
       job_id?: string;
     };
     /** @enum {string} */
@@ -7199,7 +7204,12 @@ export interface components {
       id: string;
       organization_id: string;
       /** @enum {string} */
-      kind: 'ambiguous_identity' | 'conflicting_values' | 'unclassified_device';
+      kind:
+        | 'ambiguous_identity'
+        | 'conflicting_values'
+        | 'unclassified_device'
+        | 'override_conflict'
+        | 'unlicensed_ci';
       /** @enum {string} */
       status: 'open' | 'resolved' | 'dismissed';
       payload: {
@@ -12505,7 +12515,12 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         status?: 'open' | 'resolved' | 'dismissed';
-        kind?: 'ambiguous_identity' | 'conflicting_values' | 'unclassified_device';
+        kind?:
+          | 'ambiguous_identity'
+          | 'conflicting_values'
+          | 'unclassified_device'
+          | 'override_conflict'
+          | 'unlicensed_ci';
       };
       header?: never;
       path?: never;
@@ -12553,6 +12568,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
