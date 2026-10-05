@@ -44,7 +44,7 @@ func TestSearchHitsRespectClientSiteAndReadPermission(t *testing.T) {
 		}
 	}
 	place := func(id, site string) {
-		if _, err := f.Admin.Exec(bg, `UPDATE ci SET site_id = $2 WHERE id = $1`, id, site); err != nil {
+		if _, err := f.Admin.Exec(bg, `UPDATE ci SET location_id = $2 WHERE id = $1`, id, site); err != nil {
 			t.Fatalf("place ci: %v", err)
 		}
 	}
@@ -117,8 +117,9 @@ func TestSearchHitsRespectClientSiteAndReadPermission(t *testing.T) {
 		t.Errorf("client 1 reads %d foreign search rows directly, %v", n, err)
 	}
 
-	// A CI that moves to client 2 takes its search row along.
-	if _, err := f.Admin.Exec(bg, `UPDATE ci SET client_id = $2 WHERE id = $1`, atSite1, f.Client2); err != nil {
+	// A CI that moves to client 2 takes its search row along. It leaves its
+	// location, which belongs to client 1 (WP-054).
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET client_id = $2, location_id = NULL WHERE id = $1`, atSite1, f.Client2); err != nil {
 		t.Fatalf("move ci: %v", err)
 	}
 	if c, _ := derived(atSite1); c != f.Client2 {

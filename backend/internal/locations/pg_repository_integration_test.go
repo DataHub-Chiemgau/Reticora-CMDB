@@ -252,59 +252,6 @@ func TestLocationTreeScope(t *testing.T) {
 	}
 }
 
-func TestLocationImportNodes(t *testing.T) {
-	f := scopetest.Seed(t, "46")
-	ctx := context.Background()
-	siteID := f.ID()
-	if _, err := f.Admin.Exec(ctx, `INSERT INTO site (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'import')`,
-		siteID, f.OrgA, f.Client1); err != nil {
-		t.Fatalf("seed site: %v", err)
-	}
-	siteNode, wh, zone, orphan, floor, floorZone := f.ID(), f.ID(), f.ID(), f.ID(), f.ID(), f.ID()
-	for _, n := range []struct {
-		id, parent, kind, site string
-	}{
-		{siteNode, "", "site", siteID},
-		{wh, siteNode, "warehouse", ""},
-		{zone, wh, "zone", ""},
-		{orphan, "", "warehouse", ""},
-		{floor, siteNode, "floor", ""},
-		{floorZone, floor, "zone", ""},
-	} {
-		var parent, site any
-		if n.parent != "" {
-			parent = n.parent
-		}
-		if n.site != "" {
-			site = n.site
-		}
-		if _, err := f.Admin.Exec(ctx, `INSERT INTO location_node (id, organization_id, parent_id, node_type, name, site_id) VALUES ($1, $2, $3, $4, $4, $5)`,
-			n.id, f.OrgA, parent, n.kind, site); err != nil {
-			t.Fatalf("seed node %s: %v", n.kind, err)
-		}
-	}
-
-	var skipped int
-	if err := f.Admin.QueryRow(ctx, `SELECT location_import_nodes($1)`, f.OrgA).Scan(&skipped); err != nil {
-		t.Fatalf("import: %v", err)
-	}
-	if skipped != 2 {
-		t.Errorf("skipped %d nodes, want 2 (root warehouse, zone below floor)", skipped)
-	}
-	repo := locations.NewPGRepository(f.App)
-	sub, err := repo.Subtree(f.OrgCtx(f.OrgA), f.OrgA, siteID)
-	if err != nil {
-		t.Fatalf("subtree: %v", err)
-	}
-	if len(sub) != 3 || sub[1].ID != wh || sub[2].ID != zone || sub[2].ClientID != f.Client1 {
-		t.Errorf("imported tree: %+v", sub)
-	}
-	// A second run imports nothing new.
-	if err := f.Admin.QueryRow(ctx, `SELECT location_import_nodes($1)`, f.OrgA).Scan(&skipped); err != nil || skipped != 2 {
-		t.Errorf("second import: skipped %d, %v", skipped, err)
-	}
-}
-
 // TestLocationTreeUpdateAndDelete covers WP-053: rename through the
 // specialist table, rename and move in one call, field errors of the parent
 // matrix, and delete of leaves only.

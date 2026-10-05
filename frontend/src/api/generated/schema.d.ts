@@ -4912,8 +4912,12 @@ export interface components {
       id: string;
       organization_id: string;
       client_id?: string;
-      site_id?: string;
-      room_id?: string;
+      /** @description Node of the canonical location tree (DB-05); site_id and room_id are derived from it. */
+      location_id?: string;
+      /** @description Site of location_id, derived by the server. */
+      readonly site_id?: string;
+      /** @description Room of location_id (the location or its nearest room ancestor), derived by the server. */
+      readonly room_id?: string;
       ci_type_id: string;
       name: string;
       status: components['schemas']['CIStatus'];
@@ -4952,8 +4956,8 @@ export interface components {
     CreateCIRequest: {
       ci_type_id: string;
       client_id?: string;
-      site_id?: string;
-      room_id?: string;
+      /** @description Node of the location tree; site and room of the CI follow from it. */
+      location_id?: string;
       name: string;
       status?: components['schemas']['CIStatus'];
       manufacturer?: string;
@@ -4977,8 +4981,8 @@ export interface components {
       name?: string;
       status?: components['schemas']['CIStatus'];
       client_id?: string;
-      site_id?: string;
-      room_id?: string;
+      /** @description Node of the location tree; site and room of the CI follow from it. */
+      location_id?: string;
       manufacturer?: string;
       model?: string;
       serial_number?: string;
@@ -5332,6 +5336,8 @@ export interface components {
       invoice_number?: string;
       serial_number?: string;
       location?: string;
+      /** @description Node of the canonical location tree; changed through stock movements. */
+      readonly location_id?: string;
       notes?: string;
       custom_fields: {
         [key: string]: unknown;

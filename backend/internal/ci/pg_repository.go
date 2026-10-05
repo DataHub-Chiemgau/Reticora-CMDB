@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -23,6 +25,7 @@ const ciSelectColumns = `
 	COALESCE(client_id::text, ''),
 	COALESCE(site_id::text, ''),
 	COALESCE(room_id::text, ''),
+	COALESCE(location_id::text, ''),
 	ci_type_id::text,
 	name,
 	status,
@@ -201,8 +204,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 			INSERT INTO ci (
 				organization_id,
 				client_id,
-				site_id,
-				room_id,
+				location_id,
 				ci_type_id,
 				name,
 				status,
@@ -228,9 +230,9 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				$6, $7, $8, $9, $10,
 				$11, $12, $13, $14, $15,
 				$16, $17, $18, $19, $20,
-				$21, $22, $23, $24
+				$21, $22, $23
 			)
-			RETURNING id::text, created_at, updated_at
+			RETURNING id::text, COALESCE(site_id::text, ''), COALESCE(room_id::text, ''), created_at, updated_at
 		`
 
 		var createdAt time.Time
@@ -238,8 +240,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 		if err := tx.QueryRow(ctx, query,
 			item.OrganizationID,
 			nilIfEmpty(item.ClientID),
-			nilIfEmpty(item.SiteID),
-			nilIfEmpty(item.RoomID),
+			nilIfEmpty(item.LocationID),
 			item.CITypeID,
 			item.Name,
 			item.Status,
@@ -260,8 +261,8 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 			item.FirstSeenAt,
 			item.LastSeenAt,
 			item.IsManual,
-		).Scan(&item.ID, &createdAt, &updatedAt); err != nil {
-			return fmt.Errorf("create ci: %w", err)
+		).Scan(&item.ID, &item.SiteID, &item.RoomID, &createdAt, &updatedAt); err != nil {
+			return locationError(fmt.Errorf("create ci: %w", err))
 		}
 
 		item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
@@ -306,8 +307,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		addStringField("name", req.Name)
 		addStringField("status", req.Status)
 		addStringField("client_id", req.ClientID)
-		addStringField("site_id", req.SiteID)
-		addStringField("room_id", req.RoomID)
+		addStringField("location_id", req.LocationID)
 		addStringField("manufacturer", req.Manufacturer)
 		addStringField("model", req.Model)
 		addStringField("serial_number", req.SerialNumber)
@@ -360,7 +360,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			if err == pgx.ErrNoRows {
 				return fmt.Errorf("not found")
 			}
-			return fmt.Errorf("update ci: %w", err)
+			return locationError(fmt.Errorf("update ci: %w", err))
 		}
 
 		changes := diffCI(before, item)
@@ -507,6 +507,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		&item.ClientID,
 		&item.SiteID,
 		&item.RoomID,
+		&item.LocationID,
 		&item.CITypeID,
 		&item.Name,
 		&item.Status,
@@ -629,6 +630,7 @@ func diffCI(before, after *Item) []ciFieldChange {
 		new  any
 	}{
 		{"client_id", before.ClientID, after.ClientID},
+		{"location_id", before.LocationID, after.LocationID},
 		{"site_id", before.SiteID, after.SiteID},
 		{"room_id", before.RoomID, after.RoomID},
 		{"ci_type_id", before.CITypeID, after.CITypeID},
@@ -673,4 +675,21 @@ func nilIfEmpty(value string) any {
 		return nil
 	}
 	return value
+}
+
+// locationError turns a rejected location of a CI (unknown or invisible
+// location, location of another client; trigger ci_derive_location of
+// migration 000074) into a validation error on location_id.
+func locationError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.ConstraintName {
+	case "ci_location_id_fkey":
+		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: "location not found"}}}
+	case "ci_location_client":
+		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: "the location belongs to another client"}}}
+	}
+	return err
 }

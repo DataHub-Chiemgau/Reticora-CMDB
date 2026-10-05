@@ -75,7 +75,7 @@ const (
 	WHEN 'asset' THEN EXISTS (SELECT 1 FROM asset WHERE asset.id = document_link.entity_id)
 	WHEN 'contact' THEN EXISTS (SELECT 1 FROM contact WHERE contact.id = document_link.entity_id)
 	WHEN 'ticket' THEN EXISTS (SELECT 1 FROM ticket WHERE ticket.id = document_link.entity_id)
-	WHEN 'location' THEN EXISTS (SELECT 1 FROM location_node WHERE location_node.id = document_link.entity_id)
+	WHEN 'location' THEN EXISTS (SELECT 1 FROM location WHERE location.id = document_link.entity_id)
 	ELSE true END`
 	documentVisible = "(NOT EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id)" +
 		" OR EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id AND " + linkVisible + "))"

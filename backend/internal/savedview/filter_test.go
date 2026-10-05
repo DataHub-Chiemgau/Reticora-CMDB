@@ -152,9 +152,10 @@ func TestCompileSQLLocationSearchMatchesSubtree(t *testing.T) {
 	if !strings.Contains(where, "name ILIKE $2") {
 		t.Fatalf("expected a name match predicate, got %s", where)
 	}
-	// Descendants must be included, so "Berlin" also finds racks inside it.
-	if !strings.Contains(where, "RECURSIVE") || !strings.Contains(where, "n.parent_id = s.id") {
-		t.Fatalf("expected a recursive subtree walk, got %s", where)
+	// Descendants must be included, so "Berlin" also finds racks inside it:
+	// the subtree of the canonical location tree by ltree path.
+	if !strings.Contains(where, "FROM location l") || !strings.Contains(where, "l.path <@ ANY") {
+		t.Fatalf("expected a location subtree by path, got %s", where)
 	}
 	if len(args) != 2 {
 		t.Fatalf("expected org + location args, got %v", args)

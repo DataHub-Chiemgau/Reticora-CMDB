@@ -73,25 +73,19 @@ func (f FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (stri
 		add(fmt.Sprintf("%s.location_id = %s", table, p), f.LocationID)
 	}
 	if f.LocationSubtree != "" {
-		// Recursive subtree over location_node.
+		// Subtree of the canonical location tree by its ltree path.
 		p := next()
 		add(fmt.Sprintf(`%s.location_id IN (
-			WITH RECURSIVE subtree AS (
-				SELECT id FROM location_node WHERE id = %s::uuid
-				UNION ALL
-				SELECT n.id FROM location_node n JOIN subtree s ON n.parent_id = s.id
-			) SELECT id FROM subtree)`, table, p), f.LocationSubtree)
+			SELECT l.id FROM location l
+			WHERE l.path <@ (SELECT r.path FROM location r WHERE r.id::text = %s))`, table, p), f.LocationSubtree)
 	}
 	if f.LocationSearch != "" {
 		// Name-based subtree: seed the recursion with every location whose
 		// name matches, then walk down. Only the value is parameterized.
 		p := next()
 		add(fmt.Sprintf(`%s.location_id IN (
-			WITH RECURSIVE subtree AS (
-				SELECT id FROM location_node WHERE name ILIKE %s
-				UNION ALL
-				SELECT n.id FROM location_node n JOIN subtree s ON n.parent_id = s.id
-			) SELECT id FROM subtree)`, table, p), "%"+f.LocationSearch+"%")
+			SELECT l.id FROM location l
+			WHERE l.path <@ ANY (ARRAY(SELECT r.path FROM location r WHERE r.name ILIKE %s)))`, table, p), "%"+f.LocationSearch+"%")
 	}
 	if f.WarrantyWithinDays > 0 && table == "asset" {
 		p := next()

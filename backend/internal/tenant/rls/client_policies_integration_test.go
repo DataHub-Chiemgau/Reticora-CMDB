@@ -22,7 +22,9 @@ const (
 )
 
 // clientPolicyTable describes how to insert a minimal row into one of the nine
-// tables that received a client predicate in migration 000058.
+// tables that received a client predicate in migration 000058. location_node
+// was retired by migration 000074; its archive location_node_retired carries
+// the same predicate.
 type clientPolicyTable struct {
 	name    string
 	columns string // besides organization_id and client_id
@@ -35,7 +37,7 @@ var clientPolicyTables = []clientPolicyTable{
 	{"form_def", "name, schema", "'Form ' || gen_random_uuid(), '{}'::jsonb"},
 	{"internal_order", "order_number, title", "'wp023-' || gen_random_uuid(), 'Order'"},
 	{"key_item", "name", "'Key ' || gen_random_uuid()"},
-	{"location_node", "node_type, name", "'room', 'Room ' || gen_random_uuid()"},
+	{"location_node_retired", "id, node", "gen_random_uuid(), '{}'::jsonb"},
 	{"maintenance_notification", "maintenance_window_id", "'" + cpWindow + "'"},
 	{"quantity_item", "name", "'Item ' || gen_random_uuid()"},
 	{"sla", "name, priority, response_target_minutes, resolution_target_minutes", "'SLA ' || gen_random_uuid(), 'low', 10, 20"},

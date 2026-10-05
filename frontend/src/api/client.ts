@@ -21,6 +21,8 @@ export interface CI {
   id: string;
   organization_id: string;
   client_id?: string;
+  /** Node of the location tree; site_id and room_id are derived from it. */
+  location_id?: string;
   site_id?: string;
   room_id?: string;
   ci_type_id: string;

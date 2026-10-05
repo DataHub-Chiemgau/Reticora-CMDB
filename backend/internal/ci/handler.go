@@ -140,6 +140,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	item := &Item{
 		OrganizationID:  t.OrganizationID,
 		ClientID:        req.ClientID,
+		LocationID:      req.LocationID,
 		CITypeID:        req.CITypeID,
 		Name:            req.Name,
 		Status:          status,
