@@ -46,6 +46,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"tickets":              identity.PermTicketRead,
 	"slas":                 identity.PermSLARead,
 	"users":                identity.PermUserRead,
+	"service-accounts":     identity.PermUserRead,
 	"teams":                identity.PermUserRead,
 	"clients":              identity.PermUserRead,
 	"roles":                identity.PermRoleRead,
@@ -109,7 +110,9 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"contacts":    identity.PermContactWrite,
 	"ci-contacts": identity.PermContactWrite,
 	"users":       identity.PermUserManage,
-	"teams":       identity.PermTeamManage,
+	// Service accounts are principals like users (RBA-08).
+	"service-accounts": identity.PermUserManage,
+	"teams":            identity.PermTeamManage,
 	// RBA-01: collectors and discovery jobs have their own manage keys.
 	"collectors": identity.PermCollectorManage,
 	"discovery":  identity.PermDiscoveryManage,

@@ -275,6 +275,9 @@ func main() {
 	// goes through the egress client (SEC-08).
 	egressPolicy := egress.Options{AllowPrivate: cfg.EgressAllowPrivate}
 	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, egress.NewClient(egressPolicy), webhook.DispatcherOptions{
+		// Subscriptions bound to a service account receive only events whose
+		// object the account may read (RBA-08).
+		Access:     user.ServiceAccountAccess{Repo: repos.ServiceAccounts},
 		Deliveries: repos.WebhookDeliveries,
 	})
 	defer func() {
@@ -346,7 +349,8 @@ func main() {
 	// tokens the same authenticated principal as interactive users.
 	// A key acts with the intersection of its permissions and its owner's
 	// current role assignments (AUT-04).
-	apiKeys := identity.NewAPIKeyServiceWithStore(repos.APIKeys).WithOwnerAccess(repos.Permission)
+	apiKeys := identity.NewAPIKeyServiceWithStore(repos.APIKeys).WithOwnerAccess(repos.Permission).
+		WithServiceAccountAccess(user.ServiceAccountAccess{Repo: repos.ServiceAccounts})
 	authMiddleware := middleware.AuthMiddlewareWithAPIKeys(sessionIssuer, apiKeys)
 	if sessionIssuer == nil {
 		slog.Warn("INSECURE DEVELOPMENT MODE: bearer tokens are accepted without signature verification")

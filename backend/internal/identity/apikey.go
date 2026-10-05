@@ -47,11 +47,14 @@ type StoredAPIKey struct {
 	Environment    string
 	Permissions    []Permission
 	CreatedBy      string
-	RotatedFrom    *string
-	ExpiresAt      *time.Time
-	RevokedAt      *time.Time
-	LastUsedAt     *time.Time
-	CreatedAt      time.Time
+	// ServiceAccountID binds the key to a service account (RBA-08): the key
+	// then acts with the account's rights instead of its creator's.
+	ServiceAccountID *string
+	RotatedFrom      *string
+	ExpiresAt        *time.Time
+	RevokedAt        *time.Time
+	LastUsedAt       *time.Time
+	CreatedAt        time.Time
 }
 
 // OwnerAccessResolver loads the current role grants of a key owner (RBA-08):
@@ -60,12 +63,28 @@ type OwnerAccessResolver interface {
 	AccessGrants(ctx context.Context, orgID, userID string) ([]Grant, error)
 }
 
+// ServiceAccountAccessResolver loads the role grants of a service account;
+// an inactive or unknown account has none.
+type ServiceAccountAccessResolver interface {
+	ServiceAccountGrants(ctx context.Context, orgID, id string) ([]Grant, error)
+}
+
 // APIKeyService manages API key creation and validation.
 type APIKeyService struct {
 	store APIKeyStore
 	// owners resolves the owner's current rights; nil keeps the key's own
 	// permissions (tests and --no-db).
 	owners OwnerAccessResolver
+	// serviceAccounts resolves the rights of service accounts; a key bound
+	// to an account without it grants nothing.
+	serviceAccounts ServiceAccountAccessResolver
+}
+
+// WithServiceAccountAccess resolves keys bound to a service account with the
+// account's rights (RBA-08).
+func (s *APIKeyService) WithServiceAccountAccess(r ServiceAccountAccessResolver) *APIKeyService {
+	s.serviceAccounts = r
+	return s
 }
 
 // NewAPIKeyService constructs a new API key service.
@@ -195,8 +214,19 @@ func (s *APIKeyService) Validate(ctx context.Context, rawKey string) (*APIKeyInf
 		Scopes:         stored.Permissions,
 		ExpiresAt:      stored.ExpiresAt,
 	}
-	if s.owners != nil {
-		grants, grantErr := s.owners.AccessGrants(ctx, stored.OrganizationID, stored.CreatedBy)
+	resolve := func() ([]Grant, error) { return s.owners.AccessGrants(ctx, stored.OrganizationID, stored.CreatedBy) }
+	if stored.ServiceAccountID != nil {
+		// The key acts as its service account (RBA-08).
+		info.OwnerID = *stored.ServiceAccountID
+		resolve = func() ([]Grant, error) {
+			if s.serviceAccounts == nil {
+				return nil, nil
+			}
+			return s.serviceAccounts.ServiceAccountGrants(ctx, stored.OrganizationID, *stored.ServiceAccountID)
+		}
+	}
+	if s.owners != nil || stored.ServiceAccountID != nil {
+		grants, grantErr := resolve()
 		if grantErr != nil {
 			return nil, fmt.Errorf("identity: resolve API key owner rights: %w", grantErr)
 		}

@@ -28,13 +28,13 @@ func NewPGAPIKeyStore(pool *pgxpool.Pool) *PGAPIKeyStore {
 }
 
 const apiKeyColumns = `id, organization_id, name, key_hash, key_prefix, environment, permissions,
-	created_by, rotated_from, expires_at, revoked_at, last_used_at, created_at`
+	created_by, service_account_id, rotated_from, expires_at, revoked_at, last_used_at, created_at`
 
 func scanAPIKey(row pgx.Row) (*StoredAPIKey, error) {
 	var key StoredAPIKey
 	var permissions []string
 	if err := row.Scan(&key.ID, &key.OrganizationID, &key.Name, &key.KeyHash, &key.KeyPrefix, &key.Environment,
-		&permissions, &key.CreatedBy, &key.RotatedFrom, &key.ExpiresAt, &key.RevokedAt, &key.LastUsedAt, &key.CreatedAt); err != nil {
+		&permissions, &key.CreatedBy, &key.ServiceAccountID, &key.RotatedFrom, &key.ExpiresAt, &key.RevokedAt, &key.LastUsedAt, &key.CreatedAt); err != nil {
 		return nil, err
 	}
 	key.Permissions = make([]Permission, len(permissions))
@@ -81,11 +81,11 @@ func insertAPIKey(ctx context.Context, tx pgx.Tx, key *StoredAPIKey) (*StoredAPI
 		environment = APIKeyEnvironmentLive
 	}
 	created, err := scanAPIKey(tx.QueryRow(ctx, `
-		INSERT INTO api_key (organization_id, name, key_hash, key_prefix, environment, permissions, created_by, rotated_from, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO api_key (organization_id, name, key_hash, key_prefix, environment, permissions, created_by, service_account_id, rotated_from, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING `+apiKeyColumns,
 		key.OrganizationID, key.Name, key.KeyHash, key.KeyPrefix, environment,
-		permissionStrings(key.Permissions), key.CreatedBy, key.RotatedFrom, key.ExpiresAt))
+		permissionStrings(key.Permissions), key.CreatedBy, key.ServiceAccountID, key.RotatedFrom, key.ExpiresAt))
 	if err != nil {
 		return nil, fmt.Errorf("insert api_key: %w", err)
 	}
@@ -222,7 +222,7 @@ func (s *PGAPIKeyStore) Rotate(ctx context.Context, orgID, id string, overlapUnt
 		next := &StoredAPIKey{
 			OrganizationID: orgID, Name: old.Name, KeyHash: generated.KeyHash, KeyPrefix: generated.KeyPrefix,
 			Environment: old.Environment, Permissions: old.Permissions, CreatedBy: old.CreatedBy,
-			RotatedFrom: &old.ID, ExpiresAt: old.ExpiresAt,
+			ServiceAccountID: old.ServiceAccountID, RotatedFrom: &old.ID, ExpiresAt: old.ExpiresAt,
 		}
 		if created, txErr = insertAPIKey(ctx, tx, next); txErr != nil {
 			return txErr
@@ -384,7 +384,7 @@ func (m *MemoryAPIKeyStore) Rotate(ctx context.Context, orgID, id string, overla
 	created, err := m.Create(ctx, &StoredAPIKey{
 		OrganizationID: orgID, Name: previous.Name, KeyHash: generated.KeyHash, KeyPrefix: generated.KeyPrefix,
 		Environment: previous.Environment, Permissions: previous.Permissions, CreatedBy: previous.CreatedBy,
-		RotatedFrom: &previous.ID, ExpiresAt: expiry,
+		ServiceAccountID: previous.ServiceAccountID, RotatedFrom: &previous.ID, ExpiresAt: expiry,
 	})
 	if err != nil {
 		return nil, err

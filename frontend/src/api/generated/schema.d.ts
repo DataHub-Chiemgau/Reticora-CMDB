@@ -2838,6 +2838,63 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/service-accounts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the organization's service accounts */
+    get: operations['listServiceAccounts'];
+    put?: never;
+    /** Create a service account (RBA-08) */
+    post: operations['createServiceAccount'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/service-accounts/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get a service account */
+    get: operations['getServiceAccount'];
+    put?: never;
+    post?: never;
+    /** Delete a service account no key or subscription is bound to */
+    delete: operations['deleteServiceAccount'];
+    options?: never;
+    head?: never;
+    /**
+     * Rename, describe or (de)activate a service account
+     * @description A deactivated account grants nothing to its keys and subscriptions.
+     */
+    patch: operations['updateServiceAccount'];
+    trace?: never;
+  };
+  '/api/v1/service-accounts/{id}/roles': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Replace the role assignments of a service account */
+    put: operations['setServiceAccountRoles'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/teams': {
     parameters: {
       query?: never;
@@ -5269,6 +5326,8 @@ export interface components {
       headers?: {
         [key: string]: string;
       };
+      /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose object the account may read. */
+      service_account_id?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -5283,6 +5342,8 @@ export interface components {
       headers?: {
         [key: string]: string;
       };
+      /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose object the account may read. */
+      service_account_id?: string;
     };
     WebhookDelivery: {
       id: string;
@@ -6729,6 +6790,8 @@ export interface components {
       environment: 'live' | 'test';
       permissions: string[];
       owner_id: string;
+      /** @description The key acts with this service account's rights (RBA-08). */
+      service_account_id?: string;
       rotated_from?: string;
       /** Format: date-time */
       expires_at?: string;
@@ -6760,6 +6823,8 @@ export interface components {
        * @enum {string}
        */
       environment: 'live' | 'test';
+      /** @description The key acts with this service account's rights (RBA-08). */
+      service_account_id?: string;
     };
     RotateAPIKeyRequest: {
       /** @default 86400 */
@@ -6768,6 +6833,43 @@ export interface components {
     RotatedAPIKey: {
       key: components['schemas']['CreatedAPIKey'];
       previous: components['schemas']['APIKey'];
+    };
+    ServiceAccountRole: {
+      role_id: string;
+      scope_client_id?: string;
+      scope_site_id?: string;
+    };
+    ServiceAccount: {
+      id: string;
+      organization_id: string;
+      name: string;
+      description: string;
+      is_active: boolean;
+      created_by?: string;
+      roles: components['schemas']['ServiceAccountRole'][];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    ServiceAccountListResponse: {
+      data: components['schemas']['ServiceAccount'][];
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+    };
+    CreateServiceAccountRequest: {
+      name: string;
+      description?: string;
+    };
+    UpdateServiceAccountRequest: {
+      name?: string;
+      description?: string;
+      is_active?: boolean;
+    };
+    SetServiceAccountRolesRequest: {
+      roles: components['schemas']['ServiceAccountRole'][];
     };
     User: {
       id: string;
@@ -14421,6 +14523,202 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listServiceAccounts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Service accounts with their role assignments */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ServiceAccountListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createServiceAccount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateServiceAccountRequest'];
+      };
+    };
+    responses: {
+      /** @description Service account created without roles */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ServiceAccount'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      /** @description Name missing */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getServiceAccount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The service account */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ServiceAccount'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  deleteServiceAccount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  updateServiceAccount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateServiceAccountRequest'];
+      };
+    };
+    responses: {
+      /** @description The updated service account */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ServiceAccount'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description Name empty */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  setServiceAccountRoles: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SetServiceAccountRolesRequest'];
+      };
+    };
+    responses: {
+      /** @description The service account with its new roles */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ServiceAccount'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description Unknown role */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };

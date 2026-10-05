@@ -54,11 +54,13 @@ type APIKeyView struct {
 	Environment string       `json:"environment"`
 	Permissions []Permission `json:"permissions"`
 	OwnerID     string       `json:"owner_id"`
-	RotatedFrom *string      `json:"rotated_from,omitempty"`
-	ExpiresAt   *time.Time   `json:"expires_at,omitempty"`
-	RevokedAt   *time.Time   `json:"revoked_at,omitempty"`
-	LastUsedAt  *time.Time   `json:"last_used_at,omitempty"`
-	CreatedAt   time.Time    `json:"created_at"`
+	// ServiceAccountID is set for keys bound to a service account (RBA-08).
+	ServiceAccountID *string    `json:"service_account_id,omitempty"`
+	RotatedFrom      *string    `json:"rotated_from,omitempty"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+	RevokedAt        *time.Time `json:"revoked_at,omitempty"`
+	LastUsedAt       *time.Time `json:"last_used_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
 }
 
 // CreatedAPIKey is a new key with its plaintext, shown exactly once.
@@ -74,7 +76,7 @@ func viewOf(k *StoredAPIKey) APIKeyView {
 	}
 	return APIKeyView{
 		ID: k.ID, Name: k.Name, KeyPrefix: k.KeyPrefix, Environment: k.Environment, Permissions: perms,
-		OwnerID: k.CreatedBy, RotatedFrom: k.RotatedFrom, ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
+		OwnerID: k.CreatedBy, ServiceAccountID: k.ServiceAccountID, RotatedFrom: k.RotatedFrom, ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
 		LastUsedAt: k.LastUsedAt, CreatedAt: k.CreatedAt,
 	}
 }
@@ -107,6 +109,8 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Permissions []Permission `json:"permissions"`
 		ExpiresAt   *time.Time   `json:"expires_at"`
 		Environment string       `json:"environment"`
+		// ServiceAccountID binds the key to a service account (RBA-08).
+		ServiceAccountID *string `json:"service_account_id"`
 	}
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -138,6 +142,9 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.ServiceAccountID != nil && strings.TrimSpace(*req.ServiceAccountID) == "" {
+		req.ServiceAccountID = nil
+	}
 	generated, err := GenerateAPIKey(req.Environment)
 	if err != nil {
 		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
@@ -146,6 +153,7 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	created, err := h.keys.Create(r.Context(), &StoredAPIKey{
 		OrganizationID: p.OrganizationID, Name: req.Name, KeyHash: generated.KeyHash, KeyPrefix: generated.KeyPrefix,
 		Environment: generated.Environment, Permissions: req.Permissions, CreatedBy: p.Subject, ExpiresAt: req.ExpiresAt,
+		ServiceAccountID: req.ServiceAccountID,
 	})
 	if err != nil {
 		api.WriteRepoError(w, err)

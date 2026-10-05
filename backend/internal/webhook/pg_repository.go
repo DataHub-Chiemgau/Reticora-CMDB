@@ -31,7 +31,8 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-const webhookSelectColumns = `id, organization_id, name, url, secret, events, is_active, headers, created_at, updated_at`
+const webhookSelectColumns = `id, organization_id, name, url, secret, events, is_active, headers,
+	COALESCE(service_account_id::text, ''), created_at, updated_at`
 
 // List returns paginated subscriptions.
 func (r *PGRepository) List(ctx context.Context, orgID string, page api.PaginationParams) ([]Subscription, int, error) {
@@ -99,8 +100,8 @@ func (r *PGRepository) Create(ctx context.Context, sub *Subscription) error {
 		}
 
 		query := `
-			INSERT INTO webhook_subscription (organization_id, name, url, secret, events, is_active, headers)
-			VALUES (current_setting('app.org_id')::uuid, $1, $2, $3, $4, $5, $6)
+			INSERT INTO webhook_subscription (organization_id, name, url, secret, events, is_active, headers, service_account_id)
+			VALUES (current_setting('app.org_id')::uuid, $1, $2, $3, $4, $5, $6, NULLIF($7, '')::uuid)
 			RETURNING id::text, created_at, updated_at
 		`
 		var createdAt, updatedAt time.Time
@@ -111,6 +112,7 @@ func (r *PGRepository) Create(ctx context.Context, sub *Subscription) error {
 			sub.Events,
 			sub.IsActive,
 			headersJSON,
+			sub.ServiceAccountID,
 		).Scan(&sub.ID, &createdAt, &updatedAt); err != nil {
 			return fmt.Errorf("create webhook: %w", err)
 		}
@@ -252,6 +254,7 @@ func scanWebhook(scanner webhookScanner) (*Subscription, error) {
 		&sub.Events,
 		&sub.IsActive,
 		&headersJSON,
+		&sub.ServiceAccountID,
 		&createdAt,
 		&updatedAt,
 	); err != nil {

@@ -105,16 +105,18 @@ type Repositories struct {
 	Metrics           monitoring.MetricStore
 	Permission        permission.Repository
 	// APIKeys identifies and manages API keys (AUT-04).
-	APIKeys    identity.APIKeyRepository
-	SLA        sla.Repository
-	Form       form.Repository
-	Workflow   workflow.Repository
-	Compliance compliance.Repository
-	IGA        iga.Repository
-	Search     search.Backend
-	AI         ai.Repository
-	ExportJobs export.JobRepository
-	Privacy    privacy.Repository
+	APIKeys identity.APIKeyRepository
+	// ServiceAccounts holds the non-human principals (RBA-08).
+	ServiceAccounts user.ServiceAccountRepository
+	SLA             sla.Repository
+	Form            form.Repository
+	Workflow        workflow.Repository
+	Compliance      compliance.Repository
+	IGA             iga.Repository
+	Search          search.Backend
+	AI              ai.Repository
+	ExportJobs      export.JobRepository
+	Privacy         privacy.Repository
 	// Enterprise CMDB + asset/inventory extension (additive modules).
 	CIType            citype.Repository
 	RelationshipType  relationshiptype.Repository
@@ -251,6 +253,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	registrars := []registrar{
 		identityHandler,
 		identity.NewAPIKeyHandler(repos.APIKeys),
+		user.NewServiceAccountHandler(repos.ServiceAccounts),
 		entitlement.NewHandler(opts.Entitlements),
 		ci.NewHandler(opts.CIService, opts.Dispatcher),
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),

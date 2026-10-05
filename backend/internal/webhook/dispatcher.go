@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,6 +67,71 @@ type DispatcherOptions struct {
 	// PollInterval controls how often the retry worker looks for due
 	// deliveries. A negative value disables the worker.
 	PollInterval time.Duration
+	// Access decides for a subscription bound to a service account whether
+	// the account may read the event's object (RBA-08). Without it, bound
+	// subscriptions receive nothing (fail-closed).
+	Access SubscriberAccess
+}
+
+// SubscriberAccess checks the read right of a service account on an object
+// with the given permission in its client and site (empty: org-wide).
+type SubscriberAccess interface {
+	CanReadEvent(ctx context.Context, orgID, serviceAccountID, permission, clientID, siteID string) (bool, error)
+}
+
+// EventReadPermission is the permission needed to read the object of an
+// event; "" for events without a known object (bound subscriptions do not
+// receive them).
+func EventReadPermission(event string) string {
+	prefix, _, _ := strings.Cut(event, ".")
+	switch prefix {
+	case "ci", "relationship", "ci_type", "ci_attribute", "lifecycle", "override":
+		return "ci:read"
+	case "asset", "inventory", "reservation", "composition":
+		return "asset:read"
+	case "discovery", "reconciliation":
+		return "discovery:read"
+	}
+	return ""
+}
+
+// eventObjectScope reads client_id and site_id of the event object, if the
+// payload carries them.
+func eventObjectScope(body []byte) (clientID, siteID string) {
+	var object struct {
+		ClientID *string `json:"client_id"`
+		SiteID   *string `json:"site_id"`
+	}
+	if json.Unmarshal(body, &object) != nil {
+		return "", ""
+	}
+	if object.ClientID != nil {
+		clientID = *object.ClientID
+	}
+	if object.SiteID != nil {
+		siteID = *object.SiteID
+	}
+	return clientID, siteID
+}
+
+// mayDeliver reports whether a subscription receives the event: unbound
+// subscriptions receive every event of the organization, bound ones only
+// events whose object their service account may read.
+func (d *Dispatcher) mayDeliver(ctx context.Context, orgID, event string, body []byte, sub *Subscription) bool {
+	if sub.ServiceAccountID == "" {
+		return true
+	}
+	permission := EventReadPermission(event)
+	if permission == "" || d.opts.Access == nil {
+		return false
+	}
+	clientID, siteID := eventObjectScope(body)
+	ok, err := d.opts.Access.CanReadEvent(ctx, orgID, sub.ServiceAccountID, permission, clientID, siteID)
+	if err != nil {
+		slog.Error("check webhook subscriber rights failed", "error", err, "organization_id", orgID, "subscription_id", sub.ID)
+		return false
+	}
+	return ok
 }
 
 // Dispatcher performs background webhook deliveries. Every dispatched event is
@@ -173,6 +239,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, orgID, event string, payload 
 	}
 
 	for _, sub := range subs {
+		if !d.mayDeliver(ctx, orgID, event, body, &sub) {
+			continue
+		}
 		job := deliveryJob{
 			deliveryID: d.nextID(),
 			orgID:      orgID,

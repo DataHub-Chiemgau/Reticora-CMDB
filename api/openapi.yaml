@@ -5307,6 +5307,170 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/service-accounts:
+    get:
+      operationId: listServiceAccounts
+      tags: [Service Accounts]
+      summary: List the organization's service accounts
+      responses:
+        '200':
+          description: Service accounts with their role assignments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAccountListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createServiceAccount
+      tags: [Service Accounts]
+      summary: Create a service account (RBA-08)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateServiceAccountRequest'
+      responses:
+        '201':
+          description: Service account created without roles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAccount'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: Name missing
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/service-accounts/{id}:
+    get:
+      operationId: getServiceAccount
+      tags: [Service Accounts]
+      summary: Get a service account
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      responses:
+        '200':
+          description: The service account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAccount'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateServiceAccount
+      tags: [Service Accounts]
+      summary: Rename, describe or (de)activate a service account
+      description: A deactivated account grants nothing to its keys and subscriptions.
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateServiceAccountRequest'
+      responses:
+        '200':
+          description: The updated service account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAccount'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Name empty
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteServiceAccount
+      tags: [Service Accounts]
+      summary: Delete a service account no key or subscription is bound to
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/service-accounts/{id}/roles:
+    put:
+      operationId: setServiceAccountRoles
+      tags: [Service Accounts]
+      summary: Replace the role assignments of a service account
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetServiceAccountRolesRequest'
+      responses:
+        '200':
+          description: The service account with its new roles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAccount'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Unknown role
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/v1/teams:
     get:
       operationId: listTeams
@@ -8651,6 +8815,11 @@ components:
             each header name with the value "***" (SEC-01).
           additionalProperties:
             type: string
+        service_account_id:
+          type: string
+          description: >-
+            Binds the subscription to a service account (RBA-08): it then
+            receives only events whose object the account may read.
         created_at:
           type: string
           format: date-time
@@ -8678,6 +8847,11 @@ components:
           type: object
           additionalProperties:
             type: string
+        service_account_id:
+          type: string
+          description: >-
+            Binds the subscription to a service account (RBA-08): it then
+            receives only events whose object the account may read.
 
     WebhookDelivery:
       type: object
@@ -10911,6 +11085,9 @@ components:
             type: string
         owner_id:
           type: string
+        service_account_id:
+          type: string
+          description: The key acts with this service account's rights (RBA-08).
         rotated_from:
           type: string
         expires_at:
@@ -10970,6 +11147,9 @@ components:
           type: string
           enum: [live, test]
           default: live
+        service_account_id:
+          type: string
+          description: The key acts with this service account's rights (RBA-08).
 
     RotateAPIKeyRequest:
       type: object
@@ -10988,6 +11168,89 @@ components:
           $ref: '#/components/schemas/CreatedAPIKey'
         previous:
           $ref: '#/components/schemas/APIKey'
+
+    ServiceAccountRole:
+      type: object
+      required: [role_id]
+      properties:
+        role_id:
+          type: string
+        scope_client_id:
+          type: string
+        scope_site_id:
+          type: string
+
+    ServiceAccount:
+      type: object
+      required: [id, organization_id, name, description, is_active, roles, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        is_active:
+          type: boolean
+        created_by:
+          type: string
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceAccountRole'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ServiceAccountListResponse:
+      type: object
+      required: [data, total, limit, offset, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceAccount'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+    CreateServiceAccountRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+
+    UpdateServiceAccountRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        is_active:
+          type: boolean
+
+    SetServiceAccountRolesRequest:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceAccountRole'
 
     User:
       type: object

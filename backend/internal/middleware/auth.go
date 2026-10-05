@@ -112,8 +112,14 @@ func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIK
 		}
 		// The key acts with the intersection of its permissions and its
 		// owner's current rights, in the owner's scope (AUT-04).
+		// The key acts as its owner, a user or a service account, so audit
+		// entries name the owner (RBA-08); keys without owner keep the prefix.
+		subject := info.ID
+		if info.OwnerID != "" {
+			subject = info.OwnerID
+		}
 		principal := identity.Principal{
-			Subject:          info.ID,
+			Subject:          subject,
 			OrganizationID:   info.OrganizationID,
 			ClientScope:      info.ClientScope,
 			Scope:            info.Scope,
@@ -122,7 +128,7 @@ func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIK
 			Type:             identity.PrincipalTypeAPIKey,
 		}
 		return principal, Claims{
-			Subject:        info.ID,
+			Subject:        subject,
 			OrganizationID: info.OrganizationID,
 			ClientID:       info.ClientScope,
 		}, nil

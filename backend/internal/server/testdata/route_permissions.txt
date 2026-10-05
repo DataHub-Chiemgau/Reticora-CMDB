@@ -35,6 +35,7 @@ DELETE /api/v1/relationships/{id} relationship:write
 DELETE /api/v1/roles/{id} role:manage
 DELETE /api/v1/rooms/{id} location:write
 DELETE /api/v1/saved-views/{id} saved_view:write
+DELETE /api/v1/service-accounts/{id} user:manage
 DELETE /api/v1/sites/{id} location:write
 DELETE /api/v1/slas/{id} sla:write
 DELETE /api/v1/stocktakes/{id} stocktake:write
@@ -181,6 +182,8 @@ GET /api/v1/search search:read
 GET /api/v1/security/findings security:read
 GET /api/v1/security/findings/summary security:read
 GET /api/v1/security/findings/{id} security:read
+GET /api/v1/service-accounts user:read
+GET /api/v1/service-accounts/{id} user:read
 GET /api/v1/sites location:read
 GET /api/v1/sites/{id} location:read
 GET /api/v1/slas sla:read
@@ -255,6 +258,7 @@ PATCH /api/v1/roles/{id} role:manage
 PATCH /api/v1/rooms/{id} location:write
 PATCH /api/v1/saved-views/{id} saved_view:write
 PATCH /api/v1/security/findings/{id} security:write
+PATCH /api/v1/service-accounts/{id} user:manage
 PATCH /api/v1/sites/{id} location:write
 PATCH /api/v1/slas/{id} sla:write
 PATCH /api/v1/stocktakes/{id} stocktake:write
@@ -369,6 +373,7 @@ POST /api/v1/saved-views saved_view:write
 POST /api/v1/search/query search:write
 POST /api/v1/search/reindex search:write
 POST /api/v1/security/findings security:write
+POST /api/v1/service-accounts user:manage
 POST /api/v1/sites location:write
 POST /api/v1/slas sla:write
 POST /api/v1/stock-movements asset:move
@@ -401,5 +406,6 @@ PUT /api/v1/documents/{id}/content document:write
 PUT /api/v1/privacy/retention user:manage
 PUT /api/v1/reconciliation/source-policy reconciliation:manage
 PUT /api/v1/roles/{id}/permissions role:manage
+PUT /api/v1/service-accounts/{id}/roles user:manage
 PUT /scim/v2/Groups/{id} iga:write
 PUT /scim/v2/Users/{id} iga:write
