@@ -76,7 +76,9 @@ describe('logout', () => {
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(init.method).toBe('POST');
     expect(init.credentials).toBe('same-origin');
-    expect((init.headers as Record<string, string>).Authorization).toBe(['Bearer', 'live-token'].join(' '));
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      ['Bearer', 'live-token'].join(' '),
+    );
     expect(useAuthStore.getState().token).toBeNull();
   });
 
