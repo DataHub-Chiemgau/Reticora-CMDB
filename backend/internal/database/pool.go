@@ -14,7 +14,8 @@ import (
 // connection switches into. Row Level Security is silently bypassed for
 // superusers, BYPASSRLS roles and (without FORCE) table owners, so connecting
 // as the database owner would disable every tenant-isolation policy. Migration
-// 000056 creates the role and grants it to the migrating user.
+// 000056 creates the role and grants it to the migrating user; migration
+// 000078 lets it SET ROLE to DefaultOwnerRole for runtime index DDL.
 const DefaultAppRole = "reticora_app"
 
 // AppRoleEnv overrides the role name. Set it to an empty value only when the
@@ -72,6 +73,13 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	}
 
 	if err := VerifyRLSEnforced(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
+
+	// The effective rights, including inherited ones, must match the role
+	// contract (TEN-03, CH19); any deviation refuses the start.
+	if err := VerifyRoleContract(ctx, pool, DefaultOwnerRole); err != nil {
 		pool.Close()
 		return nil, err
 	}

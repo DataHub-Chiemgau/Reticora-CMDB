@@ -134,6 +134,16 @@ func TestSecurityBarrierViewsIsolateMetrics(t *testing.T) {
 		`GRANT USAGE ON SCHEMA `+spikeSchema+` TO reticora_app`,
 		`GRANT SELECT, INSERT ON `+spikeSchema+`.m_v TO reticora_app`,
 		`GRANT SELECT ON `+spikeSchema+`.m_1h_v TO reticora_app`,
+		// A cheap user function for the leak check below. The application
+		// role may not create functions itself (only index DDL, migration
+		// 000078), so it is prepared here and only called by that role.
+		`CREATE FUNCTION `+spikeSchema+`.guard(org uuid) RETURNS boolean
+			LANGUAGE plpgsql COST 0.0000001 AS $$
+			BEGIN
+				IF org <> '`+spikeOrgA+`'::uuid THEN RAISE EXCEPTION 'leaked %', org; END IF;
+				RETURN true;
+			END $$`,
+		`GRANT EXECUTE ON FUNCTION `+spikeSchema+`.guard(uuid) TO reticora_app`,
 	)
 	var compressed int
 	if err := admin.QueryRow(ctx, `SELECT count(*) FROM timescaledb_information.chunks
@@ -193,16 +203,8 @@ func TestSecurityBarrierViewsIsolateMetrics(t *testing.T) {
 		// A cheap user function in the WHERE clause runs after the barrier
 		// predicate; otherwise it would raise on a row of organization B.
 		err := inTenant(func(ctx context.Context, tx pgx.Tx) error {
-			if _, err := tx.Exec(ctx, `CREATE FUNCTION pg_temp.guard(org uuid) RETURNS boolean
-				LANGUAGE plpgsql COST 0.0000001 AS $$
-				BEGIN
-					IF org <> '`+spikeOrgA+`'::uuid THEN RAISE EXCEPTION 'leaked %', org; END IF;
-					RETURN true;
-				END $$`); err != nil {
-				return err
-			}
 			var n int
-			return tx.QueryRow(ctx, `SELECT count(*) FROM `+spikeSchema+`.m_v WHERE pg_temp.guard(organization_id)`).Scan(&n)
+			return tx.QueryRow(ctx, `SELECT count(*) FROM `+spikeSchema+`.m_v WHERE `+spikeSchema+`.guard(organization_id)`).Scan(&n)
 		})
 		if err != nil {
 			t.Fatalf("security barrier leaked: %v", err)

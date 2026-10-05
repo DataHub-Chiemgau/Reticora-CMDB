@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000077_ci_version
+Stand: Migration 000078_app_role_ddl_contract
 
 ## Prüfung
 
@@ -51,6 +51,33 @@ sobald ein Eintrag nicht mehr zutrifft, die Liste kann also nur schrumpfen:
   unvollständige Down-Migrationen, die ein WP ausdrücklich nennt.
 - Nach der Änderung wird diese Datei mit dem obigen Befehl aktualisiert und mit
   committet.
+
+## Rollenvertrag (TEN-03, CH19)
+
+Migration 000078 legt den Rollenvertrag fest; `backend/internal/database/role_check.go`
+(`VerifyRoleContract`) prüft ihn bei jedem Start von `database.NewPool` gegen die
+effektiven Rechte (inklusive geerbter Mitgliedschaften) und verweigert den
+Start bei jeder Abweichung:
+
+| Rolle | Eigenschaften | Rechte |
+|---|---|---|
+| Login-Rolle (z. B. `reticora`) | führt die Migrationen aus | Mitglied von `reticora_app`; der Pool wechselt per `SET ROLE` |
+| `reticora_app` | NOLOGIN, NOSUPERUSER, NOBYPASSRLS | DML/Sequenzen/EXECUTE; `SET ROLE reticora_owner` erlaubt, aber ohne Vererbung (`INHERIT FALSE`); kein eigenes `CREATE` auf `public` |
+| `reticora_owner` | NOLOGIN, NOSUPERUSER, NOBYPASSRLS | Eigentümer aller Tabellen in `public` außer `schema_migrations` und TimescaleDB-Hypertables; `USAGE, CREATE` auf `public` |
+
+- Jede Tabelle mit `organization_id` (plus `organization`), auf die
+  `reticora_app` zugreifen darf, hat `ENABLE` und `FORCE ROW LEVEL SECURITY`
+  und gehört `reticora_owner`; die Policies binden damit auch den Eigentümer.
+  `metric_sample` ist für `reticora_app` nicht zugreifbar (View-Barriere,
+  WP-040) und behält ihren Eigentümer.
+- Laufzeit-DDL (DB-04): Die Anwendung wechselt für Index-DDL ausdrücklich in
+  `reticora_owner`. Der Event-Trigger `reticora_restrict_app_ddl` erlaubt
+  beiden App-Rollen nur `CREATE/ALTER/DROP INDEX`; RLS abschalten, Policies,
+  Grants oder neue Tabellen bleiben den Migrationen vorbehalten.
+- Der Event-Trigger `reticora_assign_owner` übergibt Tabellen, die spätere
+  Migrationen in `public` anlegen, an `reticora_owner`.
+
+Nachweis: `backend/internal/database/role_check_integration_test.go`.
 
 ## RLS-Katalog und bekannte Lücken
 

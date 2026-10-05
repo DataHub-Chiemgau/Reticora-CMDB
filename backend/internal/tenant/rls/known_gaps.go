@@ -11,6 +11,9 @@ const (
 	// RuleRLSEnabled: ENABLE ROW LEVEL SECURITY (pg_class.relrowsecurity).
 	RuleRLSEnabled Rule = "rls-enabled"
 	// RuleRLSForced: FORCE ROW LEVEL SECURITY (pg_class.relforcerowsecurity).
+	// The tables belong to reticora_owner, which reticora_app may SET ROLE to
+	// for runtime index DDL (migration 000078); FORCE binds the owner to the
+	// policies as well. database.VerifyRoleContract checks the same at startup.
 	RuleRLSForced Rule = "rls-forced"
 	// RuleCommands: SELECT, INSERT, UPDATE and DELETE are each covered by a
 	// permissive policy.
