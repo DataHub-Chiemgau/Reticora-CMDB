@@ -4246,10 +4246,15 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        id: string;
+      };
       cookie?: never;
     };
-    /** List field provenance (discovered/override/effective) of a CI */
+    /**
+     * List field provenance (discovered/override/effective) of a CI
+     * @description Per field the observed value with source and time, the manual override with author, reason and time, and the effective value: the override when there is one, otherwise the observed value (OVR-01). GET /cis/{id} and the CI list return the same effective values.
+     */
     get: operations['listCisIdFields'];
     put?: never;
     post?: never;
@@ -4263,14 +4268,24 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        id: string;
+        /** @description CI column or attribute name */
+        name: string;
+      };
       cookie?: never;
     };
     get?: never;
-    /** Set or clear a manual field override */
+    /**
+     * Set a manual field override
+     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden.
+     */
     put: operations['putCisIdFieldsNameOverride'];
     post?: never;
-    /** Set or clear a manual field override */
+    /**
+     * Clear a manual field override
+     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited.
+     */
     delete: operations['deleteCisIdFieldsNameOverride'];
     options?: never;
     head?: never;
@@ -6277,6 +6292,39 @@ export interface components {
       ci_id?: string;
       ticket_id?: string;
       status?: string;
+    };
+    FieldProvenance: {
+      id: string;
+      organization_id: string;
+      ci_id: string;
+      field_name: string;
+      /** @description Last value an automation source reported and that was written or observed under an override */
+      discovered_value?: unknown;
+      discovered_source?: string;
+      /** Format: date-time */
+      discovered_at?: string;
+      /** @description Manual value; null with override_at set records a removed field */
+      override_value?: unknown;
+      override_author?: string;
+      override_reason?: string;
+      /** Format: date-time */
+      override_at?: string;
+      protected: boolean;
+      /** @description Override when set */
+      effective_value?: unknown;
+      /** @description Observed and effective value differ */
+      diverged: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    SetOverrideRequest: {
+      /** @description New value; null removes an attribute */
+      value?: unknown;
+      reason: string;
+      /** @default true */
+      protected: boolean;
     };
     ViolationProblem: components['schemas']['ProblemDetail'] & {
       violations: {
@@ -18192,49 +18240,64 @@ export interface operations {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        id: string;
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description List field provenance (discovered/override/effective) of a CI */
+      /** @description Field provenance of the CI */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': {
+            data: components['schemas']['FieldProvenance'][];
+          };
         };
-        content?: never;
       };
+      401: components['responses']['Unauthorized'];
     };
   };
   putCisIdFieldsNameOverride: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        id: string;
+        /** @description CI column or attribute name */
+        name: string;
+      };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SetOverrideRequest'];
+      };
+    };
     responses: {
-      /** @description Set or clear a manual field override */
+      /** @description Field provenance after the change */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['FieldProvenance'];
+        };
       };
-      /** @description Unauthorized */
-      401: {
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description The field cannot be overridden */
+      422: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };
@@ -18242,25 +18305,26 @@ export interface operations {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        id: string;
+        /** @description CI column or attribute name */
+        name: string;
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Set or clear a manual field override */
-      204: {
+      /** @description Field provenance after the change */
+      200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['FieldProvenance'];
         };
-        content?: never;
       };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   createCisIdLifecycleTransitions: {

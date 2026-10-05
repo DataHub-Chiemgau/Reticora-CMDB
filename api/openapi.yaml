@@ -7106,32 +7106,77 @@ paths:
           description: Unauthorized
 
   /api/v1/cis/{id}/fields:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
     get:
       operationId: listCisIdFields
+      tags: [CIs]
       summary: List field provenance (discovered/override/effective) of a CI
+      description: >-
+        Per field the observed value with source and time, the manual
+        override with author, reason and time, and the effective value: the
+        override when there is one, otherwise the observed value (OVR-01).
+        GET /cis/{id} and the CI list return the same effective values.
       responses:
         '200':
-          description: List field provenance (discovered/override/effective) of a CI
-        '401':
-          description: Unauthorized
+          description: Field provenance of the CI
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/FieldProvenance' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /api/v1/cis/{id}/fields/{name}/override:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: name, in: path, required: true, schema: { type: string }, description: CI column or attribute name }
     put:
       operationId: putCisIdFieldsNameOverride
-      summary: Set or clear a manual field override
+      tags: [CIs]
+      summary: Set a manual field override
+      description: >-
+        The CI takes the value at once; automation sources never overwrite it
+        (REC-03). Structural columns (client_id, location_id, ci_type_id, ...)
+        cannot be overridden.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetOverrideRequest' }
       responses:
         '200':
-          description: Set or clear a manual field override
-        '401':
-          description: Unauthorized
+          description: Field provenance after the change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FieldProvenance' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: The field cannot be overridden
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
     delete:
       operationId: deleteCisIdFieldsNameOverride
-      summary: Set or clear a manual field override
+      tags: [CIs]
+      summary: Clear a manual field override
+      description: >-
+        The CI returns to the current observed value, when there is one, in
+        the same transaction; the change is audited.
       responses:
-        '204':
-          description: Set or clear a manual field override
-        '401':
-          description: Unauthorized
+        '200':
+          description: Field provenance after the change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FieldProvenance' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/cis/{id}/lifecycle-transitions:
     post:
@@ -10271,6 +10316,33 @@ components:
         ci_id: { type: string }
         ticket_id: { type: string }
         status: { type: string }
+    FieldProvenance:
+      type: object
+      required: [id, organization_id, ci_id, field_name, protected, diverged, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        ci_id: { type: string }
+        field_name: { type: string }
+        discovered_value: { description: Last value an automation source reported and that was written or observed under an override }
+        discovered_source: { type: string }
+        discovered_at: { type: string, format: date-time }
+        override_value: { description: Manual value; null with override_at set records a removed field }
+        override_author: { type: string }
+        override_reason: { type: string }
+        override_at: { type: string, format: date-time }
+        protected: { type: boolean }
+        effective_value: { description: Override when set, otherwise the observed value }
+        diverged: { type: boolean, description: Observed and effective value differ }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SetOverrideRequest:
+      type: object
+      required: [reason]
+      properties:
+        value: { description: New value; null removes an attribute }
+        reason: { type: string, minLength: 1 }
+        protected: { type: boolean, default: true }
     ViolationProblem:
       allOf:
         - $ref: '#/components/schemas/ProblemDetail'

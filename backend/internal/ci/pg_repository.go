@@ -164,8 +164,12 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("iterate cis: %w", err)
 		}
-
-		return nil
+		rows.Close()
+		ptrs := make([]*Item, len(items))
+		for i := range items {
+			ptrs[i] = &items[i]
+		}
+		return overlayOverrides(ctx, tx, ptrs)
 	})
 
 	return items, total, err
@@ -185,7 +189,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, er
 			}
 			return fmt.Errorf("get ci by id: %w", err)
 		}
-		return nil
+		return overlayOverrides(ctx, tx, []*Item{item})
 	})
 	if err != nil {
 		return nil, err
@@ -728,4 +732,85 @@ func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before,
 		}
 	}
 	return nil
+}
+
+// overrideColumns are CI columns a manual override replaces in the effective
+// view; structuralFields are CI columns that are not overridden there.
+// Every other field name is an attribute.
+var (
+	overrideColumns = map[string]func(*Item, string){
+		"name":             func(i *Item, v string) { i.Name = v },
+		"status":           func(i *Item, v string) { i.Status = v },
+		"manufacturer":     func(i *Item, v string) { i.Manufacturer = v },
+		"model":            func(i *Item, v string) { i.Model = v },
+		"serial_number":    func(i *Item, v string) { i.SerialNumber = v },
+		"hardware_uuid":    func(i *Item, v string) { i.HardwareUUID = v },
+		"management_ip":    func(i *Item, v string) { i.ManagementIP = v },
+		"primary_mac":      func(i *Item, v string) { i.PrimaryMAC = v },
+		"hostname":         func(i *Item, v string) { i.Hostname = v },
+		"fqdn":             func(i *Item, v string) { i.FQDN = v },
+		"os_name":          func(i *Item, v string) { i.OSName = v },
+		"os_version":       func(i *Item, v string) { i.OSVersion = v },
+		"firmware_version": func(i *Item, v string) { i.FirmwareVersion = v },
+		"sys_object_id":    func(i *Item, v string) { i.SysObjectID = v },
+	}
+	structuralFields = map[string]bool{
+		"id": true, "organization_id": true, "client_id": true, "location_id": true, "site_id": true,
+		"room_id": true, "ci_type_id": true, "attributes": true, "discovery_source": true, "is_manual": true,
+		"first_seen_at": true, "last_seen_at": true, "created_at": true, "updated_at": true, "deleted_at": true,
+	}
+)
+
+// overlayOverrides applies the manual overrides of the CIs, so every read
+// returns the effective value: an override before the observed value
+// (OVR-01, CI-10). The CI rows normally carry it already (manual writes
+// and override changes update them); the overlay keeps reads consistent
+// for rows written before.
+func overlayOverrides(ctx context.Context, tx pgx.Tx, items []*Item) error {
+	if len(items) == 0 {
+		return nil
+	}
+	byID := make(map[string]*Item, len(items))
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		byID[item.ID] = item
+		ids = append(ids, item.ID)
+	}
+	rows, err := tx.Query(ctx, `SELECT ci_id::text, field_name, override_value FROM ci_field_value
+		WHERE ci_id = ANY($1::uuid[]) AND override_at IS NOT NULL`, ids)
+	if err != nil {
+		return fmt.Errorf("read overrides: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ciID, field string
+		var value any
+		if err = rows.Scan(&ciID, &field, &value); err != nil {
+			return fmt.Errorf("scan override: %w", err)
+		}
+		applyOverride(byID[ciID], field, value)
+	}
+	return rows.Err()
+}
+
+func applyOverride(item *Item, field string, value any) {
+	if item == nil || structuralFields[field] {
+		return
+	}
+	if set, ok := overrideColumns[field]; ok {
+		text := ""
+		if value != nil {
+			text = fmt.Sprint(value)
+		}
+		set(item, text)
+		return
+	}
+	if value == nil {
+		delete(item.Attributes, field)
+		return
+	}
+	if item.Attributes == nil {
+		item.Attributes = map[string]any{}
+	}
+	item.Attributes[field] = value
 }

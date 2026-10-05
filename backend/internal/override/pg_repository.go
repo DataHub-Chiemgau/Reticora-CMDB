@@ -3,12 +3,15 @@ package override
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -161,6 +164,9 @@ func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName s
 	if reason == "" {
 		return nil, fmt.Errorf("override reason is required")
 	}
+	if structuralFields[fieldName] {
+		return nil, ErrNotOverridable
+	}
 	var out *FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := requireVisibleCI(ctx, tx, ciID); err != nil {
@@ -182,6 +188,15 @@ func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName s
 		fv, err := scan(row)
 		if err != nil {
 			return fmt.Errorf("set override: %w", err)
+		}
+		// The CI shows the override at once (OVR-01, CI-10).
+		if syncErr := syncCIField(ctx, tx, ciID, fieldName, value); syncErr != nil {
+			return syncErr
+		}
+		if auditErr := recordAudit(ctx, tx, orgID, ciID, "ci.override_set", map[string]any{
+			"field": fieldName, "value": value, "reason": reason, "protected": protected,
+		}); auditErr != nil {
+			return auditErr
 		}
 		out = r.withEffectiveTx(ctx, tx, fv)
 		return nil
@@ -233,7 +248,9 @@ func userID(author string) any {
 	return author
 }
 
-// ClearOverride removes the manual override of a field.
+// ClearOverride removes the manual override of a field. In the same
+// transaction the CI returns to the observed value, when there is one, and
+// the change is audited (OVR-01).
 func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error) {
 	var out *FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -249,6 +266,17 @@ func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName
 				return fmt.Errorf("not found")
 			}
 			return fmt.Errorf("clear override: %w", err)
+		}
+		changes := map[string]any{"field": fieldName}
+		if fv.DiscoveredAt != nil && !structuralFields[fieldName] {
+			if syncErr := syncCIField(ctx, tx, ciID, fieldName, fv.DiscoveredValue); syncErr != nil {
+				return syncErr
+			}
+			changes["restored_value"] = fv.DiscoveredValue
+			changes["restored_source"] = fv.DiscoveredSource
+		}
+		if auditErr := recordAudit(ctx, tx, orgID, ciID, "ci.override_cleared", changes); auditErr != nil {
+			return auditErr
 		}
 		out = r.withEffectiveTx(ctx, tx, fv)
 		return nil
@@ -392,4 +420,62 @@ func nilIfEmpty(value string) any {
 		return nil
 	}
 	return value
+}
+
+// ErrNotOverridable rejects an override of a structural CI column.
+var ErrNotOverridable = errors.New("field cannot be overridden")
+
+// overrideColumns maps the CI columns an override sets to their SQL type;
+// structuralFields are columns no override touches. Every other field is an
+// attribute. They mirror the effective view of the ci package.
+var (
+	overrideColumns = map[string]string{
+		"name": "text", "status": "text", "manufacturer": "text", "model": "text",
+		"serial_number": "text", "hardware_uuid": "uuid", "management_ip": "inet",
+		"primary_mac": "macaddr", "hostname": "text", "fqdn": "text", "os_name": "text",
+		"os_version": "text", "firmware_version": "text", "sys_object_id": "text",
+	}
+	structuralFields = map[string]bool{
+		"id": true, "organization_id": true, "client_id": true, "location_id": true, "site_id": true,
+		"room_id": true, "ci_type_id": true, "attributes": true, "discovery_source": true, "is_manual": true,
+		"first_seen_at": true, "last_seen_at": true, "created_at": true, "updated_at": true, "deleted_at": true,
+	}
+)
+
+// syncCIField writes value into the CI column or attribute fieldName; nil
+// clears the column or removes the attribute.
+func syncCIField(ctx context.Context, tx pgx.Tx, ciID, fieldName string, value any) error {
+	var err error
+	if sqlType, ok := overrideColumns[fieldName]; ok {
+		var text any
+		if value != nil {
+			text = fmt.Sprint(value)
+		}
+		_, err = tx.Exec(ctx, fmt.Sprintf(`UPDATE ci SET %s = $2::text::%s, updated_at = now() WHERE id = $1`, fieldName, sqlType), ciID, text)
+	} else if value == nil {
+		_, err = tx.Exec(ctx, `UPDATE ci SET attributes = COALESCE(attributes, '{}'::jsonb) - $2, updated_at = now() WHERE id = $1`, ciID, fieldName)
+	} else {
+		_, err = tx.Exec(ctx, `UPDATE ci SET attributes = jsonb_set(COALESCE(attributes, '{}'::jsonb), ARRAY[$2], $3::jsonb, true), updated_at = now() WHERE id = $1`,
+			ciID, fieldName, jsonValue(value))
+	}
+	if err != nil {
+		return fmt.Errorf("update ci %s: %w", fieldName, err)
+	}
+	return nil
+}
+
+// recordAudit writes the audit entry of an override change on the CI.
+func recordAudit(ctx context.Context, tx pgx.Tx, orgID, ciID, action string, changes map[string]any) error {
+	actor := strings.TrimSpace(tenant.FromContext(ctx).UserID)
+	actorType := "system"
+	if actor != "" {
+		actorType = "user"
+	}
+	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+		OrganizationID: orgID, ActorID: actor, ActorType: actorType,
+		Action: action, ResourceType: "ci", ResourceID: ciID, Changes: changes,
+	}); err != nil {
+		return fmt.Errorf("record audit: %w", err)
+	}
+	return nil
 }
