@@ -172,6 +172,8 @@ func TestEveryOperationRequiresItsExpectedPermission(t *testing.T) {
 		switch {
 		case access == routePublic:
 			value = "public"
+		case access == routeOperator:
+			value = "operator"
 		case access == routeProtected && required == "":
 			value = "authenticated"
 		case access == routeUnmapped:

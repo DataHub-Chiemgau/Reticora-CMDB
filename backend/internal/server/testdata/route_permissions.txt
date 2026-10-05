@@ -49,6 +49,10 @@ DELETE /api/v1/webhooks/{id} webhook:manage
 DELETE /api/v1/workflows/{id} workflow:write
 DELETE /scim/v2/Groups/{id} iga:write
 DELETE /scim/v2/Users/{id} iga:write
+GET /api/v1/admin/audit operator
+GET /api/v1/admin/audit/verify operator
+GET /api/v1/admin/me operator
+GET /api/v1/admin/orgs operator
 GET /api/v1/agents agent:read
 GET /api/v1/ai/conversations ai:read
 GET /api/v1/api-keys apikey:manage
@@ -270,6 +274,7 @@ PATCH /api/v1/users/{id} user:manage
 PATCH /api/v1/workflows/{id} workflow:write
 PATCH /scim/v2/Groups/{id} iga:write
 PATCH /scim/v2/Users/{id} iga:write
+POST /api/v1/admin/auth/callback operator
 POST /api/v1/agents/enroll agent:manage
 POST /api/v1/agents/enrollment-tokens agent:manage
 POST /api/v1/agents/telemetry agent:ingest

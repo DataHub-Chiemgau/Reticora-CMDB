@@ -29,6 +29,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
@@ -289,15 +290,21 @@ func main() {
 	}()
 
 	mux, httpMetrics, err := server.NewRouter(repos, server.Options{
-		Version:              version,
-		MetricsTenantLabel:   cfg.MetricsTenantLabel,
-		Entitlements:         entitlementSvc,
-		Dispatcher:           webhookDispatcher,
-		CIService:            ci.NewServiceWithLimits(repos.CI, entitlementSvc).WithFieldResolver(repos.CIType),
-		Credentials:          credential.NewService(repos.Credential, encryptor),
-		OIDC:                 oidcProvider,
-		Sessions:             sessionIssuer,
-		RefreshSessions:      refreshSessions,
+		Version:            version,
+		MetricsTenantLabel: cfg.MetricsTenantLabel,
+		Entitlements:       entitlementSvc,
+		Dispatcher:         webhookDispatcher,
+		CIService:          ci.NewServiceWithLimits(repos.CI, entitlementSvc).WithFieldResolver(repos.CIType),
+		Credentials:        credential.NewService(repos.Credential, encryptor),
+		OIDC:               oidcProvider,
+		Sessions:           sessionIssuer,
+		RefreshSessions:    refreshSessions,
+		Operator: operator.Config{
+			BreakGlassToken: cfg.OperatorToken,
+			Group:           cfg.OperatorGroup,
+			MFAACRValues:    strings.Split(cfg.OperatorMFAACR, ","),
+		},
+		OperatorPool:         auditPool,
 		UserProvisioner:      userProvisioner(repos),
 		DefaultProvisionRole: cfg.DefaultProvisionRole,
 		Audit:                auditHandler,

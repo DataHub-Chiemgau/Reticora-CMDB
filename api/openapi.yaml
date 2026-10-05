@@ -124,6 +124,121 @@ paths:
               schema:
                 $ref: '#/components/schemas/ReadinessResponse'
 
+  /api/v1/admin/auth/callback:
+    post:
+      operationId: operatorLogin
+      tags: [Operator]
+      security: []
+      summary: Operator login (SEC-07)
+      description: |
+        Exchanges an OIDC authorization code (PKCE) for a 15-minute operator
+        session. Only members of the operator group (RETICORA_OPERATOR_GROUP,
+        default "operators") who logged in with a second factor (amr, or acr
+        in RETICORA_OPERATOR_MFA_ACR) get one. Every attempt is recorded in
+        operator_audit. Operator sessions are refused by the tenant API.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallbackRequest'
+      responses:
+        '200':
+          description: Operator session issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorSession'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/admin/me:
+    get:
+      operationId: getOperator
+      tags: [Operator]
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      summary: The authenticated operator
+      responses:
+        '200':
+          description: Operator identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorIdentity'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/admin/orgs:
+    get:
+      operationId: listOrganizationsAsOperator
+      tags: [Operator]
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      summary: List every organization
+      responses:
+        '200':
+          description: Organizations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorOrgListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/admin/audit:
+    get:
+      operationId: listOperatorAudit
+      tags: [Operator]
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      summary: List the operator audit, newest first
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Operator audit entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorAuditListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/admin/audit/verify:
+    get:
+      operationId: verifyOperatorAudit
+      tags: [Operator]
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      summary: Verify the operator audit hash chain
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorAuditVerification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/v1/auth/config:
     get:
       operationId: getAuthConfig
@@ -8031,6 +8146,16 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
+    OperatorAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Operator session from POST /api/v1/admin/auth/callback (SEC-07).
+    BreakGlassAuth:
+      type: apiKey
+      in: header
+      name: X-Operator-Token
+      description: RETICORA_OPERATOR_TOKEN, bootstrap and break-glass only; every use raises an alarm.
 
   parameters:
     ResourceID:
@@ -11251,6 +11376,125 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ServiceAccountRole'
+
+    OperatorIdentity:
+      type: object
+      required: [id, kind]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        kind:
+          type: string
+          enum: [oidc, break_glass]
+
+    OperatorSession:
+      type: object
+      required: [token, expires_at, operator]
+      properties:
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        operator:
+          $ref: '#/components/schemas/OperatorIdentity'
+
+    OperatorOrg:
+      type: object
+      required: [id, name, slug, plan, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        plan:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    OperatorOrgListResponse:
+      type: object
+      required: [data, total, limit, offset, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperatorOrg'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+    OperatorAuditEntry:
+      type: object
+      required: [id, timestamp, operator_id, operator_kind, action, status, details, previous_hash, entry_hash]
+      properties:
+        id:
+          type: integer
+          format: int64
+        timestamp:
+          type: string
+          format: date-time
+        operator_id:
+          type: string
+        operator_kind:
+          type: string
+          enum: [oidc, break_glass]
+        action:
+          type: string
+        target_org:
+          type: string
+        status:
+          type: integer
+        details:
+          type: object
+          additionalProperties: true
+        previous_hash:
+          type: string
+        entry_hash:
+          type: string
+
+    OperatorAuditListResponse:
+      type: object
+      required: [data, total, limit, offset, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperatorAuditEntry'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+    OperatorAuditVerification:
+      type: object
+      required: [valid, checked]
+      properties:
+        valid:
+          type: boolean
+        checked:
+          type: integer
+        broken_at:
+          type: integer
+          format: int64
+        reason:
+          type: string
 
     User:
       type: object

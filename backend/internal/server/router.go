@@ -44,6 +44,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/order"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
@@ -155,6 +156,11 @@ type Options struct {
 	// RefreshSessions stores the rotating refresh tokens in the shared cache
 	// store; nil keeps a per-process store (tests).
 	RefreshSessions *identity.RefreshSessions
+	// Operator configures the operator path /admin (SEC-07); OperatorPool
+	// holds operator_audit and serves the organization listing (nil: the
+	// audit fails and is logged, tests and --no-db).
+	Operator     operator.Config
+	OperatorPool *pgxpool.Pool
 	// UserProvisioner auto-creates the app_user on first OIDC login (nil
 	// disables). DefaultProvisionRole names the standard role assigned on
 	// first login (empty assigns none).
@@ -252,6 +258,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	}
 	registrars := []registrar{
 		identityHandler,
+		operator.NewHandler(opts.Operator, opts.OIDC, opts.Sessions, operator.NewAuditor(opts.OperatorPool), opts.OperatorPool),
 		identity.NewAPIKeyHandler(repos.APIKeys),
 		user.NewServiceAccountHandler(repos.ServiceAccounts),
 		entitlement.NewHandler(opts.Entitlements),
@@ -442,6 +449,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	registry.MustRegister(collectors.NewGoCollector())
 	observability.RegisterWorkerMetrics(registry)
 	override.RegisterMetrics(registry)
+	operator.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 

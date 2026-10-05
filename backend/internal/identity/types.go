@@ -252,7 +252,10 @@ type SessionClaims struct {
 	Name             string
 	Email            string
 	// ID is the token id (jti) a logout revokes.
-	ID        string
+	ID string
+	// Operator marks an operator session of the /admin path (SEC-07). Such a
+	// token carries no organization and is refused by the tenant API.
+	Operator  bool
 	IssuedAt  time.Time
 	ExpiresAt time.Time
 }
@@ -277,6 +280,7 @@ type sessionClaimsWire struct {
 	Name             string                          `json:"name,omitempty"`
 	Email            string                          `json:"email,omitempty"`
 	ID               string                          `json:"jti,omitempty"`
+	Operator         bool                            `json:"opr,omitempty"`
 	IssuedAt         int64                           `json:"iat,omitempty"`
 	ExpiresAt        int64                           `json:"exp,omitempty"`
 }
@@ -353,6 +357,7 @@ func (c SessionClaims) MarshalJSON() ([]byte, error) { //nolint:gocritic // see 
 		Name:           c.Name,
 		Email:          c.Email,
 		ID:             c.ID,
+		Operator:       c.Operator,
 		IssuedAt:       numericDate(c.IssuedAt),
 		ExpiresAt:      numericDate(c.ExpiresAt),
 	}
@@ -388,6 +393,7 @@ func (c *SessionClaims) UnmarshalJSON(data []byte) error {
 		Name:           w.Name,
 		Email:          w.Email,
 		ID:             w.ID,
+		Operator:       w.Operator,
 		IssuedAt:       fromNumericDate(w.IssuedAt),
 		ExpiresAt:      fromNumericDate(w.ExpiresAt),
 	}

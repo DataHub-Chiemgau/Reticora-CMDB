@@ -145,7 +145,7 @@ func TestKnownGapsList(t *testing.T) {
 		rls.RuleUsing: true, rls.RuleWithCheck: true, rls.RuleOrgPredicate: true,
 		rls.RuleSystemWrite: true, rls.RuleGlobalRows: true, rls.RuleClientScope: true,
 		rls.RuleSiteScope: true, rls.RuleTeamScope: true, rls.RuleOrgColumn: true,
-		rls.RuleReadOnlyCatalog: true, rls.RuleViewBarrier: true,
+		rls.RuleReadOnlyCatalog: true, rls.RuleViewBarrier: true, rls.RuleOperatorOnly: true,
 	}
 	plan, err := os.ReadFile(planPath)
 	if err != nil {
@@ -232,6 +232,21 @@ func violations(tbl *catalogTable) []rls.Rule {
 		// organization_id must be read-only for the application.
 		if tbl.appWrite {
 			return []rls.Rule{rls.RuleReadOnlyCatalog}
+		}
+		return nil
+	}
+	if slices.Contains(rls.OperatorTables, tbl.name) {
+		// Documented exception (SEC-07): organization-spanning operator
+		// table, reachable only in the operator context.
+		operatorOnly := tbl.rls && tbl.force && len(tbl.policies) > 0
+		for i := range tbl.policies {
+			p := &tbl.policies[i]
+			if !usesGUC(p.using, rls.OperatorGUC) || (p.cmd != "SELECT" && p.cmd != "DELETE" && !usesGUC(p.expr("check"), rls.OperatorGUC)) {
+				operatorOnly = false
+			}
+		}
+		if !operatorOnly {
+			return []rls.Rule{rls.RuleOperatorOnly}
 		}
 		return nil
 	}

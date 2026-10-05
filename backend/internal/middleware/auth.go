@@ -171,6 +171,10 @@ func authenticate(r *http.Request, verifier SessionVerifier) (Claims, error) {
 	if err != nil {
 		return Claims{}, fmt.Errorf("invalid session token")
 	}
+	if sessionClaims.Operator {
+		// Operator sessions belong to /admin only (SEC-07).
+		return Claims{}, fmt.Errorf("operator sessions are not valid for the tenant API")
+	}
 	if sessionClaims.OrganizationID == "" {
 		return Claims{}, fmt.Errorf("organization claim is required")
 	}
@@ -281,9 +285,10 @@ func requiresAuth(r *http.Request) bool {
 		// The enrollment code is the credential; the collector has no session
 		// or API key before it enrolls.
 		return false
-	default:
-		return true
 	}
+	// The operator path authenticates operators itself and has no tenant
+	// (SEC-07, internal/operator); tenant credentials never reach it.
+	return !strings.HasPrefix(r.URL.Path, "/api/v1/admin/")
 }
 
 func claimsFromRequest(r *http.Request) (Claims, error) {

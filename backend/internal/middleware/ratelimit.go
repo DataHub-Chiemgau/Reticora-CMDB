@@ -211,6 +211,8 @@ var preAuthPaths = map[string]bool{
 	"/api/v1/auth/callback":     true,
 	"/api/v1/auth/refresh":      true,
 	"/api/v1/collectors/enroll": true,
+	// Operator login (SEC-07).
+	"/api/v1/admin/auth/callback": true,
 }
 
 // PreAuthRateLimiter limits authentication attempts per client IP before any
@@ -227,7 +229,9 @@ func PreAuthRateLimiter(perMinute int, store cache.Store) func(http.Handler) htt
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			preAuth := preAuthPaths[r.URL.Path]
-			if !preAuth && !requiresAuth(r) {
+			// The operator path authenticates itself; its failed attempts
+			// count against the same budget.
+			if !preAuth && !requiresAuth(r) && !strings.HasPrefix(r.URL.Path, "/api/v1/admin/") {
 				next.ServeHTTP(w, r)
 				return
 			}

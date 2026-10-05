@@ -249,6 +249,10 @@ const (
 	// routePublic marks routes that are intentionally reachable without an
 	// authenticated principal (health, metrics, public auth endpoints).
 	routePublic
+	// routeOperator marks the operator path /api/v1/admin (SEC-07): the
+	// tenant authorization does not apply; internal/operator admits
+	// operators only and audits every request.
+	routeOperator
 	// routeProtected marks routes that require an authenticated principal
 	// holding the resolved permission.
 	routeProtected
@@ -269,6 +273,9 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 
 	if !strings.HasPrefix(path, "/api/") {
 		return "", routePublic
+	}
+	if strings.HasPrefix(path, "/api/v1/admin/") {
+		return "", routeOperator
 	}
 
 	// Public authentication endpoints are unauthenticated by design.
@@ -355,7 +362,7 @@ func AuthorizeRoute(method, path string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch access {
-			case routePublic:
+			case routePublic, routeOperator:
 				next.ServeHTTP(w, r)
 				return
 			case routeUnmapped:

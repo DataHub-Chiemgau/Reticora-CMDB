@@ -64,7 +64,15 @@ type Config struct {
 	// session signing keys whose tokens stay valid during a key rotation
 	// (SEC-06); new tokens are signed with SessionKeyPath only.
 	SessionPreviousKeyPaths string
-	AllowInsecureDevAuth    bool // opt-in: accept session tokens without signature verification
+
+	// Operator path /admin (SEC-07): RETICORA_OPERATOR_TOKEN is the
+	// break-glass token (empty disables it, at least 32 characters
+	// otherwise); operators are members of OperatorGroup who logged in with
+	// MFA (amr, or one of OperatorMFAACR as acr).
+	OperatorToken        string
+	OperatorGroup        string
+	OperatorMFAACR       string
+	AllowInsecureDevAuth bool // opt-in: accept session tokens without signature verification
 
 	// Entitlements
 	DefaultPlan string // plan applied to tenants without entitlement rows
@@ -145,6 +153,9 @@ func Load() *Config {
 		OIDCCACertFile:          l.str("RETICORA_OIDC_CA_CERT_FILE", ""),
 		SessionKeyPath:          l.str("RETICORA_SESSION_KEY_PATH", ""),
 		SessionPreviousKeyPaths: l.str("RETICORA_SESSION_PREVIOUS_KEY_PATHS", ""),
+		OperatorToken:           l.str("RETICORA_OPERATOR_TOKEN", ""),
+		OperatorGroup:           l.str("RETICORA_OPERATOR_GROUP", "operators"),
+		OperatorMFAACR:          l.str("RETICORA_OPERATOR_MFA_ACR", "2"),
 		AllowInsecureDevAuth:    l.str("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false") == "true",
 
 		DefaultPlan:            l.str("RETICORA_DEFAULT_PLAN", "essential"),
@@ -232,6 +243,9 @@ func (c *Config) Validate(noDB bool) error {
 	}
 	for _, key := range c.invalid {
 		errs = append(errs, fmt.Errorf("%s has an invalid value", key))
+	}
+	if c.OperatorToken != "" && len(c.OperatorToken) < 32 {
+		errs = append(errs, fmt.Errorf("RETICORA_OPERATOR_TOKEN must have at least 32 characters"))
 	}
 	if c.RateLimitRPM <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_RPM must be positive, got %d", c.RateLimitRPM))

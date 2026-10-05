@@ -41,6 +41,98 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/admin/auth/callback': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Operator login (SEC-07)
+     * @description Exchanges an OIDC authorization code (PKCE) for a 15-minute operator
+     *     session. Only members of the operator group (RETICORA_OPERATOR_GROUP,
+     *     default "operators") who logged in with a second factor (amr, or acr
+     *     in RETICORA_OPERATOR_MFA_ACR) get one. Every attempt is recorded in
+     *     operator_audit. Operator sessions are refused by the tenant API.
+     */
+    post: operations['operatorLogin'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/admin/me': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The authenticated operator */
+    get: operations['getOperator'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/admin/orgs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List every organization */
+    get: operations['listOrganizationsAsOperator'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/admin/audit': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the operator audit, newest first */
+    get: operations['listOperatorAudit'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/admin/audit/verify': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Verify the operator audit hash chain */
+    get: operations['verifyOperatorAudit'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/auth/config': {
     parameters: {
       query?: never;
@@ -6871,6 +6963,65 @@ export interface components {
     SetServiceAccountRolesRequest: {
       roles: components['schemas']['ServiceAccountRole'][];
     };
+    OperatorIdentity: {
+      id: string;
+      name?: string;
+      email?: string;
+      /** @enum {string} */
+      kind: 'oidc' | 'break_glass';
+    };
+    OperatorSession: {
+      token: string;
+      /** Format: date-time */
+      expires_at: string;
+      operator: components['schemas']['OperatorIdentity'];
+    };
+    OperatorOrg: {
+      id: string;
+      name: string;
+      slug: string;
+      plan: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    OperatorOrgListResponse: {
+      data: components['schemas']['OperatorOrg'][];
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+    };
+    OperatorAuditEntry: {
+      /** Format: int64 */
+      id: number;
+      /** Format: date-time */
+      timestamp: string;
+      operator_id: string;
+      /** @enum {string} */
+      operator_kind: 'oidc' | 'break_glass';
+      action: string;
+      target_org?: string;
+      status: number;
+      details: {
+        [key: string]: unknown;
+      };
+      previous_hash: string;
+      entry_hash: string;
+    };
+    OperatorAuditListResponse: {
+      data: components['schemas']['OperatorAuditEntry'][];
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+    };
+    OperatorAuditVerification: {
+      valid: boolean;
+      checked: number;
+      /** Format: int64 */
+      broken_at?: number;
+      reason?: string;
+    };
     User: {
       id: string;
       organization_id: string;
@@ -7929,6 +8080,129 @@ export interface operations {
           'application/json': components['schemas']['ReadinessResponse'];
         };
       };
+    };
+  };
+  operatorLogin: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CallbackRequest'];
+      };
+    };
+    responses: {
+      /** @description Operator session issued */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OperatorSession'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getOperator: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Operator identity */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OperatorIdentity'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  listOrganizationsAsOperator: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Organizations */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OperatorOrgListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listOperatorAudit: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Operator audit entries */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OperatorAuditListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  verifyOperatorAudit: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Verification result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OperatorAuditVerification'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
     };
   };
   getAuthConfig: {

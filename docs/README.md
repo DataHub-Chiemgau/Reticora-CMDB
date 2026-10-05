@@ -262,6 +262,17 @@ transaction (`database.WithSystem`); everything else runs in the tenant
 transaction of the key's organization. Keys issued before this format
 (underscore between prefix and secret) remain valid until rotated.
 
+**Operator path (SEC-07):** `/api/v1/admin/*` is outside the tenant API.
+Operators log in with `POST /api/v1/admin/auth/callback` (OIDC code + PKCE);
+only members of `RETICORA_OPERATOR_GROUP` (default `operators`) who used a
+second factor (`amr`, or an `acr` from `RETICORA_OPERATOR_MFA_ACR`, default
+`2`) get a 15-minute operator session, which the tenant API refuses.
+`RETICORA_OPERATOR_TOKEN` (at least 32 characters, header `X-Operator-Token`)
+is for bootstrap and break-glass only: every use logs a security alert and
+counts in `reticora_operator_break_glass_total`. Every operator request,
+refused ones included, is recorded in `operator_audit` with a hash chain of
+its own (`GET /api/v1/admin/audit`, `GET /api/v1/admin/audit/verify`).
+
 **Authorization and tenant resolution:** the auth middleware authenticates
 session bearer tokens and `X-API-Key` service tokens and populates a single
 authenticated principal (subject, organization, scopes, principal type) in the
