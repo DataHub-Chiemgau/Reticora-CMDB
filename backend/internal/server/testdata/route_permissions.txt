@@ -53,6 +53,7 @@ GET /api/v1/admin/audit operator
 GET /api/v1/admin/audit/verify operator
 GET /api/v1/admin/me operator
 GET /api/v1/admin/orgs operator
+GET /api/v1/admin/orgs/{id}/entitlements operator
 GET /api/v1/agents agent:read
 GET /api/v1/ai/conversations ai:read
 GET /api/v1/api-keys apikey:manage
@@ -275,6 +276,7 @@ PATCH /api/v1/workflows/{id} workflow:write
 PATCH /scim/v2/Groups/{id} iga:write
 PATCH /scim/v2/Users/{id} iga:write
 POST /api/v1/admin/auth/callback operator
+POST /api/v1/admin/orgs/{id}/entitlements operator
 POST /api/v1/agents/enroll agent:manage
 POST /api/v1/agents/enrollment-tokens agent:manage
 POST /api/v1/agents/telemetry agent:ingest
@@ -328,7 +330,6 @@ POST /api/v1/discovery/review-items/{id}/resolve review:resolve
 POST /api/v1/disposal-records disposal:write
 POST /api/v1/documents document:write
 POST /api/v1/documents/{id}/links document:write
-POST /api/v1/entitlements entitlement:manage
 POST /api/v1/export/jobs export:run
 POST /api/v1/forms form:write
 POST /api/v1/forms/{id}/submissions form:write

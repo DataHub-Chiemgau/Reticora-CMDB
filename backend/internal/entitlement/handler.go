@@ -20,10 +20,11 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-// RegisterRoutes registers entitlement routes.
+// RegisterRoutes registers the tenant entitlement routes. They are
+// read-only: entitlements are written by the operator only, under
+// /api/v1/admin/orgs/{id}/entitlements (ENT-04, E-12).
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/entitlements", h.List)
-	r.Post("/api/v1/entitlements", h.Grant)
 	r.Get("/api/v1/entitlements/check/{feature}", h.Check)
 }
 
@@ -50,7 +51,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type grantRequest struct {
+// GrantRequest is the body of an entitlement change (operator path).
+type GrantRequest struct {
 	FeatureKey string           `json:"feature_key"`
 	Plan       Plan             `json:"plan"`
 	Enabled    *bool            `json:"enabled,omitempty"`
@@ -59,52 +61,21 @@ type grantRequest struct {
 	Source     string           `json:"source,omitempty"`
 }
 
-// Grant handles POST /api/v1/entitlements.
-func (h *Handler) Grant(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
-		return
-	}
-
-	var req grantRequest
-	if err := api.ReadJSON(r, &req); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
+// Entitlement returns the entitlement the request stores for orgID.
+func (req *GrantRequest) Entitlement(orgID string) (Entitlement, error) {
 	if req.FeatureKey == "" {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "feature_key is required")
-		return
+		return Entitlement{}, invalid(errors.New("feature_key is required"))
 	}
-	if req.Plan == "" {
-		req.Plan = PlanEssential
+	plan := req.Plan
+	if plan == "" {
+		plan = PlanEssential
 	}
-
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-
-	granted, err := h.service.Grant(r.Context(), Entitlement{
-		OrganizationID: t.OrganizationID,
-		FeatureKey:     req.FeatureKey,
-		Plan:           req.Plan,
-		Enabled:        enabled,
-		Limits:         req.Limits,
-		ValidUntil:     req.ValidUntil,
-		Source:         req.Source,
-	})
-	var validation *ValidationError
-	if errors.As(err, &validation) {
-		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", validation.Error())
-		return
-	}
-	if err != nil {
-		api.WriteRepoError(w, err)
-		return
-	}
-
-	api.WriteJSON(w, http.StatusCreated, granted)
+	return Entitlement{OrganizationID: orgID, FeatureKey: req.FeatureKey, Plan: plan, Enabled: enabled,
+		Limits: req.Limits, ValidUntil: req.ValidUntil, Source: req.Source}, nil
 }
 
 // Check handles GET /api/v1/entitlements/check/{feature}.

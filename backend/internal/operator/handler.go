@@ -11,6 +11,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -24,6 +25,8 @@ type Handler struct {
 	sessions *identity.SessionIssuer
 	audit    *Auditor
 	pool     *pgxpool.Pool
+	// entitlements is written here only (ENT-04).
+	entitlements *entitlement.Service
 }
 
 // NewHandler creates the operator handler. pool serves the organization
@@ -40,6 +43,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.With(h.Middleware).Get("/api/v1/admin/orgs", h.ListOrgs)
 	r.With(h.Middleware).Get("/api/v1/admin/audit", h.ListAudit)
 	r.With(h.Middleware).Get("/api/v1/admin/audit/verify", h.VerifyAudit)
+	r.With(h.Middleware).Get("/api/v1/admin/orgs/{id}/entitlements", h.ListEntitlements)
+	r.With(h.Middleware).Post("/api/v1/admin/orgs/{id}/entitlements", h.GrantEntitlement)
 }
 
 var errNotOperator = errors.New("operator: login is not an operator with MFA")

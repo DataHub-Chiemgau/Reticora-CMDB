@@ -309,7 +309,11 @@ record (once per device, counter `reticora_unlicensed_ci_total`) instead of a
 CI; raising the limit adopts the waiting items as CIs, `create` adopts one
 within the limit and `dismiss` discards it, both audited. A downgrade deletes
 no data: only new CIs are blocked (REST) or held (ingest). Repository errors
-deny access (fail-closed). Plan matrix (ENT-06):
+deny access (fail-closed). The tenant API is read-only (`GET
+/api/v1/entitlements`); entitlements are written by the operator only,
+`POST /api/v1/admin/orgs/{id}/entitlements`, and every change is recorded
+in `operator_audit` with the previous and the new state (ENT-04, E-12).
+Plan matrix (ENT-06):
 
 | Plan | Features |
 |------|----------|

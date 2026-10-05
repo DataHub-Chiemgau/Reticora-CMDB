@@ -265,7 +265,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	opts.Entitlements.WithUnlicensed(discoveryHandler)
 	registrars := []registrar{
 		identityHandler,
-		operator.NewHandler(opts.Operator, opts.OIDC, opts.Sessions, operator.NewAuditor(opts.OperatorPool), opts.OperatorPool),
+		operator.NewHandler(opts.Operator, opts.OIDC, opts.Sessions, operator.NewAuditor(opts.OperatorPool), opts.OperatorPool).
+			WithEntitlements(opts.Entitlements),
 		identity.NewAPIKeyHandler(repos.APIKeys),
 		user.NewServiceAccountHandler(repos.ServiceAccounts),
 		entitlement.NewHandler(opts.Entitlements),

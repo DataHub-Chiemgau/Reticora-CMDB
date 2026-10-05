@@ -196,6 +196,66 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/admin/orgs/{id}/entitlements:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listOrganizationEntitlementsAsOperator
+      tags: [Operator]
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      summary: List the entitlements of an organization
+      responses:
+        '200':
+          description: Entitlements of the organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntitlementListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: grantEntitlementAsOperator
+      tags: [Operator]
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      summary: Grant or update an entitlement of an organization
+      description: >-
+        The only path that writes entitlements (ENT-04, E-12). The change is
+        recorded in operator_audit with the previous and the new state.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantEntitlementRequest'
+      responses:
+        '200':
+          description: Entitlement stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entitlement'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: cmdb_core disabled or limited in time, unknown source or negative limit
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/v1/admin/audit:
     get:
       operationId: listOperatorAudit
@@ -1117,6 +1177,9 @@ paths:
       operationId: listEntitlements
       tags: [Entitlements]
       summary: List tenant entitlements
+      description: >-
+        Read-only for tenants; entitlements are written by the operator only
+        (POST /api/v1/admin/orgs/{id}/entitlements, ENT-04).
       responses:
         '200':
           description: Entitlements for the current tenant
@@ -1124,32 +1187,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EntitlementListResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-    post:
-      operationId: grantEntitlement
-      tags: [Entitlements]
-      summary: Grant or update an entitlement
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GrantEntitlementRequest'
-      responses:
-        '201':
-          description: Entitlement granted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Entitlement'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '422':
-          description: cmdb_core disabled or limited in time, unknown source or negative limit
-          content:
-            application/problem+json:
-              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '401':
           $ref: '#/components/responses/Unauthorized'
 

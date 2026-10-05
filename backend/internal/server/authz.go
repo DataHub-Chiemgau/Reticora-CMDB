@@ -121,7 +121,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"clients":        identity.PermUserManage,
 	"roles":          identity.PermRoleManage,
 	"permissions":    identity.PermPermissionManage,
-	"entitlements":   identity.PermEntitlementManage,
+	"entitlements":   identity.PermEntitlementManage, // no tenant write route: the operator writes (ENT-04)
 	"webhooks":       identity.PermWebhookManage,
 	"credentials":    identity.PermCredentialManage,
 	"export":         identity.PermExportRun,

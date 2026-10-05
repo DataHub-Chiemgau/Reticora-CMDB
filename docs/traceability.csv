@@ -207,3 +207,5 @@ ENT-03;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-072
 API-04;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-072
 ENT-03;[B];B;backend/internal/entitlement/unlicensed_integration_test.go;WP-073
 ENT-08;[B];B;backend/internal/entitlement/unlicensed_integration_test.go;WP-073
+ENT-04;[B];B;backend/internal/operator/entitlements_test.go;WP-074
+API-05;[B];B;backend/internal/operator/entitlements_test.go;WP-074
