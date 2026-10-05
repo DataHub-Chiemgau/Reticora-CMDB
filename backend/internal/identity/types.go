@@ -405,9 +405,18 @@ func (c *SessionClaims) UnmarshalJSON(data []byte) error {
 
 // APIKeyInfo holds resolved API key metadata.
 type APIKeyInfo struct {
+	// ID is the public key prefix; KeyID the row id.
 	ID             string
+	KeyID          string
+	OwnerID        string
+	Environment    string
 	OrganizationID string
 	ClientScope    string
-	Scopes         []Permission
-	ExpiresAt      *time.Time
+	// Scopes are the effective permissions: the key's permissions the owner
+	// currently holds (AUT-04). Scope and PermissionScopes are the owner's
+	// scope; nil when the owner's rights are not resolved.
+	Scopes           []Permission
+	Scope            *Scope
+	PermissionScopes map[Permission]Scope
+	ExpiresAt        *time.Time
 }

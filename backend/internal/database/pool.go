@@ -204,7 +204,8 @@ const SystemGUC = "app.system"
 // UUID, which matches no row and keeps the strict ::uuid casts of the tenant
 // policies valid, so
 // only the SELECT-only system exceptions (organization, webhook_delivery,
-// webhook_dead_letter, export_job, alert_rule, collector_enrollment_code)
+// webhook_dead_letter, export_job, alert_rule, collector_enrollment_code,
+// api_key)
 // return rows. Workers use it to find due work and then change rows per
 // organization in WithTenant (E-08). Every caller is listed in the
 // allow-list of the architecture test (WP-041).

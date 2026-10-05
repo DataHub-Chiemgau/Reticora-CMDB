@@ -1764,6 +1764,71 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/api-keys': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the organization's API keys (without secrets) */
+    get: operations['listAPIKeys'];
+    put?: never;
+    /**
+     * Create an API key for the calling user
+     * @description AUT-04: the key is `rk_live_` or `rk_test_` followed by a 12 character
+     *     Base62 prefix and a 40 character Base62 secret. The plaintext is in
+     *     this response only; the server stores its SHA-256 hash. The key's
+     *     permissions must be held by the caller; at use the key grants the
+     *     intersection of its permissions and its owner's current rights, in
+     *     the owner's scope. API keys cannot create keys.
+     */
+    post: operations['createAPIKey'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/api-keys/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Revoke an API key at once */
+    delete: operations['revokeAPIKey'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/api-keys/{id}/rotate': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rotate an API key with overlap
+     * @description Issues a successor with the same name, permissions, owner, environment
+     *     and expiry. The previous key stays valid until the end of the overlap
+     *     (default 24 hours, at most 7 days) or its own earlier expiry (SEC-06).
+     */
+    post: operations['rotateAPIKey'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/users': {
     parameters: {
       query?: never;
@@ -6655,6 +6720,55 @@ export interface components {
       contacts_affected: number;
       users_affected: number;
     };
+    APIKey: {
+      id: string;
+      name: string;
+      /** @description Public 12 character prefix of the key */
+      key_prefix: string;
+      /** @enum {string} */
+      environment: 'live' | 'test';
+      permissions: string[];
+      owner_id: string;
+      rotated_from?: string;
+      /** Format: date-time */
+      expires_at?: string;
+      /** Format: date-time */
+      revoked_at?: string;
+      /** Format: date-time */
+      last_used_at?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    CreatedAPIKey: components['schemas']['APIKey'] & {
+      /** @description Plaintext key, returned only once */
+      key: string;
+    };
+    APIKeyListResponse: {
+      data: components['schemas']['APIKey'][];
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+    };
+    CreateAPIKeyRequest: {
+      name: string;
+      permissions: string[];
+      /** Format: date-time */
+      expires_at?: string;
+      /**
+       * @default live
+       * @enum {string}
+       */
+      environment: 'live' | 'test';
+    };
+    RotateAPIKeyRequest: {
+      /** @default 86400 */
+      overlap_seconds: number;
+    };
+    RotatedAPIKey: {
+      key: components['schemas']['CreatedAPIKey'];
+      previous: components['schemas']['APIKey'];
+    };
     User: {
       id: string;
       organization_id: string;
@@ -11522,6 +11636,131 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+    };
+  };
+  listAPIKeys: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description API keys of the organization, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['APIKeyListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createAPIKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateAPIKeyRequest'];
+      };
+    };
+    responses: {
+      /** @description Key created; the plaintext is shown once */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CreatedAPIKey'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description Name, permissions, expiry or environment invalid */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  revokeAPIKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Key revoked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  rotateAPIKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['RotateAPIKeyRequest'];
+      };
+    };
+    responses: {
+      /** @description Successor created; the plaintext is shown once */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RotatedAPIKey'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description Overlap out of range */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
     };
   };
   listUsers: {

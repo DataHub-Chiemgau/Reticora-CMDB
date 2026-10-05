@@ -110,12 +110,16 @@ func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIK
 		if info.OrganizationID == "" {
 			return identity.Principal{}, Claims{}, fmt.Errorf("API key is missing its organization scope")
 		}
+		// The key acts with the intersection of its permissions and its
+		// owner's current rights, in the owner's scope (AUT-04).
 		principal := identity.Principal{
-			Subject:        info.ID,
-			OrganizationID: info.OrganizationID,
-			ClientScope:    info.ClientScope,
-			Permissions:    info.Scopes,
-			Type:           identity.PrincipalTypeAPIKey,
+			Subject:          info.ID,
+			OrganizationID:   info.OrganizationID,
+			ClientScope:      info.ClientScope,
+			Scope:            info.Scope,
+			PermissionScopes: info.PermissionScopes,
+			Permissions:      info.Scopes,
+			Type:             identity.PrincipalTypeAPIKey,
 		}
 		return principal, Claims{
 			Subject:        info.ID,

@@ -1,3 +1,4 @@
+DELETE /api/v1/api-keys/{id} apikey:manage
 DELETE /api/v1/assets/{id} asset:write
 DELETE /api/v1/assignments/{id} assignment:write
 DELETE /api/v1/buildings/{id} site:write
@@ -49,6 +50,7 @@ DELETE /scim/v2/Groups/{id} iga:write
 DELETE /scim/v2/Users/{id} iga:write
 GET /api/v1/agents agent:read
 GET /api/v1/ai/conversations ai:read
+GET /api/v1/api-keys apikey:manage
 GET /api/v1/assets asset:read
 GET /api/v1/assets/{id} asset:read
 GET /api/v1/assets/{id}/children asset:read
@@ -273,6 +275,8 @@ POST /api/v1/agents/{id}/heartbeat agent:manage
 POST /api/v1/agents/{id}/site agent:manage
 POST /api/v1/ai/ask ai:read
 POST /api/v1/ai/conversations ai:read
+POST /api/v1/api-keys apikey:manage
+POST /api/v1/api-keys/{id}/rotate apikey:manage
 POST /api/v1/asset-locations asset:write
 POST /api/v1/assets asset:write
 POST /api/v1/assets/{id}/lifecycle-transitions lifecycle:transition

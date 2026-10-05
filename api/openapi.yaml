@@ -3077,6 +3077,119 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/api-keys:
+    get:
+      operationId: listAPIKeys
+      tags: [API Keys]
+      summary: List the organization's API keys (without secrets)
+      responses:
+        '200':
+          description: API keys of the organization, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIKeyListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createAPIKey
+      tags: [API Keys]
+      summary: Create an API key for the calling user
+      description: |
+        AUT-04: the key is `rk_live_` or `rk_test_` followed by a 12 character
+        Base62 prefix and a 40 character Base62 secret. The plaintext is in
+        this response only; the server stores its SHA-256 hash. The key's
+        permissions must be held by the caller; at use the key grants the
+        intersection of its permissions and its owner's current rights, in
+        the owner's scope. API keys cannot create keys.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAPIKeyRequest'
+      responses:
+        '201':
+          description: Key created; the plaintext is shown once
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedAPIKey'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: Name, permissions, expiry or environment invalid
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/api-keys/{id}:
+    delete:
+      operationId: revokeAPIKey
+      tags: [API Keys]
+      summary: Revoke an API key at once
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      responses:
+        '204':
+          description: Key revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/api-keys/{id}/rotate:
+    post:
+      operationId: rotateAPIKey
+      tags: [API Keys]
+      summary: Rotate an API key with overlap
+      description: |
+        Issues a successor with the same name, permissions, owner, environment
+        and expiry. The previous key stays valid until the end of the overlap
+        (default 24 hours, at most 7 days) or its own earlier expiry (SEC-06).
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RotateAPIKeyRequest'
+      responses:
+        '201':
+          description: Successor created; the plaintext is shown once
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RotatedAPIKey'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Overlap out of range
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/v1/users:
     get:
       operationId: listUsers
@@ -10777,6 +10890,104 @@ components:
         mode: { type: string, enum: [anonymize, delete] }
         contacts_affected: { type: integer }
         users_affected: { type: integer }
+
+    APIKey:
+      type: object
+      required: [id, name, key_prefix, environment, permissions, owner_id, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        key_prefix:
+          type: string
+          description: Public 12 character prefix of the key
+        environment:
+          type: string
+          enum: [live, test]
+        permissions:
+          type: array
+          items:
+            type: string
+        owner_id:
+          type: string
+        rotated_from:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    CreatedAPIKey:
+      allOf:
+        - $ref: '#/components/schemas/APIKey'
+        - type: object
+          required: [key]
+          properties:
+            key:
+              type: string
+              description: Plaintext key, returned only once
+
+    APIKeyListResponse:
+      type: object
+      required: [data, total, limit, offset, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/APIKey'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+    CreateAPIKeyRequest:
+      type: object
+      required: [name, permissions]
+      properties:
+        name:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        expires_at:
+          type: string
+          format: date-time
+        environment:
+          type: string
+          enum: [live, test]
+          default: live
+
+    RotateAPIKeyRequest:
+      type: object
+      properties:
+        overlap_seconds:
+          type: integer
+          minimum: 0
+          maximum: 604800
+          default: 86400
+
+    RotatedAPIKey:
+      type: object
+      required: [key, previous]
+      properties:
+        key:
+          $ref: '#/components/schemas/CreatedAPIKey'
+        previous:
+          $ref: '#/components/schemas/APIKey'
 
     User:
       type: object

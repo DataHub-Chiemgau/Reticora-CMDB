@@ -8,11 +8,6 @@ package database
 // list only shrinks. Each entry is a documented system path (E-08) and names
 // the work package that removes it, if any.
 var tenantGuardAllowlist = map[string]string{
-	// Identifies an API key by its public prefix before any tenant is known.
-	// WP-067 replaces it with a hash lookup under WithSystem; until then the
-	// application role cannot read api_key here under FORCE RLS.
-	"internal/identity/apikey_store.go": "WP-067: API key lookup before tenant context",
-
 	// Readiness probe: checks installed extensions in pg_extension, reads no
 	// tenant data.
 	"internal/server/health.go": "readiness check on pg_extension",

@@ -160,7 +160,6 @@ func main() {
 		repos        server.Repositories
 		auditHandler *audit.Handler
 		auditPool    *pgxpool.Pool
-		apiKeyStore  identity.APIKeyStore
 		blobStore    blob.Store
 	)
 
@@ -196,7 +195,6 @@ func main() {
 		repos = server.PostgresRepositories(pool, audit.NewPGRecorder())
 		auditHandler = audit.NewHandler(pool)
 		auditPool = pool
-		apiKeyStore = identity.NewPGAPIKeyStore(pool)
 
 		// Asynchronous exports render into object storage and are served via
 		// signed URLs. Without object storage, job creation answers 503 but
@@ -346,7 +344,10 @@ func main() {
 	// explicitly opted into the insecure development mode. API keys are
 	// verified against the database when available, which gives service
 	// tokens the same authenticated principal as interactive users.
-	authMiddleware := middleware.AuthMiddlewareWithAPIKeys(sessionIssuer, identity.NewAPIKeyServiceWithStore(apiKeyStore))
+	// A key acts with the intersection of its permissions and its owner's
+	// current role assignments (AUT-04).
+	apiKeys := identity.NewAPIKeyServiceWithStore(repos.APIKeys).WithOwnerAccess(repos.Permission)
+	authMiddleware := middleware.AuthMiddlewareWithAPIKeys(sessionIssuer, apiKeys)
 	if sessionIssuer == nil {
 		slog.Warn("INSECURE DEVELOPMENT MODE: bearer tokens are accepted without signature verification")
 	}

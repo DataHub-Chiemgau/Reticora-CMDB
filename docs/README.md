@@ -248,6 +248,20 @@ is a fatal startup error unless the operator explicitly opts into the insecure
 development mode with `RETICORA_ALLOW_INSECURE_DEV_AUTH=true`. Only
 `/api/v1/auth/{config,callback,refresh,logout}` are unauthenticated.
 
+**API keys (AUT-04):** `POST /api/v1/api-keys` (permission `apikey:manage`)
+issues `rk_live_` or `rk_test_` keys: a 12 character Base62 prefix and a 40
+character Base62 secret. The plaintext is returned once; only its SHA-256 is
+stored and compared in constant time. A key cannot be given permissions its
+creator lacks, and at every request it grants only the intersection of its
+permissions with its owner's current role assignments, in the owner's scope.
+`GET` lists keys without secrets, `DELETE /api/v1/api-keys/{id}` revokes at
+once, and `POST /api/v1/api-keys/{id}/rotate` issues a successor while the old
+key stays valid for the overlap (`overlap_seconds`, default 24 hours, at most
+7 days). A presented key is identified by its prefix in a read-only system
+transaction (`database.WithSystem`); everything else runs in the tenant
+transaction of the key's organization. Keys issued before this format
+(underscore between prefix and secret) remain valid until rotated.
+
 **Authorization and tenant resolution:** the auth middleware authenticates
 session bearer tokens and `X-API-Key` service tokens and populates a single
 authenticated principal (subject, organization, scopes, principal type) in the

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000079_rls_scoped_write_using
+Stand: Migration 000080_api_key_rotation
 
 ## Prüfung
 
@@ -155,7 +155,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ai_conversation` | ja | ja | ai_conversation_tenant_isolation (ALL) |
 | `ai_message` | ja | ja | ai_message_tenant_isolation (ALL) |
 | `alert_rule` | ja | ja | alert_rule_isolation (ALL), alert_rule_system_select (SELECT) |
-| `api_key` | ja | ja | org_isolation (ALL) |
+| `api_key` | ja | ja | api_key_system_select (SELECT), org_isolation (ALL) |
 | `app_user` | ja | ja | user_isolation (ALL) |
 | `asset` | ja | ja | asset_scoped_delete (DELETE), asset_scoped_update (UPDATE), asset_tenant_isolation (ALL) |
 | `asset_location` | ja | ja | asset_location_isolation (ALL) |

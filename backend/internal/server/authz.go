@@ -15,7 +15,9 @@ import (
 // internal/permission; the write permission is derived by replacing the
 // ":read" suffix with ":write".
 var readPermissionFor = map[string]identity.Permission{
-	"cis":                  identity.PermCIRead,
+	"cis": identity.PermCIRead,
+	// Listing API keys shows metadata only, but it is still key management.
+	"api-keys":             identity.PermAPIKeyManage,
 	"relationships":        identity.PermRelationshipRead,
 	"topology":             identity.PermTopologyRead,
 	"sites":                identity.PermSiteRead,
