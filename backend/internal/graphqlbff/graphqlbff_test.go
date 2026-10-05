@@ -40,7 +40,7 @@ func newFixture(t *testing.T) (*Handler, string) {
 		SourceCIID: item.ID, TargetCIID: other.ID, RelType: "connected_to", Source: "manual"}); err != nil {
 		t.Fatal(err)
 	}
-	return NewHandler(cis, rels), item.ID
+	return NewHandler(cis, rels).WithEntitlements(entitled{FeatureCMDBCore: true}), item.ID
 }
 
 func run(t *testing.T, h *Handler, perms []identity.Permission, body string) (int, map[string]any) {
@@ -98,6 +98,7 @@ func TestResolversCheckEntitlement(t *testing.T) {
 		Feature:    "ticketing",
 	})
 	perms := []identity.Permission{identity.PermTicketRead}
+	h.entitlements = nil
 	if got, _ := run(t, h, perms, gql(`{ tickets { id } }`)); got != http.StatusForbidden {
 		t.Errorf("gated field without entitlement checker: status %d, want 403", got)
 	}

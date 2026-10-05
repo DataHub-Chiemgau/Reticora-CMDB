@@ -3,6 +3,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -89,6 +90,39 @@ func WriteError(w http.ResponseWriter, status int, title, detail string) {
 		Status: status,
 		Detail: detail,
 	})
+}
+
+// Problem types of the entitlement checks (ENT-03, CH21).
+const (
+	// ProblemEntitlementLimit: a quota (max_cis, ...) is exhausted.
+	ProblemEntitlementLimit = "https://reticora.io/problems/entitlement-limit"
+	// ProblemFeatureNotEntitled: the organization is not entitled to the feature.
+	ProblemFeatureNotEntitled = "https://reticora.io/problems/feature-not-entitled"
+	// ProblemLicenseExpired: the discovery license expired (CH21); only
+	// discovery and ingest stop.
+	ProblemLicenseExpired = "https://reticora.io/problems/license-expired"
+)
+
+// WriteProblem writes an RFC 7807 problem detail with its own type.
+func WriteProblem(w http.ResponseWriter, status int, problemType, title, detail string) {
+	WriteJSON(w, status, ProblemDetail{Type: problemType, Title: title, Status: status, Detail: detail})
+}
+
+// TypedProblem is an error that names its RFC 7807 problem type.
+type TypedProblem interface {
+	error
+	ProblemType() string
+}
+
+// WriteTypedProblem writes err with its problem type when it names one and
+// reports whether it did.
+func WriteTypedProblem(w http.ResponseWriter, status int, err error) bool {
+	var typed TypedProblem
+	if !errors.As(err, &typed) {
+		return false
+	}
+	WriteProblem(w, status, typed.ProblemType(), http.StatusText(status), typed.Error())
+	return true
 }
 
 // ReadJSON decodes JSON from request body.

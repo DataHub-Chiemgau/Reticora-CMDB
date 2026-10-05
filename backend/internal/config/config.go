@@ -75,7 +75,7 @@ type Config struct {
 	AllowInsecureDevAuth bool // opt-in: accept session tokens without signature verification
 
 	// Entitlements
-	DefaultPlan string // plan applied to tenants without entitlement rows
+	DefaultPlan string // plan provisioned for the --no-db demo organization
 	// DefaultProvisionRole names the standard role assigned to a user on first
 	// OIDC login; empty assigns no role (admins assign explicitly).
 	DefaultProvisionRole   string

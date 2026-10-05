@@ -17,7 +17,7 @@ func tenantCtx(r *http.Request) *http.Request {
 }
 
 func TestHandlerGrantListAndCheck(t *testing.T) {
-	h := NewHandler(NewService(NewMemoryRepository(), Options{DefaultPlan: PlanEssential, Enforce: true}))
+	h := NewHandler(NewService(NewMemoryRepository(), Options{Enforce: true}))
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
@@ -72,7 +72,7 @@ func TestHandlerGrantListAndCheck(t *testing.T) {
 }
 
 func TestMiddlewareBlocksUnentitledModule(t *testing.T) {
-	svc := NewService(NewMemoryRepository(), Options{DefaultPlan: PlanEssential, Enforce: true})
+	svc := NewService(NewMemoryRepository(), Options{Enforce: true})
 	handler := svc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -109,7 +109,7 @@ func TestMiddlewareBlocksUnentitledModule(t *testing.T) {
 }
 
 func TestMiddlewareRequiresTenant(t *testing.T) {
-	svc := NewService(NewMemoryRepository(), Options{DefaultPlan: PlanEssential, Enforce: true})
+	svc := NewService(NewMemoryRepository(), Options{Enforce: true})
 	handler := svc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))

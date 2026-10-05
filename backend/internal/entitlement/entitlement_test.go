@@ -9,10 +9,17 @@ import (
 
 func testService(t *testing.T, plan Plan) *Service {
 	t.Helper()
-	return NewService(NewMemoryRepository(), Options{DefaultPlan: plan, Enforce: true})
+	svc := NewService(NewMemoryRepository(), Options{Enforce: true})
+	if _, err := svc.Provision(context.Background(), "org-1", plan); err != nil {
+		t.Fatal(err)
+	}
+	return svc
 }
 
-func TestDefaultPlanGrantsOnlyPlanFeatures(t *testing.T) {
+// TestProvisionedPlanGrantsOnlyPlanFeatures covers WP-072 (ENT-05): an
+// organization is entitled exactly to its rows; an organization without rows
+// has only cmdb_core (no default-plan fallback); provisioning runs once.
+func TestProvisionedPlanGrantsOnlyPlanFeatures(t *testing.T) {
 	svc := testService(t, PlanEssential)
 	ctx := context.Background()
 
@@ -21,6 +28,18 @@ func TestDefaultPlanGrantsOnlyPlanFeatures(t *testing.T) {
 	}
 	if svc.IsEnabled(ctx, "org-1", FeatureTicketing) {
 		t.Error("expected ticketing to be excluded from the essential plan")
+	}
+	if svc.IsEnabled(ctx, "org-2", FeatureDiscovery) || !svc.IsEnabled(ctx, "org-2", FeatureCMDBCore) {
+		t.Error("organization without rows: want only cmdb_core")
+	}
+	if list, _ := svc.List(ctx, "org-2"); len(list) != 1 || list[0].FeatureKey != FeatureCMDBCore || !list[0].Enabled {
+		t.Errorf("entitlements of an organization without rows: %+v", list)
+	}
+	if done, err := svc.Provision(ctx, "org-1", PlanEnterprise); done || err != nil {
+		t.Errorf("second provisioning: %v, %v; want no change", done, err)
+	}
+	if svc.IsEnabled(ctx, "org-1", FeatureTicketing) {
+		t.Error("second provisioning changed the plan")
 	}
 }
 
@@ -45,6 +64,8 @@ func TestGrantEnablesFeatureForSingleTenant(t *testing.T) {
 	}
 }
 
+// TestDisabledAndExpiredEntitlementsDeny covers WP-072 (CH21): a disabled
+// row denies; after valid_until only discovery stops, other features stay.
 func TestDisabledAndExpiredEntitlementsDeny(t *testing.T) {
 	svc := testService(t, PlanEnterprise)
 	ctx := context.Background()
@@ -71,8 +92,19 @@ func TestDisabledAndExpiredEntitlementsDeny(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if svc.IsEnabled(ctx, "org-1", FeatureIGA) {
-		t.Error("expected expired entitlement to deny access")
+	if !svc.IsEnabled(ctx, "org-1", FeatureIGA) {
+		t.Error("expiry stopped a feature other than discovery (CH21)")
+	}
+
+	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureDiscovery, Plan: PlanEnterprise,
+		Enabled: true, ValidUntil: &expired}); err != nil {
+		t.Fatal(err)
+	}
+	if _, status, err := svc.Status(ctx, "org-1", FeatureDiscovery); status != StatusExpired || err != nil {
+		t.Errorf("expired discovery: %s, %v; want expired", status, err)
+	}
+	if svc.IsEnabled(ctx, "org-1", FeatureDiscovery) {
+		t.Error("expired discovery still enabled")
 	}
 }
 
@@ -109,7 +141,7 @@ func TestAllowCreateEnforcesLimit(t *testing.T) {
 }
 
 func TestEnforcementDisabledAllowsEverything(t *testing.T) {
-	svc := NewService(NewMemoryRepository(), Options{DefaultPlan: PlanEssential, Enforce: false})
+	svc := NewService(NewMemoryRepository(), Options{Enforce: false})
 	ctx := context.Background()
 
 	if !svc.IsEnabled(ctx, "org-1", FeatureIGA) {
@@ -127,6 +159,14 @@ func TestRequiredFeatureMapping(t *testing.T) {
 		"/api/v1/discovery/jobs":     FeatureDiscovery,
 		"/api/v1/webhooks":           FeatureWebhooks,
 		"/api/v1/monitoring/metrics": FeatureMonitoring,
+		// WP-072 (ENT-05): ingest alias, exports and topology.
+		"/api/v1/ingest/bulk":               FeatureDiscovery,
+		"/api/v1/discovery/ingest":          FeatureDiscovery,
+		"/api/v1/export/cis":                FeatureExportCSV,
+		"/api/v1/export/jobs/j1":            FeatureExportCSV,
+		"/api/v1/topology/cis/c1/neighbors": FeatureTopology,
+		"/api/v1/cis/c1/dependencies":       FeatureTopology,
+		"/api/v1/cis/c1/blast-radius":       FeatureTopology,
 	}
 	for path, want := range cases {
 		got, gated := RequiredFeature(path)
@@ -135,7 +175,8 @@ func TestRequiredFeatureMapping(t *testing.T) {
 		}
 	}
 
-	for _, path := range []string{"/api/v1/cis", "/api/v1/auth/me", "/api/v1/entitlements", "/healthz"} {
+	for _, path := range []string{"/api/v1/cis", "/api/v1/cis/c1", "/api/v1/auth/me", "/api/v1/entitlements", "/healthz",
+		"/api/v1/collectors/enroll", "/api/v1/users/u1/data-export"} {
 		if _, gated := RequiredFeature(path); gated {
 			t.Errorf("expected %q to stay ungated", path)
 		}

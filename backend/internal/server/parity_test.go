@@ -34,8 +34,7 @@ func testRouter(t *testing.T) *chi.Mux {
 
 	repos := MemoryRepositories()
 	entitlements := entitlement.NewService(repos.Entitlement, entitlement.Options{
-		DefaultPlan: entitlement.PlanEnterprise,
-		Enforce:     false,
+		Enforce: false,
 	})
 
 	mux, _, err := NewRouter(repos, Options{

@@ -85,6 +85,13 @@ func (m *MemoryStore) Increment(_ context.Context, key string, ttl time.Duration
 	return count, nil
 }
 
+func (m *MemoryStore) Delete(_ context.Context, key string) error {
+	m.mu.Lock()
+	delete(m.entries, key)
+	m.mu.Unlock()
+	return nil
+}
+
 func (m *MemoryStore) Close() error {
 	return nil
 }

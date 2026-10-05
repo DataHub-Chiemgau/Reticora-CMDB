@@ -450,6 +450,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	observability.RegisterWorkerMetrics(registry)
 	override.RegisterMetrics(registry)
 	operator.RegisterMetrics(registry)
+	entitlement.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 

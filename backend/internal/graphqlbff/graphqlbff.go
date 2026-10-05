@@ -47,6 +47,10 @@ func (s *Schema) RegisterQuery(name string, field Field) {
 	s.queries[name] = field
 }
 
+// FeatureCMDBCore is the entitlement of the core CMDB fields (always active
+// for an organization, ENT-02).
+const FeatureCMDBCore = "cmdb_core"
+
 // EntitlementChecker reports whether an organization may use a feature.
 type EntitlementChecker interface {
 	IsEnabled(ctx context.Context, orgID, featureKey string) bool
@@ -179,9 +183,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) registerQueries() {
-	h.schema.RegisterQuery("cis", Field{Resolve: h.resolveCIs, Permission: identity.PermCIRead})
-	h.schema.RegisterQuery("ci", Field{Resolve: h.resolveCI, Permission: identity.PermCIRead})
-	h.schema.RegisterQuery("relationships", Field{Resolve: h.resolveRelationships, Permission: identity.PermRelationshipRead})
+	// Every data field names its feature and passes the entitlement check
+	// (ENT-05); CIs and relationships belong to cmdb_core.
+	h.schema.RegisterQuery("cis", Field{Resolve: h.resolveCIs, Permission: identity.PermCIRead, Feature: FeatureCMDBCore})
+	h.schema.RegisterQuery("ci", Field{Resolve: h.resolveCI, Permission: identity.PermCIRead, Feature: FeatureCMDBCore})
+	h.schema.RegisterQuery("relationships", Field{Resolve: h.resolveRelationships, Permission: identity.PermRelationshipRead,
+		Feature: FeatureCMDBCore})
 	h.schema.RegisterQuery("currentUser", Field{Resolve: h.resolveCurrentUser})
 }
 

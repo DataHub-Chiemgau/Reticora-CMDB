@@ -20,7 +20,7 @@ func TestEntitlementModel(t *testing.T) {
 	bg := context.Background()
 	ctx := f.OrgCtx(f.OrgA)
 	repo := entitlement.NewPGRepository(f.App)
-	svc := entitlement.NewService(repo, entitlement.Options{DefaultPlan: entitlement.PlanEssential, Enforce: true})
+	svc := entitlement.NewService(repo, entitlement.Options{Enforce: true})
 
 	until := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
 	if _, err := svc.Grant(ctx, entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureDiscovery,

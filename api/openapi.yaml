@@ -928,6 +928,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -5141,6 +5143,9 @@ paths:
         Updates the collector's last-heartbeat timestamp so the platform can
         track liveness. The optional body reports the offline spool state;
         losses and backpressure are logged for operators (NFR-04, COL-05).
+        The response names the discovery license status; after valid_until
+        the collector pauses (no scans, no spooling) until it is renewed
+        (CH21, ENT-07).
       requestBody:
         required: false
         content:
@@ -5150,6 +5155,12 @@ paths:
       responses:
         '204':
           description: Heartbeat recorded
+          headers:
+            Reticora-License-Status:
+              description: Discovery license status of the organization.
+              schema:
+                type: string
+                enum: [active, expired]
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5165,7 +5176,9 @@ paths:
       description: >-
         Reconciles a batch of discovered items against existing CIs, creating,
         updating or queueing them for manual review. This is the canonical
-        endpoint that `/api/v1/discovery/ingest` aliases.
+        endpoint that `/api/v1/discovery/ingest` aliases. Both require the
+        discovery feature; after the discovery license expired they answer
+        403 with the problem type license-expired (CH21).
       requestBody:
         required: true
         content:
@@ -5183,6 +5196,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalServerError'
 

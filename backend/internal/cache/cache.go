@@ -19,6 +19,9 @@ type Store interface {
 	// If the key does not exist, it is created with value 1 and the given TTL.
 	Increment(ctx context.Context, key string, ttl time.Duration) (int64, error)
 
+	// Delete removes a key; a missing key is not an error.
+	Delete(ctx context.Context, key string) error
+
 	// Close releases any resources held by the store.
 	Close() error
 }

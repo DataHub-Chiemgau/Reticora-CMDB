@@ -287,20 +287,31 @@ headers cannot reset rate budgets or collide across tenants; unauthenticated
 endpoints are rate-limited per client IP and the rate limiter fails closed
 when its cache is unavailable.
 
-**Entitlement enforcement:** `entitlement.Service` resolves the effective plan
-per tenant (falling back to `RETICORA_DEFAULT_PLAN`) and caches it for 30
-seconds. Its middleware maps add-on route prefixes to features and answers with
-HTTP 403 when the plan does not include them; core routes (CIs, auth, users,
-audit, entitlements) are never gated. Record limits are enforced in the domain
-service (`ci.Service.Create`), so limit violations surface as 403 as well.
-Repository errors deny access (fail-closed). Plan matrix:
+**Entitlement enforcement:** an organization is entitled exactly to its rows
+in `entitlement` (ENT-05): a missing row means not entitled, only `cmdb_core`
+is always active. At startup every organization without rows is provisioned
+once with the features and default quotas of its plan (`organization.plan`;
+`RETICORA_DEFAULT_PLAN` for the `--no-db` demo organization). The
+entitlements are cached per organization for 60 seconds in the shared cache
+(Redis), so a change on one instance invalidates every instance (ENT-03). The
+middleware maps route prefixes to features (export, ingest including the
+`/api/v1/discovery/ingest` alias, topology, ...) and answers with 403
+`feature-not-entitled`; GraphQL fields check their feature as well. Quotas are
+enforced in the domain service (`ci.Service.Create`) and answer with 403
+`entitlement-limit`. After `valid_until` only discovery stops (CH21): ingest
+and new scans answer 403 `license-expired` (counter
+`reticora_ingest_refused_license_expired_total`), reading, editing, export and
+every other feature stay available; the heartbeat response carries
+`Reticora-License-Status` and the collector pauses without spooling until the
+license is renewed. Repository errors deny access (fail-closed). Plan matrix
+(ENT-06):
 
 | Plan | Features |
 |------|----------|
-| essential | cmdb, discovery, inventory |
-| standard | + documents, stocktake, ticketing, export, webhooks |
-| pro | + monitoring, workflow_forms |
-| enterprise | + iga, endpoint_agent, workflow_forms, compliance |
+| essential | cmdb_core, discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email, inventory |
+| standard | + documents, stocktake, ticketing |
+| pro | + monitoring, workflow_forms, ai_assistant |
+| enterprise | + iga, endpoint_agent, compliance |
 
 
 **Permissions and SLA:** migration 0026 turns permissions into data instead of
@@ -761,7 +772,7 @@ The server is configured via environment variables:
 - `RETICORA_NATS_URL` — NATS server URL.
 - `RETICORA_REDIS_URL` — Redis connection string.
 - `RETICORA_ENVIRONMENT` — Environment name (development/staging/production).
-- `RETICORA_DEFAULT_PLAN` — Plan applied to tenants without explicit entitlements (default `essential`).
+- `RETICORA_DEFAULT_PLAN` — Plan provisioned for the `--no-db` demo organization (default `essential`); organizations in the database are provisioned with their own plan.
 - `RETICORA_ENTITLEMENT_ENFORCEMENT` — Set to `false` to disable feature/limit enforcement (default `true`).
 - `RETICORA_SEARCH_BACKEND` — `postgres` (default) or `opensearch`.
 - `RETICORA_OPENSEARCH_URL`, `RETICORA_OPENSEARCH_USERNAME`, `RETICORA_OPENSEARCH_PASSWORD`, `RETICORA_OPENSEARCH_INDEX` — OpenSearch connection settings.

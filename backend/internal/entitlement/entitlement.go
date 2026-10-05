@@ -3,19 +3,24 @@
 //
 // Entitlements are stored per organization in the `entitlement` table
 // (ENT-01): one row per feature with enabled, limits (named quotas),
-// valid_until and source. Tenants without stored rows fall back to the
-// configured default plan, so a fresh organization is always usable while
-// still being restricted to the feature set and quotas of its plan.
+// valid_until and source. An organization is entitled exactly to its rows
+// (ENT-05): a missing row means not entitled, only cmdb_core is always
+// active. Every organization is provisioned with the rows of its plan once.
 package entitlement
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 // Plan represents a subscription tier.
@@ -153,19 +158,37 @@ type Entitlement struct {
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
-// active reports whether the entitlement grants access at the given time.
-// cmdb_core is always active (ENT-02).
-func (e *Entitlement) active(now time.Time) bool {
+// Status of a feature for an organization.
+type Status string
+
+const (
+	// StatusActive grants the feature.
+	StatusActive Status = "active"
+	// StatusExpired: the discovery license passed valid_until (CH21);
+	// discovery and ingest stop, everything else stays available.
+	StatusExpired Status = "expired"
+	// StatusNotEntitled: no row, or the row is disabled.
+	StatusNotEntitled Status = "not_entitled"
+)
+
+// expiryStops reports whether valid_until stops the feature. After expiry
+// only discovery and ingest stop (CH21); reading, editing, export and every
+// other feature stay available.
+func expiryStops(featureKey string) bool { return featureKey == FeatureDiscovery }
+
+// status is the entitlement's status at the given time. cmdb_core is
+// always active (ENT-02).
+func (e *Entitlement) status(now time.Time) Status {
 	if e.FeatureKey == FeatureCMDBCore {
-		return true
+		return StatusActive
 	}
 	if !e.Enabled {
-		return false
+		return StatusNotEntitled
 	}
-	if e.ValidUntil != nil && !now.Before(*e.ValidUntil) {
-		return false
+	if e.ValidUntil != nil && !now.Before(*e.ValidUntil) && expiryStops(e.FeatureKey) {
+		return StatusExpired
 	}
-	return true
+	return StatusActive
 }
 
 // ErrCoreNotDeactivatable is returned when cmdb_core would be disabled or
@@ -217,6 +240,9 @@ func (e *LimitExceededError) Error() string {
 // map it to an HTTP 403 without importing this package.
 func (e *LimitExceededError) LimitExceeded() bool { return true }
 
+// ProblemType is the RFC 7807 type of the error (ENT-03).
+func (e *LimitExceededError) ProblemType() string { return api.ProblemEntitlementLimit }
+
 // FeatureNotEntitledError is returned when a feature is not part of the plan.
 type FeatureNotEntitledError struct {
 	FeatureKey string
@@ -230,30 +256,51 @@ func (e *FeatureNotEntitledError) Error() string {
 // it to an HTTP 403 without importing this package.
 func (e *FeatureNotEntitledError) LimitExceeded() bool { return true }
 
+// ProblemType is the RFC 7807 type of the error.
+func (e *FeatureNotEntitledError) ProblemType() string { return api.ProblemFeatureNotEntitled }
+
+// LicenseExpiredError is returned when discovery or ingest is used after the
+// discovery license expired (CH21).
+type LicenseExpiredError struct {
+	ValidUntil time.Time
+}
+
+func (e *LicenseExpiredError) Error() string {
+	return fmt.Sprintf("the discovery license expired at %s; discovery and ingest are stopped",
+		e.ValidUntil.UTC().Format(time.RFC3339))
+}
+
+// ProblemType is the RFC 7807 type of the error (CH21).
+func (e *LicenseExpiredError) ProblemType() string { return api.ProblemLicenseExpired }
+
 // Options configures the entitlement service.
 type Options struct {
-	// DefaultPlan applies to organizations without stored entitlement rows.
-	DefaultPlan Plan
-	// CacheTTL controls how long repository lookups are cached per tenant.
+	// Cache holds the entitlements of each organization (Redis in
+	// production, so a change invalidates every instance; ENT-03). Nil
+	// uses an in-memory store.
+	Cache cache.Store
+	// CacheTTL controls how long the entitlements of an organization are
+	// cached (default 60 s, ENT-03).
 	CacheTTL time.Duration
 	// Enforce toggles enforcement. When false, every check succeeds; the
 	// service still reports the configured entitlements.
 	Enforce bool
 }
 
-type cacheEntry struct {
-	entitlements []Entitlement
-	fetchedAt    time.Time
-}
+// DefaultCacheTTL is the cache lifetime of ENT-03.
+const DefaultCacheTTL = 60 * time.Second
 
-// Service provides entitlement checks backed by a repository with a short-lived
-// per-tenant cache.
+func cacheKey(orgID string) string { return "entitlements:" + orgID }
+
+// Service provides entitlement checks backed by a repository and a shared
+// per-organization cache. An organization is entitled exactly to its stored
+// rows (ENT-05): a missing row means not entitled, only cmdb_core is always
+// active.
 type Service struct {
 	repo  Repository
 	opts  Options
+	cache cache.Store
 	now   func() time.Time
-	mu    sync.RWMutex
-	cache map[string]cacheEntry
 }
 
 // NewService creates an entitlement service backed by the given repository.
@@ -263,20 +310,22 @@ func NewService(repo Repository, opts Options) *Service {
 		repo = NewMemoryRepository()
 	}
 	if opts.CacheTTL <= 0 {
-		opts.CacheTTL = 30 * time.Second
+		opts.CacheTTL = DefaultCacheTTL
 	}
-	opts.DefaultPlan = normalizePlan(opts.DefaultPlan)
-
+	store := opts.Cache
+	if store == nil {
+		store = cache.NewMemoryStore()
+	}
 	return &Service{
 		repo:  repo,
 		opts:  opts,
+		cache: store,
 		now:   func() time.Time { return time.Now().UTC() },
-		cache: make(map[string]cacheEntry),
 	}
 }
 
-// List returns the effective entitlements for the organization, including the
-// implicit ones derived from the default plan.
+// List returns the stored entitlements of the organization with their
+// effective state, plus cmdb_core, which is always active.
 func (s *Service) List(ctx context.Context, orgID string) ([]Entitlement, error) {
 	stored, err := s.load(ctx, orgID)
 	if err != nil {
@@ -285,53 +334,83 @@ func (s *Service) List(ctx context.Context, orgID string) ([]Entitlement, error)
 	return s.effective(orgID, stored), nil
 }
 
+// Status returns the stored entitlement of a feature and its status. A
+// feature without a row is not entitled (no plan fallback, ENT-05); with
+// enforcement off every feature is active.
+func (s *Service) Status(ctx context.Context, orgID, featureKey string) (Entitlement, Status, error) {
+	stored, err := s.load(ctx, orgID)
+	if err != nil {
+		return Entitlement{}, StatusNotEntitled, err
+	}
+	ent := Entitlement{OrganizationID: orgID, FeatureKey: featureKey, Limits: map[string]int64{}, Source: "manual"}
+	for i := range stored {
+		if stored[i].FeatureKey == featureKey {
+			ent = stored[i]
+			break
+		}
+	}
+	status := ent.status(s.now())
+	if !s.opts.Enforce {
+		status = StatusActive
+	}
+	ent.Enabled = status == StatusActive
+	return ent, status, nil
+}
+
 // Check returns the effective entitlement for a feature and whether it grants
 // access.
 func (s *Service) Check(ctx context.Context, orgID, featureKey string) (Entitlement, bool, error) {
-	stored, err := s.load(ctx, orgID)
+	ent, status, err := s.Status(ctx, orgID, featureKey)
 	if err != nil {
 		return Entitlement{}, false, err
 	}
-
-	now := s.now()
-	for i := range stored {
-		ent := stored[i]
-		if ent.FeatureKey != featureKey {
-			continue
-		}
-		if !s.opts.Enforce {
-			return ent, true, nil
-		}
-		return ent, ent.active(now), nil
-	}
-
-	implied := s.implied(orgID, featureKey)
-	if !s.opts.Enforce {
-		implied.Enabled = true
-		return implied, true, nil
-	}
-	return implied, implied.Enabled, nil
+	return ent, status == StatusActive, nil
 }
 
-// implied is the entitlement the default plan gives a feature.
-func (s *Service) implied(orgID, featureKey string) Entitlement {
-	ent := Entitlement{
-		OrganizationID: orgID,
-		FeatureKey:     featureKey,
-		Plan:           s.opts.DefaultPlan,
-		Enabled:        featureKey == FeatureCMDBCore || planIncludes(s.opts.DefaultPlan, featureKey),
-		Limits:         map[string]int64{},
-		Source:         "manual",
+// Provision stores the features and default quotas of the plan for an
+// organization that has no entitlement rows yet. Since a missing row means
+// not entitled, every organization is provisioned once (at startup and on
+// creation). It reports whether rows were written.
+func (s *Service) Provision(ctx context.Context, orgID string, plan Plan) (bool, error) {
+	stored, err := s.repo.List(ctx, orgID)
+	if err != nil {
+		return false, err
 	}
-	for quota, feature := range QuotaFeature {
-		if feature != featureKey {
-			continue
+	if len(stored) > 0 {
+		return false, nil
+	}
+	plan = normalizePlan(plan)
+	for _, feature := range PlanFeatures(plan) {
+		ent := Entitlement{OrganizationID: orgID, FeatureKey: feature, Plan: plan, Enabled: true,
+			Limits: map[string]int64{}, Source: "manual"}
+		for quota, owner := range QuotaFeature {
+			if v, ok := planQuotas[plan][quota]; ok && owner == feature {
+				ent.Limits[quota] = v
+			}
 		}
-		if v, ok := planQuotas[s.opts.DefaultPlan][quota]; ok {
-			ent.Limits[quota] = v
+		if _, err = s.Grant(ctx, ent); err != nil {
+			return false, fmt.Errorf("provision %s for %s: %w", feature, orgID, err)
 		}
 	}
-	return ent
+	return true, nil
+}
+
+// ProvisionOrganizations provisions every listed organization (id to plan)
+// that has no entitlement rows yet, each in its own tenant context, and
+// returns how many were provisioned.
+func (s *Service) ProvisionOrganizations(ctx context.Context, plans map[string]Plan) (int, error) {
+	n := 0
+	for orgID, plan := range plans {
+		scope := database.OrgWideScope(orgID, "")
+		done, err := s.Provision(database.ContextWithTenantScope(ctx, &scope), orgID, plan)
+		if err != nil {
+			return n, err
+		}
+		if done {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // IsEnabled reports whether a feature is available for the organization.
@@ -412,68 +491,56 @@ func (s *Service) Grant(ctx context.Context, ent Entitlement) (Entitlement, erro
 		return Entitlement{}, err
 	}
 
-	s.invalidate(ent.OrganizationID)
+	s.invalidate(ctx, ent.OrganizationID)
 	return stored, nil
 }
 
 func (s *Service) load(ctx context.Context, orgID string) ([]Entitlement, error) {
-	now := s.now()
-
-	s.mu.RLock()
-	entry, ok := s.cache[orgID]
-	s.mu.RUnlock()
-	if ok && now.Sub(entry.fetchedAt) < s.opts.CacheTTL {
-		return entry.entitlements, nil
+	key := cacheKey(orgID)
+	if raw, ok, err := s.cache.Get(ctx, key); err != nil {
+		slog.Warn("entitlement cache read failed", "error", err, "organization_id", orgID)
+	} else if ok {
+		var items []Entitlement
+		if err = json.Unmarshal([]byte(raw), &items); err == nil {
+			return items, nil
+		}
 	}
 
 	items, err := s.repo.List(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
-
-	s.mu.Lock()
-	s.cache[orgID] = cacheEntry{entitlements: items, fetchedAt: now}
-	s.mu.Unlock()
-
+	if raw, err := json.Marshal(items); err == nil {
+		if err = s.cache.Set(ctx, key, string(raw), s.opts.CacheTTL); err != nil {
+			slog.Warn("entitlement cache write failed", "error", err, "organization_id", orgID)
+		}
+	}
 	return items, nil
 }
 
-func (s *Service) invalidate(orgID string) {
-	s.mu.Lock()
-	delete(s.cache, orgID)
-	s.mu.Unlock()
+// invalidate drops the cached entitlements of the organization; with Redis
+// the change reaches every instance.
+func (s *Service) invalidate(ctx context.Context, orgID string) {
+	if err := s.cache.Delete(ctx, cacheKey(orgID)); err != nil {
+		slog.Error("entitlement cache invalidation failed", "error", err, "organization_id", orgID)
+	}
 }
 
-// effective merges the stored entitlements with the features implied by the
-// default plan so callers see the complete picture.
+// effective returns the stored entitlements with their effective state plus
+// cmdb_core, which is always active.
 func (s *Service) effective(orgID string, stored []Entitlement) []Entitlement {
 	now := s.now()
-	seen := make(map[string]bool, len(stored))
-	out := make([]Entitlement, 0, len(stored))
-
+	out := make([]Entitlement, 0, len(stored)+1)
+	core := false
 	for i := range stored {
 		ent := stored[i]
-		seen[ent.FeatureKey] = true
-		if s.opts.Enforce {
-			ent.Enabled = ent.active(now)
-		} else {
-			ent.Enabled = true
-		}
+		core = core || ent.FeatureKey == FeatureCMDBCore
+		ent.Enabled = !s.opts.Enforce || ent.status(now) == StatusActive
 		out = append(out, ent)
 	}
-
-	for _, feature := range PlanFeatures(s.opts.DefaultPlan) {
-		if seen[feature] {
-			continue
-		}
-		ent := s.implied(orgID, feature)
-		ent.Enabled = true
-		out = append(out, ent)
+	if !core {
+		out = append(out, Entitlement{OrganizationID: orgID, FeatureKey: FeatureCMDBCore, Enabled: true,
+			Limits: map[string]int64{}, Source: "manual"})
 	}
-
 	return out
-}
-
-func planIncludes(plan Plan, featureKey string) bool {
-	return slices.Contains(planFeatures[normalizePlan(plan)], featureKey)
 }

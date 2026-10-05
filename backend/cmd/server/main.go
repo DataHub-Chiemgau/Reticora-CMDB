@@ -265,10 +265,18 @@ func main() {
 	// scoring otherwise.
 	repos.CI = ci.NewIndexingRepository(repos.CI, ai.NewCIChunkIndexer(repos.AI, aiProvider))
 
+	// The entitlement cache lives in the shared store (Redis), so a change
+	// invalidates every instance (ENT-03).
 	entitlementSvc := entitlement.NewService(repos.Entitlement, entitlement.Options{
-		DefaultPlan: entitlement.Plan(cfg.DefaultPlan),
-		Enforce:     cfg.EntitlementEnforcement,
+		Cache:   cacheStore,
+		Enforce: cfg.EntitlementEnforcement,
 	})
+	// A missing entitlement row means not entitled (ENT-05): organizations
+	// without rows get the rows of their plan once.
+	if err = provisionEntitlements(context.Background(), entitlementSvc, auditPool, cfg.DefaultPlan); err != nil {
+		slog.Error("entitlement provisioning failed", "error", err)
+		os.Exit(1)
+	}
 	slog.Info("entitlement enforcement configured",
 		"default_plan", cfg.DefaultPlan, "enforced", cfg.EntitlementEnforcement)
 
@@ -416,6 +424,32 @@ func main() {
 		slog.Error("server shutdown error", "error", err)
 	}
 }
+
+// provisionEntitlements stores the plan's entitlement rows for every
+// organization without rows. Without a database (--no-db) the demo
+// organization gets the default plan.
+func provisionEntitlements(ctx context.Context, svc *entitlement.Service, pool *pgxpool.Pool, defaultPlan string) error {
+	plans := map[string]entitlement.Plan{}
+	if pool == nil {
+		plans[demoOrganizationID] = entitlement.Plan(defaultPlan)
+	} else {
+		stored, err := database.OrganizationPlans(ctx, pool)
+		if err != nil {
+			return err
+		}
+		for id, plan := range stored {
+			plans[id] = entitlement.Plan(plan)
+		}
+	}
+	n, err := svc.ProvisionOrganizations(ctx, plans)
+	if n > 0 {
+		slog.Info("entitlements provisioned", "organizations", n)
+	}
+	return err
+}
+
+// demoOrganizationID is the organization of migration 000054.
+const demoOrganizationID = "00000000-0000-0000-0000-000000000001"
 
 // userProvisioner adapts the user repository to the identity provisioning
 // port. Only the PostgreSQL-backed repository supports durable first-login

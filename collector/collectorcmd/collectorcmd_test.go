@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -371,5 +372,95 @@ func TestHeartbeatReportsSpoolBackpressureAndLoss(t *testing.T) {
 	postHeartbeat(context.Background(), up.client, cfg, up.spoolReport(context.Background()))
 	if body.Spool == nil || body.Spool.Messages != 1 || !body.Spool.Backpressure || body.Spool.DroppedMessages != 1 {
 		t.Fatalf("heartbeat spool report = %+v", body.Spool)
+	}
+}
+
+// countingPlugin counts discovery runs.
+type countingPlugin struct{ runs atomic.Int64 }
+
+func (p *countingPlugin) Name() string { return "counting" }
+func (p *countingPlugin) Discover(context.Context, []string, map[string]string) ([]plugins.Result, error) {
+	p.runs.Add(1)
+	return nil, nil
+}
+func (p *countingPlugin) Collect(context.Context, string, map[string]string) (*plugins.Result, error) {
+	return nil, nil
+}
+
+// TestLicenseExpiryPausesDiscovery covers WP-072 (ENT-07, CH21): an ingest
+// refused with the license-expired problem pauses the collector; the batch
+// is not spooled, paused cycles neither scan nor flush the spool, and the
+// heartbeat's license status resumes discovery.
+func TestLicenseExpiryPausesDiscovery(t *testing.T) {
+	var license atomic.Value
+	license.Store("expired")
+	var ingests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/heartbeat") {
+			w.Header().Set(LicenseStatusHeader, license.Load().(string))
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		ingests.Add(1)
+		if license.Load() == "expired" {
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"type":"` + problemLicenseExpired + `","title":"Forbidden","status":403}`))
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	cfg := testConfig(srv.URL, t.TempDir())
+	up, err := newUploader(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err = up.uploadResults(ctx, []plugins.Result{{Name: "a"}}); !errors.Is(err, errLicenseExpired) {
+		t.Fatalf("upload after expiry: %v, want errLicenseExpired", err)
+	}
+	if !up.paused.Load() {
+		t.Fatal("collector not paused after a license-expired refusal")
+	}
+	if n, _ := up.spool.Len(ctx); n != 0 {
+		t.Fatalf("refused batch spooled: %d messages", n)
+	}
+	if err = up.uploadResults(ctx, []plugins.Result{{Name: "b"}}); !errors.Is(err, errLicenseExpired) || ingests.Load() != 1 {
+		t.Fatalf("paused upload: %v after %d ingests, want no further request", err, ingests.Load())
+	}
+
+	// Paused cycles do not scan.
+	plugin := &countingPlugin{}
+	pluginRegistry["counting"] = plugin
+	defer delete(pluginRegistry, "counting")
+	loopCfg := cfg
+	loopCfg.Protocols = []string{"counting"}
+	loopCfg.DiscoveryInterval = 10 * time.Millisecond
+	loopCtx, cancel := context.WithTimeout(ctx, 60*time.Millisecond)
+	runDiscoveryLoop(loopCtx, loopCfg, up)
+	cancel()
+	if plugin.runs.Load() != 0 {
+		t.Fatalf("paused collector scanned %d times", plugin.runs.Load())
+	}
+
+	// The heartbeat keeps reporting the status; a renewed license resumes.
+	if status := postHeartbeat(ctx, up.client, cfg, nil); status != "expired" {
+		t.Fatalf("heartbeat license status %q", status)
+	}
+	license.Store("active")
+	up.setLicenseStatus(postHeartbeat(ctx, up.client, cfg, nil))
+	if up.paused.Load() {
+		t.Fatal("collector still paused after the license was renewed")
+	}
+	if err = up.uploadResults(ctx, []plugins.Result{{Name: "c"}}); err != nil {
+		t.Fatalf("upload after renewal: %v", err)
+	}
+	loopCtx, cancel = context.WithTimeout(ctx, 30*time.Millisecond)
+	runDiscoveryLoop(loopCtx, loopCfg, up)
+	cancel()
+	if plugin.runs.Load() == 0 {
+		t.Fatal("resumed collector did not scan")
 	}
 }

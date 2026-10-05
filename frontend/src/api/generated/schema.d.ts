@@ -2788,7 +2788,7 @@ export interface paths {
     put?: never;
     /**
      * Record a collector heartbeat
-     * @description Updates the collector's last-heartbeat timestamp so the platform can track liveness. The optional body reports the offline spool state; losses and backpressure are logged for operators (NFR-04, COL-05).
+     * @description Updates the collector's last-heartbeat timestamp so the platform can track liveness. The optional body reports the offline spool state; losses and backpressure are logged for operators (NFR-04, COL-05). The response names the discovery license status; after valid_until the collector pauses (no scans, no spooling) until it is renewed (CH21, ENT-07).
      */
     post: operations['collectorHeartbeat'];
     delete?: never;
@@ -2808,7 +2808,7 @@ export interface paths {
     put?: never;
     /**
      * Ingest discovery results in bulk
-     * @description Reconciles a batch of discovered items against existing CIs, creating, updating or queueing them for manual review. This is the canonical endpoint that `/api/v1/discovery/ingest` aliases.
+     * @description Reconciles a batch of discovered items against existing CIs, creating, updating or queueing them for manual review. This is the canonical endpoint that `/api/v1/discovery/ingest` aliases. Both require the discovery feature; after the discovery license expired they answer 403 with the problem type license-expired (CH21).
      */
     post: operations['bulkIngest'];
     delete?: never;
@@ -9018,6 +9018,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -14517,6 +14518,8 @@ export interface operations {
       /** @description Heartbeat recorded */
       204: {
         headers: {
+          /** @description Discovery license status of the organization. */
+          'Reticora-License-Status'?: 'active' | 'expired';
           [name: string]: unknown;
         };
         content?: never;
@@ -14550,6 +14553,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
     };
   };

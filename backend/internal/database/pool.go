@@ -283,3 +283,25 @@ func OrganizationIDs(ctx context.Context, pool *pgxpool.Pool) ([]string, error) 
 	})
 	return ids, err
 }
+
+// OrganizationPlans returns the plan of every organization, keyed by id
+// (system read for the entitlement provisioning at startup).
+func OrganizationPlans(ctx context.Context, pool *pgxpool.Pool) (map[string]string, error) {
+	plans := map[string]string{}
+	err := WithSystem(ctx, pool, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text, plan FROM organization`)
+		if err != nil {
+			return fmt.Errorf("list organization plans: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, plan string
+			if err := rows.Scan(&id, &plan); err != nil {
+				return fmt.Errorf("scan organization plan: %w", err)
+			}
+			plans[id] = plan
+		}
+		return rows.Err()
+	})
+	return plans, err
+}
