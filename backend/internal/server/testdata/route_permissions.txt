@@ -281,6 +281,7 @@ POST /api/v1/assignments/{id}/return assignment:write
 POST /api/v1/assignments/{id}/transfer assignment:write
 POST /api/v1/audit/verify audit:read
 POST /api/v1/auth/callback public
+POST /api/v1/auth/logout public
 POST /api/v1/auth/refresh public
 POST /api/v1/buildings site:write
 POST /api/v1/cables rack:write

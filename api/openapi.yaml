@@ -152,6 +152,9 @@ paths:
       tags: [Auth]
       security: []
       summary: Complete the OIDC callback flow and issue a session token
+      description: |
+        Issues a 15-minute access token (AUT-02) and sets the refresh token as
+        an HttpOnly, Secure, SameSite=Strict cookie for /api/v1/auth.
       requestBody:
         required: true
         content:
@@ -161,6 +164,11 @@ paths:
       responses:
         '200':
           description: Session token and resolved user info
+          headers:
+            Set-Cookie:
+              description: Refresh cookie `reticora_refresh`.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -177,24 +185,54 @@ paths:
       operationId: refreshSession
       tags: [Auth]
       security: []
-      summary: Refresh an existing session token
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RefreshRequest'
+      summary: Refresh the session with the refresh cookie
+      description: |
+        Uses up the refresh cookie and sets a new one (rotation). A cookie
+        presented a second time revokes the whole session; a revoked session
+        (logout, deactivation) or a deactivated user gets 401. Roles and
+        scopes are read again (AUT-02).
+      parameters:
+        - name: reticora_refresh
+          in: cookie
+          required: true
+          schema:
+            type: string
       responses:
         '200':
           description: Refreshed session token issued
+          headers:
+            Set-Cookie:
+              description: Rotated refresh cookie `reticora_refresh`.
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthTokenResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      tags: [Auth]
+      security: []
+      summary: End the session
+      description: |
+        Revokes the refresh cookie's session, blacklists the presented access
+        token in Redis until it expires and clears the cookie (AUT-02). It
+        needs no valid access token.
+      parameters:
+        - name: reticora_refresh
+          in: cookie
+          required: false
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Session ended; the refresh cookie is cleared
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -8008,13 +8046,6 @@ components:
         pkce_required:
           type: boolean
 
-    RefreshRequest:
-      type: object
-      required: [token]
-      properties:
-        token:
-          type: string
-
     AuthTokenResponse:
       type: object
       required: [token, expires_at]
@@ -8058,24 +8089,50 @@ components:
 
     SessionClaims:
       type: object
-      required: [sub, org_id, permissions, iat, exp]
+      description: |
+        Session JWT claims (AUT-02). cls, sts and tms are the client, site and
+        team scope: null for the whole organization, a list otherwise (an
+        empty list grants none).
+      required: [sub, org, scopes, iat, exp]
       properties:
         sub:
           type: string
-        org_id:
+        org:
           type: string
-        client_scope:
+        scopes:
+          type: array
+          items:
+            type: string
+        cls:
+          type: [array, 'null']
+          items:
+            type: string
+        sts:
+          type: [array, 'null']
+          items:
+            type: string
+        tms:
+          type: [array, 'null']
+          items:
+            type: string
+        name:
           type: string
-        permissions:
+        email:
+          type: string
+        jti:
+          type: string
+        groups:
           type: array
           items:
             type: string
         iat:
-          type: string
-          format: date-time
+          type: integer
+          format: int64
+          description: Issued at (NumericDate)
         exp:
-          type: string
-          format: date-time
+          type: integer
+          format: int64
+          description: Expires at (NumericDate)
 
     CIStatus:
       type: string

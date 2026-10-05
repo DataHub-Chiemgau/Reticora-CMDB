@@ -254,7 +254,7 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 
 	// Public authentication endpoints are unauthenticated by design.
 	switch path {
-	case "/api/v1/auth/config", "/api/v1/auth/callback", "/api/v1/auth/refresh":
+	case "/api/v1/auth/config", "/api/v1/auth/callback", "/api/v1/auth/refresh", "/api/v1/auth/logout":
 		return "", routePublic
 	case "/api/v1/collectors/enroll":
 		// Zero-config onboarding: the single-use enrollment code is the

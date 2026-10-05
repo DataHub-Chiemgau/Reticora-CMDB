@@ -190,3 +190,5 @@ TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-064
 DB-04;nicht geliefert;B;backend/internal/database/role_check_integration_test.go;WP-064
 TEN-09;[Q];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-065
 TST-02;[B];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-065
+AUT-02;[B];B;backend/internal/identity/session_test.go;WP-066
+SEC-06;[B];B;backend/internal/identity/session_test.go;WP-066

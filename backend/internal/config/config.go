@@ -58,9 +58,13 @@ type Config struct {
 	// (discovery, JWKS and token exchange). Deployments that terminate TLS
 	// with a private or not-yet-issued certificate would otherwise fail the
 	// token exchange with an x509 verification error.
-	OIDCCACertFile       string
-	SessionKeyPath       string // path to RS256 private key PEM for session JWTs
-	AllowInsecureDevAuth bool   // opt-in: accept session tokens without signature verification
+	OIDCCACertFile string
+	SessionKeyPath string // path to RS256 private key PEM for session JWTs
+	// SessionPreviousKeyPaths lists PEM files (comma separated) of previous
+	// session signing keys whose tokens stay valid during a key rotation
+	// (SEC-06); new tokens are signed with SessionKeyPath only.
+	SessionPreviousKeyPaths string
+	AllowInsecureDevAuth    bool // opt-in: accept session tokens without signature verification
 
 	// Entitlements
 	DefaultPlan string // plan applied to tenants without entitlement rows
@@ -134,13 +138,14 @@ func Load() *Config {
 		// database mode the S3 settings above are used instead.
 		BlobDir: l.str("RETICORA_BLOB_DIR", ""),
 
-		OIDCIssuerURL:        l.str("RETICORA_OIDC_ISSUER_URL", "http://localhost:8180/realms/reticora"),
-		OIDCClientID:         l.str("RETICORA_OIDC_CLIENT_ID", "reticora-app"),
-		OIDCClientSecret:     l.str("RETICORA_OIDC_CLIENT_SECRET", ""),
-		OIDCRedirectURL:      l.str("RETICORA_OIDC_REDIRECT_URL", ""),
-		OIDCCACertFile:       l.str("RETICORA_OIDC_CA_CERT_FILE", ""),
-		SessionKeyPath:       l.str("RETICORA_SESSION_KEY_PATH", ""),
-		AllowInsecureDevAuth: l.str("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false") == "true",
+		OIDCIssuerURL:           l.str("RETICORA_OIDC_ISSUER_URL", "http://localhost:8180/realms/reticora"),
+		OIDCClientID:            l.str("RETICORA_OIDC_CLIENT_ID", "reticora-app"),
+		OIDCClientSecret:        l.str("RETICORA_OIDC_CLIENT_SECRET", ""),
+		OIDCRedirectURL:         l.str("RETICORA_OIDC_REDIRECT_URL", ""),
+		OIDCCACertFile:          l.str("RETICORA_OIDC_CA_CERT_FILE", ""),
+		SessionKeyPath:          l.str("RETICORA_SESSION_KEY_PATH", ""),
+		SessionPreviousKeyPaths: l.str("RETICORA_SESSION_PREVIOUS_KEY_PATHS", ""),
+		AllowInsecureDevAuth:    l.str("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false") == "true",
 
 		DefaultPlan:            l.str("RETICORA_DEFAULT_PLAN", "essential"),
 		DefaultProvisionRole:   l.str("RETICORA_DEFAULT_PROVISION_ROLE", "viewer"),

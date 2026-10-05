@@ -145,8 +145,11 @@ func main() {
 	}
 	// Deactivation ends sessions immediately through the blacklist in the
 	// shared cache store (AUT-02, TLC-04).
+	// Refresh tokens rotate in the same store (AUT-02).
+	var refreshSessions *identity.RefreshSessions
 	if sessionIssuer != nil {
 		sessionIssuer.WithRevocations(identity.NewSessionRevocations(cacheStore))
+		refreshSessions = identity.NewRefreshSessions(cacheStore, sessionIssuer.Revocations())
 	}
 
 	// Repositories. PostgreSQL is the only supported production backend; the
@@ -293,6 +296,7 @@ func main() {
 		Credentials:          credential.NewService(repos.Credential, encryptor),
 		OIDC:                 oidcProvider,
 		Sessions:             sessionIssuer,
+		RefreshSessions:      refreshSessions,
 		UserProvisioner:      userProvisioner(repos),
 		DefaultProvisionRole: cfg.DefaultProvisionRole,
 		Audit:                auditHandler,
@@ -442,6 +446,20 @@ func loadSessionIssuer(cfg *config.Config) (*identity.SessionIssuer, error) {
 	issuer, err := identity.NewSessionIssuer(keyData)
 	if err != nil {
 		return nil, fmt.Errorf("parse session key %q: %w", cfg.SessionKeyPath, err)
+	}
+	// Previous signing keys stay valid for verification during a rotation
+	// (SEC-06); tokens name their key in the kid header.
+	for _, path := range strings.Split(cfg.SessionPreviousKeyPaths, ",") {
+		if path = strings.TrimSpace(path); path == "" {
+			continue
+		}
+		previous, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil, fmt.Errorf("read previous session key %q: %w", path, readErr)
+		}
+		if err = issuer.WithPreviousKeys(previous); err != nil {
+			return nil, fmt.Errorf("parse previous session key %q: %w", path, err)
+		}
 	}
 	return issuer, nil
 }

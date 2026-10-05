@@ -309,3 +309,17 @@ func verifyJWTSignature(signingInput string, signature []byte, alg string, key a
 		return fmt.Errorf("identity: unsupported signing algorithm %q", alg)
 	}
 }
+
+// RSAKeyThumbprint returns the JWK thumbprint of an RSA public key (RFC 7638,
+// SHA-256, base64url). It is the key id (kid) of the session signing keys.
+func RSAKeyThumbprint(pub *rsa.PublicKey) (string, error) {
+	if pub == nil || pub.N == nil {
+		return "", errors.New("identity: RSA public key is required")
+	}
+	e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes())
+	n := base64.RawURLEncoding.EncodeToString(pub.N.Bytes())
+	// The members in lexicographic order without whitespace, as RFC 7638
+	// requires; the values are base64url and need no escaping.
+	sum := sha256.Sum256([]byte(`{"e":"` + e + `","kty":"RSA","n":"` + n + `"}`))
+	return base64.RawURLEncoding.EncodeToString(sum[:]), nil
+}

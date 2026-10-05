@@ -70,7 +70,11 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Complete the OIDC callback flow and issue a session token */
+    /**
+     * Complete the OIDC callback flow and issue a session token
+     * @description Issues a 15-minute access token (AUT-02) and sets the refresh token as
+     *     an HttpOnly, Secure, SameSite=Strict cookie for /api/v1/auth.
+     */
     post: operations['authCallback'];
     delete?: never;
     options?: never;
@@ -87,8 +91,36 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Refresh an existing session token */
+    /**
+     * Refresh the session with the refresh cookie
+     * @description Uses up the refresh cookie and sets a new one (rotation). A cookie
+     *     presented a second time revokes the whole session; a revoked session
+     *     (logout, deactivation) or a deactivated user gets 401. Roles and
+     *     scopes are read again (AUT-02).
+     */
     post: operations['refreshSession'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/auth/logout': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * End the session
+     * @description Revokes the refresh cookie's session, blacklists the presented access
+     *     token in Redis until it expires and clears the cookie (AUT-02). It
+     *     needs no valid access token.
+     */
+    post: operations['logout'];
     delete?: never;
     options?: never;
     head?: never;
@@ -4885,9 +4917,6 @@ export interface components {
       end_session_endpoint?: string;
       pkce_required: boolean;
     };
-    RefreshRequest: {
-      token: string;
-    };
     AuthTokenResponse: {
       token: string;
       /** Format: date-time */
@@ -4905,15 +4934,32 @@ export interface components {
     AuthCallbackResponse: components['schemas']['AuthTokenResponse'] & {
       user: components['schemas']['AuthCallbackUser'];
     };
+    /**
+     * @description Session JWT claims (AUT-02). cls, sts and tms are the client, site and
+     *     team scope: null for the whole organization, a list otherwise (an
+     *     empty list grants none).
+     */
     SessionClaims: {
       sub: string;
-      org_id: string;
-      client_scope?: string;
-      permissions: string[];
-      /** Format: date-time */
-      iat: string;
-      /** Format: date-time */
-      exp: string;
+      org: string;
+      scopes: string[];
+      cls?: string[] | null;
+      sts?: string[] | null;
+      tms?: string[] | null;
+      name?: string;
+      email?: string;
+      jti?: string;
+      groups?: string[];
+      /**
+       * Format: int64
+       * @description Issued at (NumericDate)
+       */
+      iat: number;
+      /**
+       * Format: int64
+       * @description Expires at (NumericDate)
+       */
+      exp: number;
     };
     /** @enum {string} */
     CIStatus: 'active' | 'inactive' | 'maintenance' | 'decommissioned' | 'unknown';
@@ -7707,6 +7753,8 @@ export interface operations {
       /** @description Session token and resolved user info */
       200: {
         headers: {
+          /** @description Refresh cookie `reticora_refresh`. */
+          'Set-Cookie'?: string;
           [name: string]: unknown;
         };
         content: {
@@ -7723,25 +7771,45 @@ export interface operations {
       query?: never;
       header?: never;
       path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['RefreshRequest'];
+      cookie: {
+        reticora_refresh: string;
       };
     };
+    requestBody?: never;
     responses: {
       /** @description Refreshed session token issued */
       200: {
         headers: {
+          /** @description Rotated refresh cookie `reticora_refresh`. */
+          'Set-Cookie'?: string;
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['AuthTokenResponse'];
         };
       };
-      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  logout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: {
+        reticora_refresh?: string;
+      };
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Session ended; the refresh cookie is cleared */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       500: components['responses']['InternalServerError'];
     };
   };

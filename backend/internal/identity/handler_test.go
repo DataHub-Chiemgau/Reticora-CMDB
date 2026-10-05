@@ -248,13 +248,10 @@ func TestRefreshAllowsRecentlyExpiredToken(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body := url.Values{}
-	body.Set("token", token)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"token":"`+token+`"}`))
-	req.Header.Set("Content-Type", "application/json")
+	// The refresh cookie outlives the access token: an expired access
+	// token is renewed with it.
 	w := httptest.NewRecorder()
-
-	handler.Refresh(w, req)
+	handler.Refresh(w, refreshRequest(t, handler, token))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -519,10 +516,9 @@ func TestRefreshChecksUserStatus(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"token":"`+token+`"}`))
-		req.Header.Set("Content-Type", "application/json")
+		handler := NewHandler(nil, sessionIssuer).WithProvisioning(provisioner, "")
 		w := httptest.NewRecorder()
-		NewHandler(nil, sessionIssuer).WithProvisioning(provisioner, "").Refresh(w, req)
+		handler.Refresh(w, refreshRequest(t, handler, token))
 		return w.Code
 	}
 	provisioner := statusProvisioner{deactivated: map[string]bool{"locked": true}}
@@ -685,10 +681,9 @@ func TestSessionPermissionsComeFromDatabaseRoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"token":"`+token+`"}`))
-	req.Header.Set("Content-Type", "application/json")
+	handler := NewHandler(nil, sessionIssuer).WithAccessResolver(resolver)
 	w := httptest.NewRecorder()
-	NewHandler(nil, sessionIssuer).WithAccessResolver(resolver).Refresh(w, req)
+	handler.Refresh(w, refreshRequest(t, handler, token))
 	if w.Code != http.StatusOK {
 		t.Fatalf("refresh: status %d: %s", w.Code, w.Body.String())
 	}

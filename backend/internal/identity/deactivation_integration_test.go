@@ -63,20 +63,32 @@ func TestDeactivationEndsAccess(t *testing.T) {
 	revocations := identity.NewSessionRevocations(cache.NewMemoryStore())
 	sessions := newIssuer(t).WithRevocations(revocations)
 	plain := newIssuer(t) // without blacklist: isolates the refresh status check
-	issue := func(issuer *identity.SessionIssuer) string {
+	refreshStores := map[*identity.SessionIssuer]*identity.RefreshSessions{
+		sessions: identity.NewRefreshSessions(cache.NewMemoryStore(), revocations),
+		plain:    identity.NewRefreshSessions(cache.NewMemoryStore(), nil),
+	}
+	// session is an access token with the refresh cookie a login sets.
+	type session struct{ token, cookie string }
+	issue := func(issuer *identity.SessionIssuer) session {
 		t.Helper()
 		now := time.Now().UTC()
-		token, issueErr := issuer.Issue(identity.SessionClaims{Subject: userID, OrganizationID: f.OrgA, IssuedAt: now, ExpiresAt: now.Add(time.Hour)})
+		claims := identity.SessionClaims{Subject: userID, OrganizationID: f.OrgA, IssuedAt: now, ExpiresAt: now.Add(time.Hour)}
+		token, issueErr := issuer.Issue(claims)
 		if issueErr != nil {
 			t.Fatal(issueErr)
 		}
-		return token
+		cookie, issueErr := refreshStores[issuer].Issue(bg, &identity.RefreshGrant{Claims: claims})
+		if issueErr != nil {
+			t.Fatal(issueErr)
+		}
+		return session{token, cookie}
 	}
-	refresh := func(issuer *identity.SessionIssuer, token string) (int, []identity.Permission) {
+	refresh := func(issuer *identity.SessionIssuer, s session) (int, []identity.Permission) {
 		t.Helper()
-		h := identity.NewHandler(nil, issuer).WithProvisioning(users, "").WithAccessResolver(permission.NewPGRepository(f.App))
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"token":"`+token+`"}`))
-		req.Header.Set("Content-Type", "application/json")
+		h := identity.NewHandler(nil, issuer).WithProvisioning(users, "").WithAccessResolver(permission.NewPGRepository(f.App)).
+			WithRefreshSessions(refreshStores[issuer])
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+		req.AddCookie(&http.Cookie{Name: identity.RefreshCookieName, Value: s.cookie})
 		w := httptest.NewRecorder()
 		h.Refresh(w, req)
 		if w.Code != http.StatusOK {
@@ -134,7 +146,7 @@ func TestDeactivationEndsAccess(t *testing.T) {
 	}
 
 	// Sessions and refresh tokens end at once.
-	if _, err = sessions.Validate(before); !errors.Is(err, identity.ErrSessionRevoked) {
+	if _, err = sessions.Validate(before.token); !errors.Is(err, identity.ErrSessionRevoked) {
 		t.Errorf("session after deactivation: %v, want ErrSessionRevoked", err)
 	}
 	if code, _ := refresh(sessions, before); code != http.StatusUnauthorized {
@@ -176,7 +188,10 @@ func TestDeactivationEndsAccess(t *testing.T) {
 	if _, err = users.EnsureUser(bg, f.OrgA, subject, "deact@example.invalid", "Deact"); err != nil {
 		t.Errorf("login after reactivation: %v", err)
 	}
-	if _, err = sessions.Validate(issue(sessions)); err != nil {
+	// iat has the second resolution of a JWT NumericDate; a token from the
+	// same second as the revocation counts as revoked (fail closed).
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
+	if _, err = sessions.Validate(issue(sessions).token); err != nil {
 		t.Errorf("session issued after reactivation: %v", err)
 	}
 	if err = f.Admin.QueryRow(bg, `SELECT revoked_at IS NOT NULL FROM api_key WHERE id = $1`, keyID).Scan(&revoked); err != nil || !revoked {

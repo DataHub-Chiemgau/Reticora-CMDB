@@ -169,8 +169,10 @@ export async function completeAuthorizationCodeFlow(search: string) {
     throw new Error('Invalid authentication state.');
   }
 
+  // The response sets the HttpOnly refresh cookie (AUT-02).
   const response = await fetch(`${API_BASE}/auth/callback`, {
     method: 'POST',
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code, state, code_verifier: transaction.codeVerifier }),
   });

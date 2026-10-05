@@ -52,12 +52,42 @@ describe('fetchAPI authentication', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/auth/refresh');
-    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).toEqual({
-      token: 'old-token',
-    });
+    // The refresh token travels only in the HttpOnly cookie (AUT-02): no
+    // token in the body, cookies sent for the same origin.
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBeUndefined();
+    expect(fetchMock.mock.calls[1]?.[1]?.credentials).toBe('same-origin');
     const retryHeaders = fetchMock.mock.calls[2]?.[1]?.headers as Headers;
     expect(retryHeaders.get('Authorization')).toBe(['Bearer', 'new-token'].join(' '));
     expect(useAuthStore.getState().token).toBe('new-token');
+  });
+});
+
+describe('logout', () => {
+  it('ends the server session with the access token and the cookie, then clears the local session', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { useAuthStore } = await importClientWithSession('live-token');
+    const { logout } = await import('../auth/session');
+
+    await logout();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/auth/logout');
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(init.credentials).toBe('same-origin');
+    expect((init.headers as Record<string, string>).Authorization).toBe(['Bearer', 'live-token'].join(' '));
+    expect(useAuthStore.getState().token).toBeNull();
+  });
+
+  it('clears the local session when the server is unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')));
+    const { useAuthStore } = await importClientWithSession('live-token');
+    const { logout } = await import('../auth/session');
+
+    await logout();
+
+    expect(useAuthStore.getState().token).toBeNull();
   });
 });
 

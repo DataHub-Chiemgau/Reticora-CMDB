@@ -226,14 +226,27 @@ redirects to the identity provider, and posts `code`, `state` and
 `code_verifier` to `POST /api/v1/auth/callback`, which exchanges them for an
 RS256 session token. The verifier is mandatory and the returned ID token is
 signature-verified against the provider's JWKS with issuer, audience, expiry
-and issued-at checks. Every subsequent request carries that token as
-a bearer token in the `Authorization` header; the client refreshes it via
-`POST /api/v1/auth/refresh` once on a 401 and retries the request. Server-side
-the token signature is always verified by `middleware.AuthMiddlewareWithVerifier`
-— a missing `RETICORA_SESSION_KEY_PATH` is a fatal startup error unless the
-operator explicitly opts into the insecure development mode with
-`RETICORA_ALLOW_INSECURE_DEV_AUTH=true`. Only
-`/api/v1/auth/{config,callback,refresh}` are unauthenticated.
+and issued-at checks. The session token follows AUT-02: it lives 15 minutes,
+carries `sub`, `org`, `scopes`, `cls`/`sts`/`tms` (client, site and team scope;
+`null` = whole organization), `name`, `email`, `jti`, `iat` and `exp`, and its
+header names the signing key in `kid` (RFC 7638 thumbprint). Every subsequent
+request carries that token as a bearer token in the `Authorization` header.
+The refresh token is never visible to JavaScript: the callback sets it as the
+HttpOnly, Secure, SameSite=Strict cookie `reticora_refresh` (path
+`/api/v1/auth`), and the client calls `POST /api/v1/auth/refresh` once on a
+401, which uses the cookie up, sets a rotated one and re-reads roles and
+scopes; presenting a used cookie again revokes the whole session. Refresh
+tokens, the logout blacklist (`POST /api/v1/auth/logout` revokes the refresh
+family and blacklists the access token until it expires) and the per-user
+deactivation blacklist live in Redis, so every replica sees them at once.
+For a signing key rotation (SEC-06) set the new key in
+`RETICORA_SESSION_KEY_PATH` and the old ones in
+`RETICORA_SESSION_PREVIOUS_KEY_PATHS` (comma separated) for the overlap.
+Server-side the token signature is always verified by
+`middleware.AuthMiddlewareWithVerifier` — a missing `RETICORA_SESSION_KEY_PATH`
+is a fatal startup error unless the operator explicitly opts into the insecure
+development mode with `RETICORA_ALLOW_INSECURE_DEV_AUTH=true`. Only
+`/api/v1/auth/{config,callback,refresh,logout}` are unauthenticated.
 
 **Authorization and tenant resolution:** the auth middleware authenticates
 session bearer tokens and `X-API-Key` service tokens and populates a single

@@ -9,12 +9,15 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/go-chi/chi/v5"
 )
 
+// RefreshCookieName is the HttpOnly cookie that carries the refresh token
+// (AUT-02). It is only sent to the auth endpoints.
 const (
-	sessionLifetime = time.Hour
-	refreshWindow   = 24 * time.Hour
+	RefreshCookieName = "reticora_refresh"
+	refreshCookiePath = "/api/v1/auth"
 )
 
 // Handler provides auth-related HTTP endpoints.
@@ -32,6 +35,8 @@ type Handler struct {
 	// and refresh (RBA-03). Nil keeps the IdP groups as the only grant
 	// (tests, --no-db without users).
 	access AccessResolver
+	// refresh stores the rotating refresh tokens.
+	refresh *RefreshSessions
 }
 
 // AccessResolver loads the role grants of a user: every role assignment and
@@ -73,9 +78,18 @@ type UserProvisioner interface {
 	EnsureRole(ctx context.Context, orgID, userID, roleName string) error
 }
 
-// NewHandler constructs a new identity handler.
+// NewHandler constructs a new identity handler. Refresh tokens live in a
+// per-process store until WithRefreshSessions sets the shared one.
 func NewHandler(oidc *OIDCProvider, sessions *SessionIssuer) *Handler {
-	return &Handler{oidc: oidc, sessions: sessions}
+	return &Handler{oidc: oidc, sessions: sessions,
+		refresh: NewRefreshSessions(cache.NewMemoryStore(), sessions.Revocations())}
+}
+
+// WithRefreshSessions sets the refresh token store; production uses the Redis
+// store so that every replica sees rotations and revocations.
+func (h *Handler) WithRefreshSessions(r *RefreshSessions) *Handler {
+	h.refresh = r
+	return h
 }
 
 // WithProvisioning enables first-login app_user provisioning.
@@ -97,6 +111,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/auth/config", h.Config)
 	r.Post("/api/v1/auth/callback", h.Callback)
 	r.Post("/api/v1/auth/refresh", h.Refresh)
+	r.Post("/api/v1/auth/logout", h.Logout)
 	r.Get("/api/v1/auth/me", h.Me)
 }
 
@@ -155,6 +170,12 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 		writeIdentityError(w, err)
 		return
 	}
+	refreshToken, err := h.refresh.Issue(r.Context(), &RefreshGrant{Claims: withoutTokenTimes(&result.claims)})
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "store refresh token")
+		return
+	}
+	setRefreshCookie(w, refreshToken)
 
 	api.WriteJSON(w, http.StatusOK, map[string]any{
 		"token": sessionToken,
@@ -170,78 +191,153 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Refresh refreshes a session token.
+// Refresh issues a new access token for the refresh cookie and rotates the
+// cookie (AUT-02). The refresh token is used up; presenting it again revokes
+// the session. Roles and scopes are read again, and a deactivated user gets
+// no token.
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	if err := r.Context().Err(); err != nil {
 		writeContextError(w, err)
 		return
 	}
-	if h == nil || h.sessions == nil {
+	if h == nil || h.sessions == nil || h.refresh == nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "session issuer is not configured")
 		return
 	}
-
-	var req struct {
-		Token string `json:"token"`
-	}
-	if err := api.ReadJSON(r, &req); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+	cookie, err := r.Cookie(RefreshCookieName)
+	if err != nil || strings.TrimSpace(cookie.Value) == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "refresh cookie is required")
 		return
 	}
-	if strings.TrimSpace(req.Token) == "" {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "token is required")
-		return
-	}
-
-	claims, err := h.sessions.Validate(strings.TrimSpace(req.Token))
+	grant, err := h.refresh.Consume(r.Context(), cookie.Value)
 	if err != nil {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
-		return
-	}
-	if claims.ExpiresAt.IsZero() {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "session token expiry is required")
-		return
-	}
-
-	now := time.Now().UTC()
-	if now.After(claims.ExpiresAt.Add(refreshWindow)) {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "session token refresh window has expired")
+		clearRefreshCookie(w)
+		if errors.Is(err, ErrRefreshInvalid) || errors.Is(err, ErrRefreshReused) || errors.Is(err, ErrSessionRevoked) {
+			api.WriteError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "check refresh token")
 		return
 	}
 
 	// A deactivated or deleted user gets no new token, even when the
 	// blacklist entry of the deactivation has expired or was never written.
 	if checker, ok := h.provisioner.(UserStatusChecker); ok {
-		active, statusErr := checker.UserActive(r.Context(), claims.OrganizationID, claims.Subject)
+		active, statusErr := checker.UserActive(r.Context(), grant.Claims.OrganizationID, grant.Claims.Subject)
 		if statusErr != nil {
 			api.WriteError(w, http.StatusInternalServerError, "Internal Error", "check user status")
 			return
 		}
 		if !active {
+			clearRefreshCookie(w)
 			api.WriteError(w, http.StatusUnauthorized, "Unauthorized", ErrUserInactive.Error())
 			return
 		}
 	}
 
-	refreshedClaims := cloneSessionClaims(claims)
+	refreshedClaims := cloneSessionClaims(&grant.Claims)
 	// Roles and scopes are re-read on every refresh so revoked or narrowed
 	// assignments take effect without a new login.
 	if err = h.applyAccess(r.Context(), &refreshedClaims); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "resolve role assignments")
 		return
 	}
-	refreshedClaims.IssuedAt = now
-	refreshedClaims.ExpiresAt = now.Add(sessionLifetime)
-
+	if err = stampToken(&refreshedClaims); err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		return
+	}
 	token, err := h.sessions.Issue(refreshedClaims)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
+	grant.Claims = withoutTokenTimes(&refreshedClaims)
+	refreshToken, err := h.refresh.Issue(r.Context(), grant)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "store refresh token")
+		return
+	}
+	setRefreshCookie(w, refreshToken)
 
 	api.WriteJSON(w, http.StatusOK, map[string]string{
 		"token":      token,
 		"expires_at": refreshedClaims.ExpiresAt.Format(time.RFC3339),
+	})
+}
+
+// Logout ends the session: the refresh family of the cookie is revoked, the
+// presented access token is blacklisted until it expires (AUT-02) and the
+// cookie is cleared. It needs no valid access token, so an expired session
+// can still log out.
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	if err := r.Context().Err(); err != nil {
+		writeContextError(w, err)
+		return
+	}
+	if h == nil || h.sessions == nil || h.refresh == nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "session issuer is not configured")
+		return
+	}
+	if cookie, err := r.Cookie(RefreshCookieName); err == nil {
+		if err := h.refresh.Revoke(r.Context(), cookie.Value); err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", "revoke refresh token")
+			return
+		}
+	}
+	if token, err := bearerTokenFromRequest(r); err == nil {
+		if claims, validErr := h.sessions.Validate(token); validErr == nil {
+			if revocations := h.sessions.Revocations(); revocations != nil {
+				if err := revocations.RevokeToken(r.Context(), claims.ID, claims.ExpiresAt); err != nil {
+					api.WriteError(w, http.StatusInternalServerError, "Internal Error", "revoke access token")
+					return
+				}
+			}
+		}
+	}
+	clearRefreshCookie(w)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// stampToken sets token id, issue and expiry time of a new access token.
+func stampToken(claims *SessionClaims) error {
+	id, err := newTokenID()
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	claims.ID, claims.IssuedAt, claims.ExpiresAt = id, now, now.Add(sessionLifetime)
+	return nil
+}
+
+// withoutTokenTimes returns the claims a refresh grant keeps: everything but
+// token id, issue and expiry time.
+func withoutTokenTimes(claims *SessionClaims) SessionClaims {
+	c := cloneSessionClaims(claims)
+	c.ID, c.IssuedAt, c.ExpiresAt = "", time.Time{}, time.Time{}
+	return c
+}
+
+func setRefreshCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     RefreshCookieName,
+		Value:    token,
+		Path:     refreshCookiePath,
+		MaxAge:   int(RefreshTokenLifetime.Seconds()),
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+func clearRefreshCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     RefreshCookieName,
+		Value:    "",
+		Path:     refreshCookiePath,
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
 	})
 }
 
@@ -337,16 +433,18 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 		subject = userID
 	}
 
-	now := time.Now().UTC()
 	claims := SessionClaims{
 		Subject:        subject,
 		OrganizationID: orgID,
 		Groups:         append([]string(nil), idToken.Groups...),
-		IssuedAt:       now,
-		ExpiresAt:      now.Add(sessionLifetime),
+		Name:           idToken.Name,
+		Email:          idToken.Email,
 	}
 	if err = h.applyAccess(ctx, &claims); err != nil {
 		return "", time.Time{}, authResult{}, fmt.Errorf("identity: resolve role assignments: %w", err)
+	}
+	if stampErr := stampToken(&claims); stampErr != nil {
+		return "", time.Time{}, authResult{}, stampErr
 	}
 
 	sessionToken, err := h.sessions.Issue(claims)

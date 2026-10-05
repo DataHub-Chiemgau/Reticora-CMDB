@@ -148,6 +148,9 @@ type Options struct {
 	// OIDC and Sessions power the authentication endpoints.
 	OIDC     *identity.OIDCProvider
 	Sessions *identity.SessionIssuer
+	// RefreshSessions stores the rotating refresh tokens in the shared cache
+	// store; nil keeps a per-process store (tests).
+	RefreshSessions *identity.RefreshSessions
 	// UserProvisioner auto-creates the app_user on first OIDC login (nil
 	// disables). DefaultProvisionRole names the standard role assigned on
 	// first login (empty assigns none).
@@ -237,10 +240,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// every route is mapped.
 	protected := authorizingRouter{Router: mux, after: opts.RouteMiddleware}
 
+	identityHandler := identity.NewHandler(opts.OIDC, opts.Sessions).
+		WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole).
+		WithAccessResolver(repos.Permission)
+	if opts.RefreshSessions != nil {
+		identityHandler.WithRefreshSessions(opts.RefreshSessions)
+	}
 	registrars := []registrar{
-		identity.NewHandler(opts.OIDC, opts.Sessions).
-			WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole).
-			WithAccessResolver(repos.Permission),
+		identityHandler,
 		entitlement.NewHandler(opts.Entitlements),
 		ci.NewHandler(opts.CIService, opts.Dispatcher),
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
