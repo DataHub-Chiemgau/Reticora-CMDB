@@ -148,7 +148,10 @@ export interface paths {
     delete: operations['deleteCI'];
     options?: never;
     head?: never;
-    /** Update a configuration item */
+    /**
+     * Update a configuration item
+     * @description Optimistic concurrency (API-07): If-Match names the version the editor read. A stale version is refused with 409 only when a field of the request was changed since by a write of rank >= 92 (manual, import, workflow); observed discovery updates do not change the version. An organization can require If-Match (settings.require_if_match); then a request without it is 412, like an unknown version.
+     */
     patch: operations['updateCI'];
     trace?: never;
   };
@@ -4930,6 +4933,11 @@ export interface components {
       id: string;
       organization_id: string;
       client_id?: string;
+      /**
+       * Format: int64
+       * @description CI version, also the ETag (API-07).
+       */
+      readonly version?: number;
       /** @description Node of the canonical location tree (DB-05); site_id and room_id are derived from it. */
       location_id?: string;
       /** @description Site of location_id, derived by the server. */
@@ -6325,6 +6333,11 @@ export interface components {
       reason: string;
       /** @default true */
       protected: boolean;
+    };
+    VersionConflictProblem: components['schemas']['ProblemDetail'] & {
+      fields: string[];
+      /** Format: int64 */
+      current_version: number;
     };
     ViolationProblem: components['schemas']['ProblemDetail'] & {
       violations: {
@@ -7844,6 +7857,8 @@ export interface operations {
       /** @description Configuration item details */
       200: {
         headers: {
+          /** @description The CI version (API-07); send it as If-Match with a PATCH. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -7880,7 +7895,10 @@ export interface operations {
   updateCI: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
@@ -7896,6 +7914,8 @@ export interface operations {
       /** @description Configuration item updated */
       200: {
         headers: {
+          /** @description The new CI version. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -7905,6 +7925,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description Fields of the request changed since the If-Match version */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['VersionConflictProblem'];
+        };
+      };
+      /** @description If-Match missing although required, or not a version of the CI */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listCIChanges: {
