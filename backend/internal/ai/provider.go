@@ -31,6 +31,15 @@ type OpenAIProvider struct {
 	client *http.Client
 }
 
+// NewProvider returns the configured provider, or the disabled provider in
+// the air-gapped profile: no external AI call is made at all (AI-02).
+func NewProvider(cfg *ProviderConfig, airGapped bool, client *http.Client) Provider {
+	if airGapped {
+		return DisabledProvider{}
+	}
+	return NewOpenAIProvider(*cfg, client)
+}
+
 func NewOpenAIProvider(cfg ProviderConfig, client *http.Client) Provider {
 	if strings.TrimSpace(cfg.BaseURL) == "" || strings.TrimSpace(cfg.ChatModel) == "" {
 		return DisabledProvider{}

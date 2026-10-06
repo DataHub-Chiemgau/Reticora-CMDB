@@ -15,12 +15,14 @@ import (
 // internal/permission; the write permission is derived by replacing the
 // ":read" suffix with ":write".
 var readPermissionFor = map[string]identity.Permission{
-	"cis":                  identity.PermCIRead,
+	"cis": identity.PermCIRead,
+	// Listing API keys shows metadata only, but it is still key management.
+	"api-keys":             identity.PermAPIKeyManage,
 	"relationships":        identity.PermRelationshipRead,
 	"topology":             identity.PermTopologyRead,
-	"sites":                identity.PermSiteRead,
-	"buildings":            identity.PermSiteRead,
-	"rooms":                identity.PermSiteRead,
+	"sites":                identity.PermLocationRead,
+	"buildings":            identity.PermLocationRead,
+	"rooms":                identity.PermLocationRead,
 	"racks":                identity.PermRackRead,
 	"rack-mounts":          identity.PermRackRead,
 	"contacts":             identity.PermContactRead,
@@ -44,6 +46,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"tickets":              identity.PermTicketRead,
 	"slas":                 identity.PermSLARead,
 	"users":                identity.PermUserRead,
+	"service-accounts":     identity.PermUserRead,
 	"teams":                identity.PermUserRead,
 	"clients":              identity.PermUserRead,
 	"roles":                identity.PermRoleRead,
@@ -79,7 +82,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"relationship-types":    identity.PermRelationshipRead,
 	"lifecycle-definitions": identity.PermAssetRead,
 	"lifecycle-transitions": identity.PermAssetRead,
-	"locations":             identity.PermSiteRead,
+	"locations":             identity.PermLocationRead,
 	"stock-movements":       identity.PermAssetRead,
 	"inventory":             identity.PermAssetRead,
 	"movements":             identity.PermAssetRead,
@@ -100,22 +103,29 @@ var readPermissionFor = map[string]identity.Permission{
 // writePermissionOverrides covers resources whose write permission does not
 // follow the read→write suffix convention.
 var writePermissionOverrides = map[string]identity.Permission{
-	"sites":     identity.PermSiteWrite,
-	"buildings": identity.PermSiteWrite,
-	"rooms":     identity.PermSiteWrite,
+	"sites":     identity.PermLocationWrite,
+	"buildings": identity.PermLocationWrite,
+	"rooms":     identity.PermLocationWrite,
 
-	"contacts":     identity.PermContactWrite,
-	"ci-contacts":  identity.PermContactWrite,
-	"users":        identity.PermUserManage,
-	"teams":        identity.PermUserManage,
-	"clients":      identity.PermUserManage,
-	"roles":        identity.PermRoleManage,
-	"permissions":  identity.PermPermissionManage,
-	"entitlements": identity.PermEntitlementManage,
-	"webhooks":     identity.PermWebhookManage,
-	"credentials":  identity.PermCredentialManage,
-	"export":       identity.PermExportRun,
-	"search":       identity.PermSearchWrite,
+	"contacts":    identity.PermContactWrite,
+	"ci-contacts": identity.PermContactWrite,
+	"users":       identity.PermUserManage,
+	// Service accounts are principals like users (RBA-08).
+	"service-accounts": identity.PermUserManage,
+	"teams":            identity.PermTeamManage,
+	// RBA-01: collectors and discovery jobs have their own manage keys.
+	"collectors": identity.PermCollectorManage,
+	"discovery":  identity.PermDiscoveryManage,
+	// Resolving reconciliation conflicts is resolving review items.
+	"reconciliation": identity.PermReviewResolve,
+	"clients":        identity.PermUserManage,
+	"roles":          identity.PermRoleManage,
+	"permissions":    identity.PermPermissionManage,
+	"entitlements":   identity.PermEntitlementManage, // no tenant write route: the operator writes (ENT-04)
+	"webhooks":       identity.PermWebhookManage,
+	"credentials":    identity.PermCredentialManage,
+	"export":         identity.PermExportRun,
+	"search":         identity.PermSearchWrite,
 	// Audit integrity verification is a read-side operation; the audit trail
 	// itself is append-only and written by the system, not the API.
 	"audit": identity.PermAuditRead,
@@ -133,7 +143,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"relationship-types":    identity.PermRelationshipTypeManage,
 	"lifecycle-definitions": identity.PermLifecycleManage,
 	"lifecycle-transitions": identity.PermLifecycleManage,
-	"locations":             identity.PermSiteWrite,
+	"locations":             identity.PermLocationWrite,
 	"stock-movements":       identity.PermAssetMove,
 	"inventory":             identity.PermInventoryManage,
 	"movements":             identity.PermAssetMove,
@@ -141,7 +151,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"children":              identity.PermAssetWrite,
 	"compositions":          identity.PermAssetWrite,
 	"override":              identity.PermOverrideWrite,
-	"source-policy":         identity.PermReconciliationResolve,
+	"source-policy":         identity.PermReconciliationManage,
 	"saved-views":           identity.PermSavedViewWrite,
 	// Read-only surfaces: writes (if any) stay on the read permission so no
 	// non-existent derived write permission is required.
@@ -192,6 +202,15 @@ var routeRules = []routeRule{
 	{http.MethodPost, "orders/*/reject", identity.PermOrderApprove},
 	// Reconciliation settings (RBA-06); reading them stays discovery:read.
 	{http.MethodPut, "reconciliation/source-policy", identity.PermReconciliationManage},
+	// Collectors report with the ingest credential; managing them is
+	// collector:manage (RBA-01).
+	{http.MethodPost, "collectors/*/heartbeat", identity.PermDiscoveryIngest},
+	{http.MethodPost, "discovery/ingest", identity.PermDiscoveryIngest},
+	// Resolving a review item is its own right (RBA-01, RBA-02).
+	{http.MethodPost, "discovery/review-items/*/resolve", identity.PermReviewResolve},
+	// Reading jobs (RBA-01); starting an export stays export:run.
+	{http.MethodGet, "export/jobs", identity.PermJobRead},
+	{http.MethodGet, "export/jobs/*", identity.PermJobRead},
 }
 
 // matchRouteRule returns the permission of the first rule matching the
@@ -230,6 +249,10 @@ const (
 	// routePublic marks routes that are intentionally reachable without an
 	// authenticated principal (health, metrics, public auth endpoints).
 	routePublic
+	// routeOperator marks the operator path /api/v1/admin (SEC-07): the
+	// tenant authorization does not apply; internal/operator admits
+	// operators only and audits every request.
+	routeOperator
 	// routeProtected marks routes that require an authenticated principal
 	// holding the resolved permission.
 	routeProtected
@@ -251,10 +274,13 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 	if !strings.HasPrefix(path, "/api/") {
 		return "", routePublic
 	}
+	if strings.HasPrefix(path, "/api/v1/admin/") {
+		return "", routeOperator
+	}
 
 	// Public authentication endpoints are unauthenticated by design.
 	switch path {
-	case "/api/v1/auth/config", "/api/v1/auth/callback", "/api/v1/auth/refresh":
+	case "/api/v1/auth/config", "/api/v1/auth/callback", "/api/v1/auth/refresh", "/api/v1/auth/logout":
 		return "", routePublic
 	case "/api/v1/collectors/enroll":
 		// Zero-config onboarding: the single-use enrollment code is the
@@ -336,7 +362,7 @@ func AuthorizeRoute(method, path string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch access {
-			case routePublic:
+			case routePublic, routeOperator:
 				next.ServeHTTP(w, r)
 				return
 			case routeUnmapped:

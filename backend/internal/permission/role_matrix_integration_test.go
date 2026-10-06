@@ -11,20 +11,24 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 )
 
-// rba02 is the RBA-02 matrix of the catalogue text over the keys it governs,
-// translated to the current permission keys (migration 000073). "C" marks a
-// right the client technician holds only in its client scope.
+// rba02 is the RBA-02 matrix of the catalogue text with its exact keys
+// (RBA-01 names since migration 000081), plus the module keys that WP-046
+// assigned to the rows they stand for (rack:read with location:read, the
+// credential keys with credential:manage, ci_type:manage with citype:manage,
+// permission:write with role:manage). "C" marks a right the client
+// technician holds only in its client scope.
 var rba02 = []struct {
 	keys                                    []string
 	orgAdmin, engineer, viewer, clientTechn string
 }{
-	{[]string{"ci:read", "site:read", "rack:read", "topology:read"}, "✓", "✓", "✓", "C"},
+	{[]string{"ci:read", "location:read", "rack:read", "topology:read"}, "✓", "✓", "✓", "C"},
 	{[]string{"ci:write", "rack:write", "relationship:write", "contact:write"}, "✓", "✓", "–", "C"},
-	{[]string{"ci:delete", "site:write"}, "✓", "✓", "–", "–"},
-	{[]string{"reconciliation:resolve", "export:run"}, "✓", "✓", "–", "C"},
-	{[]string{"discovery:write", "credential:read", "credential:write", "credential:manage", "credential:decrypt"}, "✓", "✓", "–", "–"},
-	{[]string{"citype:manage", "ci_type:manage", "webhook:manage"}, "✓", "–", "–", "–"},
-	{[]string{"user:manage", "role:manage", "permission:write", "entitlement:manage", "audit:read", "apikey:manage"}, "✓", "–", "–", "–"},
+	{[]string{"ci:delete", "location:write"}, "✓", "✓", "–", "–"},
+	{[]string{"review:resolve"}, "✓", "✓", "–", "C"},
+	{[]string{"export:run", "job:read"}, "✓", "✓", "–", "C"},
+	{[]string{"discovery:manage", "collector:manage", "vrf:manage", "credential:read", "credential:write", "credential:manage", "credential:decrypt"}, "✓", "✓", "–", "–"},
+	{[]string{"citype:manage", "ci_type:manage", "webhook:manage", "notification:manage"}, "✓", "–", "–", "–"},
+	{[]string{"user:manage", "team:manage", "role:manage", "permission:write", "entitlement:manage", "audit:read", "apikey:manage"}, "✓", "–", "–", "–"},
 }
 
 // TestStandardRolesMatchTheRoleMatrix covers WP-046 (RBA-02): the roles the

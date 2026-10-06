@@ -50,6 +50,13 @@ func (r *RedisStore) Increment(ctx context.Context, key string, ttl time.Duratio
 	return incr.Val(), nil
 }
 
+func (r *RedisStore) Delete(ctx context.Context, key string) error {
+	if err := r.client.Del(ctx, key).Err(); err != nil {
+		return fmt.Errorf("cache: redis del: %w", err)
+	}
+	return nil
+}
+
 func (r *RedisStore) Close() error {
 	// The Redis client lifecycle is managed externally.
 	return nil

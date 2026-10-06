@@ -23,14 +23,14 @@ func TestAPIKeyStoreScope(t *testing.T) {
 	ctx := f.ClientCtx(f.Client1)
 
 	key := identity.StoredAPIKey{OrganizationID: f.OrgA, Name: "scopetest", KeyHash: "hash-a", KeyPrefix: "prefix1e", CreatedBy: f.User}
-	if err := store.Save(ctx, key); err != nil {
+	if err := store.Save(ctx, &key); err != nil {
 		t.Fatalf("save org A key: %v", err)
 	}
 	other := identity.StoredAPIKey{OrganizationID: f.OrgB, Name: "scopetest", KeyHash: "hash-b", KeyPrefix: "prefix1e", CreatedBy: f.User}
-	if err := store.Save(ctx, other); !errors.Is(err, database.ErrTenantMismatch) {
+	if err := store.Save(ctx, &other); !errors.Is(err, database.ErrTenantMismatch) {
 		t.Fatalf("save organization B key: got %v, want ErrTenantMismatch", err)
 	}
-	if err := store.Save(context.Background(), key); !errors.Is(err, database.ErrNoTenantScope) {
+	if err := store.Save(context.Background(), &key); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("save without scope: got %v, want ErrNoTenantScope", err)
 	}
 

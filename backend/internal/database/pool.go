@@ -204,7 +204,8 @@ const SystemGUC = "app.system"
 // UUID, which matches no row and keeps the strict ::uuid casts of the tenant
 // policies valid, so
 // only the SELECT-only system exceptions (organization, webhook_delivery,
-// webhook_dead_letter, export_job, alert_rule, collector_enrollment_code)
+// webhook_dead_letter, export_job, alert_rule, collector_enrollment_code,
+// api_key)
 // return rows. Workers use it to find due work and then change rows per
 // organization in WithTenant (E-08). Every caller is listed in the
 // allow-list of the architecture test (WP-041).
@@ -223,6 +224,37 @@ func WithSystem(ctx context.Context, pool *pgxpool.Pool, fn func(ctx context.Con
 		set_config('`+SiteScopeGUC+`', $1, true),
 		set_config('`+TeamScopeGUC+`', $1, true)`, noAccessScope); err != nil {
 		return fmt.Errorf("set system context: %w", err)
+	}
+	if err := fn(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// OperatorGUC is the flag WithOperator sets. Only the policies of the
+// operator tables (operator_audit, migration 000083) honor it.
+const OperatorGUC = "app.operator"
+
+// WithOperator runs fn in a transaction of the operator path (/admin, SEC-07):
+// the operator flag is set and no tenant is, so tenant tables return no rows
+// and accept no writes; only the operator tables are reachable. Organization
+// data an operator reads goes through WithSystem or WithTenant of the target
+// organization.
+func WithOperator(ctx context.Context, pool *pgxpool.Pool, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin operator transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT
+		set_config('`+OperatorGUC+`', 'on', true),
+		set_config('`+OrgGUC+`', $1, true),
+		set_config('`+UserGUC+`', '', true),
+		set_config('`+ClientScopeGUC+`', $1, true),
+		set_config('`+SiteScopeGUC+`', $1, true),
+		set_config('`+TeamScopeGUC+`', $1, true)`, noAccessScope); err != nil {
+		return fmt.Errorf("set operator context: %w", err)
 	}
 	if err := fn(ctx, tx); err != nil {
 		return err
@@ -250,4 +282,26 @@ func OrganizationIDs(ctx context.Context, pool *pgxpool.Pool) ([]string, error) 
 		return rows.Err()
 	})
 	return ids, err
+}
+
+// OrganizationPlans returns the plan of every organization, keyed by id
+// (system read for the entitlement provisioning at startup).
+func OrganizationPlans(ctx context.Context, pool *pgxpool.Pool) (map[string]string, error) {
+	plans := map[string]string{}
+	err := WithSystem(ctx, pool, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text, plan FROM organization`)
+		if err != nil {
+			return fmt.Errorf("list organization plans: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, plan string
+			if err := rows.Scan(&id, &plan); err != nil {
+				return fmt.Errorf("scan organization plan: %w", err)
+			}
+			plans[id] = plan
+		}
+		return rows.Err()
+	})
+	return plans, err
 }

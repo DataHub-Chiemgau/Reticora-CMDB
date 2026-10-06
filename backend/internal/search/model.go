@@ -70,6 +70,6 @@ var ReadPermission = map[string]string{
 	"ticket":      "ticket:read",
 	"contact":     "contact:read",
 	"compliance":  "compliance:read",
-	"location":    "site:read",
+	"location":    "location:read",
 	"reservation": "asset:read",
 }

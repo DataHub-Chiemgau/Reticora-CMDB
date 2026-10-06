@@ -29,6 +29,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
@@ -145,8 +146,11 @@ func main() {
 	}
 	// Deactivation ends sessions immediately through the blacklist in the
 	// shared cache store (AUT-02, TLC-04).
+	// Refresh tokens rotate in the same store (AUT-02).
+	var refreshSessions *identity.RefreshSessions
 	if sessionIssuer != nil {
 		sessionIssuer.WithRevocations(identity.NewSessionRevocations(cacheStore))
+		refreshSessions = identity.NewRefreshSessions(cacheStore, sessionIssuer.Revocations())
 	}
 
 	// Repositories. PostgreSQL is the only supported production backend; the
@@ -157,7 +161,6 @@ func main() {
 		repos        server.Repositories
 		auditHandler *audit.Handler
 		auditPool    *pgxpool.Pool
-		apiKeyStore  identity.APIKeyStore
 		blobStore    blob.Store
 	)
 
@@ -193,7 +196,6 @@ func main() {
 		repos = server.PostgresRepositories(pool, audit.NewPGRecorder())
 		auditHandler = audit.NewHandler(pool)
 		auditPool = pool
-		apiKeyStore = identity.NewPGAPIKeyStore(pool)
 
 		// Asynchronous exports render into object storage and are served via
 		// signed URLs. Without object storage, job creation answers 503 but
@@ -254,26 +256,43 @@ func main() {
 	// failing search backend never breaks CI persistence, and the index can
 	// always be rebuilt via POST /api/v1/search/reindex.
 	repos.CI = ci.NewIndexingRepository(repos.CI, search.NewCIIndexer(repos.Search))
-	aiProvider := ai.NewOpenAIProvider(ai.ProviderConfig{
+	// In the air-gapped profile no external AI call is made at all (AI-02).
+	aiProvider := ai.NewProvider(&ai.ProviderConfig{
 		BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, ChatModel: cfg.LLMChatModel, EmbeddingModel: cfg.LLMEmbeddingModel,
-	}, nil)
-	// Mirror CI mutations into the retrieval chunk store so the governed RAG
-	// assistant has tenant-owned content to ground its answers. Chunks are
-	// embedded when an embedding model is configured and fall back to lexical
-	// scoring otherwise.
-	repos.CI = ci.NewIndexingRepository(repos.CI, ai.NewCIChunkIndexer(repos.AI, aiProvider))
+	}, cfg.AirGapped, nil)
+	slog.Info("AI provider configured", "air_gapped", cfg.AirGapped,
+		"chat_enabled", aiProvider.Enabled(), "embeddings_enabled", aiProvider.EmbeddingsEnabled())
 
+	// The entitlement cache lives in the shared store (Redis), so a change
+	// invalidates every instance (ENT-03).
 	entitlementSvc := entitlement.NewService(repos.Entitlement, entitlement.Options{
-		DefaultPlan: entitlement.Plan(cfg.DefaultPlan),
-		Enforce:     cfg.EntitlementEnforcement,
+		Cache:   cacheStore,
+		Enforce: cfg.EntitlementEnforcement,
 	})
+	// A missing entitlement row means not entitled (ENT-05): organizations
+	// without rows get the rows of their plan once.
+	if err = provisionEntitlements(context.Background(), entitlementSvc, auditPool, cfg.DefaultPlan); err != nil {
+		slog.Error("entitlement provisioning failed", "error", err)
+		os.Exit(1)
+	}
 	slog.Info("entitlement enforcement configured",
 		"default_plan", cfg.DefaultPlan, "enforced", cfg.EntitlementEnforcement)
+
+	// Mirror CI mutations into the retrieval chunk store so the governed RAG
+	// assistant has tenant-owned content to ground its answers. Chunks are
+	// embedded only for organizations that opted in and hold the ai add-on
+	// (AI-02); otherwise they stay lexical.
+	aiOptIn, _ := repos.AI.(ai.OptInSource)
+	repos.CI = ci.NewIndexingRepository(repos.CI, ai.NewCIChunkIndexer(repos.AI, aiProvider).
+		WithConsent(ai.OrgConsent{OptIn: aiOptIn, Entitlements: entitlementSvc}))
 
 	// Webhook and connector destinations are user input: every outbound call
 	// goes through the egress client (SEC-08).
 	egressPolicy := egress.Options{AllowPrivate: cfg.EgressAllowPrivate}
 	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, egress.NewClient(egressPolicy), webhook.DispatcherOptions{
+		// Subscriptions bound to a service account receive only events whose
+		// object the account may read (RBA-08).
+		Access:     user.ServiceAccountAccess{Repo: repos.ServiceAccounts},
 		Deliveries: repos.WebhookDeliveries,
 	})
 	defer func() {
@@ -285,14 +304,21 @@ func main() {
 	}()
 
 	mux, httpMetrics, err := server.NewRouter(repos, server.Options{
-		Version:              version,
-		MetricsTenantLabel:   cfg.MetricsTenantLabel,
-		Entitlements:         entitlementSvc,
-		Dispatcher:           webhookDispatcher,
-		CIService:            ci.NewServiceWithLimits(repos.CI, entitlementSvc).WithFieldResolver(repos.CIType),
-		Credentials:          credential.NewService(repos.Credential, encryptor),
-		OIDC:                 oidcProvider,
-		Sessions:             sessionIssuer,
+		Version:            version,
+		MetricsTenantLabel: cfg.MetricsTenantLabel,
+		Entitlements:       entitlementSvc,
+		Dispatcher:         webhookDispatcher,
+		CIService:          ci.NewServiceWithLimits(repos.CI, entitlementSvc).WithFieldResolver(repos.CIType),
+		Credentials:        credential.NewService(repos.Credential, encryptor),
+		OIDC:               oidcProvider,
+		Sessions:           sessionIssuer,
+		RefreshSessions:    refreshSessions,
+		Operator: operator.Config{
+			BreakGlassToken: cfg.OperatorToken,
+			Group:           cfg.OperatorGroup,
+			MFAACRValues:    strings.Split(cfg.OperatorMFAACR, ","),
+		},
+		OperatorPool:         auditPool,
 		UserProvisioner:      userProvisioner(repos),
 		DefaultProvisionRole: cfg.DefaultProvisionRole,
 		Audit:                auditHandler,
@@ -342,7 +368,11 @@ func main() {
 	// explicitly opted into the insecure development mode. API keys are
 	// verified against the database when available, which gives service
 	// tokens the same authenticated principal as interactive users.
-	authMiddleware := middleware.AuthMiddlewareWithAPIKeys(sessionIssuer, identity.NewAPIKeyServiceWithStore(apiKeyStore))
+	// A key acts with the intersection of its permissions and its owner's
+	// current role assignments (AUT-04).
+	apiKeys := identity.NewAPIKeyServiceWithStore(repos.APIKeys).WithOwnerAccess(repos.Permission).
+		WithServiceAccountAccess(user.ServiceAccountAccess{Repo: repos.ServiceAccounts})
+	authMiddleware := middleware.AuthMiddlewareWithAPIKeys(sessionIssuer, apiKeys)
 	if sessionIssuer == nil {
 		slog.Warn("INSECURE DEVELOPMENT MODE: bearer tokens are accepted without signature verification")
 	}
@@ -401,6 +431,32 @@ func main() {
 	}
 }
 
+// provisionEntitlements stores the plan's entitlement rows for every
+// organization without rows. Without a database (--no-db) the demo
+// organization gets the default plan.
+func provisionEntitlements(ctx context.Context, svc *entitlement.Service, pool *pgxpool.Pool, defaultPlan string) error {
+	plans := map[string]entitlement.Plan{}
+	if pool == nil {
+		plans[demoOrganizationID] = entitlement.Plan(defaultPlan)
+	} else {
+		stored, err := database.OrganizationPlans(ctx, pool)
+		if err != nil {
+			return err
+		}
+		for id, plan := range stored {
+			plans[id] = entitlement.Plan(plan)
+		}
+	}
+	n, err := svc.ProvisionOrganizations(ctx, plans)
+	if n > 0 {
+		slog.Info("entitlements provisioned", "organizations", n)
+	}
+	return err
+}
+
+// demoOrganizationID is the organization of migration 000054.
+const demoOrganizationID = "00000000-0000-0000-0000-000000000001"
+
 // userProvisioner adapts the user repository to the identity provisioning
 // port. Only the PostgreSQL-backed repository supports durable first-login
 // provisioning; the in-memory variant returns nil so --no-db smoke tests keep
@@ -442,6 +498,20 @@ func loadSessionIssuer(cfg *config.Config) (*identity.SessionIssuer, error) {
 	issuer, err := identity.NewSessionIssuer(keyData)
 	if err != nil {
 		return nil, fmt.Errorf("parse session key %q: %w", cfg.SessionKeyPath, err)
+	}
+	// Previous signing keys stay valid for verification during a rotation
+	// (SEC-06); tokens name their key in the kid header.
+	for _, path := range strings.Split(cfg.SessionPreviousKeyPaths, ",") {
+		if path = strings.TrimSpace(path); path == "" {
+			continue
+		}
+		previous, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil, fmt.Errorf("read previous session key %q: %w", path, readErr)
+		}
+		if err = issuer.WithPreviousKeys(previous); err != nil {
+			return nil, fmt.Errorf("parse previous session key %q: %w", path, err)
+		}
 	}
 	return issuer, nil
 }

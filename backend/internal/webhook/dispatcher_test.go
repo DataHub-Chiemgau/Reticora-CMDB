@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -231,5 +232,79 @@ func TestDispatcherDefaultClientBlocksInternalDestinations(t *testing.T) {
 	}
 	if !strings.Contains(delivery.Error+fmt.Sprint(err), "not allowed") {
 		t.Errorf("delivery error %q / %v does not name the blocked destination", delivery.Error, err)
+	}
+}
+
+// fakeAccess grants read rights per service account, permission and client.
+type fakeAccess map[string]bool
+
+func (f fakeAccess) CanReadEvent(_ context.Context, _, serviceAccountID, permission, clientID, _ string) (bool, error) {
+	return f[serviceAccountID+"|"+permission+"|"+clientID], nil
+}
+
+// TestDispatcherFiltersBoundSubscriptions covers WP-069 (RBA-08): a
+// subscription bound to a service account receives an event only when the
+// account may read the event's object; unbound subscriptions receive every
+// event; without an access checker or for events without a known object,
+// bound subscriptions receive nothing.
+func TestDispatcherFiltersBoundSubscriptions(t *testing.T) {
+	var mu sync.Mutex
+	received := map[string][]string{} // subscription name -> client ids
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			ClientID string `json:"client_id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		mu.Lock()
+		received[r.URL.Path] = append(received[r.URL.Path], payload.ClientID)
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	run := func(access SubscriberAccess, event string, clients ...string) map[string][]string {
+		t.Helper()
+		mu.Lock()
+		received = map[string][]string{}
+		mu.Unlock()
+		repo := NewMemoryRepository()
+		for _, sub := range []Subscription{
+			{Name: "unbound", URL: server.URL + "/unbound"},
+			{Name: "bound", URL: server.URL + "/bound", ServiceAccountID: "sa-1"},
+		} {
+			sub.OrganizationID, sub.Secret, sub.Events, sub.IsActive = "org-1", "secret", []string{event}, true
+			if err := repo.Create(context.Background(), &sub); err != nil {
+				t.Fatal(err)
+			}
+		}
+		d := NewDispatcher(repo, server.Client(), DispatcherOptions{Access: access, PollInterval: -1})
+		for _, c := range clients {
+			d.Dispatch(context.Background(), "org-1", event, map[string]any{"id": "ci-" + c, "client_id": c})
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = d.Shutdown(ctx)
+		mu.Lock()
+		defer mu.Unlock()
+		out := map[string][]string{}
+		for k, v := range received {
+			out[k] = append([]string(nil), v...)
+		}
+		return out
+	}
+
+	access := fakeAccess{"sa-1|ci:read|c1": true}
+	got := run(access, "ci.created", "c1", "c2")
+	if len(got["/unbound"]) != 2 {
+		t.Errorf("unbound subscription received %v, want both events", got["/unbound"])
+	}
+	if strings.Join(got["/bound"], ",") != "c1" {
+		t.Errorf("bound subscription received %v, want only the event of client c1", got["/bound"])
+	}
+	if got = run(nil, "ci.created", "c1"); len(got["/bound"]) != 0 {
+		t.Errorf("bound subscription without access checker received %v", got["/bound"])
+	}
+	if got = run(access, "workflow.custom", "c1"); len(got["/bound"]) != 0 || len(got["/unbound"]) != 1 {
+		t.Errorf("event without known object: %v", got)
 	}
 }

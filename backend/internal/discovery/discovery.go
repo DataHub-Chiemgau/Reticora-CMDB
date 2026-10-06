@@ -97,8 +97,11 @@ type BulkIngestResponse struct {
 	ProtectedOverrides int `json:"protected_overrides,omitempty"`
 	// ProtectedInstanceFields counts matched CIs where discovered values for
 	// instance attributes were not written (MET-14).
-	ProtectedInstanceFields int    `json:"protected_instance_fields,omitempty"`
-	JobID                   string `json:"job_id,omitempty"`
+	ProtectedInstanceFields int `json:"protected_instance_fields,omitempty"`
+	// Unlicensed counts new devices held as unlicensed_ci because max_cis is
+	// reached (ENT-03, CH21); already queued devices count again.
+	Unlicensed int    `json:"unlicensed,omitempty"`
+	JobID      string `json:"job_id,omitempty"`
 }
 
 // Repository defines persistence operations for collectors, discovery jobs and
@@ -305,6 +308,7 @@ type FieldProvenance struct {
 
 // Handler provides HTTP handlers for discovery endpoints.
 type Handler struct {
+	limits     LimitGuard
 	repo       Repository
 	ciRepo     ci.Repository
 	relRepo    relationship.Repository
@@ -769,7 +773,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 		resp.ReviewItems++
 	}
 
-	existing, _, err := h.ciRepo.List(r.Context(), t.OrganizationID, ci.FilterParams{}, api.PaginationParams{Limit: 10000, Offset: 0})
+	existing, total, err := h.ciRepo.List(r.Context(), t.OrganizationID, ci.FilterParams{}, api.PaginationParams{Limit: 10000, Offset: 0})
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -786,6 +790,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 	// resolvedCIID[i] holds the CI id that item i resolved to (matched or
 	// created). Conflicts leave it empty so no topology is derived for them.
 	resolvedCIID := make([]string, len(req.Items))
+	var unlicensed queuedDevices
 
 	for i, item := range req.Items {
 		if typeIDs[i] == "" {
@@ -802,57 +807,32 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 		// are visible, searchable and filterable like any other attribute; the
 		// per-field provenance recorded below keeps the reporting source and
 		// timestamp available for reconciliation.
-		attributes := map[string]any{
-			"fingerprint": item.Fingerprint,
-			"raw_data":    item.RawData,
-		}
-		for k, v := range item.Attributes {
-			if k == "fingerprint" || k == "raw_data" {
-				continue
-			}
-			attributes[k] = v
-		}
+		attributes := discoveredAttributes(&item)
 
 		switch result.Action {
 		case ReconcileCreated:
-			nowTime := time.Now().UTC()
-			newItem := ci.Item{
-				OrganizationID:  t.OrganizationID,
-				CITypeID:        typeIDs[i],
-				Name:            item.Name,
-				Status:          "active",
-				Manufacturer:    item.Manufacturer,
-				Model:           item.Model,
-				SerialNumber:    item.SerialNumber,
-				HardwareUUID:    item.HardwareUUID,
-				ManagementIP:    item.ManagementIP,
-				PrimaryMAC:      item.PrimaryMAC,
-				Hostname:        item.Hostname,
-				FQDN:            item.FQDN,
-				Attributes:      attributes,
-				DiscoverySource: source,
-				FirstSeenAt:     &nowTime,
-				LastSeenAt:      &nowTime,
+			// Over max_cis the device is held as unlicensed_ci instead of
+			// becoming a CI (ENT-03, CH21); existing CIs keep updating.
+			if h.limits != nil {
+				queued, admitErr := h.admitNewCI(r.Context(), t.OrganizationID, int64(total), &item, typeIDs[i], source, &unlicensed)
+				if admitErr != nil {
+					api.WriteRepoError(w, admitErr)
+					return
+				}
+				if queued {
+					resp.Unlicensed++
+					continue
+				}
 			}
-			if err := h.ciRepo.Create(r.Context(), &newItem); err != nil {
+			newItem, err := h.createDiscoveredCI(r.Context(), t.OrganizationID, &item, typeIDs[i], source)
+			if err != nil {
 				api.WriteRepoError(w, err)
 				return
 			}
+			total++
 			existing = append(existing, newItem)
 			resolvedCIID[i] = newItem.ID
 			resp.Created++
-			// New CIs carry no overrides; every discovered field is recorded
-			// as provenance so future drift is visible (spec §13).
-			h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, "name", item.Name, source)
-			h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, "manufacturer", item.Manufacturer, source)
-			h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, "model", item.Model, source)
-			h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, "serial_number", item.SerialNumber, source)
-			h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, "management_ip", item.ManagementIP, source)
-			h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, "hostname", item.Hostname, source)
-			h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, "fqdn", item.FQDN, source)
-			for k, v := range item.Attributes {
-				h.recordDiscovered(r.Context(), t.OrganizationID, newItem.ID, k, v, source)
-			}
 		case ReconcileMatched:
 			matched := findCI(existing, result.MatchedCIID)
 			if matched == nil {

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -182,8 +181,7 @@ func TestRefreshFailsWhenRoleAssignmentsCannotBeRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"token":"`+token+`"}`))
-	req.Header.Set("Content-Type", "application/json")
+	req := refreshRequest(t, handler, token)
 	w := httptest.NewRecorder()
 	handler.Refresh(w, req)
 	if w.Code != http.StatusInternalServerError {
@@ -240,10 +238,7 @@ func TestCallbackCombinesGroupsAndRoleAssignments(t *testing.T) {
 
 func refresh(t *testing.T, handler *Handler, token string) *SessionClaims {
 	t.Helper()
-	body := url.Values{}
-	body.Set("token", token)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"token":"`+token+`"}`))
-	req.Header.Set("Content-Type", "application/json")
+	req := refreshRequest(t, handler, token)
 	w := httptest.NewRecorder()
 	handler.Refresh(w, req)
 	if w.Code != http.StatusOK {

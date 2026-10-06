@@ -18,7 +18,7 @@ type Repository interface {
 
 // LimitFeatureKey is the entitlement feature whose limit caps the number of CIs
 // an organization may store.
-const LimitFeatureKey = "cmdb"
+const LimitFeatureKey = "max_cis"
 
 // ChangeReader defines persistence operations for CI change history.
 type ChangeReader interface {

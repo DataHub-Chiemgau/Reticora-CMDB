@@ -24,6 +24,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -178,6 +179,36 @@ type uploader struct {
 	client *http.Client
 	mtls   bool
 	spool  *buffer.DiskBuffer
+	// paused is set while the discovery license of the organization is
+	// expired (CH21, ENT-07): the collector neither scans nor spools.
+	paused atomic.Bool
+}
+
+// LicenseStatusHeader carries the discovery license status on heartbeat
+// responses ("active" or "expired").
+const LicenseStatusHeader = "Reticora-License-Status"
+
+// problemLicenseExpired is the problem type of an ingest refused after the
+// license expired (CH21).
+const problemLicenseExpired = "https://reticora.io/problems/license-expired"
+
+// errLicenseExpired: the backend refused the ingest because the discovery
+// license expired. The batch is not spooled; it would never be accepted.
+var errLicenseExpired = errors.New("discovery license expired")
+
+// setLicenseStatus pauses or resumes discovery after a heartbeat or a refused
+// ingest; every change is logged.
+func (u *uploader) setLicenseStatus(status string) {
+	paused := status == "expired"
+	if u.paused.Swap(paused) == paused {
+		return
+	}
+	if paused {
+		slog.Warn("discovery paused: the discovery license expired; no scans and no spooling until it is renewed",
+			"event", "collector.license.paused")
+	} else {
+		slog.Info("discovery resumed: the discovery license is active", "event", "collector.license.resumed")
+	}
 }
 
 // newUploader builds the upload path: mTLS when certificate material is
@@ -285,6 +316,17 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 		cycleStart := time.Now()
 		// Backlog first: spooled batches are delivered before anything new
 		// is collected (COL-05).
+		if up.paused.Load() {
+			// CH21: after the license expired the collector does not scan;
+			// the heartbeat resumes it once the license is renewed.
+			select {
+			case <-ctx.Done():
+				slog.Info("discovery loop stopped")
+				return
+			case <-ticker.C:
+				continue
+			}
+		}
 		up.flushSpool(ctx)
 		if up.backpressure(ctx) {
 			slog.Warn("discovery paused: spool is saturated and the backend is unreachable",
@@ -409,6 +451,9 @@ func (u *uploader) uploadResultsAt(ctx context.Context, results []plugins.Result
 		return nil
 	}
 
+	if u.paused.Load() {
+		return errLicenseExpired
+	}
 	payload, err := json.Marshal(results)
 	if err != nil {
 		return fmt.Errorf("marshal results: %w", err)
@@ -425,6 +470,9 @@ func (u *uploader) uploadResultsAt(ctx context.Context, results []plugins.Result
 	}
 
 	if err := u.postPayload(ctx, payload); err != nil {
+		if errors.Is(err, errLicenseExpired) {
+			return err
+		}
 		if spoolErr := u.spoolResults(ctx, payload, sourceTime); spoolErr != nil {
 			return fmt.Errorf("upload failed (%v) and spooling failed: %w", err, spoolErr)
 		}
@@ -460,6 +508,15 @@ func (u *uploader) postPayload(ctx context.Context, payload []byte) error {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusForbidden {
+		var problem struct {
+			Type string `json:"type"`
+		}
+		if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&problem) == nil && problem.Type == problemLicenseExpired {
+			u.setLicenseStatus("expired")
+			return errLicenseExpired
+		}
+	}
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("upload failed with status %d", resp.StatusCode)
 	}
@@ -551,7 +608,7 @@ const spoolFlushBatch = 64
 // empty. Delivery stops at the first failure so spooled batches are never
 // reordered or dropped.
 func (u *uploader) flushSpool(ctx context.Context) {
-	if u.spool == nil || u.cfg.ServerURL == "" {
+	if u.spool == nil || u.cfg.ServerURL == "" || u.paused.Load() {
 		return
 	}
 	delivered := 0
@@ -581,6 +638,11 @@ func (u *uploader) flushSpool(ctx context.Context) {
 				continue
 			}
 			if err := deliver(); err != nil {
+				if errors.Is(err, errLicenseExpired) {
+					// The spooled batches stay until the license is renewed.
+					slog.Warn("spool flush postponed; discovery license expired", "message_id", msg.ID)
+					return
+				}
 				slog.Warn("spool flush postponed; backend still unreachable", "message_id", msg.ID, "error", err)
 				return
 			}
@@ -634,7 +696,9 @@ func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 	defer ticker.Stop()
 
 	for {
-		postHeartbeat(ctx, up.client, cfg, up.spoolReport(ctx))
+		if status := postHeartbeat(ctx, up.client, cfg, up.spoolReport(ctx)); status != "" {
+			up.setLicenseStatus(status)
+		}
 		select {
 		case <-ctx.Done():
 			slog.Info("heartbeat loop stopped")
@@ -677,26 +741,28 @@ func (u *uploader) spoolReport(ctx context.Context) *spoolReport {
 	}
 }
 
-func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport) {
+// postHeartbeat sends a heartbeat and returns the discovery license status of
+// the response ("" when unknown).
+func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport) string {
 	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
 		slog.Warn("skipping heartbeat due to incomplete configuration",
 			"server_url", cfg.ServerURL,
 			"organization_id", cfg.OrganizationID,
 			"collector_id", cfg.CollectorID,
 		)
-		return
+		return ""
 	}
 
 	endpoint := strings.TrimRight(cfg.ServerURL, "/") + "/api/v1/collectors/" + cfg.CollectorID + "/heartbeat"
 	body, err := json.Marshal(heartbeatBody{Spool: spool})
 	if err != nil {
 		slog.Error("encode heartbeat failed", "error", err)
-		return
+		return ""
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		slog.Error("build heartbeat request failed", "error", err)
-		return
+		return ""
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Organization-ID", cfg.OrganizationID)
@@ -705,11 +771,15 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 	resp, err := client.Do(req)
 	if err != nil {
 		slog.Error("heartbeat failed", "error", err, "endpoint", endpoint)
-		return
+		return ""
 	}
 	defer resp.Body.Close()
 
 	slog.Info("heartbeat completed", "status", resp.StatusCode, "duration_ms", time.Since(start).Milliseconds())
+	if resp.StatusCode >= 300 {
+		return ""
+	}
+	return resp.Header.Get(LicenseStatusHeader)
 }
 
 // runTrapReceiver receives SNMP traps and forwards them as metric events to

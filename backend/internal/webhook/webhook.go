@@ -25,8 +25,11 @@ type Subscription struct {
 	Events         []string          `json:"events"`
 	IsActive       bool              `json:"is_active"`
 	Headers        map[string]string `json:"headers,omitempty"`
-	CreatedAt      string            `json:"created_at"`
-	UpdatedAt      string            `json:"updated_at"`
+	// ServiceAccountID binds the subscription to a service account: it then
+	// receives only events whose object the account may read (RBA-08).
+	ServiceAccountID string `json:"service_account_id,omitempty"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 // MaskedHeaderValue replaces every custom header value in API responses.
@@ -53,6 +56,8 @@ type CreateRequest struct {
 	Secret  string            `json:"secret"`
 	Events  []string          `json:"events"`
 	Headers map[string]string `json:"headers,omitempty"`
+	// ServiceAccountID optionally binds the subscription (RBA-08).
+	ServiceAccountID string `json:"service_account_id,omitempty"`
 }
 
 // TestEvent is the event name used by the webhook test endpoint. It is
@@ -428,13 +433,14 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sub := &Subscription{
-		OrganizationID: t.OrganizationID,
-		Name:           req.Name,
-		URL:            req.URL,
-		Secret:         req.Secret,
-		Events:         req.Events,
-		IsActive:       true,
-		Headers:        req.Headers,
+		OrganizationID:   t.OrganizationID,
+		Name:             req.Name,
+		URL:              req.URL,
+		Secret:           req.Secret,
+		Events:           req.Events,
+		IsActive:         true,
+		Headers:          req.Headers,
+		ServiceAccountID: req.ServiceAccountID,
 	}
 
 	if err := h.repo.Create(r.Context(), sub); err != nil {

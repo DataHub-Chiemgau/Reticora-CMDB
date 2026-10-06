@@ -44,6 +44,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/order"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
@@ -104,15 +105,19 @@ type Repositories struct {
 	IPAM              ipam.Repository
 	Metrics           monitoring.MetricStore
 	Permission        permission.Repository
-	SLA               sla.Repository
-	Form              form.Repository
-	Workflow          workflow.Repository
-	Compliance        compliance.Repository
-	IGA               iga.Repository
-	Search            search.Backend
-	AI                ai.Repository
-	ExportJobs        export.JobRepository
-	Privacy           privacy.Repository
+	// APIKeys identifies and manages API keys (AUT-04).
+	APIKeys identity.APIKeyRepository
+	// ServiceAccounts holds the non-human principals (RBA-08).
+	ServiceAccounts user.ServiceAccountRepository
+	SLA             sla.Repository
+	Form            form.Repository
+	Workflow        workflow.Repository
+	Compliance      compliance.Repository
+	IGA             iga.Repository
+	Search          search.Backend
+	AI              ai.Repository
+	ExportJobs      export.JobRepository
+	Privacy         privacy.Repository
 	// Enterprise CMDB + asset/inventory extension (additive modules).
 	CIType            citype.Repository
 	RelationshipType  relationshiptype.Repository
@@ -148,6 +153,14 @@ type Options struct {
 	// OIDC and Sessions power the authentication endpoints.
 	OIDC     *identity.OIDCProvider
 	Sessions *identity.SessionIssuer
+	// RefreshSessions stores the rotating refresh tokens in the shared cache
+	// store; nil keeps a per-process store (tests).
+	RefreshSessions *identity.RefreshSessions
+	// Operator configures the operator path /admin (SEC-07); OperatorPool
+	// holds operator_audit and serves the organization listing (nil: the
+	// audit fails and is logged, tests and --no-db).
+	Operator     operator.Config
+	OperatorPool *pgxpool.Pool
 	// UserProvisioner auto-creates the app_user on first OIDC login (nil
 	// disables). DefaultProvisionRole names the standard role assigned on
 	// first login (empty assigns none).
@@ -237,17 +250,30 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// every route is mapped.
 	protected := authorizingRouter{Router: mux, after: opts.RouteMiddleware}
 
+	identityHandler := identity.NewHandler(opts.OIDC, opts.Sessions).
+		WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole).
+		WithAccessResolver(repos.Permission)
+	if opts.RefreshSessions != nil {
+		identityHandler.WithRefreshSessions(opts.RefreshSessions)
+	}
+	// New discovered CIs respect max_cis; over the limit they are held as
+	// unlicensed_ci and adopted once the limit is raised (ENT-03, CH21).
+	discoveryHandler := discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
+		WithProvenance(overrideProvenance{repo: repos.Override}).
+		WithInstanceFields(repos.CIType).
+		WithLimits(opts.Entitlements)
+	opts.Entitlements.WithUnlicensed(discoveryHandler)
 	registrars := []registrar{
-		identity.NewHandler(opts.OIDC, opts.Sessions).
-			WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole).
-			WithAccessResolver(repos.Permission),
+		identityHandler,
+		operator.NewHandler(opts.Operator, opts.OIDC, opts.Sessions, operator.NewAuditor(opts.OperatorPool), opts.OperatorPool).
+			WithEntitlements(opts.Entitlements),
+		identity.NewAPIKeyHandler(repos.APIKeys),
+		user.NewServiceAccountHandler(repos.ServiceAccounts),
 		entitlement.NewHandler(opts.Entitlements),
 		ci.NewHandler(opts.CIService, opts.Dispatcher),
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
-		discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
-			WithProvenance(overrideProvenance{repo: repos.Override}).
-			WithInstanceFields(repos.CIType),
+		discoveryHandler,
 		topology.NewHandler(repos.CI, repos.Relationship),
 		export.NewHandler(repos.CI),
 		export.NewJobHandler(repos.ExportJobs, export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs), opts.Blobs),
@@ -429,6 +455,9 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	registry.MustRegister(collectors.NewGoCollector())
 	observability.RegisterWorkerMetrics(registry)
 	override.RegisterMetrics(registry)
+	operator.RegisterMetrics(registry)
+	entitlement.RegisterMetrics(registry)
+	discovery.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 

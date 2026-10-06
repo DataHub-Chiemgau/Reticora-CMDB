@@ -58,12 +58,24 @@ type Config struct {
 	// (discovery, JWKS and token exchange). Deployments that terminate TLS
 	// with a private or not-yet-issued certificate would otherwise fail the
 	// token exchange with an x509 verification error.
-	OIDCCACertFile       string
-	SessionKeyPath       string // path to RS256 private key PEM for session JWTs
-	AllowInsecureDevAuth bool   // opt-in: accept session tokens without signature verification
+	OIDCCACertFile string
+	SessionKeyPath string // path to RS256 private key PEM for session JWTs
+	// SessionPreviousKeyPaths lists PEM files (comma separated) of previous
+	// session signing keys whose tokens stay valid during a key rotation
+	// (SEC-06); new tokens are signed with SessionKeyPath only.
+	SessionPreviousKeyPaths string
+
+	// Operator path /admin (SEC-07): RETICORA_OPERATOR_TOKEN is the
+	// break-glass token (empty disables it, at least 32 characters
+	// otherwise); operators are members of OperatorGroup who logged in with
+	// MFA (amr, or one of OperatorMFAACR as acr).
+	OperatorToken        string
+	OperatorGroup        string
+	OperatorMFAACR       string
+	AllowInsecureDevAuth bool // opt-in: accept session tokens without signature verification
 
 	// Entitlements
-	DefaultPlan string // plan applied to tenants without entitlement rows
+	DefaultPlan string // plan provisioned for the --no-db demo organization
 	// DefaultProvisionRole names the standard role assigned to a user on first
 	// OIDC login; empty assigns no role (admins assign explicitly).
 	DefaultProvisionRole   string
@@ -106,6 +118,8 @@ type Config struct {
 	LLMAPIKey         string
 	LLMChatModel      string
 	LLMEmbeddingModel string
+	// AirGapped disables every external AI call (AI-02, air-gapped profile).
+	AirGapped bool
 
 	// explicit records the RETICORA_* variables that were set; invalid
 	// lists variables whose value could not be parsed.
@@ -134,13 +148,17 @@ func Load() *Config {
 		// database mode the S3 settings above are used instead.
 		BlobDir: l.str("RETICORA_BLOB_DIR", ""),
 
-		OIDCIssuerURL:        l.str("RETICORA_OIDC_ISSUER_URL", "http://localhost:8180/realms/reticora"),
-		OIDCClientID:         l.str("RETICORA_OIDC_CLIENT_ID", "reticora-app"),
-		OIDCClientSecret:     l.str("RETICORA_OIDC_CLIENT_SECRET", ""),
-		OIDCRedirectURL:      l.str("RETICORA_OIDC_REDIRECT_URL", ""),
-		OIDCCACertFile:       l.str("RETICORA_OIDC_CA_CERT_FILE", ""),
-		SessionKeyPath:       l.str("RETICORA_SESSION_KEY_PATH", ""),
-		AllowInsecureDevAuth: l.str("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false") == "true",
+		OIDCIssuerURL:           l.str("RETICORA_OIDC_ISSUER_URL", "http://localhost:8180/realms/reticora"),
+		OIDCClientID:            l.str("RETICORA_OIDC_CLIENT_ID", "reticora-app"),
+		OIDCClientSecret:        l.str("RETICORA_OIDC_CLIENT_SECRET", ""),
+		OIDCRedirectURL:         l.str("RETICORA_OIDC_REDIRECT_URL", ""),
+		OIDCCACertFile:          l.str("RETICORA_OIDC_CA_CERT_FILE", ""),
+		SessionKeyPath:          l.str("RETICORA_SESSION_KEY_PATH", ""),
+		SessionPreviousKeyPaths: l.str("RETICORA_SESSION_PREVIOUS_KEY_PATHS", ""),
+		OperatorToken:           l.str("RETICORA_OPERATOR_TOKEN", ""),
+		OperatorGroup:           l.str("RETICORA_OPERATOR_GROUP", "operators"),
+		OperatorMFAACR:          l.str("RETICORA_OPERATOR_MFA_ACR", "2"),
+		AllowInsecureDevAuth:    l.str("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false") == "true",
 
 		DefaultPlan:            l.str("RETICORA_DEFAULT_PLAN", "essential"),
 		DefaultProvisionRole:   l.str("RETICORA_DEFAULT_PROVISION_ROLE", "viewer"),
@@ -167,6 +185,7 @@ func Load() *Config {
 		LLMAPIKey:         l.str("RETICORA_LLM_API_KEY", ""),
 		LLMChatModel:      l.str("RETICORA_LLM_CHAT_MODEL", ""),
 		LLMEmbeddingModel: l.str("RETICORA_LLM_EMBEDDING_MODEL", ""),
+		AirGapped:         l.boolean("RETICORA_AIR_GAPPED", false),
 
 		LogLevel: slog.LevelInfo,
 	}
@@ -227,6 +246,9 @@ func (c *Config) Validate(noDB bool) error {
 	}
 	for _, key := range c.invalid {
 		errs = append(errs, fmt.Errorf("%s has an invalid value", key))
+	}
+	if c.OperatorToken != "" && len(c.OperatorToken) < 32 {
+		errs = append(errs, fmt.Errorf("RETICORA_OPERATOR_TOKEN must have at least 32 characters"))
 	}
 	if c.RateLimitRPM <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_RPM must be positive, got %d", c.RateLimitRPM))

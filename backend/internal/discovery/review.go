@@ -292,6 +292,12 @@ func (h *Handler) ResolveReviewItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A held device is adopted within max_cis or discarded (ENT-03).
+	if item.Kind == ReviewKindUnlicensedCI {
+		h.resolveUnlicensed(w, r, item, &body)
+		return
+	}
+
 	switch body.Action {
 	case "merge":
 		if body.CIID == "" {
@@ -360,6 +366,41 @@ func (h *Handler) ResolveReviewItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resolved, err := h.repo.ResolveReviewItem(r.Context(), t.OrganizationID, id, body)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, resolved)
+}
+
+// resolveUnlicensed adopts (action create) or discards (action dismiss) an
+// unlicensed_ci item; adoption is refused while max_cis is still reached.
+func (h *Handler) resolveUnlicensed(w http.ResponseWriter, r *http.Request, item *ReviewItem, body *Resolution) {
+	t := tenant.FromContext(r.Context())
+	switch body.Action {
+	case "create":
+		if _, err := h.adoptUnlicensed(r.Context(), t.OrganizationID, body.ResolvedBy, item); err != nil {
+			if api.WriteTypedProblem(w, http.StatusForbidden, err) {
+				return
+			}
+			api.WriteRepoError(w, err)
+			return
+		}
+	case "dismiss":
+		body.Status = ReviewStatusDismissed
+		if body.Note == "" {
+			body.Note = "dismissed"
+		}
+		if _, err := h.repo.ResolveReviewItem(r.Context(), t.OrganizationID, item.ID, *body); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
+	default:
+		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity",
+			"an unlicensed_ci item is resolved by create (within max_cis) or dismiss")
+		return
+	}
+	resolved, err := h.repo.GetReviewItem(r.Context(), t.OrganizationID, item.ID)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return

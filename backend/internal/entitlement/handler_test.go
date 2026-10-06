@@ -17,16 +17,19 @@ func tenantCtx(r *http.Request) *http.Request {
 }
 
 func TestHandlerGrantListAndCheck(t *testing.T) {
-	h := NewHandler(NewService(NewMemoryRepository(), Options{DefaultPlan: PlanEssential, Enforce: true}))
+	h := NewHandler(NewService(NewMemoryRepository(), Options{Enforce: true}))
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/entitlements", bytes.NewBufferString(`{"feature_key":"ticketing","plan":"pro"}`))
-	req = tenantCtx(req)
+	// The tenant API is read-only (ENT-04): writing is refused.
+	req := tenantCtx(httptest.NewRequest(http.MethodPost, "/api/v1/entitlements", bytes.NewBufferString(`{"feature_key":"ticketing","plan":"pro"}`)))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("tenant write: %d, want 405", w.Code)
+	}
+	if _, err := h.service.Grant(req.Context(), Entitlement{OrganizationID: "org-1", FeatureKey: "ticketing", Plan: PlanPro, Enabled: true}); err != nil {
+		t.Fatal(err)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/entitlements", nil)
@@ -72,7 +75,7 @@ func TestHandlerGrantListAndCheck(t *testing.T) {
 }
 
 func TestMiddlewareBlocksUnentitledModule(t *testing.T) {
-	svc := NewService(NewMemoryRepository(), Options{DefaultPlan: PlanEssential, Enforce: true})
+	svc := NewService(NewMemoryRepository(), Options{Enforce: true})
 	handler := svc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -109,7 +112,7 @@ func TestMiddlewareBlocksUnentitledModule(t *testing.T) {
 }
 
 func TestMiddlewareRequiresTenant(t *testing.T) {
-	svc := NewService(NewMemoryRepository(), Options{DefaultPlan: PlanEssential, Enforce: true})
+	svc := NewService(NewMemoryRepository(), Options{Enforce: true})
 	handler := svc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))

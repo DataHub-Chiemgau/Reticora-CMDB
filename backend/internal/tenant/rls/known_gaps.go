@@ -50,6 +50,10 @@ const (
 	// privilege at all; their view is a security barrier with the
 	// organization predicate and grants reticora_app SELECT and INSERT only.
 	RuleViewBarrier Rule = "view-barrier"
+	// RuleOperatorOnly: tables of OperatorTables have ENABLE and FORCE ROW
+	// LEVEL SECURITY, and every policy requires OperatorGUC, so tenant
+	// transactions neither read nor write them.
+	RuleOperatorOnly Rule = "operator-only"
 )
 
 // ViewProtectedTables maps tables that cannot carry row level security to
@@ -66,6 +70,12 @@ var ViewProtectedTables = map[string]string{"metric_sample": "metric_sample_v"}
 // not a gap: the catalog test checks RuleReadOnlyCatalog for them instead.
 var GlobalCatalogTables = []string{"permission"}
 
+// OperatorTables are organization-spanning tables of the operator path
+// (SEC-07, WP-070) without organization_id. This is a documented exception to
+// RuleOrgColumn, not a gap: the catalog test checks RuleOperatorOnly for them
+// instead.
+var OperatorTables = []string{"operator_audit"}
+
 // Session variables (GUCs) the policies are expected to reference. Site and
 // team scope do not exist yet; WP-027 and WP-029 introduce them under these
 // names or adjust the constants when they close the gaps.
@@ -75,6 +85,7 @@ const (
 	SiteScopeGUC   = "app.site_scope"
 	TeamScopeGUC   = "app.team_scope"
 	SystemGUC      = "app.system"
+	OperatorGUC    = "app.operator"
 )
 
 // Gap is a known violation of a catalog rule together with the work package

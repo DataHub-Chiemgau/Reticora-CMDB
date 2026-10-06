@@ -226,14 +226,52 @@ redirects to the identity provider, and posts `code`, `state` and
 `code_verifier` to `POST /api/v1/auth/callback`, which exchanges them for an
 RS256 session token. The verifier is mandatory and the returned ID token is
 signature-verified against the provider's JWKS with issuer, audience, expiry
-and issued-at checks. Every subsequent request carries that token as
-a bearer token in the `Authorization` header; the client refreshes it via
-`POST /api/v1/auth/refresh` once on a 401 and retries the request. Server-side
-the token signature is always verified by `middleware.AuthMiddlewareWithVerifier`
-— a missing `RETICORA_SESSION_KEY_PATH` is a fatal startup error unless the
-operator explicitly opts into the insecure development mode with
-`RETICORA_ALLOW_INSECURE_DEV_AUTH=true`. Only
-`/api/v1/auth/{config,callback,refresh}` are unauthenticated.
+and issued-at checks. The session token follows AUT-02: it lives 15 minutes,
+carries `sub`, `org`, `scopes`, `cls`/`sts`/`tms` (client, site and team scope;
+`null` = whole organization), `name`, `email`, `jti`, `iat` and `exp`, and its
+header names the signing key in `kid` (RFC 7638 thumbprint). Every subsequent
+request carries that token as a bearer token in the `Authorization` header.
+The refresh token is never visible to JavaScript: the callback sets it as the
+HttpOnly, Secure, SameSite=Strict cookie `reticora_refresh` (path
+`/api/v1/auth`), and the client calls `POST /api/v1/auth/refresh` once on a
+401, which uses the cookie up, sets a rotated one and re-reads roles and
+scopes; presenting a used cookie again revokes the whole session. Refresh
+tokens, the logout blacklist (`POST /api/v1/auth/logout` revokes the refresh
+family and blacklists the access token until it expires) and the per-user
+deactivation blacklist live in Redis, so every replica sees them at once.
+For a signing key rotation (SEC-06) set the new key in
+`RETICORA_SESSION_KEY_PATH` and the old ones in
+`RETICORA_SESSION_PREVIOUS_KEY_PATHS` (comma separated) for the overlap.
+Server-side the token signature is always verified by
+`middleware.AuthMiddlewareWithVerifier` — a missing `RETICORA_SESSION_KEY_PATH`
+is a fatal startup error unless the operator explicitly opts into the insecure
+development mode with `RETICORA_ALLOW_INSECURE_DEV_AUTH=true`. Only
+`/api/v1/auth/{config,callback,refresh,logout}` are unauthenticated.
+
+**API keys (AUT-04):** `POST /api/v1/api-keys` (permission `apikey:manage`)
+issues `rk_live_` or `rk_test_` keys: a 12 character Base62 prefix and a 40
+character Base62 secret. The plaintext is returned once; only its SHA-256 is
+stored and compared in constant time. A key cannot be given permissions its
+creator lacks, and at every request it grants only the intersection of its
+permissions with its owner's current role assignments, in the owner's scope.
+`GET` lists keys without secrets, `DELETE /api/v1/api-keys/{id}` revokes at
+once, and `POST /api/v1/api-keys/{id}/rotate` issues a successor while the old
+key stays valid for the overlap (`overlap_seconds`, default 24 hours, at most
+7 days). A presented key is identified by its prefix in a read-only system
+transaction (`database.WithSystem`); everything else runs in the tenant
+transaction of the key's organization. Keys issued before this format
+(underscore between prefix and secret) remain valid until rotated.
+
+**Operator path (SEC-07):** `/api/v1/admin/*` is outside the tenant API.
+Operators log in with `POST /api/v1/admin/auth/callback` (OIDC code + PKCE);
+only members of `RETICORA_OPERATOR_GROUP` (default `operators`) who used a
+second factor (`amr`, or an `acr` from `RETICORA_OPERATOR_MFA_ACR`, default
+`2`) get a 15-minute operator session, which the tenant API refuses.
+`RETICORA_OPERATOR_TOKEN` (at least 32 characters, header `X-Operator-Token`)
+is for bootstrap and break-glass only: every use logs a security alert and
+counts in `reticora_operator_break_glass_total`. Every operator request,
+refused ones included, is recorded in `operator_audit` with a hash chain of
+its own (`GET /api/v1/admin/audit`, `GET /api/v1/admin/audit/verify`).
 
 **Authorization and tenant resolution:** the auth middleware authenticates
 session bearer tokens and `X-API-Key` service tokens and populates a single
@@ -249,20 +287,45 @@ headers cannot reset rate budgets or collide across tenants; unauthenticated
 endpoints are rate-limited per client IP and the rate limiter fails closed
 when its cache is unavailable.
 
-**Entitlement enforcement:** `entitlement.Service` resolves the effective plan
-per tenant (falling back to `RETICORA_DEFAULT_PLAN`) and caches it for 30
-seconds. Its middleware maps add-on route prefixes to features and answers with
-HTTP 403 when the plan does not include them; core routes (CIs, auth, users,
-audit, entitlements) are never gated. Record limits are enforced in the domain
-service (`ci.Service.Create`), so limit violations surface as 403 as well.
-Repository errors deny access (fail-closed). Plan matrix:
+**Entitlement enforcement:** an organization is entitled exactly to its rows
+in `entitlement` (ENT-05): a missing row means not entitled, only `cmdb_core`
+is always active. At startup every organization without rows is provisioned
+once with the features and default quotas of its plan (`organization.plan`;
+`RETICORA_DEFAULT_PLAN` for the `--no-db` demo organization). The
+entitlements are cached per organization for 60 seconds in the shared cache
+(Redis), so a change on one instance invalidates every instance (ENT-03). The
+middleware maps route prefixes to features (export, ingest including the
+`/api/v1/discovery/ingest` alias, topology, ...) and answers with 403
+`feature-not-entitled`; GraphQL fields check their feature as well. Quotas are
+enforced in the domain service (`ci.Service.Create`) and answer with 403
+`entitlement-limit`. After `valid_until` only discovery stops (CH21): ingest
+and new scans answer 403 `license-expired` (counter
+`reticora_ingest_refused_license_expired_total`), reading, editing, export and
+every other feature stay available; the heartbeat response carries
+`Reticora-License-Status` and the collector pauses without spooling until the
+license is renewed. Over `max_cis` discovery keeps updating existing CIs,
+but a new device becomes a review item `unlicensed_ci` holding the full device
+record (once per device, counter `reticora_unlicensed_ci_total`) instead of a
+CI; raising the limit adopts the waiting items as CIs, `create` adopts one
+within the limit and `dismiss` discards it, both audited. A downgrade deletes
+no data: only new CIs are blocked (REST) or held (ingest). Repository errors
+deny access (fail-closed). The tenant API is read-only (`GET
+/api/v1/entitlements`); entitlements are written by the operator only,
+`POST /api/v1/admin/orgs/{id}/entitlements`, and every change is recorded
+in `operator_audit` with the previous and the new state (ENT-04, E-12).
+Plan matrix (ENT-06):
 
 | Plan | Features |
 |------|----------|
-| essential | cmdb, discovery, inventory |
-| standard | + documents, stocktake, ticketing, export, webhooks |
+| essential | cmdb_core, discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email, inventory |
+| standard | + documents, stocktake, ticketing |
 | pro | + monitoring, workflow_forms |
-| enterprise | + iga, endpoint_agent, workflow_forms, compliance |
+| enterprise | + endpoint_agent, compliance |
+
+IGA (`iga`) and AI (`ai`) are add-ons (CH14): no plan includes them, only
+their own entitlement row unlocks them. The proposed matrix and quotas of
+ENT-06 (V) have no gate effect until confirmed (E-34): a quota only gates
+when it is stored in the limits of a row.
 
 
 **Permissions and SLA:** migration 0026 turns permissions into data instead of
@@ -521,7 +584,7 @@ restarts neither re-notify nor lose ongoing durations. Fired alerts are
 logged as structured warnings via the default notifier.
 
 **AI/RAG governance:** `/api/v1/ai/conversations` and `/api/v1/ai/ask` are
-gated by the Pro/Enterprise `ai_assistant` entitlement. If no
+gated by the `ai` add-on entitlement (CH14). If no
 OpenAI-compatible provider is configured, the handler returns HTTP 503 with a
 problem document. Retrieval first asks the search backend for tenant-owned
 candidates, applies the same permission checks, then ranks matching `ai_chunk`
@@ -543,8 +606,11 @@ answers remain auditable.
 `ai.NewCIChunkIndexer`, a second decorator on the CI repository next to the
 search indexer, so every write path (REST, collector ingest, workflow) feeds
 the assistant. Chunks store the CI title and summary as lexical content and
-an embedding vector when `RETICORA_LLM_EMBEDDING_MODEL` is configured;
-embedding failures degrade gracefully to lexical scoring and never block the
+an embedding vector when `RETICORA_LLM_EMBEDDING_MODEL` is configured and
+the organization opted in (`organization.ai_opt_in`) and holds the `ai`
+add-on (AI-02); otherwise the provider is not called and the chunk stays
+lexical. `RETICORA_AIR_GAPPED=true` disables every external AI call (chat and
+embeddings); the start log reports the state. Embedding failures degrade gracefully to lexical scoring and never block the
 CI write. Chunks for CIs created before the pipeline existed are backfilled
 by `POST /api/v1/search/reindex`, which rebuilds the tenant's search index
 (and thereby its chunks) from PostgreSQL as the source of truth.
@@ -723,11 +789,12 @@ The server is configured via environment variables:
 - `RETICORA_NATS_URL` — NATS server URL.
 - `RETICORA_REDIS_URL` — Redis connection string.
 - `RETICORA_ENVIRONMENT` — Environment name (development/staging/production).
-- `RETICORA_DEFAULT_PLAN` — Plan applied to tenants without explicit entitlements (default `essential`).
+- `RETICORA_DEFAULT_PLAN` — Plan provisioned for the `--no-db` demo organization (default `essential`); organizations in the database are provisioned with their own plan.
 - `RETICORA_ENTITLEMENT_ENFORCEMENT` — Set to `false` to disable feature/limit enforcement (default `true`).
 - `RETICORA_SEARCH_BACKEND` — `postgres` (default) or `opensearch`.
 - `RETICORA_OPENSEARCH_URL`, `RETICORA_OPENSEARCH_USERNAME`, `RETICORA_OPENSEARCH_PASSWORD`, `RETICORA_OPENSEARCH_INDEX` — OpenSearch connection settings.
 - `RETICORA_LLM_BASE_URL`, `RETICORA_LLM_API_KEY`, `RETICORA_LLM_CHAT_MODEL`, `RETICORA_LLM_EMBEDDING_MODEL` — OpenAI-compatible chat and embedding provider settings.
+- `RETICORA_AIR_GAPPED` — `true` disables every external AI call (air-gapped profile, AI-02; default `false`).
 - `RETICORA_S3_ENDPOINT`, `RETICORA_S3_BUCKET`, `RETICORA_S3_ACCESS_KEY`, `RETICORA_S3_SECRET_KEY`, `RETICORA_S3_USE_SSL` — object storage for asynchronous export jobs (MinIO/S3).
 - `RETICORA_BLOB_DIR` — filesystem blob storage used by export jobs in `--no-db` development mode (defaults to a temp directory).
 - `RETICORA_OTEL_ENDPOINT` — OTLP HTTP collector endpoint for traces/metrics; empty (default) keeps no-op telemetry.

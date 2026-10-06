@@ -41,6 +41,122 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/admin/auth/callback': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Operator login (SEC-07)
+     * @description Exchanges an OIDC authorization code (PKCE) for a 15-minute operator
+     *     session. Only members of the operator group (RETICORA_OPERATOR_GROUP,
+     *     default "operators") who logged in with a second factor (amr, or acr
+     *     in RETICORA_OPERATOR_MFA_ACR) get one. Every attempt is recorded in
+     *     operator_audit. Operator sessions are refused by the tenant API.
+     */
+    post: operations['operatorLogin'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/admin/me': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The authenticated operator */
+    get: operations['getOperator'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/admin/orgs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List every organization */
+    get: operations['listOrganizationsAsOperator'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/admin/orgs/{id}/entitlements': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** List the entitlements of an organization */
+    get: operations['listOrganizationEntitlementsAsOperator'];
+    put?: never;
+    /**
+     * Grant or update an entitlement of an organization
+     * @description The only path that writes entitlements (ENT-04, E-12). The change is recorded in operator_audit with the previous and the new state.
+     */
+    post: operations['grantEntitlementAsOperator'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/admin/audit': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the operator audit, newest first */
+    get: operations['listOperatorAudit'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/admin/audit/verify': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Verify the operator audit hash chain */
+    get: operations['verifyOperatorAudit'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/auth/config': {
     parameters: {
       query?: never;
@@ -70,7 +186,11 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Complete the OIDC callback flow and issue a session token */
+    /**
+     * Complete the OIDC callback flow and issue a session token
+     * @description Issues a 15-minute access token (AUT-02) and sets the refresh token as
+     *     an HttpOnly, Secure, SameSite=Strict cookie for /api/v1/auth.
+     */
     post: operations['authCallback'];
     delete?: never;
     options?: never;
@@ -87,8 +207,36 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Refresh an existing session token */
+    /**
+     * Refresh the session with the refresh cookie
+     * @description Uses up the refresh cookie and sets a new one (rotation). A cookie
+     *     presented a second time revokes the whole session; a revoked session
+     *     (logout, deactivation) or a deactivated user gets 401. Roles and
+     *     scopes are read again (AUT-02).
+     */
     post: operations['refreshSession'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/auth/logout': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * End the session
+     * @description Revokes the refresh cookie's session, blacklists the presented access
+     *     token in Redis until it expires and clears the cookie (AUT-02). It
+     *     needs no valid access token.
+     */
+    post: operations['logout'];
     delete?: never;
     options?: never;
     head?: never;
@@ -558,11 +706,13 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List tenant entitlements */
+    /**
+     * List tenant entitlements
+     * @description Read-only for tenants; entitlements are written by the operator only (POST /api/v1/admin/orgs/{id}/entitlements, ENT-04).
+     */
     get: operations['listEntitlements'];
     put?: never;
-    /** Grant or update an entitlement */
-    post: operations['grantEntitlement'];
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1732,6 +1882,71 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/api-keys': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the organization's API keys (without secrets) */
+    get: operations['listAPIKeys'];
+    put?: never;
+    /**
+     * Create an API key for the calling user
+     * @description AUT-04: the key is `rk_live_` or `rk_test_` followed by a 12 character
+     *     Base62 prefix and a 40 character Base62 secret. The plaintext is in
+     *     this response only; the server stores its SHA-256 hash. The key's
+     *     permissions must be held by the caller; at use the key grants the
+     *     intersection of its permissions and its owner's current rights, in
+     *     the owner's scope. API keys cannot create keys.
+     */
+    post: operations['createAPIKey'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/api-keys/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Revoke an API key at once */
+    delete: operations['revokeAPIKey'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/api-keys/{id}/rotate': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rotate an API key with overlap
+     * @description Issues a successor with the same name, permissions, owner, environment
+     *     and expiry. The previous key stays valid until the end of the overlap
+     *     (default 24 hours, at most 7 days) or its own earlier expiry (SEC-06).
+     */
+    post: operations['rotateAPIKey'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/users': {
     parameters: {
       query?: never;
@@ -1878,7 +2093,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Resolve a reconciliation review item */
+    /**
+     * Resolve a reconciliation review item
+     * @description An unlicensed_ci item (a discovered device held because max_cis is reached, ENT-03) is resolved with create, which adopts the device as a CI within max_cis (403 entitlement-limit otherwise), or with dismiss, which discards it; both are audited.
+     */
     post: operations['resolveReviewItem'];
     delete?: never;
     options?: never;
@@ -2599,7 +2817,7 @@ export interface paths {
     put?: never;
     /**
      * Record a collector heartbeat
-     * @description Updates the collector's last-heartbeat timestamp so the platform can track liveness. The optional body reports the offline spool state; losses and backpressure are logged for operators (NFR-04, COL-05).
+     * @description Updates the collector's last-heartbeat timestamp so the platform can track liveness. The optional body reports the offline spool state; losses and backpressure are logged for operators (NFR-04, COL-05). The response names the discovery license status; after valid_until the collector pauses (no scans, no spooling) until it is renewed (CH21, ENT-07).
      */
     post: operations['collectorHeartbeat'];
     delete?: never;
@@ -2619,7 +2837,7 @@ export interface paths {
     put?: never;
     /**
      * Ingest discovery results in bulk
-     * @description Reconciles a batch of discovered items against existing CIs, creating, updating or queueing them for manual review. This is the canonical endpoint that `/api/v1/discovery/ingest` aliases.
+     * @description Reconciles a batch of discovered items against existing CIs, creating, updating or queueing them for manual review. This is the canonical endpoint that `/api/v1/discovery/ingest` aliases. Both require the discovery feature; after the discovery license expired they answer 403 with the problem type license-expired (CH21).
      */
     post: operations['bulkIngest'];
     delete?: never;
@@ -2735,6 +2953,63 @@ export interface paths {
     put?: never;
     /** Link a document to another entity */
     post: operations['linkDocument'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/service-accounts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the organization's service accounts */
+    get: operations['listServiceAccounts'];
+    put?: never;
+    /** Create a service account (RBA-08) */
+    post: operations['createServiceAccount'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/service-accounts/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get a service account */
+    get: operations['getServiceAccount'];
+    put?: never;
+    post?: never;
+    /** Delete a service account no key or subscription is bound to */
+    delete: operations['deleteServiceAccount'];
+    options?: never;
+    head?: never;
+    /**
+     * Rename, describe or (de)activate a service account
+     * @description A deactivated account grants nothing to its keys and subscriptions.
+     */
+    patch: operations['updateServiceAccount'];
+    trace?: never;
+  };
+  '/api/v1/service-accounts/{id}/roles': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Replace the role assignments of a service account */
+    put: operations['setServiceAccountRoles'];
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -4885,9 +5160,6 @@ export interface components {
       end_session_endpoint?: string;
       pkce_required: boolean;
     };
-    RefreshRequest: {
-      token: string;
-    };
     AuthTokenResponse: {
       token: string;
       /** Format: date-time */
@@ -4905,15 +5177,32 @@ export interface components {
     AuthCallbackResponse: components['schemas']['AuthTokenResponse'] & {
       user: components['schemas']['AuthCallbackUser'];
     };
+    /**
+     * @description Session JWT claims (AUT-02). cls, sts and tms are the client, site and
+     *     team scope: null for the whole organization, a list otherwise (an
+     *     empty list grants none).
+     */
     SessionClaims: {
       sub: string;
-      org_id: string;
-      client_scope?: string;
-      permissions: string[];
-      /** Format: date-time */
-      iat: string;
-      /** Format: date-time */
-      exp: string;
+      org: string;
+      scopes: string[];
+      cls?: string[] | null;
+      sts?: string[] | null;
+      tms?: string[] | null;
+      name?: string;
+      email?: string;
+      jti?: string;
+      groups?: string[];
+      /**
+       * Format: int64
+       * @description Issued at (NumericDate)
+       */
+      iat: number;
+      /**
+       * Format: int64
+       * @description Expires at (NumericDate)
+       */
+      exp: number;
     };
     /** @enum {string} */
     CIStatus: 'active' | 'inactive' | 'maintenance' | 'decommissioned' | 'unknown';
@@ -5158,6 +5447,8 @@ export interface components {
       headers?: {
         [key: string]: string;
       };
+      /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose object the account may read. */
+      service_account_id?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -5172,6 +5463,8 @@ export interface components {
       headers?: {
         [key: string]: string;
       };
+      /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose object the account may read. */
+      service_account_id?: string;
     };
     WebhookDelivery: {
       id: string;
@@ -5252,6 +5545,8 @@ export interface components {
       created: number;
       updated: number;
       conflicts: number;
+      /** @description New devices held as unlicensed_ci review items because max_cis is reached (ENT-03, CH21). */
+      unlicensed?: number;
       job_id?: string;
     };
     /** @enum {string} */
@@ -5319,29 +5614,49 @@ export interface components {
     };
     /** @enum {string} */
     EntitlementPlan: 'essential' | 'standard' | 'pro' | 'enterprise';
+    /** @description Entitlement of a feature (ENT-01). Phase-1 feature keys (ENT-02): cmdb_core (always active), discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email. */
     Entitlement: {
       organization_id: string;
       feature_key: string;
       plan: components['schemas']['EntitlementPlan'];
-      /** @description Maximum number of records for the feature. 0 means unlimited. */
-      limit?: number;
       enabled: boolean;
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys. A missing quota uses the plan default. */
+      limits: {
+        [key: string]: number;
+      };
       /** Format: date-time */
-      expires_at?: string;
+      valid_until?: string;
+      /** @enum {string} */
+      source: 'manual' | 'selfsignup' | 'billing' | 'reseller';
     };
     EntitlementCheckResponse: {
       feature: string;
       plan: components['schemas']['EntitlementPlan'];
       enabled: boolean;
-      limit?: number;
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys. A missing quota uses the plan default. */
+      limits?: {
+        [key: string]: number;
+      };
     };
     GrantEntitlementRequest: {
       feature_key: string;
       plan?: components['schemas']['EntitlementPlan'];
+      /** @description cmdb_core cannot be disabled (422). */
       enabled?: boolean;
-      limit?: number;
-      /** Format: date-time */
-      expires_at?: string;
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys. A missing quota uses the plan default. */
+      limits?: {
+        [key: string]: number;
+      };
+      /**
+       * Format: date-time
+       * @description Not allowed for cmdb_core (422).
+       */
+      valid_until?: string;
+      /**
+       * @default manual
+       * @enum {string}
+       */
+      source: 'manual' | 'selfsignup' | 'billing' | 'reseller';
     };
     EntitlementListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Entitlement'][];
@@ -6609,6 +6924,155 @@ export interface components {
       contacts_affected: number;
       users_affected: number;
     };
+    APIKey: {
+      id: string;
+      name: string;
+      /** @description Public 12 character prefix of the key */
+      key_prefix: string;
+      /** @enum {string} */
+      environment: 'live' | 'test';
+      permissions: string[];
+      owner_id: string;
+      /** @description The key acts with this service account's rights (RBA-08). */
+      service_account_id?: string;
+      rotated_from?: string;
+      /** Format: date-time */
+      expires_at?: string;
+      /** Format: date-time */
+      revoked_at?: string;
+      /** Format: date-time */
+      last_used_at?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    CreatedAPIKey: components['schemas']['APIKey'] & {
+      /** @description Plaintext key, returned only once */
+      key: string;
+    };
+    APIKeyListResponse: {
+      data: components['schemas']['APIKey'][];
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+    };
+    CreateAPIKeyRequest: {
+      name: string;
+      permissions: string[];
+      /** Format: date-time */
+      expires_at?: string;
+      /**
+       * @default live
+       * @enum {string}
+       */
+      environment: 'live' | 'test';
+      /** @description The key acts with this service account's rights (RBA-08). */
+      service_account_id?: string;
+    };
+    RotateAPIKeyRequest: {
+      /** @default 86400 */
+      overlap_seconds: number;
+    };
+    RotatedAPIKey: {
+      key: components['schemas']['CreatedAPIKey'];
+      previous: components['schemas']['APIKey'];
+    };
+    ServiceAccountRole: {
+      role_id: string;
+      scope_client_id?: string;
+      scope_site_id?: string;
+    };
+    ServiceAccount: {
+      id: string;
+      organization_id: string;
+      name: string;
+      description: string;
+      is_active: boolean;
+      created_by?: string;
+      roles: components['schemas']['ServiceAccountRole'][];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    ServiceAccountListResponse: {
+      data: components['schemas']['ServiceAccount'][];
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+    };
+    CreateServiceAccountRequest: {
+      name: string;
+      description?: string;
+    };
+    UpdateServiceAccountRequest: {
+      name?: string;
+      description?: string;
+      is_active?: boolean;
+    };
+    SetServiceAccountRolesRequest: {
+      roles: components['schemas']['ServiceAccountRole'][];
+    };
+    OperatorIdentity: {
+      id: string;
+      name?: string;
+      email?: string;
+      /** @enum {string} */
+      kind: 'oidc' | 'break_glass';
+    };
+    OperatorSession: {
+      token: string;
+      /** Format: date-time */
+      expires_at: string;
+      operator: components['schemas']['OperatorIdentity'];
+    };
+    OperatorOrg: {
+      id: string;
+      name: string;
+      slug: string;
+      plan: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    OperatorOrgListResponse: {
+      data: components['schemas']['OperatorOrg'][];
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+    };
+    OperatorAuditEntry: {
+      /** Format: int64 */
+      id: number;
+      /** Format: date-time */
+      timestamp: string;
+      operator_id: string;
+      /** @enum {string} */
+      operator_kind: 'oidc' | 'break_glass';
+      action: string;
+      target_org?: string;
+      status: number;
+      details: {
+        [key: string]: unknown;
+      };
+      previous_hash: string;
+      entry_hash: string;
+    };
+    OperatorAuditListResponse: {
+      data: components['schemas']['OperatorAuditEntry'][];
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+    };
+    OperatorAuditVerification: {
+      valid: boolean;
+      checked: number;
+      /** Format: int64 */
+      broken_at?: number;
+      reason?: string;
+    };
     User: {
       id: string;
       organization_id: string;
@@ -6766,7 +7230,12 @@ export interface components {
       id: string;
       organization_id: string;
       /** @enum {string} */
-      kind: 'ambiguous_identity' | 'conflicting_values' | 'unclassified_device';
+      kind:
+        | 'ambiguous_identity'
+        | 'conflicting_values'
+        | 'unclassified_device'
+        | 'override_conflict'
+        | 'unlicensed_ci';
       /** @enum {string} */
       status: 'open' | 'resolved' | 'dismissed';
       payload: {
@@ -7669,6 +8138,195 @@ export interface operations {
       };
     };
   };
+  operatorLogin: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CallbackRequest'];
+      };
+    };
+    responses: {
+      /** @description Operator session issued */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OperatorSession'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getOperator: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Operator identity */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OperatorIdentity'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  listOrganizationsAsOperator: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Organizations */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OperatorOrgListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listOrganizationEntitlementsAsOperator: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Entitlements of the organization */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['EntitlementListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  grantEntitlementAsOperator: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['GrantEntitlementRequest'];
+      };
+    };
+    responses: {
+      /** @description Entitlement stored */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Entitlement'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description cmdb_core disabled or limited in time, unknown source or negative limit */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listOperatorAudit: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Operator audit entries */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OperatorAuditListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  verifyOperatorAudit: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Verification result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OperatorAuditVerification'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
   getAuthConfig: {
     parameters: {
       query?: never;
@@ -7707,6 +8365,8 @@ export interface operations {
       /** @description Session token and resolved user info */
       200: {
         headers: {
+          /** @description Refresh cookie `reticora_refresh`. */
+          'Set-Cookie'?: string;
           [name: string]: unknown;
         };
         content: {
@@ -7723,25 +8383,45 @@ export interface operations {
       query?: never;
       header?: never;
       path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['RefreshRequest'];
+      cookie: {
+        reticora_refresh: string;
       };
     };
+    requestBody?: never;
     responses: {
       /** @description Refreshed session token issued */
       200: {
         headers: {
+          /** @description Rotated refresh cookie `reticora_refresh`. */
+          'Set-Cookie'?: string;
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['AuthTokenResponse'];
         };
       };
-      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  logout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: {
+        reticora_refresh?: string;
+      };
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Session ended; the refresh cookie is cleared */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -8440,6 +9120,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -8655,32 +9336,6 @@ export interface operations {
           'application/json': components['schemas']['EntitlementListResponse'];
         };
       };
-      401: components['responses']['Unauthorized'];
-    };
-  };
-  grantEntitlement: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['GrantEntitlementRequest'];
-      };
-    };
-    responses: {
-      /** @description Entitlement granted */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Entitlement'];
-        };
-      };
-      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
     };
   };
@@ -11456,6 +12111,131 @@ export interface operations {
       404: components['responses']['NotFound'];
     };
   };
+  listAPIKeys: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description API keys of the organization, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['APIKeyListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createAPIKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateAPIKeyRequest'];
+      };
+    };
+    responses: {
+      /** @description Key created; the plaintext is shown once */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CreatedAPIKey'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description Name, permissions, expiry or environment invalid */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  revokeAPIKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Key revoked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  rotateAPIKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['RotateAPIKeyRequest'];
+      };
+    };
+    responses: {
+      /** @description Successor created; the plaintext is shown once */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RotatedAPIKey'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description Overlap out of range */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
   listUsers: {
     parameters: {
       query?: {
@@ -11792,7 +12572,12 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         status?: 'open' | 'resolved' | 'dismissed';
-        kind?: 'ambiguous_identity' | 'conflicting_values' | 'unclassified_device';
+        kind?:
+          | 'ambiguous_identity'
+          | 'conflicting_values'
+          | 'unclassified_device'
+          | 'override_conflict'
+          | 'unlicensed_ci';
       };
       header?: never;
       path?: never;
@@ -11840,6 +12625,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
@@ -13805,6 +14591,8 @@ export interface operations {
       /** @description Heartbeat recorded */
       204: {
         headers: {
+          /** @description Discovery license status of the organization. */
+          'Reticora-License-Status'?: 'active' | 'expired';
           [name: string]: unknown;
         };
         content?: never;
@@ -13838,6 +14626,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -14114,6 +14903,202 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listServiceAccounts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Service accounts with their role assignments */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ServiceAccountListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createServiceAccount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateServiceAccountRequest'];
+      };
+    };
+    responses: {
+      /** @description Service account created without roles */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ServiceAccount'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      /** @description Name missing */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getServiceAccount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The service account */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ServiceAccount'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  deleteServiceAccount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  updateServiceAccount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateServiceAccountRequest'];
+      };
+    };
+    responses: {
+      /** @description The updated service account */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ServiceAccount'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description Name empty */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  setServiceAccountRoles: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SetServiceAccountRolesRequest'];
+      };
+    };
+    responses: {
+      /** @description The service account with its new roles */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ServiceAccount'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description Unknown role */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };

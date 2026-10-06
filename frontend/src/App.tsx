@@ -9,6 +9,7 @@ import { Skeleton } from './components/ui/Skeleton';
 import { ToastViewport } from './components/ui/Toast';
 import { useAuthStore } from './auth/authStore';
 import { fetchAuthConfig, getStoredAuthConfig } from './auth/oidc';
+import { logout } from './auth/session';
 import { LoginPage } from './pages/auth/LoginPage';
 import { CallbackPage } from './pages/auth/CallbackPage';
 import { useEntitlements, navFeatureFor } from './hooks/useEntitlements';
@@ -102,7 +103,6 @@ function App() {
   const mode = useThemeStore((state) => state.mode);
   const setMode = useThemeStore((state) => state.setMode);
   const user = useAuthStore((state) => state.user);
-  const clearSession = useAuthStore((state) => state.clearSession);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated());
 
   const currentPage: AppPage =
@@ -187,7 +187,7 @@ function App() {
   }
 
   async function handleLogout() {
-    clearSession();
+    await logout();
 
     try {
       const config = getStoredAuthConfig() ?? (await fetchAuthConfig());

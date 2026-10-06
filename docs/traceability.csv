@@ -190,3 +190,30 @@ TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-064
 DB-04;nicht geliefert;B;backend/internal/database/role_check_integration_test.go;WP-064
 TEN-09;[Q];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-065
 TST-02;[B];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-065
+AUT-02;[B];B;backend/internal/identity/session_test.go;WP-066
+SEC-06;[B];B;backend/internal/identity/session_test.go;WP-066
+AUT-04;[B];B;backend/internal/identity/apikey_integration_test.go;WP-067
+API-05;[B];B;backend/internal/identity/apikey_integration_test.go;WP-067
+RBA-01;[B];B;backend/internal/server/authz_catalog_test.go;WP-068
+RBA-08;[B];B;backend/internal/user/service_account_integration_test.go;WP-069
+API-05;[B];B;backend/internal/user/service_account_integration_test.go;WP-069
+SEC-07;[B];B;backend/internal/operator/operator_test.go;WP-070
+API-05;[B];B;backend/internal/operator/operator_test.go;WP-070
+ENT-01;[B];B;backend/internal/entitlement/entitlement_test.go;WP-071
+ENT-02;[B];B;backend/internal/entitlement/entitlement_test.go;WP-071
+ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-072
+ENT-07;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-072
+ENT-03;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-072
+API-04;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-072
+ENT-03;[B];B;backend/internal/entitlement/unlicensed_integration_test.go;WP-073
+ENT-08;[B];B;backend/internal/entitlement/unlicensed_integration_test.go;WP-073
+ENT-04;[B];B;backend/internal/operator/entitlements_test.go;WP-074
+API-05;[B];B;backend/internal/operator/entitlements_test.go;WP-074
+ENT-06;(V), [B–P4], [A];B;backend/internal/entitlement/addon_test.go;WP-075
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/entitlement/addon_test.go;WP-075
+IGA-01;[A];B;backend/internal/entitlement/addon_test.go;WP-075
+IGA-02;[A];B;backend/internal/entitlement/addon_test.go;WP-075
+IGA-03;[A];B;backend/internal/entitlement/addon_test.go;WP-075
+IGA-04;[A];B;backend/internal/entitlement/addon_test.go;WP-075
+AI-02;[A];B;backend/internal/entitlement/addon_test.go;WP-075
+AI-02;[A];B;backend/internal/ai/ci_indexer_test.go;WP-076

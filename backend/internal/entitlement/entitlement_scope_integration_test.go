@@ -24,7 +24,7 @@ func TestEntitlementRepositoryScope(t *testing.T) {
 	}
 
 	ctx := f.ClientCtx(f.Client1)
-	if _, err := repo.Upsert(ctx, entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: "cmdb", Plan: entitlement.PlanStandard, Enabled: true}); err != nil {
+	if _, err := repo.Upsert(ctx, entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore, Plan: entitlement.PlanStandard, Enabled: true}); err != nil {
 		t.Fatalf("org A upsert: %v", err)
 	}
 	list, err := repo.List(ctx, f.OrgA)

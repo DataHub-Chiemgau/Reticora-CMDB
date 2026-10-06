@@ -113,3 +113,13 @@ func (r *PGRepository) CandidateChunks(ctx context.Context, orgID string, entity
 	})
 	return out, err
 }
+
+// AIOptIn reports the organization's AI opt-in (AI-02) in the request's
+// tenant transaction.
+func (r *PGRepository) AIOptIn(ctx context.Context, orgID string) (bool, error) {
+	var optIn bool
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT ai_opt_in FROM organization WHERE id = $1`, orgID).Scan(&optIn)
+	})
+	return optIn, err
+}

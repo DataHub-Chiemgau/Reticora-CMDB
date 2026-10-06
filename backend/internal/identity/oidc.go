@@ -51,6 +51,10 @@ type IDTokenClaims struct {
 	OrganizationID string
 	Groups         []string
 	Nonce          string
+	// AMR and ACR are the authentication methods and the authentication
+	// context class of the login; the operator path requires MFA (SEC-07).
+	AMR []string
+	ACR string
 }
 
 // oidcHTTPClient is the default HTTP client for provider requests. Unlike
@@ -262,6 +266,8 @@ func (p *OIDCProvider) ValidateIDTokenWithNonce(ctx context.Context, rawToken, e
 		Name            string          `json:"name"`
 		Organization    json.RawMessage `json:"organization_id"`
 		Groups          json.RawMessage `json:"groups"`
+		AMR             []string        `json:"amr,omitempty"`
+		ACR             string          `json:"acr,omitempty"`
 		Audience        json.RawMessage `json:"aud,omitempty"`
 		AuthorizedParty string          `json:"azp,omitempty"`
 		Nonce           string          `json:"nonce,omitempty"`
@@ -321,6 +327,8 @@ func (p *OIDCProvider) ValidateIDTokenWithNonce(ctx context.Context, rawToken, e
 		OrganizationID: organization,
 		Groups:         groups,
 		Nonce:          tokenClaims.Nonce,
+		AMR:            tokenClaims.AMR,
+		ACR:            tokenClaims.ACR,
 	}, nil
 }
 

@@ -1794,6 +1794,10 @@ export interface Entitlement {
   feature_key: string;
   plan: string;
   enabled: boolean;
+  /** Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys. */
+  limits: Record<string, number>;
+  valid_until?: string;
+  source: 'manual' | 'selfsignup' | 'billing' | 'reseller';
   updated_at: string;
 }
 

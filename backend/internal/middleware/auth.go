@@ -110,15 +110,25 @@ func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIK
 		if info.OrganizationID == "" {
 			return identity.Principal{}, Claims{}, fmt.Errorf("API key is missing its organization scope")
 		}
+		// The key acts with the intersection of its permissions and its
+		// owner's current rights, in the owner's scope (AUT-04).
+		// The key acts as its owner, a user or a service account, so audit
+		// entries name the owner (RBA-08); keys without owner keep the prefix.
+		subject := info.ID
+		if info.OwnerID != "" {
+			subject = info.OwnerID
+		}
 		principal := identity.Principal{
-			Subject:        info.ID,
-			OrganizationID: info.OrganizationID,
-			ClientScope:    info.ClientScope,
-			Permissions:    info.Scopes,
-			Type:           identity.PrincipalTypeAPIKey,
+			Subject:          subject,
+			OrganizationID:   info.OrganizationID,
+			ClientScope:      info.ClientScope,
+			Scope:            info.Scope,
+			PermissionScopes: info.PermissionScopes,
+			Permissions:      info.Scopes,
+			Type:             identity.PrincipalTypeAPIKey,
 		}
 		return principal, Claims{
-			Subject:        info.ID,
+			Subject:        subject,
 			OrganizationID: info.OrganizationID,
 			ClientID:       info.ClientScope,
 		}, nil
@@ -160,6 +170,10 @@ func authenticate(r *http.Request, verifier SessionVerifier) (Claims, error) {
 	sessionClaims, err := verifier.Validate(strings.TrimSpace(parts[1]))
 	if err != nil {
 		return Claims{}, fmt.Errorf("invalid session token")
+	}
+	if sessionClaims.Operator {
+		// Operator sessions belong to /admin only (SEC-07).
+		return Claims{}, fmt.Errorf("operator sessions are not valid for the tenant API")
 	}
 	if sessionClaims.OrganizationID == "" {
 		return Claims{}, fmt.Errorf("organization claim is required")
@@ -265,15 +279,16 @@ func requiresAuth(r *http.Request) bool {
 		return false
 	}
 	switch r.URL.Path {
-	case "/api/v1/auth/config", "/api/v1/auth/callback", "/api/v1/auth/refresh":
+	case "/api/v1/auth/config", "/api/v1/auth/callback", "/api/v1/auth/refresh", "/api/v1/auth/logout":
 		return false
 	case "/api/v1/collectors/enroll":
 		// The enrollment code is the credential; the collector has no session
 		// or API key before it enrolls.
 		return false
-	default:
-		return true
 	}
+	// The operator path authenticates operators itself and has no tenant
+	// (SEC-07, internal/operator); tenant credentials never reach it.
+	return !strings.HasPrefix(r.URL.Path, "/api/v1/admin/")
 }
 
 func claimsFromRequest(r *http.Request) (Claims, error) {

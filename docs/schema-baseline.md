@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000079_rls_scoped_write_using
+Stand: Migration 000087_ai_org_optin
 
 ## Prüfung
 
@@ -125,6 +125,13 @@ App-Rolle schreibgeschützt. Heute ist das nur `permission` (WP-024). Globale
 Katalogzeilen in Tabellen mit Org-Spalte (`organization_id IS NULL`, z. B.
 System-CI-Typen) sind über getrennte Policies je Kommando nur lesbar.
 
+Die organisationsübergreifende Tabelle `operator_audit` (SEC-07, WP-070) ist
+die zweite dokumentierte Ausnahme ohne Org-Spalte: ENABLE + FORCE RLS mit einer
+Policy, die nur im Operator-Kontext (`app.operator`, `database.WithOperator`)
+greift; Mandantentransaktionen lesen und schreiben nichts. `reticora_app` hat
+kein UPDATE/DELETE, zusätzlich verhindern Trigger Änderungen
+(`TestRLSCatalog` prüft die Regel `operator-only`).
+
 Ein Prädikat gilt als erzwungen, wenn alle permissiven Policies des Kommandos
 oder eine restriktive Policy das GUC verwenden. Die folgende Liste der heute
 bekannten Lücken muss exakt stimmen: Neue Verstöße und bereits geschlossene
@@ -155,7 +162,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ai_conversation` | ja | ja | ai_conversation_tenant_isolation (ALL) |
 | `ai_message` | ja | ja | ai_message_tenant_isolation (ALL) |
 | `alert_rule` | ja | ja | alert_rule_isolation (ALL), alert_rule_system_select (SELECT) |
-| `api_key` | ja | ja | org_isolation (ALL) |
+| `api_key` | ja | ja | api_key_system_select (SELECT), org_isolation (ALL) |
 | `app_user` | ja | ja | user_isolation (ALL) |
 | `asset` | ja | ja | asset_scoped_delete (DELETE), asset_scoped_update (UPDATE), asset_tenant_isolation (ALL) |
 | `asset_location` | ja | ja | asset_location_isolation (ALL) |
@@ -220,6 +227,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `metric_sample` | nein | nein | – |
 | `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |
 | `network_interface` | ja | ja | network_interface_scoped_delete (DELETE), network_interface_scoped_update (UPDATE), org_isolation (ALL) |
+| `operator_audit` | ja | ja | operator_audit_operator (ALL) |
 | `org_dek` | ja | ja | org_dek_isolation (ALL) |
 | `organization` | ja | ja | org_isolation (ALL), organization_system_select (SELECT) |
 | `permission` | nein | nein | – |
@@ -238,6 +246,8 @@ SECURITY`), Policies mit ihrem Kommando.
 | `saved_view` | ja | ja | saved_view_isolation (ALL) |
 | `search_document` | ja | ja | search_document_scoped_delete (DELETE), search_document_scoped_update (UPDATE), search_document_tenant_isolation (ALL) |
 | `security_finding` | ja | ja | security_finding_isolation (ALL), security_finding_scoped_delete (DELETE), security_finding_scoped_update (UPDATE) |
+| `service_account` | ja | ja | service_account_isolation (ALL) |
+| `service_account_role` | ja | ja | service_account_role_isolation (ALL) |
 | `site` | ja | ja | site_isolation (ALL), site_scoped_delete (DELETE), site_scoped_update (UPDATE) |
 | `sla` | ja | ja | sla_scoped_delete (DELETE), sla_scoped_update (UPDATE), sla_tenant_isolation (ALL) |
 | `source_priority_policy` | ja | ja | source_priority_policy_isolation (ALL) |

@@ -162,7 +162,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.svc.Create(r.Context(), item); err != nil {
 		if isEntitlementError(err) {
-			api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
+			if !api.WriteTypedProblem(w, http.StatusForbidden, err) {
+				api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
+			}
 			return
 		}
 		if writeValidationError(w, err) {
