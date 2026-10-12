@@ -58,6 +58,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/signup"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
@@ -186,6 +187,8 @@ type Options struct {
 	// IngestQueue carries discovery records over ingest.> (REC-01); nil
 	// processes them in the request.
 	IngestQueue *discovery.NATSIngestQueue
+	// Signup is the self-signup flow (TLC-01); nil answers 503.
+	Signup *signup.Service
 }
 
 // registrar is implemented by every domain handler.
@@ -335,6 +338,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
 		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),
+		signup.NewHandler(opts.Signup),
 	}
 	for _, h := range registrars {
 		h.RegisterRoutes(protected)

@@ -262,6 +262,37 @@ func WithOperator(ctx context.Context, pool *pgxpool.Pool, fn func(ctx context.C
 	return tx.Commit(ctx)
 }
 
+// WithOrganizationSetup runs fn in the one transaction that creates the
+// organization orgID (self-signup, WP-111): the operator flag is set, so the
+// operator tables (signup_request, operator_audit) are reachable, and the
+// tenant context is orgID organization-wide without a user, so the
+// organization row and everything its creation seeds pass the tenant
+// policies. No other organization is reachable.
+func WithOrganizationSetup(ctx context.Context, pool *pgxpool.Pool, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	if strings.TrimSpace(orgID) == "" {
+		return ErrIncompleteScope
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin organization setup transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT
+		set_config('`+OperatorGUC+`', 'on', true),
+		set_config('`+OrgGUC+`', $1, true),
+		set_config('`+UserGUC+`', '', true),
+		set_config('`+ClientScopeGUC+`', '', true),
+		set_config('`+SiteScopeGUC+`', '', true),
+		set_config('`+TeamScopeGUC+`', '', true)`, orgID); err != nil {
+		return fmt.Errorf("set organization setup context: %w", err)
+	}
+	if err := fn(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // OrganizationIDs lists the ids of all organizations for workers that iterate
 // tenants. It is a system read (WithSystem).
 func OrganizationIDs(ctx context.Context, pool *pgxpool.Pool) ([]string, error) {

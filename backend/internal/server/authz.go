@@ -298,6 +298,10 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 		// Zero-config onboarding: the single-use enrollment code is the
 		// credential; the collector has no bearer token before enrolling.
 		return "", routePublic
+	case "/api/v1/signup", "/api/v1/signup/verify":
+		// Self-signup (TLC-01): no account exists yet; the verification
+		// token is the credential.
+		return "", routePublic
 	}
 
 	rest := strings.TrimPrefix(path, "/api/v1/")

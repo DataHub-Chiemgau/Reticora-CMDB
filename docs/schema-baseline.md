@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000102_location_uniques_height_units
+Stand: Migration 000103_signup_requests
 
 ## Prüfung
 
@@ -130,7 +130,10 @@ die zweite dokumentierte Ausnahme ohne Org-Spalte: ENABLE + FORCE RLS mit einer
 Policy, die nur im Operator-Kontext (`app.operator`, `database.WithOperator`)
 greift; Mandantentransaktionen lesen und schreiben nichts. `reticora_app` hat
 kein UPDATE/DELETE, zusätzlich verhindern Trigger Änderungen
-(`TestRLSCatalog` prüft die Regel `operator-only`).
+(`TestRLSCatalog` prüft die Regel `operator-only`). Nach demselben Muster ist
+`signup_request` (WP-111) geschützt: Ein Signup-Antrag existiert vor seiner
+Organisation und ist nur im Operator-Kontext (`database.WithOperator`,
+`database.WithOrganizationSetup`) erreichbar.
 
 Ein Prädikat gilt als erzwungen, wenn alle permissiven Policies des Kommandos
 oder eine restriktive Policy das GUC verwenden. Die folgende Liste der heute
@@ -249,6 +252,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `security_finding` | ja | ja | security_finding_isolation (ALL), security_finding_scoped_delete (DELETE), security_finding_scoped_update (UPDATE) |
 | `service_account` | ja | ja | service_account_isolation (ALL) |
 | `service_account_role` | ja | ja | service_account_role_isolation (ALL) |
+| `signup_request` | ja | ja | signup_request_operator (ALL) |
 | `site` | ja | ja | site_isolation (ALL), site_scoped_delete (DELETE), site_scoped_update (UPDATE) |
 | `sla` | ja | ja | sla_scoped_delete (DELETE), sla_scoped_update (UPDATE), sla_tenant_isolation (ALL) |
 | `source_priority_policy` | ja | ja | source_priority_policy_isolation (ALL) |

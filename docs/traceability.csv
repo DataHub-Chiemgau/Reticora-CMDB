@@ -275,3 +275,5 @@ LOC-05;B/G1;B;backend/internal/tenantapi/location_uniques_integration_test.go;WP
 LOC-06;B/G1;B;backend/internal/tenantapi/location_uniques_integration_test.go;WP-108
 TEN-01;[B], Reseller [P4];B;backend/internal/locations/hierarchy_integration_test.go;WP-109
 AUT-03;[B];B;backend/internal/config/config_test.go;WP-110
+TLC-01;[B];B;backend/internal/signup/service_test.go;WP-111
+API-05;[B];B;backend/internal/signup/service_test.go;WP-111

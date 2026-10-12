@@ -39,6 +39,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/signup"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -349,6 +350,7 @@ func main() {
 		},
 		Readiness:   readiness,
 		IngestQueue: ingestQueue,
+		Signup:      signupService(cfg, auditPool),
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -650,4 +652,34 @@ func backlogOf[C any](repo any, count func(context.Context, C) (int, error)) fun
 		return nil
 	}
 	return func(ctx context.Context) (int, error) { return count(ctx, c) }
+}
+
+// signupService builds the self-signup flow (TLC-01). Signups need the
+// database, the Keycloak admin client and an e-mail channel; the channel
+// arrives with the notification channels (WP-137), so until then every
+// signup answers 503.
+func signupService(cfg *config.Config, pool *pgxpool.Pool) *signup.Service {
+	sc := signup.DefaultConfig()
+	sc.TrialPlan = entitlement.Plan(cfg.TrialPlan)
+	sc.TrialDays = cfg.TrialDays
+	sc.TrialMaxCIs = int64(cfg.TrialMaxCIs)
+	sc.VerifyURL = cfg.SignupVerifyURL
+	var (
+		repo     signup.Repository
+		accounts signup.Accounts
+	)
+	if pool != nil {
+		repo = signup.NewPGRepository(pool)
+	}
+	if cfg.KeycloakAdminClientID != "" {
+		kc, err := signup.NewKeycloakAccounts(cfg.OIDCIssuerURL, cfg.KeycloakAdminClientID, cfg.KeycloakAdminClientSecret, nil)
+		if err != nil {
+			slog.Error("self-signup: Keycloak admin client disabled", "error", err)
+		} else {
+			accounts = kc
+		}
+	}
+	svc := signup.NewService(repo, nil, accounts, sc)
+	slog.Info("self-signup configured", "available", svc.Available())
+	return svc
 }

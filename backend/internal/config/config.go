@@ -96,6 +96,17 @@ type Config struct {
 	// stay blocked (SEC-08). Default off.
 	EgressAllowPrivate bool
 
+	// Self-signup (TLC-01, E-33). SignupVerifyURL is the page the
+	// verification link opens; the Keycloak admin client creates the first
+	// org_admin's account. Without them, or without an e-mail channel
+	// (WP-137), signup answers 503.
+	SignupVerifyURL           string
+	KeycloakAdminClientID     string
+	KeycloakAdminClientSecret string
+	TrialPlan                 string // ENT-07: standard
+	TrialDays                 int    // ENT-07: 30
+	TrialMaxCIs               int    // ENT-07: 100
+
 	// PreAuthRateLimitRPM is the budget of authentication attempts per
 	// client IP and minute (AUT-10, default 20).
 	PreAuthRateLimitRPM int
@@ -164,9 +175,16 @@ func Load() *Config {
 		OperatorMFAACR:          l.str("RETICORA_OPERATOR_MFA_ACR", "2"),
 		AllowInsecureDevAuth:    l.str("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false") == "true",
 
-		DefaultPlan:            l.str("RETICORA_DEFAULT_PLAN", "essential"),
-		DefaultProvisionRole:   l.str("RETICORA_DEFAULT_PROVISION_ROLE", "viewer"),
-		EntitlementEnforcement: l.str("RETICORA_ENTITLEMENT_ENFORCEMENT", "true") != "false",
+		DefaultPlan: l.str("RETICORA_DEFAULT_PLAN", "essential"),
+
+		SignupVerifyURL:           l.str("RETICORA_SIGNUP_VERIFY_URL", ""),
+		KeycloakAdminClientID:     l.str("RETICORA_KEYCLOAK_ADMIN_CLIENT_ID", ""),
+		KeycloakAdminClientSecret: l.str("RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET", ""),
+		TrialPlan:                 l.str("RETICORA_TRIAL_PLAN", "standard"),
+		TrialDays:                 l.integer("RETICORA_TRIAL_DAYS", 30),
+		TrialMaxCIs:               l.integer("RETICORA_TRIAL_MAX_CIS", 100),
+		DefaultProvisionRole:      l.str("RETICORA_DEFAULT_PROVISION_ROLE", "viewer"),
+		EntitlementEnforcement:    l.str("RETICORA_ENTITLEMENT_ENFORCEMENT", "true") != "false",
 
 		MasterKey: l.str("RETICORA_MASTER_KEY", ""),
 
@@ -301,6 +319,17 @@ func (c *Config) Validate(noDB bool) error {
 	}
 	if c.OperatorToken != "" && len(c.OperatorToken) < 32 {
 		errs = append(errs, fmt.Errorf("RETICORA_OPERATOR_TOKEN must have at least 32 characters"))
+	}
+	switch c.TrialPlan {
+	case "essential", "standard", "pro", "enterprise":
+	default:
+		errs = append(errs, fmt.Errorf("RETICORA_TRIAL_PLAN=%q is not one of essential, standard, pro, enterprise", c.TrialPlan))
+	}
+	if c.TrialDays <= 0 {
+		errs = append(errs, fmt.Errorf("RETICORA_TRIAL_DAYS must be positive, got %d", c.TrialDays))
+	}
+	if c.TrialMaxCIs < 0 {
+		errs = append(errs, fmt.Errorf("RETICORA_TRIAL_MAX_CIS must not be negative, got %d", c.TrialMaxCIs))
 	}
 	if c.RateLimitRPM <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_RPM must be positive, got %d", c.RateLimitRPM))

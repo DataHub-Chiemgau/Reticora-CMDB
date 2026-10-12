@@ -302,6 +302,9 @@ func requiresAuth(r *http.Request) bool {
 		// The enrollment code is the credential; the collector has no session
 		// or API key before it enrolls.
 		return false
+	case "/api/v1/signup", "/api/v1/signup/verify":
+		// Self-signup: no account exists yet (TLC-01).
+		return false
 	}
 	// The operator path authenticates operators itself and has no tenant
 	// (SEC-07, internal/operator); tenant credentials never reach it.

@@ -393,6 +393,8 @@ POST /api/v1/search/query search:write
 POST /api/v1/search/reindex search:write
 POST /api/v1/security/findings security:write
 POST /api/v1/service-accounts user:manage
+POST /api/v1/signup public
+POST /api/v1/signup/verify public
 POST /api/v1/sites location:write
 POST /api/v1/slas sla:write
 POST /api/v1/stock-movements asset:move

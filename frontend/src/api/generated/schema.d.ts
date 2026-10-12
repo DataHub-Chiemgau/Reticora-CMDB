@@ -177,6 +177,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/signup': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Request a self-signup (TLC-01)
+     * @description Stores a signup request and sends a verification link to the address. The answer is 202 whether or not the address already has an account. 503 while no e-mail channel or IdP administration is configured.
+     */
+    post: operations['submitSignup'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/signup/verify': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Verify a self-signup and create the organization (TLC-01)
+     * @description The token of the verification link is the credential. Creates, in one transaction, the organization with a slug derived from its name, the default VRF, the first user as org_admin and the trial entitlements (ENT-07), sets the password in the IdP (it is never stored by Reticora) and records the signup in operator_audit. 404 for an unknown or used token, 410 for an expired one, 409 when the address already has an IdP account, 422 when the IdP rejects the password.
+     */
+    post: operations['verifySignup'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/auth/callback': {
     parameters: {
       query?: never;
@@ -5253,6 +5293,25 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    SignupRequest: {
+      organization_name: string;
+      email: string;
+      display_name?: string;
+    };
+    SignupVerification: {
+      token: string;
+      /** @description Set directly in the IdP; at least 12 characters, the IdP's password policy applies. */
+      password: string;
+    };
+    SignupResult: {
+      /** Format: uuid */
+      organization_id: string;
+      organization_slug: string;
+      /** @enum {string} */
+      plan: 'essential' | 'standard' | 'pro' | 'enterprise';
+      /** Format: date-time */
+      trial_ends_at: string;
+    };
     CollectorHeartbeatRequest: {
       spool?: components['schemas']['CollectorSpoolReport'];
     };
@@ -8518,6 +8577,15 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
+    /** @description The pre-auth budget of the client IP is spent (AUT-10) */
+    TooManyRequests: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
     /** @description A required subsystem is not configured or temporarily unavailable */
     ServiceUnavailable: {
       headers: {
@@ -8845,6 +8913,77 @@ export interface operations {
           'application/json': components['schemas']['AuthConfigResponse'];
         };
       };
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  submitSignup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SignupRequest'];
+      };
+    };
+    responses: {
+      /** @description Verification link sent */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** @enum {string} */
+            status: 'verification_sent';
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
+      429: components['responses']['TooManyRequests'];
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  verifySignup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SignupVerification'];
+      };
+    };
+    responses: {
+      /** @description Organization created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SignupResult'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description The verification link has expired */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
+      429: components['responses']['TooManyRequests'];
       500: components['responses']['InternalServerError'];
       503: components['responses']['ServiceUnavailable'];
     };

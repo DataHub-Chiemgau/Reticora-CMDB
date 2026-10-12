@@ -228,11 +228,14 @@ func clientIP(r *http.Request) string {
 const DefaultPreAuthPerMinute = 20
 
 // preAuthPaths are the unauthenticated endpoints that verify a credential:
-// login code exchange, session refresh and collector enrollment.
+// login code exchange, session refresh, collector enrollment and self-signup.
 var preAuthPaths = map[string]bool{
 	"/api/v1/auth/callback":     true,
 	"/api/v1/auth/refresh":      true,
 	"/api/v1/collectors/enroll": true,
+	// Self-signup request and verification (TLC-01).
+	"/api/v1/signup":        true,
+	"/api/v1/signup/verify": true,
 	// Operator login (SEC-07).
 	"/api/v1/admin/auth/callback": true,
 }
