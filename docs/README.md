@@ -301,6 +301,14 @@ Mounting a CI into a rack or moving it to another rack sets the location
 (the asset's for a linked CI, otherwise the CI's) to the rack; unmounting
 sets the rack's room. Every mount change writes `ci_change` (movement,
 location_change) and an audit entry in the same transaction (RCK-03).
+Physical containment (chassis → blade) is `ci.parent_ci_id`, which rejects
+cycles. The structural relationships `contains`, `mounted_in` and
+`located_in` are not stored but projected from `parent_ci_id`, `rack_mount`
+and the CI's location (view `ci_structure_edge`, CH27); the relationship API
+lists them with `projected: true` and rejects storing them (422). Topology and
+impact traverse the projected containment. Migration 0089 turned stored
+containment rows into `parent_ci_id` and moved the structural rows to
+`migration_quarantine`.
 
 **Entitlement enforcement:** an organization is entitled exactly to its rows
 in `entitlement` (ENT-05): a missing row means not entitled, only `cmdb_core`

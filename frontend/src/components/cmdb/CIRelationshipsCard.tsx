@@ -119,12 +119,16 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
                 <span className="flex flex-wrap items-center gap-2">
                   <Badge variant="neutral">{relationship.rel_type}</Badge>
                   <span aria-hidden="true">{isOutgoing ? '→' : '←'}</span>
-                  <Link
-                    to={`/cmdb/${otherId}`}
-                    className="font-mono text-xs text-primary underline-offset-2 hover:underline"
-                  >
-                    {otherId}
-                  </Link>
+                  {relationship.target_location_id ? (
+                    <span className="font-mono text-xs">{relationship.target_location_id}</span>
+                  ) : (
+                    <Link
+                      to={`/cmdb/${otherId}`}
+                      className="font-mono text-xs text-primary underline-offset-2 hover:underline"
+                    >
+                      {otherId}
+                    </Link>
+                  )}
                   <Badge variant={verificationBadgeVariant(state)}>
                     {t(`relationship.state.${state}`, state)}
                   </Badge>
@@ -133,7 +137,10 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
                   <span className="text-xs text-gray-500 dark:text-gray-400">
                     {relationship.source_system || relationship.source}
                   </span>
-                  {state !== 'verified' ? (
+                  {relationship.projected ? (
+                    <Badge variant="info">{t('relationship.projected')}</Badge>
+                  ) : null}
+                  {!relationship.projected && state !== 'verified' ? (
                     <button
                       className="text-xs text-primary hover:underline"
                       disabled={updateRelationship.isPending}
@@ -147,19 +154,23 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
                       {t('relationship.verify', 'Bestätigen')}
                     </button>
                   ) : null}
-                  <button
-                    className="text-xs text-primary hover:underline"
-                    onClick={() => setEditing(relationship)}
-                  >
-                    {t('common.edit', 'Bearbeiten')}
-                  </button>
-                  <button
-                    className="text-xs text-red-600 hover:underline"
-                    disabled={deleteRelationship.isPending}
-                    onClick={() => deleteRelationship.mutate(relationship.id)}
-                  >
-                    {t('common.delete', 'Löschen')}
-                  </button>
+                  {relationship.projected ? null : (
+                    <>
+                      <button
+                        className="text-xs text-primary hover:underline"
+                        onClick={() => setEditing(relationship)}
+                      >
+                        {t('common.edit', 'Bearbeiten')}
+                      </button>
+                      <button
+                        className="text-xs text-red-600 hover:underline"
+                        disabled={deleteRelationship.isPending}
+                        onClick={() => deleteRelationship.mutate(relationship.id)}
+                      >
+                        {t('common.delete', 'Löschen')}
+                      </button>
+                    </>
+                  )}
                 </span>
               </li>
             );

@@ -899,6 +899,7 @@
       "verified": "Bestätigt",
       "disputed": "Widersprochen",
       "stale": "Veraltet"
-    }
+    },
+    "projected": "projiziert (Struktur)"
   }
 }

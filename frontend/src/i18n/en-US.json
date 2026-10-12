@@ -899,6 +899,7 @@
       "verified": "Verified",
       "disputed": "Disputed",
       "stale": "Stale"
-    }
+    },
+    "projected": "projected (structure)"
   }
 }

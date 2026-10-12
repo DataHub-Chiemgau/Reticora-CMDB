@@ -24,8 +24,11 @@ type Item struct {
 	// inventory data: LocationID mirrors the asset's location and Asset
 	// shows the asset's data read-only. SerialNumber stays the observed
 	// value used for identity resolution.
-	AssetID         string         `json:"asset_id,omitempty"`
-	Asset           *AssetFacts    `json:"asset,omitempty"`
+	AssetID string      `json:"asset_id,omitempty"`
+	Asset   *AssetFacts `json:"asset,omitempty"`
+	// ParentCIID is the CI this one is physically part of (chassis → blade,
+	// AST-05); the relationship contains is projected from it (DB-05).
+	ParentCIID      string         `json:"parent_ci_id,omitempty"`
 	CITypeID        string         `json:"ci_type_id"`
 	Name            string         `json:"name"`
 	Status          string         `json:"status"` // active|inactive|maintenance|decommissioned|unknown
@@ -78,6 +81,7 @@ type CreateRequest struct {
 	ClientID        string         `json:"client_id,omitempty"`
 	LocationID      string         `json:"location_id,omitempty"`
 	AssetID         string         `json:"asset_id,omitempty"`
+	ParentCIID      string         `json:"parent_ci_id,omitempty"`
 	Name            string         `json:"name"`
 	Status          string         `json:"status,omitempty"`
 	Manufacturer    string         `json:"manufacturer,omitempty"`
@@ -103,7 +107,9 @@ type UpdateRequest struct {
 	ClientID   *string `json:"client_id,omitempty"`
 	LocationID *string `json:"location_id,omitempty"`
 	// AssetID links ("" unlinks) the CI to an asset.
-	AssetID         *string        `json:"asset_id,omitempty"`
+	AssetID *string `json:"asset_id,omitempty"`
+	// ParentCIID sets ("" clears) the containing CI.
+	ParentCIID      *string        `json:"parent_ci_id,omitempty"`
 	Manufacturer    *string        `json:"manufacturer,omitempty"`
 	Model           *string        `json:"model,omitempty"`
 	SerialNumber    *string        `json:"serial_number,omitempty"`

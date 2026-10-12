@@ -433,7 +433,10 @@ export interface paths {
     /** List relationships */
     get: operations['listRelationships'];
     put?: never;
-    /** Create a relationship */
+    /**
+     * Create a relationship
+     * @description contains, contained_by, parent_of, child_of, mounted_in and located_in are projected and cannot be stored (422, REL-01, CH27): containment is the CI's parent_ci_id, mounted_in follows from the rack mount, located_in from the CI's location.
+     */
     post: operations['createRelationship'];
     delete?: never;
     options?: never;
@@ -5241,6 +5244,8 @@ export interface components {
       /** @description Asset the CI is linked to (DB-05, AST-04). The asset is canonical for serial number, location, physical lifecycle and inventory data; they appear read-only under asset. */
       asset_id?: string;
       asset?: components['schemas']['CIAssetFacts'];
+      /** @description CI this one is physically part of (chassis → blade, AST-05); the relationship contains is projected from it. Cycles are rejected (422). */
+      parent_ci_id?: string;
       /** @description Site of location_id, derived by the server. */
       readonly site_id?: string;
       /** @description Room of location_id (the location or its nearest room ancestor), derived by the server. */
@@ -5307,6 +5312,8 @@ export interface components {
       location_id?: string;
       /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
       asset_id?: string;
+      /** @description Containing CI (empty string clears it on update); cycles are rejected (422). */
+      parent_ci_id?: string;
       name: string;
       status?: components['schemas']['CIStatus'];
       manufacturer?: string;
@@ -5337,6 +5344,8 @@ export interface components {
       location_id?: string;
       /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
       asset_id?: string;
+      /** @description Containing CI (empty string clears it on update); cycles are rejected (422). */
+      parent_ci_id?: string;
       manufacturer?: string;
       model?: string;
       serial_number?: string;
@@ -5425,7 +5434,12 @@ export interface components {
       id: string;
       organization_id: string;
       source_ci_id: string;
+      /** @description Empty for mounted_in and located_in, whose target is target_location_id. */
       target_ci_id: string;
+      /** @description Structural relationship derived from parent_ci_id (contains), rack_mount (mounted_in) or the CI's location (located_in); it cannot be changed through this API (DB-05, CH27). */
+      readonly projected?: boolean;
+      /** @description Rack (mounted_in) or location (located_in) of a projected relationship. */
+      readonly target_location_id?: string;
       rel_type: components['schemas']['RelationshipType'];
       attributes: {
         [key: string]: unknown;
@@ -8880,6 +8894,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Structural relationship type, which is projected and cannot be stored */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };

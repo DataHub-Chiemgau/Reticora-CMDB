@@ -34,7 +34,24 @@ type Relationship struct {
 	Notes             string   `json:"notes,omitempty"`
 	CreatedAt         string   `json:"created_at"`
 	UpdatedAt         string   `json:"updated_at"`
+	// Projected marks a structural relationship that is not stored but
+	// derived (DB-05, CH27): contains from ci.parent_ci_id, mounted_in from
+	// rack_mount, located_in from ci.location_id. It cannot be changed
+	// through the relationship API.
+	Projected bool `json:"projected,omitempty"`
+	// TargetLocationID is the target of mounted_in (the rack) and located_in
+	// (the location); TargetCIID is empty for them.
+	TargetLocationID string `json:"target_location_id,omitempty"`
 }
+
+// StructuralRelTypes are projected, never stored (REL-01, CH27).
+var StructuralRelTypes = map[string]bool{
+	"contains": true, "contained_by": true, "parent_of": true, "child_of": true,
+	"mounted_in": true, "located_in": true,
+}
+
+// ProjectionSource is the source of a projected relationship.
+const ProjectionSource = "projection"
 
 // CreateRequest is the payload for creating a relationship.
 type CreateRequest struct {
@@ -377,6 +394,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if req.SourceCIID == "" || req.TargetCIID == "" || req.RelType == "" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "source_ci_id, target_ci_id, and rel_type are required")
+		return
+	}
+	if StructuralRelTypes[req.RelType] {
+		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity",
+			"rel_type "+req.RelType+" is projected and cannot be stored: containment is the CI's parent_ci_id, "+
+				"mounted_in follows from the rack mount, located_in from the CI's location")
 		return
 	}
 	if !h.validRelType(r, t.OrganizationID, req.RelType) {

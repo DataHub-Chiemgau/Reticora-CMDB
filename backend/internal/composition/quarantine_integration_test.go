@@ -86,9 +86,11 @@ func TestMigration56QuarantinesInconsistentRows(t *testing.T) {
 	}
 
 	// Schema state just before the tenant-reference section of 000056.
-	// ci_asset_id_fkey (000088) depends on asset_id_organization_key.
+	// ci_asset_id_fkey (000088) and ci_parent_ci_fkey (000089) depend on
+	// the keys 000056 adds.
 	exec("undo 000056 references", `
 		ALTER TABLE ci DROP CONSTRAINT ci_asset_id_fkey;
+		ALTER TABLE ci DROP CONSTRAINT ci_parent_ci_fkey;
 		ALTER TABLE composition DROP CONSTRAINT composition_child_asset_tenant_fkey;
 		ALTER TABLE composition DROP CONSTRAINT composition_child_ci_tenant_fkey;
 		ALTER TABLE composition DROP CONSTRAINT composition_parent_tenant_fkey;

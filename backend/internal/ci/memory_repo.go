@@ -153,6 +153,9 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 	if req.AssetID != nil {
 		item.AssetID = *req.AssetID
 	}
+	if req.ParentCIID != nil {
+		item.ParentCIID = *req.ParentCIID
+	}
 	if req.LocationID != nil {
 		// Without the location tree, site and room cannot be derived.
 		item.LocationID, item.SiteID, item.RoomID = *req.LocationID, "", ""

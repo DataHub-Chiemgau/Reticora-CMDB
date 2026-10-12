@@ -106,6 +106,10 @@ export interface Relationship {
   notes?: string;
   created_at: string;
   updated_at: string;
+  /** Structural relationship derived from containment, rack mount or location; read-only (DB-05). */
+  projected?: boolean;
+  /** Target of mounted_in (the rack) and located_in (the location). */
+  target_location_id?: string;
 }
 
 /** Verification vocabulary accepted by the relationships API. */

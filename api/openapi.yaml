@@ -745,6 +745,11 @@ paths:
       operationId: createRelationship
       tags: [Relationships]
       summary: Create a relationship
+      description: >-
+        contains, contained_by, parent_of, child_of, mounted_in and located_in
+        are projected and cannot be stored (422, REL-01, CH27): containment is
+        the CI's parent_ci_id, mounted_in follows from the rack mount,
+        located_in from the CI's location.
       requestBody:
         required: true
         content:
@@ -762,6 +767,11 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Structural relationship type, which is projected and cannot be stored
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -8647,6 +8657,12 @@ components:
             data; they appear read-only under asset.
         asset:
           $ref: '#/components/schemas/CIAssetFacts'
+        parent_ci_id:
+          type: string
+          description: >-
+            CI this one is physically part of (chassis → blade, AST-05); the
+            relationship contains is projected from it. Cycles are rejected
+            (422).
         site_id:
           type: string
           readOnly: true
@@ -8756,6 +8772,9 @@ components:
             Links the CI to an asset (empty string unlinks on update); the CI
             then takes the asset's location, a location in the same request
             is rejected (422).
+        parent_ci_id:
+          type: string
+          description: Containing CI (empty string clears it on update); cycles are rejected (422).
         name:
           type: string
         status:
@@ -8815,6 +8834,9 @@ components:
             Links the CI to an asset (empty string unlinks on update); the CI
             then takes the asset's location, a location in the same request
             is rejected (422).
+        parent_ci_id:
+          type: string
+          description: Containing CI (empty string clears it on update); cycles are rejected (422).
         manufacturer:
           type: string
         model:
@@ -8968,6 +8990,18 @@ components:
           type: string
         target_ci_id:
           type: string
+          description: Empty for mounted_in and located_in, whose target is target_location_id.
+        projected:
+          type: boolean
+          readOnly: true
+          description: >-
+            Structural relationship derived from parent_ci_id (contains),
+            rack_mount (mounted_in) or the CI's location (located_in); it
+            cannot be changed through this API (DB-05, CH27).
+        target_location_id:
+          type: string
+          readOnly: true
+          description: Rack (mounted_in) or location (located_in) of a projected relationship.
         rel_type:
           $ref: '#/components/schemas/RelationshipType'
         attributes:

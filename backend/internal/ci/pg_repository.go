@@ -51,7 +51,8 @@ const ciSelectColumns = `
 	updated_at,
 	deleted_at,
 	version,
-	COALESCE(asset_id::text, '')
+	COALESCE(asset_id::text, ''),
+	COALESCE(parent_ci_id::text, '')
 `
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
@@ -238,13 +239,14 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				first_seen_at,
 				last_seen_at,
 				is_manual,
-				asset_id
+				asset_id,
+				parent_ci_id
 			) VALUES (
 				$1, $2, $3, $4, $5,
 				$6, $7, $8, $9, $10,
 				$11, $12, $13, $14, $15,
 				$16, $17, $18, $19, $20,
-				$21, $22, $23, $24
+				$21, $22, $23, $24, $25
 			)
 			RETURNING id::text, COALESCE(site_id::text, ''), COALESCE(room_id::text, ''),
 				COALESCE(location_id::text, ''), version, created_at, updated_at
@@ -277,6 +279,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 			item.LastSeenAt,
 			item.IsManual,
 			nilIfEmpty(item.AssetID),
+			nilIfEmpty(item.ParentCIID),
 		).Scan(&item.ID, &item.SiteID, &item.RoomID, &item.LocationID, &item.Version, &createdAt, &updatedAt); err != nil {
 			return locationError(fmt.Errorf("create ci: %w", err))
 		}
@@ -333,6 +336,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		addStringField("status", req.Status)
 		addStringField("client_id", req.ClientID)
 		addStringField("asset_id", req.AssetID)
+		addStringField("parent_ci_id", req.ParentCIID)
 		addStringField("location_id", req.LocationID)
 		addStringField("manufacturer", req.Manufacturer)
 		addStringField("model", req.Model)
@@ -572,6 +576,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		&deletedAt,
 		&item.Version,
 		&item.AssetID,
+		&item.ParentCIID,
 	); err != nil {
 		return nil, err
 	}
@@ -673,6 +678,7 @@ func diffCI(before, after *Item) []ciFieldChange {
 	}{
 		{"client_id", before.ClientID, after.ClientID},
 		{"asset_id", before.AssetID, after.AssetID},
+		{"parent_ci_id", before.ParentCIID, after.ParentCIID},
 		{"location_id", before.LocationID, after.LocationID},
 		{"site_id", before.SiteID, after.SiteID},
 		{"room_id", before.RoomID, after.RoomID},
@@ -733,6 +739,10 @@ func locationError(err error) error {
 		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: "location not found"}}}
 	case "ci_location_client":
 		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: "the location belongs to another client"}}}
+	case "ci_parent_ci_fkey":
+		return &ValidationError{Violations: []Violation{{Field: "parent_ci_id", Detail: "parent CI not found"}}}
+	case "ci_parent_not_self", "ci_parent_cycle":
+		return &ValidationError{Violations: []Violation{{Field: "parent_ci_id", Detail: "a CI cannot contain itself, directly or through its parents"}}}
 	case "ci_asset_id_fkey":
 		return &ValidationError{Violations: []Violation{{Field: "asset_id", Detail: "asset not found"}}}
 	case "ci_location_from_asset":
@@ -788,7 +798,7 @@ func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
 
 // derivedFields are set by the database, not by the writer of a change.
 // The asset link is structural, not an observed value.
-var derivedFields = map[string]bool{"site_id": true, "room_id": true, "attributes": true, "asset_id": true}
+var derivedFields = map[string]bool{"site_id": true, "room_id": true, "attributes": true, "asset_id": true, "parent_ci_id": true}
 
 // recordManualOverrides gives every field a manual change touched a
 // protected override, so discovery never overwrites it (OVR-01, CH9): the
@@ -837,7 +847,7 @@ var (
 		"sys_object_id":    func(i *Item, v string) { i.SysObjectID = v },
 	}
 	structuralFields = map[string]bool{
-		"id": true, "organization_id": true, "client_id": true, "location_id": true, "asset_id": true, "site_id": true,
+		"id": true, "organization_id": true, "client_id": true, "location_id": true, "asset_id": true, "parent_ci_id": true, "site_id": true,
 		"room_id": true, "ci_type_id": true, "attributes": true, "discovery_source": true, "is_manual": true,
 		"first_seen_at": true, "last_seen_at": true, "created_at": true, "updated_at": true, "deleted_at": true,
 	}
