@@ -68,6 +68,14 @@ func RateLimiterWithStore(requestsPerMinute int, store cache.Store) func(http.Ha
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// The operational probes must report the state of the
+			// dependencies themselves: a Redis outage would otherwise turn
+			// /readyz into 429 instead of 503 with "redis": "unavailable"
+			// (OPS-06).
+			if isOperationalProbe(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			allowed, err := allowWithStore(r.Context(), store, rateLimitKey(r), requestsPerMinute)
 			if err != nil {
 				// Fail closed: a cache outage must not turn the rate limiter
@@ -85,6 +93,20 @@ func RateLimiterWithStore(requestsPerMinute int, store cache.Store) func(http.Ha
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// isOperationalProbe reports the unauthenticated health and metrics
+// endpoints (/healthz, /readyz, /metrics), which are exempt from the
+// Redis-backed rate limit.
+func isOperationalProbe(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	switch r.URL.Path {
+	case "/healthz", "/readyz", "/metrics":
+		return true
+	}
+	return false
 }
 
 // allowWithStore implements a fixed-window rate limit using the cache store.
