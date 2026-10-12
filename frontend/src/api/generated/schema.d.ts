@@ -7487,7 +7487,9 @@ export interface components {
         | 'conflicting_values'
         | 'unclassified_device'
         | 'override_conflict'
-        | 'unlicensed_ci';
+        | 'unlicensed_ci'
+        | 'serial_mismatch'
+        | 'probable_duplicate';
       /** @enum {string} */
       status: 'open' | 'resolved' | 'dismissed';
       payload: {
@@ -12935,7 +12937,9 @@ export interface operations {
           | 'conflicting_values'
           | 'unclassified_device'
           | 'override_conflict'
-          | 'unlicensed_ci';
+          | 'unlicensed_ci'
+          | 'serial_mismatch'
+          | 'probable_duplicate';
       };
       header?: never;
       path?: never;

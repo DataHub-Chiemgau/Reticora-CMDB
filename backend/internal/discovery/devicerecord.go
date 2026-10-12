@@ -112,6 +112,7 @@ func itemFromRecord(rec *DeviceRecord) IngestItem {
 		PrimaryMAC:   rec.Identity.PrimaryMAC,
 		Hostname:     rec.Identity.Hostname,
 		FQDN:         rec.Identity.FQDN,
+		SysObjectID:  rec.Classification.SysObjectID,
 
 		RecordID:   rec.RecordID,
 		ObservedAt: rec.ObservedAt.UTC(),
@@ -152,6 +153,9 @@ func itemFromRecord(rec *DeviceRecord) IngestItem {
 		if value != "" {
 			raw[key] = value
 		}
+	}
+	if rec.VRFID != "" {
+		raw["vrf_id"] = rec.VRFID
 	}
 	if rec.System.UptimeSeconds > 0 {
 		raw["uptime_seconds"] = rec.System.UptimeSeconds

@@ -60,6 +60,9 @@ type ReconcileResult struct {
 	Action         ReconcileAction `json:"action"`
 	MatchedCIID    string          `json:"matched_ci_id,omitempty"`
 	CandidateCIIDs []string        `json:"candidate_ci_ids,omitempty"`
+	// ProbableDuplicates are CIs sharing the hostname or FQDN of a new CI
+	// (REC-02, CH29); they are reviewed, never merged.
+	ProbableDuplicates []string `json:"probable_duplicates,omitempty"`
 	Criterion      string          `json:"criterion,omitempty"`
 
 	// ValueConflicts lists fields where the incoming item carries a different
@@ -69,78 +72,10 @@ type ReconcileResult struct {
 	ValueConflicts []string `json:"value_conflicts,omitempty"`
 }
 
-// Reconcile matches an incoming discovery item against existing CIs using the
-// configured identity priority order (spec §5.3):
-//
-//  1. Seriennummer
-//  2. Chassis-/Hardware-UUID
-//  3. MAC-Adresse(n)
-//  4. Management-IP + sysObjectID/CI-Typ
-//  5. Hostname/FQDN
-//
-// On a match, ValueConflicts reports identity fields where the incoming item
-// contradicts the stored CI; whether an incoming value is written is decided
-// per field by override.DecideAutomatedWrite (REC-03).
+// Reconcile matches an incoming discovery item against existing CIs by the
+// identity rules of REC-02 (ResolveIdentity) without type or VRF context.
 func Reconcile(existing []ci.Item, incoming IngestItem) ReconcileResult {
-	criteria := []struct {
-		name  string
-		match func(ci.Item) bool
-	}{
-		{
-			name: "serial_number",
-			match: func(item ci.Item) bool {
-				return normalizedEqual(item.SerialNumber, incoming.SerialNumber)
-			},
-		},
-		{
-			name: "hardware_uuid",
-			match: func(item ci.Item) bool {
-				return normalizedEqual(existingFingerprintValue(item, "hardware_uuid"), fingerprintString(incoming.Fingerprint["hardware_uuid"])) ||
-					normalizedEqual(item.HardwareUUID, incoming.HardwareUUID)
-			},
-		},
-		{
-			name: "mac_addresses",
-			match: func(item ci.Item) bool {
-				return macAddressOverlap(existingFingerprintSlice(item, "mac_addresses"), fingerprintSlice(incoming.Fingerprint["mac_addresses"])) ||
-					normalizedMACEqual(item.PrimaryMAC, incoming.PrimaryMAC)
-			},
-		},
-		{
-			name: "management_ip_ci_type",
-			match: func(item ci.Item) bool {
-				return normalizedEqual(item.ManagementIP, incoming.ManagementIP) && normalizedEqual(item.CITypeID, incoming.CITypeName)
-			},
-		},
-		{
-			name: "hostname_fqdn",
-			match: func(item ci.Item) bool {
-				if normalizedEqual(item.FQDN, incoming.FQDN) {
-					return true
-				}
-				if normalizedEqual(item.Hostname, incoming.Hostname) {
-					return true
-				}
-				// Backwards compatibility: the item name carries the hostname
-				// for sweeps and SSH collections.
-				return normalizedEqual(item.Name, incoming.Name)
-			},
-		},
-	}
-
-	for _, criterion := range criteria {
-		matches := matchingItems(existing, criterion.match)
-		if len(matches) == 1 {
-			result := ReconcileResult{Action: ReconcileMatched, MatchedCIID: matches[0].ID, Criterion: criterion.name}
-			result.ValueConflicts = identityConflicts(matches[0], incoming)
-			return result
-		}
-		if len(matches) > 1 {
-			return ReconcileResult{Action: ReconcileConflict, CandidateCIIDs: collectIDs(matches), Criterion: criterion.name}
-		}
-	}
-
-	return ReconcileResult{Action: ReconcileCreated}
+	return ResolveIdentity(existing, &incoming, nil)
 }
 
 // identityConflicts compares the strong identity fields of a matched CI with

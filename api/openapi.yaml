@@ -3681,7 +3681,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [ambiguous_identity, conflicting_values, unclassified_device, override_conflict, unlicensed_ci]
+            enum: [ambiguous_identity, conflicting_values, unclassified_device, override_conflict, unlicensed_ci, serial_mismatch, probable_duplicate]
       responses:
         '200':
           description: Paginated list of review items
@@ -12380,7 +12380,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [ambiguous_identity, conflicting_values, unclassified_device, override_conflict, unlicensed_ci]
+          enum: [ambiguous_identity, conflicting_values, unclassified_device, override_conflict, unlicensed_ci, serial_mismatch, probable_duplicate]
         status:
           type: string
           enum: [open, resolved, dismissed]

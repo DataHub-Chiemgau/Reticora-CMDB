@@ -72,6 +72,9 @@ type IngestItem struct {
 	PrimaryMAC   string `json:"primary_mac,omitempty"`
 	Hostname     string `json:"hostname,omitempty"`
 	FQDN         string `json:"fqdn,omitempty"`
+	// SysObjectID identifies the SNMP device model; with the management IP
+	// and VRF it identifies a device (REC-02).
+	SysObjectID string `json:"sys_object_id,omitempty"`
 
 	// Interfaces discovered on the CI (MACs feed neighbor resolution).
 	Interfaces []wire.IngestInterface `json:"interfaces,omitempty"`
@@ -821,10 +824,13 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 		resp.ReviewItems++
 	}
 
-	existing, total, err := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 10000, Offset: 0})
+	// The CI count for max_cis; identity candidates are looked up per item
+	// over the whole inventory (REC-02).
+	_, total, err := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 1})
 	if err != nil {
 		return resp, err
 	}
+	identity := h.identityContext(ctx, orgID)
 
 	// Reconciliation compares stored CIs (UUID type) against the incoming
 	// item, so the item must carry the resolved UUID as well.
@@ -844,7 +850,11 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			// Unresolvable CI type: already queued for review above.
 			continue
 		}
-		result := Reconcile(existing, item)
+		candidates, err := h.identityCandidates(ctx, orgID, &item)
+		if err != nil {
+			return resp, err
+		}
+		result := ResolveIdentity(candidates, &item, identity)
 		now := time.Now().UTC().Format(time.RFC3339)
 		source := item.Source
 		if source == "" {
@@ -870,16 +880,25 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 					continue
 				}
 			}
+			withoutTakenIdentity(&item, candidates)
 			newItem, err := h.createDiscoveredCI(ctx, orgID, &item, typeIDs[i], source)
 			if err != nil {
 				return resp, err
 			}
 			total++
-			existing = append(existing, newItem)
 			resolvedCIID[i] = newItem.ID
 			resp.Created++
+			// A hostname or FQDN hit is never merged (CH29): the new CI is
+			// reviewed as a probable duplicate.
+			if len(result.ProbableDuplicates) > 0 {
+				review := probableDuplicateReview(orgID, newItem.ID, &item, result.ProbableDuplicates)
+				if reviewErr := h.repo.CreateReviewItem(ctx, review); reviewErr != nil {
+					return resp, reviewErr
+				}
+				resp.ReviewItems++
+			}
 		case ReconcileMatched:
-			matched := findCI(existing, result.MatchedCIID)
+			matched := findCI(candidates, result.MatchedCIID)
 			if matched == nil {
 				matched = &ci.Item{ID: result.MatchedCIID}
 			}
@@ -962,12 +981,6 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			if conflict {
 				resp.ProtectedOverrides++
 			}
-			for j := range existing {
-				if existing[j].ID == updated.ID {
-					existing[j] = *updated
-					break
-				}
-			}
 			resolvedCIID[i] = updated.ID
 			resp.Updated++
 			// Contradicting identity values on a matched CI (e.g. a changed
@@ -992,7 +1005,7 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 		}
 	}
 
-	resp.Relationships = h.deriveTopology(ctx, orgID, req.Items, resolvedCIID, existing)
+	resp.Relationships = h.deriveTopology(ctx, orgID, req.Items, resolvedCIID, h.neighborCandidates(ctx, orgID, req.Items))
 	return resp, h.markProcessed(ctx, orgID, req.Items)
 }
 

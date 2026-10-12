@@ -77,7 +77,9 @@ func discoveredAttributes(item *IngestItem) map[string]any {
 func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *IngestItem, typeID, source string) (ci.Item, error) {
 	now := time.Now().UTC()
 	newItem := ci.Item{
-		OrganizationID:  orgID,
+		OrganizationID: orgID,
+		// The client of the discovery scope (REC-02).
+		ClientID:        item.ClientID,
 		CITypeID:        typeID,
 		Name:            item.Name,
 		Status:          "active",
@@ -89,6 +91,7 @@ func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *In
 		PrimaryMAC:      item.PrimaryMAC,
 		Hostname:        item.Hostname,
 		FQDN:            item.FQDN,
+		SysObjectID:     item.SysObjectID,
 		Attributes:      discoveredAttributes(item),
 		DiscoverySource: source,
 		FirstSeenAt:     &now,

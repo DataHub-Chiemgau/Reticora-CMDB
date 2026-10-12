@@ -176,7 +176,7 @@ func TestBulkIngestDerivesTopology(t *testing.T) {
 	h := NewHandler(repo, ciRepo, relRepo)
 	mux := newTestRouter(h)
 
-	body := `{"collector_id":"c1","items":[{"fingerprint":{},"raw_data":{},"ci_type_name":"server","name":"srv1","management_ip":"10.0.0.1","relationships":[{"target_ip":"10.0.0.2","type_key":"powered_by","confidence":0.8}]}]}`
+	body := `{"collector_id":"c1","items":[{"fingerprint":{},"raw_data":{},"ci_type_name":"server","name":"srv1","serial_number":"SRV1-SN","management_ip":"10.0.0.1","relationships":[{"target_ip":"10.0.0.2","type_key":"powered_by","confidence":0.8}]}]}`
 	resp := doJSON(t, mux, "POST", "/api/v1/ingest/bulk", body)
 	if resp.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d: %s", resp.Code, resp.Body.String())

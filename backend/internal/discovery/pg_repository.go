@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -680,4 +682,67 @@ func (r *PGRepository) MarkRecordsProcessed(ctx context.Context, orgID string, r
 			orgID, RecordDedupeWindow.String())
 		return err
 	})
+}
+
+// IdentityCandidates returns the ids of the CIs an incoming device may be,
+// using the indexes on serial number, hardware UUID, primary MAC, management
+// IP and hostname/FQDN plus the attribute index for interface MACs, over the
+// whole inventory of the organization (REC-02, NFR-01). Soft-deleted CIs are
+// excluded.
+func (r *PGRepository) IdentityCandidates(ctx context.Context, orgID string, q *IdentityQuery) ([]string, error) {
+	var ids []string
+	macDocs := make([]string, 0, len(q.MACs))
+	for _, mac := range q.MACs {
+		macDocs = append(macDocs, `{"fingerprint":{"mac_addresses":["`+mac+`"]}}`)
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT id::text FROM ci WHERE organization_id = $1 AND deleted_at IS NULL AND (
+				($2 <> '' AND serial_number = $2)
+				OR ($3 <> '' AND hardware_uuid = NULLIF($3, '')::uuid)
+				OR primary_mac = ANY($4::macaddr[])
+				OR attributes @> ANY($5::jsonb[])
+				OR ($6 <> '' AND management_ip = NULLIF($6, '')::inet)
+				OR lower(hostname) = ANY($7::text[])
+				OR lower(fqdn) = ANY($7::text[])
+			)
+			ORDER BY created_at, id
+			LIMIT 1000`,
+			orgID, q.SerialNumber, q.HardwareUUID, q.MACs, macDocs, hostOnly(q.ManagementIP), q.Hostnames)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			ids = append(ids, id)
+		}
+		return rows.Err()
+	})
+	return ids, err
+}
+
+// hostOnly drops a prefix length and anything that is no IP address.
+func hostOnly(ip string) string {
+	ip = strings.TrimSpace(ip)
+	if i := strings.IndexByte(ip, '/'); i >= 0 {
+		ip = ip[:i]
+	}
+	if net.ParseIP(ip) == nil {
+		return ""
+	}
+	return ip
+}
+
+// DefaultVRF returns the organization's default VRF; records without vrf_id
+// belong to it (REC-02).
+func (r *PGRepository) DefaultVRF(ctx context.Context, orgID string) (string, error) {
+	var id string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT COALESCE(default_vrf_of($1)::text, '')`, orgID).Scan(&id)
+	})
+	return id, err
 }
