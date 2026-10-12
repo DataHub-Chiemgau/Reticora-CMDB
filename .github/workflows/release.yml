@@ -20,7 +20,12 @@ env:
   REGISTRY: ghcr.io/datahub-chiemgau
 
 jobs:
+  # A release is only published when the outage suite passes (OPS-06).
+  outage:
+    uses: ./.github/workflows/outage.yml
+
   binaries:
+    needs: outage
     runs-on: ubuntu-latest
     permissions:
       contents: write   # attach the files to the GitHub release
@@ -95,6 +100,7 @@ jobs:
         run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/*
 
   images:
+    needs: outage
     runs-on: ubuntu-latest
     permissions:
       contents: read

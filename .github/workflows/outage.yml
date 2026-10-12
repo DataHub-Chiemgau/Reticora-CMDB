@@ -1,0 +1,66 @@
+# Outage and backpressure suite (WP-104, OPS-06): installs the Compose stack
+# and simulates the outage of PostgreSQL, NATS, Redis and object storage,
+# plus the component scenarios (collector with the server unreachable,
+# spool limits, webhook target down). Runs nightly, before every release
+# (called by release.yml) and on changes to the suite.
+name: Outage Suite
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - "tests/outage/**"
+      - ".github/workflows/outage.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  outage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.9"
+
+      - name: Install the stack
+        run: ./install.sh --cloud --non-interactive
+        env:
+          RETICORA_SOURCE_DIR: ${{ github.workspace }}
+
+      - name: Run the outage scenarios
+        run: ./tests/outage/run.sh
+        env:
+          OUTAGE_REPORT: ${{ github.workspace }}/outage-report.md
+
+      - name: Publish the protocol
+        if: always()
+        run: |
+          [ -f outage-report.md ] && cat outage-report.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload the protocol
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: outage-report
+          path: outage-report.md
+          retention-days: 90
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          cd deploy/docker-compose
+          docker compose --env-file .env ps || true
+          docker compose --env-file .env logs --tail 100 server || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          cd deploy/docker-compose
+          docker compose --env-file .env down -v --remove-orphans || true

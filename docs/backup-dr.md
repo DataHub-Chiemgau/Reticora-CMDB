@@ -124,6 +124,29 @@ it is missing there). Check from backup whether rows were lost:
    and re-create the valid ones through the API. Record the check in the
    operations log.
 
+## Outage and backpressure suite (OPS-06)
+
+`tests/outage/run.sh` tests the behaviour on a dependency outage against an
+installed Compose stack. `.github/workflows/outage.yml` runs it every night,
+before every release (`release.yml` publishes only after it passed) and on
+changes to the suite. The protocol `outage-report.md` is kept as a workflow
+artifact for 90 days.
+
+| Scenario | Simulation | Expected |
+|---|---|---|
+| PostgreSQL, NATS, Redis, object storage (MinIO) | `docker compose stop <service>` for 30 s | `/readyz` answers 503 and reports exactly that dependency as `unavailable`, so load balancers stop routing (backpressure). The server process keeps running without restarts and is ready again after the restart. A marker row written before the outage is still there. |
+| Collector, server unreachable | `TestUploadRecords_FailureSpoolsAndFlushDelivers`, `TestHeartbeatReportsSpoolBackpressureAndLoss` | Records go to the spool and are delivered once the server is reachable. The spool level and every loss are reported. |
+| Collector spool limits | `TestDiskBufferSizeLimitAppliesBackpressure`, `TestDiskBufferMaxAgeKeepsMessagesFor24Hours`, `TestPersistenceAcrossBufferInstances` | A full spool refuses new data instead of dropping old data silently. The spool survives restarts. |
+| Webhook target down | `TestDispatcherPersistsAndRetriesFailedDelivery`, `TestDispatcherMarksDeliveryFailedAfterMaxAttempts` | Deliveries are persisted and retried. After the last attempt they go to the dead-letter queue. |
+| SMTP | — | Not applicable while no SMTP delivery exists (TEC-13). It becomes a scenario with the notification channel. |
+
+Run it locally after `./install.sh --cloud --non-interactive`:
+
+```bash
+./tests/outage/run.sh            # all scenarios
+./tests/outage/run.sh nats redis # selected scenarios
+```
+
 ## DR checklist
 
 - [ ] Confirm the last successful base backup / WAL archive lag is within RPO.

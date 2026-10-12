@@ -260,3 +260,4 @@ OPS-02;[B], [P3], [A];A;backend/internal/config/config_test.go;WP-098
 TEC-15;[B];A;edgecore/update/update_test.go;WP-102
 COL-06;[B], Air-Gapped [O];A;edgecore/update/update_test.go;WP-102
 OPS-05;[B];A;backend/internal/server/workers_test.go;WP-103
+OPS-06;[Q];A;tests/outage/;WP-104
