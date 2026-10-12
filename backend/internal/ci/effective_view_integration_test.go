@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -74,7 +75,7 @@ func TestEffectiveViewAndOverrideClear(t *testing.T) {
 	}
 
 	// Clearing returns to the current observed value.
-	if _, err := overrides.RecordDiscovered(ctx, f.OrgA, ciID, "model", "discovered-model", "snmp"); err != nil {
+	if _, err := overrides.RecordDiscovered(ctx, f.OrgA, ciID, "model", "discovered-model", "snmp", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := overrides.ClearOverride(ctx, f.OrgA, ciID, "model"); err != nil {

@@ -21,7 +21,7 @@ const selectColumns = `
 	discovered_value, COALESCE(discovered_source, ''), discovered_at,
 	override_value, COALESCE(override_author::text, ''),
 	COALESCE(override_reason, ''), override_at, protected,
-	created_at, updated_at
+	created_at, updated_at, COALESCE(discovered_rank, 0), observed_at
 `
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
@@ -132,7 +132,10 @@ func (r *PGRepository) Get(ctx context.Context, orgID, ciID, fieldName string) (
 // RecordDiscovered upserts only the discovered columns. The override columns
 // are excluded from the upsert's SET clause, so a protected manual override
 // is never overwritten by discovery (spec §13).
-func (r *PGRepository) RecordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string) (*FieldValue, error) {
+func (r *PGRepository) RecordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string, observedAt time.Time) (*FieldValue, error) {
+	if observedAt.IsZero() {
+		observedAt = time.Now()
+	}
 	var out *FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := requireVisibleCI(ctx, tx, ciID); err != nil {
@@ -141,14 +144,16 @@ func (r *PGRepository) RecordDiscovered(ctx context.Context, orgID, ciID, fieldN
 		row := tx.QueryRow(ctx, fmt.Sprintf(`
 			INSERT INTO ci_field_value (
 				organization_id, ci_id, field_name, discovered_value,
-				discovered_source, discovered_at
-			) VALUES ($1, $2, $3, $4, $5, now())
+				discovered_source, discovered_at, discovered_rank, observed_at
+			) VALUES ($1, $2, $3, $4, $5, now(), $6, $7)
 			ON CONFLICT (ci_id, field_name) DO UPDATE SET
 				discovered_value = EXCLUDED.discovered_value,
 				discovered_source = EXCLUDED.discovered_source,
-				discovered_at = EXCLUDED.discovered_at
+				discovered_at = EXCLUDED.discovered_at,
+				discovered_rank = EXCLUDED.discovered_rank,
+				observed_at = EXCLUDED.observed_at
 			RETURNING %s`, selectColumns),
-			orgID, ciID, fieldName, jsonValue(value), nilIfEmpty(source))
+			orgID, ciID, fieldName, jsonValue(value), nilIfEmpty(source), SourceRank(source), observedAt.UTC())
 		fv, err := scan(row)
 		if err != nil {
 			return fmt.Errorf("record discovered value: %w", err)
@@ -384,12 +389,12 @@ type scanner interface {
 func scan(s scanner) (*FieldValue, error) {
 	fv := &FieldValue{}
 	var discoveredRaw, overrideRaw []byte
-	var discoveredAt, overrideAt *time.Time
+	var discoveredAt, overrideAt, observedAt *time.Time
 	if err := s.Scan(
 		&fv.ID, &fv.OrganizationID, &fv.CIID, &fv.FieldName,
 		&discoveredRaw, &fv.DiscoveredSource, &discoveredAt,
 		&overrideRaw, &fv.OverrideAuthor, &fv.OverrideReason, &overrideAt,
-		&fv.Protected, &fv.CreatedAt, &fv.UpdatedAt,
+		&fv.Protected, &fv.CreatedAt, &fv.UpdatedAt, &fv.DiscoveredRank, &observedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -400,6 +405,7 @@ func scan(s scanner) (*FieldValue, error) {
 		_ = json.Unmarshal(overrideRaw, &fv.OverrideValue)
 	}
 	fv.DiscoveredAt = discoveredAt
+	fv.ObservedAt = observedAt
 	fv.OverrideAt = overrideAt
 	return fv, nil
 }

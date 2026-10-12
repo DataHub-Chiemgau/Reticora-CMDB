@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -25,7 +26,7 @@ func TestOverrideRepositoryClientScope(t *testing.T) {
 	repo := override.NewPGRepository(f.App)
 	orgCtx := f.OrgCtx(f.OrgA)
 	for _, id := range []string{own, foreign} {
-		if _, err := repo.RecordDiscovered(orgCtx, f.OrgA, id, "hostname", "discovered", "snmp"); err != nil {
+		if _, err := repo.RecordDiscovered(orgCtx, f.OrgA, id, "hostname", "discovered", "snmp", time.Now()); err != nil {
 			t.Fatalf("org-wide discovered value on %s: %v", id, err)
 		}
 		if _, err := repo.SetOverride(orgCtx, f.OrgA, id, "hostname", "manual", f.User, "fixture", true); err != nil {
@@ -50,7 +51,7 @@ func TestOverrideRepositoryClientScope(t *testing.T) {
 	if _, err = repo.SetOverride(ctx, f.OrgA, foreign, "hostname", "hijacked", f.User, "test", true); err == nil {
 		t.Fatal("client-1 principal set an override on a client-2 CI")
 	}
-	if _, err = repo.RecordDiscovered(ctx, f.OrgA, foreign, "hostname", "hijacked", "snmp"); err == nil {
+	if _, err = repo.RecordDiscovered(ctx, f.OrgA, foreign, "hostname", "hijacked", "snmp", time.Now()); err == nil {
 		t.Fatal("client-1 principal recorded a discovered value on a client-2 CI")
 	}
 	if _, err = repo.ClearOverride(ctx, f.OrgA, foreign, "hostname"); err == nil {

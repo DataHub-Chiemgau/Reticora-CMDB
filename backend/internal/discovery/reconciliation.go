@@ -3,11 +3,48 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 )
+
+// MaxFutureSkew is how far observed_at may lie after the arrival time before
+// a record is rejected (GLO-12).
+const MaxFutureSkew = 5 * time.Minute
+
+var futureRecordsRejected atomic.Int64
+
+// FutureRecordsRejected is the number of records rejected since start because
+// their observed_at lay more than MaxFutureSkew in the future.
+func FutureRecordsRejected() int64 { return futureRecordsRejected.Load() }
+
+// admitObservedAt prepares the source times of an ingest (GLO-12): items
+// without observed_at (the deprecated items contract) take the arrival time;
+// items observed more than MaxFutureSkew after arrival are removed and
+// counted. It returns the admitted items and the number removed.
+func admitObservedAt(items []IngestItem, arrival time.Time) (admitted []IngestItem, rejected int) {
+	admitted = items[:0]
+	for i := range items {
+		item := items[i]
+		if item.ObservedAt.IsZero() {
+			item.ObservedAt = arrival
+		}
+		if item.ObservedAt.After(arrival.Add(MaxFutureSkew)) {
+			rejected++
+			futureRecordsRejected.Add(1)
+			slog.Warn("ingest record rejected: observed_at lies in the future",
+				"event", "ingest.record.future", "record_id", item.RecordID,
+				"observed_at", item.ObservedAt, "arrival", arrival)
+			continue
+		}
+		admitted = append(admitted, item)
+	}
+	return admitted, rejected
+}
 
 // ReconcileAction represents the reconciliation outcome.
 type ReconcileAction string

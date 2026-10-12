@@ -5781,6 +5781,8 @@ export interface components {
       created: number;
       updated: number;
       conflicts: number;
+      /** @description Records whose observed_at lies more than five minutes in the future; they are rejected and counted (GLO-12). */
+      rejected_future?: number;
       /** @description New devices held as unlicensed_ci review items because max_cis is reached (ENT-03, CH21). */
       unlicensed?: number;
       job_id?: string;
@@ -6860,8 +6862,18 @@ export interface components {
       /** @description Last value an automation source reported and that was written or observed under an override */
       discovered_value?: unknown;
       discovered_source?: string;
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description Time the value was recorded
+       */
       discovered_at?: string;
+      /** @description REC-03 rank of discovered_source when the value was recorded */
+      discovered_rank?: number;
+      /**
+       * Format: date-time
+       * @description Source time of the discovered value (GLO-12); same-rank values replace it only when observed later
+       */
+      observed_at?: string;
       /** @description Manual value; null with override_at set records a removed field */
       override_value?: unknown;
       override_author?: string;

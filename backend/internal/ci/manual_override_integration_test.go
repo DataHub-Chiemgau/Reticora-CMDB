@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -21,8 +22,8 @@ import (
 // provenance adapts the override repository to discovery as the server does.
 type provenance struct{ repo *override.PGRepository }
 
-func (p provenance) RecordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string) (*discovery.FieldProvenance, error) {
-	fv, err := p.repo.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source)
+func (p provenance) RecordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string, observedAt time.Time) (*discovery.FieldProvenance, error) {
+	fv, err := p.repo.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source, observedAt)
 	if err != nil {
 		return nil, err
 	}

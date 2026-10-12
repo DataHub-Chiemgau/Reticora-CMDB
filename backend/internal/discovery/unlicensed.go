@@ -41,8 +41,14 @@ var unlicensedQueued atomic.Int64
 // start.
 func UnlicensedQueued() int64 { return unlicensedQueued.Load() }
 
-// RegisterMetrics registers reticora_unlicensed_ci_total (ENT-03).
+// RegisterMetrics registers reticora_unlicensed_ci_total (ENT-03) and
+// reticora_ingest_future_records_total (GLO-12).
 func RegisterMetrics(reg prometheus.Registerer) {
+	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
+		Namespace: "reticora",
+		Name:      "ingest_future_records_total",
+		Help:      "Ingested records rejected because observed_at is more than five minutes in the future.",
+	}, func() float64 { return float64(FutureRecordsRejected()) }))
 	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
 		Namespace: "reticora",
 		Name:      "unlicensed_ci_total",
@@ -98,10 +104,10 @@ func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *In
 		"serial_number": item.SerialNumber, "management_ip": item.ManagementIP,
 		"hostname": item.Hostname, "fqdn": item.FQDN,
 	} {
-		h.recordDiscovered(ctx, orgID, newItem.ID, field, value, source)
+		h.recordDiscovered(ctx, orgID, newItem.ID, field, value, source, item.ObservedAt)
 	}
 	for k, v := range item.Attributes {
-		h.recordDiscovered(ctx, orgID, newItem.ID, k, v, source)
+		h.recordDiscovered(ctx, orgID, newItem.ID, k, v, source, item.ObservedAt)
 	}
 	return newItem, nil
 }

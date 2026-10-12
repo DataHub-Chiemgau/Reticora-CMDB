@@ -18,7 +18,7 @@ type Repository interface {
 	// RecordDiscovered upserts the discovered side of a field. It never
 	// touches the override side: a protected manual override survives every
 	// discovery run (spec §13).
-	RecordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string) (*FieldValue, error)
+	RecordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string, observedAt time.Time) (*FieldValue, error)
 	SetOverride(ctx context.Context, orgID, ciID, fieldName string, value any, author, reason string, protected bool) (*FieldValue, error)
 	ClearOverride(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error)
 	// Conflicts returns field values where discovered and effective diverge.
@@ -119,14 +119,20 @@ func (r *MemoryRepository) upsertLocked(orgID, ciID, fieldName string, mutate fu
 
 // RecordDiscovered updates only the discovered side; the override columns
 // stay untouched so protected overrides survive (spec §13).
-func (r *MemoryRepository) RecordDiscovered(_ context.Context, orgID, ciID, fieldName string, value any, source string) (*FieldValue, error) {
+func (r *MemoryRepository) RecordDiscovered(_ context.Context, orgID, ciID, fieldName string, value any, source string, observedAt time.Time) (*FieldValue, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := time.Now().UTC()
+	if observedAt.IsZero() {
+		observedAt = now
+	}
+	observedAt = observedAt.UTC()
 	fv := r.upsertLocked(orgID, ciID, fieldName, func(fv *FieldValue) {
 		fv.DiscoveredValue = value
 		fv.DiscoveredSource = source
 		fv.DiscoveredAt = &now
+		fv.DiscoveredRank = SourceRank(source)
+		fv.ObservedAt = &observedAt
 	})
 	return r.withEffective(fv), nil
 }

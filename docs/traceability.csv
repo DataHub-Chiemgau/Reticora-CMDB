@@ -234,3 +234,5 @@ NET-02;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
 NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
 DIS-05;[B];D;backend/internal/discovery/devicerecord_test.go;WP-083
 GLO-12;[B];D;backend/internal/discovery/devicerecord_test.go;WP-083
+GLO-12;[B];D;backend/internal/override/decide_test.go;WP-084
+REC-05;[B];D;backend/internal/override/decide_test.go;WP-084

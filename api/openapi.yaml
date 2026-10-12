@@ -9700,6 +9700,11 @@ components:
           type: integer
         conflicts:
           type: integer
+        rejected_future:
+          type: integer
+          description: >-
+            Records whose observed_at lies more than five minutes in the
+            future; they are rejected and counted (GLO-12).
         unlicensed:
           type: integer
           description: >-
@@ -11423,7 +11428,9 @@ components:
         field_name: { type: string }
         discovered_value: { description: Last value an automation source reported and that was written or observed under an override }
         discovered_source: { type: string }
-        discovered_at: { type: string, format: date-time }
+        discovered_at: { type: string, format: date-time, description: Time the value was recorded }
+        discovered_rank: { type: integer, description: REC-03 rank of discovered_source when the value was recorded }
+        observed_at: { type: string, format: date-time, description: Source time of the discovered value (GLO-12); same-rank values replace it only when observed later }
         override_value: { description: Manual value; null with override_at set records a removed field }
         override_author: { type: string }
         override_reason: { type: string }

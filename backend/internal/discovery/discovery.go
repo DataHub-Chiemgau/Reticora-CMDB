@@ -108,6 +108,9 @@ type BulkIngestResponse struct {
 	// ProtectedInstanceFields counts matched CIs where discovered values for
 	// instance attributes were not written (MET-14).
 	ProtectedInstanceFields int `json:"protected_instance_fields,omitempty"`
+	// RejectedFuture counts records observed more than five minutes in the
+	// future; they change nothing (GLO-12).
+	RejectedFuture int `json:"rejected_future,omitempty"`
 	// Unlicensed counts new devices held as unlicensed_ci because max_cis is
 	// reached (ENT-03, CH21); already queued devices count again.
 	Unlicensed int    `json:"unlicensed,omitempty"`
@@ -303,7 +306,7 @@ func enrollmentCodeHash(raw string) string {
 // keeps per-field discovered/discovered_source/discovered_at state and never
 // overwrites protected manual overrides.
 type ProvenanceRecorder interface {
-	RecordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string) (*FieldProvenance, error)
+	RecordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string, observedAt time.Time) (*FieldProvenance, error)
 	// Decide is the central, fail-closed write decision for automation
 	// sources (override.DecideAutomatedWrite, REC-03): discovery writes a
 	// field of an existing CI only when it permits.
@@ -390,11 +393,11 @@ func (h *Handler) stripInstanceFields(ctx context.Context, orgID, ciID string, a
 
 // recordDiscovered fields the provenance of one applied field. It never
 // fails the ingest: provenance is best-effort alongside the audited CI row.
-func (h *Handler) recordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string) {
+func (h *Handler) recordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string, observedAt time.Time) {
 	if h.provenance == nil || ciID == "" {
 		return
 	}
-	_, _ = h.provenance.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source)
+	_, _ = h.provenance.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source, observedAt)
 }
 
 // decide applies the central write decision; without a provenance store
@@ -737,9 +740,14 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Times compare by the source's observed_at (GLO-12): items of the
+	// deprecated contract carry none and take the arrival time; records
+	// from the future are rejected and counted.
+	received := len(items)
+	items, rejected := admitObservedAt(items, time.Now().UTC())
 	req := BulkIngestRequest{Items: items}
 
-	resp := BulkIngestResponse{Received: len(req.Items)}
+	resp := BulkIngestResponse{Received: received, RejectedFuture: rejected}
 	if h.ciRepo == nil {
 		api.WriteJSON(w, http.StatusAccepted, resp)
 		return
@@ -844,11 +852,11 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			if matched == nil {
 				matched = &ci.Item{ID: result.MatchedCIID}
 			}
-			observedAt := time.Now().UTC()
+			observedAt := item.ObservedAt
 			// Every field goes through the central write decision (REC-03):
 			// overrides are never overwritten, ranks and observation times
 			// decide the rest, unreadable state writes nothing.
-			conflict := false
+			conflict, refused := false, false
 			decide := func(field string, value, current any) bool {
 				d := h.decide(r.Context(), &override.Write{
 					OrganizationID: t.OrganizationID, CIID: matched.ID, Field: field, Value: value,
@@ -857,7 +865,11 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 				if d.Write || d.Conflict || d.Reason == override.ReasonOverride {
 					// Observed under an override or written: the provenance
 					// keeps the reported value (REC-12, REC-10).
-					h.recordDiscovered(r.Context(), t.OrganizationID, matched.ID, field, value, source)
+					h.recordDiscovered(r.Context(), t.OrganizationID, matched.ID, field, value, source, observedAt)
+				}
+				switch d.Reason {
+				case override.ReasonLowerRank, override.ReasonStale, override.ReasonError:
+					refused = true
 				}
 				if d.Conflict {
 					conflict = true
@@ -868,9 +880,6 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 				return d.Write
 			}
 			update := ci.UpdateRequest{LastSeenAt: &now}
-			if override.SourceRank(source) >= override.SourceRank(matched.DiscoverySource) {
-				update.DiscoverySource = &source
-			}
 			for _, f := range []struct {
 				name           string
 				value, current string
@@ -904,6 +913,11 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 				if decide(k, v, matched.Attributes[k]) {
 					writes[k] = v
 				}
+			}
+			// A source whose values were refused does not become the CI's
+			// discovery source (REC-05).
+			if !refused && override.SourceRank(source) >= override.SourceRank(matched.DiscoverySource) {
+				update.DiscoverySource = &source
 			}
 			// Instance attributes of this CI are never written (MET-14).
 			if h.stripInstanceFields(r.Context(), t.OrganizationID, matched.ID, writes, item.Attributes) {
