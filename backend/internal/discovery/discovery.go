@@ -115,6 +115,9 @@ type BulkIngestResponse struct {
 	// Duplicates counts records whose record_id was processed within the
 	// last 48 hours; they change nothing (REC-01).
 	Duplicates int `json:"duplicates,omitempty"`
+	// Resurrected counts records that match a soft-deleted CI; they are held
+	// in a resurrected_device review instead of creating a CI (CI-13).
+	Resurrected int `json:"resurrected,omitempty"`
 	// Queued counts records published to the ingest.> queue; they are
 	// processed asynchronously (REC-01).
 	Queued int `json:"queued,omitempty"`
@@ -855,6 +858,20 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			return resp, err
 		}
 		result := ResolveIdentity(candidates, &item, identity)
+		// No live CI: a soft-deleted one may be the device (CI-13).
+		if result.Action == ReconcileCreated {
+			held, reviewed, resErr := h.resurrection(ctx, orgID, &item, identity)
+			if resErr != nil {
+				return resp, resErr
+			}
+			if held {
+				resp.Resurrected++
+				if reviewed {
+					resp.ReviewItems++
+				}
+				continue
+			}
+		}
 		now := time.Now().UTC().Format(time.RFC3339)
 		source := item.Source
 		if source == "" {

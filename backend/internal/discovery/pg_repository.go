@@ -10,6 +10,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -691,24 +692,9 @@ func (r *PGRepository) MarkRecordsProcessed(ctx context.Context, orgID string, r
 // excluded.
 func (r *PGRepository) IdentityCandidates(ctx context.Context, orgID string, q *IdentityQuery) ([]string, error) {
 	var ids []string
-	macDocs := make([]string, 0, len(q.MACs))
-	for _, mac := range q.MACs {
-		macDocs = append(macDocs, `{"fingerprint":{"mac_addresses":["`+mac+`"]}}`)
-	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `
-			SELECT id::text FROM ci WHERE organization_id = $1 AND deleted_at IS NULL AND (
-				($2 <> '' AND serial_number = $2)
-				OR ($3 <> '' AND hardware_uuid = NULLIF($3, '')::uuid)
-				OR primary_mac = ANY($4::macaddr[])
-				OR attributes @> ANY($5::jsonb[])
-				OR ($6 <> '' AND management_ip = NULLIF($6, '')::inet)
-				OR lower(hostname) = ANY($7::text[])
-				OR lower(fqdn) = ANY($7::text[])
-			)
-			ORDER BY created_at, id
-			LIMIT 1000`,
-			orgID, q.SerialNumber, q.HardwareUUID, q.MACs, macDocs, hostOnly(q.ManagementIP), q.Hostnames)
+		rows, err := tx.Query(ctx, `SELECT id::text FROM ci WHERE organization_id = $1 AND deleted_at IS NULL AND `+identityPredicate+`
+			ORDER BY created_at, id LIMIT 1000`, identityArgs(orgID, q)...)
 		if err != nil {
 			return err
 		}
@@ -723,6 +709,56 @@ func (r *PGRepository) IdentityCandidates(ctx context.Context, orgID string, q *
 		return rows.Err()
 	})
 	return ids, err
+}
+
+// DeletedIdentityCandidates returns the soft-deleted CIs an incoming device
+// may be, with the fields identity resolution compares (CI-13).
+func (r *PGRepository) DeletedIdentityCandidates(ctx context.Context, orgID string, q *IdentityQuery) ([]ci.Item, error) {
+	var out []ci.Item
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text, ci_type_id::text, COALESCE(client_id::text, ''), name,
+				COALESCE(serial_number, ''), COALESCE(hardware_uuid::text, ''), COALESCE(primary_mac::text, ''),
+				COALESCE(host(management_ip), ''), COALESCE(sys_object_id, ''), COALESCE(hostname, ''), COALESCE(fqdn, ''),
+				COALESCE(attributes, '{}'::jsonb), deleted_at
+			FROM ci WHERE organization_id = $1 AND deleted_at IS NOT NULL AND `+identityPredicate+`
+			ORDER BY deleted_at DESC, id LIMIT 1000`, identityArgs(orgID, q)...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			item := ci.Item{OrganizationID: orgID}
+			var deletedAt time.Time
+			if err := rows.Scan(&item.ID, &item.CITypeID, &item.ClientID, &item.Name, &item.SerialNumber, &item.HardwareUUID,
+				&item.PrimaryMAC, &item.ManagementIP, &item.SysObjectID, &item.Hostname, &item.FQDN, &item.Attributes, &deletedAt); err != nil {
+				return err
+			}
+			item.DeletedAt = &deletedAt
+			out = append(out, item)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// identityPredicate matches CIs by the indexed identity columns; its
+// arguments come from identityArgs.
+const identityPredicate = `(
+	($2 <> '' AND serial_number = $2)
+	OR ($3 <> '' AND hardware_uuid = NULLIF($3, '')::uuid)
+	OR primary_mac = ANY($4::macaddr[])
+	OR attributes @> ANY($5::jsonb[])
+	OR ($6 <> '' AND management_ip = NULLIF($6, '')::inet)
+	OR lower(hostname) = ANY($7::text[])
+	OR lower(fqdn) = ANY($7::text[])
+)`
+
+func identityArgs(orgID string, q *IdentityQuery) []any {
+	macDocs := make([]string, 0, len(q.MACs))
+	for _, mac := range q.MACs {
+		macDocs = append(macDocs, `{"fingerprint":{"mac_addresses":["`+mac+`"]}}`)
+	}
+	return []any{orgID, q.SerialNumber, q.HardwareUUID, q.MACs, macDocs, hostOnly(q.ManagementIP), q.Hostnames}
 }
 
 // hostOnly drops a prefix length and anything that is no IP address.

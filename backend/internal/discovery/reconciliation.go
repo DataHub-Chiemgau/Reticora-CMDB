@@ -63,7 +63,7 @@ type ReconcileResult struct {
 	// ProbableDuplicates are CIs sharing the hostname or FQDN of a new CI
 	// (REC-02, CH29); they are reviewed, never merged.
 	ProbableDuplicates []string `json:"probable_duplicates,omitempty"`
-	Criterion      string          `json:"criterion,omitempty"`
+	Criterion          string   `json:"criterion,omitempty"`
 
 	// ValueConflicts lists fields where the incoming item carries a different
 	// non-empty identity value than the matched CI (e.g. a changed serial

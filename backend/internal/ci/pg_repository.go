@@ -466,6 +466,31 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	})
 }
 
+// Restore reactivates a soft-deleted CI (CI-13): an operator decided that a
+// device seen again is the deleted one. It records the decision in the
+// change history and the audit trail.
+func (r *PGRepository) Restore(ctx context.Context, orgID, id string) (*Item, error) {
+	var restored *Item
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, "UPDATE ci SET deleted_at = NULL, updated_at = NOW() WHERE id = $1 AND organization_id = $2 AND deleted_at IS NOT NULL", id, orgID)
+		if err != nil {
+			return fmt.Errorf("restore ci: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("not found")
+		}
+		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2", ciSelectColumns)
+		if restored, err = scanCI(tx.QueryRow(ctx, query, id, orgID)); err != nil {
+			return fmt.Errorf("get restored ci: %w", err)
+		}
+		if changeErr := r.recordCIChange(ctx, tx, orgID, id, restored.Version, "reconciliation_decision", "deleted_at", "deleted", nil); changeErr != nil {
+			return changeErr
+		}
+		return r.recordAudit(ctx, tx, "ci.restored", restored, map[string]interface{}{"reason": "resurrected_device"})
+	})
+	return restored, err
+}
+
 // ListChanges returns paginated change history for a CI.
 func (r *PGRepository) ListChanges(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Change, int, error) {
 	changes := []Change{}

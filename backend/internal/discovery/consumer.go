@@ -216,6 +216,7 @@ func (r *BulkIngestResponse) add(o *BulkIngestResponse) {
 	r.ProtectedInstanceFields += o.ProtectedInstanceFields
 	r.Unlicensed += o.Unlicensed
 	r.Duplicates += o.Duplicates
+	r.Resurrected += o.Resurrected
 	r.Queued += o.Queued
 	r.RejectedFuture += o.RejectedFuture
 }

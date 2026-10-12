@@ -5783,6 +5783,8 @@ export interface components {
       conflicts: number;
       /** @description Records published to the ingest.> queue (REC-01); with NATS the records are processed asynchronously and the other counters stay 0. */
       queued?: number;
+      /** @description Records matching a soft-deleted CI; they are held in a resurrected_device review instead of creating a CI (CI-13). */
+      resurrected?: number;
       /** @description Records whose record_id was processed within the last 48 hours (REC-01). */
       duplicates?: number;
       /** @description Records whose observed_at lies more than five minutes in the future; they are rejected and counted (GLO-12). */
@@ -7489,7 +7491,8 @@ export interface components {
         | 'override_conflict'
         | 'unlicensed_ci'
         | 'serial_mismatch'
-        | 'probable_duplicate';
+        | 'probable_duplicate'
+        | 'resurrected_device';
       /** @enum {string} */
       status: 'open' | 'resolved' | 'dismissed';
       payload: {
@@ -12939,7 +12942,8 @@ export interface operations {
           | 'override_conflict'
           | 'unlicensed_ci'
           | 'serial_mismatch'
-          | 'probable_duplicate';
+          | 'probable_duplicate'
+          | 'resurrected_device';
       };
       header?: never;
       path?: never;

@@ -3681,7 +3681,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [ambiguous_identity, conflicting_values, unclassified_device, override_conflict, unlicensed_ci, serial_mismatch, probable_duplicate]
+            enum: [ambiguous_identity, conflicting_values, unclassified_device, override_conflict, unlicensed_ci, serial_mismatch, probable_duplicate, resurrected_device]
       responses:
         '200':
           description: Paginated list of review items
@@ -9705,6 +9705,11 @@ components:
           description: >-
             Records published to the ingest.> queue (REC-01); with NATS the
             records are processed asynchronously and the other counters stay 0.
+        resurrected:
+          type: integer
+          description: >-
+            Records matching a soft-deleted CI; they are held in a
+            resurrected_device review instead of creating a CI (CI-13).
         duplicates:
           type: integer
           description: Records whose record_id was processed within the last 48 hours (REC-01).
@@ -12380,7 +12385,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [ambiguous_identity, conflicting_values, unclassified_device, override_conflict, unlicensed_ci, serial_mismatch, probable_duplicate]
+          enum: [ambiguous_identity, conflicting_values, unclassified_device, override_conflict, unlicensed_ci, serial_mismatch, probable_duplicate, resurrected_device]
         status:
           type: string
           enum: [open, resolved, dismissed]

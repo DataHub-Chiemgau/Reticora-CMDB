@@ -25,6 +25,8 @@ const (
 	// from the serial number of its asset (DB-05, AST-04); opened by the
 	// database, at most one open item per CI.
 	ReviewKindSerialMismatch = "serial_mismatch"
+	// ReviewKindResurrectedDevice and ReviewKindProbableDuplicate are
+	// declared with the identity resolution (identity.go).
 
 	ReviewStatusOpen      = "open"
 	ReviewStatusResolved  = "resolved"
@@ -309,6 +311,14 @@ func (h *Handler) ResolveReviewItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A device seen again is reactivated as the deleted CI (merge) or
+	// becomes a new CI (create), CI-13.
+	if item.Kind == ReviewKindResurrectedDevice && body.Action == "merge" {
+		if !h.restoreCandidate(w, r, item, &body) {
+			return
+		}
+	}
+
 	switch body.Action {
 	case "merge":
 		if body.CIID == "" {
@@ -382,6 +392,35 @@ func (h *Handler) ResolveReviewItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, resolved)
+}
+
+// ciRestorer reactivates soft-deleted CIs; the PostgreSQL CI repository
+// implements it.
+type ciRestorer interface {
+	Restore(ctx context.Context, orgID, id string) (*ci.Item, error)
+}
+
+// restoreCandidate reactivates the deleted CI chosen to resolve a
+// resurrected_device review; it writes the error response and returns false
+// when that is impossible.
+func (h *Handler) restoreCandidate(w http.ResponseWriter, r *http.Request, item *ReviewItem, body *Resolution) bool {
+	if body.CIID == "" || !containsString(item.CandidateCIIDs, body.CIID) {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "ci_id must be one of the candidate CIs")
+		return false
+	}
+	restorer, ok := h.ciRepo.(ciRestorer)
+	if !ok {
+		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", "this repository cannot reactivate CIs")
+		return false
+	}
+	if _, err := restorer.Restore(r.Context(), item.OrganizationID, body.CIID); err != nil {
+		api.WriteRepoError(w, err)
+		return false
+	}
+	if body.Note == "" {
+		body.Note = "reactivated " + body.CIID
+	}
+	return true
 }
 
 // resolveUnlicensed adopts (action create) or discards (action dismiss) an

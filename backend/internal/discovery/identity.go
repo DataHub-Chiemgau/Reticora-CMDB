@@ -438,3 +438,63 @@ func probableDuplicateReview(orgID, newCIID string, incoming *IngestItem, candid
 		CandidateCIIDs: candidates,
 	}
 }
+
+// ReviewKindResurrectedDevice: a device matches a soft-deleted CI (CI-13);
+// an operator reactivates that CI or creates a new one. No CI is created
+// automatically (PRI-03).
+const ReviewKindResurrectedDevice = "resurrected_device"
+
+// DeletedCandidateFinder finds soft-deleted CIs by the identity indexes
+// (CI-13). The PostgreSQL repository implements it.
+type DeletedCandidateFinder interface {
+	DeletedIdentityCandidates(ctx context.Context, orgID string, q *IdentityQuery) ([]ci.Item, error)
+}
+
+// resurrection checks a device without a live match against the
+// soft-deleted CIs (CI-13). On a match by REC-02 it opens one
+// resurrected_device review per deleted CI and reports that the device is
+// held for it: reviewed reports whether a new review was opened.
+func (h *Handler) resurrection(ctx context.Context, orgID string, item *IngestItem, ic *IdentityContext) (held, reviewed bool, err error) {
+	finder, ok := h.repo.(DeletedCandidateFinder)
+	if !ok {
+		return false, false, nil
+	}
+	q := identityQuery(item)
+	if q.SerialNumber == "" && q.HardwareUUID == "" && len(q.MACs) == 0 && q.ManagementIP == "" {
+		return false, false, nil
+	}
+	deleted, err := finder.DeletedIdentityCandidates(ctx, orgID, &q)
+	if err != nil {
+		return false, false, fmt.Errorf("deleted identity candidates: %w", err)
+	}
+	res := ResolveIdentity(deleted, item, ic)
+	var candidates []string
+	switch res.Action {
+	case ReconcileMatched:
+		candidates = []string{res.MatchedCIID}
+	case ReconcileConflict:
+		candidates = res.CandidateCIIDs
+	default:
+		return false, false, nil
+	}
+	// One open review per deleted CI: a device seen again and again is
+	// not queued again.
+	open, _, err := h.repo.ListReviewItems(ctx, orgID, ReviewFilter{Status: ReviewStatusOpen, Kind: ReviewKindResurrectedDevice},
+		api.PaginationParams{Limit: 1000})
+	if err != nil {
+		return false, false, err
+	}
+	for i := range open {
+		for _, id := range open[i].CandidateCIIDs {
+			if containsString(candidates, id) {
+				return true, false, nil
+			}
+		}
+	}
+	review := reviewItemFromConflict(orgID, *item, ReconcileResult{CandidateCIIDs: candidates, Criterion: res.Criterion})
+	review.Kind = ReviewKindResurrectedDevice
+	if createErr := h.repo.CreateReviewItem(ctx, review); createErr != nil {
+		return false, false, createErr
+	}
+	return true, true, nil
+}

@@ -240,3 +240,4 @@ REC-01;[B];D;backend/internal/discovery/consumer_test.go;WP-085
 NFR-03;[B], Teilumfang [P5];D;backend/internal/discovery/consumer_test.go;WP-085
 REC-02;[B];D;backend/internal/discovery/identity_test.go;WP-086
 NFR-01;[B], Teilumfang [P5];D;backend/internal/discovery/identity_test.go;WP-086
+CI-13;[B];D;backend/internal/discovery/resurrect_test.go;WP-087
