@@ -276,7 +276,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 			nilIfEmpty(item.OSVersion),
 			nilIfEmpty(item.FirmwareVersion),
 			nilIfEmpty(item.SysObjectID),
-			item.Attributes,
+			storedAttributes(item.Attributes, nil),
 			nilIfEmpty(item.DiscoverySource),
 			item.FirstSeenAt,
 			item.LastSeenAt,
@@ -357,8 +357,14 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 
 		if req.Attributes != nil {
 			// RFC 7396: nested objects merge, null removes a member (CI-04).
-			setClauses = append(setClauses, fmt.Sprintf("attributes = $%d", argPos))
-			args = append(args, MergePatch(before.Attributes, req.Attributes))
+			// Instance attributes are stored under _instance; the projected
+			// namespaces of the row stay (CI-10).
+			instance, namesErr := instanceFieldNames(ctx, tx, id)
+			if namesErr != nil {
+				return namesErr
+			}
+			setClauses = append(setClauses, fmt.Sprintf("attributes = $%d::jsonb || ci_attribute_namespaces(attributes)", argPos))
+			args = append(args, storedAttributes(MergePatch(before.Attributes, req.Attributes), instance))
 			argPos++
 		}
 
@@ -435,6 +441,24 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	})
 
 	return item, err
+}
+
+// instanceFieldNames lists the names of the instance attributes of a CI.
+func instanceFieldNames(ctx context.Context, tx pgx.Tx, ciID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `SELECT name FROM ci_instance_field_definition WHERE ci_id = $1`, ciID)
+	if err != nil {
+		return nil, fmt.Errorf("instance attributes: %w", err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
 }
 
 // Delete soft-deletes a CI.
@@ -613,9 +637,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		return nil, err
 	}
 
-	if item.Attributes == nil {
-		item.Attributes = make(map[string]any)
-	}
+	item.Attributes = presentAttributes(item.Attributes)
 	if firstSeen.Valid {
 		t := firstSeen.Time.UTC()
 		item.FirstSeenAt = &t

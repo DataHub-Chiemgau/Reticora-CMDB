@@ -5429,6 +5429,7 @@ export interface components {
       os_version?: string;
       firmware_version?: string;
       sys_object_id?: string;
+      /** @description Business attributes, instance attributes under their names (stored in _instance). The namespaces _overrides, _observed, _provenance and _instance are not part of this view (CI-10); the per-field view is GET /api/v1/cis/{id}/fields. */
       attributes: {
         [key: string]: unknown;
       };
@@ -5487,6 +5488,7 @@ export interface components {
       os_version?: string;
       firmware_version?: string;
       sys_object_id?: string;
+      /** @description The keys _overrides, _observed, _provenance and _instance are reserved (GLO-13): 400 with the field. */
       attributes?: {
         [key: string]: unknown;
       };
@@ -5517,6 +5519,7 @@ export interface components {
       os_version?: string;
       firmware_version?: string;
       sys_object_id?: string;
+      /** @description RFC 7396 merge patch. The keys _overrides, _observed, _provenance and _instance are reserved (GLO-13): 400 with the field. */
       attributes?: {
         [key: string]: unknown;
       };

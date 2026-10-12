@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/wire"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 )
@@ -64,6 +65,23 @@ func readIngestItems(w http.ResponseWriter, r *http.Request) ([]IngestItem, bool
 			status = http.StatusRequestEntityTooLarge
 		}
 		api.WriteError(w, status, http.StatusText(status), err.Error())
+		return nil, false
+	}
+	// Reserved attribute namespaces are written by reconciliation only
+	// (GLO-13): a record or item carrying one is a malformed request.
+	var reserved []string
+	for i := range body.Records {
+		if err := ci.CheckReservedKeys(fmt.Sprintf("records[%d].attributes", i), body.Records[i].Attributes); err != nil {
+			reserved = append(reserved, err.Error())
+		}
+	}
+	for i := range body.Items {
+		if err := ci.CheckReservedKeys(fmt.Sprintf("items[%d].attributes", i), body.Items[i].Attributes); err != nil {
+			reserved = append(reserved, err.Error())
+		}
+	}
+	if len(reserved) > 0 {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", strings.Join(reserved, "; "))
 		return nil, false
 	}
 	switch {

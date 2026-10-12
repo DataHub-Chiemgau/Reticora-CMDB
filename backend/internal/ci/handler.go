@@ -284,6 +284,24 @@ func (h *Handler) ListChanges(w http.ResponseWriter, r *http.Request) {
 // map the response back onto their form fields. It reports whether err was a
 // validation error.
 func writeValidationError(w http.ResponseWriter, err error) bool {
+	// Reserved attribute keys are a malformed request (GLO-13): 400 with the
+	// fields.
+	var reserved *ReservedKeyError
+	if errors.As(err, &reserved) {
+		violations := make([]Violation, len(reserved.Fields))
+		for i, f := range reserved.Fields {
+			violations[i] = Violation{Field: f, Detail: "reserved namespace, not allowed as an attribute key"}
+		}
+		api.WriteJSON(w, http.StatusBadRequest, struct {
+			api.ProblemDetail
+			Violations []Violation `json:"violations"`
+		}{
+			ProblemDetail: api.ProblemDetail{Type: "https://reticora.io/problems/400", Title: "Bad Request",
+				Status: http.StatusBadRequest, Detail: reserved.Error()},
+			Violations: violations,
+		})
+		return true
+	}
 	ve, ok := AsValidationError(err)
 	if !ok {
 		return false

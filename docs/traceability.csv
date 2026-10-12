@@ -248,3 +248,5 @@ REC-12;[B];D;backend/internal/reviews/conflict_test.go;WP-089
 REC-07;[B];D;backend/internal/discovery/last_seen_test.go;WP-090
 AUD-03;[B];D;backend/internal/discovery/last_seen_test.go;WP-090
 NET-01;[B];D;backend/internal/discovery/last_seen_test.go;WP-090
+GLO-13;[B];D;backend/internal/ci/validation_test.go;WP-091
+CI-10;[B];D;backend/internal/ci/validation_test.go;WP-091

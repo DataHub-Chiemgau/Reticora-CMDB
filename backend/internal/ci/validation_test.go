@@ -2,9 +2,15 @@ package ci
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 func f64(v float64) *float64 { return &v }
@@ -172,5 +178,71 @@ func TestServiceCreateRejectsInvalidAttributes(t *testing.T) {
 	item.Attributes = map[string]any{"server_kind": "virtual", "hypervisor": "esx-01"}
 	if err := svc.Create(context.Background(), item); err != nil {
 		t.Fatalf("valid payload must be accepted, got %v", err)
+	}
+}
+
+// TestReservedNamespaces covers WP-091 (GLO-13, CI-10): the four namespaces
+// are rejected as attribute keys by create and PATCH (400 naming the field)
+// and as field names; the read view hides the projected namespaces and
+// shows the instance attributes under their names; the write form moves
+// instance attributes into _instance.
+func TestReservedNamespaces(t *testing.T) {
+	if len(ReservedNamespaces) != 4 {
+		t.Fatalf("namespaces: %v", ReservedNamespaces)
+	}
+	for _, ns := range ReservedNamespaces {
+		if !IsReservedKey(ns) {
+			t.Errorf("%s is not reserved", ns)
+		}
+		if err := fieldmeta.ValidateDefinition(fieldmeta.FieldDefinition{Name: ns, DataType: fieldmeta.TypeText}); err == nil {
+			t.Errorf("field definition named %s accepted", ns)
+		}
+	}
+	if IsReservedKey("overrides") || IsReservedKey("_custom") {
+		t.Error("an ordinary key is reserved")
+	}
+
+	svc := NewService(NewMemoryRepository())
+	ctx := context.Background()
+	var reserved *ReservedKeyError
+	err := svc.Create(ctx, &Item{OrganizationID: "org-1", CITypeID: "t", Name: "x", Attributes: map[string]any{"_overrides": map[string]any{}, "rack": "R1"}})
+	if !errors.As(err, &reserved) || len(reserved.Fields) != 1 || reserved.Fields[0] != "attributes._overrides" {
+		t.Errorf("create with _overrides: %v", err)
+	}
+	item := &Item{OrganizationID: "org-1", CITypeID: "t", Name: "x", Attributes: map[string]any{"rack": "R1"}}
+	if err = svc.Create(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	for _, ns := range ReservedNamespaces {
+		if _, err = svc.Update(ctx, "org-1", item.ID, UpdateRequest{Attributes: map[string]any{ns: "x"}}); !errors.As(err, &reserved) {
+			t.Errorf("PATCH %s: %v", ns, err)
+		}
+	}
+
+	// The HTTP answer is 400 with the field.
+	mux := chi.NewRouter()
+	NewHandler(svc).RegisterRoutes(mux)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/cis/"+item.ID, strings.NewReader(`{"attributes":{"_provenance":{}}}`))
+	req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "attributes._provenance") {
+		t.Errorf("PATCH _provenance: %d %s", w.Code, w.Body.String())
+	}
+
+	stored := map[string]any{
+		"rack": "R1", "_instance": map[string]any{"label": "A"},
+		"_overrides": map[string]any{"model": map[string]any{"value": "m"}}, "_observed": map[string]any{}, "_provenance": map[string]any{},
+	}
+	view := presentAttributes(stored)
+	if len(view) != 2 || view["rack"] != "R1" || view["label"] != "A" {
+		t.Errorf("read view: %v", view)
+	}
+	back := storedAttributes(view, []string{"label"})
+	if len(back) != 2 || back["rack"] != "R1" || back["_instance"].(map[string]any)["label"] != "A" {
+		t.Errorf("write form: %v", back)
+	}
+	if out := storedAttributes(map[string]any{"_overrides": 1, "x": 2}, nil); len(out) != 1 {
+		t.Errorf("namespaces in the write form: %v", out)
 	}
 }

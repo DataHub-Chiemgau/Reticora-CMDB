@@ -119,6 +119,10 @@ var DeviceRecordSources = []string{"redfish", "ipmi", "agent", "snmp", "api", "i
 // NeighborProtocols are the values of DeviceNeighbor.Protocol.
 var NeighborProtocols = []string{"lldp", "cdp", "arp", "fdb"}
 
+// ReservedAttributeKeys are the attribute namespaces of the server's CI
+// storage (CI-10); a record must not use them (GLO-13).
+var ReservedAttributeKeys = map[string]bool{"_overrides": true, "_observed": true, "_provenance": true, "_instance": true}
+
 // InterfaceStatuses are the values of admin_status and oper_status.
 var InterfaceStatuses = []string{"up", "down", "unknown"}
 
@@ -203,6 +207,11 @@ func (r *DeviceRecord) Validate() []Violation {
 	macField("identity.primary_mac", r.Identity.PrimaryMAC)
 	if strings.TrimSpace(r.Classification.CIType) == "" {
 		add("classification.ci_type", "is required")
+	}
+	for key := range r.Attributes {
+		if ReservedAttributeKeys[key] {
+			add("attributes."+key, "is a reserved namespace")
+		}
 	}
 	if r.System.UptimeSeconds < 0 {
 		add("system.uptime_seconds", "must not be negative")

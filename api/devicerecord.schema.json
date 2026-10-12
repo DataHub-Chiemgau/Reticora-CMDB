@@ -50,7 +50,11 @@
         "uptime_seconds": { "type": "integer", "minimum": 0 }
       }
     },
-    "attributes": { "type": "object" },
+    "attributes": {
+      "type": "object",
+      "description": "Further observed attributes; the namespaces of the CI storage are reserved (GLO-13).",
+      "propertyNames": { "not": { "enum": ["_overrides", "_observed", "_provenance", "_instance"] } }
+    },
     "interfaces": {
       "type": "array",
       "items": {

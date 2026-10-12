@@ -458,11 +458,25 @@ func syncCIField(ctx context.Context, tx pgx.Tx, ciID, fieldName string, value a
 			text = fmt.Sprint(value)
 		}
 		_, err = tx.Exec(ctx, fmt.Sprintf(`UPDATE ci SET %s = $2::text::%s, updated_at = now() WHERE id = $1`, fieldName, sqlType), ciID, text)
-	} else if value == nil {
-		_, err = tx.Exec(ctx, `UPDATE ci SET attributes = COALESCE(attributes, '{}'::jsonb) - $2, updated_at = now() WHERE id = $1`, ciID, fieldName)
 	} else {
-		_, err = tx.Exec(ctx, `UPDATE ci SET attributes = jsonb_set(COALESCE(attributes, '{}'::jsonb), ARRAY[$2], $3::jsonb, true), updated_at = now() WHERE id = $1`,
-			ciID, fieldName, jsonValue(value))
+		// Instance attributes live in attributes._instance (CI-10).
+		var instance bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci_instance_field_definition WHERE ci_id = $1 AND name = $2)`,
+			ciID, fieldName).Scan(&instance); err != nil {
+			return fmt.Errorf("instance attribute %s: %w", fieldName, err)
+		}
+		path := []string{fieldName}
+		if instance {
+			path = []string{"_instance", fieldName}
+		}
+		if value == nil {
+			_, err = tx.Exec(ctx, `UPDATE ci SET attributes = COALESCE(attributes, '{}'::jsonb) #- $2::text[], updated_at = now() WHERE id = $1`, ciID, path)
+		} else {
+			_, err = tx.Exec(ctx, `UPDATE ci SET attributes = jsonb_set(
+				CASE WHEN $4 AND NOT COALESCE(attributes, '{}'::jsonb) ? '_instance'
+					THEN COALESCE(attributes, '{}'::jsonb) || '{"_instance": {}}'::jsonb ELSE COALESCE(attributes, '{}'::jsonb) END,
+				$2::text[], $3::jsonb, true), updated_at = now() WHERE id = $1`, ciID, path, jsonValue(value), instance)
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("update ci %s: %w", fieldName, err)

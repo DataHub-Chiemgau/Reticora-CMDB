@@ -215,6 +215,17 @@ func TestIngestAcceptsDeviceRecords(t *testing.T) {
 	if w = post("/api/v1/ingest/bulk", both, false); w.Code != http.StatusBadRequest {
 		t.Errorf("records and items together: %d", w.Code)
 	}
+	// Reserved namespaces are rejected (GLO-13, WP-091).
+	reserved := rec
+	reserved.Attributes = map[string]any{"_instance": map[string]any{"x": 1}}
+	if w = post("/api/v1/discovery/ingest", DeviceRecordBatch{Records: []DeviceRecord{reserved}}, true); w.Code != http.StatusBadRequest ||
+		!strings.Contains(w.Body.String(), "records[0].attributes._instance") {
+		t.Errorf("reserved attribute key: %d %s", w.Code, w.Body.String())
+	}
+	if w = post("/api/v1/ingest/bulk", map[string]any{"collector_id": "c", "items": []map[string]any{{"ci_type_name": "server",
+		"name": "x", "attributes": map[string]any{"_overrides": 1}}}}, false); w.Code != http.StatusBadRequest {
+		t.Errorf("reserved attribute key in a legacy item: %d", w.Code)
+	}
 	if w = post("/api/v1/discovery/ingest", []plugins.Result{{Name: "x"}}, true); w.Code != http.StatusBadRequest {
 		t.Errorf("the old collector result array: %d, want 400", w.Code)
 	}

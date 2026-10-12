@@ -200,6 +200,7 @@ func TestDeviceRecordSchemaAndGoValidationAgree(t *testing.T) {
 		"neighbor anonymous": func(r *plugins.DeviceRecord) { r.Neighbors[0].RemoteMAC = "" },
 		"power":              func(r *plugins.DeviceRecord) { r.Power = &plugins.DevicePower{DrawWatts: -5} },
 		"outlet":             func(r *plugins.DeviceRecord) { r.Power = &plugins.DevicePower{Outlets: []plugins.DeviceOutlet{{}}} },
+		"reserved attribute": func(r *plugins.DeviceRecord) { r.Attributes = map[string]any{"_overrides": map[string]any{}} },
 	}
 	base := valid()
 	if v := base.Validate(); len(v) > 0 {
@@ -356,6 +357,16 @@ func (s *jsonSchema) check(schema map[string]any, v any, path string) []string {
 			if arr, ok := v.([]any); ok {
 				for i, item := range arr {
 					out = append(out, s.check(rule.(map[string]any), item, fmt.Sprintf("%s[%d]", path, i))...)
+				}
+			}
+		case "not":
+			if len(s.check(rule.(map[string]any), v, path)) == 0 {
+				fail("matches the excluded schema")
+			}
+		case "propertyNames":
+			if obj, ok := v.(map[string]any); ok {
+				for name := range obj {
+					out = append(out, s.check(rule.(map[string]any), name, path+"."+name)...)
 				}
 			}
 		case "anyOf":
