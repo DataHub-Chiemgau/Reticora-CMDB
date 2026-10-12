@@ -103,6 +103,12 @@ func (a overrideProvenance) RecordDiscovered(ctx context.Context, orgID, ciID, f
 	return &discovery.FieldProvenance{Diverged: fv.Diverged}, nil
 }
 
+// ClearOverride accepts the observed value of an override_conflict (REC-12).
+func (a overrideProvenance) ClearOverride(ctx context.Context, orgID, ciID, field string) error {
+	_, err := a.repo.ClearOverride(ctx, orgID, ciID, field)
+	return err
+}
+
 func (a overrideProvenance) Decide(ctx context.Context, w *override.Write) override.Decision {
 	return override.DecideAutomatedWrite(ctx, a.repo, w)
 }

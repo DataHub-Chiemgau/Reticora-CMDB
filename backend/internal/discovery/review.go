@@ -51,6 +51,7 @@ func (h *Handler) ReviewService() *reviews.Service {
 			svc.WithEffect(kind, h.resolveCIReview)
 		}
 		svc.WithEffect(ReviewKindUnlicensedCI, h.resolveUnlicensed)
+		svc.WithEffect(ReviewKindOverrideConflict, h.resolveOverrideConflict)
 		if h.reviewNotifier != nil {
 			svc.WithNotifier(h.reviewNotifier)
 		}
@@ -151,22 +152,17 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 		if ciID == "" {
 			return false, refused(http.StatusUnprocessableEntity, "the item names no CI")
 		}
-		update := ci.UpdateRequest{}
-		fields, _ := item.Payload["conflict_fields"].([]any)
-		for _, f := range fields {
-			value := payloadStringPtr(item.Payload, f.(string))
-			switch f {
-			case "serial_number":
-				update.SerialNumber = value
-			case "hardware_uuid":
-				update.HardwareUUID = value
-			case "management_ip":
-				update.ManagementIP = value
-			case "hostname":
-				update.Hostname = value
-			case "fqdn":
-				update.FQDN = value
+		// The reported values, kept unchanged in the item (REC-06).
+		incoming, _ := item.Payload["incoming"].(map[string]any)
+		value := func(field string) *string {
+			if v, ok := incoming[field].(string); ok && v != "" {
+				return &v
 			}
+			return nil
+		}
+		update := ci.UpdateRequest{SerialNumber: value("serial_number"), HardwareUUID: value("hardware_uuid")}
+		if update.SerialNumber == nil && update.HardwareUUID == nil {
+			return false, refused(http.StatusUnprocessableEntity, "the item reports no value to accept")
 		}
 		if _, err := h.ciRepo.Update(ctx, orgID, ciID, update); err != nil {
 			return false, err
@@ -184,6 +180,33 @@ func isNotFound(err error) bool {
 // implements it.
 type ciRestorer interface {
 	Restore(ctx context.Context, orgID, id string) (*ci.Item, error)
+}
+
+// OverrideClearer removes the manual override of a field; the CI returns to
+// the observed value (OVR-01). The override repository implements it.
+type OverrideClearer interface {
+	ClearOverride(ctx context.Context, orgID, ciID, field string) error
+}
+
+// resolveOverrideConflict accepts the observed value of an override_conflict
+// item: the override is removed and the CI takes the observed value
+// (REC-12). Dismissing keeps the override; the dismissed value is then
+// suppressed until the source reports another (queueOverrideConflict).
+func (h *Handler) resolveOverrideConflict(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
+	if res.Action != reviews.ActionAccept {
+		res.Note = "override kept"
+		return false, nil
+	}
+	clearer, ok := h.provenance.(OverrideClearer)
+	if !ok {
+		return false, refused(http.StatusNotImplemented, "overrides cannot be cleared here")
+	}
+	ciID, field := payloadString(item.Payload, "ci_id"), payloadString(item.Payload, "field")
+	if err := clearer.ClearOverride(ctx, item.OrganizationID, ciID, field); err != nil {
+		return false, err
+	}
+	res.Note = "override of " + field + " removed, observed value accepted"
+	return false, nil
 }
 
 // resolveUnlicensed adopts (new) or discards (dismiss) an unlicensed_ci
@@ -206,17 +229,28 @@ func reviewItemFromValueConflicts(orgID string, matched ci.Item, incoming Ingest
 	if len(result.ValueConflicts) == 0 {
 		return nil
 	}
+	// The reported values stay unchanged next to the stored ones (REC-06).
+	incomingValues := map[string]any{}
+	for _, field := range result.ValueConflicts {
+		switch field {
+		case "serial_number":
+			incomingValues[field] = incoming.SerialNumber
+		case "hardware_uuid":
+			incomingValues[field] = incomingUUID(&incoming)
+		}
+	}
 	payload := map[string]any{
 		"criterion":          result.Criterion,
 		"matched_ci_id":      result.MatchedCIID,
 		"conflict_fields":    result.ValueConflicts,
+		"incoming":           incomingValues,
 		"ci_type_name":       incoming.CITypeName,
 		"name":               incoming.Name,
 		"manufacturer":       incoming.Manufacturer,
 		"model":              incoming.Model,
 		"serial_number":      incoming.SerialNumber,
 		"management_ip":      incoming.ManagementIP,
-		"hardware_uuid":      incoming.HardwareUUID,
+		"hardware_uuid":      incomingUUID(&incoming),
 		"primary_mac":        incoming.PrimaryMAC,
 		"hostname":           incoming.Hostname,
 		"fqdn":               incoming.FQDN,

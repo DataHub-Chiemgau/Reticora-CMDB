@@ -1,7 +1,9 @@
 package reviews
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -58,6 +60,30 @@ func (s *Service) Open(ctx context.Context, item *Item) (bool, error) {
 	slog.InfoContext(ctx, "review item opened", "event", "review.opened", "organization_id", item.OrganizationID,
 		"review_item_id", item.ID, "kind", item.Kind)
 	return true, nil
+}
+
+// OpenUnlessDismissed opens an item unless the latest dismissed item of the
+// same object and type reported the same value under valueKey: a dismissal
+// suppresses that value until it changes (REC-12). It reports whether a new
+// item was opened.
+func (s *Service) OpenUnlessDismissed(ctx context.Context, item *Item, valueKey string) (bool, error) {
+	if item.ObjectKey != "" {
+		dismissed, _, err := s.repo.ListReviewItems(ctx, item.OrganizationID,
+			Filter{Kind: item.Kind, ObjectKey: item.ObjectKey, Status: StatusDismissed}, api.PaginationParams{Limit: 1})
+		if err != nil {
+			return false, err
+		}
+		if len(dismissed) > 0 && sameValue(dismissed[0].Payload[valueKey], item.Payload[valueKey]) {
+			return false, nil
+		}
+	}
+	return s.Open(ctx, item)
+}
+
+func sameValue(a, b any) bool {
+	ja, errA := json.Marshal(a)
+	jb, errB := json.Marshal(b)
+	return errA == nil && errB == nil && bytes.Equal(ja, jb)
 }
 
 // List lists items.

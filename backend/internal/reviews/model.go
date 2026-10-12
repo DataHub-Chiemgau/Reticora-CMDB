@@ -125,6 +125,8 @@ func (i *Item) markEscalated(now time.Time) {
 type Filter struct {
 	Status string
 	Kind   string
+	// ObjectKey lists the items of one object.
+	ObjectKey string
 	// Escalated lists only open items older than EscalationAge.
 	Escalated bool
 }

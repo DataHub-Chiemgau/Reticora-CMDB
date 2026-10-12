@@ -64,13 +64,17 @@ func (r *PGRepository) ListReviewItems(ctx context.Context, orgID string, filter
 			args = append(args, filter.Kind)
 			where += fmt.Sprintf(" AND kind = $%d", len(args))
 		}
+		if filter.ObjectKey != "" {
+			args = append(args, filter.ObjectKey)
+			where += fmt.Sprintf(" AND object_key = $%d", len(args))
+		}
 		if filter.Escalated {
 			where += " AND status = 'open' AND created_at < now() - make_interval(secs => $1::double precision)"
 		}
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM review_item WHERE $1::double precision IS NOT NULL AND "+where, args...).Scan(&total); err != nil {
 			return fmt.Errorf("count review items: %w", err)
 		}
-		query := fmt.Sprintf("SELECT %s FROM review_item WHERE %s ORDER BY created_at DESC, id LIMIT $%d OFFSET $%d",
+		query := fmt.Sprintf("SELECT %s FROM review_item WHERE %s ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d",
 			selectColumns, where, len(args)+1, len(args)+2)
 		args = append(args, page.Limit, page.Offset)
 		rows, err := tx.Query(ctx, query, args...)

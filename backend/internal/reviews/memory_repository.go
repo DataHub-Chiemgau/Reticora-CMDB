@@ -64,12 +64,19 @@ func (r *MemoryRepository) ListReviewItems(_ context.Context, orgID string, filt
 		item := *stored
 		item.markEscalated(now)
 		if item.OrganizationID != orgID || (filter.Status != "" && item.Status != filter.Status) ||
-			(filter.Kind != "" && item.Kind != filter.Kind) || (filter.Escalated && !item.Escalated) {
+			(filter.Kind != "" && item.Kind != filter.Kind) || (filter.Escalated && !item.Escalated) ||
+			(filter.ObjectKey != "" && item.ObjectKey != filter.ObjectKey) {
 			continue
 		}
 		result = append(result, item)
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	// Newest first, as in PostgreSQL.
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].CreatedAt != result[j].CreatedAt {
+			return result[i].CreatedAt > result[j].CreatedAt
+		}
+		return result[i].ID > result[j].ID
+	})
 	total := len(result)
 	start := min(page.Offset, total)
 	end := min(start+page.Limit, total)

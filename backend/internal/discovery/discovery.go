@@ -433,8 +433,9 @@ func (h *Handler) decide(ctx context.Context, w *override.Write) override.Decisi
 }
 
 // queueOverrideConflict opens an override_conflict review for a field unless
-// one is open already (REC-12, deduplicated per field). A failure does not
-// fail the ingest: the override stays in place either way.
+// one is open already or the value was dismissed (REC-12, deduplicated per
+// field). A failure does not fail the ingest: the override stays in place
+// either way.
 func (h *Handler) queueOverrideConflict(ctx context.Context, orgID, ciID, field string, value any, source string) bool {
 	item := &ReviewItem{
 		OrganizationID: orgID,
@@ -444,7 +445,9 @@ func (h *Handler) queueOverrideConflict(ctx context.Context, orgID, ciID, field 
 		CandidateCIIDs: []string{ciID},
 		ObjectKey:      "ci:" + ciID + "/" + field,
 	}
-	opened, err := h.openReview(ctx, item)
+	// One open item per field; a dismissed value stays suppressed until the
+	// source reports another one (REC-12).
+	opened, err := h.ReviewService().OpenUnlessDismissed(ctx, item, "observed_value")
 	if err != nil {
 		slog.WarnContext(ctx, "override conflict review not created", "ci_id", ciID, "field", field, "error", err)
 		return false
@@ -926,6 +929,9 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			// overrides are never overwritten, ranks and observation times
 			// decide the rest, unreadable state writes nothing.
 			conflict, refused := false, false
+			// Serial number and hardware UUID refused for a lower rank are
+			// reviewed as conflicting_values with the reported value (REC-06).
+			var lowerRank []string
 			decide := func(field string, value, current any) bool {
 				d := h.decide(ctx, &override.Write{
 					OrganizationID: orgID, CIID: matched.ID, Field: field, Value: value,
@@ -939,6 +945,9 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 				switch d.Reason {
 				case override.ReasonLowerRank, override.ReasonStale, override.ReasonError:
 					refused = true
+				}
+				if d.Reason == override.ReasonLowerRank && (field == "serial_number" || field == "hardware_uuid") {
+					lowerRank = append(lowerRank, field)
 				}
 				if d.Conflict {
 					conflict = true
@@ -958,6 +967,7 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 				{"manufacturer", item.Manufacturer, matched.Manufacturer, &update.Manufacturer},
 				{"model", item.Model, matched.Model, &update.Model},
 				{"serial_number", item.SerialNumber, matched.SerialNumber, &update.SerialNumber},
+				{"hardware_uuid", strings.ToLower(incomingUUID(&item)), strings.ToLower(matched.HardwareUUID), &update.HardwareUUID},
 				{"management_ip", item.ManagementIP, matched.ManagementIP, &update.ManagementIP},
 			} {
 				if f.value == "" || f.value == f.current {
@@ -1005,7 +1015,8 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			// Contradicting identity values on a matched CI (e.g. a changed
 			// serial number) are queued for operator review instead of being
 			// silently applied (spec §5.3: Unklarheiten in Review-Queue).
-			if len(result.ValueConflicts) > 0 && matched != nil {
+			if len(lowerRank) > 0 {
+				result.ValueConflicts = lowerRank
 				if reviewItem := reviewItemFromValueConflicts(orgID, *matched, item, result); reviewItem != nil {
 					opened, openErr := h.openReview(ctx, reviewItem)
 					if openErr != nil {

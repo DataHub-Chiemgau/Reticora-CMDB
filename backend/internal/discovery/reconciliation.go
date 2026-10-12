@@ -96,9 +96,6 @@ func identityConflicts(item ci.Item, incoming IngestItem) []string {
 	} else {
 		addIfDiffering("hardware_uuid", item.HardwareUUID, incoming.HardwareUUID)
 	}
-	addIfDiffering("management_ip", item.ManagementIP, incoming.ManagementIP)
-	addIfDiffering("hostname", item.Hostname, incoming.Hostname)
-	addIfDiffering("fqdn", item.FQDN, incoming.FQDN)
 	return conflicts
 }
 
