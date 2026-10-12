@@ -428,6 +428,8 @@ RETICORA_OIDC_REDIRECT_URL=$RETICORA_OIDC_REDIRECT_URL
 # HTTPS / Let's Encrypt (empty = plain HTTP)
 RETICORA_TLS_DOMAIN=$RETICORA_TLS_DOMAIN
 RETICORA_CERT_EMAIL=$RETICORA_CERT_EMAIL
+# nginx TLS template mounted into the frontend (empty one without a domain)
+RETICORA_NGINX_TLS_TEMPLATE=$(tls_template_source)
 
 # Extra CA bundle the server trusts when it calls the OIDC issuer. The server
 # reaches Keycloak through the public HTTPS endpoint, so while only the
@@ -734,16 +736,35 @@ tls_cert_expires_soon() {
     ! openssl x509 -in "$cert" -noout -checkend 86400 >/dev/null 2>&1
 }
 
-# tls_cert_is_selfsigned — returns 0 when the current certificate is the
-# bootstrap placeholder (issuer == subject) or no certificate exists yet.
+# tls_cert_is_trusted <fullchain> — returns 0 when the leaf certificate
+# verifies against the system trust store with the intermediates of the
+# chain file (INS-03). openssl verify reads the first certificate of the file
+# as the leaf; RETICORA_TLS_CA_BUNDLE adds a CA file (tests, private CAs).
+tls_cert_is_trusted() {
+    local cert="$1"
+    [ -f "$cert" ] || return 1
+    local -a ca_args=()
+    [ -n "${RETICORA_TLS_CA_BUNDLE:-}" ] && ca_args=(-CAfile "$RETICORA_TLS_CA_BUNDLE")
+    openssl verify "${ca_args[@]}" -untrusted "$cert" "$cert" >/dev/null 2>&1
+}
+
+# tls_cert_is_selfsigned — returns 0 when no trusted certificate is served
+# yet: none exists, it is the self-signed bootstrap placeholder, or its chain
+# does not verify (INS-03). The installer then requests a Let's Encrypt
+# certificate.
 tls_cert_is_selfsigned() {
-    local cert
-    cert="$(tls_live_dir)/fullchain.pem"
-    [ -f "$cert" ] || return 0
-    local subject issuer
-    subject="$(openssl x509 -in "$cert" -noout -subject 2>/dev/null || true)"
-    issuer="$(openssl x509 -in "$cert" -noout -issuer 2>/dev/null || true)"
-    [ -z "$subject" ] || [ "$subject" = "$issuer" ]
+    ! tls_cert_is_trusted "$(tls_live_dir)/fullchain.pem"
+}
+
+# tls_template_source — the nginx TLS template mounted into the frontend
+# container: the TLS server blocks with a domain, an empty template without
+# one, so no TLS configuration is rendered (INS-03).
+tls_template_source() {
+    if [ -n "$RETICORA_TLS_DOMAIN" ]; then
+        printf './nginx-tls.conf.template'
+    else
+        printf './nginx-no-tls.conf.template'
+    fi
 }
 
 # Set to 1 when an existing bootstrap certificate was replaced, so an already
@@ -804,13 +825,15 @@ bootstrap_tls_cert() {
     success "Bootstrap certificate created (will be replaced by Let's Encrypt)"
 }
 
-# validate_tls_material <domain> — verifies that the certificate chain and
-# private key under letsencrypt/live/<domain> form a consistent, usable pair:
-# the certificate must parse, carry a SAN for the domain, be unexpired, and
-# match the private key. Called after bootstrap generation and again after
-# certbot issuance so TLS problems surface at install time.
+# validate_tls_material <domain> [chain] — verifies that the certificate chain
+# and private key under letsencrypt/live/<domain> form a consistent, usable
+# pair: the certificate must parse, carry a SAN for the domain, be unexpired,
+# and match the private key. With chain=1 the chain must also verify against
+# the trust store (INS-03). Called after bootstrap generation and again
+# (with chain=1) after certbot issuance so TLS problems surface at install
+# time.
 validate_tls_material() {
-    local domain="$1"
+    local domain="$1" chain="${2:-0}"
     local live_dir; live_dir="$(tls_live_dir)"
     local cert="$live_dir/fullchain.pem" key="$live_dir/privkey.pem"
 
@@ -837,6 +860,12 @@ validate_tls_material() {
     key_pub="$(openssl pkey -in "$key" -pubout 2>/dev/null | openssl sha256)"
     [ -n "$cert_pub" ] && [ "$cert_pub" = "$key_pub" ] \
         || die "TLS certificate $cert and private key $key do not match."
+    if [ "$chain" = "1" ]; then
+        tls_cert_is_trusted "$cert" \
+            || die "TLS certificate chain $cert does not verify against the system trust store (incomplete chain or untrusted issuer)."
+        success "TLS material for $domain is consistent (parses, SAN present, key matches, chain verifies)"
+        return 0
+    fi
     success "TLS material for $domain is consistent (parses, SAN present, key matches)"
 }
 
@@ -867,13 +896,14 @@ issue_tls_certificate() {
     # The certbot container shares the webroot volume with the frontend, and
     # ./letsencrypt is bind-mounted as /etc/letsencrypt in both. nginx is
     # already running with the bootstrap certificate, serving the challenge
-    # directory over plain HTTP on port 80.
-    if compose_cmd run --rm --no-deps certbot certonly \
+    # directory over plain HTTP on port 80. The service's entrypoint is the
+    # renewal loop shell, so the one-off run selects the certbot binary.
+    if compose_cmd run --rm --no-deps --entrypoint certbot certbot certonly \
         --webroot -w /var/www/certbot \
         -d "$RETICORA_TLS_DOMAIN" \
         --non-interactive --agree-tos \
         "${email_args[@]}"; then
-        validate_tls_material "$RETICORA_TLS_DOMAIN"
+        validate_tls_material "$RETICORA_TLS_DOMAIN" 1
         compose_cmd exec -T frontend nginx -s reload >/dev/null 2>&1 \
             || warn "Could not reload nginx automatically; restart the frontend to activate the certificate: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE restart frontend"
         success "Let's Encrypt certificate issued for $RETICORA_TLS_DOMAIN"

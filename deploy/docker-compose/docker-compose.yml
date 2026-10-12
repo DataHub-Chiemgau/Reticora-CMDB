@@ -265,7 +265,11 @@ services:
     volumes:
       - ./letsencrypt:/etc/letsencrypt:ro
       - certbot-webroot:/var/www/certbot
-      - ./nginx-tls.conf.template:/etc/nginx/templates/reticora-tls.conf.template:ro
+      # The TLS server blocks only with a TLS domain; without one
+      # install-cloud.sh selects the empty template (INS-03). Older .env
+      # files without the variable keep the TLS template; the frontend's
+      # 25-reticora-tls-optional.sh drops it again when no domain is set.
+      - ${RETICORA_NGINX_TLS_TEMPLATE:-./nginx-tls.conf.template}:/etc/nginx/templates/reticora-tls.conf.template:ro
     ports:
       # The plain-HTTP port answers ACME http-01 challenges and redirects
       # everything else to HTTPS when TLS is enabled, so it must be reachable

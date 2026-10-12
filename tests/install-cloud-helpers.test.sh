@@ -130,6 +130,116 @@ run_test   "validate_tls_material accepts a consistent cert/key pair" test_tls_v
 expect_fail "validate_tls_material rejects a mismatched key"          test_tls_key_mismatch
 expect_fail "validate_tls_material rejects an unparseable cert"       test_tls_unparseable
 
+# ─── TLS detection, ACME path and template (WP-094, INS-03) ──────────────────
+
+# make_ca_chain <dir> <domain> — a private CA (ca.pem) and a leaf certificate
+# for <domain> signed by an intermediate, written as fullchain.pem (leaf +
+# intermediate) and privkey.pem like certbot does.
+make_ca_chain() {
+    local dir="$1" domain="$2"
+    mkdir -p "$dir"
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout "$dir/ca.key" -out "$dir/ca.pem" -days 30 \
+        -subj "/CN=Test Root" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
+    openssl req -newkey rsa:2048 -nodes -keyout "$dir/int.key" -out "$dir/int.csr" -subj "/CN=Test Intermediate" 2>/dev/null
+    printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' > "$dir/int.ext"
+    openssl x509 -req -in "$dir/int.csr" -CA "$dir/ca.pem" -CAkey "$dir/ca.key" -CAcreateserial -days 30 \
+        -extfile "$dir/int.ext" -out "$dir/int.pem" 2>/dev/null
+    openssl req -newkey rsa:2048 -nodes -keyout "$dir/privkey.pem" -out "$dir/leaf.csr" -subj "/CN=$domain" 2>/dev/null
+    printf 'subjectAltName=DNS:%s\n' "$domain" > "$dir/leaf.ext"
+    openssl x509 -req -in "$dir/leaf.csr" -CA "$dir/int.pem" -CAkey "$dir/int.key" -CAcreateserial -days 30 \
+        -extfile "$dir/leaf.ext" -out "$dir/leaf.pem" 2>/dev/null
+    cat "$dir/leaf.pem" "$dir/int.pem" > "$dir/fullchain.pem"
+}
+
+# The bootstrap placeholder is self-signed: ACME must run. (The former
+# subject=/issuer= comparison never matched and skipped ACME.)
+test_tls_placeholder_detected() {
+    RETICORA_TLS_DOMAIN="placeholder.example.com"
+    local live="$TMP_ROOT/tls-placeholder/live/$RETICORA_TLS_DOMAIN"
+    make_cert "$live" "$RETICORA_TLS_DOMAIN"
+    tls_live_dir() { printf '%s' "$live"; }
+    tls_cert_is_selfsigned
+}
+
+test_tls_missing_counts_as_placeholder() {
+    RETICORA_TLS_DOMAIN="missing.example.com"
+    tls_live_dir() { printf '%s' "$TMP_ROOT/tls-none"; }
+    tls_cert_is_selfsigned
+}
+
+# A certificate whose chain verifies is a real one: no new request.
+test_tls_trusted_chain_detected() {
+    RETICORA_TLS_DOMAIN="real.example.com"
+    local live="$TMP_ROOT/tls-real/live/$RETICORA_TLS_DOMAIN"
+    make_ca_chain "$live" "$RETICORA_TLS_DOMAIN"
+    tls_live_dir() { printf '%s' "$live"; }
+    RETICORA_TLS_CA_BUNDLE="$live/ca.pem"
+    ! tls_cert_is_selfsigned && validate_tls_material "$RETICORA_TLS_DOMAIN" 1
+}
+
+# Without its intermediate the chain does not verify: rejected after issuance.
+test_tls_incomplete_chain_rejected() {
+    RETICORA_TLS_DOMAIN="chain.example.com"
+    local live="$TMP_ROOT/tls-chain/live/$RETICORA_TLS_DOMAIN"
+    make_ca_chain "$live" "$RETICORA_TLS_DOMAIN"
+    cp "$live/leaf.pem" "$live/fullchain.pem"
+    tls_live_dir() { printf '%s' "$live"; }
+    RETICORA_TLS_CA_BUNDLE="$live/ca.pem"
+    validate_tls_material "$RETICORA_TLS_DOMAIN" 1
+}
+
+# The ACME request runs certbot itself, not the renewal-loop entrypoint.
+test_tls_acme_uses_certbot_entrypoint() {
+    RETICORA_TLS_DOMAIN="acme.example.com"
+    RETICORA_CERT_EMAIL="ops@example.com"
+    local live="$TMP_ROOT/tls-acme/live/$RETICORA_TLS_DOMAIN" calls="$TMP_ROOT/compose-calls"
+    make_ca_chain "$TMP_ROOT/tls-acme-issued" "$RETICORA_TLS_DOMAIN"
+    make_cert "$live" "$RETICORA_TLS_DOMAIN"
+    tls_live_dir() { printf '%s' "$live"; }
+    compose_cmd() {
+        printf '%s\n' "$*" >> "$calls"
+        # certbot "issues" the real chain.
+        if [ "$1" = "run" ]; then cp "$TMP_ROOT/tls-acme-issued/fullchain.pem" "$TMP_ROOT/tls-acme-issued/privkey.pem" "$live/"; fi
+        return 0
+    }
+    RETICORA_TLS_CA_BUNDLE="$TMP_ROOT/tls-acme-issued/ca.pem"
+    issue_tls_certificate
+    grep -q -- "run --rm --no-deps --entrypoint certbot certbot certonly --webroot -w /var/www/certbot -d acme.example.com" "$calls" \
+        && grep -q -- "--email ops@example.com" "$calls" && grep -q -- "exec -T frontend nginx -s reload" "$calls"
+}
+
+# A served real certificate is not requested again.
+test_tls_acme_skipped_with_real_certificate() {
+    RETICORA_TLS_DOMAIN="kept.example.com"
+    local live="$TMP_ROOT/tls-kept/live/$RETICORA_TLS_DOMAIN"
+    make_ca_chain "$live" "$RETICORA_TLS_DOMAIN"
+    tls_live_dir() { printf '%s' "$live"; }
+    RETICORA_TLS_CA_BUNDLE="$live/ca.pem"
+    compose_cmd() { return 1; }
+    issue_tls_certificate
+}
+
+test_tls_template_selection() {
+    RETICORA_TLS_DOMAIN=""
+    [ "$(tls_template_source)" = "./nginx-no-tls.conf.template" ] || return 1
+    RETICORA_TLS_DOMAIN="cmdb.example.com"
+    [ "$(tls_template_source)" = "./nginx-tls.conf.template" ] || return 1
+    # Both templates exist next to the compose file, and the no-TLS one
+    # declares no server block.
+    [ -f "$REPO_ROOT/deploy/docker-compose/nginx-tls.conf.template" ] &&
+        [ -f "$REPO_ROOT/deploy/docker-compose/nginx-no-tls.conf.template" ] &&
+        ! grep -q 'server' <(grep -v '^#' "$REPO_ROOT/deploy/docker-compose/nginx-no-tls.conf.template") &&
+        grep -q 'RETICORA_NGINX_TLS_TEMPLATE' "$REPO_ROOT/deploy/docker-compose/docker-compose.yml"
+}
+
+run_test   "tls: the self-signed placeholder is detected"                 test_tls_placeholder_detected
+run_test   "tls: a missing certificate counts as placeholder"              test_tls_missing_counts_as_placeholder
+run_test   "tls: a verifying chain is a real certificate"                  test_tls_trusted_chain_detected
+expect_fail "tls: an incomplete chain is rejected after issuance"          test_tls_incomplete_chain_rejected
+run_test   "tls: ACME runs certbot with the webroot and reloads nginx"     test_tls_acme_uses_certbot_entrypoint
+run_test   "tls: no new request while a real certificate is served"        test_tls_acme_skipped_with_real_certificate
+run_test   "tls: the TLS template is mounted only with a domain"           test_tls_template_selection
+
 # ─── realm files and initial administrator (WP-044, AUT-09) ───────────────────
 
 realm_py() {

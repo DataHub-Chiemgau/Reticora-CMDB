@@ -252,3 +252,5 @@ GLO-13;[B];D;backend/internal/ci/validation_test.go;WP-091
 CI-10;[B];D;backend/internal/ci/validation_test.go;WP-091
 INS-07;[B];A;tests/install-preflight.test.sh;WP-093
 TEC-09;[B];A;tests/install-preflight.test.sh;WP-093
+INS-03;[B];A;tests/install-cloud-helpers.test.sh;WP-094
+TEC-09;[B];A;tests/install-cloud-helpers.test.sh;WP-094
