@@ -18,6 +18,7 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 # `main "$@"`; dropping the last line removes that call.
 HARNESS="$TMP_ROOT/harness.sh"
 head -n -1 install-cloud.sh > "$HARNESS"
+cp install-preflight.sh "$TMP_ROOT/"
 
 PASS=0
 FAIL=0

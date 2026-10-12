@@ -13,6 +13,15 @@ Reticora CMDB is a multi-tenant Configuration Management Database designed for M
 - **Cache**: Redis 7
 - **Observability**: OpenTelemetry, Prometheus metrics
 
+### Installation requirements
+
+`install.sh` supports Ubuntu 22.04 LTS, Ubuntu 24.04 LTS and Debian 12 with
+Docker Engine ≥ 24 and Docker Compose v2, and refuses other systems. The
+minimum for the central cloud is 4 vCPU, 8 GB RAM and 100 GB SSD for up to
+10,000 objects; the sizing table up to 50,000 objects is in
+[ops/sizing.md](ops/sizing.md). Installation problems:
+[troubleshooting-installation.md](troubleshooting-installation.md).
+
 ### Monorepo Structure
 
 ```

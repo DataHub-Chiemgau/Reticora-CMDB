@@ -15,6 +15,21 @@ docker compose --env-file .env -f docker-compose.yml ps
 
 ---
 
+## 0. Preflight refusals
+
+The installers check the host before they change anything
+(`install-preflight.sh`, INS-07).
+
+| Message | Cause | Fix |
+|---|---|---|
+| `Platform … is not supported` | Not Ubuntu 22.04/24.04 LTS or Debian 12 (CH22) | Install on a supported system. `RETICORA_ALLOW_UNSUPPORTED_PLATFORM=1` continues, without support. |
+| `Docker Engine … is too old` | Docker Engine below 24 | Upgrade Docker Engine (https://docs.docker.com/engine/install/), re-run. |
+| `Docker Compose … is not supported` | The Python `docker-compose` v1 | Install the compose plugin (`apt-get install docker-compose-plugin`), re-run. |
+| `… is required but could not be installed automatically` | No `apt-get` (not Debian/Ubuntu) | Install the named tool yourself, re-run. |
+| `Only … available; the … minimum is …` (warning) | Host below the minimum sizing | The installation continues; see [ops/sizing.md](ops/sizing.md). |
+
+---
+
 ## 1. Container health failures
 
 ### `container docker-compose-server-1 is unhealthy`

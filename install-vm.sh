@@ -86,6 +86,10 @@ success() { printf '%s✔%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
 warn()    { printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
 die()     { printf '%s✘ Error:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 
+# Platform, Docker/Compose and sizing checks (INS-07).
+# shellcheck source=install-preflight.sh
+. "$SCRIPT_DIR/install-preflight.sh"
+
 trim() {
     local s="$1"
     s="${s#"${s%%[![:space:]]*}"}"
@@ -102,11 +106,10 @@ if [ "$(id -u)" -ne 0 ] && have_cmd sudo; then
     SUDO="sudo"
 fi
 
+# Only the package manager of the supported platforms (Ubuntu, Debian; CH22)
+# is used; other systems install the prerequisites themselves.
 pkg_manager() {
-    local mgr
-    for mgr in apt-get dnf yum zypper pacman apk; do
-        if have_cmd "$mgr"; then printf '%s' "$mgr"; return 0; fi
-    done
+    if have_cmd apt-get; then printf 'apt-get'; return 0; fi
     return 1
 }
 
@@ -120,10 +123,6 @@ install_packages() {
             $SUDO apt-get update -qq || true
             DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y "$@"
             ;;
-        dnf|yum)  $SUDO "$mgr" install -y "$@" ;;
-        zypper)   $SUDO zypper --non-interactive install -y "$@" ;;
-        pacman)   $SUDO pacman -Sy --noconfirm "$@" ;;
-        apk)      $SUDO apk add --no-cache "$@" ;;
     esac
 }
 
@@ -351,6 +350,9 @@ preflight() {
         die "Please run the collector installer as root (sudo $0)."
     fi
 
+    check_platform
+    check_sizing collector /
+
     if [ "$MODE" = "docker" ]; then
         if ! have_cmd docker; then
             warn "Docker was not found on this machine — installing it now."
@@ -365,6 +367,13 @@ preflight() {
         fi
         docker compose version >/dev/null 2>&1 || have_cmd docker-compose \
             || die "Docker Compose (plugin or docker-compose binary) is required but could not be installed automatically."
+        # Docker Engine >= 24 and Compose v2 (INS-07).
+        check_docker_engine docker
+        if docker compose version >/dev/null 2>&1; then
+            check_compose_v2 docker compose
+        else
+            check_compose_v2 docker-compose
+        fi
         success "Docker detected"
     else
         have_cmd systemctl || die "systemd is required for the systemd mode; use --docker on systems without systemd."

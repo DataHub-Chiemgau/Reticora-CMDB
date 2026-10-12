@@ -113,11 +113,10 @@ if [ "$(id -u)" -ne 0 ]; then
     if have_cmd sudo; then SUDO="sudo"; fi
 fi
 
+# Only the package manager of the supported platforms (Ubuntu, Debian; CH22)
+# is used; other systems install the prerequisites themselves.
 pkg_manager() {
-    local mgr
-    for mgr in apt-get dnf yum zypper pacman apk; do
-        if have_cmd "$mgr"; then printf '%s' "$mgr"; return 0; fi
-    done
+    if have_cmd apt-get; then printf 'apt-get'; return 0; fi
     return 1
 }
 
@@ -131,10 +130,6 @@ install_packages() {
             $SUDO apt-get update -qq || true
             DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y "$@"
             ;;
-        dnf|yum)  $SUDO "$mgr" install -y "$@" ;;
-        zypper)   $SUDO zypper --non-interactive install -y "$@" ;;
-        pacman)   $SUDO pacman -Sy --noconfirm "$@" ;;
-        apk)      $SUDO apk add --no-cache "$@" ;;
     esac
 }
 
@@ -148,10 +143,11 @@ ensure_command() {
     have_cmd "$cmd" || die "'$cmd' is required but could not be installed automatically. Please install it and re-run."
 }
 
-# ─── Platform check (CH22, TEC-09) ────────────────────────────────────────────
-# Supported platforms: Ubuntu 22.04/24.04 LTS and Debian 12. Other systems get
-# a warning; RETICORA_STRICT_PLATFORM=1 (used by the install smoke matrix)
-# turns it into an error, so CI proves it really runs on each target.
+# ─── Platform check (CH22, TEC-09, INS-07) ────────────────────────────────────
+# Supported platforms: Ubuntu 22.04/24.04 LTS and Debian 12; other systems are
+# refused with a support message. RETICORA_ALLOW_UNSUPPORTED_PLATFORM=1
+# continues with a warning. The component installers repeat the check
+# (install-preflight.sh); this copy runs before the sources are downloaded.
 SUPPORTED_PLATFORMS="ubuntu:22.04 ubuntu:24.04 debian:12"
 
 detect_platform() {
@@ -167,19 +163,19 @@ check_platform() {
     case " $SUPPORTED_PLATFORMS " in
         *" $platform "*)
             info "Platform $platform is supported."
-            ;;
-        *)
-            if [ "${RETICORA_STRICT_PLATFORM:-0}" = "1" ]; then
-                die "Platform $platform is not supported (supported: $SUPPORTED_PLATFORMS)."
-            fi
-            warn "Platform $platform is not a supported platform ($SUPPORTED_PLATFORMS); continuing without guarantee."
+            return 0
             ;;
     esac
+    if [ "${RETICORA_ALLOW_UNSUPPORTED_PLATFORM:-0}" = "1" ]; then
+        warn "Platform $platform is not supported (supported: Ubuntu 22.04/24.04 LTS, Debian 12); continuing because RETICORA_ALLOW_UNSUPPORTED_PLATFORM=1 — this installation is not supported."
+        return 0
+    fi
+    die "Platform $platform is not supported. Reticora supports Ubuntu 22.04 LTS, Ubuntu 24.04 LTS and Debian 12 (see docs/troubleshooting-installation.md). Set RETICORA_ALLOW_UNSUPPORTED_PLATFORM=1 to continue without support."
 }
 
 # ─── Source bootstrap ─────────────────────────────────────────────────────────
 have_sources() {
-    [ -f "$1/install-cloud.sh" ] && [ -f "$1/install-vm.sh" ]
+    [ -f "$1/install-cloud.sh" ] && [ -f "$1/install-vm.sh" ] && [ -f "$1/install-preflight.sh" ]
 }
 
 download_sources() {

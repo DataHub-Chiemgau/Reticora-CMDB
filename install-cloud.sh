@@ -83,6 +83,10 @@ success() { printf '%s✔%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
 warn()    { printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
 die()     { printf '%s✘ Error:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 
+# Platform, Docker/Compose and sizing checks (INS-07).
+# shellcheck source=install-preflight.sh
+. "$SCRIPT_DIR/install-preflight.sh"
+
 # ─── Generic helpers ──────────────────────────────────────────────────────────
 trim() {
     local s="$1"
@@ -101,11 +105,10 @@ if [ "$(id -u)" -ne 0 ] && have_cmd sudo; then
     SUDO="sudo"
 fi
 
+# Only the package manager of the supported platforms (Ubuntu, Debian; CH22)
+# is used; other systems install the prerequisites themselves.
 pkg_manager() {
-    local mgr
-    for mgr in apt-get dnf yum zypper pacman apk; do
-        if have_cmd "$mgr"; then printf '%s' "$mgr"; return 0; fi
-    done
+    if have_cmd apt-get; then printf 'apt-get'; return 0; fi
     return 1
 }
 
@@ -119,10 +122,6 @@ install_packages() {
             $SUDO apt-get update -qq || true
             DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y "$@"
             ;;
-        dnf|yum)  $SUDO "$mgr" install -y "$@" ;;
-        zypper)   $SUDO zypper --non-interactive install -y "$@" ;;
-        pacman)   $SUDO pacman -Sy --noconfirm "$@" ;;
-        apk)      $SUDO apk add --no-cache "$@" ;;
     esac
 }
 
@@ -201,6 +200,10 @@ detect_container_tooling() {
     else
         die "Docker Compose (plugin or docker-compose binary) is required but could not be installed automatically."
     fi
+
+    # Docker Engine >= 24 and Compose v2 (INS-07).
+    check_docker_engine "$DOCKER"
+    check_compose_v2 "${COMPOSE[@]}"
 }
 
 compose_cmd() {
@@ -456,12 +459,15 @@ EOF
 preflight() {
     info "Checking prerequisites …"
 
+    check_platform
+
     # Tools the installer itself needs; missing ones are installed automatically.
     ensure_command curl curl ca-certificates
     ensure_command openssl openssl
 
     detect_container_tooling
     success "Container tooling: ${COMPOSE[*]}"
+    check_sizing cloud "$($DOCKER info --format '{{.DockerRootDir}}' 2>/dev/null || printf '/var/lib/docker')"
 
     if [ ! -f "$COMPOSE_FILE" ]; then
         die "Compose file not found at $COMPOSE_FILE — run this script from a full checkout, or use ./install.sh which downloads the sources for you."
