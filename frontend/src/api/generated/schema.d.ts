@@ -5246,6 +5246,15 @@ export interface components {
       asset?: components['schemas']['CIAssetFacts'];
       /** @description CI this one is physically part of (chassis → blade, AST-05); the relationship contains is projected from it. Cycles are rejected (422). */
       parent_ci_id?: string;
+      /** @description Software lifecycle; only CI types with a lifecycle model have one, and it changes through lifecycle transitions (DB-05). */
+      readonly lifecycle_state?: string;
+      /**
+       * @description Computed from the monitoring state: critical or warning when the latest sample of a metric breaches an enabled alert rule of that severity, ok with samples and no breach, unknown without recent samples (DB-05).
+       * @enum {string}
+       */
+      readonly health?: 'ok' | 'warning' | 'critical' | 'unknown';
+      /** Format: date-time */
+      readonly health_updated_at?: string;
       /** @description Site of location_id, derived by the server. */
       readonly site_id?: string;
       /** @description Room of location_id (the location or its nearest room ancestor), derived by the server. */

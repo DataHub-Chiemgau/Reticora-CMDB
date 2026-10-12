@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -153,6 +154,10 @@ func (h *Handler) transition(w http.ResponseWriter, r *http.Request, entityType 
 	}
 	entityID := chi.URLParam(r, "id")
 	defKey, err := h.resolver.LifecycleKeyFor(r, t.OrganizationID, entityType, entityID)
+	if errors.Is(err, ErrNoLifecycleModel) {
+		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		return
+	}
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "entity not found")
 		return

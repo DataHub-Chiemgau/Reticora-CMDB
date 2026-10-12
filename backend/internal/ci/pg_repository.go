@@ -52,7 +52,10 @@ const ciSelectColumns = `
 	deleted_at,
 	version,
 	COALESCE(asset_id::text, ''),
-	COALESCE(parent_ci_id::text, '')
+	COALESCE(parent_ci_id::text, ''),
+	COALESCE(lifecycle_state, ''),
+	health,
+	health_updated_at
 `
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
@@ -249,7 +252,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				$21, $22, $23, $24, $25
 			)
 			RETURNING id::text, COALESCE(site_id::text, ''), COALESCE(room_id::text, ''),
-				COALESCE(location_id::text, ''), version, created_at, updated_at
+				COALESCE(location_id::text, ''), health, version, created_at, updated_at
 		`
 
 		var createdAt time.Time
@@ -280,7 +283,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 			item.IsManual,
 			nilIfEmpty(item.AssetID),
 			nilIfEmpty(item.ParentCIID),
-		).Scan(&item.ID, &item.SiteID, &item.RoomID, &item.LocationID, &item.Version, &createdAt, &updatedAt); err != nil {
+		).Scan(&item.ID, &item.SiteID, &item.RoomID, &item.LocationID, &item.Health, &item.Version, &createdAt, &updatedAt); err != nil {
 			return locationError(fmt.Errorf("create ci: %w", err))
 		}
 
@@ -541,6 +544,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 	var firstSeen sql.NullTime
 	var lastSeen sql.NullTime
 	var deletedAt sql.NullTime
+	var healthUpdated sql.NullTime
 	var createdAt time.Time
 	var updatedAt time.Time
 
@@ -577,6 +581,9 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		&item.Version,
 		&item.AssetID,
 		&item.ParentCIID,
+		&item.LifecycleState,
+		&item.Health,
+		&healthUpdated,
 	); err != nil {
 		return nil, err
 	}
@@ -595,6 +602,10 @@ func scanCI(scanner ciScanner) (*Item, error) {
 	if deletedAt.Valid {
 		t := deletedAt.Time.UTC()
 		item.DeletedAt = &t
+	}
+	if healthUpdated.Valid {
+		t := healthUpdated.Time.UTC()
+		item.HealthUpdatedAt = &t
 	}
 	item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 	item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
@@ -743,6 +754,11 @@ func locationError(err error) error {
 		return &ValidationError{Violations: []Violation{{Field: "parent_ci_id", Detail: "parent CI not found"}}}
 	case "ci_parent_not_self", "ci_parent_cycle":
 		return &ValidationError{Violations: []Violation{{Field: "parent_ci_id", Detail: "a CI cannot contain itself, directly or through its parents"}}}
+	case "ci_lifecycle_requires_model":
+		return &ValidationError{Violations: []Violation{{Field: "lifecycle_state",
+			Detail: "only CI types with a lifecycle model have a lifecycle state, and it must be a state of that model"}}}
+	case "ci_health_read_only":
+		return &ValidationError{Violations: []Violation{{Field: "health", Detail: "the health is computed from monitoring"}}}
 	case "ci_asset_id_fkey":
 		return &ValidationError{Violations: []Violation{{Field: "asset_id", Detail: "asset not found"}}}
 	case "ci_location_from_asset":

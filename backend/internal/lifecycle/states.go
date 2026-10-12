@@ -104,6 +104,11 @@ func (r *Resolver) LifecycleKeyFor(req *http.Request, orgID, entityType, entityI
 				SELECT COALESCE(ct.lifecycle_definition_id::text, '')
 				FROM ci c JOIN ci_type ct ON ct.id = c.ci_type_id
 				WHERE c.id = $1`, entityID).Scan(&definitionID)
+			if err == nil && definitionID == "" {
+				// Only CI types with a lifecycle model have a lifecycle
+				// state (DB-05).
+				return ErrNoLifecycleModel
+			}
 		default:
 			return fmt.Errorf("unsupported entity type %q", entityType)
 		}

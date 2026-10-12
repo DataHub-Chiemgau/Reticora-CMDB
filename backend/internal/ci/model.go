@@ -28,7 +28,15 @@ type Item struct {
 	Asset   *AssetFacts `json:"asset,omitempty"`
 	// ParentCIID is the CI this one is physically part of (chassis → blade,
 	// AST-05); the relationship contains is projected from it (DB-05).
-	ParentCIID      string         `json:"parent_ci_id,omitempty"`
+	ParentCIID string `json:"parent_ci_id,omitempty"`
+	// LifecycleState is the software lifecycle; only CI types with a
+	// lifecycle model have one, and it changes through lifecycle
+	// transitions (DB-05).
+	LifecycleState string `json:"lifecycle_state,omitempty"`
+	// Health is computed from the monitoring state and read-only (DB-05):
+	// ok, warning, critical or unknown.
+	Health          string         `json:"health"`
+	HealthUpdatedAt *time.Time     `json:"health_updated_at,omitempty"`
 	CITypeID        string         `json:"ci_type_id"`
 	Name            string         `json:"name"`
 	Status          string         `json:"status"` // active|inactive|maintenance|decommissioned|unknown

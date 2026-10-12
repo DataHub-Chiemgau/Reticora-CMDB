@@ -210,7 +210,13 @@
     "location": "Standort",
     "barcode": "Barcode",
     "warrantyEnd": "Garantieende",
-    "supplier": "Lieferant"
+    "supplier": "Lieferant",
+    "healthState": {
+      "ok": "Zustand: OK",
+      "warning": "Zustand: Warnung",
+      "critical": "Zustand: kritisch",
+      "unknown": "Zustand: unbekannt"
+    }
   },
   "form": {
     "createCI": "CI erstellen",

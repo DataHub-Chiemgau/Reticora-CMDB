@@ -31,6 +31,12 @@ export interface CI {
   asset_id?: string;
   /** Read-only data of the linked asset. */
   asset?: CIAssetFacts;
+  /** Containing CI (chassis of a blade). */
+  parent_ci_id?: string;
+  /** Software lifecycle; only for types with a lifecycle model. */
+  lifecycle_state?: string;
+  /** Computed from monitoring; read-only. */
+  health?: 'ok' | 'warning' | 'critical' | 'unknown';
   ci_type_id: string;
   name: string;
   status: string;

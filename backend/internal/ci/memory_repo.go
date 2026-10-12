@@ -116,6 +116,9 @@ func (r *MemoryRepository) Create(ctx context.Context, item *Item) error {
 	item.CreatedAt = now
 	item.UpdatedAt = now
 	item.Version = 1
+	if item.Health == "" {
+		item.Health = "unknown"
+	}
 	r.items[item.ID] = item
 	return nil
 }

@@ -8663,6 +8663,25 @@ components:
             CI this one is physically part of (chassis → blade, AST-05); the
             relationship contains is projected from it. Cycles are rejected
             (422).
+        lifecycle_state:
+          type: string
+          readOnly: true
+          description: >-
+            Software lifecycle; only CI types with a lifecycle model have one,
+            and it changes through lifecycle transitions (DB-05).
+        health:
+          type: string
+          readOnly: true
+          enum: [ok, warning, critical, unknown]
+          description: >-
+            Computed from the monitoring state: critical or warning when the
+            latest sample of a metric breaches an enabled alert rule of that
+            severity, ok with samples and no breach, unknown without recent
+            samples (DB-05).
+        health_updated_at:
+          type: string
+          format: date-time
+          readOnly: true
         site_id:
           type: string
           readOnly: true

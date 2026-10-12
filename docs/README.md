@@ -309,6 +309,13 @@ lists them with `projected: true` and rejects storing them (422). Topology and
 impact traverse the projected containment. Migration 0089 turned stored
 containment rows into `parent_ci_id` and moved the structural rows to
 `migration_quarantine`.
+`ci.lifecycle_state` (software lifecycle) exists only for CI types with a
+lifecycle model and must be a state of it (trigger; a transition of a CI
+without a model is 422). `ci.health` is read-only: after every alert
+evaluation `ci_refresh_health` sets critical or warning when the latest
+sample of a metric breaches an enabled rule of that severity, ok for samples
+without a breach and unknown without a sample in the last 15 minutes
+(migration 0090; health findings are not G1 scope, E-36).
 
 **Entitlement enforcement:** an organization is entitled exactly to its rows
 in `entitlement` (ENT-05): a missing row means not entitled, only `cmdb_core`

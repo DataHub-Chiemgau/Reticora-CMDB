@@ -210,7 +210,13 @@
     "location": "Location",
     "barcode": "Barcode",
     "warrantyEnd": "Warranty end",
-    "supplier": "Supplier"
+    "supplier": "Supplier",
+    "healthState": {
+      "ok": "Health: OK",
+      "warning": "Health: warning",
+      "critical": "Health: critical",
+      "unknown": "Health: unknown"
+    }
   },
   "form": {
     "createCI": "Create CI",

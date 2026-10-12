@@ -110,6 +110,11 @@ export function CIDetailPage() {
               {t(getStatusTranslationKey(ci.status))}
             </Badge>
             <Badge variant="info">{ci.ci_type_id}</Badge>
+            {ci.health ? (
+              <Badge variant={healthBadgeVariant(ci.health)}>
+                {t(`ci.healthState.${ci.health}`)}
+              </Badge>
+            ) : null}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -221,17 +226,26 @@ export function CIDetailPage() {
           serverError={updateCI.error as Error | null}
         />
         <ProvenanceSection ciId={ci.id} />
-        <LifecycleSection
-          entityType="cis"
-          entityId={ci.id}
-          currentState={(ci as { lifecycle_state?: string }).lifecycle_state}
-        />
+        <LifecycleSection entityType="cis" entityId={ci.id} currentState={ci.lifecycle_state} />
         <ImpactSection ciId={ci.id} />
       </div>
 
       <CIFormModal open={isEditOpen} onOpenChange={setIsEditOpen} ci={ci} />
     </div>
   );
+}
+
+function healthBadgeVariant(health: string) {
+  switch (health) {
+    case 'critical':
+      return 'danger' as const;
+    case 'warning':
+      return 'warning' as const;
+    case 'ok':
+      return 'success' as const;
+    default:
+      return 'neutral' as const;
+  }
 }
 
 function DetailRow({ label, value }: { label: string; value?: string }) {

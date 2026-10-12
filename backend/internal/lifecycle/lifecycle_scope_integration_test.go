@@ -22,6 +22,13 @@ func TestLifecycleRepositoryScope(t *testing.T) {
 	f := scopetest.Seed(t, "18")
 	own := f.CI(t, f.OrgA, f.Client1, "lifecycle-c1")
 	foreign := f.CI(t, f.OrgA, f.Client2, "lifecycle-c2")
+	// Only CI types with a lifecycle model have lifecycle states (WP-080).
+	if _, err := f.Admin.Exec(context.Background(), `
+		WITH t AS (INSERT INTO ci_type (organization_id, key, name, lifecycle_definition_id)
+		           VALUES ($1, 'lifecycle-scope-18', 'Lifecycle scope', '00000000-0000-0000-0000-000000000101') RETURNING id)
+		UPDATE ci SET ci_type_id = (SELECT id FROM t) WHERE id IN ($2, $3)`, f.OrgA, own, foreign); err != nil {
+		t.Fatalf("lifecycle type: %v", err)
+	}
 
 	repo := lifecycle.NewPGRepository(f.App)
 	defA := &lifecycle.Definition{OrganizationID: f.OrgA, Key: "scopetest_a", Name: "Scopetest A", AppliesTo: "ci"}
@@ -50,7 +57,7 @@ func TestLifecycleRepositoryScope(t *testing.T) {
 	}
 
 	states := lifecycle.NewPGStateStore(f.App)
-	if err = states.SetState(ctx, f.OrgA, "ci", own, "in_use"); err != nil {
+	if err = states.SetState(ctx, f.OrgA, "ci", own, "deployed"); err != nil {
 		t.Fatalf("client-1 set state of own CI: %v", err)
 	}
 	if err = states.SetState(ctx, f.OrgA, "ci", foreign, "retired"); err == nil {
