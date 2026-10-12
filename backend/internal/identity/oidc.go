@@ -429,3 +429,37 @@ func decodeGroups(raw json.RawMessage) ([]string, error) {
 
 	return nil, errors.New("identity: groups claim must be a string array or string")
 }
+
+// CheckIssuer fetches the OIDC discovery document of issuer with client and
+// returns the issuer it announces. It fails when the document cannot be read
+// or announces another issuer (INS-02): the backend then could not verify
+// the tokens the browser brings from that issuer.
+func CheckIssuer(ctx context.Context, client *http.Client, issuer string) (string, error) {
+	issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
+	if client == nil {
+		client = oidcHTTPClient
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, issuer+"/.well-known/openid-configuration", http.NoBody)
+	if err != nil {
+		return "", fmt.Errorf("discovery request: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("discovery of %s: %w", issuer, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("discovery of %s: HTTP %d", issuer, resp.StatusCode)
+	}
+	var doc struct {
+		Issuer string `json:"issuer"`
+	}
+	if err = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&doc); err != nil {
+		return "", fmt.Errorf("discovery of %s: %w", issuer, err)
+	}
+	announced := strings.TrimRight(doc.Issuer, "/")
+	if announced != issuer {
+		return announced, fmt.Errorf("discovery of %s announces the issuer %q", issuer, doc.Issuer)
+	}
+	return announced, nil
+}

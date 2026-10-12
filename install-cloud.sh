@@ -551,8 +551,19 @@ collect_config() {
         issuer_host="$(printf '%s' "$RETICORA_PUBLIC_BASE_URL" | sed -E 's|^https?://||; s|[:/].*$||')"
         def_kc_port="$(env_get RETICORA_KEYCLOAK_PORT || true)"
         case "$issuer_host" in
-            localhost|127.*|0.0.0.0|[0-9]*.[0-9]*.[0-9]*.[0-9]*)
-                # Local/literal-IP install: Keycloak is published directly on
+            localhost|127.*|0.0.0.0)
+                # Loopback install: the backend container cannot reach a
+                # localhost issuer (INS-02), so Keycloak is addressed via the
+                # host's primary IP — reachable from the host, the containers
+                # and browsers on the network alike.
+                ensure_command ip iproute2
+                def_issuer="${issuer_scheme}://$(host_primary_ip || true):${def_kc_port:-8180}/realms/reticora"
+                case "$def_issuer" in
+                    *://:*) def_issuer="${issuer_scheme}://${issuer_host}:${def_kc_port:-8180}/realms/reticora" ;;
+                esac
+                ;;
+            [0-9]*.[0-9]*.[0-9]*.[0-9]*)
+                # Literal-IP install: Keycloak is published directly on
                 # its host port (8180 unless already configured in .env).
                 def_issuer="${issuer_scheme}://${issuer_host}:${def_kc_port:-8180}/realms/reticora"
                 ;;
@@ -1016,17 +1027,11 @@ validate_realm_json() {
 validate_keycloak_bootstrap() {
     info "Validating the Keycloak bootstrap …"
 
-    # The issuer URL must not point at localhost when the UI is served from a
-    # different host — the browser resolves it, not the server.
-    case "$RETICORA_OIDC_ISSUER_URL" in
-        http://localhost:*|http://localhost/*|https://localhost:*|https://localhost/*|http://127.*|https://127.*)
-            case "$RETICORA_PUBLIC_BASE_URL" in
-                http://localhost*|https://localhost*|http://127.*|https://127.*) : ;;
-                *) warn "RETICORA_OIDC_ISSUER_URL ($RETICORA_OIDC_ISSUER_URL) points at localhost but the public base URL is $RETICORA_PUBLIC_BASE_URL."
-                   warn "Remote browsers cannot reach a localhost issuer — sign-in will fail for every user not on this machine." ;;
-            esac
-            ;;
-    esac
+    # A localhost issuer resolves to the backend container itself, not to
+    # Keycloak: the backend could not verify any token (INS-02).
+    if issuer_is_loopback "$RETICORA_OIDC_ISSUER_URL"; then
+        die "RETICORA_OIDC_ISSUER_URL ($RETICORA_OIDC_ISSUER_URL) points at localhost, which the backend container cannot reach. Set it to an address reachable from this host, the containers and the users' browsers, e.g. http://$(host_primary_ip || printf '<host-ip>'):${RETICORA_KEYCLOAK_PORT:-8180}/realms/reticora (see docs/troubleshooting-installation.md, 'OIDC issuer check failed')."
+    fi
 
     # Verify the realm's OIDC discovery document is served (proves the realm
     # import succeeded). The issuer may be a public URL not resolvable from
@@ -1064,6 +1069,75 @@ validate_keycloak_bootstrap() {
         die "Keycloak answered the discovery document without an 'issuer' field — the realm import is incomplete."
     fi
     success "Keycloak realm 'reticora' is imported and serving OIDC discovery"
+
+    check_issuer_from_host
+    check_issuer_from_container
+}
+
+# host_primary_ip — the host's primary IPv4 address (the source address of
+# its default route); RETICORA_HOST_IP overrides it.
+host_primary_ip() {
+    if [ -n "${RETICORA_HOST_IP:-}" ]; then printf '%s' "$RETICORA_HOST_IP"; return 0; fi
+    local addr=""
+    if command -v ip >/dev/null 2>&1; then
+        addr="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
+    fi
+    if [ -z "$addr" ] && command -v hostname >/dev/null 2>&1; then
+        addr="$(hostname -I 2>/dev/null | awk '{ print $1 }')"
+    fi
+    [ -n "$addr" ] || return 1
+    printf '%s' "$addr"
+}
+
+# issuer_is_loopback <url> — returns 0 for an issuer on localhost/127.x.
+issuer_is_loopback() {
+    case "$1" in
+        http://localhost:*|http://localhost/*|https://localhost:*|https://localhost/*|http://127.*|https://127.*|http://0.0.0.0*|https://0.0.0.0*) return 0 ;;
+    esac
+    return 1
+}
+
+# discovery_issuer — prints the "issuer" of the discovery document on stdin.
+discovery_issuer() {
+    tr -d '\n' | sed -nE 's/.*"issuer"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p'
+}
+
+ISSUER_TROUBLESHOOTING="see docs/troubleshooting-installation.md, 'OIDC issuer check failed'"
+
+# check_issuer_from_host — the configured issuer serves its discovery
+# document to this host and announces exactly itself (INS-02). A
+# self-signed certificate of the installation is trusted explicitly.
+check_issuer_from_host() {
+    local issuer="${RETICORA_OIDC_ISSUER_URL%/}" doc="" announced cert ca_args=()
+    cert="$(tls_live_dir)/fullchain.pem"
+    if [ -n "$RETICORA_TLS_DOMAIN" ] && [ -f "$cert" ] && tls_cert_is_selfsigned "$cert"; then
+        ca_args=(--cacert "$cert")
+    fi
+    for _ in 1 2 3; do
+        doc="$(curl -fsS --max-time 5 "${ca_args[@]}" "$issuer/.well-known/openid-configuration" 2>/dev/null)" && break
+        doc=""
+        sleep "${RETICORA_ISSUER_RETRY_DELAY:-3}"
+    done
+    if [ -z "$doc" ]; then
+        die "The OIDC issuer $issuer is not reachable from this host (no discovery document at $issuer/.well-known/openid-configuration). Check DNS, firewall and RETICORA_OIDC_ISSUER_URL ($ISSUER_TROUBLESHOOTING)."
+    fi
+    announced="$(printf '%s' "$doc" | discovery_issuer)"
+    if [ "${announced%/}" != "$issuer" ]; then
+        die "The OIDC issuer $issuer announces itself as '${announced:-<none>}' — tokens would not match the configured issuer. Align RETICORA_OIDC_ISSUER_URL with the address Keycloak is published under ($ISSUER_TROUBLESHOOTING)."
+    fi
+    success "OIDC issuer $issuer is reachable from this host"
+}
+
+# check_issuer_from_container — the backend container reaches the same
+# issuer through the client it uses for sign-in (including
+# RETICORA_OIDC_CA_CERT_FILE); the server binary checks it and exits.
+check_issuer_from_container() {
+    local out
+    if ! out="$(compose_cmd run --rm --no-deps --entrypoint server server -check-oidc-issuer 2>&1)"; then
+        printf '%s\n' "$out" | tail -n 5 >&2
+        die "The backend container cannot reach the OIDC issuer $RETICORA_OIDC_ISSUER_URL — sign-in would fail. The issuer must resolve to Keycloak from inside the containers as well ($ISSUER_TROUBLESHOOTING)."
+    fi
+    success "OIDC issuer is reachable from the backend container"
 }
 
 # ─── Images: build / pull ─────────────────────────────────────────────────────

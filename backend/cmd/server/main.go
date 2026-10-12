@@ -50,9 +50,14 @@ var version = "dev"
 func main() {
 	noDB := flag.Bool("no-db", false,
 		"run with in-memory repositories for local development; all data is lost on restart")
+	checkIssuer := flag.Bool("check-oidc-issuer", false,
+		"check that the configured OIDC issuer is reachable from this container and announces itself, then exit (used by the installer)")
 	flag.Parse()
 
 	cfg := config.Load()
+	if *checkIssuer {
+		os.Exit(runIssuerCheck(cfg))
+	}
 
 	// Every record passes the redaction handler: secret attributes and URL
 	// passwords never reach the log (SEC-01).
@@ -570,4 +575,24 @@ func hostPort(rawURL, defaultPort string) (string, error) {
 		port = defaultPort
 	}
 	return net.JoinHostPort(u.Hostname(), port), nil
+}
+
+// runIssuerCheck fetches the discovery document of the configured issuer
+// through the same HTTP client the server uses for sign-in (including
+// RETICORA_OIDC_CA_CERT_FILE) and reports the result on stdout/stderr
+// (INS-02). The installer runs it inside the backend container.
+func runIssuerCheck(cfg *config.Config) int {
+	client, err := identity.NewHTTPClientWithCA(cfg.OIDCCACertFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "OIDC CA bundle %s: %v\n", cfg.OIDCCACertFile, err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if _, err = identity.CheckIssuer(ctx, client, cfg.OIDCIssuerURL); err != nil {
+		fmt.Fprintf(os.Stderr, "OIDC issuer check failed: %v\n", err)
+		return 1
+	}
+	fmt.Printf("OIDC issuer %s is reachable\n", cfg.OIDCIssuerURL)
+	return 0
 }

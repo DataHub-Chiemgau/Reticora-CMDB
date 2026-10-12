@@ -98,13 +98,52 @@ letting the login fail later in the browser.
 `http://localhost:8180/...` on a remote machine.
 
 **Cause:** `RETICORA_OIDC_ISSUER_URL` points at localhost — the browser
-resolves it, not the server. The installer derives the issuer from the public
-base URL and warns when the two disagree.
+resolves it, not the server, and inside the backend container localhost is the
+container itself. The installer therefore refuses a localhost issuer; for a
+localhost base URL it proposes `http://<host-ip>:8180/realms/reticora`.
 
 **Fix:** Edit `.env`, set `RETICORA_OIDC_ISSUER_URL` to the publicly reachable
 Keycloak URL (`https://<domain>/realms/reticora` behind the reverse proxy, or
 `http://<host-ip>:8180/realms/reticora` for direct port publishing), then
 re-run the installer.
+
+### OIDC issuer check failed
+
+**Symptom:** The installer stops after the Keycloak start with one of
+
+- `The OIDC issuer … is not reachable from this host`
+- `The OIDC issuer … announces itself as '…'`
+- `The backend container cannot reach the OIDC issuer …`
+
+**Cause:** The issuer must be one and the same URL for the users' browsers,
+this host and the backend container (INS-02): the browser fetches tokens from
+it, the backend verifies them against the issuer they name. The installer
+fetches `<issuer>/.well-known/openid-configuration` from the host and — via
+`server -check-oidc-issuer` — from inside the backend container, and requires
+the document to announce exactly the configured issuer.
+
+**Fix:**
+
+- *Not reachable from this host:* check DNS for the issuer's hostname, the
+  firewall for the Keycloak port (default 8180) and the reverse proxy.
+- *Announces another issuer:* Keycloak names itself after the address it is
+  called under. Use the address it is published under (behind the reverse
+  proxy `https://<domain>/realms/reticora`, else
+  `http://<host-ip>:8180/realms/reticora`), not an alias.
+- *Not reachable from the container:* the issuer's hostname must resolve to
+  this host from inside Docker as well (no `/etc/hosts`-only entries, no
+  split-horizon DNS without the containers), and a host firewall must allow
+  the Docker bridge to reach the published port. With a private CA, set
+  `RETICORA_OIDC_CA_CERT_FILE` to a CA bundle mounted into the container.
+
+Run the container check manually:
+
+```bash
+cd deploy/docker-compose
+docker compose --env-file .env run --rm --no-deps --entrypoint server server -check-oidc-issuer
+```
+
+Then correct `RETICORA_OIDC_ISSUER_URL` in `.env` and re-run the installer.
 
 ### Login fails with "Invalid redirect uri"
 

@@ -254,3 +254,4 @@ INS-07;[B];A;tests/install-preflight.test.sh;WP-093
 TEC-09;[B];A;tests/install-preflight.test.sh;WP-093
 INS-03;[B];A;tests/install-cloud-helpers.test.sh;WP-094
 TEC-09;[B];A;tests/install-cloud-helpers.test.sh;WP-094
+INS-02;[B];A;tests/install-cloud-helpers.test.sh;WP-095

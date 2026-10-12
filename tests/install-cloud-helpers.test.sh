@@ -240,6 +240,96 @@ run_test   "tls: ACME runs certbot with the webroot and reloads nginx"     test_
 run_test   "tls: no new request while a real certificate is served"        test_tls_acme_skipped_with_real_certificate
 run_test   "tls: the TLS template is mounted only with a domain"           test_tls_template_selection
 
+# ─── OIDC issuer from the host and the container (WP-095, INS-02) ───────────
+
+ISSUER="http://192.0.2.10:8180/realms/reticora"
+
+# curl stub: serves a discovery document announcing $STUB_ANNOUNCED, or
+# fails when it is empty.
+stub_discovery() {
+    STUB_ANNOUNCED="$1"
+    RETICORA_ISSUER_RETRY_DELAY=0
+    curl() {
+        [ -n "$STUB_ANNOUNCED" ] || return 7
+        printf '{\n  "issuer": "%s",\n  "jwks_uri": "x"\n}\n' "$STUB_ANNOUNCED"
+    }
+}
+
+test_issuer_host_matches() {
+    RETICORA_OIDC_ISSUER_URL="$ISSUER/"
+    RETICORA_TLS_DOMAIN=""
+    stub_discovery "$ISSUER"
+    check_issuer_from_host
+}
+
+test_issuer_host_other_issuer() {
+    RETICORA_OIDC_ISSUER_URL="$ISSUER"
+    RETICORA_TLS_DOMAIN=""
+    stub_discovery "http://localhost:8180/realms/reticora"
+    local out
+    out="$( (check_issuer_from_host) 2>&1)" && return 1
+    printf '%s' "$out" | grep -q "announces itself as 'http://localhost:8180/realms/reticora'" &&
+        printf '%s' "$out" | grep -q "docs/troubleshooting-installation.md"
+}
+
+test_issuer_host_unreachable() {
+    RETICORA_OIDC_ISSUER_URL="$ISSUER"
+    RETICORA_TLS_DOMAIN=""
+    stub_discovery ""
+    local out
+    out="$( (check_issuer_from_host) 2>&1)" && return 1
+    printf '%s' "$out" | grep -q "not reachable from this host" &&
+        printf '%s' "$out" | grep -q "docs/troubleshooting-installation.md"
+}
+
+test_issuer_container_check_runs_server() {
+    RETICORA_OIDC_ISSUER_URL="$ISSUER"
+    local calls="$TMP_ROOT/issuer-compose-calls"
+    compose_cmd() { printf '%s\n' "$*" >> "$calls"; }
+    check_issuer_from_container
+    grep -qx -- "run --rm --no-deps --entrypoint server server -check-oidc-issuer" "$calls"
+}
+
+test_issuer_container_unreachable() {
+    RETICORA_OIDC_ISSUER_URL="$ISSUER"
+    compose_cmd() { echo "OIDC issuer check failed: dial tcp 192.0.2.10:8180: connect: connection refused"; return 1; }
+    local out
+    out="$( (check_issuer_from_container) 2>&1)" && return 1
+    printf '%s' "$out" | grep -q "connection refused" &&
+        printf '%s' "$out" | grep -q "backend container cannot reach the OIDC issuer" &&
+        printf '%s' "$out" | grep -q "docs/troubleshooting-installation.md"
+}
+
+test_issuer_loopback_refused() {
+    RETICORA_OIDC_ISSUER_URL="http://localhost:8180/realms/reticora"
+    RETICORA_HOST_IP="192.0.2.10"
+    local out
+    out="$( (validate_keycloak_bootstrap) 2>&1)" && return 1
+    printf '%s' "$out" | grep -q "backend container cannot reach" &&
+        printf '%s' "$out" | grep -q "http://192.0.2.10:8180/realms/reticora"
+}
+
+test_host_primary_ip() {
+    RETICORA_HOST_IP="198.51.100.7"
+    [ "$(host_primary_ip)" = "198.51.100.7" ] || return 1
+    issuer_is_loopback "http://127.0.0.1:8180/realms/reticora" &&
+        issuer_is_loopback "https://localhost/realms/reticora" &&
+        ! issuer_is_loopback "$ISSUER"
+}
+
+test_issuer_troubleshooting_documented() {
+    grep -q "OIDC issuer check failed" "$REPO_ROOT/docs/troubleshooting-installation.md"
+}
+
+run_test   "issuer: discovery from the host announces the configured issuer" test_issuer_host_matches
+run_test   "issuer: another announced issuer is refused with a hint"         test_issuer_host_other_issuer
+run_test   "issuer: an unreachable issuer is refused with a hint"            test_issuer_host_unreachable
+run_test   "issuer: the backend container checks the issuer itself"          test_issuer_container_check_runs_server
+run_test   "issuer: unreachable from the container is refused with a hint"   test_issuer_container_unreachable
+run_test   "issuer: a localhost issuer is refused, the host IP suggested"    test_issuer_loopback_refused
+run_test   "issuer: host IP and loopback detection"                          test_host_primary_ip
+run_test   "issuer: the troubleshooting guide covers the check"              test_issuer_troubleshooting_documented
+
 # ─── realm files and initial administrator (WP-044, AUT-09) ───────────────────
 
 realm_py() {
