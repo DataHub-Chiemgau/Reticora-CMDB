@@ -219,3 +219,5 @@ AI-02;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 AI-02;[A];B;backend/internal/ai/ci_indexer_test.go;WP-076
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/asset_canonical_integration_test.go;WP-077
 AST-04;[P2];B;backend/internal/ci/asset_canonical_integration_test.go;WP-077
+RCK-03;[B];B;backend/internal/rack/mount_location_integration_test.go;WP-078
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/rack/mount_location_integration_test.go;WP-078

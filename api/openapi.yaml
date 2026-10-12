@@ -4325,6 +4325,9 @@ paths:
       operationId: createRackMount
       tags: [Racks]
       summary: Mount a CI into a rack
+      description: >-
+        The location of the CI, or of its asset, becomes the rack; ci_change
+        and the audit record the mount (RCK-03, DB-05).
       requestBody:
         required: true
         content:
@@ -4367,6 +4370,10 @@ paths:
       operationId: updateRackMount
       tags: [Racks]
       summary: Update a rack mount
+      description: >-
+        Repositions the mount (another rack included). The location of the
+        CI, or of its asset, becomes the rack; ci_change and the audit record
+        the change (RCK-03, DB-05).
       requestBody:
         required: true
         content:
@@ -4390,6 +4397,9 @@ paths:
       operationId: deleteRackMount
       tags: [Racks]
       summary: Delete a rack mount
+      description: >-
+        Unmounts the CI. Its location, or its asset's, becomes the rack's
+        room; ci_change and the audit record the change (RCK-03, DB-05).
       responses:
         '204':
           description: Rack mount deleted
@@ -12412,6 +12422,9 @@ components:
     UpdateRackMountRequest:
       type: object
       properties:
+        rack_id:
+          type: string
+          description: Moves the mount to another rack; the CI's location follows (RCK-03).
         position_u:
           type: integer
           minimum: 1

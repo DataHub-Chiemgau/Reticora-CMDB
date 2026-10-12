@@ -297,6 +297,10 @@ the asset; writing the location of a linked CI is rejected with 422.
 difference to the asset's serial number opens one review item
 `serial_mismatch` per CI, and a manual serial write on a linked CI is
 rejected.
+Mounting a CI into a rack or moving it to another rack sets the location
+(the asset's for a linked CI, otherwise the CI's) to the rack; unmounting
+sets the rack's room. Every mount change writes `ci_change` (movement,
+location_change) and an audit entry in the same transaction (RCK-03).
 
 **Entitlement enforcement:** an organization is entitled exactly to its rows
 in `entitlement` (ENT-05): a missing row means not entitled, only `cmdb_core`

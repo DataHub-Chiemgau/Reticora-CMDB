@@ -2382,7 +2382,10 @@ export interface paths {
     /** List mounts in a rack */
     get: operations['listRackMounts'];
     put?: never;
-    /** Mount a CI into a rack */
+    /**
+     * Mount a CI into a rack
+     * @description The location of the CI, or of its asset, becomes the rack; ci_change and the audit record the mount (RCK-03, DB-05).
+     */
     post: operations['createRackMount'];
     delete?: never;
     options?: never;
@@ -2404,11 +2407,17 @@ export interface paths {
     get: operations['getRackMount'];
     put?: never;
     post?: never;
-    /** Delete a rack mount */
+    /**
+     * Delete a rack mount
+     * @description Unmounts the CI. Its location, or its asset's, becomes the rack's room; ci_change and the audit record the change (RCK-03, DB-05).
+     */
     delete: operations['deleteRackMount'];
     options?: never;
     head?: never;
-    /** Update a rack mount */
+    /**
+     * Update a rack mount
+     * @description Repositions the mount (another rack included). The location of the CI, or of its asset, becomes the rack; ci_change and the audit record the change (RCK-03, DB-05).
+     */
     patch: operations['updateRackMount'];
     trace?: never;
   };
@@ -7509,6 +7518,8 @@ export interface components {
       face?: 'front' | 'rear' | 'both';
     };
     UpdateRackMountRequest: {
+      /** @description Moves the mount to another rack; the CI's location follows (RCK-03). */
+      rack_id?: string;
       position_u?: number;
       height_u?: number;
       /** @enum {string} */
