@@ -263,3 +263,5 @@ OPS-05;[B];A;backend/internal/server/workers_test.go;WP-103
 OPS-06;[Q];A;tests/outage/;WP-104
 OPS-04;[B], [P5];A;tests/backup-config.test.sh;WP-100
 NFR-05;[B];A;tests/backup-config.test.sh;WP-100
+NFR-05;[B];A;tests/restore-pitr.sh;WP-101
+OPS-04;[B], [P5];A;tests/restore-pitr.sh;WP-101

@@ -97,8 +97,11 @@ PITR takes the place of pgBackRest, with the same RPO, RTO and retention.
 
 ## Restore procedure (PITR)
 
-1. Stop the server so that nothing writes during the restore. Stop
-   PostgreSQL: `docker compose stop server backup postgres`.
+1. Stop the server so that nothing writes during the restore.
+   - If PostgreSQL still runs (logical error), first archive the current
+     WAL: `docker compose exec backup reticora-pgbackrest-env.sh pgbackrest
+     --stanza=reticora check`.
+   - Then stop it: `docker compose stop server backup postgres`.
 2. Restore into an empty data directory, up to the target time:
 
    ```bash
@@ -108,7 +111,9 @@ PITR takes the place of pgBackRest, with the same RPO, RTO and retention.
        --type=time --target="2026-10-12 09:30:00+00" --target-action=promote restore'
    ```
 
-   Without `--type`/`--target`, the restore replays the whole archive.
+   Without `--type`/`--target`, the restore replays the whole archive. It
+   follows the newest timeline, also after an earlier point in time
+   restore.
 3. Start PostgreSQL: `docker compose up -d postgres`. It replays the WAL up to
    the target and promotes.
 4. Start the backup service again; it takes a new full backup on the new
@@ -117,6 +122,43 @@ PITR takes the place of pgBackRest, with the same RPO, RTO and retention.
    than the backup.
 6. Rebuild the search index per tenant: `POST /api/v1/search/reindex`.
 7. Verify the audit hash chain: `backend/cmd/audit-verify` (see below).
+
+## Restore proof: RPO and RTO (WP-101, NFR-05)
+
+`tests/restore-pitr.sh` proves the chain with the real image. The `pitr`
+job of `.github/workflows/restore-test.yml` runs it every night and on
+changes to the chain. The protocol `restore-pitr-report.md` is kept as an
+artifact for 90 days and shown in the job summary.
+
+The test starts `postgres` and `backup` in a throwaway Compose project and
+writes a workload after the first base backup. It then runs two scenarios:
+
+1. **Logical error:** archive the current WAL, then restore to a target time
+   between two workload phases. Every row before the target must be back,
+   none after it.
+2. **Loss of the data volume during continuous writes:** writes run 7
+   minutes, longer than `archive_timeout`, so that a full archive cycle is
+   covered. Then a crash and the restore of the latest archived state.
+   - Measured RPO: last committed row minus last restored row.
+   - The restore follows the timeline created by scenario 1.
+
+Both restores measure the RTO: wipe, restore, WAL replay and promotion.
+After the restore, archiving must work again (`pgbackrest check`). The job
+fails above **RPO 900 s (15 min)** or **RTO 14,400 s (4 h)**, or when the
+point in time restore is not exact.
+
+Measured on 2026-10-12 with a 50,000 row workload and 30 s of writes:
+
+| Check | Result |
+|---|---|
+| Point in time restore | exact (50,000 rows before the target, none after it) |
+| RPO | 52 s |
+| RTO | 5 s per restore |
+| Archiving after the restore | works |
+
+With continuous writes, the RPO is bounded by `archive_timeout` (300 s)
+plus the archive lag. The RTO grows with the database size and with the WAL
+to replay since the last daily full backup.
 
 ## Logical backup (portable safety net)
 
