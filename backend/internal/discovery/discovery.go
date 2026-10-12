@@ -344,6 +344,7 @@ type Handler struct {
 	provenance ProvenanceRecorder
 	instance   InstanceFieldSource
 	queue      IngestQueue
+	interfaces InterfaceSyncer
 	// The review queue (package reviews), built on first use.
 	reviewsOnce    sync.Once
 	reviews        *reviews.Service
@@ -910,6 +911,9 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			total++
 			resolvedCIID[i] = newItem.ID
 			resp.Created++
+			if syncErr := h.syncInterfaces(ctx, orgID, newItem.ID, &item); syncErr != nil {
+				return resp, syncErr
+			}
 			// A hostname or FQDN hit is never merged (CH29): the new CI is
 			// reviewed as a probable duplicate.
 			if len(result.ProbableDuplicates) > 0 {
@@ -957,7 +961,13 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 				}
 				return d.Write
 			}
+			// A sighting updates last_seen_at without history and brings an
+			// unknown CI back to active (REC-07, AUD-03).
 			update := ci.UpdateRequest{LastSeenAt: &now}
+			if matched.Status == "unknown" {
+				active := "active"
+				update.Status = &active
+			}
 			for _, f := range []struct {
 				name           string
 				value, current string
@@ -1012,6 +1022,9 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			}
 			resolvedCIID[i] = updated.ID
 			resp.Updated++
+			if syncErr := h.syncInterfaces(ctx, orgID, updated.ID, &item); syncErr != nil {
+				return resp, syncErr
+			}
 			// Contradicting identity values on a matched CI (e.g. a changed
 			// serial number) are queued for operator review instead of being
 			// silently applied (spec §5.3: Unklarheiten in Review-Queue).

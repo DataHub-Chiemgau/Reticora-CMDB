@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 )
 
 // MaxFutureSkew is how far observed_at may lie after the arrival time before
@@ -44,6 +45,41 @@ func admitObservedAt(items []IngestItem, arrival time.Time) (admitted []IngestIt
 		admitted = append(admitted, item)
 	}
 	return admitted, rejected
+}
+
+// InterfaceSyncer applies the interfaces a record reports to its CI and
+// removes those missed three times in a row (REC-07). The IPAM repository
+// implements it.
+type InterfaceSyncer interface {
+	SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID string, observed []ipam.ObservedInterface) (ipam.SyncResult, error)
+}
+
+// WithInterfaces attaches the interface synchronization of ingest.
+func (h *Handler) WithInterfaces(syncer InterfaceSyncer) *Handler {
+	h.interfaces = syncer
+	return h
+}
+
+// syncInterfaces applies the interfaces of an item to its CI. Items that
+// report no interfaces leave them untouched: only an observation that lists
+// interfaces can miss one.
+func (h *Handler) syncInterfaces(ctx context.Context, orgID, ciID string, item *IngestItem) error {
+	if h.interfaces == nil || ciID == "" || len(item.Interfaces) == 0 {
+		return nil
+	}
+	observed := make([]ipam.ObservedInterface, 0, len(item.Interfaces))
+	for i := range item.Interfaces {
+		ifc := &item.Interfaces[i]
+		if strings.TrimSpace(ifc.Name) == "" {
+			continue
+		}
+		observed = append(observed, ipam.ObservedInterface{
+			Name: ifc.Name, IfIndex: ifc.IfIndex, MAC: canonicalMAC(ifc.MAC), SpeedMbps: ifc.SpeedMbps, MTU: ifc.MTU,
+			AdminStatus: ifc.AdminStatus, OperStatus: ifc.OperStatus, IsManagement: ifc.Management, IPs: ifc.IPs,
+		})
+	}
+	_, err := h.interfaces.SyncDiscoveredInterfaces(ctx, orgID, ciID, observed)
+	return err
 }
 
 // ReconcileAction represents the reconciliation outcome.

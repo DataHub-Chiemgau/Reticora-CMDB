@@ -266,6 +266,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		WithInstanceFields(repos.CIType).
 		WithLimits(opts.Entitlements)
 	opts.Entitlements.WithUnlicensed(discoveryHandler)
+	// Discovered interfaces and addresses are kept in IPAM (REC-07).
+	if syncer, ok := repos.IPAM.(discovery.InterfaceSyncer); ok {
+		discoveryHandler.WithInterfaces(syncer)
+	}
 	if opts.IngestQueue != nil {
 		opts.IngestQueue.Attach(discoveryHandler)
 	}

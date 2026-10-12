@@ -187,8 +187,8 @@ func TestIngestAcceptsDeviceRecords(t *testing.T) {
 		t.Errorf("attributes from the record: %v", got.Attributes)
 	}
 	rawData, _ := got.Attributes["raw_data"].(map[string]any)
-	if rawData["record_id"] != rec.RecordID || rawData["observed_at"] != "2026-10-12T08:00:00Z" {
-		t.Errorf("raw_data keeps record_id and observed_at: %v", rawData)
+	if rawData["target_ip"] != "192.0.2.20" || rawData["record_id"] != nil || rawData["observed_at"] != nil {
+		t.Errorf("raw_data describes the device, not the record: %v", rawData)
 	}
 
 	item := itemFromRecord(&rec)

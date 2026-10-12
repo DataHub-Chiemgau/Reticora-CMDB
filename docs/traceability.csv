@@ -245,3 +245,6 @@ REC-08;[B];D;backend/internal/reviews/service_test.go;WP-088
 API-05;[B];D;backend/internal/reviews/service_test.go;WP-088
 REC-06;[B];D;backend/internal/reviews/conflict_test.go;WP-089
 REC-12;[B];D;backend/internal/reviews/conflict_test.go;WP-089
+REC-07;[B];D;backend/internal/discovery/last_seen_test.go;WP-090
+AUD-03;[B];D;backend/internal/discovery/last_seen_test.go;WP-090
+NET-01;[B];D;backend/internal/discovery/last_seen_test.go;WP-090

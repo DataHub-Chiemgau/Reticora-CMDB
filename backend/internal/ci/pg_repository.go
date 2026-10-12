@@ -706,6 +706,8 @@ func marshalJSONValue(value any) (string, error) {
 	return string(b), nil
 }
 
+// diffCI lists the changed fields that are historized. last_seen_at is not
+// (AUD-03, REC-07): a sighting alone writes no ci_change.
 func diffCI(before, after *Item) []ciFieldChange {
 	fields := []struct {
 		name string
@@ -736,7 +738,6 @@ func diffCI(before, after *Item) []ciFieldChange {
 		{"attributes", before.Attributes, after.Attributes},
 		{"discovery_source", before.DiscoverySource, after.DiscoverySource},
 		{"first_seen_at", timePtrRFC3339(before.FirstSeenAt), timePtrRFC3339(after.FirstSeenAt)},
-		{"last_seen_at", timePtrRFC3339(before.LastSeenAt), timePtrRFC3339(after.LastSeenAt)},
 		{"is_manual", before.IsManual, after.IsManual},
 	}
 	changes := make([]ciFieldChange, 0, len(fields))

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/wire"
@@ -140,10 +139,11 @@ func itemFromRecord(rec *DeviceRecord) IngestItem {
 	}
 	item.Fingerprint = fingerprint
 
+	// raw_data holds what describes the device; record_id and observed_at
+	// change with every record and live in the ingest ledger and the field
+	// provenance, so a sighting alone changes no attribute (AUD-03).
 	raw := map[string]any{
-		"record_id":   rec.RecordID,
-		"observed_at": rec.ObservedAt.UTC().Format(time.RFC3339Nano),
-		"target_ip":   rec.TargetIP,
+		"target_ip": rec.TargetIP,
 	}
 	for key, value := range map[string]string{
 		"sys_object_id": rec.Classification.SysObjectID,
