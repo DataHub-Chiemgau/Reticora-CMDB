@@ -164,6 +164,7 @@ GET /api/v1/monitoring/metrics monitoring:read
 GET /api/v1/network-interfaces/{id} ipam:read
 GET /api/v1/orders order:read
 GET /api/v1/orders/{id} order:read
+GET /api/v1/org location:read
 GET /api/v1/permissions permission:read
 GET /api/v1/privacy/retention user:manage
 GET /api/v1/rack-mounts/{id} rack:read
@@ -263,6 +264,7 @@ PATCH /api/v1/maintenance-windows/{id} maintenance:write
 PATCH /api/v1/monitoring/alerts/{id} monitoring:write
 PATCH /api/v1/network-interfaces/{id} ipam:write
 PATCH /api/v1/orders/{id} order:write
+PATCH /api/v1/org user:manage
 PATCH /api/v1/rack-mounts/{id} rack:write
 PATCH /api/v1/racks/{id} rack:write
 PATCH /api/v1/relationship-types/{key} relationship_type:manage

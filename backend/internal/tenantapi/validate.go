@@ -1,0 +1,83 @@
+package tenantapi
+
+import (
+	"fmt"
+	"strings"
+	"time"
+	_ "time/tzdata" // IANA zone names validate without the host's zoneinfo
+
+	"golang.org/x/text/language"
+)
+
+// FieldError rejects the value of one field (400 with the field name).
+type FieldError struct {
+	Field   string
+	Message string
+}
+
+func (e *FieldError) Error() string { return e.Field + ": " + e.Message }
+
+// ConflictError reports a unique field that is already taken (409, LOC-01–
+// LOC-03).
+type ConflictError struct {
+	Field   string
+	Message string
+}
+
+func (e *ConflictError) Error() string { return e.Field + ": " + e.Message }
+
+// validTimezone checks an IANA time zone name (LOC-01–LOC-03). "UTC" is a
+// name of the tz database; "Local" and abbreviations are not.
+func validTimezone(field, tz string) error {
+	if tz == "" || tz == "Local" || !strings.Contains(tz, "/") && tz != "UTC" {
+		return &FieldError{Field: field, Message: fmt.Sprintf("%q is not an IANA time zone (e.g. Europe/Berlin)", tz)}
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
+		return &FieldError{Field: field, Message: fmt.Sprintf("%q is not an IANA time zone (e.g. Europe/Berlin)", tz)}
+	}
+	return nil
+}
+
+// validOptionalTimezone accepts an empty value (no own time zone).
+func validOptionalTimezone(field string, tz *string) error {
+	if tz == nil || *tz == "" {
+		return nil
+	}
+	return validTimezone(field, *tz)
+}
+
+// validCurrency checks an active ISO 4217 alphabetic code (LOC-01).
+func validCurrency(code string) error {
+	if !iso4217[code] {
+		return &FieldError{Field: "currency", Message: fmt.Sprintf("%q is not an ISO 4217 currency code (e.g. EUR)", code)}
+	}
+	return nil
+}
+
+// canonicalLocale checks a BCP 47 language tag and returns its canonical
+// form ("de-de" → "de-DE"; LOC-01).
+func canonicalLocale(tag string) (string, error) {
+	t, err := language.Parse(tag)
+	if err != nil || tag == "" || t == language.Und {
+		return "", &FieldError{Field: "locale", Message: fmt.Sprintf("%q is not a BCP 47 language tag (e.g. de-DE)", tag)}
+	}
+	return t.String(), nil
+}
+
+// iso4217 lists the active alphabetic codes of ISO 4217 (list one,
+// including the special codes for gold, SDR and testing purposes).
+var iso4217 = func() map[string]bool {
+	codes := strings.Fields(`
+AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB BOV BRL BSD BTN BWP BYN BZD
+CAD CDF CHE CHF CHW CLF CLP CNY COP COU CRC CUC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP
+GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW
+KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MXV MYR MZN NAD NGN
+NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SLL
+SOS SRD SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD USN UYI UYU UYW UZS VED VES
+VND VUV WST XAF XAG XAU XBA XBB XBC XBD XCD XCG XDR XOF XPD XPF XPT XSU XTS XUA XXX YER ZAR ZMW ZWG ZWL`)
+	m := make(map[string]bool, len(codes))
+	for _, c := range codes {
+		m[c] = true
+	}
+	return m
+}()

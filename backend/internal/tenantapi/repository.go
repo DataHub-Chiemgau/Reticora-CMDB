@@ -13,6 +13,10 @@ import (
 
 // Repository defines persistence operations for the location hierarchy.
 type Repository interface {
+	// Organization (the tenant itself)
+	GetOrganization(ctx context.Context, orgID string) (*Organization, error)
+	UpdateOrganization(ctx context.Context, orgID string, req UpdateOrganizationRequest) (*Organization, error)
+
 	// Clients
 	ListClients(ctx context.Context, orgID string, page api.PaginationParams) ([]Client, int, error)
 	GetClient(ctx context.Context, orgID, id string) (*Client, error)
@@ -45,6 +49,7 @@ type Repository interface {
 // MemoryRepository is an in-memory implementation of Repository.
 type MemoryRepository struct {
 	mu        sync.RWMutex
+	orgs      map[string]*Organization
 	clients   map[string]*Client
 	sites     map[string]*Site
 	buildings map[string]*Building
@@ -55,6 +60,7 @@ type MemoryRepository struct {
 // NewMemoryRepository creates an in-memory location repository.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
+		orgs:      make(map[string]*Organization),
 		clients:   make(map[string]*Client),
 		sites:     make(map[string]*Site),
 		buildings: make(map[string]*Building),
@@ -78,6 +84,94 @@ func paginate[T any](items []T, page api.PaginationParams) ([]T, int) {
 		end = total
 	}
 	return items[start:end], total
+}
+
+// setOptional applies an optional text field of a PATCH: nil keeps the
+// value, an empty string clears it.
+func setOptional(dst **string, v *string) {
+	if v == nil {
+		return
+	}
+	if *v == "" {
+		*dst = nil
+		return
+	}
+	value := *v
+	*dst = &value
+}
+
+// --- Organization ---
+
+// organization returns the stored organization or, in --no-db mode, the
+// defaults of a new one (LOC-01). Callers hold the lock.
+func (r *MemoryRepository) organization(orgID string) *Organization {
+	if o, ok := r.orgs[orgID]; ok {
+		return o
+	}
+	now := time.Now().UTC()
+	o := &Organization{ID: orgID, Name: orgID, Slug: orgID, Plan: "essential", Settings: map[string]any{},
+		Timezone: "UTC", Currency: "EUR", Locale: "de-DE", CreatedAt: now, UpdatedAt: now}
+	r.orgs[orgID] = o
+	return o
+}
+
+func (r *MemoryRepository) GetOrganization(_ context.Context, orgID string) (*Organization, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cp := *r.organization(orgID)
+	return &cp, nil
+}
+
+func (r *MemoryRepository) UpdateOrganization(_ context.Context, orgID string, req UpdateOrganizationRequest) (*Organization, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	o := r.organization(orgID)
+	if req.Name != nil {
+		o.Name = *req.Name
+	}
+	if req.Settings != nil {
+		o.Settings = req.Settings
+	}
+	if req.Timezone != nil {
+		o.Timezone = *req.Timezone
+	}
+	if req.Currency != nil {
+		o.Currency = *req.Currency
+	}
+	if req.Locale != nil {
+		o.Locale = *req.Locale
+	}
+	o.UpdatedAt = time.Now().UTC()
+	cp := *o
+	return &cp, nil
+}
+
+// clientConflict reports a client of the organization other than id with
+// the same name or slug (LOC-02). Callers hold the lock.
+func (r *MemoryRepository) clientConflict(orgID, id, name, slug string) error {
+	for _, existing := range r.clients {
+		if existing.OrganizationID != orgID || existing.ID == id {
+			continue
+		}
+		if existing.Name == name {
+			return &ConflictError{Field: "name", Message: "a client with this name already exists"}
+		}
+		if existing.Slug == slug {
+			return &ConflictError{Field: "slug", Message: "a client with this slug already exists"}
+		}
+	}
+	return nil
+}
+
+// siteConflict reports a site of the same client other than id with the
+// same name (LOC-03). Callers hold the lock.
+func (r *MemoryRepository) siteConflict(orgID, clientID, id, name string) error {
+	for _, existing := range r.sites {
+		if existing.OrganizationID == orgID && existing.ClientID == clientID && existing.ID != id && existing.Name == name {
+			return &ConflictError{Field: "name", Message: "a site with this name already exists for the client"}
+		}
+	}
+	return nil
 }
 
 // --- Clients ---
@@ -110,10 +204,8 @@ func (r *MemoryRepository) GetClient(_ context.Context, orgID, id string) (*Clie
 func (r *MemoryRepository) CreateClient(_ context.Context, c *Client) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, existing := range r.clients {
-		if existing.OrganizationID == c.OrganizationID && existing.Slug == c.Slug {
-			return fmt.Errorf("duplicate slug")
-		}
+	if err := r.clientConflict(c.OrganizationID, "", c.Name, c.Slug); err != nil {
+		return err
 	}
 	c.ID = r.nextID("client")
 	now := time.Now().UTC()
@@ -133,12 +225,19 @@ func (r *MemoryRepository) UpdateClient(_ context.Context, orgID, id string, req
 	if !ok || c.OrganizationID != orgID {
 		return nil, fmt.Errorf("not found")
 	}
+	name, slug := c.Name, c.Slug
 	if req.Name != nil {
-		c.Name = *req.Name
+		name = *req.Name
 	}
 	if req.Slug != nil {
-		c.Slug = *req.Slug
+		slug = *req.Slug
 	}
+	if err := r.clientConflict(orgID, id, name, slug); err != nil {
+		return nil, err
+	}
+	c.Name, c.Slug = name, slug
+	setOptional(&c.ExternalRef, req.ExternalRef)
+	setOptional(&c.Timezone, req.Timezone)
 	if req.Settings != nil {
 		c.Settings = req.Settings
 	}
@@ -193,7 +292,10 @@ func (r *MemoryRepository) CreateSite(_ context.Context, s *Site) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.clients[s.ClientID]; !ok || r.clients[s.ClientID].OrganizationID != s.OrganizationID {
-		return fmt.Errorf("client not found")
+		return &FieldError{Field: "client_id", Message: "the referenced record does not exist"}
+	}
+	if err := r.siteConflict(s.OrganizationID, s.ClientID, "", s.Name); err != nil {
+		return err
 	}
 	s.ID = r.nextID("site")
 	now := time.Now().UTC()
@@ -211,11 +313,15 @@ func (r *MemoryRepository) UpdateSite(_ context.Context, orgID, id string, req U
 		return nil, fmt.Errorf("not found")
 	}
 	if req.Name != nil {
+		if err := r.siteConflict(orgID, s.ClientID, id, *req.Name); err != nil {
+			return nil, err
+		}
 		s.Name = *req.Name
 	}
 	if req.Address != nil {
 		s.Address = *req.Address
 	}
+	setOptional(&s.Timezone, req.Timezone)
 	if req.GeoLat != nil {
 		s.GeoLat = req.GeoLat
 	}

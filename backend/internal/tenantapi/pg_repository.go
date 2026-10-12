@@ -3,6 +3,7 @@ package tenantapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -23,15 +25,130 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-const clientCols = `id::text, organization_id::text, name, slug, settings, created_at, updated_at`
+const clientCols = `id::text, organization_id::text, name, slug, external_ref, timezone, settings, created_at, updated_at`
 
 type scanner interface {
 	Scan(dest ...any) error
 }
 
+// constraintFields maps the unique and check constraints of LOC-01–LOC-03
+// onto the request field they protect.
+var constraintFields = map[string]string{
+	"client_org_name_key":             "name",
+	"client_organization_id_slug_key": "slug",
+	"site_org_client_name_key":        "name",
+	"organization_timezone_iana":      "timezone",
+	"client_timezone_iana":            "timezone",
+	"site_timezone_iana":              "timezone",
+	"organization_currency_iso4217":   "currency",
+	"organization_locale_bcp47":       "locale",
+	"site_client_id_fkey":             "client_id",
+}
+
+// fieldDBError turns a unique violation into a *ConflictError (409) and a
+// check violation into a *FieldError (400) naming the field; other errors
+// pass through.
+func fieldDBError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	field, known := constraintFields[pgErr.ConstraintName]
+	if !known {
+		return err
+	}
+	switch pgErr.Code {
+	case "23505":
+		return &ConflictError{Field: field, Message: "the value is already taken"}
+	case "23514":
+		return &FieldError{Field: field, Message: "the value is not allowed"}
+	case "23503":
+		return &FieldError{Field: field, Message: "the referenced record does not exist"}
+	}
+	return err
+}
+
+// nullable stores an empty optional text as NULL.
+func nullable(v *string) any {
+	if v == nil || *v == "" {
+		return nil
+	}
+	return *v
+}
+
+const orgCols = `id::text, name, slug, plan, settings, timezone, currency, locale, created_at, updated_at`
+
+func scanOrganization(s scanner) (*Organization, error) {
+	o := &Organization{}
+	if err := s.Scan(&o.ID, &o.Name, &o.Slug, &o.Plan, &o.Settings, &o.Timezone, &o.Currency, &o.Locale, &o.CreatedAt, &o.UpdatedAt); err != nil {
+		return nil, err
+	}
+	if o.Settings == nil {
+		o.Settings = map[string]any{}
+	}
+	o.CreatedAt = o.CreatedAt.UTC()
+	o.UpdatedAt = o.UpdatedAt.UTC()
+	return o, nil
+}
+
+// --- Organization ---
+
+func (r *PGRepository) GetOrganization(ctx context.Context, orgID string) (*Organization, error) {
+	var o *Organization
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		o, err = scanOrganization(tx.QueryRow(ctx, "SELECT "+orgCols+" FROM organization WHERE id = $1", orgID))
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("not found")
+		}
+		return err
+	})
+	return o, err
+}
+
+func (r *PGRepository) UpdateOrganization(ctx context.Context, orgID string, req UpdateOrganizationRequest) (*Organization, error) {
+	var o *Organization
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		sets := []string{}
+		args := []any{orgID}
+		add := func(column string, value any) {
+			args = append(args, value)
+			sets = append(sets, fmt.Sprintf("%s = $%d", column, len(args)))
+		}
+		if req.Name != nil {
+			add("name", *req.Name)
+		}
+		if req.Settings != nil {
+			add("settings", req.Settings)
+		}
+		if req.Timezone != nil {
+			add("timezone", *req.Timezone)
+		}
+		if req.Currency != nil {
+			add("currency", *req.Currency)
+		}
+		if req.Locale != nil {
+			add("locale", *req.Locale)
+		}
+		var err error
+		if len(sets) == 0 {
+			o, err = scanOrganization(tx.QueryRow(ctx, "SELECT "+orgCols+" FROM organization WHERE id = $1", orgID))
+		} else {
+			sets = append(sets, "updated_at = NOW()")
+			o, err = scanOrganization(tx.QueryRow(ctx,
+				"UPDATE organization SET "+strings.Join(sets, ", ")+" WHERE id = $1 RETURNING "+orgCols, args...))
+		}
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("not found")
+		}
+		return fieldDBError(err)
+	})
+	return o, err
+}
+
 func scanClient(s scanner) (*Client, error) {
 	c := &Client{}
-	if err := s.Scan(&c.ID, &c.OrganizationID, &c.Name, &c.Slug, &c.Settings, &c.CreatedAt, &c.UpdatedAt); err != nil {
+	if err := s.Scan(&c.ID, &c.OrganizationID, &c.Name, &c.Slug, &c.ExternalRef, &c.Timezone, &c.Settings, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if c.Settings == nil {
@@ -110,10 +227,11 @@ func (r *PGRepository) CreateClient(ctx context.Context, c *Client) error {
 		c.Settings = map[string]any{}
 	}
 	return database.WithRequestTenant(ctx, r.pool, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx,
-			`INSERT INTO client (organization_id, name, slug, settings) VALUES ($1,$2,$3,$4) RETURNING id::text, created_at, updated_at`,
-			c.OrganizationID, c.Name, c.Slug, c.Settings,
-		).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
+		return fieldDBError(tx.QueryRow(ctx,
+			`INSERT INTO client (organization_id, name, slug, external_ref, timezone, settings) VALUES ($1,$2,$3,$4,$5,$6)
+			 RETURNING id::text, created_at, updated_at`,
+			c.OrganizationID, c.Name, c.Slug, nullable(c.ExternalRef), nullable(c.Timezone), c.Settings,
+		).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt))
 	})
 }
 
@@ -133,6 +251,16 @@ func (r *PGRepository) UpdateClient(ctx context.Context, orgID, id string, req U
 			args = append(args, *req.Slug)
 			pos++
 		}
+		if req.ExternalRef != nil {
+			sets = append(sets, fmt.Sprintf("external_ref = $%d", pos))
+			args = append(args, nullable(req.ExternalRef))
+			pos++
+		}
+		if req.Timezone != nil {
+			sets = append(sets, fmt.Sprintf("timezone = $%d", pos))
+			args = append(args, nullable(req.Timezone))
+			pos++
+		}
 		if req.Settings != nil {
 			sets = append(sets, fmt.Sprintf("settings = $%d", pos))
 			args = append(args, req.Settings)
@@ -149,7 +277,7 @@ func (r *PGRepository) UpdateClient(ctx context.Context, orgID, id string, req U
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("not found")
 		}
-		return err
+		return fieldDBError(err)
 	})
 	return c, err
 }
@@ -197,11 +325,11 @@ func (r *PGRepository) deleteLocation(ctx context.Context, orgID, table, visible
 
 // --- Sites ---
 
-const siteCols = `id::text, organization_id::text, client_id::text, name, COALESCE(address,''), geo_lat, geo_lon, COALESCE(notes,''), created_at, updated_at`
+const siteCols = `id::text, organization_id::text, client_id::text, name, COALESCE(address,''), geo_lat, geo_lon, COALESCE(notes,''), timezone, created_at, updated_at`
 
 func scanSite(s scanner) (*Site, error) {
 	si := &Site{}
-	if err := s.Scan(&si.ID, &si.OrganizationID, &si.ClientID, &si.Name, &si.Address, &si.GeoLat, &si.GeoLon, &si.Notes, &si.CreatedAt, &si.UpdatedAt); err != nil {
+	if err := s.Scan(&si.ID, &si.OrganizationID, &si.ClientID, &si.Name, &si.Address, &si.GeoLat, &si.GeoLon, &si.Notes, &si.Timezone, &si.CreatedAt, &si.UpdatedAt); err != nil {
 		return nil, err
 	}
 	si.CreatedAt = si.CreatedAt.UTC()
@@ -256,11 +384,11 @@ func (r *PGRepository) GetSite(ctx context.Context, orgID, id string) (*Site, er
 
 func (r *PGRepository) CreateSite(ctx context.Context, s *Site) error {
 	return database.WithRequestTenant(ctx, r.pool, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx,
-			`INSERT INTO site (organization_id, client_id, name, address, geo_lat, geo_lon, notes)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id::text, created_at, updated_at`,
-			s.OrganizationID, s.ClientID, s.Name, nilIfEmpty(s.Address), s.GeoLat, s.GeoLon, nilIfEmpty(s.Notes),
-		).Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
+		return fieldDBError(tx.QueryRow(ctx,
+			`INSERT INTO site (organization_id, client_id, name, address, geo_lat, geo_lon, notes, timezone)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id::text, created_at, updated_at`,
+			s.OrganizationID, s.ClientID, s.Name, nilIfEmpty(s.Address), s.GeoLat, s.GeoLon, nilIfEmpty(s.Notes), nullable(s.Timezone),
+		).Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt))
 	})
 }
 
@@ -295,6 +423,10 @@ func (r *PGRepository) UpdateSite(ctx context.Context, orgID, id string, req Upd
 			args = append(args, nilIfEmpty(*req.Notes))
 			pos++
 		}
+		if req.Timezone != nil {
+			sets = append(sets, fmt.Sprintf("timezone = $%d", pos))
+			args = append(args, nullable(req.Timezone))
+		}
 		var err error
 		if len(sets) == 0 {
 			si, err = scanSite(tx.QueryRow(ctx, "SELECT "+siteCols+" FROM site WHERE organization_id = $1 AND id = $2", orgID, id))
@@ -306,7 +438,7 @@ func (r *PGRepository) UpdateSite(ctx context.Context, orgID, id string, req Upd
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("not found")
 		}
-		return err
+		return fieldDBError(err)
 	})
 	return si, err
 }

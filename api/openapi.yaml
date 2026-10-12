@@ -3951,6 +3951,51 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/org:
+    get:
+      operationId: getOrganization
+      tags: [Organization]
+      summary: Get the caller's organization (LOC-01)
+      responses:
+        '200':
+          description: The organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateOrganization
+      tags: [Organization]
+      summary: Update name, settings, time zone, currency and locale of the organization
+      description: >
+        The time zone is an IANA name (Europe/Berlin), the currency an ISO 4217
+        code (EUR) and the locale a BCP 47 tag, stored in canonical form
+        (de-ch → de-CH). Slug and plan are not changed here. An invalid value
+        answers 400 naming the field.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrganizationRequest'
+      responses:
+        '200':
+          description: Organization updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/clients:
     get:
       operationId: listClients
@@ -3989,6 +4034,8 @@ paths:
                 $ref: '#/components/schemas/Client'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -4031,6 +4078,8 @@ paths:
                 $ref: '#/components/schemas/Client'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -4086,6 +4135,8 @@ paths:
                 $ref: '#/components/schemas/Site'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -4128,6 +4179,8 @@ paths:
                 $ref: '#/components/schemas/Site'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -8832,6 +8885,9 @@ components:
           format: uri
         trace_id:
           type: string
+        field:
+          type: string
+          description: Request field a 400 or 409 refers to (e.g. the unique `name` of a client).
 
     PaginationEnvelope:
       type: object
@@ -12620,9 +12676,62 @@ components:
           items:
             $ref: '#/components/schemas/TopologyEdge'
 
+    Organization:
+      type: object
+      description: The tenant (LOC-01).
+      required: [id, name, slug, plan, settings, timezone, currency, locale, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        plan:
+          type: string
+        settings:
+          type: object
+          additionalProperties: true
+        timezone:
+          type: string
+          description: IANA time zone name.
+          example: Europe/Berlin
+        currency:
+          type: string
+          description: ISO 4217 currency code.
+          example: EUR
+        locale:
+          type: string
+          description: BCP 47 language tag.
+          example: de-DE
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UpdateOrganizationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+        settings:
+          type: object
+          additionalProperties: true
+        timezone:
+          type: string
+        currency:
+          type: string
+        locale:
+          type: string
+
     Client:
       type: object
-      required: [id, organization_id, name, slug, settings, created_at, updated_at]
+      description: Customer of the organization (LOC-02); the name is unique per organization.
+      required: [id, organization_id, name, slug, external_ref, timezone, settings, created_at, updated_at]
       properties:
         id:
           type: string
@@ -12632,6 +12741,12 @@ components:
           type: string
         slug:
           type: string
+        external_ref:
+          type: [string, 'null']
+          description: Reference in an external system (CRM, PSA).
+        timezone:
+          type: [string, 'null']
+          description: Optional IANA time zone of the client.
         settings:
           type: object
           additionalProperties: true
@@ -12654,6 +12769,11 @@ components:
         code:
           type: string
           description: Alias for slug (accepted for integrations sending {name, code}).
+        external_ref:
+          type: string
+        timezone:
+          type: string
+          description: IANA time zone name.
         settings:
           type: object
           additionalProperties: true
@@ -12665,6 +12785,12 @@ components:
           type: string
         slug:
           type: string
+        external_ref:
+          type: string
+          description: Empty clears the reference.
+        timezone:
+          type: string
+          description: IANA time zone name; empty clears it.
         settings:
           type: object
           additionalProperties: true
@@ -12682,7 +12808,8 @@ components:
 
     Site:
       type: object
-      required: [id, organization_id, client_id, name, created_at, updated_at]
+      description: Site of a client (LOC-03); the name is unique per (organization, client).
+      required: [id, organization_id, client_id, name, timezone, created_at, updated_at]
       properties:
         id:
           type: string
@@ -12700,6 +12827,9 @@ components:
           type: number
         notes:
           type: string
+        timezone:
+          type: [string, 'null']
+          description: Optional IANA time zone of the site.
         created_at:
           type: string
           format: date-time
@@ -12723,6 +12853,9 @@ components:
           type: number
         notes:
           type: string
+        timezone:
+          type: string
+          description: IANA time zone name.
 
     UpdateSiteRequest:
       type: object
@@ -12737,6 +12870,9 @@ components:
           type: number
         notes:
           type: string
+        timezone:
+          type: string
+          description: IANA time zone name; empty clears it.
 
     SiteListResponse:
       allOf:

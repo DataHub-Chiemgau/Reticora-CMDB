@@ -2239,6 +2239,27 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/org': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get the caller's organization (LOC-01) */
+    get: operations['getOrganization'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update name, settings, time zone, currency and locale of the organization
+     * @description The time zone is an IANA name (Europe/Berlin), the currency an ISO 4217 code (EUR) and the locale a BCP 47 tag, stored in canonical form (de-ch → de-CH). Slug and plan are not changed here. An invalid value answers 400 naming the field.
+     */
+    patch: operations['updateOrganization'];
+    trace?: never;
+  };
   '/api/v1/clients': {
     parameters: {
       query?: never;
@@ -5279,6 +5300,8 @@ export interface components {
       /** Format: uri */
       instance?: string;
       trace_id?: string;
+      /** @description Request field a 400 or 409 refers to (e.g. the unique `name` of a client). */
+      field?: string;
     };
     PaginationEnvelope: {
       total: number;
@@ -7632,11 +7655,54 @@ export interface components {
       nodes: components['schemas']['TopologyNode'][];
       edges: components['schemas']['TopologyEdge'][];
     };
+    /** @description The tenant (LOC-01). */
+    Organization: {
+      id: string;
+      name: string;
+      slug: string;
+      plan: string;
+      settings: {
+        [key: string]: unknown;
+      };
+      /**
+       * @description IANA time zone name.
+       * @example Europe/Berlin
+       */
+      timezone: string;
+      /**
+       * @description ISO 4217 currency code.
+       * @example EUR
+       */
+      currency: string;
+      /**
+       * @description BCP 47 language tag.
+       * @example de-DE
+       */
+      locale: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    UpdateOrganizationRequest: {
+      name?: string;
+      settings?: {
+        [key: string]: unknown;
+      };
+      timezone?: string;
+      currency?: string;
+      locale?: string;
+    };
+    /** @description Customer of the organization (LOC-02); the name is unique per organization. */
     Client: {
       id: string;
       organization_id: string;
       name: string;
       slug: string;
+      /** @description Reference in an external system (CRM, PSA). */
+      external_ref: string | null;
+      /** @description Optional IANA time zone of the client. */
+      timezone: string | null;
       settings: {
         [key: string]: unknown;
       };
@@ -7651,6 +7717,9 @@ export interface components {
       slug?: string;
       /** @description Alias for slug (accepted for integrations sending {name, code}). */
       code?: string;
+      external_ref?: string;
+      /** @description IANA time zone name. */
+      timezone?: string;
       settings?: {
         [key: string]: unknown;
       };
@@ -7658,6 +7727,10 @@ export interface components {
     UpdateClientRequest: {
       name?: string;
       slug?: string;
+      /** @description Empty clears the reference. */
+      external_ref?: string;
+      /** @description IANA time zone name; empty clears it. */
+      timezone?: string;
       settings?: {
         [key: string]: unknown;
       };
@@ -7665,6 +7738,7 @@ export interface components {
     ClientListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Client'][];
     };
+    /** @description Site of a client (LOC-03); the name is unique per (organization, client). */
     Site: {
       id: string;
       organization_id: string;
@@ -7674,6 +7748,8 @@ export interface components {
       geo_lat?: number;
       geo_lon?: number;
       notes?: string;
+      /** @description Optional IANA time zone of the site. */
+      timezone: string | null;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -7686,6 +7762,8 @@ export interface components {
       geo_lat?: number;
       geo_lon?: number;
       notes?: string;
+      /** @description IANA time zone name. */
+      timezone?: string;
     };
     UpdateSiteRequest: {
       name?: string;
@@ -7693,6 +7771,8 @@ export interface components {
       geo_lat?: number;
       geo_lon?: number;
       notes?: string;
+      /** @description IANA time zone name; empty clears it. */
+      timezone?: string;
     };
     SiteListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Site'][];
@@ -13282,6 +13362,55 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
+  getOrganization: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The organization */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Organization'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateOrganization: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateOrganizationRequest'];
+      };
+    };
+    responses: {
+      /** @description Organization updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Organization'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
   listClients: {
     parameters: {
       query?: {
@@ -13336,6 +13465,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13415,6 +13545,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listSites: {
@@ -13472,6 +13603,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13552,6 +13684,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listBuildings: {

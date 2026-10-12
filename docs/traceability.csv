@@ -265,3 +265,8 @@ OPS-04;[B], [P5];A;tests/backup-config.test.sh;WP-100
 NFR-05;[B];A;tests/backup-config.test.sh;WP-100
 NFR-05;[B];A;tests/restore-pitr.sh;WP-101
 OPS-04;[B], [P5];A;tests/restore-pitr.sh;WP-101
+LOC-01;B/G1;B;backend/internal/tenantapi/handler_test.go;WP-107
+LOC-02;B/G1;B;backend/internal/tenantapi/handler_test.go;WP-107
+LOC-03;B/G1;B;backend/internal/tenantapi/handler_test.go;WP-107
+TEN-01;[B], Reseller [P4];B;backend/internal/tenantapi/handler_test.go;WP-107
+API-05;[B];B;backend/internal/tenantapi/handler_test.go;WP-107
