@@ -6,7 +6,7 @@ Reticora CMDB is a multi-tenant Configuration Management Database designed for M
 
 ### Technology Stack
 
-- **Backend**: Go 1.25+, chi v5 router, pgx v5 (hand-written SQL)
+- **Backend**: Go 1.26.9+, chi v5 router, pgx v5 (hand-written SQL)
 - **Frontend**: React 18, TypeScript, Vite, TanStack Query v5, Zustand, React Router v6
 - **Database**: PostgreSQL 16 with Row-Level Security
 - **Messaging**: NATS JetStream
@@ -841,7 +841,7 @@ Continuous Integration runs on **GitHub Actions** (`.github/workflows/ci.yml`), 
 **Backend job:**
 
 1. Checkout code.
-2. Setup Go 1.25.
+2. Setup Go 1.26.9.
 3. `go mod download` — Fetch dependencies.
 4. `go build ./...` — Compile all packages.
 5. `go test -race -coverprofile=coverage.out ./...` — Run tests with race detector and coverage.

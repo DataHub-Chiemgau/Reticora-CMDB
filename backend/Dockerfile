@@ -1,4 +1,4 @@
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26.9-alpine AS builder
 
 # The backend module replace-directs to the sibling collector/edgecore
 # modules (see backend/go.mod), so the build context must be the repository
