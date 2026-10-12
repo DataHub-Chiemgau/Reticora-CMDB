@@ -306,6 +306,12 @@ func (c *Config) Validate(noDB bool) error {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_RPM must be positive, got %d", c.RateLimitRPM))
 	}
 	if !c.IsDevelopment() {
+		// The development login (unsigned session tokens) exists only in
+		// development (AUT-03).
+		if c.AllowInsecureDevAuth {
+			errs = append(errs, fmt.Errorf("RETICORA_ALLOW_INSECURE_DEV_AUTH is only allowed with RETICORA_ENVIRONMENT=%s, not %s (AUT-03)",
+				EnvDevelopment, c.Environment))
+		}
 		if noDB {
 			errs = append(errs, fmt.Errorf("--no-db is only allowed with RETICORA_ENVIRONMENT=%s", EnvDevelopment))
 		}

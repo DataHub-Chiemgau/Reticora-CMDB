@@ -254,7 +254,10 @@ For a signing key rotation (SEC-06) set the new key in
 Server-side the token signature is always verified by
 `middleware.AuthMiddlewareWithVerifier` — a missing `RETICORA_SESSION_KEY_PATH`
 is a fatal startup error unless the operator explicitly opts into the insecure
-development mode with `RETICORA_ALLOW_INSECURE_DEV_AUTH=true`. Only
+development mode with `RETICORA_ALLOW_INSECURE_DEV_AUTH=true`. That development
+login exists only with `RETICORA_ENVIRONMENT=development` (AUT-03): the start
+check refuses it in staging and production, and without a verifier the
+middleware rejects every session token outside development. Only
 `/api/v1/auth/{config,callback,refresh,logout}` are unauthenticated.
 
 **API keys (AUT-04):** `POST /api/v1/api-keys` (permission `apikey:manage`)

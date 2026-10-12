@@ -197,3 +197,25 @@ func TestWorkerSwitches(t *testing.T) {
 		t.Errorf("invalid switch: %v", err)
 	}
 }
+
+// TestDevAuthOnlyInDevelopment covers WP-110 (AUT-03): the start check
+// refuses RETICORA_ALLOW_INSECURE_DEV_AUTH outside development.
+func TestDevAuthOnlyInDevelopment(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("RETICORA_ALLOW_INSECURE_DEV_AUTH", "true")
+	if err := Load().Validate(false); err != nil {
+		t.Errorf("development with the dev login: %v", err)
+	}
+	for _, env := range []string{EnvStaging, EnvProduction} {
+		setAll(t, productionEnv)
+		t.Setenv("RETICORA_ENVIRONMENT", env)
+		err := Load().Validate(false)
+		if err == nil || !strings.Contains(err.Error(), "RETICORA_ALLOW_INSECURE_DEV_AUTH") {
+			t.Errorf("%s with the dev login: %v", env, err)
+		}
+	}
+	t.Setenv("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false")
+	if err := Load().Validate(false); err != nil {
+		t.Errorf("production without the dev login: %v", err)
+	}
+}

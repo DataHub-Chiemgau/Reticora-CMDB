@@ -423,7 +423,13 @@ func main() {
 	// current role assignments (AUT-04).
 	apiKeys := identity.NewAPIKeyServiceWithStore(repos.APIKeys).WithOwnerAccess(repos.Permission).
 		WithServiceAccountAccess(user.ServiceAccountAccess{Repo: repos.ServiceAccounts})
-	authMiddleware := middleware.AuthMiddlewareWithAPIKeys(sessionIssuer, apiKeys)
+	// A nil *SessionIssuer must reach the middleware as a nil interface:
+	// only then does the development login (AUT-03, development only) apply.
+	var sessionVerifier middleware.SessionVerifier
+	if sessionIssuer != nil {
+		sessionVerifier = sessionIssuer
+	}
+	authMiddleware := middleware.AuthMiddlewareWithAPIKeys(sessionVerifier, apiKeys)
 	if sessionIssuer == nil {
 		slog.Warn("INSECURE DEVELOPMENT MODE: bearer tokens are accepted without signature verification")
 	}
