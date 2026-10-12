@@ -26,11 +26,16 @@ type FieldValue struct {
 	DiscoveredValue  any        `json:"discovered_value,omitempty"`
 	DiscoveredSource string     `json:"discovered_source,omitempty"`
 	DiscoveredAt     *time.Time `json:"discovered_at,omitempty"`
-	OverrideValue    any        `json:"override_value,omitempty"`
-	OverrideAuthor   string     `json:"override_author,omitempty"`
-	OverrideReason   string     `json:"override_reason,omitempty"`
-	OverrideAt       *time.Time `json:"override_at,omitempty"`
-	Protected        bool       `json:"protected"`
+	// DiscoveredRank is the REC-03 rank of DiscoveredSource when the value
+	// was recorded; ObservedAt is the source time of the observation
+	// (GLO-12, REC-05), DiscoveredAt the time it was recorded.
+	DiscoveredRank int        `json:"discovered_rank,omitempty"`
+	ObservedAt     *time.Time `json:"observed_at,omitempty"`
+	OverrideValue  any        `json:"override_value,omitempty"`
+	OverrideAuthor string     `json:"override_author,omitempty"`
+	OverrideReason string     `json:"override_reason,omitempty"`
+	OverrideAt     *time.Time `json:"override_at,omitempty"`
+	Protected      bool       `json:"protected"`
 	// EffectiveValue resolves through the source-priority policy: a protected
 	// override always wins; otherwise the highest-trust discovered value.
 	EffectiveValue any `json:"effective_value,omitempty"`

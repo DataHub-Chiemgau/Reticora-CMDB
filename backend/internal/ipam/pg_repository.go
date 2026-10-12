@@ -2,6 +2,7 @@ package ipam
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -506,4 +507,165 @@ func (r *PGRepository) UpdateInterface(ctx context.Context, orgID, id string, re
 
 func (r *PGRepository) DeleteInterface(ctx context.Context, orgID, id string) error {
 	return r.deleteByID(ctx, orgID, "network_interface", nicVisible, id)
+}
+
+// ObservedInterface is an interface of a CI as one discovery record reported
+// it, with its addresses in CIDR notation.
+type ObservedInterface struct {
+	Name         string
+	IfIndex      int
+	MAC          string
+	SpeedMbps    int
+	MTU          int
+	AdminStatus  string
+	OperStatus   string
+	IsManagement bool
+	IPs          []string
+}
+
+// SyncResult counts what a sync changed.
+type SyncResult struct {
+	Added, Updated, Removed int
+}
+
+// MaxMissedObservations is how many consecutive observations of a CI may
+// miss an interface or address before it is removed (REC-07).
+const MaxMissedObservations = 3
+
+// SyncDiscoveredInterfaces applies one discovery observation of the
+// interfaces of a CI (REC-07, NET-01): reported interfaces and addresses are
+// created or updated and their miss_count is reset; those of the CI the
+// observation did not report count one miss and are removed at the third
+// consecutive miss, with an entry in the CI's history. The caller syncs only
+// observations that report interfaces at all.
+func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID string, observed []ObservedInterface) (SyncResult, error) {
+	var res SyncResult
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		existing := map[string]string{} // name -> id
+		rows, err := tx.Query(ctx, `SELECT id::text, name FROM network_interface WHERE ci_id = $1 AND organization_id = $2`, ciID, orgID)
+		if err != nil {
+			return fmt.Errorf("list interfaces: %w", err)
+		}
+		for rows.Next() {
+			var id, name string
+			if err = rows.Scan(&id, &name); err != nil {
+				rows.Close()
+				return err
+			}
+			existing[name] = id
+		}
+		rows.Close()
+		if rowsErr := rows.Err(); rowsErr != nil {
+			return rowsErr
+		}
+
+		seenInterfaces := map[string]bool{}
+		var seenIPs []string
+		for i := range observed {
+			ifc := &observed[i]
+			id, ok := existing[ifc.Name]
+			if ok {
+				if _, err = tx.Exec(ctx, `UPDATE network_interface SET if_index = NULLIF($2, 0), mac_address = NULLIF($3, '')::macaddr,
+					speed_mbps = NULLIF($4, 0), mtu = NULLIF($5, 0), admin_status = COALESCE(NULLIF($6, ''), admin_status),
+					oper_status = COALESCE(NULLIF($7, ''), oper_status), is_management = $8, miss_count = 0, updated_at = now()
+					WHERE id = $1`, id, ifc.IfIndex, ifc.MAC, ifc.SpeedMbps, ifc.MTU, ifc.AdminStatus, ifc.OperStatus, ifc.IsManagement); err != nil {
+					return fmt.Errorf("update interface %s: %w", ifc.Name, err)
+				}
+				res.Updated++
+			} else {
+				if err = tx.QueryRow(ctx, `INSERT INTO network_interface (organization_id, ci_id, name, if_index, mac_address, speed_mbps, mtu,
+					admin_status, oper_status, is_management)
+					VALUES ($1, $2, $3, NULLIF($4, 0), NULLIF($5, '')::macaddr, NULLIF($6, 0), NULLIF($7, 0),
+						COALESCE(NULLIF($8, ''), 'up'), COALESCE(NULLIF($9, ''), 'unknown'), $10)
+					RETURNING id::text`, orgID, ciID, ifc.Name, ifc.IfIndex, ifc.MAC, ifc.SpeedMbps, ifc.MTU,
+					ifc.AdminStatus, ifc.OperStatus, ifc.IsManagement).Scan(&id); err != nil {
+					return fmt.Errorf("create interface %s: %w", ifc.Name, err)
+				}
+				res.Added++
+			}
+			seenInterfaces[id] = true
+			for _, address := range ifc.IPs {
+				var ipID string
+				err = tx.QueryRow(ctx, `UPDATE ip_address SET miss_count = 0, last_seen_at = now(), updated_at = now()
+					WHERE interface_id = $1 AND host(address) = host($2::inet) RETURNING id::text`, id, address).Scan(&ipID)
+				if errors.Is(err, pgx.ErrNoRows) {
+					err = tx.QueryRow(ctx, `INSERT INTO ip_address (organization_id, interface_id, address, status, last_seen_at)
+						VALUES ($1, $2, $3::inet, 'active', now()) RETURNING id::text`, orgID, id, address).Scan(&ipID)
+				}
+				if err != nil {
+					return fmt.Errorf("sync address %s: %w", address, err)
+				}
+				seenIPs = append(seenIPs, ipID)
+			}
+		}
+
+		// Addresses of the CI's interfaces the observation did not report.
+		removedIPs, err := missAndRemove(ctx, tx, `UPDATE ip_address a SET miss_count = a.miss_count + 1
+			FROM network_interface n
+			WHERE a.interface_id = n.id AND n.ci_id = $1 AND NOT (a.id::text = ANY($2::text[]))
+			RETURNING a.id::text, host(a.address), a.miss_count`, ciID, seenIPs, "ip_address")
+		if err != nil {
+			return err
+		}
+		var seenIDs []string
+		for id := range seenInterfaces {
+			seenIDs = append(seenIDs, id)
+		}
+		removedInterfaces, err := missAndRemove(ctx, tx, `UPDATE network_interface SET miss_count = miss_count + 1
+			WHERE ci_id = $1 AND NOT (id::text = ANY($2::text[]))
+			RETURNING id::text, name, miss_count`, ciID, seenIDs, "network_interface")
+		if err != nil {
+			return err
+		}
+		res.Removed = len(removedIPs) + len(removedInterfaces)
+		for _, removed := range []struct {
+			field string
+			names []string
+		}{{"ip_addresses", removedIPs}, {"interfaces", removedInterfaces}} {
+			if len(removed.names) == 0 {
+				continue
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO ci_change (organization_id, ci_id, change_type, field_name, old_value, new_value, comment)
+				VALUES ($1, $2, 'update', $3, to_jsonb($4::text[]), NULL, $5)`, orgID, ciID, removed.field, removed.names,
+				fmt.Sprintf("removed after %d observations without them (REC-07)", MaxMissedObservations)); err != nil {
+				return fmt.Errorf("record removal: %w", err)
+			}
+		}
+		return nil
+	})
+	return res, err
+}
+
+// missAndRemove counts one miss with countQuery and deletes the rows of
+// table that reached MaxMissedObservations; it returns their names.
+func missAndRemove(ctx context.Context, tx pgx.Tx, countQuery, ciID string, seen []string, table string) ([]string, error) {
+	if seen == nil {
+		seen = []string{}
+	}
+	rows, err := tx.Query(ctx, countQuery, ciID, seen)
+	if err != nil {
+		return nil, fmt.Errorf("count misses of %s: %w", table, err)
+	}
+	var ids, names []string
+	for rows.Next() {
+		var id, name string
+		var misses int
+		if err = rows.Scan(&id, &name, &misses); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if misses >= MaxMissedObservations {
+			ids, names = append(ids, id), append(names, name)
+		}
+	}
+	rows.Close()
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return nil, rowsErr
+	}
+	if len(ids) > 0 {
+		if _, err = tx.Exec(ctx, "DELETE FROM "+table+" WHERE id::text = ANY($1::text[])", ids); err != nil {
+			return nil, fmt.Errorf("remove %s: %w", table, err)
+		}
+	}
+	return names, nil
 }

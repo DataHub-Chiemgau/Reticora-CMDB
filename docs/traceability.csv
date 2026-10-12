@@ -232,3 +232,21 @@ NET-02;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
 TEN-10;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
 NET-02;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
 NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
+DIS-05;[B];D;backend/internal/discovery/devicerecord_test.go;WP-083
+GLO-12;[B];D;backend/internal/discovery/devicerecord_test.go;WP-083
+GLO-12;[B];D;backend/internal/override/decide_test.go;WP-084
+REC-05;[B];D;backend/internal/override/decide_test.go;WP-084
+REC-01;[B];D;backend/internal/discovery/consumer_test.go;WP-085
+NFR-03;[B], Teilumfang [P5];D;backend/internal/discovery/consumer_test.go;WP-085
+REC-02;[B];D;backend/internal/discovery/identity_test.go;WP-086
+NFR-01;[B], Teilumfang [P5];D;backend/internal/discovery/identity_test.go;WP-086
+CI-13;[B];D;backend/internal/discovery/resurrect_test.go;WP-087
+REC-08;[B];D;backend/internal/reviews/service_test.go;WP-088
+API-05;[B];D;backend/internal/reviews/service_test.go;WP-088
+REC-06;[B];D;backend/internal/reviews/conflict_test.go;WP-089
+REC-12;[B];D;backend/internal/reviews/conflict_test.go;WP-089
+REC-07;[B];D;backend/internal/discovery/last_seen_test.go;WP-090
+AUD-03;[B];D;backend/internal/discovery/last_seen_test.go;WP-090
+NET-01;[B];D;backend/internal/discovery/last_seen_test.go;WP-090
+GLO-13;[B];D;backend/internal/ci/validation_test.go;WP-091
+CI-10;[B];D;backend/internal/ci/validation_test.go;WP-091

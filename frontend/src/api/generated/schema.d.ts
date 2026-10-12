@@ -2067,6 +2067,69 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/review-items': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List review items
+     * @description The review queue of reconciliation (REC-08). Items open longer than 14 days carry escalated = true; escalated=true lists only those (the dashboard's escalation).
+     */
+    get: operations['listReviewItems'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/review-items/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a review item */
+    get: operations['getReviewItem'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/review-items/{id}/resolve': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Resolve a review item
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge removes the new CI); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss; serial_mismatch and duplicate_ip dismiss. Another action is 422.
+     */
+    post: operations['resolveReviewItem'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/discovery/review-items': {
     parameters: {
       query?: never;
@@ -2074,8 +2137,11 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List reconciliation review items */
-    get: operations['listReviewItems'];
+    /**
+     * List reconciliation review items (deprecated, use /api/v1/review-items)
+     * @deprecated
+     */
+    get: operations['listDiscoveryReviewItems'];
     put?: never;
     post?: never;
     delete?: never;
@@ -2097,10 +2163,11 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Resolve a reconciliation review item
+     * Resolve a reconciliation review item (deprecated, use /api/v1/review-items/{id}/resolve)
+     * @deprecated
      * @description An unlicensed_ci item (a discovered device held because max_cis is reached, ENT-03) is resolved with create, which adopts the device as a CI within max_cis (403 entitlement-limit otherwise), or with dismiss, which discards it; both are audited.
      */
-    post: operations['resolveReviewItem'];
+    post: operations['resolveDiscoveryReviewItem'];
     delete?: never;
     options?: never;
     head?: never;
@@ -5362,6 +5429,7 @@ export interface components {
       os_version?: string;
       firmware_version?: string;
       sys_object_id?: string;
+      /** @description Business attributes, instance attributes under their names (stored in _instance). The namespaces _overrides, _observed, _provenance and _instance are not part of this view (CI-10); the per-field view is GET /api/v1/cis/{id}/fields. */
       attributes: {
         [key: string]: unknown;
       };
@@ -5420,6 +5488,7 @@ export interface components {
       os_version?: string;
       firmware_version?: string;
       sys_object_id?: string;
+      /** @description The keys _overrides, _observed, _provenance and _instance are reserved (GLO-13): 400 with the field. */
       attributes?: {
         [key: string]: unknown;
       };
@@ -5450,6 +5519,7 @@ export interface components {
       os_version?: string;
       firmware_version?: string;
       sys_object_id?: string;
+      /** @description RFC 7396 merge patch. The keys _overrides, _observed, _provenance and _instance are reserved (GLO-13): 400 with the field. */
       attributes?: {
         [key: string]: unknown;
       };
@@ -5678,6 +5748,100 @@ export interface components {
       serial_number?: string;
       management_ip?: string;
     };
+    DeviceRecordBatch: {
+      records: components['schemas']['DeviceRecord'][];
+    };
+    /** @description One device observation (DIS-05). Mirrors api/devicerecord.schema.json, the normative schema; observed_at is the source time (GLO-12). */
+    DeviceRecord: {
+      /** Format: uuid */
+      record_id: string;
+      /** Format: date-time */
+      observed_at: string;
+      /** @enum {string} */
+      source:
+        | 'redfish'
+        | 'ipmi'
+        | 'agent'
+        | 'snmp'
+        | 'api'
+        | 'integration'
+        | 'wmi'
+        | 'ssh'
+        | 'nas'
+        | 'sweep';
+      target_ip: string;
+      /** Format: uuid */
+      vrf_id?: string;
+      /** Format: uuid */
+      scope_id?: string;
+      /** Format: uuid */
+      site_id?: string;
+      /** Format: uuid */
+      client_id?: string;
+      identity: {
+        serial_number?: string;
+        /** Format: uuid */
+        hardware_uuid?: string;
+        primary_mac?: string;
+        hostname?: string;
+        fqdn?: string;
+      };
+      classification: {
+        ci_type: string;
+        manufacturer?: string;
+        model?: string;
+        sys_object_id?: string;
+        profile?: string;
+      };
+      system: {
+        name?: string;
+        description?: string;
+        os_name?: string;
+        os_version?: string;
+        firmware_version?: string;
+        uptime_seconds?: number;
+      };
+      attributes?: {
+        [key: string]: unknown;
+      };
+      interfaces?: {
+        name: string;
+        if_index?: number;
+        mac?: string;
+        speed_mbps?: number;
+        mtu?: number;
+        /** @enum {string} */
+        admin_status?: 'up' | 'down' | 'unknown';
+        /** @enum {string} */
+        oper_status?: 'up' | 'down' | 'unknown';
+        vlan_id?: number;
+        ips?: {
+          address: string;
+          prefix_length?: number;
+        }[];
+      }[];
+      neighbors?: {
+        /** @enum {string} */
+        protocol: 'lldp' | 'cdp' | 'arp' | 'fdb';
+        local_interface?: string;
+        remote_mac?: string;
+        remote_ip?: string;
+        remote_hostname?: string;
+        remote_interface?: string;
+      }[];
+      power?: {
+        device_type?: string;
+        draw_watts?: number;
+        outlets?: {
+          name: string;
+          state?: string;
+        }[];
+      };
+    };
+    /**
+     * @deprecated
+     * @description Deprecated ingest request; use DeviceRecordBatch (DIS-05).
+     */
     DiscoveryIngestRequest: {
       collector_id: string;
       items: components['schemas']['DiscoveryIngestItem'][];
@@ -5687,6 +5851,14 @@ export interface components {
       created: number;
       updated: number;
       conflicts: number;
+      /** @description Records published to the ingest.> queue (REC-01); with NATS the records are processed asynchronously and the other counters stay 0. */
+      queued?: number;
+      /** @description Records matching a soft-deleted CI; they are held in a resurrected_device review instead of creating a CI (CI-13). */
+      resurrected?: number;
+      /** @description Records whose record_id was processed within the last 48 hours (REC-01). */
+      duplicates?: number;
+      /** @description Records whose observed_at lies more than five minutes in the future; they are rejected and counted (GLO-12). */
+      rejected_future?: number;
       /** @description New devices held as unlicensed_ci review items because max_cis is reached (ENT-03, CH21). */
       unlicensed?: number;
       job_id?: string;
@@ -6766,8 +6938,18 @@ export interface components {
       /** @description Last value an automation source reported and that was written or observed under an override */
       discovered_value?: unknown;
       discovered_source?: string;
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description Time the value was recorded
+       */
       discovered_at?: string;
+      /** @description REC-03 rank of discovered_source when the value was recorded */
+      discovered_rank?: number;
+      /**
+       * Format: date-time
+       * @description Source time of the discovered value (GLO-12); same-rank values replace it only when observed later
+       */
+      observed_at?: string;
       /** @description Manual value; null with override_at set records a removed field */
       override_value?: unknown;
       override_author?: string;
@@ -7373,11 +7555,16 @@ export interface components {
       organization_id: string;
       /** @enum {string} */
       kind:
+        | 'unclassified_device'
         | 'ambiguous_identity'
         | 'conflicting_values'
-        | 'unclassified_device'
+        | 'probable_duplicate'
         | 'override_conflict'
-        | 'unlicensed_ci';
+        | 'resurrected_device'
+        | 'unlicensed_ci'
+        | 'scope_suggested'
+        | 'serial_mismatch'
+        | 'duplicate_ip';
       /** @enum {string} */
       status: 'open' | 'resolved' | 'dismissed';
       payload: {
@@ -7388,6 +7575,12 @@ export interface components {
       /** Format: date-time */
       resolved_at?: string;
       resolution?: string;
+      /** @description The object the item is about; one item per object and type is open (REC-08). */
+      object_key?: string;
+      /** @enum {string} */
+      action?: 'merge' | 'new' | 'dismiss' | 'accept';
+      /** @description Open longer than 14 days (REC-08). */
+      escalated?: boolean;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -7398,10 +7591,10 @@ export interface components {
     };
     ReviewItemResolveRequest: {
       /**
-       * @description merge folds discovery data into an existing candidate CI (requires ci_id); create spawns a new CI from the payload; dismiss closes the item with no CI change.
+       * @description merge folds the observation into a candidate CI (requires ci_id); new creates a CI from the observation; accept applies what the item proposes; dismiss closes the item with no change. create is the deprecated name of new.
        * @enum {string}
        */
-      action: 'merge' | 'create' | 'dismiss';
+      action: 'merge' | 'new' | 'dismiss' | 'accept' | 'create';
       /** @description Target candidate CI id, required when action is merge. */
       ci_id?: string;
       resolved_by?: string;
@@ -9321,19 +9514,27 @@ export interface operations {
   ingestDiscoveryData: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description Collectors send the body gzip-compressed. */
+        'Content-Encoding'?: 'gzip';
+      };
       path?: never;
       cookie?: never;
     };
+    /** @description A DeviceRecord batch (DIS-05, normative schema api/devicerecord.schema.json). The collector_id/items request is deprecated and answered with a Deprecation header. */
     requestBody: {
       content: {
-        'application/json': components['schemas']['DiscoveryIngestRequest'];
+        'application/json':
+          | components['schemas']['DeviceRecordBatch']
+          | components['schemas']['DiscoveryIngestRequest'];
       };
     };
     responses: {
       /** @description Discovery payload accepted */
       202: {
         headers: {
+          /** @description Set (RFC 9745) when the deprecated collector_id/items request was used. */
+          Deprecation?: string;
           [name: string]: unknown;
         };
         content: {
@@ -9343,6 +9544,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      /** @description Decompressed body larger than 64 MiB */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field) */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -12795,11 +13014,127 @@ export interface operations {
         offset?: components['parameters']['Offset'];
         status?: 'open' | 'resolved' | 'dismissed';
         kind?:
+          | 'unclassified_device'
           | 'ambiguous_identity'
           | 'conflicting_values'
-          | 'unclassified_device'
+          | 'probable_duplicate'
           | 'override_conflict'
-          | 'unlicensed_ci';
+          | 'resurrected_device'
+          | 'unlicensed_ci'
+          | 'scope_suggested'
+          | 'serial_mismatch'
+          | 'duplicate_ip';
+        escalated?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of review items */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReviewItemListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getReviewItem: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The review item */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReviewItem'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  resolveReviewItem: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReviewItemResolveRequest'];
+      };
+    };
+    responses: {
+      /** @description The resolved review item */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReviewItem'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description The action does not resolve items of this type */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listDiscoveryReviewItems: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        status?: 'open' | 'resolved' | 'dismissed';
+        kind?:
+          | 'unclassified_device'
+          | 'ambiguous_identity'
+          | 'conflicting_values'
+          | 'probable_duplicate'
+          | 'override_conflict'
+          | 'resurrected_device'
+          | 'unlicensed_ci'
+          | 'scope_suggested'
+          | 'serial_mismatch'
+          | 'duplicate_ip';
       };
       header?: never;
       path?: never;
@@ -12820,7 +13155,7 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
-  resolveReviewItem: {
+  resolveDiscoveryReviewItem: {
     parameters: {
       query?: never;
       header?: never;
@@ -15110,19 +15445,27 @@ export interface operations {
   bulkIngest: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description Collectors send the body gzip-compressed. */
+        'Content-Encoding'?: 'gzip';
+      };
       path?: never;
       cookie?: never;
     };
+    /** @description A DeviceRecord batch (DIS-05, normative schema api/devicerecord.schema.json). The collector_id/items request is deprecated and answered with a Deprecation header. */
     requestBody: {
       content: {
-        'application/json': components['schemas']['DiscoveryIngestRequest'];
+        'application/json':
+          | components['schemas']['DeviceRecordBatch']
+          | components['schemas']['DiscoveryIngestRequest'];
       };
     };
     responses: {
       /** @description Discovery payload accepted */
       202: {
         headers: {
+          /** @description Set (RFC 9745) when the deprecated collector_id/items request was used. */
+          Deprecation?: string;
           [name: string]: unknown;
         };
         content: {
@@ -15132,6 +15475,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      /** @description Decompressed body larger than 64 MiB */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field) */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };

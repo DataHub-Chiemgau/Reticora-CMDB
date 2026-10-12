@@ -341,7 +341,7 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 		}
 		slog.Info("discovery cycle started", "scan_subnets", cfg.ScanSubnets, "protocols", cfg.Protocols)
 
-		var allResults []plugins.Result
+		var records []plugins.DeviceRecord
 
 		// Expand subnets to individual targets for discovery
 		targets := expandSubnets(cfg.ScanSubnets)
@@ -358,27 +358,31 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 			}
 
 			slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
+			observedAt := time.Now()
 			results, err := plug.Discover(ctx, targets, plugins.CredentialsFor(protocol, cfg.Credentials))
 			if err != nil {
 				slog.Error("discovery plugin error", "protocol", protocol, "error", err)
 				continue
 			}
 			slog.Info("discovery plugin completed", "protocol", protocol, "results", len(results))
-			allResults = append(allResults, results...)
+			for i := range results {
+				records = append(records, plugins.RecordFromResult(protocol, &results[i], observedAt))
+			}
 		}
+		records = deliverableRecords(ctx, records)
 
-		// Upload results to the backend in a compressed batch, then flush any
-		// results spooled while the backend was unreachable.
-		if len(allResults) > 0 {
-			if err := up.uploadResultsAt(ctx, allResults, cycleStart); err != nil {
-				slog.Error("failed to upload discovery results", "error", err, "count", len(allResults))
+		// Upload records to the backend in a compressed batch, then flush any
+		// records spooled while the backend was unreachable.
+		if len(records) > 0 {
+			if err := up.uploadRecordsAt(ctx, records, cycleStart); err != nil {
+				slog.Error("failed to upload discovery records", "error", err, "count", len(records))
 			} else {
-				slog.Info("discovery results uploaded", "count", len(allResults))
+				slog.Info("discovery records uploaded", "count", len(records))
 			}
 		}
 		up.flushSpool(ctx)
 
-		slog.Info("discovery cycle completed", "duration_ms", time.Since(cycleStart).Milliseconds(), "total_results", len(allResults))
+		slog.Info("discovery cycle completed", "duration_ms", time.Since(cycleStart).Milliseconds(), "total_records", len(records))
 
 		select {
 		case <-ctx.Done():
@@ -433,18 +437,40 @@ func incrementIP(ip net.IP) {
 	}
 }
 
-// uploadResults uploads results collected now; see uploadResultsAt.
-func (u *uploader) uploadResults(ctx context.Context, results []plugins.Result) error {
-	return u.uploadResultsAt(ctx, results, time.Now())
+// deliverableRecords resolves the address of targets configured by name and
+// drops records that break the DeviceRecord contract (DIS-05); the server
+// would reject them.
+func deliverableRecords(ctx context.Context, records []plugins.DeviceRecord) []plugins.DeviceRecord {
+	out := records[:0]
+	for _, rec := range records {
+		if rec.TargetIP == "" && rec.Identity.Hostname != "" {
+			if addrs, err := net.DefaultResolver.LookupHost(ctx, rec.Identity.Hostname); err == nil && len(addrs) > 0 {
+				rec.TargetIP = addrs[0]
+			}
+		}
+		if violations := rec.Validate(); len(violations) > 0 {
+			slog.Warn("dropping device record that breaks the DeviceRecord contract",
+				"event", "collector.record.invalid", "source", rec.Source, "target", rec.TargetIP,
+				"violations", fmt.Sprint(violations))
+			continue
+		}
+		out = append(out, rec)
+	}
+	return out
 }
 
-// uploadResultsAt sends discovery results collected at sourceTime to the
-// backend via compressed JSON POST. While older batches wait in the spool the
-// new batch is queued behind them, so the backend receives data in source-time
-// order (COL-05). When the upload fails and a spool directory is configured,
-// the batch is persisted and delivered by flushSpool once the backend is
-// reachable again.
-func (u *uploader) uploadResultsAt(ctx context.Context, results []plugins.Result, sourceTime time.Time) error {
+// uploadRecords uploads records collected now; see uploadRecordsAt.
+func (u *uploader) uploadRecords(ctx context.Context, records []plugins.DeviceRecord) error {
+	return u.uploadRecordsAt(ctx, records, time.Now())
+}
+
+// uploadRecordsAt sends the DeviceRecords of a discovery cycle that started at
+// sourceTime to the backend via compressed JSON POST. While older batches
+// wait in the spool the new batch is queued behind them, so the backend
+// receives data in source-time order (COL-05). When the upload fails and a
+// spool directory is configured, the batch is persisted and delivered by
+// flushSpool once the backend is reachable again.
+func (u *uploader) uploadRecordsAt(ctx context.Context, records []plugins.DeviceRecord, sourceTime time.Time) error {
 	cfg := u.cfg
 	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
 		slog.Warn("skipping upload due to incomplete configuration")
@@ -454,9 +480,9 @@ func (u *uploader) uploadResultsAt(ctx context.Context, results []plugins.Result
 	if u.paused.Load() {
 		return errLicenseExpired
 	}
-	payload, err := json.Marshal(results)
+	payload, err := json.Marshal(plugins.DeviceRecordBatch{Records: records})
 	if err != nil {
-		return fmt.Errorf("marshal results: %w", err)
+		return fmt.Errorf("marshal records: %w", err)
 	}
 
 	if u.spool != nil {

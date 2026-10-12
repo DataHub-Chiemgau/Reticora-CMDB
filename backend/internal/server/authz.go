@@ -29,6 +29,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"ci-contacts":          identity.PermContactRead,
 	"collectors":           identity.PermDiscoveryRead,
 	"discovery":            identity.PermDiscoveryRead,
+	"review-items":         identity.PermDiscoveryRead,
 	"assets":               identity.PermAssetRead,
 	"asset-locations":      identity.PermAssetWrite,
 	"assignments":          identity.PermAssignmentRead,
@@ -107,6 +108,8 @@ var readPermissionFor = map[string]identity.Permission{
 var writePermissionOverrides = map[string]identity.Permission{
 	// VRFs are managed with their own key (TEN-10, RBA-01).
 	"vrfs": identity.PermVRFManage,
+	// Review items are only written by resolving them (REC-08).
+	"review-items": identity.PermReviewResolve,
 
 	"sites":     identity.PermLocationWrite,
 	"buildings": identity.PermLocationWrite,
@@ -213,6 +216,7 @@ var routeRules = []routeRule{
 	{http.MethodPost, "discovery/ingest", identity.PermDiscoveryIngest},
 	// Resolving a review item is its own right (RBA-01, RBA-02).
 	{http.MethodPost, "discovery/review-items/*/resolve", identity.PermReviewResolve},
+	{http.MethodPost, "review-items/*/resolve", identity.PermReviewResolve},
 	// Reading jobs (RBA-01); starting an export stays export:run.
 	{http.MethodGet, "export/jobs", identity.PermJobRead},
 	{http.MethodGet, "export/jobs/*", identity.PermJobRead},

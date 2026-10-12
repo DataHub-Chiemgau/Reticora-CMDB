@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
@@ -94,12 +95,18 @@ type overrideProvenance struct {
 	repo override.Repository
 }
 
-func (a overrideProvenance) RecordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string) (*discovery.FieldProvenance, error) {
-	fv, err := a.repo.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source)
+func (a overrideProvenance) RecordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string, observedAt time.Time) (*discovery.FieldProvenance, error) {
+	fv, err := a.repo.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source, observedAt)
 	if err != nil {
 		return nil, err
 	}
 	return &discovery.FieldProvenance{Diverged: fv.Diverged}, nil
+}
+
+// ClearOverride accepts the observed value of an override_conflict (REC-12).
+func (a overrideProvenance) ClearOverride(ctx context.Context, orgID, ciID, field string) error {
+	_, err := a.repo.ClearOverride(ctx, orgID, ciID, field)
+	return err
 }
 
 func (a overrideProvenance) Decide(ctx context.Context, w *override.Write) override.Decision {

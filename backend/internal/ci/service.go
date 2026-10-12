@@ -148,6 +148,9 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 			return err
 		}
 	}
+	if err := CheckReservedKeys("attributes", item.Attributes); err != nil {
+		return err
+	}
 	if err := s.validate(ctx, item.OrganizationID, item.CITypeID, "", nil, item.Attributes); err != nil {
 		return err
 	}
@@ -161,6 +164,9 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 // the mutation transaction so the recorded diff cannot race with concurrent
 // writers.
 func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
+	if err := CheckReservedKeys("attributes", req.Attributes); err != nil {
+		return nil, err
+	}
 	needsBefore := s.fields != nil || (req.Manual != nil && (req.LocationID != nil || req.SerialNumber != nil))
 	if needsBefore {
 		before, err := s.repo.GetByID(ctx, orgID, id)

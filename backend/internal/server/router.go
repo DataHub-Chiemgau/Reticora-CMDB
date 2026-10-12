@@ -183,6 +183,9 @@ type Options struct {
 	RouteMiddleware []func(http.Handler) http.Handler
 	// Readiness lists the dependencies /readyz verifies (OPS-01).
 	Readiness []ReadinessCheck
+	// IngestQueue carries discovery records over ingest.> (REC-01); nil
+	// processes them in the request.
+	IngestQueue *discovery.NATSIngestQueue
 }
 
 // registrar is implemented by every domain handler.
@@ -263,6 +266,13 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		WithInstanceFields(repos.CIType).
 		WithLimits(opts.Entitlements)
 	opts.Entitlements.WithUnlicensed(discoveryHandler)
+	// Discovered interfaces and addresses are kept in IPAM (REC-07).
+	if syncer, ok := repos.IPAM.(discovery.InterfaceSyncer); ok {
+		discoveryHandler.WithInterfaces(syncer)
+	}
+	if opts.IngestQueue != nil {
+		opts.IngestQueue.Attach(discoveryHandler)
+	}
 	registrars := []registrar{
 		identityHandler,
 		operator.NewHandler(opts.Operator, opts.OIDC, opts.Sessions, operator.NewAuditor(opts.OperatorPool), opts.OperatorPool).

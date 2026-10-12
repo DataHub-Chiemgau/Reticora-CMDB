@@ -3,11 +3,84 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 )
+
+// MaxFutureSkew is how far observed_at may lie after the arrival time before
+// a record is rejected (GLO-12).
+const MaxFutureSkew = 5 * time.Minute
+
+var futureRecordsRejected atomic.Int64
+
+// FutureRecordsRejected is the number of records rejected since start because
+// their observed_at lay more than MaxFutureSkew in the future.
+func FutureRecordsRejected() int64 { return futureRecordsRejected.Load() }
+
+// admitObservedAt prepares the source times of an ingest (GLO-12): items
+// without observed_at (the deprecated items contract) take the arrival time;
+// items observed more than MaxFutureSkew after arrival are removed and
+// counted. It returns the admitted items and the number removed.
+func admitObservedAt(items []IngestItem, arrival time.Time) (admitted []IngestItem, rejected int) {
+	admitted = items[:0]
+	for i := range items {
+		item := items[i]
+		if item.ObservedAt.IsZero() {
+			item.ObservedAt = arrival
+		}
+		if item.ObservedAt.After(arrival.Add(MaxFutureSkew)) {
+			rejected++
+			futureRecordsRejected.Add(1)
+			slog.Warn("ingest record rejected: observed_at lies in the future",
+				"event", "ingest.record.future", "record_id", item.RecordID,
+				"observed_at", item.ObservedAt, "arrival", arrival)
+			continue
+		}
+		admitted = append(admitted, item)
+	}
+	return admitted, rejected
+}
+
+// InterfaceSyncer applies the interfaces a record reports to its CI and
+// removes those missed three times in a row (REC-07). The IPAM repository
+// implements it.
+type InterfaceSyncer interface {
+	SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID string, observed []ipam.ObservedInterface) (ipam.SyncResult, error)
+}
+
+// WithInterfaces attaches the interface synchronization of ingest.
+func (h *Handler) WithInterfaces(syncer InterfaceSyncer) *Handler {
+	h.interfaces = syncer
+	return h
+}
+
+// syncInterfaces applies the interfaces of an item to its CI. Items that
+// report no interfaces leave them untouched: only an observation that lists
+// interfaces can miss one.
+func (h *Handler) syncInterfaces(ctx context.Context, orgID, ciID string, item *IngestItem) error {
+	if h.interfaces == nil || ciID == "" || len(item.Interfaces) == 0 {
+		return nil
+	}
+	observed := make([]ipam.ObservedInterface, 0, len(item.Interfaces))
+	for i := range item.Interfaces {
+		ifc := &item.Interfaces[i]
+		if strings.TrimSpace(ifc.Name) == "" {
+			continue
+		}
+		observed = append(observed, ipam.ObservedInterface{
+			Name: ifc.Name, IfIndex: ifc.IfIndex, MAC: canonicalMAC(ifc.MAC), SpeedMbps: ifc.SpeedMbps, MTU: ifc.MTU,
+			AdminStatus: ifc.AdminStatus, OperStatus: ifc.OperStatus, IsManagement: ifc.Management, IPs: ifc.IPs,
+		})
+	}
+	_, err := h.interfaces.SyncDiscoveredInterfaces(ctx, orgID, ciID, observed)
+	return err
+}
 
 // ReconcileAction represents the reconciliation outcome.
 type ReconcileAction string
@@ -23,7 +96,10 @@ type ReconcileResult struct {
 	Action         ReconcileAction `json:"action"`
 	MatchedCIID    string          `json:"matched_ci_id,omitempty"`
 	CandidateCIIDs []string        `json:"candidate_ci_ids,omitempty"`
-	Criterion      string          `json:"criterion,omitempty"`
+	// ProbableDuplicates are CIs sharing the hostname or FQDN of a new CI
+	// (REC-02, CH29); they are reviewed, never merged.
+	ProbableDuplicates []string `json:"probable_duplicates,omitempty"`
+	Criterion          string   `json:"criterion,omitempty"`
 
 	// ValueConflicts lists fields where the incoming item carries a different
 	// non-empty identity value than the matched CI (e.g. a changed serial
@@ -32,78 +108,10 @@ type ReconcileResult struct {
 	ValueConflicts []string `json:"value_conflicts,omitempty"`
 }
 
-// Reconcile matches an incoming discovery item against existing CIs using the
-// configured identity priority order (spec §5.3):
-//
-//  1. Seriennummer
-//  2. Chassis-/Hardware-UUID
-//  3. MAC-Adresse(n)
-//  4. Management-IP + sysObjectID/CI-Typ
-//  5. Hostname/FQDN
-//
-// On a match, ValueConflicts reports identity fields where the incoming item
-// contradicts the stored CI; whether an incoming value is written is decided
-// per field by override.DecideAutomatedWrite (REC-03).
+// Reconcile matches an incoming discovery item against existing CIs by the
+// identity rules of REC-02 (ResolveIdentity) without type or VRF context.
 func Reconcile(existing []ci.Item, incoming IngestItem) ReconcileResult {
-	criteria := []struct {
-		name  string
-		match func(ci.Item) bool
-	}{
-		{
-			name: "serial_number",
-			match: func(item ci.Item) bool {
-				return normalizedEqual(item.SerialNumber, incoming.SerialNumber)
-			},
-		},
-		{
-			name: "hardware_uuid",
-			match: func(item ci.Item) bool {
-				return normalizedEqual(existingFingerprintValue(item, "hardware_uuid"), fingerprintString(incoming.Fingerprint["hardware_uuid"])) ||
-					normalizedEqual(item.HardwareUUID, incoming.HardwareUUID)
-			},
-		},
-		{
-			name: "mac_addresses",
-			match: func(item ci.Item) bool {
-				return macAddressOverlap(existingFingerprintSlice(item, "mac_addresses"), fingerprintSlice(incoming.Fingerprint["mac_addresses"])) ||
-					normalizedMACEqual(item.PrimaryMAC, incoming.PrimaryMAC)
-			},
-		},
-		{
-			name: "management_ip_ci_type",
-			match: func(item ci.Item) bool {
-				return normalizedEqual(item.ManagementIP, incoming.ManagementIP) && normalizedEqual(item.CITypeID, incoming.CITypeName)
-			},
-		},
-		{
-			name: "hostname_fqdn",
-			match: func(item ci.Item) bool {
-				if normalizedEqual(item.FQDN, incoming.FQDN) {
-					return true
-				}
-				if normalizedEqual(item.Hostname, incoming.Hostname) {
-					return true
-				}
-				// Backwards compatibility: the item name carries the hostname
-				// for sweeps and SSH collections.
-				return normalizedEqual(item.Name, incoming.Name)
-			},
-		},
-	}
-
-	for _, criterion := range criteria {
-		matches := matchingItems(existing, criterion.match)
-		if len(matches) == 1 {
-			result := ReconcileResult{Action: ReconcileMatched, MatchedCIID: matches[0].ID, Criterion: criterion.name}
-			result.ValueConflicts = identityConflicts(matches[0], incoming)
-			return result
-		}
-		if len(matches) > 1 {
-			return ReconcileResult{Action: ReconcileConflict, CandidateCIIDs: collectIDs(matches), Criterion: criterion.name}
-		}
-	}
-
-	return ReconcileResult{Action: ReconcileCreated}
+	return ResolveIdentity(existing, &incoming, nil)
 }
 
 // identityConflicts compares the strong identity fields of a matched CI with
@@ -124,9 +132,6 @@ func identityConflicts(item ci.Item, incoming IngestItem) []string {
 	} else {
 		addIfDiffering("hardware_uuid", item.HardwareUUID, incoming.HardwareUUID)
 	}
-	addIfDiffering("management_ip", item.ManagementIP, incoming.ManagementIP)
-	addIfDiffering("hostname", item.Hostname, incoming.Hostname)
-	addIfDiffering("fqdn", item.FQDN, incoming.FQDN)
 	return conflicts
 }
 

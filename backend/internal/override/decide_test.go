@@ -3,6 +3,9 @@ package override
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -97,5 +100,83 @@ func TestIsProtectedFailsClosed(t *testing.T) {
 	repo := NewMemoryRepository()
 	if protected, err := IsProtected(context.Background(), repo, "org", "ci", "name"); err != nil || protected {
 		t.Errorf("field without row: protected=%v, %v", protected, err)
+	}
+}
+
+// TestDecideComparesObservedAtPerField covers WP-084 (GLO-12, REC-05): a
+// value of the same rank wins only with a newer source time; the comparison
+// uses the field's stored observed_at and rank, not the time the value was
+// recorded.
+func TestDecideComparesObservedAtPerField(t *testing.T) {
+	now := time.Now().UTC()
+	at := func(t time.Time) *time.Time { return &t }
+	write := func(source string, observedAt time.Time) *Write {
+		return &Write{Field: "model", Value: "new", Current: "old", Source: source, ObservedAt: observedAt}
+	}
+	// Recorded just now, observed an hour ago.
+	late := &FieldValue{DiscoveredValue: "old", DiscoveredSource: "snmp", DiscoveredRank: 80,
+		DiscoveredAt: at(now), ObservedAt: at(now.Add(-time.Hour))}
+	// Recorded with a rank that differs from today's table.
+	ranked := &FieldValue{DiscoveredValue: "old", DiscoveredSource: "custom", DiscoveredRank: 85,
+		DiscoveredAt: at(now), ObservedAt: at(now.Add(-time.Hour))}
+	// Written before WP-084: no observed_at, no rank.
+	legacy := &FieldValue{DiscoveredValue: "old", DiscoveredSource: "snmp", DiscoveredAt: at(now.Add(-time.Hour))}
+
+	for _, c := range []struct {
+		name   string
+		fv     *FieldValue
+		w      *Write
+		write  bool
+		reason string
+	}{
+		{"same rank newer than observed_at, older than recording", late, write("snmp", now.Add(-30*time.Minute)), true, ReasonAllowed},
+		{"same rank, same source time", late, write("snmp", now.Add(-time.Hour)), false, ReasonStale},
+		{"same rank, older source time", late, write("snmp", now.Add(-2*time.Hour)), false, ReasonStale},
+		{"same rank without source time", late, write("snmp", time.Time{}), false, ReasonStale},
+		{"higher rank with older source time", late, write("redfish", now.Add(-2*time.Hour)), true, ReasonAllowed},
+		{"lower rank with newer source time", late, write("sweep", now), false, ReasonLowerRank},
+		{"stored rank decides", ranked, write("snmp", now), false, ReasonLowerRank},
+		{"stored rank, same rank newer", ranked, write("agent", now), true, ReasonAllowed},
+		{"legacy row falls back to discovered_at", legacy, write("snmp", now.Add(-2*time.Hour)), false, ReasonStale},
+		{"legacy row, newer", legacy, write("snmp", now), true, ReasonAllowed},
+	} {
+		got := DecideAutomatedWrite(context.Background(), stubReader{fv: c.fv}, c.w)
+		if got.Write != c.write || got.Reason != c.reason {
+			t.Errorf("%s: %+v, want write=%v reason=%s", c.name, got, c.write, c.reason)
+		}
+	}
+}
+
+// TestRecordDiscoveredKeepsSourceRankAndObservedAt covers WP-084 (REC-05):
+// the provenance of a field stores source, rank and observed_at; the
+// recording time stays separate.
+func TestRecordDiscoveredKeepsSourceRankAndObservedAt(t *testing.T) {
+	repo := NewMemoryRepository()
+	observed := time.Date(2026, 10, 12, 6, 0, 0, 0, time.UTC)
+	fv, err := repo.RecordDiscovered(context.Background(), "org", "ci", "model", "R760", "redfish", observed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fv.DiscoveredSource != "redfish" || fv.DiscoveredRank != 90 || fv.ObservedAt == nil || !fv.ObservedAt.Equal(observed) ||
+		fv.DiscoveredAt == nil || !fv.DiscoveredAt.After(observed) {
+		t.Errorf("provenance %+v", fv)
+	}
+}
+
+// TestMigrationRanksFollowTheRankTable keeps the backfill of migration
+// 000093 in step with SourceRanks.
+func TestMigrationRanksFollowTheRankTable(t *testing.T) {
+	raw, err := os.ReadFile("../../migrations/000093_field_provenance_observed_at.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for source, rank := range SourceRanks {
+		if !strings.Contains(sql, fmt.Sprintf("WHEN '%s' THEN %d", source, rank)) {
+			t.Errorf("migration 000093 lacks rank %d of %s", rank, source)
+		}
+	}
+	if n := strings.Count(sql, "WHEN '"); n != len(SourceRanks) {
+		t.Errorf("migration 000093 ranks %d sources, the table %d", n, len(SourceRanks))
 	}
 }

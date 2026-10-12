@@ -31,6 +31,8 @@ tags:
     description: Webhook subscription management
   - name: Discovery
     description: Discovery ingest and job tracking
+  - name: Reviews
+    description: Review queue of reconciliation (REC-08)
   - name: Collectors
     description: Customer-deployed discovery collector management
   - name: Credentials
@@ -981,15 +983,33 @@ paths:
       operationId: ingestDiscoveryData
       tags: [Discovery]
       summary: Ingest discovery results in bulk
+      parameters:
+        - name: Content-Encoding
+          in: header
+          description: Collectors send the body gzip-compressed.
+          schema:
+            type: string
+            enum: [gzip]
       requestBody:
         required: true
+        description: >-
+          A DeviceRecord batch (DIS-05, normative schema
+          api/devicerecord.schema.json). The collector_id/items request is
+          deprecated and answered with a Deprecation header.
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DiscoveryIngestRequest'
+              oneOf:
+                - $ref: '#/components/schemas/DeviceRecordBatch'
+                - $ref: '#/components/schemas/DiscoveryIngestRequest'
       responses:
         '202':
           description: Discovery payload accepted
+          headers:
+            Deprecation:
+              description: Set (RFC 9745) when the deprecated collector_id/items request was used.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -1000,6 +1020,16 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          description: Decompressed body larger than 64 MiB
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: A record breaks the DeviceRecord contract; the detail names each field (records[i].field)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -3636,11 +3666,15 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
-  /api/v1/discovery/review-items:
+  /api/v1/review-items:
     get:
       operationId: listReviewItems
-      tags: [Discovery]
-      summary: List reconciliation review items
+      tags: [Reviews]
+      summary: List review items
+      description: >-
+        The review queue of reconciliation (REC-08). Items open longer than
+        14 days carry escalated = true; escalated=true lists only those (the
+        dashboard's escalation).
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
@@ -3653,7 +3687,114 @@ paths:
           in: query
           schema:
             type: string
-            enum: [ambiguous_identity, conflicting_values, unclassified_device, override_conflict, unlicensed_ci]
+            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip]
+        - name: escalated
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Paginated list of review items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewItemListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/review-items/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getReviewItem
+      tags: [Reviews]
+      summary: Get a review item
+      responses:
+        '200':
+          description: The review item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/review-items/{id}/resolve:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: resolveReviewItem
+      tags: [Reviews]
+      summary: Resolve a review item
+      description: >-
+        Requires review:resolve. The actions per type (REC-08):
+        unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss;
+        conflicting_values accept|dismiss; probable_duplicate merge|dismiss
+        (merge removes the new CI); override_conflict accept|dismiss (accept
+        removes the override and the CI takes the observed value; dismiss
+        keeps the override and suppresses the value until the source reports
+        another); conflicting_values accept applies the reported serial
+        number or hardware UUID kept in payload.incoming;
+        resurrected_device merge|new|dismiss (merge reactivates the deleted
+        CI); unlicensed_ci new|dismiss (new adopts the device within max_cis,
+        403 entitlement-limit otherwise); scope_suggested accept|dismiss;
+        serial_mismatch and duplicate_ip dismiss. Another action is 422.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewItemResolveRequest'
+      responses:
+        '200':
+          description: The resolved review item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: The action does not resolve items of this type
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/discovery/review-items:
+    get:
+      operationId: listDiscoveryReviewItems
+      deprecated: true
+      tags: [Discovery]
+      summary: List reconciliation review items (deprecated, use /api/v1/review-items)
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, resolved, dismissed]
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip]
       responses:
         '200':
           description: Paginated list of review items
@@ -3670,9 +3811,10 @@ paths:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
-      operationId: resolveReviewItem
+      operationId: resolveDiscoveryReviewItem
+      deprecated: true
       tags: [Discovery]
-      summary: Resolve a reconciliation review item
+      summary: Resolve a reconciliation review item (deprecated, use /api/v1/review-items/{id}/resolve)
       description: >-
         An unlicensed_ci item (a discovered device held because max_cis is
         reached, ENT-03) is resolved with create, which adopts the device as a
@@ -5451,15 +5593,33 @@ paths:
         endpoint that `/api/v1/discovery/ingest` aliases. Both require the
         discovery feature; after the discovery license expired they answer
         403 with the problem type license-expired (CH21).
+      parameters:
+        - name: Content-Encoding
+          in: header
+          description: Collectors send the body gzip-compressed.
+          schema:
+            type: string
+            enum: [gzip]
       requestBody:
         required: true
+        description: >-
+          A DeviceRecord batch (DIS-05, normative schema
+          api/devicerecord.schema.json). The collector_id/items request is
+          deprecated and answered with a Deprecation header.
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DiscoveryIngestRequest'
+              oneOf:
+                - $ref: '#/components/schemas/DeviceRecordBatch'
+                - $ref: '#/components/schemas/DiscoveryIngestRequest'
       responses:
         '202':
           description: Discovery payload accepted
+          headers:
+            Deprecation:
+              description: Set (RFC 9745) when the deprecated collector_id/items request was used.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -5470,6 +5630,16 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          description: Decompressed body larger than 64 MiB
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: A record breaks the DeviceRecord contract; the detail names each field (records[i].field)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -8942,6 +9112,8 @@ components:
         attributes:
           type: object
           additionalProperties: true
+          description: >-
+            Business attributes, instance attributes under their names (stored in _instance). The namespaces _overrides, _observed, _provenance and _instance are not part of this view (CI-10); the per-field view is GET /api/v1/cis/{id}/fields.
         discovery_source:
           $ref: '#/components/schemas/CIDiscoverySource'
         first_seen_at:
@@ -9033,6 +9205,8 @@ components:
         attributes:
           type: object
           additionalProperties: true
+          description: >-
+            The keys _overrides, _observed, _provenance and _instance are reserved (GLO-13): 400 with the field.
         discovery_source:
           $ref: '#/components/schemas/CIDiscoverySource'
 
@@ -9091,6 +9265,8 @@ components:
         attributes:
           type: object
           additionalProperties: true
+          description: >-
+            RFC 7396 merge patch. The keys _overrides, _observed, _provenance and _instance are reserved (GLO-13): 400 with the field.
         discovery_source:
           $ref: '#/components/schemas/CIDiscoverySource'
         last_seen_at:
@@ -9506,8 +9682,123 @@ components:
         management_ip:
           type: string
 
+    DeviceRecordBatch:
+      type: object
+      required: [records]
+      properties:
+        records:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/DeviceRecord'
+
+    DeviceRecord:
+      type: object
+      description: >-
+        One device observation (DIS-05). Mirrors api/devicerecord.schema.json,
+        the normative schema; observed_at is the source time (GLO-12).
+      required: [record_id, observed_at, source, target_ip, identity, classification, system]
+      additionalProperties: false
+      properties:
+        record_id: { type: string, format: uuid }
+        observed_at: { type: string, format: date-time }
+        source:
+          type: string
+          enum: [redfish, ipmi, agent, snmp, api, integration, wmi, ssh, nas, sweep]
+        target_ip: { type: string }
+        vrf_id: { type: string, format: uuid }
+        scope_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        client_id: { type: string, format: uuid }
+        identity:
+          type: object
+          additionalProperties: false
+          properties:
+            serial_number: { type: string }
+            hardware_uuid: { type: string, format: uuid }
+            primary_mac: { type: string }
+            hostname: { type: string }
+            fqdn: { type: string }
+        classification:
+          type: object
+          required: [ci_type]
+          additionalProperties: false
+          properties:
+            ci_type: { type: string, minLength: 1 }
+            manufacturer: { type: string }
+            model: { type: string }
+            sys_object_id: { type: string }
+            profile: { type: string }
+        system:
+          type: object
+          additionalProperties: false
+          properties:
+            name: { type: string }
+            description: { type: string }
+            os_name: { type: string }
+            os_version: { type: string }
+            firmware_version: { type: string }
+            uptime_seconds: { type: integer, minimum: 0 }
+        attributes:
+          type: object
+          additionalProperties: true
+        interfaces:
+          type: array
+          items:
+            type: object
+            required: [name]
+            additionalProperties: false
+            properties:
+              name: { type: string, minLength: 1 }
+              if_index: { type: integer }
+              mac: { type: string }
+              speed_mbps: { type: integer }
+              mtu: { type: integer }
+              admin_status: { type: string, enum: [up, down, unknown] }
+              oper_status: { type: string, enum: [up, down, unknown] }
+              vlan_id: { type: integer, minimum: 1, maximum: 4094 }
+              ips:
+                type: array
+                items:
+                  type: object
+                  required: [address]
+                  additionalProperties: false
+                  properties:
+                    address: { type: string }
+                    prefix_length: { type: integer, minimum: 0, maximum: 128 }
+        neighbors:
+          type: array
+          items:
+            type: object
+            required: [protocol]
+            additionalProperties: false
+            properties:
+              protocol: { type: string, enum: [lldp, cdp, arp, fdb] }
+              local_interface: { type: string }
+              remote_mac: { type: string }
+              remote_ip: { type: string }
+              remote_hostname: { type: string }
+              remote_interface: { type: string }
+        power:
+          type: object
+          additionalProperties: false
+          properties:
+            device_type: { type: string }
+            draw_watts: { type: number, minimum: 0 }
+            outlets:
+              type: array
+              items:
+                type: object
+                required: [name]
+                additionalProperties: false
+                properties:
+                  name: { type: string, minLength: 1 }
+                  state: { type: string }
+
     DiscoveryIngestRequest:
       type: object
+      deprecated: true
+      description: Deprecated ingest request; use DeviceRecordBatch (DIS-05).
       required: [collector_id, items]
       properties:
         collector_id:
@@ -9529,6 +9820,24 @@ components:
           type: integer
         conflicts:
           type: integer
+        queued:
+          type: integer
+          description: >-
+            Records published to the ingest.> queue (REC-01); with NATS the
+            records are processed asynchronously and the other counters stay 0.
+        resurrected:
+          type: integer
+          description: >-
+            Records matching a soft-deleted CI; they are held in a
+            resurrected_device review instead of creating a CI (CI-13).
+        duplicates:
+          type: integer
+          description: Records whose record_id was processed within the last 48 hours (REC-01).
+        rejected_future:
+          type: integer
+          description: >-
+            Records whose observed_at lies more than five minutes in the
+            future; they are rejected and counted (GLO-12).
         unlicensed:
           type: integer
           description: >-
@@ -11252,7 +11561,9 @@ components:
         field_name: { type: string }
         discovered_value: { description: Last value an automation source reported and that was written or observed under an override }
         discovered_source: { type: string }
-        discovered_at: { type: string, format: date-time }
+        discovered_at: { type: string, format: date-time, description: Time the value was recorded }
+        discovered_rank: { type: integer, description: REC-03 rank of discovered_source when the value was recorded }
+        observed_at: { type: string, format: date-time, description: Source time of the discovered value (GLO-12); same-rank values replace it only when observed later }
         override_value: { description: Manual value; null with override_at set records a removed field }
         override_author: { type: string }
         override_reason: { type: string }
@@ -12194,7 +12505,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [ambiguous_identity, conflicting_values, unclassified_device, override_conflict, unlicensed_ci]
+          enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip]
         status:
           type: string
           enum: [open, resolved, dismissed]
@@ -12212,6 +12523,15 @@ components:
           format: date-time
         resolution:
           type: string
+        object_key:
+          type: string
+          description: The object the item is about; one item per object and type is open (REC-08).
+        action:
+          type: string
+          enum: [merge, new, dismiss, accept]
+        escalated:
+          type: boolean
+          description: Open longer than 14 days (REC-08).
         created_at:
           type: string
           format: date-time
@@ -12236,11 +12556,12 @@ components:
       properties:
         action:
           type: string
-          enum: [merge, create, dismiss]
+          enum: [merge, new, dismiss, accept, create]
           description: >-
-            merge folds discovery data into an existing candidate CI (requires
-            ci_id); create spawns a new CI from the payload; dismiss closes the
-            item with no CI change.
+            merge folds the observation into a candidate CI (requires ci_id);
+            new creates a CI from the observation; accept applies what the item
+            proposes; dismiss closes the item with no change. create is the
+            deprecated name of new.
         ci_id:
           type: string
           description: Target candidate CI id, required when action is merge.

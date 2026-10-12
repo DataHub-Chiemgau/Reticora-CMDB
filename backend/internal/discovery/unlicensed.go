@@ -14,6 +14,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -21,7 +22,7 @@ import (
 // ReviewKindUnlicensedCI holds a discovered device that would exceed max_cis
 // (ENT-03, CH21, E-22): the device record is kept in the payload, nothing is
 // lost; raising the limit adopts it as a CI, dismissing discards it.
-const ReviewKindUnlicensedCI = "unlicensed_ci"
+const ReviewKindUnlicensedCI = reviews.KindUnlicensedCI
 
 // LimitGuard enforces licensed quotas before a discovered device becomes a
 // CI. The entitlement service implements it.
@@ -41,8 +42,14 @@ var unlicensedQueued atomic.Int64
 // start.
 func UnlicensedQueued() int64 { return unlicensedQueued.Load() }
 
-// RegisterMetrics registers reticora_unlicensed_ci_total (ENT-03).
+// RegisterMetrics registers reticora_unlicensed_ci_total (ENT-03) and
+// reticora_ingest_future_records_total (GLO-12).
 func RegisterMetrics(reg prometheus.Registerer) {
+	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
+		Namespace: "reticora",
+		Name:      "ingest_future_records_total",
+		Help:      "Ingested records rejected because observed_at is more than five minutes in the future.",
+	}, func() float64 { return float64(FutureRecordsRejected()) }))
 	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
 		Namespace: "reticora",
 		Name:      "unlicensed_ci_total",
@@ -71,7 +78,9 @@ func discoveredAttributes(item *IngestItem) map[string]any {
 func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *IngestItem, typeID, source string) (ci.Item, error) {
 	now := time.Now().UTC()
 	newItem := ci.Item{
-		OrganizationID:  orgID,
+		OrganizationID: orgID,
+		// The client of the discovery scope (REC-02).
+		ClientID:        item.ClientID,
 		CITypeID:        typeID,
 		Name:            item.Name,
 		Status:          "active",
@@ -83,6 +92,7 @@ func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *In
 		PrimaryMAC:      item.PrimaryMAC,
 		Hostname:        item.Hostname,
 		FQDN:            item.FQDN,
+		SysObjectID:     item.SysObjectID,
 		Attributes:      discoveredAttributes(item),
 		DiscoverySource: source,
 		FirstSeenAt:     &now,
@@ -98,10 +108,10 @@ func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *In
 		"serial_number": item.SerialNumber, "management_ip": item.ManagementIP,
 		"hostname": item.Hostname, "fqdn": item.FQDN,
 	} {
-		h.recordDiscovered(ctx, orgID, newItem.ID, field, value, source)
+		h.recordDiscovered(ctx, orgID, newItem.ID, field, value, source, item.ObservedAt)
 	}
 	for k, v := range item.Attributes {
-		h.recordDiscovered(ctx, orgID, newItem.ID, k, v, source)
+		h.recordDiscovered(ctx, orgID, newItem.ID, k, v, source, item.ObservedAt)
 	}
 	return newItem, nil
 }
@@ -172,8 +182,10 @@ func (h *Handler) admitNewCI(ctx context.Context, orgID string, current int64, i
 			"limit":        exceeded.Limit,
 			"current":      exceeded.Current,
 		},
+		ObjectKey: key,
 	}
-	if err = h.repo.CreateReviewItem(ctx, review); err != nil {
+	opened, err := h.openReview(ctx, review)
+	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			// Queued concurrently by another ingest.
@@ -183,6 +195,9 @@ func (h *Handler) admitNewCI(ctx context.Context, orgID string, current int64, i
 		return false, err
 	}
 	queued.keys[key] = true
+	if !opened {
+		return true, nil
+	}
 	unlicensedQueued.Add(1)
 	slog.WarnContext(ctx, "discovered device held as unlicensed_ci: max_cis reached",
 		"event", "entitlement.unlicensed_ci", "organization_id", orgID, "review_item_id", review.ID,
@@ -260,7 +275,7 @@ func (h *Handler) adoptUnlicensed(ctx context.Context, orgID, actorID string, it
 	if err != nil {
 		return "", err
 	}
-	if _, err = h.repo.ResolveReviewItem(ctx, orgID, item.ID, Resolution{Status: ReviewStatusResolved,
+	if _, err = h.repo.ResolveReviewItem(ctx, orgID, item.ID, &Resolution{Status: ReviewStatusResolved, Action: reviews.ActionNew,
 		ResolvedBy: actorID, Note: "created CI " + created.ID + " within max_cis"}); err != nil {
 		return "", err
 	}

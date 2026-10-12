@@ -106,9 +106,9 @@ func RegisterMetrics(reg prometheus.Registerer) {
 //   - A manual override is never overwritten, by any source. A differing
 //     value is a conflict for the review queue; an equal one needs no write.
 //   - An empty current value may be filled by any source.
-//   - Otherwise the source's rank must be at least that of the source of the
-//     current value, and the observation must not be older than the stored
-//     one of the same or a higher-ranked source.
+//   - Otherwise a value wins with a higher rank than the stored value's
+//     source, or with the same rank and a newer source time (observed_at,
+//     REC-05, GLO-12). Provenance is compared per field.
 func DecideAutomatedWrite(ctx context.Context, reader FieldReader, w *Write) Decision {
 	var fv *FieldValue
 	if reader != nil {
@@ -135,16 +135,25 @@ func DecideAutomatedWrite(ctx context.Context, reader FieldReader, w *Write) Dec
 		return Decision{Write: true, Reason: ReasonEmpty}
 	}
 
-	currentSource, currentAt := w.FallbackSource, (*time.Time)(nil)
+	var currentAt *time.Time
+	currentRank := SourceRank(w.FallbackSource)
 	if fv != nil && fv.DiscoveredSource != "" {
-		currentSource, currentAt = fv.DiscoveredSource, fv.DiscoveredAt
+		currentRank = fv.DiscoveredRank
+		if currentRank == 0 {
+			currentRank = SourceRank(fv.DiscoveredSource)
+		}
+		currentAt = fv.ObservedAt
+		if currentAt == nil {
+			currentAt = fv.DiscoveredAt
+		}
 	}
-	if SourceRank(w.Source) < SourceRank(currentSource) {
+	rank := SourceRank(w.Source)
+	if rank < currentRank {
 		return Decision{Reason: ReasonLowerRank}
 	}
-	// Ranks are equal here at most: an observation of the same rank must not
-	// be older than the stored one.
-	if currentAt != nil && SourceRank(currentSource) >= SourceRank(w.Source) && !w.ObservedAt.IsZero() && w.ObservedAt.Before(*currentAt) {
+	// A source of the same rank wins only with a newer source time (REC-05,
+	// GLO-12); the arrival time does not count.
+	if rank == currentRank && currentAt != nil && !w.ObservedAt.After(*currentAt) {
 		return Decision{Reason: ReasonStale}
 	}
 	return Decision{Write: true, Reason: ReasonAllowed}
@@ -190,6 +199,6 @@ func (g *Guard) Record(ctx context.Context, w *Write) error {
 	if g == nil || g.repo == nil {
 		return nil
 	}
-	_, err := g.repo.RecordDiscovered(ctx, w.OrganizationID, w.CIID, w.Field, w.Value, w.Source)
+	_, err := g.repo.RecordDiscovered(ctx, w.OrganizationID, w.CIID, w.Field, w.Value, w.Source, w.ObservedAt)
 	return err
 }

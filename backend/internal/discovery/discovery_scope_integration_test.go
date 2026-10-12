@@ -71,7 +71,7 @@ func TestDiscoveryRepositoryClientScope(t *testing.T) {
 	if err != nil || total != 0 || len(items) != 0 {
 		t.Fatalf("client-1 review items: total=%d %+v err=%v, want none", total, items, err)
 	}
-	if _, err = repo.ResolveReviewItem(ctx, f.OrgA, foreignReview.ID, discovery.Resolution{Status: discovery.ReviewStatusResolved}); err == nil {
+	if _, err = repo.ResolveReviewItem(ctx, f.OrgA, foreignReview.ID, &discovery.Resolution{Status: discovery.ReviewStatusResolved}); err == nil {
 		t.Fatal("client-1 principal resolved a review item about a client-2 CI")
 	}
 

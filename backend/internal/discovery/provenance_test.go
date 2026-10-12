@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -22,7 +23,7 @@ type stubProvenance struct {
 	recorded  map[string]any
 }
 
-func (s *stubProvenance) RecordDiscovered(_ context.Context, orgID, ciID, fieldName string, value any, source string) (*FieldProvenance, error) {
+func (s *stubProvenance) RecordDiscovered(_ context.Context, orgID, ciID, fieldName string, value any, source string, _ time.Time) (*FieldProvenance, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.recorded == nil {
@@ -215,5 +216,26 @@ func TestBulkIngestProtectedAttributeOverrideWins(t *testing.T) {
 	// The discovered value stays visible as provenance so the drift is reviewable.
 	if got := prov.recorded[existing.ID+"/ram_gb"]; got != float64(32) {
 		t.Fatalf("expected discovered value recorded as provenance, got %#v", got)
+	}
+}
+
+// TestAdmitObservedAt covers WP-084 (GLO-12): items without a source time
+// take the arrival time, records more than five minutes in the future are
+// removed and counted, records within five minutes stay.
+func TestAdmitObservedAt(t *testing.T) {
+	arrival := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	before := FutureRecordsRejected()
+	items := []IngestItem{
+		{Name: "legacy"},
+		{Name: "past", ObservedAt: arrival.Add(-time.Hour)},
+		{Name: "edge", ObservedAt: arrival.Add(MaxFutureSkew)},
+		{Name: "future", ObservedAt: arrival.Add(MaxFutureSkew + time.Second)},
+	}
+	admitted, rejected := admitObservedAt(items, arrival)
+	if rejected != 1 || len(admitted) != 3 || FutureRecordsRejected() != before+1 {
+		t.Fatalf("admitted %d, rejected %d, counter %d", len(admitted), rejected, FutureRecordsRejected()-before)
+	}
+	if !admitted[0].ObservedAt.Equal(arrival) || admitted[1].Name != "past" || admitted[2].Name != "edge" {
+		t.Errorf("admitted %+v", admitted)
 	}
 }

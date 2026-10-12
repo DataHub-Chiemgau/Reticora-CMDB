@@ -16,15 +16,16 @@ import (
 
 func TestReconcilePriorityOrder(t *testing.T) {
 	existing := []ci.Item{{ID: "ci-1", SerialNumber: "SN-1", Attributes: map[string]any{"fingerprint": map[string]any{"hardware_uuid": "uuid-1", "mac_addresses": []any{"aa:bb:cc"}}}, ManagementIP: "10.0.0.1", CITypeID: "server", Name: "srv-01"}}
-	result := Reconcile(existing, IngestItem{SerialNumber: "SN-1", Fingerprint: map[string]any{"hardware_uuid": "uuid-2"}, Name: "other"})
+	result := Reconcile(existing, IngestItem{CITypeName: "server", SerialNumber: "SN-1", Fingerprint: map[string]any{"hardware_uuid": "uuid-2"}, Name: "other"})
 	if result.Action != ReconcileMatched || result.MatchedCIID != "ci-1" || result.Criterion != "serial_number" {
 		t.Fatalf("unexpected reconcile result: %+v", result)
 	}
 }
 
 func TestReconcileConflict(t *testing.T) {
-	existing := []ci.Item{{ID: "ci-1", Name: "srv-01"}, {ID: "ci-2", Name: "srv-01"}}
-	result := Reconcile(existing, IngestItem{Name: "srv-01"})
+	// Several CIs with one of the reported MACs: ambiguous (REC-02).
+	existing := []ci.Item{{ID: "ci-1", PrimaryMAC: "00:1b:21:00:00:01"}, {ID: "ci-2", PrimaryMAC: "00:1b:21:00:00:02"}}
+	result := Reconcile(existing, IngestItem{Fingerprint: map[string]any{"mac_addresses": []any{"00:1b:21:00:00:01", "00:1b:21:00:00:02"}}})
 	if result.Action != ReconcileConflict || len(result.CandidateCIIDs) != 2 {
 		t.Fatalf("unexpected reconcile result: %+v", result)
 	}
@@ -75,8 +76,8 @@ func discoveryTenantCtx(r *http.Request) *http.Request {
 }
 
 func TestReconcileMatchesPrimaryMAC(t *testing.T) {
-	existing := []ci.Item{{ID: "ci-1", PrimaryMAC: "AA:BB:CC:DD:EE:FF"}}
-	result := Reconcile(existing, IngestItem{PrimaryMAC: "aa-bb-cc-dd-ee-ff"})
+	existing := []ci.Item{{ID: "ci-1", PrimaryMAC: "00:1B:21:DD:EE:FF"}}
+	result := Reconcile(existing, IngestItem{PrimaryMAC: "00-1b-21-dd-ee-ff"})
 	if result.Action != ReconcileMatched || result.MatchedCIID != "ci-1" || result.Criterion != "mac_addresses" {
 		t.Fatalf("unexpected reconcile result: %+v", result)
 	}
@@ -88,18 +89,20 @@ func TestReconcileMatchesHostnameFQDN(t *testing.T) {
 		{ID: "ci-2", FQDN: "fw-01.example.net"},
 		{ID: "ci-3", Name: "legacy-01"},
 	}
+	// Hostname and FQDN never merge (REC-02, CH29): a new CI, reviewed as a
+	// probable duplicate.
 	byHostname := Reconcile(existing, IngestItem{Hostname: "SW-CORE-01"})
-	if byHostname.Action != ReconcileMatched || byHostname.MatchedCIID != "ci-1" || byHostname.Criterion != "hostname_fqdn" {
-		t.Fatalf("hostname match: %+v", byHostname)
+	if byHostname.Action != ReconcileCreated || len(byHostname.ProbableDuplicates) != 1 || byHostname.ProbableDuplicates[0] != "ci-1" {
+		t.Fatalf("hostname hit: %+v", byHostname)
 	}
 	byFQDN := Reconcile(existing, IngestItem{FQDN: "fw-01.example.net"})
-	if byFQDN.Action != ReconcileMatched || byFQDN.MatchedCIID != "ci-2" {
-		t.Fatalf("fqdn match: %+v", byFQDN)
+	if byFQDN.Action != ReconcileCreated || len(byFQDN.ProbableDuplicates) != 1 || byFQDN.ProbableDuplicates[0] != "ci-2" {
+		t.Fatalf("fqdn hit: %+v", byFQDN)
 	}
-	// Name fallback keeps sweep/SSH behavior where the name carries the hostname.
+	// The display name identifies nothing.
 	byName := Reconcile(existing, IngestItem{Name: "legacy-01"})
-	if byName.Action != ReconcileMatched || byName.MatchedCIID != "ci-3" {
-		t.Fatalf("name fallback: %+v", byName)
+	if byName.Action != ReconcileCreated || len(byName.ProbableDuplicates) != 0 {
+		t.Fatalf("name: %+v", byName)
 	}
 }
 
@@ -112,22 +115,26 @@ func TestReconcileMatchesHardwareUUIDColumn(t *testing.T) {
 }
 
 func TestReconcileReportsValueConflicts(t *testing.T) {
+	// Only the strong identity fields conflict (REC-06); a changed IP or
+	// hostname is an ordinary update.
 	existing := []ci.Item{{
 		ID:           "ci-1",
 		SerialNumber: "SN-1",
+		HardwareUUID: "4c4c4544-0042-3510-8051-b4c04f4a4e33",
 		ManagementIP: "10.0.0.1",
 		Hostname:     "old-name",
 	}}
 	result := Reconcile(existing, IngestItem{
-		SerialNumber: "SN-1",
+		SerialNumber: "SN-REPLACED",
+		HardwareUUID: "4c4c4544-0042-3510-8051-b4c04f4a4e33",
 		ManagementIP: "10.0.0.9",
 		Hostname:     "new-name",
 	})
-	if result.Action != ReconcileMatched {
-		t.Fatalf("action = %s, want matched", result.Action)
+	if result.Action != ReconcileMatched || result.Criterion != "hardware_uuid" {
+		t.Fatalf("result = %+v, want matched by hardware_uuid", result)
 	}
-	if len(result.ValueConflicts) != 2 {
-		t.Fatalf("ValueConflicts = %v, want management_ip + hostname", result.ValueConflicts)
+	if len(result.ValueConflicts) != 1 || result.ValueConflicts[0] != "serial_number" {
+		t.Fatalf("ValueConflicts = %v, want serial_number", result.ValueConflicts)
 	}
 }
 
@@ -208,42 +215,51 @@ func TestIngestQueuesOverrideConflictOnce(t *testing.T) {
 	}
 }
 
+// TestBulkIngestQueuesValueConflictsForReview covers WP-089 (REC-06): a
+// lower-ranked source reporting another serial number for a CI it matched by
+// hardware UUID opens conflicting_values with the reported value unchanged;
+// the stored values stay. A lower-ranked IP change is no conflict.
 func TestBulkIngestQueuesValueConflictsForReview(t *testing.T) {
 	discoveryRepo := NewMemoryRepository()
 	discoveryRepo.SeedCIType("server", "server")
 	ciRepo := ci.NewMemoryRepository()
-	if err := ciRepo.Create(context.Background(), &ci.Item{OrganizationID: "org-1", CITypeID: "server", Name: "srv-01", SerialNumber: "SN-1", ManagementIP: "10.0.0.1", DiscoverySource: ci.SourceRedfish, Attributes: map[string]any{}}); err != nil {
+	if err := ciRepo.Create(context.Background(), &ci.Item{OrganizationID: "org-1", CITypeID: "server", Name: "srv-01", SerialNumber: "SN-1",
+		HardwareUUID: "4c4c4544-0042-3510-8051-b4c04f4a4e33", ManagementIP: "10.0.0.1", DiscoverySource: ci.SourceRedfish,
+		Attributes: map[string]any{}}); err != nil {
 		t.Fatal(err)
 	}
 
 	h := NewHandler(discoveryRepo, ciRepo)
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
-
-	payload := `{"collector_id":"col-1","items":[{"fingerprint":{},"ci_type_name":"server","name":"srv-01","serial_number":"SN-1","management_ip":"10.0.0.9","source":"snmp"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/bulk", bytes.NewBufferString(payload))
-	req = discoveryTenantCtx(req)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	post := func(payload string) BulkIngestResponse {
+		t.Helper()
+		req := discoveryTenantCtx(httptest.NewRequest(http.MethodPost, "/api/v1/ingest/bulk", bytes.NewBufferString(payload)))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp BulkIngestResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		return resp
 	}
-	var resp BulkIngestResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
+
+	if resp := post(`{"collector_id":"col-1","items":[{"ci_type_name":"server","name":"srv-01","serial_number":"SN-1","management_ip":"10.0.0.9","source":"snmp"}]}`); resp.Updated != 1 || resp.ReviewItems != 0 {
+		t.Fatalf("lower-ranked IP change: %+v", resp)
 	}
+	resp := post(`{"collector_id":"col-1","items":[{"ci_type_name":"server","name":"srv-01","hardware_uuid":"4C4C4544-0042-3510-8051-B4C04F4A4E33","serial_number":" sn-other ","source":"snmp"}]}`)
 	if resp.Updated != 1 || resp.ReviewItems != 1 {
-		t.Fatalf("expected 1 update + 1 review item, got %+v", resp)
+		t.Fatalf("lower-ranked serial: %+v", resp)
 	}
 
-	// The low-trust sweep/SNMP sighting must not clobber the fresh
-	// redfish-sourced management IP.
 	items, _, err := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10, Offset: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].ManagementIP != "10.0.0.1" {
+	if len(items) != 1 || items[0].ManagementIP != "10.0.0.1" || items[0].SerialNumber != "SN-1" {
 		t.Fatalf("source trust not enforced: %+v", items)
 	}
 
@@ -253,5 +269,13 @@ func TestBulkIngestQueuesValueConflictsForReview(t *testing.T) {
 	}
 	if total != 1 || reviewItems[0].Kind != ReviewKindConflictingValues {
 		t.Fatalf("expected conflicting_values review item, got %+v", reviewItems)
+	}
+	payload := reviewItems[0].Payload
+	incoming, _ := payload["incoming"].(map[string]any)
+	if incoming["serial_number"] != " sn-other " || payload["serial_number"] != " sn-other " {
+		t.Errorf("reported serial not kept unchanged: %v", payload)
+	}
+	if existing, _ := payload["existing"].(map[string]any); existing["serial_number"] != "SN-1" {
+		t.Errorf("stored serial in the payload: %v", payload["existing"])
 	}
 }

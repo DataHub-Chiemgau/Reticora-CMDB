@@ -276,7 +276,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 			nilIfEmpty(item.OSVersion),
 			nilIfEmpty(item.FirmwareVersion),
 			nilIfEmpty(item.SysObjectID),
-			item.Attributes,
+			storedAttributes(item.Attributes, nil),
 			nilIfEmpty(item.DiscoverySource),
 			item.FirstSeenAt,
 			item.LastSeenAt,
@@ -357,8 +357,14 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 
 		if req.Attributes != nil {
 			// RFC 7396: nested objects merge, null removes a member (CI-04).
-			setClauses = append(setClauses, fmt.Sprintf("attributes = $%d", argPos))
-			args = append(args, MergePatch(before.Attributes, req.Attributes))
+			// Instance attributes are stored under _instance; the projected
+			// namespaces of the row stay (CI-10).
+			instance, namesErr := instanceFieldNames(ctx, tx, id)
+			if namesErr != nil {
+				return namesErr
+			}
+			setClauses = append(setClauses, fmt.Sprintf("attributes = $%d::jsonb || ci_attribute_namespaces(attributes)", argPos))
+			args = append(args, storedAttributes(MergePatch(before.Attributes, req.Attributes), instance))
 			argPos++
 		}
 
@@ -437,6 +443,24 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	return item, err
 }
 
+// instanceFieldNames lists the names of the instance attributes of a CI.
+func instanceFieldNames(ctx context.Context, tx pgx.Tx, ciID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `SELECT name FROM ci_instance_field_definition WHERE ci_id = $1`, ciID)
+	if err != nil {
+		return nil, fmt.Errorf("instance attributes: %w", err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
 // Delete soft-deletes a CI.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -464,6 +488,31 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		}
 		return nil
 	})
+}
+
+// Restore reactivates a soft-deleted CI (CI-13): an operator decided that a
+// device seen again is the deleted one. It records the decision in the
+// change history and the audit trail.
+func (r *PGRepository) Restore(ctx context.Context, orgID, id string) (*Item, error) {
+	var restored *Item
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, "UPDATE ci SET deleted_at = NULL, updated_at = NOW() WHERE id = $1 AND organization_id = $2 AND deleted_at IS NOT NULL", id, orgID)
+		if err != nil {
+			return fmt.Errorf("restore ci: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("not found")
+		}
+		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2", ciSelectColumns)
+		if restored, err = scanCI(tx.QueryRow(ctx, query, id, orgID)); err != nil {
+			return fmt.Errorf("get restored ci: %w", err)
+		}
+		if changeErr := r.recordCIChange(ctx, tx, orgID, id, restored.Version, "reconciliation_decision", "deleted_at", "deleted", nil); changeErr != nil {
+			return changeErr
+		}
+		return r.recordAudit(ctx, tx, "ci.restored", restored, map[string]interface{}{"reason": "resurrected_device"})
+	})
+	return restored, err
 }
 
 // ListChanges returns paginated change history for a CI.
@@ -588,9 +637,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		return nil, err
 	}
 
-	if item.Attributes == nil {
-		item.Attributes = make(map[string]any)
-	}
+	item.Attributes = presentAttributes(item.Attributes)
 	if firstSeen.Valid {
 		t := firstSeen.Time.UTC()
 		item.FirstSeenAt = &t
@@ -681,6 +728,8 @@ func marshalJSONValue(value any) (string, error) {
 	return string(b), nil
 }
 
+// diffCI lists the changed fields that are historized. last_seen_at is not
+// (AUD-03, REC-07): a sighting alone writes no ci_change.
 func diffCI(before, after *Item) []ciFieldChange {
 	fields := []struct {
 		name string
@@ -711,7 +760,6 @@ func diffCI(before, after *Item) []ciFieldChange {
 		{"attributes", before.Attributes, after.Attributes},
 		{"discovery_source", before.DiscoverySource, after.DiscoverySource},
 		{"first_seen_at", timePtrRFC3339(before.FirstSeenAt), timePtrRFC3339(after.FirstSeenAt)},
-		{"last_seen_at", timePtrRFC3339(before.LastSeenAt), timePtrRFC3339(after.LastSeenAt)},
 		{"is_manual", before.IsManual, after.IsManual},
 	}
 	changes := make([]ciFieldChange, 0, len(fields))

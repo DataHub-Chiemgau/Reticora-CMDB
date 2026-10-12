@@ -70,3 +70,22 @@ func TestOpenAPIValidatorRejectsMissingRequiredQueryParam(t *testing.T) {
 		t.Fatalf("expected 400, got %d", w.Code)
 	}
 }
+
+// TestOpenAPIValidationLeavesCompressedBodiesToTheHandler covers WP-083
+// (DIS-05): collectors send the ingest body gzip-compressed; the handler
+// decompresses and validates it.
+func TestOpenAPIValidationLeavesCompressedBodiesToTheHandler(t *testing.T) {
+	handler := OpenAPIValidation(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/bulk", strings.NewReader("\x1f\x8b compressed"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", w.Code)
+	}
+}

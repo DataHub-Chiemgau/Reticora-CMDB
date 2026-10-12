@@ -123,10 +123,17 @@ type Predicate struct {
 	Value any    `json:"value,omitempty"`
 }
 
+// ReservedNames are the attribute namespaces of CI-10; no field may be
+// called like one (GLO-13).
+var ReservedNames = map[string]bool{"_overrides": true, "_observed": true, "_provenance": true, "_instance": true}
+
 // ValidateDefinition checks structural validity of a field definition.
 func ValidateDefinition(def FieldDefinition) error {
 	if strings.TrimSpace(def.Name) == "" {
 		return fmt.Errorf("field name is required")
+	}
+	if ReservedNames[def.Name] {
+		return fmt.Errorf("field name %q is a reserved namespace (GLO-13)", def.Name)
 	}
 	if !ValidFieldTypes[def.DataType] {
 		return fmt.Errorf("unsupported field type %q", def.DataType)
