@@ -2067,6 +2067,69 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/review-items': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List review items
+     * @description The review queue of reconciliation (REC-08). Items open longer than 14 days carry escalated = true; escalated=true lists only those (the dashboard's escalation).
+     */
+    get: operations['listReviewItems'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/review-items/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a review item */
+    get: operations['getReviewItem'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/review-items/{id}/resolve': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Resolve a review item
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge removes the new CI); override_conflict accept|dismiss; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss; serial_mismatch and duplicate_ip dismiss. Another action is 422.
+     */
+    post: operations['resolveReviewItem'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/discovery/review-items': {
     parameters: {
       query?: never;
@@ -2074,8 +2137,11 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List reconciliation review items */
-    get: operations['listReviewItems'];
+    /**
+     * List reconciliation review items (deprecated, use /api/v1/review-items)
+     * @deprecated
+     */
+    get: operations['listDiscoveryReviewItems'];
     put?: never;
     post?: never;
     delete?: never;
@@ -2097,10 +2163,11 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Resolve a reconciliation review item
+     * Resolve a reconciliation review item (deprecated, use /api/v1/review-items/{id}/resolve)
+     * @deprecated
      * @description An unlicensed_ci item (a discovered device held because max_cis is reached, ENT-03) is resolved with create, which adopts the device as a CI within max_cis (403 entitlement-limit otherwise), or with dismiss, which discards it; both are audited.
      */
-    post: operations['resolveReviewItem'];
+    post: operations['resolveDiscoveryReviewItem'];
     delete?: never;
     options?: never;
     head?: never;
@@ -7485,14 +7552,16 @@ export interface components {
       organization_id: string;
       /** @enum {string} */
       kind:
+        | 'unclassified_device'
         | 'ambiguous_identity'
         | 'conflicting_values'
-        | 'unclassified_device'
-        | 'override_conflict'
-        | 'unlicensed_ci'
-        | 'serial_mismatch'
         | 'probable_duplicate'
-        | 'resurrected_device';
+        | 'override_conflict'
+        | 'resurrected_device'
+        | 'unlicensed_ci'
+        | 'scope_suggested'
+        | 'serial_mismatch'
+        | 'duplicate_ip';
       /** @enum {string} */
       status: 'open' | 'resolved' | 'dismissed';
       payload: {
@@ -7503,6 +7572,12 @@ export interface components {
       /** Format: date-time */
       resolved_at?: string;
       resolution?: string;
+      /** @description The object the item is about; one item per object and type is open (REC-08). */
+      object_key?: string;
+      /** @enum {string} */
+      action?: 'merge' | 'new' | 'dismiss' | 'accept';
+      /** @description Open longer than 14 days (REC-08). */
+      escalated?: boolean;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -7513,10 +7588,10 @@ export interface components {
     };
     ReviewItemResolveRequest: {
       /**
-       * @description merge folds discovery data into an existing candidate CI (requires ci_id); create spawns a new CI from the payload; dismiss closes the item with no CI change.
+       * @description merge folds the observation into a candidate CI (requires ci_id); new creates a CI from the observation; accept applies what the item proposes; dismiss closes the item with no change. create is the deprecated name of new.
        * @enum {string}
        */
-      action: 'merge' | 'create' | 'dismiss';
+      action: 'merge' | 'new' | 'dismiss' | 'accept' | 'create';
       /** @description Target candidate CI id, required when action is merge. */
       ci_id?: string;
       resolved_by?: string;
@@ -12936,14 +13011,127 @@ export interface operations {
         offset?: components['parameters']['Offset'];
         status?: 'open' | 'resolved' | 'dismissed';
         kind?:
+          | 'unclassified_device'
           | 'ambiguous_identity'
           | 'conflicting_values'
-          | 'unclassified_device'
-          | 'override_conflict'
-          | 'unlicensed_ci'
-          | 'serial_mismatch'
           | 'probable_duplicate'
-          | 'resurrected_device';
+          | 'override_conflict'
+          | 'resurrected_device'
+          | 'unlicensed_ci'
+          | 'scope_suggested'
+          | 'serial_mismatch'
+          | 'duplicate_ip';
+        escalated?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of review items */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReviewItemListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getReviewItem: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The review item */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReviewItem'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  resolveReviewItem: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReviewItemResolveRequest'];
+      };
+    };
+    responses: {
+      /** @description The resolved review item */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReviewItem'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description The action does not resolve items of this type */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listDiscoveryReviewItems: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        status?: 'open' | 'resolved' | 'dismissed';
+        kind?:
+          | 'unclassified_device'
+          | 'ambiguous_identity'
+          | 'conflicting_values'
+          | 'probable_duplicate'
+          | 'override_conflict'
+          | 'resurrected_device'
+          | 'unlicensed_ci'
+          | 'scope_suggested'
+          | 'serial_mismatch'
+          | 'duplicate_ip';
       };
       header?: never;
       path?: never;
@@ -12964,7 +13152,7 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
-  resolveReviewItem: {
+  resolveDiscoveryReviewItem: {
     parameters: {
       query?: never;
       header?: never;

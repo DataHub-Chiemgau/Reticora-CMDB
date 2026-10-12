@@ -177,6 +177,8 @@ GET /api/v1/relationship-types/{key} relationship:read
 GET /api/v1/relationships relationship:read
 GET /api/v1/reservations asset:read
 GET /api/v1/reservations/{id} asset:read
+GET /api/v1/review-items discovery:read
+GET /api/v1/review-items/{id} discovery:read
 GET /api/v1/roles role:read
 GET /api/v1/roles/{id} role:read
 GET /api/v1/roles/{id}/permissions role:read
@@ -380,6 +382,7 @@ POST /api/v1/relationship-types relationship_type:manage
 POST /api/v1/relationships relationship:write
 POST /api/v1/reservations asset:reserve
 POST /api/v1/reservations/{id}/release asset:reserve
+POST /api/v1/review-items/{id}/resolve review:resolve
 POST /api/v1/roles role:manage
 POST /api/v1/roles/assign role:manage
 POST /api/v1/rooms location:write

@@ -2,69 +2,200 @@ package discovery
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net/http"
-	"sort"
 	"time"
 
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
-	"github.com/go-chi/chi/v5"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 )
 
-// Review item kinds and statuses (mirrors the review_item table CHECKs).
+// The review queue lives in package reviews (REC-08, REP-01); discovery
+// opens items and carries out what resolving them means for CIs.
+type (
+	// ReviewItem is a reconciliation item queued for human resolution.
+	ReviewItem = reviews.Item
+	// ReviewFilter narrows a review-item listing.
+	ReviewFilter = reviews.Filter
+	// Resolution is the request body for resolving a review item.
+	Resolution = reviews.Resolution
+)
+
+// Review types and statuses (reviews.Kinds).
 const (
-	ReviewKindAmbiguousIdentity  = "ambiguous_identity"
-	ReviewKindConflictingValues  = "conflicting_values"
-	ReviewKindUnclassifiedDevice = "unclassified_device"
-	// ReviewKindOverrideConflict: a source reported a value that differs
-	// from a manual override (REC-12); one open item per CI field.
-	ReviewKindOverrideConflict = "override_conflict"
-	// ReviewKindSerialMismatch: the observed serial number of a CI differs
-	// from the serial number of its asset (DB-05, AST-04); opened by the
-	// database, at most one open item per CI.
-	ReviewKindSerialMismatch = "serial_mismatch"
-	// ReviewKindResurrectedDevice and ReviewKindProbableDuplicate are
-	// declared with the identity resolution (identity.go).
+	ReviewKindAmbiguousIdentity  = reviews.KindAmbiguousIdentity
+	ReviewKindConflictingValues  = reviews.KindConflictingValues
+	ReviewKindUnclassifiedDevice = reviews.KindUnclassifiedDevice
+	ReviewKindOverrideConflict   = reviews.KindOverrideConflict
+	ReviewKindSerialMismatch     = reviews.KindSerialMismatch
+	// ReviewKindProbableDuplicate: a new CI shares its hostname or FQDN with
+	// existing CIs (REC-02, CH29); an operator decides whether they are one.
+	ReviewKindProbableDuplicate = reviews.KindProbableDuplicate
+	// ReviewKindResurrectedDevice: a device matches a soft-deleted CI
+	// (CI-13); an operator reactivates that CI or creates a new one. No CI
+	// is created automatically (PRI-03).
+	ReviewKindResurrectedDevice = reviews.KindResurrectedDevice
 
-	ReviewStatusOpen      = "open"
-	ReviewStatusResolved  = "resolved"
-	ReviewStatusDismissed = "dismissed"
+	ReviewStatusOpen      = reviews.StatusOpen
+	ReviewStatusResolved  = reviews.StatusResolved
+	ReviewStatusDismissed = reviews.StatusDismissed
 )
 
-// ReviewItem is a reconciliation ambiguity queued for human resolution.
-type ReviewItem struct {
-	ID             string         `json:"id"`
-	OrganizationID string         `json:"organization_id"`
-	Kind           string         `json:"kind"`
-	Status         string         `json:"status"`
-	Payload        map[string]any `json:"payload"`
-	CandidateCIIDs []string       `json:"candidate_ci_ids,omitempty"`
-	ResolvedBy     string         `json:"resolved_by,omitempty"`
-	ResolvedAt     string         `json:"resolved_at,omitempty"`
-	Resolution     string         `json:"resolution,omitempty"`
-	CreatedAt      string         `json:"created_at"`
-	UpdatedAt      string         `json:"updated_at"`
+// ReviewService returns the review queue of this handler's repository with
+// the discovery effects of merge, new and accept.
+func (h *Handler) ReviewService() *reviews.Service {
+	h.reviewsOnce.Do(func() {
+		svc := reviews.NewService(h.repo)
+		for _, kind := range []string{ReviewKindAmbiguousIdentity, ReviewKindUnclassifiedDevice, ReviewKindProbableDuplicate,
+			ReviewKindResurrectedDevice, ReviewKindConflictingValues} {
+			svc.WithEffect(kind, h.resolveCIReview)
+		}
+		svc.WithEffect(ReviewKindUnlicensedCI, h.resolveUnlicensed)
+		if h.reviewNotifier != nil {
+			svc.WithNotifier(h.reviewNotifier)
+		}
+		h.reviews = svc
+	})
+	return h.reviews
 }
 
-// ReviewFilter narrows a review-item listing.
-type ReviewFilter struct {
-	Status string
-	Kind   string
+// WithReviewNotifier attaches the notification of opened review items
+// (REC-08, NTF-05).
+func (h *Handler) WithReviewNotifier(n reviews.Notifier) *Handler {
+	h.reviewNotifier = n
+	return h
 }
 
-// Resolution is the request body for resolving a review item.
-type Resolution struct {
-	// Action selects how to resolve: "merge" folds discovery data into an
-	// existing candidate CI, "create" spawns a new CI from the payload,
-	// "dismiss" closes the item without a CI change.
-	Action     string `json:"action"`
-	CIID       string `json:"ci_id,omitempty"`
-	ResolvedBy string `json:"resolved_by,omitempty"`
-	Note       string `json:"resolution,omitempty"`
-	// Status is the terminal status to persist; derived from Action when empty.
-	Status string `json:"-"`
+// openReview opens a review item, deduplicated per object and type, and
+// reports whether it is new.
+func (h *Handler) openReview(ctx context.Context, item *ReviewItem) (bool, error) {
+	return h.ReviewService().Open(ctx, item)
+}
+
+func refused(status int, msg string) error {
+	return &reviews.Error{Status: status, Message: msg}
+}
+
+// resolveCIReview carries out merge, new and accept of the CI review types.
+func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
+	orgID := item.OrganizationID
+	if h.ciRepo == nil || res.Action == reviews.ActionDismiss {
+		return false, nil
+	}
+	switch res.Action {
+	case reviews.ActionMerge:
+		if res.CIID == "" {
+			return false, refused(http.StatusBadRequest, "ci_id is required to merge")
+		}
+		if !containsString(item.CandidateCIIDs, res.CIID) {
+			return false, refused(http.StatusBadRequest, "ci_id is not one of the candidate CIs")
+		}
+		switch item.Kind {
+		case ReviewKindResurrectedDevice:
+			// The device seen again is the deleted CI (CI-13).
+			restorer, ok := h.ciRepo.(ciRestorer)
+			if !ok {
+				return false, refused(http.StatusNotImplemented, "this repository cannot reactivate CIs")
+			}
+			if _, err := restorer.Restore(ctx, orgID, res.CIID); err != nil {
+				return false, err
+			}
+			res.Note = "reactivated " + res.CIID
+		case ReviewKindProbableDuplicate:
+			// The new CI is the existing one: it is removed (CH29).
+			if dup := payloadString(item.Payload, "ci_id"); dup != "" && dup != res.CIID {
+				if err := h.ciRepo.Delete(ctx, orgID, dup); err != nil && !isNotFound(err) {
+					return false, err
+				}
+				res.Note = "merged " + dup + " into " + res.CIID
+				return false, nil
+			}
+		}
+		now := time.Now().UTC().Format(time.RFC3339)
+		source := ci.SourceSweep
+		if _, err := h.ciRepo.Update(ctx, orgID, res.CIID, ci.UpdateRequest{
+			ManagementIP:    payloadStringPtr(item.Payload, "management_ip"),
+			DiscoverySource: &source,
+			LastSeenAt:      &now,
+		}); err != nil {
+			return false, err
+		}
+		if res.Note == "" {
+			res.Note = "merged into " + res.CIID
+		}
+	case reviews.ActionNew:
+		nowTime := time.Now().UTC()
+		newItem := ci.Item{
+			OrganizationID:  orgID,
+			CITypeID:        payloadString(item.Payload, "ci_type_name"),
+			Name:            payloadString(item.Payload, "name"),
+			Status:          "active",
+			Manufacturer:    payloadString(item.Payload, "manufacturer"),
+			Model:           payloadString(item.Payload, "model"),
+			SerialNumber:    payloadString(item.Payload, "serial_number"),
+			ManagementIP:    payloadString(item.Payload, "management_ip"),
+			Hostname:        payloadString(item.Payload, "hostname"),
+			FQDN:            payloadString(item.Payload, "fqdn"),
+			Attributes:      map[string]any{"review_item_id": item.ID},
+			DiscoverySource: ci.SourceSweep,
+			FirstSeenAt:     &nowTime,
+			LastSeenAt:      &nowTime,
+		}
+		if err := h.ciRepo.Create(ctx, &newItem); err != nil {
+			return false, err
+		}
+		res.Note = "created new CI " + newItem.ID
+	case reviews.ActionAccept:
+		// The observed identity values replace the stored ones.
+		ciID := payloadString(item.Payload, "matched_ci_id")
+		if ciID == "" {
+			return false, refused(http.StatusUnprocessableEntity, "the item names no CI")
+		}
+		update := ci.UpdateRequest{}
+		fields, _ := item.Payload["conflict_fields"].([]any)
+		for _, f := range fields {
+			value := payloadStringPtr(item.Payload, f.(string))
+			switch f {
+			case "serial_number":
+				update.SerialNumber = value
+			case "hardware_uuid":
+				update.HardwareUUID = value
+			case "management_ip":
+				update.ManagementIP = value
+			case "hostname":
+				update.Hostname = value
+			case "fqdn":
+				update.FQDN = value
+			}
+		}
+		if _, err := h.ciRepo.Update(ctx, orgID, ciID, update); err != nil {
+			return false, err
+		}
+		res.Note = "accepted the observed values on " + ciID
+	}
+	return false, nil
+}
+
+func isNotFound(err error) bool {
+	return err != nil && (err.Error() == "not found" || errors.Is(err, reviews.ErrNotFound))
+}
+
+// ciRestorer reactivates soft-deleted CIs; the PostgreSQL CI repository
+// implements it.
+type ciRestorer interface {
+	Restore(ctx context.Context, orgID, id string) (*ci.Item, error)
+}
+
+// resolveUnlicensed adopts (new) or discards (dismiss) an unlicensed_ci
+// item; adoption is refused while max_cis is still reached (ENT-03).
+func (h *Handler) resolveUnlicensed(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
+	if res.Action != reviews.ActionNew {
+		return false, nil
+	}
+	if _, err := h.adoptUnlicensed(ctx, item.OrganizationID, res.ResolvedBy, item); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // reviewItemFromValueConflicts maps contradicting identity values on a
@@ -102,6 +233,7 @@ func reviewItemFromValueConflicts(orgID string, matched ci.Item, incoming Ingest
 		Status:         ReviewStatusOpen,
 		Payload:        payload,
 		CandidateCIIDs: []string{result.MatchedCIID},
+		ObjectKey:      "ci:" + result.MatchedCIID,
 	}
 }
 
@@ -148,314 +280,8 @@ func reviewItemFromConflict(orgID string, incoming IngestItem, result ReconcileR
 		Status:         ReviewStatusOpen,
 		Payload:        payload,
 		CandidateCIIDs: result.CandidateCIIDs,
+		ObjectKey:      deviceKey(&incoming),
 	}
-}
-
-// ---- MemoryRepository review-item methods ----
-
-func (r *MemoryRepository) CreateReviewItem(_ context.Context, item *ReviewItem) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	r.seq++
-	item.ID = fmt.Sprintf("%08d-0000-0000-0000-%012d", r.seq, r.seq)
-	now := time.Now().UTC().Format(time.RFC3339)
-	if item.Status == "" {
-		item.Status = ReviewStatusOpen
-	}
-	if item.Payload == nil {
-		item.Payload = map[string]any{}
-	}
-	item.CreatedAt = now
-	item.UpdatedAt = now
-	stored := *item
-	r.reviewItems[item.ID] = &stored
-	return nil
-}
-
-func (r *MemoryRepository) ListReviewItems(_ context.Context, orgID string, filter ReviewFilter, page api.PaginationParams) ([]ReviewItem, int, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	var result []ReviewItem
-	for _, item := range r.reviewItems {
-		if item.OrganizationID != orgID {
-			continue
-		}
-		if filter.Status != "" && item.Status != filter.Status {
-			continue
-		}
-		if filter.Kind != "" && item.Kind != filter.Kind {
-			continue
-		}
-		result = append(result, *item)
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
-
-	total := len(result)
-	start := page.Offset
-	if start > total {
-		start = total
-	}
-	end := start + page.Limit
-	if end > total {
-		end = total
-	}
-	return result[start:end], total, nil
-}
-
-func (r *MemoryRepository) GetReviewItem(_ context.Context, orgID, id string) (*ReviewItem, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	item, ok := r.reviewItems[id]
-	if !ok || item.OrganizationID != orgID {
-		return nil, fmt.Errorf("not found")
-	}
-	clone := *item
-	return &clone, nil
-}
-
-func (r *MemoryRepository) ResolveReviewItem(_ context.Context, orgID, id string, resolution Resolution) (*ReviewItem, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	item, ok := r.reviewItems[id]
-	if !ok || item.OrganizationID != orgID {
-		return nil, fmt.Errorf("not found")
-	}
-	item.Status = resolution.Status
-	item.Resolution = resolution.Note
-	item.ResolvedBy = resolution.ResolvedBy
-	item.ResolvedAt = time.Now().UTC().Format(time.RFC3339)
-	item.UpdatedAt = item.ResolvedAt
-	clone := *item
-	return &clone, nil
-}
-
-// ---- Handlers ----
-
-// ListReviewItems handles GET /api/v1/discovery/review-items
-func (h *Handler) ListReviewItems(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
-		return
-	}
-
-	page := api.ParsePagination(r)
-	filter := ReviewFilter{
-		Status: r.URL.Query().Get("status"),
-		Kind:   r.URL.Query().Get("kind"),
-	}
-	items, total, err := h.repo.ListReviewItems(r.Context(), t.OrganizationID, filter, page)
-	if err != nil {
-		api.WriteRepoError(w, err)
-		return
-	}
-
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[ReviewItem]{
-		Data:    items,
-		Total:   total,
-		Limit:   page.Limit,
-		Offset:  page.Offset,
-		HasMore: page.Offset+page.Limit < total,
-	})
-}
-
-// ResolveReviewItem handles POST /api/v1/discovery/review-items/{id}/resolve
-func (h *Handler) ResolveReviewItem(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
-		return
-	}
-
-	id := chi.URLParam(r, "id")
-	var body Resolution
-	if err := api.ReadJSON(r, &body); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
-	if body.ResolvedBy == "" {
-		body.ResolvedBy = t.UserID
-	}
-
-	item, err := h.repo.GetReviewItem(r.Context(), t.OrganizationID, id)
-	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "review item not found")
-		return
-	}
-	if item.Status != ReviewStatusOpen {
-		api.WriteError(w, http.StatusConflict, "Conflict", "review item already resolved")
-		return
-	}
-	// A merge or create would write the observed value past the override;
-	// accepting it means clearing the override (REC-12).
-	if item.Kind == ReviewKindOverrideConflict && body.Action != "dismiss" {
-		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity",
-			"an override conflict is resolved by dismissing it or by clearing the override")
-		return
-	}
-	// The asset is canonical for the serial number: a mismatch is resolved
-	// by correcting the asset or the device, then dismissing the item.
-	if item.Kind == ReviewKindSerialMismatch && body.Action != "dismiss" {
-		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity",
-			"a serial mismatch is resolved by correcting the asset or the device and dismissing it")
-		return
-	}
-
-	// A held device is adopted within max_cis or discarded (ENT-03).
-	if item.Kind == ReviewKindUnlicensedCI {
-		h.resolveUnlicensed(w, r, item, &body)
-		return
-	}
-
-	// A device seen again is reactivated as the deleted CI (merge) or
-	// becomes a new CI (create), CI-13.
-	if item.Kind == ReviewKindResurrectedDevice && body.Action == "merge" {
-		if !h.restoreCandidate(w, r, item, &body) {
-			return
-		}
-	}
-
-	switch body.Action {
-	case "merge":
-		if body.CIID == "" {
-			api.WriteError(w, http.StatusBadRequest, "Bad Request", "ci_id is required to merge")
-			return
-		}
-		if !containsString(item.CandidateCIIDs, body.CIID) {
-			api.WriteError(w, http.StatusBadRequest, "Bad Request", "ci_id is not one of the candidate CIs")
-			return
-		}
-		if h.ciRepo != nil {
-			now := time.Now().UTC().Format(time.RFC3339)
-			source := ci.SourceSweep
-			if _, err := h.ciRepo.Update(r.Context(), t.OrganizationID, body.CIID, ci.UpdateRequest{
-				ManagementIP:    payloadStringPtr(item.Payload, "management_ip"),
-				DiscoverySource: &source,
-				LastSeenAt:      &now,
-			}); err != nil {
-				api.WriteRepoError(w, err)
-				return
-			}
-		}
-		body.Status = ReviewStatusResolved
-		if body.Note == "" {
-			body.Note = "merged into " + body.CIID
-		}
-	case "create":
-		newID := ""
-		if h.ciRepo != nil {
-			nowTime := time.Now().UTC()
-			source := ci.SourceSweep
-			newItem := ci.Item{
-				OrganizationID:  t.OrganizationID,
-				CITypeID:        payloadString(item.Payload, "ci_type_name"),
-				Name:            payloadString(item.Payload, "name"),
-				Status:          "active",
-				Manufacturer:    payloadString(item.Payload, "manufacturer"),
-				Model:           payloadString(item.Payload, "model"),
-				SerialNumber:    payloadString(item.Payload, "serial_number"),
-				ManagementIP:    payloadString(item.Payload, "management_ip"),
-				Hostname:        payloadString(item.Payload, "hostname"),
-				FQDN:            payloadString(item.Payload, "fqdn"),
-				Attributes:      map[string]any{"review_item_id": item.ID},
-				DiscoverySource: source,
-				FirstSeenAt:     &nowTime,
-				LastSeenAt:      &nowTime,
-			}
-			if err := h.ciRepo.Create(r.Context(), &newItem); err != nil {
-				api.WriteRepoError(w, err)
-				return
-			}
-			newID = newItem.ID
-		}
-		body.Status = ReviewStatusResolved
-		if body.Note == "" {
-			body.Note = "created new CI " + newID
-		}
-	case "dismiss":
-		body.Status = ReviewStatusDismissed
-		if body.Note == "" {
-			body.Note = "dismissed"
-		}
-	default:
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "action must be one of merge, create, dismiss")
-		return
-	}
-
-	resolved, err := h.repo.ResolveReviewItem(r.Context(), t.OrganizationID, id, body)
-	if err != nil {
-		api.WriteRepoError(w, err)
-		return
-	}
-	api.WriteJSON(w, http.StatusOK, resolved)
-}
-
-// ciRestorer reactivates soft-deleted CIs; the PostgreSQL CI repository
-// implements it.
-type ciRestorer interface {
-	Restore(ctx context.Context, orgID, id string) (*ci.Item, error)
-}
-
-// restoreCandidate reactivates the deleted CI chosen to resolve a
-// resurrected_device review; it writes the error response and returns false
-// when that is impossible.
-func (h *Handler) restoreCandidate(w http.ResponseWriter, r *http.Request, item *ReviewItem, body *Resolution) bool {
-	if body.CIID == "" || !containsString(item.CandidateCIIDs, body.CIID) {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "ci_id must be one of the candidate CIs")
-		return false
-	}
-	restorer, ok := h.ciRepo.(ciRestorer)
-	if !ok {
-		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", "this repository cannot reactivate CIs")
-		return false
-	}
-	if _, err := restorer.Restore(r.Context(), item.OrganizationID, body.CIID); err != nil {
-		api.WriteRepoError(w, err)
-		return false
-	}
-	if body.Note == "" {
-		body.Note = "reactivated " + body.CIID
-	}
-	return true
-}
-
-// resolveUnlicensed adopts (action create) or discards (action dismiss) an
-// unlicensed_ci item; adoption is refused while max_cis is still reached.
-func (h *Handler) resolveUnlicensed(w http.ResponseWriter, r *http.Request, item *ReviewItem, body *Resolution) {
-	t := tenant.FromContext(r.Context())
-	switch body.Action {
-	case "create":
-		if _, err := h.adoptUnlicensed(r.Context(), t.OrganizationID, body.ResolvedBy, item); err != nil {
-			if api.WriteTypedProblem(w, http.StatusForbidden, err) {
-				return
-			}
-			api.WriteRepoError(w, err)
-			return
-		}
-	case "dismiss":
-		body.Status = ReviewStatusDismissed
-		if body.Note == "" {
-			body.Note = "dismissed"
-		}
-		if _, err := h.repo.ResolveReviewItem(r.Context(), t.OrganizationID, item.ID, *body); err != nil {
-			api.WriteRepoError(w, err)
-			return
-		}
-	default:
-		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity",
-			"an unlicensed_ci item is resolved by create (within max_cis) or dismiss")
-		return
-	}
-	resolved, err := h.repo.GetReviewItem(r.Context(), t.OrganizationID, item.ID)
-	if err != nil {
-		api.WriteRepoError(w, err)
-		return
-	}
-	api.WriteJSON(w, http.StatusOK, resolved)
 }
 
 func containsString(values []string, target string) bool {

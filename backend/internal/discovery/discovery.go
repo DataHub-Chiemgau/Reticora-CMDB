@@ -22,6 +22,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/wire"
 	"github.com/go-chi/chi/v5"
@@ -153,15 +154,15 @@ type Repository interface {
 	ListReviewItems(ctx context.Context, orgID string, filter ReviewFilter, page api.PaginationParams) ([]ReviewItem, int, error)
 	CreateReviewItem(ctx context.Context, item *ReviewItem) error
 	GetReviewItem(ctx context.Context, orgID, id string) (*ReviewItem, error)
-	ResolveReviewItem(ctx context.Context, orgID, id string, resolution Resolution) (*ReviewItem, error)
+	ResolveReviewItem(ctx context.Context, orgID, id string, resolution *Resolution) (*ReviewItem, error)
 }
 
 // MemoryRepository is an in-memory collector store.
 type MemoryRepository struct {
+	*reviews.MemoryRepository
 	mu           sync.RWMutex
 	collectors   map[string]*Collector
 	jobs         map[string]*Job
-	reviewItems  map[string]*ReviewItem
 	ciTypes      map[string]string
 	enrollCodes  map[string]*EnrollmentCode
 	enrollHashes map[string]string
@@ -172,10 +173,10 @@ type MemoryRepository struct {
 // NewMemoryRepository creates a new in-memory discovery repository.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		collectors:  make(map[string]*Collector),
-		jobs:        make(map[string]*Job),
-		reviewItems: make(map[string]*ReviewItem),
-		ciTypes:     make(map[string]string),
+		MemoryRepository: reviews.NewMemoryRepository(),
+		collectors:       make(map[string]*Collector),
+		jobs:             make(map[string]*Job),
+		ciTypes:          make(map[string]string),
 	}
 }
 
@@ -343,6 +344,10 @@ type Handler struct {
 	provenance ProvenanceRecorder
 	instance   InstanceFieldSource
 	queue      IngestQueue
+	// The review queue (package reviews), built on first use.
+	reviewsOnce    sync.Once
+	reviews        *reviews.Service
+	reviewNotifier reviews.Notifier
 	// serial holds one mutex per organization: the ingests of an
 	// organization run one after another in this process (REC-01).
 	serial sync.Map
@@ -431,27 +436,20 @@ func (h *Handler) decide(ctx context.Context, w *override.Write) override.Decisi
 // one is open already (REC-12, deduplicated per field). A failure does not
 // fail the ingest: the override stays in place either way.
 func (h *Handler) queueOverrideConflict(ctx context.Context, orgID, ciID, field string, value any, source string) bool {
-	open, _, err := h.repo.ListReviewItems(ctx, orgID, ReviewFilter{Status: ReviewStatusOpen, Kind: ReviewKindOverrideConflict},
-		api.PaginationParams{Limit: 1000})
-	if err == nil {
-		for k := range open {
-			if open[k].Payload["ci_id"] == ciID && open[k].Payload["field"] == field {
-				return false
-			}
-		}
-	}
 	item := &ReviewItem{
 		OrganizationID: orgID,
 		Kind:           ReviewKindOverrideConflict,
 		Status:         ReviewStatusOpen,
 		Payload:        map[string]any{"ci_id": ciID, "field": field, "observed_value": value, "source": source},
 		CandidateCIIDs: []string{ciID},
+		ObjectKey:      "ci:" + ciID + "/" + field,
 	}
-	if err = h.repo.CreateReviewItem(ctx, item); err != nil {
+	opened, err := h.openReview(ctx, item)
+	if err != nil {
 		slog.WarnContext(ctx, "override conflict review not created", "ci_id", ciID, "field", field, "error", err)
 		return false
 	}
-	return true
+	return opened
 }
 
 // isUUID reports whether value looks like a canonical UUID.
@@ -528,8 +526,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/discovery/jobs/{id}", h.GetJob)
 
 	// Reconciliation review queue.
-	r.Get("/api/v1/discovery/review-items", h.ListReviewItems)
-	r.Post("/api/v1/discovery/review-items/{id}/resolve", h.ResolveReviewItem)
+	// The review-items resource (API-05) and its deprecated discovery path.
+	reviews.NewHandler(h.ReviewService()).RegisterRoutes(r)
 }
 
 // ListCollectors handles GET /api/v1/collectors
@@ -820,11 +818,15 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 				"fingerprint":   item.Fingerprint,
 				"raw_data":      item.RawData,
 			},
+			ObjectKey: deviceKey(&item),
 		}
-		if createErr := h.repo.CreateReviewItem(ctx, reviewItem); createErr != nil {
-			return resp, createErr
+		opened, openErr := h.openReview(ctx, reviewItem)
+		if openErr != nil {
+			return resp, openErr
 		}
-		resp.ReviewItems++
+		if opened {
+			resp.ReviewItems++
+		}
 	}
 
 	// The CI count for max_cis; identity candidates are looked up per item
@@ -909,7 +911,7 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			// reviewed as a probable duplicate.
 			if len(result.ProbableDuplicates) > 0 {
 				review := probableDuplicateReview(orgID, newItem.ID, &item, result.ProbableDuplicates)
-				if reviewErr := h.repo.CreateReviewItem(ctx, review); reviewErr != nil {
+				if _, reviewErr := h.openReview(ctx, review); reviewErr != nil {
 					return resp, reviewErr
 				}
 				resp.ReviewItems++
@@ -1005,19 +1007,25 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			// silently applied (spec §5.3: Unklarheiten in Review-Queue).
 			if len(result.ValueConflicts) > 0 && matched != nil {
 				if reviewItem := reviewItemFromValueConflicts(orgID, *matched, item, result); reviewItem != nil {
-					if err := h.repo.CreateReviewItem(ctx, reviewItem); err != nil {
-						return resp, err
+					opened, openErr := h.openReview(ctx, reviewItem)
+					if openErr != nil {
+						return resp, openErr
 					}
-					resp.ReviewItems++
+					if opened {
+						resp.ReviewItems++
+					}
 				}
 			}
 		case ReconcileConflict:
 			resp.Conflicts++
 			if reviewItem := reviewItemFromConflict(orgID, item, result); reviewItem != nil {
-				if err := h.repo.CreateReviewItem(ctx, reviewItem); err != nil {
-					return resp, err
+				opened, openErr := h.openReview(ctx, reviewItem)
+				if openErr != nil {
+					return resp, openErr
 				}
-				resp.ReviewItems++
+				if opened {
+					resp.ReviewItems++
+				}
 			}
 		}
 	}

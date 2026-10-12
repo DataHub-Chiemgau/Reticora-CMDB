@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -31,12 +31,14 @@ const collectorSelectColumns = `
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
+	// Review items are stored by package reviews.
+	*reviews.PGRepository
 	pool *pgxpool.Pool
 }
 
 // NewPGRepository creates a new PostgreSQL-backed discovery repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
-	return &PGRepository{pool: pool}
+	return &PGRepository{PGRepository: reviews.NewPGRepository(pool), pool: pool}
 }
 
 // Discovery jobs, review items and suppressions carry no client column yet
@@ -45,10 +47,7 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 // a job through its collector, a review item through all its candidate CIs, a
 // suppression through both CIs.
 const (
-	jobVisible    = "(discovery_job.collector_id IS NULL OR EXISTS (SELECT 1 FROM collector WHERE collector.id = discovery_job.collector_id))"
-	reviewVisible = `NOT EXISTS (
-		SELECT 1 FROM unnest(review_item.candidate_ci_ids) AS candidate(id)
-		WHERE NOT EXISTS (SELECT 1 FROM ci WHERE ci.id = candidate.id))`
+	jobVisible         = "(discovery_job.collector_id IS NULL OR EXISTS (SELECT 1 FROM collector WHERE collector.id = discovery_job.collector_id))"
 	suppressionVisible = `EXISTS (SELECT 1 FROM ci WHERE ci.id = relationship_suppression.source_ci_id)
 	AND EXISTS (SELECT 1 FROM ci WHERE ci.id = relationship_suppression.target_ci_id)`
 )
@@ -344,192 +343,6 @@ func scanJob(scanner collectorScanner) (*Job, error) {
 }
 
 // ─── Reconciliation review items ────────────────────────────────────────────
-
-const reviewSelectColumns = `
-	id::text,
-	organization_id::text,
-	kind,
-	status,
-	payload,
-	COALESCE(candidate_ci_ids::text[], '{}'),
-	COALESCE(resolved_by::text, ''),
-	resolved_at,
-	COALESCE(resolution, ''),
-	created_at,
-	updated_at
-`
-
-func (r *PGRepository) ListReviewItems(ctx context.Context, orgID string, filter ReviewFilter, page api.PaginationParams) ([]ReviewItem, int, error) {
-	items := make([]ReviewItem, 0)
-	var total int
-
-	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := "organization_id = $1 AND " + reviewVisible
-		args := []any{orgID}
-		if filter.Status != "" {
-			args = append(args, filter.Status)
-			where += fmt.Sprintf(" AND status = $%d", len(args))
-		}
-		if filter.Kind != "" {
-			args = append(args, filter.Kind)
-			where += fmt.Sprintf(" AND kind = $%d", len(args))
-		}
-
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM review_item WHERE "+where, args...).Scan(&total); err != nil {
-			return fmt.Errorf("count review items: %w", err)
-		}
-
-		query := fmt.Sprintf(
-			"SELECT %s FROM review_item WHERE %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d",
-			reviewSelectColumns, where, len(args)+1, len(args)+2,
-		)
-		args = append(args, page.Limit, page.Offset)
-		rows, err := tx.Query(ctx, query, args...)
-		if err != nil {
-			return fmt.Errorf("list review items: %w", err)
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			item, err := scanReviewItem(rows)
-			if err != nil {
-				return fmt.Errorf("scan review item: %w", err)
-			}
-			items = append(items, *item)
-		}
-		return rows.Err()
-	})
-
-	return items, total, err
-}
-
-func (r *PGRepository) CreateReviewItem(ctx context.Context, item *ReviewItem) error {
-	return database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		if item.Payload == nil {
-			item.Payload = map[string]any{}
-		}
-		status := item.Status
-		if status == "" {
-			status = ReviewStatusOpen
-		}
-		query := `
-			INSERT INTO review_item (organization_id, kind, status, payload, candidate_ci_ids)
-			VALUES ($1, $2, $3, $4::jsonb, $5::uuid[])
-			RETURNING id::text, status, created_at, updated_at
-		`
-		var createdAt time.Time
-		var updatedAt time.Time
-		candidates := item.CandidateCIIDs
-		if candidates == nil {
-			candidates = []string{}
-		}
-		if err := tx.QueryRow(ctx, query,
-			item.OrganizationID,
-			item.Kind,
-			status,
-			item.Payload,
-			candidates,
-		).Scan(&item.ID, &item.Status, &createdAt, &updatedAt); err != nil {
-			return fmt.Errorf("create review item: %w", err)
-		}
-		item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
-		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
-		return requireVisible(ctx, tx, "review_item", reviewVisible, item.ID)
-	})
-}
-
-func (r *PGRepository) GetReviewItem(ctx context.Context, orgID, id string) (*ReviewItem, error) {
-	var item *ReviewItem
-	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf("SELECT %s FROM review_item WHERE id = $1 AND organization_id = $2 AND %s", reviewSelectColumns, reviewVisible)
-		row := tx.QueryRow(ctx, query, id, orgID)
-		scanned, err := scanReviewItem(row)
-		if err != nil {
-			return err
-		}
-		item = scanned
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return item, nil
-}
-
-func (r *PGRepository) ResolveReviewItem(ctx context.Context, orgID, id string, resolution Resolution) (*ReviewItem, error) {
-	var item *ReviewItem
-	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf(`
-			UPDATE review_item
-			SET status = $3,
-			    resolution = $4,
-			    resolved_by = NULLIF($5, '')::uuid,
-			    resolved_at = now(),
-			    updated_at = now()
-			WHERE id = $1 AND organization_id = $2 AND %s
-			RETURNING %s
-		`, reviewVisible, reviewSelectColumns)
-		row := tx.QueryRow(ctx, query, id, orgID, resolution.Status, resolution.Note, resolution.ResolvedBy)
-		scanned, err := scanReviewItem(row)
-		if err != nil {
-			return err
-		}
-		item = scanned
-		if item.Kind != ReviewKindUnlicensedCI {
-			return nil
-		}
-		// Adopting or discarding a held device is audited (ENT-03).
-		actorType := "user"
-		if resolution.ResolvedBy == "" {
-			actorType = "system"
-		}
-		_, err = audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
-			OrganizationID: orgID, ActorID: resolution.ResolvedBy, ActorType: actorType,
-			Action: "unlicensed_ci." + item.Status, ResourceType: "review_item", ResourceID: item.ID,
-			Changes: map[string]any{"resolution": item.Resolution, "device_key": item.Payload["device_key"]},
-		})
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return item, nil
-}
-
-func scanReviewItem(scanner collectorScanner) (*ReviewItem, error) {
-	item := &ReviewItem{}
-	var candidates []string
-	var resolvedAt sql.NullTime
-	var createdAt time.Time
-	var updatedAt time.Time
-	if err := scanner.Scan(
-		&item.ID,
-		&item.OrganizationID,
-		&item.Kind,
-		&item.Status,
-		&item.Payload,
-		&candidates,
-		&item.ResolvedBy,
-		&resolvedAt,
-		&item.Resolution,
-		&createdAt,
-		&updatedAt,
-	); err != nil {
-		return nil, err
-	}
-	if item.Payload == nil {
-		item.Payload = map[string]any{}
-	}
-	if len(candidates) > 0 {
-		item.CandidateCIIDs = candidates
-	}
-	if resolvedAt.Valid {
-		item.ResolvedAt = resolvedAt.Time.UTC().Format(time.RFC3339Nano)
-	}
-	item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
-	item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
-	return item, nil
-}
 
 // SuppressedPairs returns the set of suppressed (source|target) CI pairs for the
 // organization, used to skip discovery-derived topology edges.

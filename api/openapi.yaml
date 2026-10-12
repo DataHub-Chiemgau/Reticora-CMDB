@@ -31,6 +31,8 @@ tags:
     description: Webhook subscription management
   - name: Discovery
     description: Discovery ingest and job tracking
+  - name: Reviews
+    description: Review queue of reconciliation (REC-08)
   - name: Collectors
     description: Customer-deployed discovery collector management
   - name: Credentials
@@ -3664,11 +3666,15 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
-  /api/v1/discovery/review-items:
+  /api/v1/review-items:
     get:
       operationId: listReviewItems
-      tags: [Discovery]
-      summary: List reconciliation review items
+      tags: [Reviews]
+      summary: List review items
+      description: >-
+        The review queue of reconciliation (REC-08). Items open longer than
+        14 days carry escalated = true; escalated=true lists only those (the
+        dashboard's escalation).
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
@@ -3681,7 +3687,110 @@ paths:
           in: query
           schema:
             type: string
-            enum: [ambiguous_identity, conflicting_values, unclassified_device, override_conflict, unlicensed_ci, serial_mismatch, probable_duplicate, resurrected_device]
+            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip]
+        - name: escalated
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Paginated list of review items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewItemListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/review-items/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getReviewItem
+      tags: [Reviews]
+      summary: Get a review item
+      responses:
+        '200':
+          description: The review item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/review-items/{id}/resolve:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: resolveReviewItem
+      tags: [Reviews]
+      summary: Resolve a review item
+      description: >-
+        Requires review:resolve. The actions per type (REC-08):
+        unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss;
+        conflicting_values accept|dismiss; probable_duplicate merge|dismiss
+        (merge removes the new CI); override_conflict accept|dismiss;
+        resurrected_device merge|new|dismiss (merge reactivates the deleted
+        CI); unlicensed_ci new|dismiss (new adopts the device within max_cis,
+        403 entitlement-limit otherwise); scope_suggested accept|dismiss;
+        serial_mismatch and duplicate_ip dismiss. Another action is 422.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewItemResolveRequest'
+      responses:
+        '200':
+          description: The resolved review item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: The action does not resolve items of this type
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/discovery/review-items:
+    get:
+      operationId: listDiscoveryReviewItems
+      deprecated: true
+      tags: [Discovery]
+      summary: List reconciliation review items (deprecated, use /api/v1/review-items)
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, resolved, dismissed]
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip]
       responses:
         '200':
           description: Paginated list of review items
@@ -3698,9 +3807,10 @@ paths:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
-      operationId: resolveReviewItem
+      operationId: resolveDiscoveryReviewItem
+      deprecated: true
       tags: [Discovery]
-      summary: Resolve a reconciliation review item
+      summary: Resolve a reconciliation review item (deprecated, use /api/v1/review-items/{id}/resolve)
       description: >-
         An unlicensed_ci item (a discovered device held because max_cis is
         reached, ENT-03) is resolved with create, which adopts the device as a
@@ -12385,7 +12495,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [ambiguous_identity, conflicting_values, unclassified_device, override_conflict, unlicensed_ci, serial_mismatch, probable_duplicate, resurrected_device]
+          enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip]
         status:
           type: string
           enum: [open, resolved, dismissed]
@@ -12403,6 +12513,15 @@ components:
           format: date-time
         resolution:
           type: string
+        object_key:
+          type: string
+          description: The object the item is about; one item per object and type is open (REC-08).
+        action:
+          type: string
+          enum: [merge, new, dismiss, accept]
+        escalated:
+          type: boolean
+          description: Open longer than 14 days (REC-08).
         created_at:
           type: string
           format: date-time
@@ -12427,11 +12546,12 @@ components:
       properties:
         action:
           type: string
-          enum: [merge, create, dismiss]
+          enum: [merge, new, dismiss, accept, create]
           description: >-
-            merge folds discovery data into an existing candidate CI (requires
-            ci_id); create spawns a new CI from the payload; dismiss closes the
-            item with no CI change.
+            merge folds the observation into a candidate CI (requires ci_id);
+            new creates a CI from the observation; accept applies what the item
+            proposes; dismiss closes the item with no change. create is the
+            deprecated name of new.
         ci_id:
           type: string
           description: Target candidate CI id, required when action is merge.
