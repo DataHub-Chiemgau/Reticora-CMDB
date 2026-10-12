@@ -45,6 +45,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/vlans/{id}", h.GetVLAN)
 	r.Patch("/api/v1/vlans/{id}", h.UpdateVLAN)
 	r.Delete("/api/v1/vlans/{id}", h.DeleteVLAN)
+
+	r.Get("/api/v1/vrfs", h.ListVRFs)
+	r.Post("/api/v1/vrfs", h.CreateVRF)
+	r.Get("/api/v1/vrfs/{id}", h.GetVRF)
+	r.Patch("/api/v1/vrfs/{id}", h.UpdateVRF)
+	r.Delete("/api/v1/vrfs/{id}", h.DeleteVRF)
 }
 
 func org(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -128,6 +134,7 @@ func (h *Handler) CreateSubnet(w http.ResponseWriter, r *http.Request) {
 		ClientID:       req.ClientID,
 		SiteID:         req.SiteID,
 		CIDR:           normalized,
+		VRFID:          req.VRFID,
 		Name:           req.Name,
 		VLANID:         req.VLANID,
 		Gateway:        req.Gateway,

@@ -10,7 +10,10 @@ type Subnet struct {
 	ClientID       string `json:"client_id,omitempty"`
 	SiteID         string `json:"site_id,omitempty"`
 	CIDR           string `json:"cidr"`
-	Name           string `json:"name,omitempty"`
+	// VRFID is the VRF of the subnet; the organization's default VRF when
+	// none is given (CH10). The CIDR is unique per VRF.
+	VRFID string `json:"vrf_id"`
+	Name  string `json:"name,omitempty"`
 	// VLANID references the VLAN catalog (NET-02, NET-08).
 	VLANID       string    `json:"vlan_id,omitempty"`
 	Gateway      string    `json:"gateway,omitempty"`
@@ -26,6 +29,7 @@ type CreateSubnetRequest struct {
 	ClientID     string   `json:"client_id,omitempty"`
 	SiteID       string   `json:"site_id,omitempty"`
 	CIDR         string   `json:"cidr"`
+	VRFID        string   `json:"vrf_id,omitempty"`
 	Name         string   `json:"name,omitempty"`
 	VLANID       string   `json:"vlan_id,omitempty"`
 	Gateway      string   `json:"gateway,omitempty"`
@@ -38,7 +42,9 @@ type CreateSubnetRequest struct {
 type UpdateSubnetRequest struct {
 	ClientID *string `json:"client_id,omitempty"`
 	SiteID   *string `json:"site_id,omitempty"`
-	Name     *string `json:"name,omitempty"`
+	// VRFID moves the subnet to another VRF ("" = default VRF).
+	VRFID *string `json:"vrf_id,omitempty"`
+	Name  *string `json:"name,omitempty"`
 	// VLANID sets ("" clears) the VLAN of the subnet.
 	VLANID       *string  `json:"vlan_id,omitempty"`
 	Gateway      *string  `json:"gateway,omitempty"`
@@ -49,17 +55,20 @@ type UpdateSubnetRequest struct {
 
 // IPAddress represents a single IP address assignment.
 type IPAddress struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	SubnetID       string    `json:"subnet_id,omitempty"`
-	InterfaceID    string    `json:"interface_id,omitempty"`
-	Address        string    `json:"address"`
-	Status         string    `json:"status"`
-	DNSName        string    `json:"dns_name,omitempty"`
-	Description    string    `json:"description,omitempty"`
-	LastSeenAt     *string   `json:"last_seen_at,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	SubnetID       string `json:"subnet_id,omitempty"`
+	InterfaceID    string `json:"interface_id,omitempty"`
+	Address        string `json:"address"`
+	// VRFID is the VRF of the subnet (read-only); addresses are unique per
+	// VRF and interface (NET-03).
+	VRFID       string    `json:"vrf_id"`
+	Status      string    `json:"status"`
+	DNSName     string    `json:"dns_name,omitempty"`
+	Description string    `json:"description,omitempty"`
+	LastSeenAt  *string   `json:"last_seen_at,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // CreateIPAddressRequest is the payload for creating an IP address.

@@ -324,6 +324,15 @@ client follows the site and scopes the VLAN under RLS. `subnet.vlan_id` and
 `network_interface.vlan_id` reference the catalog; migration 0091 turned the
 former integer VLAN numbers of subnets into catalog entries.
 
+**VRFs (TEN-10, CH10):** `vrf` per organization (name unique, description,
+`is_default`) with `/api/v1/vrfs` (writes need `vrf:manage`). Every
+organization gets exactly one default VRF `global` on creation (trigger on
+`organization`, backfill in migration 0092); it cannot be deleted, nor can a
+VRF with subnets. `subnet.vrf_id` is NOT NULL (default VRF when omitted) and
+subnets are unique per (organization, VRF, CIDR); `ip_address.vrf_id` follows
+the subnet and addresses are unique per (organization, VRF, address,
+interface).
+
 **Entitlement enforcement:** an organization is entitled exactly to its rows
 in `entitlement` (ENT-05): a missing row means not entitled, only `cmdb_core`
 is always active. At startup every organization without rows is provisioned

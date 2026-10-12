@@ -4671,6 +4671,110 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/vrfs:
+    get:
+      operationId: listVRFs
+      tags: [IPAM]
+      summary: List the VRFs of the organization, the default first
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of VRFs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VRFListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createVRF
+      tags: [IPAM]
+      summary: Create a VRF (vrf:manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVRFRequest'
+      responses:
+        '201':
+          description: VRF created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VRF'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/vrfs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getVRF
+      tags: [IPAM]
+      summary: Get a VRF
+      responses:
+        '200':
+          description: VRF
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VRF'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateVRF
+      tags: [IPAM]
+      summary: Rename a VRF or change its description (vrf:manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateVRFRequest'
+      responses:
+        '200':
+          description: VRF updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VRF'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      operationId: deleteVRF
+      tags: [IPAM]
+      summary: Delete a VRF (vrf:manage)
+      description: The default VRF and VRFs with subnets or addresses cannot be deleted (422).
+      responses:
+        '204':
+          description: VRF deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Default VRF or VRF still in use
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
   /api/v1/vlans:
     get:
       operationId: listVLANs
@@ -12831,6 +12935,9 @@ components:
           type: string
         cidr:
           type: string
+        vrf_id:
+          type: string
+          description: VRF of the subnet (CH10); the CIDR is unique per VRF.
         name:
           type: string
         vlan_id:
@@ -12863,6 +12970,9 @@ components:
           type: string
         cidr:
           type: string
+        vrf_id:
+          type: string
+          description: VRF of the subnet; the organization's default VRF when omitted.
         name:
           type: string
         vlan_id:
@@ -12888,6 +12998,9 @@ components:
           type: string
         name:
           type: string
+        vrf_id:
+          type: string
+          description: Moves the subnet and its addresses to another VRF (empty string = default VRF).
         vlan_id:
           type: string
           description: VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update.
@@ -12901,6 +13014,46 @@ components:
           type: string
         is_management:
           type: boolean
+
+    VRF:
+      type: object
+      required: [id, organization_id, name, is_default, created_at, updated_at]
+      description: >-
+        VRF of the organization (TEN-10, CH10). Every organization has exactly
+        one default VRF "global", created with the organization; it cannot be
+        deleted.
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        is_default: { type: boolean, readOnly: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateVRFRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+
+    UpdateVRFRequest:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+
+    VRFListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/VRF'
 
     VLAN:
       type: object
@@ -12974,6 +13127,10 @@ components:
           type: string
         address:
           type: string
+        vrf_id:
+          type: string
+          readOnly: true
+          description: VRF of the subnet; addresses are unique per VRF and interface (NET-03).
         status:
           type: string
           enum: [active, reserved, deprecated, dhcp, available]

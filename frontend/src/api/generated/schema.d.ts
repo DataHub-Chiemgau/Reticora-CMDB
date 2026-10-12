@@ -2545,6 +2545,49 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/vrfs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the VRFs of the organization, the default first */
+    get: operations['listVRFs'];
+    put?: never;
+    /** Create a VRF (vrf:manage) */
+    post: operations['createVRF'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/vrfs/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a VRF */
+    get: operations['getVRF'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a VRF (vrf:manage)
+     * @description The default VRF and VRFs with subnets or addresses cannot be deleted (422).
+     */
+    delete: operations['deleteVRF'];
+    options?: never;
+    head?: never;
+    /** Rename a VRF or change its description (vrf:manage) */
+    patch: operations['updateVRF'];
+    trace?: never;
+  };
   '/api/v1/vlans': {
     parameters: {
       query?: never;
@@ -7703,6 +7746,8 @@ export interface components {
       client_id?: string;
       site_id?: string;
       cidr: string;
+      /** @description VRF of the subnet (CH10); the CIDR is unique per VRF. */
+      vrf_id?: string;
       name?: string;
       /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
       vlan_id?: string;
@@ -7719,6 +7764,8 @@ export interface components {
       client_id?: string;
       site_id?: string;
       cidr: string;
+      /** @description VRF of the subnet; the organization's default VRF when omitted. */
+      vrf_id?: string;
       name?: string;
       /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
       vlan_id?: string;
@@ -7731,12 +7778,37 @@ export interface components {
       client_id?: string;
       site_id?: string;
       name?: string;
+      /** @description Moves the subnet and its addresses to another VRF (empty string = default VRF). */
+      vrf_id?: string;
       /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
       vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
       description?: string;
       is_management?: boolean;
+    };
+    /** @description VRF of the organization (TEN-10, CH10). Every organization has exactly one default VRF "global", created with the organization; it cannot be deleted. */
+    VRF: {
+      id: string;
+      organization_id: string;
+      name: string;
+      description?: string;
+      readonly is_default: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateVRFRequest: {
+      name: string;
+      description?: string;
+    };
+    UpdateVRFRequest: {
+      name?: string;
+      description?: string;
+    };
+    VRFListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['VRF'][];
     };
     /** @description Entry of the VLAN catalog (NET-08). The number is unique per site, or per organization for VLANs without site (E-24). */
     VLAN: {
@@ -7776,6 +7848,8 @@ export interface components {
       subnet_id?: string;
       interface_id?: string;
       address: string;
+      /** @description VRF of the subnet; addresses are unique per VRF and interface (NET-03). */
+      readonly vrf_id?: string;
       /** @enum {string} */
       status: 'active' | 'reserved' | 'deprecated' | 'dhcp' | 'available';
       dns_name?: string;
@@ -14052,6 +14126,151 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+    };
+  };
+  listVRFs: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of VRFs */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VRFListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createVRF: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateVRFRequest'];
+      };
+    };
+    responses: {
+      /** @description VRF created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VRF'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  getVRF: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description VRF */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VRF'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteVRF: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description VRF deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description Default VRF or VRF still in use */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  updateVRF: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateVRFRequest'];
+      };
+    };
+    responses: {
+      /** @description VRF updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VRF'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listVLANs: {

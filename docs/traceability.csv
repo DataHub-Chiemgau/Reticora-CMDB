@@ -229,3 +229,6 @@ NET-08;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ipam/vlan_integration_test.go;WP-081
 NET-01;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
 NET-02;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
+TEN-10;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
+NET-02;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
+NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
