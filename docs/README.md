@@ -816,6 +816,13 @@ Dashboards in `deploy/grafana/` (`dashboard-overview.json`, plus
 `deploy/monitoring/slo-rules.yaml` (99.9 % availability, p95 read latency
 < 500 ms), carrying the `organization_id` label when tenant metrics are
 enabled.
+Background workers export `reticora_worker_enabled`, `reticora_worker_up`,
+`reticora_worker_runs_total`, `reticora_worker_errors_total`,
+`reticora_worker_last_success_timestamp_seconds` and `reticora_worker_backlog`
+per worker (OPS-05). The rules for stopped workers, errors, missing
+successful runs and backlog are in `deploy/monitoring/worker-rules.yaml`.
+`deploy/monitoring/alertmanager.yaml` routes all alerts to the operators;
+see [`docs/ops/workers.md`](ops/workers.md).
 
 **Tenant-aware observability (Epic H3):** the server exports
 `reticora_http_requests_total` and `reticora_http_request_duration_seconds`

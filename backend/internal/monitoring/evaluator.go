@@ -92,9 +92,11 @@ func (e *Evaluator) Run(ctx context.Context, interval time.Duration) {
 // Evaluate checks every enabled rule once against the latest sample of its
 // metric.
 func (e *Evaluator) Evaluate(ctx context.Context) {
+	failures := 0
+	defer func() { observability.ObserveWorkerRun(evaluatorWorker, failures) }()
 	rules, err := e.alerts.ListEnabled(ctx)
 	if err != nil {
-		observability.WorkerErrors.WithLabelValues("alert_evaluator").Inc()
+		failures++
 		slog.Error("alert evaluation: list rules failed", "error", err)
 		return
 	}
@@ -103,17 +105,21 @@ func (e *Evaluator) Evaluate(ctx context.Context) {
 			return
 		}
 		if err := e.evaluateRule(ctx, rule); err != nil {
-			observability.WorkerErrors.WithLabelValues("alert_evaluator").Inc()
+			failures++
 			slog.Error("alert evaluation failed", "rule_id", rule.ID, "organization_id", rule.OrgID, "rule", rule.Name, "error", err)
 		}
 	}
 	if e.health != nil {
 		if err := e.health.RefreshHealth(ctx); err != nil {
-			observability.WorkerErrors.WithLabelValues("ci_health").Inc()
+			failures++
 			slog.Error("ci health refresh failed", "error", err)
 		}
 	}
 }
+
+// evaluatorWorker is the worker name of the evaluator's metrics and switch
+// (OPS-02/05).
+const evaluatorWorker = "monitoring"
 
 // evaluateRule evaluates a single rule:
 //   - no sample in the lookback window → condition not met, pending cleared;

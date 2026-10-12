@@ -2,12 +2,19 @@ package server
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // TestDisabledWorkerDoesNotStart covers WP-098 (OPS-02): a worker whose
@@ -72,6 +79,77 @@ func TestEveryRegisteredWorkerHasASwitch(t *testing.T) {
 	for _, name := range config.WorkerNames {
 		if cfg.WorkerEnabled(name) {
 			t.Errorf("%s stays enabled with %s=false", name, config.WorkerEnvKey(name))
+		}
+	}
+}
+
+// TestWorkerMetricsAreRegisteredAndRecorded covers WP-103 (OPS-05): /metrics
+// exports run, error, last-success, enabled, up and backlog series per
+// worker; StartWorkers marks running and disabled workers, a stopped loop
+// drops worker_up to 0 and the backlog probe is sampled.
+func TestWorkerMetricsAreRegisteredAndRecorded(t *testing.T) {
+	stopEarly := make(chan struct{})
+	set, err := StartWorkers(func(name string) bool { return name != config.WorkerExport },
+		Worker{Name: config.WorkerExport, Run: func(ctx context.Context) { <-ctx.Done() }},
+		Worker{Name: config.WorkerIngest, Run: func(ctx context.Context) { <-ctx.Done() },
+			Backlog: func(context.Context) (int, error) { return 42, nil }},
+		Worker{Name: config.WorkerReservationSweeper, Run: func(context.Context) { <-stopEarly }},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = set.Stop(ctx)
+	}()
+	set.SampleBacklog(context.Background())
+	observability.ObserveWorkerRun(config.WorkerIngest, 0)
+	observability.ObserveWorkerRun(config.WorkerIngest, 2)
+	close(stopEarly)
+	deadline := time.Now().Add(5 * time.Second)
+	for testutil.ToFloat64(observability.WorkerUp.WithLabelValues(config.WorkerReservationSweeper)) != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	mux := chi.NewRouter()
+	registerOperational(mux, "test", false, nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody))
+	body := rec.Body.String()
+	for _, want := range []string{
+		`reticora_worker_enabled{worker="export"} 0`,
+		`reticora_worker_up{worker="export"} 0`,
+		`reticora_worker_enabled{worker="ingest"} 1`,
+		`reticora_worker_up{worker="ingest"} 1`,
+		`reticora_worker_up{worker="reservation_sweeper"} 0`,
+		`reticora_worker_backlog{worker="ingest"} 42`,
+		`reticora_worker_runs_total{worker="ingest"}`,
+		`reticora_worker_errors_total{worker="ingest"}`,
+		`reticora_worker_last_success_timestamp_seconds{worker="ingest"}`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/metrics lacks %s", want)
+		}
+	}
+}
+
+// TestWorkerAlertRulesCoverTheWorkerMetrics: deploy/monitoring alerts on
+// stopped workers, errors, missing successful runs and backlog.
+func TestWorkerAlertRulesCoverTheWorkerMetrics(t *testing.T) {
+	raw, err := os.ReadFile("../../../deploy/monitoring/worker-rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := string(raw)
+	for _, want := range []string{
+		"alert: ReticoraWorkerStopped", "reticora_worker_up", "reticora_worker_enabled",
+		"alert: ReticoraWorkerErrors", "reticora_worker_errors_total",
+		"alert: ReticoraWorkerNoSuccess", "reticora_worker_last_success_timestamp_seconds",
+		"alert: ReticoraWorkerBacklog", "reticora_worker_backlog",
+	} {
+		if !strings.Contains(rules, want) {
+			t.Errorf("worker-rules.yaml lacks %s", want)
 		}
 	}
 }

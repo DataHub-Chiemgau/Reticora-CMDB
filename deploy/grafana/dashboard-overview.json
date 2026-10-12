@@ -99,6 +99,46 @@
       "targets": [
         { "expr": "reticora_webhook_delivery_status", "legendFormat": "{{status}}" }
       ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "id": 8,
+      "title": "Worker Runs and Errors",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "sum by (worker) (rate(reticora_worker_runs_total[5m]))", "legendFormat": "{{worker}} runs" },
+        { "expr": "sum by (worker) (rate(reticora_worker_errors_total[5m]))", "legendFormat": "{{worker}} errors" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "id": 9,
+      "title": "Worker Backlog",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "max by (worker) (reticora_worker_backlog)", "legendFormat": "{{worker}}" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 32 },
+      "id": 10,
+      "title": "Running Worker Instances",
+      "type": "stat",
+      "targets": [
+        { "expr": "sum by (worker) (reticora_worker_up)", "legendFormat": "{{worker}}" }
+      ]
     }
   ],
   "schemaVersion": 38,

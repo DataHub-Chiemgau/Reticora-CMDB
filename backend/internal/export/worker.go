@@ -9,6 +9,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 )
 
@@ -51,6 +52,8 @@ type JobWorker struct {
 	JobTTL  time.Duration
 	Now     func() time.Time
 	onError func(jobID string, err error)
+	// failures counts the errors of the current cycle (OPS-05).
+	failures int
 }
 
 // NewJobWorker creates a worker. A nil blobs store disables the worker: the
@@ -70,6 +73,12 @@ func NewJobWorker(jobs JobRepository, cis ci.Repository, blobs blob.Store) *JobW
 	}
 }
 
+// report logs err through onError and counts it for the cycle metrics.
+func (w *JobWorker) report(jobID string, err error) {
+	w.failures++
+	w.onError(jobID, err)
+}
+
 // Enabled reports whether the worker can persist rendered objects.
 func (w *JobWorker) Enabled() bool {
 	return w != nil && w.Jobs != nil && w.CIs != nil && w.Blobs != nil
@@ -83,7 +92,7 @@ func (w *JobWorker) ProcessOne(ctx context.Context) bool {
 	}
 	jobs, err := w.Jobs.ClaimPending(ctx, 1)
 	if err != nil {
-		w.onError("", fmt.Errorf("claim pending export jobs: %w", err))
+		w.report("", fmt.Errorf("claim pending export jobs: %w", err))
 		return false
 	}
 	if len(jobs) == 0 {
@@ -123,14 +132,14 @@ func (w *JobWorker) process(ctx context.Context, job Job) {
 
 	now := w.Now()
 	if err := w.Jobs.CompleteJob(ctx, job.OrganizationID, job.ID, key, rowCount, int64(buf.Len()), now, now.Add(w.JobTTL)); err != nil {
-		w.onError(job.ID, fmt.Errorf("complete export job: %w", err))
+		w.report(job.ID, fmt.Errorf("complete export job: %w", err))
 	}
 }
 
 func (w *JobWorker) fail(ctx context.Context, job *Job, err error) {
-	w.onError(job.ID, err)
+	w.report(job.ID, err)
 	if ferr := w.Jobs.FailJob(ctx, job.OrganizationID, job.ID, err.Error(), w.Now()); ferr != nil {
-		w.onError(job.ID, fmt.Errorf("mark export job failed: %w", ferr))
+		w.report(job.ID, fmt.Errorf("mark export job failed: %w", ferr))
 	}
 }
 
@@ -147,6 +156,8 @@ func (w *JobWorker) Run(ctx context.Context, pollInterval time.Duration) {
 		// back.
 		for w.ProcessOne(ctx) {
 		}
+		observability.ObserveWorkerRun("export", w.failures)
+		w.failures = 0
 		select {
 		case <-ctx.Done():
 			return

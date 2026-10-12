@@ -28,6 +28,31 @@ stop a single worker during an incident, without touching the API.
 | `monitoring` | `RETICORA_WORKER_MONITORING_ENABLED` | Evaluates alert rules and the health of the CIs. |
 | `reservation_sweeper` | `RETICORA_WORKER_RESERVATION_SWEEPER_ENABLED` | Releases expired reservations. |
 
+## Metrics and alerts (OPS-05)
+
+Every worker exports these series, labelled `worker`:
+
+| Metric | Meaning |
+|---|---|
+| `reticora_worker_enabled` | 1 when the switch is on in this instance |
+| `reticora_worker_up` | 1 while the loop runs; 0 when disabled or stopped |
+| `reticora_worker_runs_total` | Completed cycles (poll, sweep, batch) |
+| `reticora_worker_errors_total` | Failures inside the cycles |
+| `reticora_worker_last_success_timestamp_seconds` | Time of the last cycle without error |
+| `reticora_worker_backlog` | Waiting items, sampled every 30 s: queued exports (`export`), due deliveries (`webhook_dispatcher`), pending and unacknowledged messages (`ingest`) |
+
+`deploy/monitoring/worker-rules.yaml` defines these alerts:
+
+| Alert | Fires when |
+|---|---|
+| `ReticoraWorkerStopped` | A switched-on worker is not running, for 5 minutes |
+| `ReticoraWorkerErrors` | More than 5 failures in 15 minutes |
+| `ReticoraWorkerNoSuccess` | No successful cycle for 30 minutes |
+| `ReticoraWorkerBacklog` | Backlog above 1000 |
+| `ReticoraWorkerBacklogGrowing` | Backlog grows for 30 minutes |
+
+`deploy/monitoring/alertmanager.yaml` routes all alerts to the operators. Critical alerts also go to the on-call webhook. The product's notification channel (NTF) is added with WP-137. The Grafana dashboard `deploy/grafana/dashboard-overview.json` shows runs, errors, backlog and running instances.
+
 ## Planned workers
 
 The OPS-02 workers below do not exist yet as separate runners. Each one

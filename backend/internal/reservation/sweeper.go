@@ -46,7 +46,9 @@ func (s *Sweeper) SweepOnce(ctx context.Context) {
 	}
 	expired, err := s.repo.ExpireDue(ctx, time.Now().UTC())
 	if err != nil {
-		observability.WorkerErrors.WithLabelValues("reservation_sweeper").Inc()
+		observability.ObserveWorkerRun("reservation_sweeper", 1)
 		slog.Error("reservation sweep failed", "expired", expired, "error", err)
+		return
 	}
+	observability.ObserveWorkerRun("reservation_sweeper", 0)
 }

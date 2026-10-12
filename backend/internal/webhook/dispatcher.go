@@ -17,6 +17,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
 
@@ -413,9 +414,11 @@ func (d *Dispatcher) ProcessDue(ctx context.Context) {
 
 	records, err := d.store.ClaimDue(ctx, d.now(), defaultClaimBatch, defaultClaimLease)
 	if err != nil {
+		observability.ObserveWorkerRun("webhook_dispatcher", 1)
 		slog.Error("claim due webhook deliveries failed", "error", err)
 		return
 	}
+	observability.ObserveWorkerRun("webhook_dispatcher", 0)
 
 	for _, rec := range records {
 		sub, err := d.repo.GetByID(orgScoped(ctx, rec.OrganizationID), rec.OrganizationID, rec.SubscriptionID)

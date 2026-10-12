@@ -362,6 +362,9 @@ func main() {
 		// Re-send persisted webhook deliveries that are due for a retry.
 		Name: config.WorkerWebhookDispatcher,
 		Run:  func(ctx context.Context) { webhookDispatcher.RunRetries(ctx, 15*time.Second) },
+		Backlog: backlogOf(repos.WebhookDeliveries, func(ctx context.Context, c dueCounter) (int, error) {
+			return c.CountDue(ctx, time.Now().UTC())
+		}),
 	}, {
 		// Release expired reservations (spec §10). The sweeper is
 		// interval-driven and shares no state with request handling.
@@ -375,11 +378,14 @@ func main() {
 		workers = append(workers, server.Worker{
 			Name: config.WorkerExport,
 			Run:  func(ctx context.Context) { exportWorker.Run(ctx, 2*time.Second) },
+			Backlog: backlogOf(repos.ExportJobs, func(ctx context.Context, c pendingCounter) (int, error) {
+				return c.CountPending(ctx)
+			}),
 		})
 	}
 	// Consume ingest.> (REC-01).
 	if ingestQueue != nil {
-		workers = append(workers, server.Worker{Name: config.WorkerIngest, Run: ingestQueue.Run})
+		workers = append(workers, server.Worker{Name: config.WorkerIngest, Run: ingestQueue.Run, Backlog: ingestQueue.Backlog})
 	}
 	// Evaluate monitoring alert rules against the metric store. Fired alerts
 	// are logged via the default notifier; evaluation state is persisted in
@@ -613,4 +619,24 @@ func runIssuerCheck(cfg *config.Config) int {
 	}
 	fmt.Printf("OIDC issuer %s is reachable\n", cfg.OIDCIssuerURL)
 	return 0
+}
+
+// Backlog sources of the workers (OPS-05); the PostgreSQL repositories
+// implement them, the in-memory ones of --no-db report no backlog.
+type (
+	pendingCounter interface {
+		CountPending(ctx context.Context) (int, error)
+	}
+	dueCounter interface {
+		CountDue(ctx context.Context, now time.Time) (int, error)
+	}
+)
+
+// backlogOf returns count bound to repo when repo implements C, else nil.
+func backlogOf[C any](repo any, count func(context.Context, C) (int, error)) func(context.Context) (int, error) {
+	c, ok := repo.(C)
+	if !ok {
+		return nil
+	}
+	return func(ctx context.Context) (int, error) { return count(ctx, c) }
 }
