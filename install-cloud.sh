@@ -1265,7 +1265,10 @@ SQL
                 continue
             fi
             info "  → migration $f"
-            compose_cmd exec -T postgres psql -U reticora -d reticora -v ON_ERROR_STOP=1 -q \
+            # One transaction per file, like golang-migrate: a failed migration
+            # leaves nothing behind, and ON COMMIT DROP temp tables live until
+            # the end of the file instead of the end of their statement.
+            compose_cmd exec -T postgres psql -U reticora -d reticora -v ON_ERROR_STOP=1 -q --single-transaction \
                 < "$SCRIPT_DIR/backend/migrations/$f" \
                 || die "Migration $f failed."
             compose_cmd exec -T postgres psql -U reticora -d reticora -q -c \
