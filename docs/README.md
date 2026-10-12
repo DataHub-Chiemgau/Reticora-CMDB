@@ -317,6 +317,13 @@ sample of a metric breaches an enabled rule of that severity, ok for samples
 without a breach and unknown without a sample in the last 15 minutes
 (migration 0090; health findings are not G1 scope, E-36).
 
+**VLAN catalog (NET-08):** `vlan` (organization, optional site, number
+1–4094, name, description) with `/api/v1/vlans`; the number is unique per site
+and, for VLANs without site, per organization (two partial indexes, E-24). The
+client follows the site and scopes the VLAN under RLS. `subnet.vlan_id` and
+`network_interface.vlan_id` reference the catalog; migration 0091 turned the
+former integer VLAN numbers of subnets into catalog entries.
+
 **Entitlement enforcement:** an organization is entitled exactly to its rows
 in `entitlement` (ENT-05): a missing row means not entitled, only `cmdb_core`
 is always active. At startup every organization without rows is provisioned

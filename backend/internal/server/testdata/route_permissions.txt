@@ -45,6 +45,7 @@ DELETE /api/v1/teams/{teamId}/members/{userId} team:manage
 DELETE /api/v1/tickets/{id} ticket:write
 DELETE /api/v1/trainings/{id} training:write
 DELETE /api/v1/users/{id} user:manage
+DELETE /api/v1/vlans/{id} ipam:write
 DELETE /api/v1/webhooks/{id} webhook:manage
 DELETE /api/v1/workflows/{id} workflow:write
 DELETE /scim/v2/Groups/{id} iga:write
@@ -219,6 +220,8 @@ GET /api/v1/users user:read
 GET /api/v1/users/{id} user:read
 GET /api/v1/users/{id}/data-export user:read
 GET /api/v1/users/{id}/roles user:read
+GET /api/v1/vlans ipam:read
+GET /api/v1/vlans/{id} ipam:read
 GET /api/v1/webhooks webhook:read
 GET /api/v1/webhooks/dead-letters webhook:read
 GET /api/v1/webhooks/{id} webhook:read
@@ -272,6 +275,7 @@ PATCH /api/v1/teams/{id} team:manage
 PATCH /api/v1/tickets/{id} ticket:write
 PATCH /api/v1/trainings/{id} training:write
 PATCH /api/v1/users/{id} user:manage
+PATCH /api/v1/vlans/{id} ipam:write
 PATCH /api/v1/workflows/{id} workflow:write
 PATCH /scim/v2/Groups/{id} iga:write
 PATCH /scim/v2/Users/{id} iga:write
@@ -397,6 +401,7 @@ POST /api/v1/trainings training:write
 POST /api/v1/trainings/{id}/assignments training:write
 POST /api/v1/users user:manage
 POST /api/v1/users/{id}/anonymize user:manage
+POST /api/v1/vlans ipam:write
 POST /api/v1/webhooks webhook:manage
 POST /api/v1/webhooks/{id}/test webhook:manage
 POST /api/v1/workflow-runs/{id}/approval workflow:write

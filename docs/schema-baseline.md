@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000090_ci_health_lifecycle
+Stand: Migration 000091_vlan_catalog
 
 ## Prüfung
 
@@ -264,6 +264,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `training_assignment` | ja | ja | training_assignment_isolation (ALL) |
 | `user_custom_role` | ja | ja | user_custom_role_isolation (ALL) |
 | `user_invitation` | ja | ja | org_isolation (ALL) |
+| `vlan` | ja | ja | vlan_isolation (ALL), vlan_scoped_delete (DELETE), vlan_scoped_update (UPDATE) |
 | `webhook_dead_letter` | ja | ja | webhook_dead_letter_isolation (ALL), webhook_dead_letter_system_select (SELECT) |
 | `webhook_delivery` | ja | ja | webhook_delivery_isolation (ALL), webhook_delivery_system_select (SELECT) |
 | `webhook_subscription` | ja | ja | webhook_sub_isolation (ALL) |

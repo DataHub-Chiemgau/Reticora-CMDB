@@ -4671,6 +4671,110 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/vlans:
+    get:
+      operationId: listVLANs
+      tags: [IPAM]
+      summary: List the VLAN catalog
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: site_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of VLANs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VLANListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createVLAN
+      tags: [IPAM]
+      summary: Create a VLAN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVLANRequest'
+      responses:
+        '201':
+          description: VLAN created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VLAN'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/vlans/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getVLAN
+      tags: [IPAM]
+      summary: Get a VLAN
+      responses:
+        '200':
+          description: VLAN
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VLAN'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateVLAN
+      tags: [IPAM]
+      summary: Update a VLAN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateVLANRequest'
+      responses:
+        '200':
+          description: VLAN updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VLAN'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      operationId: deleteVLAN
+      tags: [IPAM]
+      summary: Delete a VLAN; subnets and interfaces lose the reference
+      responses:
+        '204':
+          description: VLAN deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/subnets:
     get:
       operationId: listSubnets
@@ -12730,7 +12834,8 @@ components:
         name:
           type: string
         vlan_id:
-          type: integer
+          type: string
+          description: VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update.
         gateway:
           type: string
         dns_servers:
@@ -12761,7 +12866,8 @@ components:
         name:
           type: string
         vlan_id:
-          type: integer
+          type: string
+          description: VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update.
         gateway:
           type: string
         dns_servers:
@@ -12783,7 +12889,8 @@ components:
         name:
           type: string
         vlan_id:
-          type: integer
+          type: string
+          description: VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update.
         gateway:
           type: string
         dns_servers:
@@ -12794,6 +12901,53 @@ components:
           type: string
         is_management:
           type: boolean
+
+    VLAN:
+      type: object
+      required: [id, organization_id, vlan_id, name, created_at, updated_at]
+      description: >-
+        Entry of the VLAN catalog (NET-08). The number is unique per site, or
+        per organization for VLANs without site (E-24).
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        client_id:
+          type: string
+          readOnly: true
+          description: Client of the site.
+        site_id: { type: string }
+        vlan_id: { type: integer, minimum: 1, maximum: 4094 }
+        name: { type: string }
+        description: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateVLANRequest:
+      type: object
+      required: [vlan_id, name]
+      properties:
+        site_id: { type: string }
+        vlan_id: { type: integer, minimum: 1, maximum: 4094 }
+        name: { type: string }
+        description: { type: string }
+
+    UpdateVLANRequest:
+      type: object
+      properties:
+        vlan_id: { type: integer, minimum: 1, maximum: 4094 }
+        name: { type: string }
+        description: { type: string }
+
+    VLANListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/VLAN'
 
     SubnetListResponse:
       allOf:
@@ -12900,6 +13054,9 @@ components:
           enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
         speed_mbps:
           type: integer
+        vlan_id:
+          type: string
+          description: VLAN of the VLAN catalog (NET-01).
         is_management:
           type: boolean
         is_uplink:
@@ -12930,6 +13087,9 @@ components:
           enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
         speed_mbps:
           type: integer
+        vlan_id:
+          type: string
+          description: VLAN of the VLAN catalog (NET-01).
         is_management:
           type: boolean
         is_uplink:
@@ -12953,6 +13113,9 @@ components:
           enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
         speed_mbps:
           type: integer
+        vlan_id:
+          type: string
+          description: VLAN of the VLAN catalog (NET-01).
         is_management:
           type: boolean
         is_uplink:

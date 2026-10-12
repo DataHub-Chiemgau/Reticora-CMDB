@@ -5,19 +5,20 @@ import "time"
 
 // Subnet represents an IP network range.
 type Subnet struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	ClientID       string    `json:"client_id,omitempty"`
-	SiteID         string    `json:"site_id,omitempty"`
-	CIDR           string    `json:"cidr"`
-	Name           string    `json:"name,omitempty"`
-	VLANID         *int      `json:"vlan_id,omitempty"`
-	Gateway        string    `json:"gateway,omitempty"`
-	DNSServers     []string  `json:"dns_servers,omitempty"`
-	Description    string    `json:"description,omitempty"`
-	IsManagement   bool      `json:"is_management"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	ClientID       string `json:"client_id,omitempty"`
+	SiteID         string `json:"site_id,omitempty"`
+	CIDR           string `json:"cidr"`
+	Name           string `json:"name,omitempty"`
+	// VLANID references the VLAN catalog (NET-02, NET-08).
+	VLANID       string    `json:"vlan_id,omitempty"`
+	Gateway      string    `json:"gateway,omitempty"`
+	DNSServers   []string  `json:"dns_servers,omitempty"`
+	Description  string    `json:"description,omitempty"`
+	IsManagement bool      `json:"is_management"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // CreateSubnetRequest is the payload for creating a subnet.
@@ -26,7 +27,7 @@ type CreateSubnetRequest struct {
 	SiteID       string   `json:"site_id,omitempty"`
 	CIDR         string   `json:"cidr"`
 	Name         string   `json:"name,omitempty"`
-	VLANID       *int     `json:"vlan_id,omitempty"`
+	VLANID       string   `json:"vlan_id,omitempty"`
 	Gateway      string   `json:"gateway,omitempty"`
 	DNSServers   []string `json:"dns_servers,omitempty"`
 	Description  string   `json:"description,omitempty"`
@@ -35,10 +36,11 @@ type CreateSubnetRequest struct {
 
 // UpdateSubnetRequest is the payload for updating a subnet.
 type UpdateSubnetRequest struct {
-	ClientID     *string  `json:"client_id,omitempty"`
-	SiteID       *string  `json:"site_id,omitempty"`
-	Name         *string  `json:"name,omitempty"`
-	VLANID       *int     `json:"vlan_id,omitempty"`
+	ClientID *string `json:"client_id,omitempty"`
+	SiteID   *string `json:"site_id,omitempty"`
+	Name     *string `json:"name,omitempty"`
+	// VLANID sets ("" clears) the VLAN of the subnet.
+	VLANID       *string  `json:"vlan_id,omitempty"`
 	Gateway      *string  `json:"gateway,omitempty"`
 	DNSServers   []string `json:"dns_servers,omitempty"`
 	Description  *string  `json:"description,omitempty"`
@@ -81,20 +83,22 @@ type UpdateIPAddressRequest struct {
 
 // NetworkInterface represents a CI's network interface.
 type NetworkInterface struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	CIID           string    `json:"ci_id"`
-	Name           string    `json:"name"`
-	MACAddress     string    `json:"mac_address,omitempty"`
-	InterfaceType  string    `json:"interface_type"`
-	SpeedMbps      *int      `json:"speed_mbps,omitempty"`
-	IsManagement   bool      `json:"is_management"`
-	IsUplink       bool      `json:"is_uplink"`
-	AdminStatus    string    `json:"admin_status"`
-	OperStatus     string    `json:"oper_status"`
-	Description    string    `json:"description,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	CIID           string `json:"ci_id"`
+	Name           string `json:"name"`
+	MACAddress     string `json:"mac_address,omitempty"`
+	InterfaceType  string `json:"interface_type"`
+	SpeedMbps      *int   `json:"speed_mbps,omitempty"`
+	// VLANID references the VLAN catalog (NET-01).
+	VLANID       string    `json:"vlan_id,omitempty"`
+	IsManagement bool      `json:"is_management"`
+	IsUplink     bool      `json:"is_uplink"`
+	AdminStatus  string    `json:"admin_status"`
+	OperStatus   string    `json:"oper_status"`
+	Description  string    `json:"description,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // CreateInterfaceRequest is the payload for creating a network interface.
@@ -103,6 +107,7 @@ type CreateInterfaceRequest struct {
 	MACAddress    string `json:"mac_address,omitempty"`
 	InterfaceType string `json:"interface_type,omitempty"`
 	SpeedMbps     *int   `json:"speed_mbps,omitempty"`
+	VLANID        string `json:"vlan_id,omitempty"`
 	IsManagement  bool   `json:"is_management,omitempty"`
 	IsUplink      bool   `json:"is_uplink,omitempty"`
 	AdminStatus   string `json:"admin_status,omitempty"`
@@ -116,6 +121,7 @@ type UpdateInterfaceRequest struct {
 	MACAddress    *string `json:"mac_address,omitempty"`
 	InterfaceType *string `json:"interface_type,omitempty"`
 	SpeedMbps     *int    `json:"speed_mbps,omitempty"`
+	VLANID        *string `json:"vlan_id,omitempty"`
 	IsManagement  *bool   `json:"is_management,omitempty"`
 	IsUplink      *bool   `json:"is_uplink,omitempty"`
 	AdminStatus   *string `json:"admin_status,omitempty"`

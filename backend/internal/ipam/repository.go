@@ -43,6 +43,12 @@ type Repository interface {
 	CreateInterface(ctx context.Context, ni *NetworkInterface) error
 	UpdateInterface(ctx context.Context, orgID, id string, req UpdateInterfaceRequest) (*NetworkInterface, error)
 	DeleteInterface(ctx context.Context, orgID, id string) error
+
+	ListVLANs(ctx context.Context, orgID, siteID string, page api.PaginationParams) ([]VLAN, int, error)
+	GetVLAN(ctx context.Context, orgID, id string) (*VLAN, error)
+	CreateVLAN(ctx context.Context, v *VLAN) error
+	UpdateVLAN(ctx context.Context, orgID, id string, req UpdateVLANRequest) (*VLAN, error)
+	DeleteVLAN(ctx context.Context, orgID, id string) error
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -51,6 +57,7 @@ type MemoryRepository struct {
 	subnets    map[string]*Subnet
 	addresses  map[string]*IPAddress
 	interfaces map[string]*NetworkInterface
+	vlans      map[string]*VLAN
 	seq        int
 }
 
@@ -60,6 +67,7 @@ func NewMemoryRepository() *MemoryRepository {
 		subnets:    make(map[string]*Subnet),
 		addresses:  make(map[string]*IPAddress),
 		interfaces: make(map[string]*NetworkInterface),
+		vlans:      make(map[string]*VLAN),
 	}
 }
 
@@ -144,7 +152,7 @@ func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req
 		s.Name = *req.Name
 	}
 	if req.VLANID != nil {
-		s.VLANID = req.VLANID
+		s.VLANID = *req.VLANID
 	}
 	if req.Gateway != nil {
 		s.Gateway = *req.Gateway
@@ -318,6 +326,9 @@ func (r *MemoryRepository) UpdateInterface(_ context.Context, orgID, id string, 
 	}
 	if req.SpeedMbps != nil {
 		ni.SpeedMbps = req.SpeedMbps
+	}
+	if req.VLANID != nil {
+		ni.VLANID = *req.VLANID
 	}
 	if req.IsManagement != nil {
 		ni.IsManagement = *req.IsManagement

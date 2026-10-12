@@ -225,3 +225,7 @@ DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/relationship/projection_in
 REL-01;[B];B;backend/internal/relationship/projection_integration_test.go;WP-079
 AST-05;[P2];B;backend/internal/relationship/projection_integration_test.go;WP-079
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/health_integration_test.go;WP-080
+NET-08;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ipam/vlan_integration_test.go;WP-081
+NET-01;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
+NET-02;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081

@@ -58,6 +58,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"export":               identity.PermCIRead,
 	"ip-addresses":         identity.PermIPAMRead,
 	"subnets":              identity.PermIPAMRead,
+	"vlans":                identity.PermIPAMRead,
 	"network-interfaces":   identity.PermIPAMRead,
 	"cables":               identity.PermRackRead,
 	"forms":                identity.PermFormRead,

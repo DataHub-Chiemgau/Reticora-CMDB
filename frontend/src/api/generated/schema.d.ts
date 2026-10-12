@@ -2545,6 +2545,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/vlans': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the VLAN catalog */
+    get: operations['listVLANs'];
+    put?: never;
+    /** Create a VLAN */
+    post: operations['createVLAN'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/vlans/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a VLAN */
+    get: operations['getVLAN'];
+    put?: never;
+    post?: never;
+    /** Delete a VLAN; subnets and interfaces lose the reference */
+    delete: operations['deleteVLAN'];
+    options?: never;
+    head?: never;
+    /** Update a VLAN */
+    patch: operations['updateVLAN'];
+    trace?: never;
+  };
   '/api/v1/subnets': {
     parameters: {
       query?: never;
@@ -7664,7 +7704,8 @@ export interface components {
       site_id?: string;
       cidr: string;
       name?: string;
-      vlan_id?: number;
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
       description?: string;
@@ -7679,7 +7720,8 @@ export interface components {
       site_id?: string;
       cidr: string;
       name?: string;
-      vlan_id?: number;
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
       description?: string;
@@ -7689,11 +7731,41 @@ export interface components {
       client_id?: string;
       site_id?: string;
       name?: string;
-      vlan_id?: number;
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
       description?: string;
       is_management?: boolean;
+    };
+    /** @description Entry of the VLAN catalog (NET-08). The number is unique per site, or per organization for VLANs without site (E-24). */
+    VLAN: {
+      id: string;
+      organization_id: string;
+      /** @description Client of the site. */
+      readonly client_id?: string;
+      site_id?: string;
+      vlan_id: number;
+      name: string;
+      description?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateVLANRequest: {
+      site_id?: string;
+      vlan_id: number;
+      name: string;
+      description?: string;
+    };
+    UpdateVLANRequest: {
+      vlan_id?: number;
+      name?: string;
+      description?: string;
+    };
+    VLANListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['VLAN'][];
     };
     SubnetListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Subnet'][];
@@ -7745,6 +7817,8 @@ export interface components {
       interface_type:
         'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
+      /** @description VLAN of the VLAN catalog (NET-01). */
+      vlan_id?: string;
       is_management: boolean;
       is_uplink: boolean;
       admin_status: string;
@@ -7762,6 +7836,8 @@ export interface components {
       interface_type?:
         'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
+      /** @description VLAN of the VLAN catalog (NET-01). */
+      vlan_id?: string;
       is_management?: boolean;
       is_uplink?: boolean;
       admin_status?: string;
@@ -7775,6 +7851,8 @@ export interface components {
       interface_type?:
         'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
+      /** @description VLAN of the VLAN catalog (NET-01). */
+      vlan_id?: string;
       is_management?: boolean;
       is_uplink?: boolean;
       admin_status?: string;
@@ -13974,6 +14052,144 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+    };
+  };
+  listVLANs: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        site_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of VLANs */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VLANListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createVLAN: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateVLANRequest'];
+      };
+    };
+    responses: {
+      /** @description VLAN created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VLAN'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getVLAN: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description VLAN */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VLAN'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteVLAN: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description VLAN deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateVLAN: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateVLANRequest'];
+      };
+    };
+    responses: {
+      /** @description VLAN updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VLAN'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listSubnets: {

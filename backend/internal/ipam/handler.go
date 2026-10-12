@@ -39,6 +39,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/network-interfaces/{id}", h.GetInterface)
 	r.Patch("/api/v1/network-interfaces/{id}", h.UpdateInterface)
 	r.Delete("/api/v1/network-interfaces/{id}", h.DeleteInterface)
+
+	r.Get("/api/v1/vlans", h.ListVLANs)
+	r.Post("/api/v1/vlans", h.CreateVLAN)
+	r.Get("/api/v1/vlans/{id}", h.GetVLAN)
+	r.Patch("/api/v1/vlans/{id}", h.UpdateVLAN)
+	r.Delete("/api/v1/vlans/{id}", h.DeleteVLAN)
 }
 
 func org(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -427,6 +433,7 @@ func (h *Handler) CreateInterface(w http.ResponseWriter, r *http.Request) {
 		MACAddress:     req.MACAddress,
 		InterfaceType:  ifType,
 		SpeedMbps:      req.SpeedMbps,
+		VLANID:         req.VLANID,
 		IsManagement:   req.IsManagement,
 		IsUplink:       req.IsUplink,
 		AdminStatus:    adminStatus,
