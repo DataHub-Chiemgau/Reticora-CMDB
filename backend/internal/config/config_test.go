@@ -162,3 +162,38 @@ func TestMaskDSN(t *testing.T) {
 		}
 	}
 }
+
+// TestWorkerSwitches covers WP-098 (OPS-02): every registered worker is on
+// by default and switched off independently by RETICORA_WORKER_<NAME>_ENABLED;
+// an invalid value fails the start check; unknown workers are never enabled.
+func TestWorkerSwitches(t *testing.T) {
+	clearEnv(t)
+	for _, name := range WorkerNames {
+		t.Setenv(WorkerEnvKey(name), "")
+	}
+	cfg := Load()
+	for _, name := range WorkerNames {
+		if !cfg.WorkerEnabled(name) {
+			t.Errorf("%s is off by default", name)
+		}
+	}
+	if cfg.WorkerEnabled("unknown") || IsWorker("unknown") {
+		t.Error("unknown worker enabled")
+	}
+	if WorkerEnvKey(WorkerWebhookDispatcher) != "RETICORA_WORKER_WEBHOOK_DISPATCHER_ENABLED" {
+		t.Errorf("switch name: %s", WorkerEnvKey(WorkerWebhookDispatcher))
+	}
+
+	t.Setenv(WorkerEnvKey(WorkerExport), "false")
+	cfg = Load()
+	for _, name := range WorkerNames {
+		if cfg.WorkerEnabled(name) != (name != WorkerExport) {
+			t.Errorf("%s: enabled %v with only export switched off", name, cfg.WorkerEnabled(name))
+		}
+	}
+
+	t.Setenv(WorkerEnvKey(WorkerIngest), "maybe")
+	if err := Load().Validate(false); err == nil || !strings.Contains(err.Error(), WorkerEnvKey(WorkerIngest)) {
+		t.Errorf("invalid switch: %v", err)
+	}
+}

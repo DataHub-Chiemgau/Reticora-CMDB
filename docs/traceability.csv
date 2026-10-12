@@ -256,3 +256,4 @@ INS-03;[B];A;tests/install-cloud-helpers.test.sh;WP-094
 TEC-09;[B];A;tests/install-cloud-helpers.test.sh;WP-094
 INS-02;[B];A;tests/install-cloud-helpers.test.sh;WP-095
 INS-05;[B];A;tests/install-cloud-helpers.test.sh;WP-096
+OPS-02;[B], [P3], [A];A;backend/internal/config/config_test.go;WP-098

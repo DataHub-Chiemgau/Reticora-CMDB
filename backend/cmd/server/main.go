@@ -309,6 +309,8 @@ func main() {
 		// object the account may read (RBA-08).
 		Access:     user.ServiceAccountAccess{Repo: repos.ServiceAccounts},
 		Deliveries: repos.WebhookDeliveries,
+		// The retry worker runs under its operator switch below (OPS-02).
+		PollInterval: -1,
 	})
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -353,43 +355,59 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Process queued asynchronous export jobs until shutdown. All replicas
-	// share the queue via FOR UPDATE SKIP LOCKED, so jobs are never run twice.
+	// Background workers, each under its operator switch
+	// RETICORA_WORKER_<NAME>_ENABLED (OPS-02), so they can run on dedicated
+	// instances.
+	workers := []server.Worker{{
+		// Re-send persisted webhook deliveries that are due for a retry.
+		Name: config.WorkerWebhookDispatcher,
+		Run:  func(ctx context.Context) { webhookDispatcher.RunRetries(ctx, 15*time.Second) },
+	}, {
+		// Release expired reservations (spec §10). The sweeper is
+		// interval-driven and shares no state with request handling.
+		Name: config.WorkerReservationSweeper,
+		Run:  reservation.NewSweeper(repos.Reservation, webhookDispatcher, time.Minute).Run,
+	}}
+	// Process queued asynchronous export jobs. All replicas share the queue
+	// via FOR UPDATE SKIP LOCKED, so jobs are never run twice.
 	if blobStore != nil {
 		exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, blobStore)
-		workerCtx, stopWorker := context.WithCancel(context.Background())
-		defer stopWorker()
-		go exportWorker.Run(workerCtx, 2*time.Second)
+		workers = append(workers, server.Worker{
+			Name: config.WorkerExport,
+			Run:  func(ctx context.Context) { exportWorker.Run(ctx, 2*time.Second) },
+		})
 	}
-
-	// Consume ingest.> until shutdown (REC-01).
+	// Consume ingest.> (REC-01).
 	if ingestQueue != nil {
-		consumerCtx, stopConsumer := context.WithCancel(context.Background())
-		defer stopConsumer()
-		go ingestQueue.Run(consumerCtx)
+		workers = append(workers, server.Worker{Name: config.WorkerIngest, Run: ingestQueue.Run})
 	}
-
-	// Evaluate monitoring alert rules against the metric store until shutdown.
-	// Fired alerts are logged via the default notifier; evaluation state is
-	// persisted in the alert store so restarts neither re-notify nor lose
-	// pending durations.
+	// Evaluate monitoring alert rules against the metric store. Fired alerts
+	// are logged via the default notifier; evaluation state is persisted in
+	// the alert store so restarts neither re-notify nor lose pending
+	// durations.
 	if alertStore, ok := repos.Metrics.(monitoring.EvaluatingStore); ok {
 		evaluator := monitoring.NewEvaluator(repos.Metrics, alertStore.AlertStore(), nil)
 		// The health of the CIs follows the monitoring state (DB-05).
 		if refresher, ok := repos.Metrics.(monitoring.HealthRefreshingStore); ok {
 			evaluator.WithHealth(refresher.HealthRefresher())
 		}
-		evalCtx, stopEvaluator := context.WithCancel(context.Background())
-		defer stopEvaluator()
-		go evaluator.Run(evalCtx, time.Minute)
+		workers = append(workers, server.Worker{
+			Name: config.WorkerMonitoring,
+			Run:  func(ctx context.Context) { evaluator.Run(ctx, time.Minute) },
+		})
 	}
-
-	// Release expired reservations until shutdown (spec §10). The sweeper is
-	// interval-driven and shares no state with request handling.
-	sweeper := reservation.NewSweeper(repos.Reservation, webhookDispatcher, time.Minute)
-	sweepCtx, stopSweeper := context.WithCancel(context.Background())
-	defer stopSweeper()
-	go sweeper.Run(sweepCtx)
+	workerSet, err := server.StartWorkers(cfg.WorkerEnabled, workers...)
+	if err != nil {
+		slog.Error("worker registration failed", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := workerSet.Stop(ctx); err != nil {
+			slog.Error("worker shutdown error", "error", err)
+		}
+	}()
 
 	// Session tokens are always verified cryptographically unless the operator
 	// explicitly opted into the insecure development mode. API keys are

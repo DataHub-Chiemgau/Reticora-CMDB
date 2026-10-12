@@ -121,6 +121,10 @@ type Config struct {
 	// AirGapped disables every external AI call (AI-02, air-gapped profile).
 	AirGapped bool
 
+	// workers holds the operator switch of every registered background
+	// worker (OPS-02, see WorkerNames).
+	workers map[string]bool
+
 	// explicit records the RETICORA_* variables that were set; invalid
 	// lists variables whose value could not be parsed.
 	explicit map[string]bool
@@ -190,6 +194,11 @@ func Load() *Config {
 		LogLevel: slog.LevelInfo,
 	}
 
+	cfg.workers = make(map[string]bool, len(WorkerNames))
+	for _, name := range WorkerNames {
+		cfg.workers[name] = l.boolean(WorkerEnvKey(name), true)
+	}
+
 	cfg.explicit = l.set
 	cfg.invalid = l.invalid
 
@@ -202,6 +211,49 @@ func Load() *Config {
 	}
 
 	return cfg
+}
+
+// Background workers with an independent operator switch (OPS-02). The
+// convention: worker <name> is switched by RETICORA_WORKER_<NAME>_ENABLED
+// (true/false, default true); a disabled worker is not started in this
+// process, so each worker can run on dedicated instances. A new worker adds
+// its name here and registers under it in the server's worker set.
+const (
+	WorkerWebhookDispatcher  = "webhook_dispatcher"
+	WorkerExport             = "export"
+	WorkerIngest             = "ingest"
+	WorkerMonitoring         = "monitoring"
+	WorkerReservationSweeper = "reservation_sweeper"
+)
+
+// WorkerNames lists every registered worker.
+var WorkerNames = []string{
+	WorkerWebhookDispatcher,
+	WorkerExport,
+	WorkerIngest,
+	WorkerMonitoring,
+	WorkerReservationSweeper,
+}
+
+// WorkerEnvKey returns the switch variable of a worker.
+func WorkerEnvKey(name string) string {
+	return "RETICORA_WORKER_" + strings.ToUpper(name) + "_ENABLED"
+}
+
+// IsWorker reports whether name is a registered worker.
+func IsWorker(name string) bool {
+	for _, n := range WorkerNames {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// WorkerEnabled reports the switch of a registered worker; unknown names
+// are never enabled.
+func (c *Config) WorkerEnabled(name string) bool {
+	return c.workers[name]
 }
 
 // Variables that staging and production must set explicitly instead of
