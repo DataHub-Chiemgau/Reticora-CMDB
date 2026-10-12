@@ -8625,7 +8625,18 @@ components:
           description: CI version, also the ETag (API-07).
         location_id:
           type: string
-          description: Node of the canonical location tree (DB-05); site_id and room_id are derived from it.
+          description: >-
+            Node of the canonical location tree (DB-05); site_id and room_id
+            are derived from it. For a CI linked to an asset it mirrors the
+            asset's location and cannot be written (422).
+        asset_id:
+          type: string
+          description: >-
+            Asset the CI is linked to (DB-05, AST-04). The asset is canonical
+            for serial number, location, physical lifecycle and inventory
+            data; they appear read-only under asset.
+        asset:
+          $ref: '#/components/schemas/CIAssetFacts'
         site_id:
           type: string
           readOnly: true
@@ -8646,6 +8657,11 @@ components:
           type: string
         serial_number:
           type: string
+          description: >-
+            Observed serial number used for identity resolution. For a linked
+            CI the canonical serial number is asset.serial_number; a
+            difference opens a review item serial_mismatch, a manual write is
+            rejected (422).
         rfid_tag:
           type: string
           description: RFID tag for direct-access labels and scan flows.
@@ -8693,6 +8709,26 @@ components:
           type: string
           format: date-time
 
+    CIAssetFacts:
+      type: object
+      readOnly: true
+      description: Canonical data of the linked asset, shown read-only on the CI (DB-05).
+      required: [id, asset_tag, name, status]
+      properties:
+        id: { type: string }
+        asset_tag: { type: string }
+        name: { type: string }
+        serial_number: { type: string }
+        location_id: { type: string }
+        lifecycle_state: { type: string, description: Physical lifecycle of the asset. }
+        status: { type: string }
+        barcode: { type: string }
+        rfid_tag: { type: string }
+        purchase_date: { type: string, format: date }
+        warranty_end: { type: string, format: date }
+        supplier: { type: string }
+        invoice_number: { type: string }
+
     CreateCIRequest:
       type: object
       required: [ci_type_id, name]
@@ -8704,6 +8740,12 @@ components:
         location_id:
           type: string
           description: Node of the location tree; site and room of the CI follow from it.
+        asset_id:
+          type: string
+          description: >-
+            Links the CI to an asset (empty string unlinks on update); the CI
+            then takes the asset's location, a location in the same request
+            is rejected (422).
         name:
           type: string
         status:
@@ -8757,6 +8799,12 @@ components:
         location_id:
           type: string
           description: Node of the location tree; site and room of the CI follow from it.
+        asset_id:
+          type: string
+          description: >-
+            Links the CI to an asset (empty string unlinks on update); the CI
+            then takes the asset's location, a location in the same request
+            is rejected (422).
         manufacturer:
           type: string
         model:

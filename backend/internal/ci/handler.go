@@ -142,6 +142,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		OrganizationID:  t.OrganizationID,
 		ClientID:        req.ClientID,
 		LocationID:      req.LocationID,
+		AssetID:         req.AssetID,
 		CITypeID:        req.CITypeID,
 		Name:            req.Name,
 		Status:          status,

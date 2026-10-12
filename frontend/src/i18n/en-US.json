@@ -201,7 +201,16 @@
     "protected": "protected",
     "instanceFields": "Instance fields",
     "provenanceHint": "Discovered vs. effective value. Protected manual overrides are never overwritten by discovery.",
-    "discovered": "Discovered"
+    "discovered": "Discovered",
+    "assetCanonical": "Asset (canonical data)",
+    "assetCanonicalHint": "Serial number, location, physical lifecycle and inventory data come from the asset and are read-only here.",
+    "observedSerialNumber": "Observed serial number",
+    "assetTag": "Asset tag",
+    "physicalLifecycle": "Physical lifecycle",
+    "location": "Location",
+    "barcode": "Barcode",
+    "warrantyEnd": "Warranty end",
+    "supplier": "Supplier"
   },
   "form": {
     "createCI": "Create CI",

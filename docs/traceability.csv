@@ -217,3 +217,5 @@ IGA-03;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 IGA-04;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 AI-02;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 AI-02;[A];B;backend/internal/ai/ci_indexer_test.go;WP-076
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/asset_canonical_integration_test.go;WP-077
+AST-04;[P2];B;backend/internal/ci/asset_canonical_integration_test.go;WP-077

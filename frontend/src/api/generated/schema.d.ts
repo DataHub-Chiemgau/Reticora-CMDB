@@ -5227,8 +5227,11 @@ export interface components {
        * @description CI version, also the ETag (API-07).
        */
       readonly version?: number;
-      /** @description Node of the canonical location tree (DB-05); site_id and room_id are derived from it. */
+      /** @description Node of the canonical location tree (DB-05); site_id and room_id are derived from it. For a CI linked to an asset it mirrors the asset's location and cannot be written (422). */
       location_id?: string;
+      /** @description Asset the CI is linked to (DB-05, AST-04). The asset is canonical for serial number, location, physical lifecycle and inventory data; they appear read-only under asset. */
+      asset_id?: string;
+      asset?: components['schemas']['CIAssetFacts'];
       /** @description Site of location_id, derived by the server. */
       readonly site_id?: string;
       /** @description Room of location_id (the location or its nearest room ancestor), derived by the server. */
@@ -5238,6 +5241,7 @@ export interface components {
       status: components['schemas']['CIStatus'];
       manufacturer?: string;
       model?: string;
+      /** @description Observed serial number used for identity resolution. For a linked CI the canonical serial number is asset.serial_number; a difference opens a review item serial_mismatch, a manual write is rejected (422). */
       serial_number?: string;
       /** @description RFID tag for direct-access labels and scan flows. */
       rfid_tag?: string;
@@ -5268,11 +5272,32 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description Canonical data of the linked asset, shown read-only on the CI (DB-05). */
+    CIAssetFacts: {
+      id: string;
+      asset_tag: string;
+      name: string;
+      serial_number?: string;
+      location_id?: string;
+      /** @description Physical lifecycle of the asset. */
+      lifecycle_state?: string;
+      status: string;
+      barcode?: string;
+      rfid_tag?: string;
+      /** Format: date */
+      purchase_date?: string;
+      /** Format: date */
+      warranty_end?: string;
+      supplier?: string;
+      invoice_number?: string;
+    };
     CreateCIRequest: {
       ci_type_id: string;
       client_id?: string;
       /** @description Node of the location tree; site and room of the CI follow from it. */
       location_id?: string;
+      /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
+      asset_id?: string;
       name: string;
       status?: components['schemas']['CIStatus'];
       manufacturer?: string;
@@ -5301,6 +5326,8 @@ export interface components {
       client_id?: string;
       /** @description Node of the location tree; site and room of the CI follow from it. */
       location_id?: string;
+      /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
+      asset_id?: string;
       manufacturer?: string;
       model?: string;
       serial_number?: string;

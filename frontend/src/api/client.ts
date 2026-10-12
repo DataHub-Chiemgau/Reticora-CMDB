@@ -27,6 +27,10 @@ export interface CI {
   version?: number;
   site_id?: string;
   room_id?: string;
+  /** Linked asset; it is canonical for serial number, location and inventory data (DB-05). */
+  asset_id?: string;
+  /** Read-only data of the linked asset. */
+  asset?: CIAssetFacts;
   ci_type_id: string;
   name: string;
   status: string;
@@ -41,6 +45,22 @@ export interface CI {
   last_seen_at?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface CIAssetFacts {
+  id: string;
+  asset_tag: string;
+  name: string;
+  serial_number?: string;
+  location_id?: string;
+  lifecycle_state?: string;
+  status: string;
+  barcode?: string;
+  rfid_tag?: string;
+  purchase_date?: string;
+  warranty_end?: string;
+  supplier?: string;
+  invoice_number?: string;
 }
 
 export interface CICreateRequest {

@@ -287,6 +287,17 @@ headers cannot reset rate budgets or collide across tenants; unauthenticated
 endpoints are rate-limited per client IP and the rate limiter fails closed
 when its cache is unavailable.
 
+**Asset and CI (DB-05, CH12):** a CI can be linked to an asset
+(`ci.asset_id`; `asset.ci_id` stays the asset's primary CI and links it). The
+asset is canonical for serial number, location, physical lifecycle and
+inventory data, which the CI shows read-only under `asset`. `ci.location_id`
+mirrors `asset.location_id` (migration 0088 triggers) and follows a move of
+the asset; writing the location of a linked CI is rejected with 422.
+`ci.serial_number` stays the observed value for identity resolution; a
+difference to the asset's serial number opens one review item
+`serial_mismatch` per CI, and a manual serial write on a linked CI is
+rejected.
+
 **Entitlement enforcement:** an organization is entitled exactly to its rows
 in `entitlement` (ENT-05): a missing row means not entitled, only `cmdb_core`
 is always active. At startup every organization without rows is provisioned
