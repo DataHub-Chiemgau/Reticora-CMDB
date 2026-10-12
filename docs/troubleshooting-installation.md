@@ -42,7 +42,7 @@ healthy".
 | Cause | Diagnosis | Fix |
 |---|---|---|
 | Session key unreadable | `docker compose logs server` shows `read session key: permission denied` or `is a directory` | Re-run the installer — `ensure_session_key` removes Docker-created directories and fixes ownership (`uid:65534`, mode `0640`). |
-| Database password mismatch | `logs postgres` / `logs server` show `SQLSTATE 28P01` (password authentication failed) | Re-run the installer — `sync_db_password` resets the stored role password to the value in `.env` using a temporary trust-auth instance. **Manual alternative (data loss):** `docker compose down -v` removes the stale volume. |
+| Database password mismatch | `logs postgres` / `logs server` show `SQLSTATE 28P01` (password authentication failed) | Re-run the installer — `sync_db_password` probes both databases (CMDB and Keycloak) over TCP and resets a stale role password to the value in `.env` using a temporary trust-auth instance. **Manual alternative (data loss):** `docker compose down -v` removes the stale volume. |
 | Migrations not applied | `logs server` shows missing tables/columns | Re-run the installer; migrations run before the server starts. |
 
 **General diagnosis:**
@@ -227,9 +227,9 @@ The installer is safe to re-run and reuses existing `.env` values as defaults:
 
 | Resource | Behaviour on re-run |
 |---|---|
-| `.env` | Existing values are defaults; secrets are regenerated only when absent. |
+| `.env` | Existing values are defaults; secrets are regenerated only when absent. Settings the installer does not write itself (e.g. `RETICORA_HTTP_BIND`) are kept in a section at the end. |
 | Session key | Reused; a Docker-created directory or zero-byte file is removed and regenerated. |
-| Database password | Probed; on `28P01` mismatch the stored role password is resynced automatically. |
+| Database passwords | `RETICORA_DB_PASSWORD` (CMDB) and `KEYCLOAK_DB_PASSWORD` (Keycloak) are probed over TCP — the images trust the local socket and 127.0.0.1 regardless of the password — and on mismatch the stored role password is resynced automatically. |
 | TLS bootstrap cert | Reused; regenerated when SAN-less or expiring within a day. |
 | Let's Encrypt cert | Not re-issued when a real certificate is present. |
 | Realm file | Re-rendered and validated on every run. |

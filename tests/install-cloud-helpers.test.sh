@@ -330,6 +330,95 @@ run_test   "issuer: a localhost issuer is refused, the host IP suggested"    tes
 run_test   "issuer: host IP and loopback detection"                          test_host_primary_ip
 run_test   "issuer: the troubleshooting guide covers the check"              test_issuer_troubleshooting_documented
 
+# ─── re-run: .env merge and password probes (WP-096, INS-05) ─────────────────
+
+set_env_values() {
+    local v
+    for v in KEYCLOAK_ADMIN KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD RETICORA_CERT_EMAIL RETICORA_DB_PASSWORD \
+        RETICORA_FRONTEND_PORT RETICORA_GC_KEEP_IMAGES RETICORA_IMAGE_REGISTRY RETICORA_IMAGE_TAG \
+        RETICORA_INITIAL_ADMIN_EMAIL RETICORA_KEYCLOAK_PORT RETICORA_MASTER_KEY RETICORA_OIDC_CLIENT_ID \
+        RETICORA_OIDC_CLIENT_SECRET RETICORA_OIDC_ISSUER_URL RETICORA_OIDC_REDIRECT_URL RETICORA_PUBLIC_BASE_URL \
+        RETICORA_S3_ACCESS_KEY RETICORA_S3_SECRET_KEY RETICORA_SERVER_PORT; do
+        printf -v "$v" '%s' "new-$v"
+    done
+    RETICORA_TLS_DOMAIN=""
+}
+
+# A re-run keeps settings the installer does not write itself, replaces the
+# ones it writes and does not duplicate the kept ones on the next run.
+test_env_merge_keeps_extra_settings() {
+    ENV_FILE="$TMP_ROOT/merge.env"
+    printf '# old header\nRETICORA_DB_PASSWORD=old\nRETICORA_HTTP_BIND=127.0.0.1\nRETICORA_EXTRA="a=b"\n\n# comment\n' > "$ENV_FILE"
+    set_env_values
+    write_env
+    write_env
+    grep -qx 'RETICORA_HTTP_BIND=127.0.0.1' "$ENV_FILE" &&
+        grep -qx 'RETICORA_EXTRA="a=b"' "$ENV_FILE" &&
+        grep -qx 'RETICORA_DB_PASSWORD=new-RETICORA_DB_PASSWORD' "$ENV_FILE" &&
+        [ "$(grep -c '^RETICORA_DB_PASSWORD=' "$ENV_FILE")" -eq 1 ] &&
+        [ "$(grep -c '^RETICORA_HTTP_BIND=' "$ENV_FILE")" -eq 1 ] &&
+        [ "$(grep -c 'kept from the previous .env' "$ENV_FILE")" -eq 1 ] &&
+        [ "$(stat -c %a "$ENV_FILE")" = "600" ]
+}
+
+test_env_first_run_has_no_extras() {
+    ENV_FILE="$TMP_ROOT/fresh.env"
+    rm -f "$ENV_FILE"
+    set_env_values
+    write_env
+    ! grep -q 'kept from the previous .env' "$ENV_FILE"
+}
+
+# The probe connects over TCP to the service address: the postgres images
+# trust the local socket and 127.0.0.1 regardless of the password.
+test_password_probe_uses_tcp() {
+    local calls="$TMP_ROOT/probe-calls"
+    compose_cmd() { printf '%s\n' "$*" >> "$calls"; }
+    db_password_matches keycloak-db keycloak keycloak secret
+    grep -qx -- "exec -T -e PGPASSWORD=secret -e PGCONNECT_TIMEOUT=5 keycloak-db psql -h keycloak-db -U keycloak -d keycloak -tAc SELECT 1" "$calls"
+}
+
+test_password_sync_covers_both_databases() {
+    local calls="$TMP_ROOT/sync-calls"
+    RETICORA_DB_PASSWORD="cmdb-pw"
+    KEYCLOAK_DB_PASSWORD="kc-pw"
+    db_password_matches() { printf '%s\n' "$*" >> "$calls"; }
+    sync_db_password
+    grep -qx "postgres reticora reticora cmdb-pw" "$calls" && grep -qx "keycloak-db keycloak keycloak kc-pw" "$calls"
+}
+
+# A mismatching Keycloak DB password is reset on the keycloakdb volume with
+# the Keycloak image and verified over TCP afterwards.
+test_password_sync_resets_keycloak_db() {
+    local calls="$TMP_ROOT/reset-calls" probes="$TMP_ROOT/reset-probes"
+    : > "$probes"
+    db_password_matches() { printf 'x\n' >> "$probes"; [ "$(wc -l < "$probes")" -gt 1 ]; }
+    compose_cmd() { printf 'compose %s\n' "$*" >> "$calls"; }
+    wait_for_service() { return 0; }
+    db_volume_name() { printf 'proj_%s' "$2"; }
+    db_image() { printf 'image-of-%s' "$1"; }
+    fake_docker() {
+        printf 'docker %s\n' "$*" >> "$calls"
+        if [ "$1" = "exec" ]; then cat >> "$calls"; fi
+        return 0
+    }
+    DOCKER=fake_docker
+    sync_role_password keycloak-db keycloak keycloak kc-pw keycloakdb
+    grep -q -- "compose rm -sf keycloak-db" "$calls" &&
+        grep -q -- "-v proj_keycloakdb:/var/lib/postgresql/data" "$calls" &&
+        grep -q -- "image-of-keycloak-db" "$calls" &&
+        grep -q -- 'ALTER ROLE "keycloak" WITH PASSWORD' "$calls" &&
+        ! grep -q -- "kc-pw" <(grep '^docker run\|ALTER' "$calls" | grep -v 'POSTGRES_PASSWORD') &&
+        grep -q -- "compose up -d keycloak-db" "$calls" &&
+        [ "$(wc -l < "$probes")" -eq 2 ]
+}
+
+run_test   "re-run: .env keeps extra settings such as RETICORA_HTTP_BIND"   test_env_merge_keeps_extra_settings
+run_test   "re-run: a fresh .env has no kept section"                       test_env_first_run_has_no_extras
+run_test   "re-run: the password probe connects over TCP"                   test_password_probe_uses_tcp
+run_test   "re-run: CMDB and Keycloak database passwords are both probed"   test_password_sync_covers_both_databases
+run_test   "re-run: a stale Keycloak DB password is reset and re-verified"  test_password_sync_resets_keycloak_db
+
 # ─── realm files and initial administrator (WP-044, AUT-09) ───────────────────
 
 realm_py() {

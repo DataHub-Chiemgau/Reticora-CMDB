@@ -453,8 +453,29 @@ RETICORA_IMAGE_TAG=$RETICORA_IMAGE_TAG
 # Container image garbage collection
 RETICORA_GC_KEEP_IMAGES=$RETICORA_GC_KEEP_IMAGES
 EOF
+    merge_env_extras "$tmp"
     mv "$tmp" "$ENV_FILE"
     chmod 600 "$ENV_FILE"
+}
+
+# merge_env_extras <new env file> — appends every KEY=value of the existing
+# .env that the installer does not write itself (e.g. RETICORA_HTTP_BIND), so
+# a re-run merges instead of dropping additional configuration (INS-05).
+merge_env_extras() {
+    local new="$1" line key extras=()
+    [ -f "$ENV_FILE" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in ''|'#'*) continue ;; esac
+        key="${line%%=*}"
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        grep -q "^${key}=" "$new" && continue
+        extras+=("$line")
+    done < "$ENV_FILE"
+    [ "${#extras[@]}" -gt 0 ] || return 0
+    {
+        printf '\n# Additional settings kept from the previous .env\n'
+        printf '%s\n' "${extras[@]}"
+    } >> "$new"
 }
 
 # ─── Preflight checks ─────────────────────────────────────────────────────────
@@ -1198,12 +1219,13 @@ show_service_logs() {
     compose_cmd logs --tail 40 "$service" >&2 || true
 }
 
-# db_volume_name — prints the name of the Docker volume holding the main
-# PostgreSQL data directory (<project>_pgdata), resolved from the running
-# postgres container's mounts (falling back to the compose project name).
+# db_volume_name [service] [volume suffix] — prints the name of the Docker
+# volume holding the data directory of a PostgreSQL service (default: the
+# main database, <project>_pgdata), resolved from the running container's
+# mounts (falling back to the compose project name).
 db_volume_name() {
-    local cid project name
-    cid="$(compose_cmd ps -q postgres 2>/dev/null || true)"
+    local service="${1:-postgres}" suffix="${2:-pgdata}" cid project name
+    cid="$(compose_cmd ps -q "$service" 2>/dev/null || true)"
     if [ -n "$cid" ]; then
         name="$($DOCKER inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' \
             "$cid" 2>/dev/null || true)"
@@ -1214,86 +1236,105 @@ db_volume_name() {
     fi
     project="$("${COMPOSE[@]}" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config --format json 2>/dev/null \
         | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
-    printf '%s_pgdata' "${project:-docker-compose}"
+    printf '%s_%s' "${project:-docker-compose}" "$suffix"
 }
 
-# db_image — prints the container image configured for the postgres service,
-# so the temporary password-reset instance runs exactly the same PostgreSQL
-# version as the real stack (an older binary refuses a newer data directory).
+# db_image [service] — prints the container image configured for a
+# PostgreSQL service, so the temporary password-reset instance runs exactly
+# the same PostgreSQL version as the real stack (an older binary refuses a
+# newer data directory).
 db_image() {
-    local img
+    local service="${1:-postgres}" fallback img
+    case "$service" in
+        postgres) fallback="timescale/timescaledb:latest-pg16" ;;
+        *) fallback="postgres:16-alpine" ;;
+    esac
     img="$("${COMPOSE[@]}" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config 2>/dev/null \
-        | awk '/^[[:space:]]*postgres:/{f=1} f && /^[[:space:]]*image:/{print $2; exit}')"
-    printf '%s' "${img:-timescale/timescaledb:latest-pg16}"
+        | awk -v svc="$service" '$0 == "  " svc ":" {f=1; next} f && /^  [^ ]/ {exit} f && /^    image:/ {print $2; exit}')"
+    printf '%s' "${img:-$fallback}"
+}
+
+# db_password_matches <service> <role> <database> <password> — probes the
+# password over TCP (INS-05). The postgres images trust every connection on
+# the local socket and on 127.0.0.1, so only a connection to the service's
+# network address proves the password.
+db_password_matches() {
+    local service="$1" role="$2" database="$3" password="$4"
+    compose_cmd exec -T -e PGPASSWORD="$password" -e PGCONNECT_TIMEOUT=5 "$service" \
+        psql -h "$service" -U "$role" -d "$database" -tAc 'SELECT 1' >/dev/null 2>&1
 }
 
 # sync_db_password — the postgres image applies POSTGRES_PASSWORD only when it
 # initializes an *empty* data directory. When the installer is re-run with a
-# changed RETICORA_DB_PASSWORD, the persistent pgdata volume still carries the
-# previous password, so every connection fails with SQLSTATE 28P01
-# (password authentication failed) and the server container never becomes
-# healthy ("dependency failed to start: container docker-compose-server-1 is
-# unhealthy"). Probe the authentication here and, on mismatch, resync the
-# stored password so the database matches .env again.
+# changed password, the persistent volume still carries the previous one, so
+# every connection fails with SQLSTATE 28P01 (password authentication failed)
+# and the server or Keycloak never becomes healthy. Both databases — the
+# CMDB (RETICORA_DB_PASSWORD) and Keycloak's (KEYCLOAK_DB_PASSWORD) — are
+# probed and, on mismatch, resynced to .env (INS-05).
 sync_db_password() {
-    info "Checking database authentication …"
-    if compose_cmd exec -T -e PGPASSWORD="$RETICORA_DB_PASSWORD" postgres \
-        psql -U reticora -d reticora -tAc 'SELECT 1' >/dev/null 2>&1; then
-        success "Database password matches the configuration"
+    sync_role_password postgres reticora reticora "$RETICORA_DB_PASSWORD" pgdata
+    sync_role_password keycloak-db keycloak keycloak "$KEYCLOAK_DB_PASSWORD" keycloakdb
+}
+
+# sync_role_password <service> <role> <database> <password> <volume suffix>
+sync_role_password() {
+    local service="$1" role="$2" database="$3" password="$4" suffix="$5"
+    info "Checking the password of database role '$role' ($service) …"
+    if db_password_matches "$service" "$role" "$database" "$password"; then
+        success "Password of '$role' matches the configuration"
         return 0
     fi
 
-    warn "The existing PostgreSQL volume still uses a different password (SQLSTATE 28P01);"
+    warn "The existing '$service' volume still uses a different password for '$role' (SQLSTATE 28P01);"
     warn "PostgreSQL ignores POSTGRES_PASSWORD once its data directory is initialized."
-    info "Updating the password of database role 'reticora' to the configured value …"
+    info "Updating the password of database role '$role' to the configured value …"
 
     # Start a temporary PostgreSQL instance on the same data volume, but with
     # 'trust' authentication for local connections (via a throwaway hba config
     # outside the volume) so the role password can be changed without knowing
     # the old one. The new password is passed through the PGPASSWORD
     # environment variable and a psql variable, never on a command line.
-    local hba_vol image
-    hba_vol="$(db_volume_name)"
-    image="$(db_image)"
-    compose_cmd rm -sf postgres >/dev/null 2>&1 || true
-    $DOCKER run -d --rm --name reticora-db-pwreset \
+    local data_vol image container="reticora-db-pwreset"
+    data_vol="$(db_volume_name "$service" "$suffix")"
+    image="$(db_image "$service")"
+    compose_cmd rm -sf "$service" >/dev/null 2>&1 || true
+    $DOCKER run -d --rm --name "$container" \
         --entrypoint sh \
-        -v "$hba_vol:/var/lib/postgresql/data" \
-        -e POSTGRES_PASSWORD="$RETICORA_DB_PASSWORD" \
+        -v "$data_vol:/var/lib/postgresql/data" \
+        -e POSTGRES_PASSWORD="$password" \
         -e RESET_HBA='local all all trust
 host all all all scram-sha-256' \
         "$image" \
         -c 'mkdir -p /etc/reticora-pwreset && printf "%s\n" "$RESET_HBA" > /etc/reticora-pwreset/pg_hba.conf && chmod 644 /etc/reticora-pwreset/pg_hba.conf && exec docker-entrypoint.sh postgres -c hba_file=/etc/reticora-pwreset/pg_hba.conf' \
         >/dev/null 2>&1 \
-        || die "Cannot start the temporary PostgreSQL instance on volume '$hba_vol' — is another postgres container still running?"
+        || die "Cannot start the temporary PostgreSQL instance on volume '$data_vol' — is another postgres container still running?"
 
     local ok=1
     for _ in $(seq 1 30); do
         # The password travels only via stdin: the \set meta-command reads it
         # from the PGPASSWORD environment variable inside psql, so it never
         # appears in a process list or on a command line.
-        if printf '%s\n' '\set pw `printenv PGPASSWORD`' "ALTER ROLE reticora WITH PASSWORD :'pw'" | \
-            $DOCKER exec -i -e PGPASSWORD="$RETICORA_DB_PASSWORD" reticora-db-pwreset \
-                psql -U reticora -d reticora -v ON_ERROR_STOP=1 -q >/dev/null 2>&1; then
+        if printf '%s\n' '\set pw `printenv PGPASSWORD`' "ALTER ROLE \"$role\" WITH PASSWORD :'pw'" | \
+            $DOCKER exec -i -e PGPASSWORD="$password" "$container" \
+                psql -U "$role" -d "$database" -v ON_ERROR_STOP=1 -q >/dev/null 2>&1; then
             ok=0
             break
         fi
         sleep 2
     done
-    $DOCKER rm -f reticora-db-pwreset >/dev/null 2>&1 || true
+    $DOCKER rm -f "$container" >/dev/null 2>&1 || true
     if [ "$ok" -ne 0 ]; then
-        die "Could not reset the database password. Remove the stale volume with '$DOCKER volume rm $hba_vol' (all CMDB data is lost) and re-run this installer."
+        die "Could not reset the password of '$role'. Remove the stale volume with '$DOCKER volume rm $data_vol' (its data is lost) and re-run this installer."
     fi
-    success "Database password updated"
+    success "Password of '$role' updated"
 
-    info "Restarting PostgreSQL with normal authentication …"
-    compose_cmd up -d postgres
-    wait_for_service postgres || die "PostgreSQL did not become healthy."
-    if compose_cmd exec -T -e PGPASSWORD="$RETICORA_DB_PASSWORD" postgres \
-        psql -U reticora -d reticora -tAc 'SELECT 1' >/dev/null 2>&1; then
-        success "Database authentication verified"
+    info "Restarting $service with normal authentication …"
+    compose_cmd up -d "$service"
+    wait_for_service "$service" || die "$service did not become healthy."
+    if db_password_matches "$service" "$role" "$database" "$password"; then
+        success "Authentication of '$role' verified over TCP"
     else
-        die "Database authentication still fails after the password reset. Remove the stale volume with '$DOCKER volume rm $hba_vol' (all CMDB data is lost) and re-run this installer."
+        die "Authentication of '$role' still fails after the password reset. Remove the stale volume with '$DOCKER volume rm $data_vol' (its data is lost) and re-run this installer."
     fi
 }
 
