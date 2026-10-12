@@ -883,9 +883,42 @@ Continuous Integration runs on **GitHub Actions** (`.github/workflows/ci.yml`), 
 6. `npm test` — Vitest unit and component tests.
 7. `npm run build` — Production build.
 
+**Signed releases (`.github/workflows/release.yml`, TEC-15, COL-06):**
+
+A version tag `v*` starts the release workflow. Tools follow E-31.
+
+1. It builds the edge binaries `reticora-collector` and `reticora-agent` for linux/amd64 and linux/arm64.
+2. It builds the images `reticora-server`, `reticora-collector` and `reticora-frontend` and pushes them to `ghcr.io/datahub-chiemgau`.
+3. Syft generates an SPDX SBOM for every binary and every image, plus one for the source tree.
+4. Everything is signed keyless with cosign: a Fulcio certificate for the identity of the release workflow and an entry in the Rekor log.
+   - Binaries and SBOMs get a Sigstore bundle (`<file>.sigstore.json`).
+   - Images are signed, and their SBOM is attached as a cosign attestation (`spdxjson`).
+5. The workflow verifies its own signatures. It then publishes the files on the GitHub release, together with `SHA256SUMS` and one updater manifest per binary (`<binary>.release.json`, holding `downloadUrl`, `signatureBundleUrl` and `checksums.sha256`).
+
+Mandatory signature check in the updater (`edgecore/update`):
+
+- `Checker.Apply` installs an artifact only after its signature has been verified.
+- The updater refuses, and leaves the running binary untouched, in these cases:
+  - the release has no `signatureBundleUrl`;
+  - the bundle cannot be loaded;
+  - verification fails;
+  - no verifier is configured.
+- `CosignVerifier` calls `cosign verify-blob --bundle`. It pins the signer to `release.yml` of this repository on a `v*` tag, with the GitHub Actions OIDC issuer.
+
+Check a signature by hand:
+
+```bash
+cosign verify-blob --bundle reticora-collector-linux-amd64.sigstore.json \
+  --certificate-identity-regexp '^https://github\.com/DataHub-Chiemgau/Reticora-CMDB/\.github/workflows/release\.yml@refs/tags/v.+$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  reticora-collector-linux-amd64
+cosign verify ghcr.io/datahub-chiemgau/reticora-server:<tag> \
+  --certificate-identity-regexp '…release\.yml@refs/tags/v.+$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 **Planned additions:**
 
-- Docker image build and push to container registry on tag/release.
 - Kubernetes deployment via GitOps (ArgoCD or Flux).
 - Database migration validation in CI.
 - Integration tests against docker-compose services.
