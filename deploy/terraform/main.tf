@@ -50,7 +50,7 @@ output "backup_policy" {
 # replica region is reported on every plan.
 check "backup_replication" {
   assert {
-    condition     = var.environment != "production" || (var.backup_replica_region != null && var.backup_replica_region != local.data_locations.backups)
+    condition     = var.environment != "production" ? true : (var.backup_replica_region == null ? false : var.backup_replica_region != local.data_locations.backups)
     error_message = "production needs backup_replica_region: an EU region other than the backup region (NFR-05)."
   }
 }

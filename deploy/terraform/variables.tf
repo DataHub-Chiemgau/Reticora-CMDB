@@ -66,7 +66,7 @@ variable "backup_region" {
   default     = null
 
   validation {
-    condition     = var.backup_region == null || contains(local.eu_regions, var.backup_region)
+    condition     = var.backup_region == null ? true : contains(local.eu_regions, var.backup_region)
     error_message = "backup_region must be an EU region (NFR-09: backups stay in the EU)."
   }
 }
@@ -77,7 +77,7 @@ variable "log_region" {
   default     = null
 
   validation {
-    condition     = var.log_region == null || contains(local.eu_regions, var.log_region)
+    condition     = var.log_region == null ? true : contains(local.eu_regions, var.log_region)
     error_message = "log_region must be an EU region (NFR-09: logs stay in the EU)."
   }
 }
@@ -88,7 +88,7 @@ variable "search_region" {
   default     = null
 
   validation {
-    condition     = var.search_region == null || contains(local.eu_regions, var.search_region)
+    condition     = var.search_region == null ? true : contains(local.eu_regions, var.search_region)
     error_message = "search_region must be an EU region (NFR-09: the search index stays in the EU)."
   }
 }
@@ -113,7 +113,7 @@ variable "backup_replica_region" {
   default     = null
 
   validation {
-    condition     = var.backup_replica_region == null || contains(local.eu_regions, var.backup_replica_region)
+    condition     = var.backup_replica_region == null ? true : contains(local.eu_regions, var.backup_replica_region)
     error_message = "backup_replica_region must be an EU region (NFR-09: backup replicas stay in the EU)."
   }
 }
