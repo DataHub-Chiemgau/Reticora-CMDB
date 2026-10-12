@@ -273,3 +273,4 @@ API-05;[B];B;backend/internal/tenantapi/handler_test.go;WP-107
 LOC-04;B/G1;B;backend/internal/tenantapi/location_uniques_integration_test.go;WP-108
 LOC-05;B/G1;B;backend/internal/tenantapi/location_uniques_integration_test.go;WP-108
 LOC-06;B/G1;B;backend/internal/tenantapi/location_uniques_integration_test.go;WP-108
+TEN-01;[B], Reseller [P4];B;backend/internal/locations/hierarchy_integration_test.go;WP-109
