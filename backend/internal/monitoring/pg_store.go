@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -36,6 +37,41 @@ func NewPGMetricStore(pool *pgxpool.Pool) *PGMetricStore {
 // store; the router uses it so the HTTP layer and the evaluator share one
 // persistence for rules.
 func (s *PGMetricStore) AlertStore() AlertStore { return s.alerts }
+
+// HealthRefresher returns the refresher of ci.health over this store's
+// database (DB-05).
+func (s *PGMetricStore) HealthRefresher() HealthRefresher { return &PGHealthRefresher{pool: s.pool} }
+
+// HealthWindow is how old the latest sample of a metric may be to count for
+// the health of a CI; older CIs become unknown.
+const HealthWindow = 15 * time.Minute
+
+// PGHealthRefresher computes ci.health of every organization with the
+// database function ci_refresh_health (migration 000090), each in its
+// organization's tenant transaction.
+type PGHealthRefresher struct {
+	pool *pgxpool.Pool
+}
+
+// RefreshHealth implements HealthRefresher.
+func (h *PGHealthRefresher) RefreshHealth(ctx context.Context) error {
+	ids, err := database.OrganizationIDs(ctx, h.pool)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, id := range ids {
+		scope := database.OrgWideScope(id, "")
+		err := database.WithTenant(ctx, h.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			var changed int
+			return tx.QueryRow(ctx, `SELECT ci_refresh_health($1)`, HealthWindow).Scan(&changed)
+		})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("refresh health of %s: %w", id, err))
+		}
+	}
+	return errors.Join(errs...)
+}
 
 // Ingest inserts the samples through metric_sample_v. Every sample
 // must belong to the caller's organization and name a CI visible under its

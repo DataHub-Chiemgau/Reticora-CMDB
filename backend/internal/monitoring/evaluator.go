@@ -30,6 +30,7 @@ type Evaluator struct {
 	metrics  MetricStore
 	alerts   AlertStore
 	notifier Notifier
+	health   HealthRefresher
 	// Now is overridable for tests.
 	Now func() time.Time
 }
@@ -51,6 +52,23 @@ func NewEvaluator(metrics MetricStore, alerts AlertStore, notifier Notifier) *Ev
 		})
 	}
 	return &Evaluator{metrics: metrics, alerts: alerts, notifier: notifier, Now: time.Now}
+}
+
+// HealthRefresher recomputes ci.health from the monitoring state (DB-05).
+type HealthRefresher interface {
+	RefreshHealth(ctx context.Context) error
+}
+
+// HealthRefreshingStore is implemented by stores that can recompute the
+// health of the CIs (the PostgreSQL metric store).
+type HealthRefreshingStore interface {
+	HealthRefresher() HealthRefresher
+}
+
+// WithHealth recomputes the health of the CIs after every evaluation.
+func (e *Evaluator) WithHealth(health HealthRefresher) *Evaluator {
+	e.health = health
+	return e
 }
 
 // Run evaluates rules every interval until ctx is cancelled. It blocks and
@@ -87,6 +105,12 @@ func (e *Evaluator) Evaluate(ctx context.Context) {
 		if err := e.evaluateRule(ctx, rule); err != nil {
 			observability.WorkerErrors.WithLabelValues("alert_evaluator").Inc()
 			slog.Error("alert evaluation failed", "rule_id", rule.ID, "organization_id", rule.OrgID, "rule", rule.Name, "error", err)
+		}
+	}
+	if e.health != nil {
+		if err := e.health.RefreshHealth(ctx); err != nil {
+			observability.WorkerErrors.WithLabelValues("ci_health").Inc()
+			slog.Error("ci health refresh failed", "error", err)
 		}
 	}
 }

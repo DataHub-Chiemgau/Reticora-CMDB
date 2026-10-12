@@ -21,6 +21,10 @@ const (
 	// ReviewKindOverrideConflict: a source reported a value that differs
 	// from a manual override (REC-12); one open item per CI field.
 	ReviewKindOverrideConflict = "override_conflict"
+	// ReviewKindSerialMismatch: the observed serial number of a CI differs
+	// from the serial number of its asset (DB-05, AST-04); opened by the
+	// database, at most one open item per CI.
+	ReviewKindSerialMismatch = "serial_mismatch"
 
 	ReviewStatusOpen      = "open"
 	ReviewStatusResolved  = "resolved"
@@ -289,6 +293,13 @@ func (h *Handler) ResolveReviewItem(w http.ResponseWriter, r *http.Request) {
 	if item.Kind == ReviewKindOverrideConflict && body.Action != "dismiss" {
 		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity",
 			"an override conflict is resolved by dismissing it or by clearing the override")
+		return
+	}
+	// The asset is canonical for the serial number: a mismatch is resolved
+	// by correcting the asset or the device, then dismissing the item.
+	if item.Kind == ReviewKindSerialMismatch && body.Action != "dismiss" {
+		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity",
+			"a serial mismatch is resolved by correcting the asset or the device and dismissing it")
 		return
 	}
 

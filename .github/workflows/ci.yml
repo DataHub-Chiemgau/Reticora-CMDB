@@ -20,7 +20,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.9"
 
       - name: Download dependencies
         run: go mod download
@@ -57,7 +57,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.9"
 
       - name: Download dependencies
         run: go mod download
@@ -109,7 +109,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.9"
 
       - name: Install golang-migrate
         run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
@@ -187,7 +187,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.9"
 
       # Work packages are taken from the PR title and the "Arbeitspakete:" line
       # of the PR template. Untrusted text is only read through env variables.
@@ -225,7 +225,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.9"
 
       - name: Check golangci-lint pin matches the Makefile
         run: grep -qx "GOLANGCI_LINT_VERSION := ${GOLANGCI_LINT_VERSION}" Makefile
@@ -351,7 +351,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.9"
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0

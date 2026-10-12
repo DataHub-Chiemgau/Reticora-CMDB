@@ -58,6 +58,8 @@ var readPermissionFor = map[string]identity.Permission{
 	"export":               identity.PermCIRead,
 	"ip-addresses":         identity.PermIPAMRead,
 	"subnets":              identity.PermIPAMRead,
+	"vlans":                identity.PermIPAMRead,
+	"vrfs":                 identity.PermIPAMRead,
 	"network-interfaces":   identity.PermIPAMRead,
 	"cables":               identity.PermRackRead,
 	"forms":                identity.PermFormRead,
@@ -103,6 +105,9 @@ var readPermissionFor = map[string]identity.Permission{
 // writePermissionOverrides covers resources whose write permission does not
 // follow the read→write suffix convention.
 var writePermissionOverrides = map[string]identity.Permission{
+	// VRFs are managed with their own key (TEN-10, RBA-01).
+	"vrfs": identity.PermVRFManage,
+
 	"sites":     identity.PermLocationWrite,
 	"buildings": identity.PermLocationWrite,
 	"rooms":     identity.PermLocationWrite,

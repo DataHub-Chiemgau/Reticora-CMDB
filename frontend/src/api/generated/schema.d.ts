@@ -433,7 +433,10 @@ export interface paths {
     /** List relationships */
     get: operations['listRelationships'];
     put?: never;
-    /** Create a relationship */
+    /**
+     * Create a relationship
+     * @description contains, contained_by, parent_of, child_of, mounted_in and located_in are projected and cannot be stored (422, REL-01, CH27): containment is the CI's parent_ci_id, mounted_in follows from the rack mount, located_in from the CI's location.
+     */
     post: operations['createRelationship'];
     delete?: never;
     options?: never;
@@ -2382,7 +2385,10 @@ export interface paths {
     /** List mounts in a rack */
     get: operations['listRackMounts'];
     put?: never;
-    /** Mount a CI into a rack */
+    /**
+     * Mount a CI into a rack
+     * @description The location of the CI, or of its asset, becomes the rack; ci_change and the audit record the mount (RCK-03, DB-05).
+     */
     post: operations['createRackMount'];
     delete?: never;
     options?: never;
@@ -2404,11 +2410,17 @@ export interface paths {
     get: operations['getRackMount'];
     put?: never;
     post?: never;
-    /** Delete a rack mount */
+    /**
+     * Delete a rack mount
+     * @description Unmounts the CI. Its location, or its asset's, becomes the rack's room; ci_change and the audit record the change (RCK-03, DB-05).
+     */
     delete: operations['deleteRackMount'];
     options?: never;
     head?: never;
-    /** Update a rack mount */
+    /**
+     * Update a rack mount
+     * @description Repositions the mount (another rack included). The location of the CI, or of its asset, becomes the rack; ci_change and the audit record the change (RCK-03, DB-05).
+     */
     patch: operations['updateRackMount'];
     trace?: never;
   };
@@ -2531,6 +2543,89 @@ export interface paths {
     options?: never;
     head?: never;
     patch?: never;
+    trace?: never;
+  };
+  '/api/v1/vrfs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the VRFs of the organization, the default first */
+    get: operations['listVRFs'];
+    put?: never;
+    /** Create a VRF (vrf:manage) */
+    post: operations['createVRF'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/vrfs/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a VRF */
+    get: operations['getVRF'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a VRF (vrf:manage)
+     * @description The default VRF and VRFs with subnets or addresses cannot be deleted (422).
+     */
+    delete: operations['deleteVRF'];
+    options?: never;
+    head?: never;
+    /** Rename a VRF or change its description (vrf:manage) */
+    patch: operations['updateVRF'];
+    trace?: never;
+  };
+  '/api/v1/vlans': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the VLAN catalog */
+    get: operations['listVLANs'];
+    put?: never;
+    /** Create a VLAN */
+    post: operations['createVLAN'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/vlans/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a VLAN */
+    get: operations['getVLAN'];
+    put?: never;
+    post?: never;
+    /** Delete a VLAN; subnets and interfaces lose the reference */
+    delete: operations['deleteVLAN'];
+    options?: never;
+    head?: never;
+    /** Update a VLAN */
+    patch: operations['updateVLAN'];
     trace?: never;
   };
   '/api/v1/subnets': {
@@ -5227,8 +5322,22 @@ export interface components {
        * @description CI version, also the ETag (API-07).
        */
       readonly version?: number;
-      /** @description Node of the canonical location tree (DB-05); site_id and room_id are derived from it. */
+      /** @description Node of the canonical location tree (DB-05); site_id and room_id are derived from it. For a CI linked to an asset it mirrors the asset's location and cannot be written (422). */
       location_id?: string;
+      /** @description Asset the CI is linked to (DB-05, AST-04). The asset is canonical for serial number, location, physical lifecycle and inventory data; they appear read-only under asset. */
+      asset_id?: string;
+      asset?: components['schemas']['CIAssetFacts'];
+      /** @description CI this one is physically part of (chassis → blade, AST-05); the relationship contains is projected from it. Cycles are rejected (422). */
+      parent_ci_id?: string;
+      /** @description Software lifecycle; only CI types with a lifecycle model have one, and it changes through lifecycle transitions (DB-05). */
+      readonly lifecycle_state?: string;
+      /**
+       * @description Computed from the monitoring state: critical or warning when the latest sample of a metric breaches an enabled alert rule of that severity, ok with samples and no breach, unknown without recent samples (DB-05).
+       * @enum {string}
+       */
+      readonly health?: 'ok' | 'warning' | 'critical' | 'unknown';
+      /** Format: date-time */
+      readonly health_updated_at?: string;
       /** @description Site of location_id, derived by the server. */
       readonly site_id?: string;
       /** @description Room of location_id (the location or its nearest room ancestor), derived by the server. */
@@ -5238,6 +5347,7 @@ export interface components {
       status: components['schemas']['CIStatus'];
       manufacturer?: string;
       model?: string;
+      /** @description Observed serial number used for identity resolution. For a linked CI the canonical serial number is asset.serial_number; a difference opens a review item serial_mismatch, a manual write is rejected (422). */
       serial_number?: string;
       /** @description RFID tag for direct-access labels and scan flows. */
       rfid_tag?: string;
@@ -5268,11 +5378,34 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description Canonical data of the linked asset, shown read-only on the CI (DB-05). */
+    CIAssetFacts: {
+      id: string;
+      asset_tag: string;
+      name: string;
+      serial_number?: string;
+      location_id?: string;
+      /** @description Physical lifecycle of the asset. */
+      lifecycle_state?: string;
+      status: string;
+      barcode?: string;
+      rfid_tag?: string;
+      /** Format: date */
+      purchase_date?: string;
+      /** Format: date */
+      warranty_end?: string;
+      supplier?: string;
+      invoice_number?: string;
+    };
     CreateCIRequest: {
       ci_type_id: string;
       client_id?: string;
       /** @description Node of the location tree; site and room of the CI follow from it. */
       location_id?: string;
+      /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
+      asset_id?: string;
+      /** @description Containing CI (empty string clears it on update); cycles are rejected (422). */
+      parent_ci_id?: string;
       name: string;
       status?: components['schemas']['CIStatus'];
       manufacturer?: string;
@@ -5301,6 +5434,10 @@ export interface components {
       client_id?: string;
       /** @description Node of the location tree; site and room of the CI follow from it. */
       location_id?: string;
+      /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
+      asset_id?: string;
+      /** @description Containing CI (empty string clears it on update); cycles are rejected (422). */
+      parent_ci_id?: string;
       manufacturer?: string;
       model?: string;
       serial_number?: string;
@@ -5389,7 +5526,12 @@ export interface components {
       id: string;
       organization_id: string;
       source_ci_id: string;
+      /** @description Empty for mounted_in and located_in, whose target is target_location_id. */
       target_ci_id: string;
+      /** @description Structural relationship derived from parent_ci_id (contains), rack_mount (mounted_in) or the CI's location (located_in); it cannot be changed through this API (DB-05, CH27). */
+      readonly projected?: boolean;
+      /** @description Rack (mounted_in) or location (located_in) of a projected relationship. */
+      readonly target_location_id?: string;
       rel_type: components['schemas']['RelationshipType'];
       attributes: {
         [key: string]: unknown;
@@ -7482,6 +7624,8 @@ export interface components {
       face?: 'front' | 'rear' | 'both';
     };
     UpdateRackMountRequest: {
+      /** @description Moves the mount to another rack; the CI's location follows (RCK-03). */
+      rack_id?: string;
       position_u?: number;
       height_u?: number;
       /** @enum {string} */
@@ -7602,8 +7746,11 @@ export interface components {
       client_id?: string;
       site_id?: string;
       cidr: string;
+      /** @description VRF of the subnet (CH10); the CIDR is unique per VRF. */
+      vrf_id?: string;
       name?: string;
-      vlan_id?: number;
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
       description?: string;
@@ -7617,8 +7764,11 @@ export interface components {
       client_id?: string;
       site_id?: string;
       cidr: string;
+      /** @description VRF of the subnet; the organization's default VRF when omitted. */
+      vrf_id?: string;
       name?: string;
-      vlan_id?: number;
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
       description?: string;
@@ -7628,11 +7778,66 @@ export interface components {
       client_id?: string;
       site_id?: string;
       name?: string;
-      vlan_id?: number;
+      /** @description Moves the subnet and its addresses to another VRF (empty string = default VRF). */
+      vrf_id?: string;
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
       description?: string;
       is_management?: boolean;
+    };
+    /** @description VRF of the organization (TEN-10, CH10). Every organization has exactly one default VRF "global", created with the organization; it cannot be deleted. */
+    VRF: {
+      id: string;
+      organization_id: string;
+      name: string;
+      description?: string;
+      readonly is_default: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateVRFRequest: {
+      name: string;
+      description?: string;
+    };
+    UpdateVRFRequest: {
+      name?: string;
+      description?: string;
+    };
+    VRFListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['VRF'][];
+    };
+    /** @description Entry of the VLAN catalog (NET-08). The number is unique per site, or per organization for VLANs without site (E-24). */
+    VLAN: {
+      id: string;
+      organization_id: string;
+      /** @description Client of the site. */
+      readonly client_id?: string;
+      site_id?: string;
+      vlan_id: number;
+      name: string;
+      description?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateVLANRequest: {
+      site_id?: string;
+      vlan_id: number;
+      name: string;
+      description?: string;
+    };
+    UpdateVLANRequest: {
+      vlan_id?: number;
+      name?: string;
+      description?: string;
+    };
+    VLANListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['VLAN'][];
     };
     SubnetListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Subnet'][];
@@ -7643,6 +7848,8 @@ export interface components {
       subnet_id?: string;
       interface_id?: string;
       address: string;
+      /** @description VRF of the subnet; addresses are unique per VRF and interface (NET-03). */
+      readonly vrf_id?: string;
       /** @enum {string} */
       status: 'active' | 'reserved' | 'deprecated' | 'dhcp' | 'available';
       dns_name?: string;
@@ -7684,6 +7891,8 @@ export interface components {
       interface_type:
         'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
+      /** @description VLAN of the VLAN catalog (NET-01). */
+      vlan_id?: string;
       is_management: boolean;
       is_uplink: boolean;
       admin_status: string;
@@ -7701,6 +7910,8 @@ export interface components {
       interface_type?:
         'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
+      /** @description VLAN of the VLAN catalog (NET-01). */
+      vlan_id?: string;
       is_management?: boolean;
       is_uplink?: boolean;
       admin_status?: string;
@@ -7714,6 +7925,8 @@ export interface components {
       interface_type?:
         'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
+      /** @description VLAN of the VLAN catalog (NET-01). */
+      vlan_id?: string;
       is_management?: boolean;
       is_uplink?: boolean;
       admin_status?: string;
@@ -8842,6 +9055,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Structural relationship type, which is projected and cannot be stored */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13904,6 +14126,289 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+    };
+  };
+  listVRFs: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of VRFs */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VRFListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createVRF: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateVRFRequest'];
+      };
+    };
+    responses: {
+      /** @description VRF created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VRF'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  getVRF: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description VRF */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VRF'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteVRF: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description VRF deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description Default VRF or VRF still in use */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  updateVRF: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateVRFRequest'];
+      };
+    };
+    responses: {
+      /** @description VRF updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VRF'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  listVLANs: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        site_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of VLANs */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VLANListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createVLAN: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateVLANRequest'];
+      };
+    };
+    responses: {
+      /** @description VLAN created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VLAN'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getVLAN: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description VLAN */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VLAN'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteVLAN: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description VLAN deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateVLAN: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateVLANRequest'];
+      };
+    };
+    responses: {
+      /** @description VLAN updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VLAN'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listSubnets: {

@@ -254,7 +254,14 @@ func (r *MemoryRepository) UpdateMount(_ context.Context, orgID, id string, req 
 	if !ok || m.OrganizationID != orgID {
 		return nil, ErrNotFound
 	}
-	rk := r.racks[m.RackID]
+	rackID := m.RackID
+	if req.RackID != nil && *req.RackID != "" {
+		rackID = *req.RackID
+	}
+	rk := r.racks[rackID]
+	if rk == nil || rk.OrganizationID != orgID {
+		return nil, ErrRackNotFound
+	}
 	pos, height, face := m.PositionU, m.HeightU, m.Face
 	if req.PositionU != nil {
 		pos = *req.PositionU
@@ -269,11 +276,11 @@ func (r *MemoryRepository) UpdateMount(_ context.Context, orgID, id string, req 
 		}
 	}
 	if rk != nil {
-		if err := validateMountFit(rk.HeightU, pos, height, face, r.mountsForRack(m.RackID), id); err != nil {
+		if err := validateMountFit(rk.HeightU, pos, height, face, r.mountsForRack(rackID), id); err != nil {
 			return nil, err
 		}
 	}
-	m.PositionU, m.HeightU, m.Face = pos, height, face
+	m.RackID, m.PositionU, m.HeightU, m.Face = rackID, pos, height, face
 	m.UpdatedAt = time.Now().UTC()
 	cp := *m
 	return &cp, nil

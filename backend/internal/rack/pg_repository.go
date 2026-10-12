@@ -291,7 +291,10 @@ func (r *PGRepository) CreateMount(ctx context.Context, m *RackMount) error {
 			return fmt.Errorf("%w: %v", ErrValidation, err)
 		}
 		// The mounted CI must be visible under the scope as well.
-		return requireVisible(ctx, tx, "rack_mount", mountVisible, m.ID)
+		if visErr := requireVisible(ctx, tx, "rack_mount", mountVisible, m.ID); visErr != nil {
+			return visErr
+		}
+		return recordPlacement(ctx, tx, m.OrganizationID, m.CIID, "ci.rack_mounted", nil, m)
 	})
 }
 
@@ -318,7 +321,10 @@ func (r *PGRepository) UpdateMount(ctx context.Context, orgID, id string, req Up
 		if err != nil {
 			return err
 		}
-		pos, height, face := current.PositionU, current.HeightU, current.Face
+		pos, height, face, rackID := current.PositionU, current.HeightU, current.Face, current.RackID
+		if req.RackID != nil && *req.RackID != "" {
+			rackID = *req.RackID
+		}
 		if req.PositionU != nil {
 			pos = *req.PositionU
 		}
@@ -332,10 +338,14 @@ func (r *PGRepository) UpdateMount(ctx context.Context, orgID, id string, req Up
 			}
 		}
 		var rackHeight int
-		if heightErr := tx.QueryRow(ctx, "SELECT height_u FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, orgID, current.RackID).Scan(&rackHeight); heightErr != nil {
+		heightErr := tx.QueryRow(ctx, "SELECT height_u FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, orgID, rackID).Scan(&rackHeight)
+		if heightErr == pgx.ErrNoRows {
+			return ErrRackNotFound
+		}
+		if heightErr != nil {
 			return heightErr
 		}
-		existing, err := mountsForRackTx(ctx, tx, orgID, current.RackID)
+		existing, err := mountsForRackTx(ctx, tx, orgID, rackID)
 		if err != nil {
 			return err
 		}
@@ -343,24 +353,28 @@ func (r *PGRepository) UpdateMount(ctx context.Context, orgID, id string, req Up
 			return err
 		}
 		m, err = scanMount(tx.QueryRow(ctx,
-			`UPDATE rack_mount SET position_u = $3, height_u = $4, face = $5, updated_at = NOW()
+			`UPDATE rack_mount SET rack_id = $6, position_u = $3, height_u = $4, face = $5, updated_at = NOW()
 			 WHERE organization_id = $1 AND id = $2 RETURNING `+mountCols,
-			orgID, id, pos, height, face))
-		return err
+			orgID, id, pos, height, face, rackID))
+		if err != nil {
+			return err
+		}
+		return recordPlacement(ctx, tx, orgID, m.CIID, "ci.rack_moved", current, m)
 	})
 	return m, err
 }
 
 func (r *PGRepository) DeleteMount(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "DELETE FROM rack_mount WHERE organization_id = $1 AND id = $2 AND "+mountVisible, orgID, id)
+		current, err := scanMount(tx.QueryRow(ctx,
+			"DELETE FROM rack_mount WHERE organization_id = $1 AND id = $2 AND "+mountVisible+" RETURNING "+mountCols, orgID, id))
+		if err == pgx.ErrNoRows {
+			return ErrNotFound
+		}
 		if err != nil {
 			return err
 		}
-		if tag.RowsAffected() == 0 {
-			return ErrNotFound
-		}
-		return nil
+		return recordPlacement(ctx, tx, orgID, current.CIID, "ci.rack_unmounted", current, nil)
 	})
 }
 

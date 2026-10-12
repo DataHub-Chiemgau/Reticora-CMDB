@@ -284,7 +284,7 @@ func (h *Handler) DeleteMount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.DeleteMount(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "rack mount not found")
+		writeRepoError(w, err, "rack mount not found")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

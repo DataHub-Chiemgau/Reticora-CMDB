@@ -16,9 +16,27 @@ type Item struct {
 	// LocationID is the location of the CI in the canonical location tree
 	// (DB-05). SiteID and RoomID are derived from it by the database and are
 	// read-only.
-	LocationID      string         `json:"location_id,omitempty"`
-	SiteID          string         `json:"site_id,omitempty"`
-	RoomID          string         `json:"room_id,omitempty"`
+	LocationID string `json:"location_id,omitempty"`
+	SiteID     string `json:"site_id,omitempty"`
+	RoomID     string `json:"room_id,omitempty"`
+	// AssetID links the CI to its asset (DB-05, AST-04). The asset is then
+	// canonical for serial number, location, physical lifecycle and
+	// inventory data: LocationID mirrors the asset's location and Asset
+	// shows the asset's data read-only. SerialNumber stays the observed
+	// value used for identity resolution.
+	AssetID string      `json:"asset_id,omitempty"`
+	Asset   *AssetFacts `json:"asset,omitempty"`
+	// ParentCIID is the CI this one is physically part of (chassis → blade,
+	// AST-05); the relationship contains is projected from it (DB-05).
+	ParentCIID string `json:"parent_ci_id,omitempty"`
+	// LifecycleState is the software lifecycle; only CI types with a
+	// lifecycle model have one, and it changes through lifecycle
+	// transitions (DB-05).
+	LifecycleState string `json:"lifecycle_state,omitempty"`
+	// Health is computed from the monitoring state and read-only (DB-05):
+	// ok, warning, critical or unknown.
+	Health          string         `json:"health"`
+	HealthUpdatedAt *time.Time     `json:"health_updated_at,omitempty"`
 	CITypeID        string         `json:"ci_type_id"`
 	Name            string         `json:"name"`
 	Status          string         `json:"status"` // active|inactive|maintenance|decommissioned|unknown
@@ -47,11 +65,31 @@ type Item struct {
 	UpdatedAt string     `json:"updated_at"`
 }
 
+// AssetFacts are the canonical data of the asset a CI is linked to, shown
+// read-only on the CI (DB-05).
+type AssetFacts struct {
+	ID             string `json:"id"`
+	AssetTag       string `json:"asset_tag"`
+	Name           string `json:"name"`
+	SerialNumber   string `json:"serial_number,omitempty"`
+	LocationID     string `json:"location_id,omitempty"`
+	LifecycleState string `json:"lifecycle_state,omitempty"`
+	Status         string `json:"status"`
+	Barcode        string `json:"barcode,omitempty"`
+	RFIDTag        string `json:"rfid_tag,omitempty"`
+	PurchaseDate   string `json:"purchase_date,omitempty"`
+	WarrantyEnd    string `json:"warranty_end,omitempty"`
+	Supplier       string `json:"supplier,omitempty"`
+	InvoiceNumber  string `json:"invoice_number,omitempty"`
+}
+
 // CreateRequest is the payload for creating a CI.
 type CreateRequest struct {
 	CITypeID        string         `json:"ci_type_id"`
 	ClientID        string         `json:"client_id,omitempty"`
 	LocationID      string         `json:"location_id,omitempty"`
+	AssetID         string         `json:"asset_id,omitempty"`
+	ParentCIID      string         `json:"parent_ci_id,omitempty"`
 	Name            string         `json:"name"`
 	Status          string         `json:"status,omitempty"`
 	Manufacturer    string         `json:"manufacturer,omitempty"`
@@ -72,10 +110,14 @@ type CreateRequest struct {
 
 // UpdateRequest is the payload for updating a CI.
 type UpdateRequest struct {
-	Name            *string        `json:"name,omitempty"`
-	Status          *string        `json:"status,omitempty"`
-	ClientID        *string        `json:"client_id,omitempty"`
-	LocationID      *string        `json:"location_id,omitempty"`
+	Name       *string `json:"name,omitempty"`
+	Status     *string `json:"status,omitempty"`
+	ClientID   *string `json:"client_id,omitempty"`
+	LocationID *string `json:"location_id,omitempty"`
+	// AssetID links ("" unlinks) the CI to an asset.
+	AssetID *string `json:"asset_id,omitempty"`
+	// ParentCIID sets ("" clears) the containing CI.
+	ParentCIID      *string        `json:"parent_ci_id,omitempty"`
 	Manufacturer    *string        `json:"manufacturer,omitempty"`
 	Model           *string        `json:"model,omitempty"`
 	SerialNumber    *string        `json:"serial_number,omitempty"`

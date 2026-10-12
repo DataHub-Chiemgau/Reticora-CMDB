@@ -43,6 +43,18 @@ type Repository interface {
 	CreateInterface(ctx context.Context, ni *NetworkInterface) error
 	UpdateInterface(ctx context.Context, orgID, id string, req UpdateInterfaceRequest) (*NetworkInterface, error)
 	DeleteInterface(ctx context.Context, orgID, id string) error
+
+	ListVLANs(ctx context.Context, orgID, siteID string, page api.PaginationParams) ([]VLAN, int, error)
+	GetVLAN(ctx context.Context, orgID, id string) (*VLAN, error)
+	CreateVLAN(ctx context.Context, v *VLAN) error
+	UpdateVLAN(ctx context.Context, orgID, id string, req UpdateVLANRequest) (*VLAN, error)
+	DeleteVLAN(ctx context.Context, orgID, id string) error
+
+	ListVRFs(ctx context.Context, orgID string, page api.PaginationParams) ([]VRF, int, error)
+	GetVRF(ctx context.Context, orgID, id string) (*VRF, error)
+	CreateVRF(ctx context.Context, v *VRF) error
+	UpdateVRF(ctx context.Context, orgID, id string, req UpdateVRFRequest) (*VRF, error)
+	DeleteVRF(ctx context.Context, orgID, id string) error
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -51,6 +63,8 @@ type MemoryRepository struct {
 	subnets    map[string]*Subnet
 	addresses  map[string]*IPAddress
 	interfaces map[string]*NetworkInterface
+	vlans      map[string]*VLAN
+	vrfs       map[string]*VRF
 	seq        int
 }
 
@@ -60,6 +74,8 @@ func NewMemoryRepository() *MemoryRepository {
 		subnets:    make(map[string]*Subnet),
 		addresses:  make(map[string]*IPAddress),
 		interfaces: make(map[string]*NetworkInterface),
+		vlans:      make(map[string]*VLAN),
+		vrfs:       make(map[string]*VRF),
 	}
 }
 
@@ -113,8 +129,11 @@ func (r *MemoryRepository) GetSubnet(_ context.Context, orgID, id string) (*Subn
 func (r *MemoryRepository) CreateSubnet(_ context.Context, s *Subnet) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if s.VRFID == "" {
+		s.VRFID = r.defaultVRF(s.OrganizationID).ID
+	}
 	for _, e := range r.subnets {
-		if e.OrganizationID == s.OrganizationID && e.CIDR == s.CIDR {
+		if e.OrganizationID == s.OrganizationID && e.VRFID == s.VRFID && e.CIDR == s.CIDR {
 			return fmt.Errorf("%w: duplicate cidr", ErrValidation)
 		}
 	}
@@ -143,8 +162,11 @@ func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req
 	if req.Name != nil {
 		s.Name = *req.Name
 	}
+	if req.VRFID != nil {
+		s.VRFID = *req.VRFID
+	}
 	if req.VLANID != nil {
-		s.VLANID = req.VLANID
+		s.VLANID = *req.VLANID
 	}
 	if req.Gateway != nil {
 		s.Gateway = *req.Gateway
@@ -208,8 +230,12 @@ func (r *MemoryRepository) GetIPAddress(_ context.Context, orgID, id string) (*I
 func (r *MemoryRepository) CreateIPAddress(_ context.Context, a *IPAddress) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	a.VRFID = r.defaultVRF(a.OrganizationID).ID
+	if sn, ok := r.subnets[a.SubnetID]; ok && sn.VRFID != "" {
+		a.VRFID = sn.VRFID
+	}
 	for _, e := range r.addresses {
-		if e.OrganizationID == a.OrganizationID && e.Address == a.Address {
+		if e.OrganizationID == a.OrganizationID && e.VRFID == a.VRFID && e.InterfaceID == a.InterfaceID && e.Address == a.Address {
 			return fmt.Errorf("%w: duplicate address", ErrValidation)
 		}
 	}
@@ -318,6 +344,9 @@ func (r *MemoryRepository) UpdateInterface(_ context.Context, orgID, id string, 
 	}
 	if req.SpeedMbps != nil {
 		ni.SpeedMbps = req.SpeedMbps
+	}
+	if req.VLANID != nil {
+		ni.VLANID = *req.VLANID
 	}
 	if req.IsManagement != nil {
 		ni.IsManagement = *req.IsManagement

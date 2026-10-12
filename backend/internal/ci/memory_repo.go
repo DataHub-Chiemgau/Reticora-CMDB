@@ -116,6 +116,9 @@ func (r *MemoryRepository) Create(ctx context.Context, item *Item) error {
 	item.CreatedAt = now
 	item.UpdatedAt = now
 	item.Version = 1
+	if item.Health == "" {
+		item.Health = "unknown"
+	}
 	r.items[item.ID] = item
 	return nil
 }
@@ -149,6 +152,12 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 	}
 	if req.FirmwareVersion != nil {
 		item.FirmwareVersion = *req.FirmwareVersion
+	}
+	if req.AssetID != nil {
+		item.AssetID = *req.AssetID
+	}
+	if req.ParentCIID != nil {
+		item.ParentCIID = *req.ParentCIID
 	}
 	if req.LocationID != nil {
 		// Without the location tree, site and room cannot be derived.

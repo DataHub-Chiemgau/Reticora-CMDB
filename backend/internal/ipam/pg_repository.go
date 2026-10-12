@@ -29,12 +29,12 @@ type scanner interface {
 // --- Subnets ---
 
 const subnetCols = `id::text, organization_id::text, COALESCE(client_id::text,''), COALESCE(site_id::text,''),
-	cidr::text, COALESCE(name,''), vlan_id, COALESCE(gateway::text,''), COALESCE(dns_servers::text[], '{}'),
+	cidr::text, vrf_id::text, COALESCE(name,''), COALESCE(vlan_id::text,''), COALESCE(gateway::text,''), COALESCE(dns_servers::text[], '{}'),
 	COALESCE(description,''), is_management, created_at, updated_at`
 
 func scanSubnet(s scanner) (*Subnet, error) {
 	sn := &Subnet{}
-	if err := s.Scan(&sn.ID, &sn.OrganizationID, &sn.ClientID, &sn.SiteID, &sn.CIDR, &sn.Name,
+	if err := s.Scan(&sn.ID, &sn.OrganizationID, &sn.ClientID, &sn.SiteID, &sn.CIDR, &sn.VRFID, &sn.Name,
 		&sn.VLANID, &sn.Gateway, &sn.DNSServers, &sn.Description, &sn.IsManagement, &sn.CreatedAt, &sn.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -131,11 +131,12 @@ func (r *PGRepository) GetSubnet(ctx context.Context, orgID, id string) (*Subnet
 func (r *PGRepository) CreateSubnet(ctx context.Context, s *Subnet) error {
 	return database.WithRequestTenant(ctx, r.pool, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
-			`INSERT INTO subnet (organization_id, client_id, site_id, cidr, name, vlan_id, gateway, dns_servers, description, is_management)
-			 VALUES ($1,$2,$3,$4::cidr,$5,$6,$7::inet,$8::inet[],$9,$10) RETURNING id::text, created_at, updated_at`,
+			`INSERT INTO subnet (organization_id, client_id, site_id, cidr, name, vlan_id, gateway, dns_servers, description, is_management, vrf_id)
+			 VALUES ($1,$2,$3,$4::cidr,$5,$6,$7::inet,$8::inet[],$9,$10,$11) RETURNING id::text, vrf_id::text, created_at, updated_at`,
 			s.OrganizationID, nilIfEmpty(s.ClientID), nilIfEmpty(s.SiteID), s.CIDR, nilIfEmpty(s.Name),
-			s.VLANID, nilIfEmpty(s.Gateway), dnsServersArg(s.DNSServers), nilIfEmpty(s.Description), s.IsManagement,
-		).Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
+			nilIfEmpty(s.VLANID), nilIfEmpty(s.Gateway), dnsServersArg(s.DNSServers), nilIfEmpty(s.Description), s.IsManagement,
+			nilIfEmpty(s.VRFID),
+		).Scan(&s.ID, &s.VRFID, &s.CreatedAt, &s.UpdatedAt)
 	})
 }
 
@@ -160,9 +161,15 @@ func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req U
 			args = append(args, nilIfEmpty(*req.Name))
 			pos++
 		}
+		if req.VRFID != nil {
+			// An empty VRF falls back to the default VRF (trigger).
+			sets = append(sets, fmt.Sprintf("vrf_id = $%d", pos))
+			args = append(args, nilIfEmpty(*req.VRFID))
+			pos++
+		}
 		if req.VLANID != nil {
 			sets = append(sets, fmt.Sprintf("vlan_id = $%d", pos))
-			args = append(args, *req.VLANID)
+			args = append(args, nilIfEmpty(*req.VLANID))
 			pos++
 		}
 		if req.Gateway != nil {
@@ -222,12 +229,12 @@ func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, visible, id
 // --- IP Addresses ---
 
 const ipCols = `id::text, organization_id::text, COALESCE(subnet_id::text,''), COALESCE(interface_id::text,''),
-	address::text, status, COALESCE(dns_name,''), COALESCE(description,''), last_seen_at, created_at, updated_at`
+	address::text, vrf_id::text, status, COALESCE(dns_name,''), COALESCE(description,''), last_seen_at, created_at, updated_at`
 
 func scanIP(s scanner) (*IPAddress, error) {
 	a := &IPAddress{}
 	var lastSeen *time.Time
-	if err := s.Scan(&a.ID, &a.OrganizationID, &a.SubnetID, &a.InterfaceID, &a.Address, &a.Status,
+	if err := s.Scan(&a.ID, &a.OrganizationID, &a.SubnetID, &a.InterfaceID, &a.Address, &a.VRFID, &a.Status,
 		&a.DNSName, &a.Description, &lastSeen, &a.CreatedAt, &a.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -289,10 +296,10 @@ func (r *PGRepository) CreateIPAddress(ctx context.Context, a *IPAddress) error 
 	return database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
 			`INSERT INTO ip_address (organization_id, subnet_id, interface_id, address, status, dns_name, description)
-			 VALUES ($1,$2,$3,$4::inet,$5,$6,$7) RETURNING id::text, created_at, updated_at`,
+			 VALUES ($1,$2,$3,$4::inet,$5,$6,$7) RETURNING id::text, vrf_id::text, created_at, updated_at`,
 			a.OrganizationID, nilIfEmpty(a.SubnetID), nilIfEmpty(a.InterfaceID), a.Address, a.Status,
 			nilIfEmpty(a.DNSName), nilIfEmpty(a.Description),
-		).Scan(&a.ID, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		).Scan(&a.ID, &a.VRFID, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return err
 		}
 		return requireVisible(ctx, tx, "ip_address", ipVisible, a.ID)
@@ -357,12 +364,12 @@ func (r *PGRepository) DeleteIPAddress(ctx context.Context, orgID, id string) er
 // --- Network Interfaces ---
 
 const nicCols = `id::text, organization_id::text, ci_id::text, name, COALESCE(mac_address::text,''), interface_type,
-	speed_mbps, is_management, is_uplink, admin_status, oper_status, COALESCE(description,''), created_at, updated_at`
+	speed_mbps, COALESCE(vlan_id::text,''), is_management, is_uplink, admin_status, oper_status, COALESCE(description,''), created_at, updated_at`
 
 func scanNIC(s scanner) (*NetworkInterface, error) {
 	ni := &NetworkInterface{}
 	if err := s.Scan(&ni.ID, &ni.OrganizationID, &ni.CIID, &ni.Name, &ni.MACAddress, &ni.InterfaceType,
-		&ni.SpeedMbps, &ni.IsManagement, &ni.IsUplink, &ni.AdminStatus, &ni.OperStatus, &ni.Description,
+		&ni.SpeedMbps, &ni.VLANID, &ni.IsManagement, &ni.IsUplink, &ni.AdminStatus, &ni.OperStatus, &ni.Description,
 		&ni.CreatedAt, &ni.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -411,10 +418,10 @@ func (r *PGRepository) GetInterface(ctx context.Context, orgID, id string) (*Net
 func (r *PGRepository) CreateInterface(ctx context.Context, ni *NetworkInterface) error {
 	return database.WithRequestTenant(ctx, r.pool, ni.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
-			`INSERT INTO network_interface (organization_id, ci_id, name, mac_address, interface_type, speed_mbps, is_management, is_uplink, admin_status, oper_status, description)
-			 VALUES ($1,$2,$3,$4::macaddr,$5,$6,$7,$8,$9,$10,$11) RETURNING id::text, created_at, updated_at`,
+			`INSERT INTO network_interface (organization_id, ci_id, name, mac_address, interface_type, speed_mbps, is_management, is_uplink, admin_status, oper_status, description, vlan_id)
+			 VALUES ($1,$2,$3,$4::macaddr,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id::text, created_at, updated_at`,
 			ni.OrganizationID, ni.CIID, ni.Name, nilIfEmpty(ni.MACAddress), ni.InterfaceType, ni.SpeedMbps,
-			ni.IsManagement, ni.IsUplink, ni.AdminStatus, ni.OperStatus, nilIfEmpty(ni.Description),
+			ni.IsManagement, ni.IsUplink, ni.AdminStatus, ni.OperStatus, nilIfEmpty(ni.Description), nilIfEmpty(ni.VLANID),
 		).Scan(&ni.ID, &ni.CreatedAt, &ni.UpdatedAt); err != nil {
 			return err
 		}
@@ -451,6 +458,11 @@ func (r *PGRepository) UpdateInterface(ctx context.Context, orgID, id string, re
 		if req.IsManagement != nil {
 			sets = append(sets, fmt.Sprintf("is_management = $%d", pos))
 			args = append(args, *req.IsManagement)
+			pos++
+		}
+		if req.VLANID != nil {
+			sets = append(sets, fmt.Sprintf("vlan_id = $%d", pos))
+			args = append(args, nilIfEmpty(*req.VLANID))
 			pos++
 		}
 		if req.IsUplink != nil {

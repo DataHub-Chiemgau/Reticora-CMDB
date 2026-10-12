@@ -352,6 +352,10 @@ func main() {
 	// pending durations.
 	if alertStore, ok := repos.Metrics.(monitoring.EvaluatingStore); ok {
 		evaluator := monitoring.NewEvaluator(repos.Metrics, alertStore.AlertStore(), nil)
+		// The health of the CIs follows the monitoring state (DB-05).
+		if refresher, ok := repos.Metrics.(monitoring.HealthRefreshingStore); ok {
+			evaluator.WithHealth(refresher.HealthRefresher())
+		}
 		evalCtx, stopEvaluator := context.WithCancel(context.Background())
 		defer stopEvaluator()
 		go evaluator.Run(evalCtx, time.Minute)

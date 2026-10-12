@@ -49,41 +49,70 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 const visibleEndpoints = `EXISTS (SELECT 1 FROM ci WHERE ci.id = ci_relationship.source_ci_id)
 	AND EXISTS (SELECT 1 FROM ci WHERE ci.id = ci_relationship.target_ci_id)`
 
+// projectedEdges are the structural relationships of ci_structure_edge in
+// the column layout of relationshipSelectColumns (DB-05, CH27). The id is
+// derived from the edge so it is stable across reads.
+const projectedEdges = `
+	SELECT md5(e.rel_type || ':' || e.source_ci_id::text || ':' ||
+	           COALESCE(e.target_ci_id::text, e.target_location_id::text))::uuid AS id,
+	       e.organization_id, e.source_ci_id, e.target_ci_id, e.rel_type,
+	       '{}'::jsonb AS attributes, 'projection'::text AS source, NULL::numeric AS confidence,
+	       NULL::timestamptz AS first_seen_at, NULL::timestamptz AS last_seen_at,
+	       'verified'::text AS verification_state, NULL::text AS source_system, NULL::text AS notes,
+	       src.created_at, src.updated_at, true AS projected, e.target_location_id
+	FROM ci_structure_edge e
+	JOIN ci src ON src.id = e.source_ci_id
+	WHERE e.target_ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = e.target_ci_id)`
+
+// graphEdges are the stored relationships plus the projected containment
+// (CI → CI), the edges topology and impact traverse.
+const graphEdges = `(
+	SELECT id, organization_id, source_ci_id, target_ci_id, rel_type, source FROM ci_relationship
+	UNION ALL
+	SELECT md5('contains:' || source_ci_id::text || ':' || target_ci_id::text)::uuid, organization_id,
+	       source_ci_id, target_ci_id, rel_type, 'projection'
+	FROM ci_structure_edge WHERE rel_type = 'contains'
+)`
+
+// List returns the relationships of the organization (of one CI when ciID
+// is set): the stored ones and, after them, the projected structural ones.
 func (r *PGRepository) List(ctx context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
 	items := make([]Relationship, 0)
 	var total int
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		whereParts := []string{"organization_id = $1", visibleEndpoints}
 		args := []any{orgID}
-		argPos := 2
+		ciFilter := "true"
 		if ciID != "" {
-			whereParts = append(whereParts, fmt.Sprintf("(source_ci_id = $%d OR target_ci_id = $%d)", argPos, argPos))
+			ciFilter = "(source_ci_id = $2 OR target_ci_id = $2)"
 			args = append(args, ciID)
-			argPos++
 		}
-
-		whereClause := strings.Join(whereParts, " AND ")
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ci_relationship WHERE "+whereClause, args...).Scan(&total); err != nil {
+		edges := fmt.Sprintf(`
+			SELECT id, organization_id, source_ci_id, target_ci_id, rel_type, attributes, source, confidence,
+			       first_seen_at, last_seen_at, verification_state, source_system, notes, created_at, updated_at,
+			       false AS projected, NULL::uuid AS target_location_id
+			FROM ci_relationship WHERE organization_id = $1 AND %s AND %s
+			UNION ALL
+			SELECT * FROM (%s) p WHERE p.organization_id = $1 AND %s`,
+			visibleEndpoints, ciFilter, projectedEdges, ciFilter)
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ("+edges+") e", args...).Scan(&total); err != nil {
 			return fmt.Errorf("count relationships: %w", err)
 		}
 
-		listArgs := append(append([]any{}, args...), page.Limit, page.Offset)
-		query := fmt.Sprintf(
-			"SELECT %s FROM ci_relationship WHERE %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d",
-			relationshipSelectColumns,
-			whereClause,
-			argPos,
-			argPos+1,
-		)
-		rows, err := tx.Query(ctx, query, listArgs...)
+		limitPos := len(args) + 1
+		query := fmt.Sprintf(`SELECT id::text, organization_id::text, source_ci_id::text, COALESCE(target_ci_id::text, ''),
+				rel_type, attributes, source, confidence, first_seen_at, last_seen_at, verification_state,
+				COALESCE(source_system, ''), COALESCE(notes, ''), created_at, updated_at,
+				projected, COALESCE(target_location_id::text, '')
+			FROM (%s) e ORDER BY projected, created_at DESC, id LIMIT $%d OFFSET $%d`, edges, limitPos, limitPos+1)
+		rows, err := tx.Query(ctx, query, append(args, page.Limit, page.Offset)...)
 		if err != nil {
 			return fmt.Errorf("list relationships: %w", err)
 		}
 		defer rows.Close()
 
 		for rows.Next() {
-			item, err := scanRelationship(rows)
+			item, err := scanRelationship(rows, true)
 			if err != nil {
 				return fmt.Errorf("scan relationship: %w", err)
 			}
@@ -255,7 +284,7 @@ func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string,
 				SELECT CASE WHEN r.source_ci_id = w.ci_id THEN r.target_ci_id ELSE r.source_ci_id END,
 				       w.depth + 1
 				FROM reach w
-				JOIN ci_relationship r
+				JOIN `+graphEdges+` r
 				  ON r.organization_id = $1
 				 AND (r.source_ci_id = w.ci_id OR r.target_ci_id = w.ci_id)
 				JOIN ci s ON s.id = r.source_ci_id AND s.deleted_at IS NULL
@@ -269,7 +298,7 @@ func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string,
 				SELECT ci_id, depth FROM nodes ORDER BY depth, ci_id::text COLLATE "C" LIMIT $4
 			)
 			SELECT `+traversalSelectColumns+`
-			FROM ci_relationship r
+			FROM `+graphEdges+` r
 			JOIN kept a ON a.ci_id = r.source_ci_id
 			JOIN kept b ON b.ci_id = r.target_ci_id
 			WHERE r.organization_id = $1
@@ -309,14 +338,14 @@ type relationshipScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanRelationship(scanner relationshipScanner) (*Relationship, error) {
+func scanRelationship(scanner relationshipScanner, withProjection ...bool) (*Relationship, error) {
 	item := &Relationship{}
 	var createdAt time.Time
 	var updatedAt time.Time
 	var confidence *float64
 	var firstSeen, lastSeen *time.Time
 	var verification *string
-	if err := scanner.Scan(
+	dest := []any{
 		&item.ID,
 		&item.OrganizationID,
 		&item.SourceCIID,
@@ -332,7 +361,11 @@ func scanRelationship(scanner relationshipScanner) (*Relationship, error) {
 		&item.Notes,
 		&createdAt,
 		&updatedAt,
-	); err != nil {
+	}
+	if len(withProjection) > 0 && withProjection[0] {
+		dest = append(dest, &item.Projected, &item.TargetLocationID)
+	}
+	if err := scanner.Scan(dest...); err != nil {
 		return nil, err
 	}
 	if item.Attributes == nil {

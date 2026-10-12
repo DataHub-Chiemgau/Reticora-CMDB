@@ -59,6 +59,8 @@ type CreateMountRequest struct {
 
 // UpdateMountRequest is the payload for updating a rack mount.
 type UpdateMountRequest struct {
+	// RackID moves the mount to another rack (RCK-03).
+	RackID    *string `json:"rack_id,omitempty"`
 	PositionU *int    `json:"position_u,omitempty"`
 	HeightU   *int    `json:"height_u,omitempty"`
 	Face      *string `json:"face,omitempty"`

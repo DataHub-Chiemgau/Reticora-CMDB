@@ -217,3 +217,18 @@ IGA-03;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 IGA-04;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 AI-02;[A];B;backend/internal/entitlement/addon_test.go;WP-075
 AI-02;[A];B;backend/internal/ai/ci_indexer_test.go;WP-076
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/asset_canonical_integration_test.go;WP-077
+AST-04;[P2];B;backend/internal/ci/asset_canonical_integration_test.go;WP-077
+RCK-03;[B];B;backend/internal/rack/mount_location_integration_test.go;WP-078
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/rack/mount_location_integration_test.go;WP-078
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/relationship/projection_integration_test.go;WP-079
+REL-01;[B];B;backend/internal/relationship/projection_integration_test.go;WP-079
+AST-05;[P2];B;backend/internal/relationship/projection_integration_test.go;WP-079
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/health_integration_test.go;WP-080
+NET-08;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ipam/vlan_integration_test.go;WP-081
+NET-01;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
+NET-02;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
+TEN-10;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
+NET-02;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
+NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082

@@ -151,6 +151,9 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 	if err := s.validate(ctx, item.OrganizationID, item.CITypeID, "", nil, item.Attributes); err != nil {
 		return err
 	}
+	if item.AssetID != "" && item.LocationID != "" {
+		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: locationOwnedByAsset}}}
+	}
 	return s.repo.Create(ctx, item)
 }
 
@@ -158,7 +161,8 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 // the mutation transaction so the recorded diff cannot race with concurrent
 // writers.
 func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
-	if s.fields != nil {
+	needsBefore := s.fields != nil || (req.Manual != nil && (req.LocationID != nil || req.SerialNumber != nil))
+	if needsBefore {
 		before, err := s.repo.GetByID(ctx, orgID, id)
 		if err != nil {
 			return nil, err
@@ -166,8 +170,39 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 		if err := s.validate(ctx, orgID, before.CITypeID, id, before.Attributes, req.Attributes); err != nil {
 			return nil, err
 		}
+		if err := checkAssetOwnedFields(before, &req); err != nil {
+			return nil, err
+		}
 	}
 	return s.repo.Update(ctx, orgID, id, req)
+}
+
+// checkAssetOwnedFields rejects a manual write of the fields the asset owns
+// on a linked CI (DB-05, CH12): the location mirrors the asset; the serial
+// number is the asset's, the CI keeps the observed one from discovery.
+func checkAssetOwnedFields(before *Item, req *UpdateRequest) error {
+	if req.Manual == nil {
+		return nil
+	}
+	linked := before.AssetID != ""
+	if req.AssetID != nil {
+		linked = *req.AssetID != ""
+	}
+	if !linked {
+		return nil
+	}
+	var violations []Violation
+	if req.LocationID != nil && *req.LocationID != before.LocationID {
+		violations = append(violations, Violation{Field: "location_id", Detail: locationOwnedByAsset})
+	}
+	if req.SerialNumber != nil && *req.SerialNumber != before.SerialNumber {
+		violations = append(violations, Violation{Field: "serial_number",
+			Detail: "the serial number of a CI linked to an asset is the asset's; the CI keeps the observed value"})
+	}
+	if len(violations) > 0 {
+		return &ValidationError{Violations: violations}
+	}
+	return nil
 }
 
 // Delete removes a CI after loading its prior state.

@@ -50,7 +50,12 @@ const ciSelectColumns = `
 	created_at,
 	updated_at,
 	deleted_at,
-	version
+	version,
+	COALESCE(asset_id::text, ''),
+	COALESCE(parent_ci_id::text, ''),
+	COALESCE(lifecycle_state, ''),
+	health,
+	health_updated_at
 `
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
@@ -170,7 +175,10 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 		for i := range items {
 			ptrs[i] = &items[i]
 		}
-		return overlayOverrides(ctx, tx, ptrs)
+		if err := overlayOverrides(ctx, tx, ptrs); err != nil {
+			return err
+		}
+		return loadAssetFacts(ctx, tx, ptrs)
 	})
 
 	return items, total, err
@@ -190,7 +198,10 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, er
 			}
 			return fmt.Errorf("get ci by id: %w", err)
 		}
-		return overlayOverrides(ctx, tx, []*Item{item})
+		if err := overlayOverrides(ctx, tx, []*Item{item}); err != nil {
+			return err
+		}
+		return loadAssetFacts(ctx, tx, []*Item{item})
 	})
 	if err != nil {
 		return nil, err
@@ -230,15 +241,18 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				discovery_source,
 				first_seen_at,
 				last_seen_at,
-				is_manual
+				is_manual,
+				asset_id,
+				parent_ci_id
 			) VALUES (
 				$1, $2, $3, $4, $5,
 				$6, $7, $8, $9, $10,
 				$11, $12, $13, $14, $15,
 				$16, $17, $18, $19, $20,
-				$21, $22, $23
+				$21, $22, $23, $24, $25
 			)
-			RETURNING id::text, COALESCE(site_id::text, ''), COALESCE(room_id::text, ''), version, created_at, updated_at
+			RETURNING id::text, COALESCE(site_id::text, ''), COALESCE(room_id::text, ''),
+				COALESCE(location_id::text, ''), health, version, created_at, updated_at
 		`
 
 		var createdAt time.Time
@@ -267,12 +281,17 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 			item.FirstSeenAt,
 			item.LastSeenAt,
 			item.IsManual,
-		).Scan(&item.ID, &item.SiteID, &item.RoomID, &item.Version, &createdAt, &updatedAt); err != nil {
+			nilIfEmpty(item.AssetID),
+			nilIfEmpty(item.ParentCIID),
+		).Scan(&item.ID, &item.SiteID, &item.RoomID, &item.LocationID, &item.Health, &item.Version, &createdAt, &updatedAt); err != nil {
 			return locationError(fmt.Errorf("create ci: %w", err))
 		}
 
 		item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+		if err := loadAssetFacts(ctx, tx, []*Item{item}); err != nil {
+			return err
+		}
 		if err := r.recordCIChange(ctx, tx, item.OrganizationID, item.ID, item.Version, "create", "", nil, item); err != nil {
 			return err
 		}
@@ -319,6 +338,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		addStringField("name", req.Name)
 		addStringField("status", req.Status)
 		addStringField("client_id", req.ClientID)
+		addStringField("asset_id", req.AssetID)
+		addStringField("parent_ci_id", req.ParentCIID)
 		addStringField("location_id", req.LocationID)
 		addStringField("manufacturer", req.Manufacturer)
 		addStringField("model", req.Model)
@@ -380,6 +401,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			return locationError(fmt.Errorf("update ci: %w", err))
 		}
 
+		if err := loadAssetFacts(ctx, tx, []*Item{item}); err != nil {
+			return err
+		}
 		changes := diffCI(before, item)
 		if len(changes) == 0 {
 			return nil
@@ -520,6 +544,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 	var firstSeen sql.NullTime
 	var lastSeen sql.NullTime
 	var deletedAt sql.NullTime
+	var healthUpdated sql.NullTime
 	var createdAt time.Time
 	var updatedAt time.Time
 
@@ -554,6 +579,11 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		&updatedAt,
 		&deletedAt,
 		&item.Version,
+		&item.AssetID,
+		&item.ParentCIID,
+		&item.LifecycleState,
+		&item.Health,
+		&healthUpdated,
 	); err != nil {
 		return nil, err
 	}
@@ -572,6 +602,10 @@ func scanCI(scanner ciScanner) (*Item, error) {
 	if deletedAt.Valid {
 		t := deletedAt.Time.UTC()
 		item.DeletedAt = &t
+	}
+	if healthUpdated.Valid {
+		t := healthUpdated.Time.UTC()
+		item.HealthUpdatedAt = &t
 	}
 	item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 	item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
@@ -654,6 +688,8 @@ func diffCI(before, after *Item) []ciFieldChange {
 		new  any
 	}{
 		{"client_id", before.ClientID, after.ClientID},
+		{"asset_id", before.AssetID, after.AssetID},
+		{"parent_ci_id", before.ParentCIID, after.ParentCIID},
 		{"location_id", before.LocationID, after.LocationID},
 		{"site_id", before.SiteID, after.SiteID},
 		{"room_id", before.RoomID, after.RoomID},
@@ -714,12 +750,71 @@ func locationError(err error) error {
 		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: "location not found"}}}
 	case "ci_location_client":
 		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: "the location belongs to another client"}}}
+	case "ci_parent_ci_fkey":
+		return &ValidationError{Violations: []Violation{{Field: "parent_ci_id", Detail: "parent CI not found"}}}
+	case "ci_parent_not_self", "ci_parent_cycle":
+		return &ValidationError{Violations: []Violation{{Field: "parent_ci_id", Detail: "a CI cannot contain itself, directly or through its parents"}}}
+	case "ci_lifecycle_requires_model":
+		return &ValidationError{Violations: []Violation{{Field: "lifecycle_state",
+			Detail: "only CI types with a lifecycle model have a lifecycle state, and it must be a state of that model"}}}
+	case "ci_health_read_only":
+		return &ValidationError{Violations: []Violation{{Field: "health", Detail: "the health is computed from monitoring"}}}
+	case "ci_asset_id_fkey":
+		return &ValidationError{Violations: []Violation{{Field: "asset_id", Detail: "asset not found"}}}
+	case "ci_location_from_asset":
+		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: locationOwnedByAsset}}}
 	}
 	return err
 }
 
+// locationOwnedByAsset is the violation of a location write on a CI linked
+// to an asset (DB-05).
+const locationOwnedByAsset = "the location of a CI linked to an asset is the asset's location"
+
+// loadAssetFacts shows the canonical data of each linked asset on its CIs
+// (DB-05). Assets the principal cannot see are left out.
+func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
+	byAsset := map[string][]*Item{}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.AssetID == "" {
+			continue
+		}
+		if _, seen := byAsset[item.AssetID]; !seen {
+			ids = append(ids, item.AssetID)
+		}
+		byAsset[item.AssetID] = append(byAsset[item.AssetID], item)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT id::text, asset_tag, name, COALESCE(serial_number, ''), COALESCE(location_id::text, ''),
+		       COALESCE(lifecycle_state, ''), status, COALESCE(barcode, ''), COALESCE(rfid_tag, ''),
+		       COALESCE(to_char(purchase_date, 'YYYY-MM-DD'), ''), COALESCE(to_char(warranty_end, 'YYYY-MM-DD'), ''),
+		       COALESCE(supplier, ''), COALESCE(invoice_number, '')
+		FROM asset WHERE id = ANY($1::uuid[])`, ids)
+	if err != nil {
+		return fmt.Errorf("load asset facts: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a AssetFacts
+		if err := rows.Scan(&a.ID, &a.AssetTag, &a.Name, &a.SerialNumber, &a.LocationID, &a.LifecycleState, &a.Status,
+			&a.Barcode, &a.RFIDTag, &a.PurchaseDate, &a.WarrantyEnd, &a.Supplier, &a.InvoiceNumber); err != nil {
+			return fmt.Errorf("scan asset facts: %w", err)
+		}
+		for _, item := range byAsset[a.ID] {
+			facts := a
+			item.Asset = &facts
+		}
+	}
+	return rows.Err()
+}
+
 // derivedFields are set by the database, not by the writer of a change.
-var derivedFields = map[string]bool{"site_id": true, "room_id": true, "attributes": true}
+// The asset link is structural, not an observed value.
+var derivedFields = map[string]bool{"site_id": true, "room_id": true, "attributes": true, "asset_id": true, "parent_ci_id": true}
 
 // recordManualOverrides gives every field a manual change touched a
 // protected override, so discovery never overwrites it (OVR-01, CH9): the
@@ -731,7 +826,8 @@ func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before,
 		reason = DefaultChangeReason
 	}
 	for _, change := range diffCI(before, after) {
-		if derivedFields[change.Field] {
+		if derivedFields[change.Field] || (change.Field == "location_id" && after.AssetID != "") {
+			// The location of a linked CI is the asset's (DB-05).
 			continue
 		}
 		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, change.Field, change.New, req.Manual.Author, reason, true); err != nil {
@@ -767,7 +863,7 @@ var (
 		"sys_object_id":    func(i *Item, v string) { i.SysObjectID = v },
 	}
 	structuralFields = map[string]bool{
-		"id": true, "organization_id": true, "client_id": true, "location_id": true, "site_id": true,
+		"id": true, "organization_id": true, "client_id": true, "location_id": true, "asset_id": true, "parent_ci_id": true, "site_id": true,
 		"room_id": true, "ci_type_id": true, "attributes": true, "discovery_source": true, "is_manual": true,
 		"first_seen_at": true, "last_seen_at": true, "created_at": true, "updated_at": true, "deleted_at": true,
 	}

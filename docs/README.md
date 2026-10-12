@@ -6,7 +6,7 @@ Reticora CMDB is a multi-tenant Configuration Management Database designed for M
 
 ### Technology Stack
 
-- **Backend**: Go 1.25+, chi v5 router, pgx v5 (hand-written SQL)
+- **Backend**: Go 1.26.9+, chi v5 router, pgx v5 (hand-written SQL)
 - **Frontend**: React 18, TypeScript, Vite, TanStack Query v5, Zustand, React Router v6
 - **Database**: PostgreSQL 16 with Row-Level Security
 - **Messaging**: NATS JetStream
@@ -286,6 +286,52 @@ Rate limiting and idempotency are keyed off the principal as well, so spoofed
 headers cannot reset rate budgets or collide across tenants; unauthenticated
 endpoints are rate-limited per client IP and the rate limiter fails closed
 when its cache is unavailable.
+
+**Asset and CI (DB-05, CH12):** a CI can be linked to an asset
+(`ci.asset_id`; `asset.ci_id` stays the asset's primary CI and links it). The
+asset is canonical for serial number, location, physical lifecycle and
+inventory data, which the CI shows read-only under `asset`. `ci.location_id`
+mirrors `asset.location_id` (migration 0088 triggers) and follows a move of
+the asset; writing the location of a linked CI is rejected with 422.
+`ci.serial_number` stays the observed value for identity resolution; a
+difference to the asset's serial number opens one review item
+`serial_mismatch` per CI, and a manual serial write on a linked CI is
+rejected.
+Mounting a CI into a rack or moving it to another rack sets the location
+(the asset's for a linked CI, otherwise the CI's) to the rack; unmounting
+sets the rack's room. Every mount change writes `ci_change` (movement,
+location_change) and an audit entry in the same transaction (RCK-03).
+Physical containment (chassis → blade) is `ci.parent_ci_id`, which rejects
+cycles. The structural relationships `contains`, `mounted_in` and
+`located_in` are not stored but projected from `parent_ci_id`, `rack_mount`
+and the CI's location (view `ci_structure_edge`, CH27); the relationship API
+lists them with `projected: true` and rejects storing them (422). Topology and
+impact traverse the projected containment. Migration 0089 turned stored
+containment rows into `parent_ci_id` and moved the structural rows to
+`migration_quarantine`.
+`ci.lifecycle_state` (software lifecycle) exists only for CI types with a
+lifecycle model and must be a state of it (trigger; a transition of a CI
+without a model is 422). `ci.health` is read-only: after every alert
+evaluation `ci_refresh_health` sets critical or warning when the latest
+sample of a metric breaches an enabled rule of that severity, ok for samples
+without a breach and unknown without a sample in the last 15 minutes
+(migration 0090; health findings are not G1 scope, E-36).
+
+**VLAN catalog (NET-08):** `vlan` (organization, optional site, number
+1–4094, name, description) with `/api/v1/vlans`; the number is unique per site
+and, for VLANs without site, per organization (two partial indexes, E-24). The
+client follows the site and scopes the VLAN under RLS. `subnet.vlan_id` and
+`network_interface.vlan_id` reference the catalog; migration 0091 turned the
+former integer VLAN numbers of subnets into catalog entries.
+
+**VRFs (TEN-10, CH10):** `vrf` per organization (name unique, description,
+`is_default`) with `/api/v1/vrfs` (writes need `vrf:manage`). Every
+organization gets exactly one default VRF `global` on creation (trigger on
+`organization`, backfill in migration 0092); it cannot be deleted, nor can a
+VRF with subnets. `subnet.vrf_id` is NOT NULL (default VRF when omitted) and
+subnets are unique per (organization, VRF, CIDR); `ip_address.vrf_id` follows
+the subnet and addresses are unique per (organization, VRF, address,
+interface).
 
 **Entitlement enforcement:** an organization is entitled exactly to its rows
 in `entitlement` (ENT-05): a missing row means not entitled, only `cmdb_core`
@@ -811,7 +857,7 @@ Continuous Integration runs on **GitHub Actions** (`.github/workflows/ci.yml`), 
 **Backend job:**
 
 1. Checkout code.
-2. Setup Go 1.25.
+2. Setup Go 1.26.9.
 3. `go mod download` — Fetch dependencies.
 4. `go build ./...` — Compile all packages.
 5. `go test -race -coverprofile=coverage.out ./...` — Run tests with race detector and coverage.

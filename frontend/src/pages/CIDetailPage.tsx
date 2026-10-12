@@ -110,6 +110,11 @@ export function CIDetailPage() {
               {t(getStatusTranslationKey(ci.status))}
             </Badge>
             <Badge variant="info">{ci.ci_type_id}</Badge>
+            {ci.health ? (
+              <Badge variant={healthBadgeVariant(ci.health)}>
+                {t(`ci.healthState.${ci.health}`)}
+              </Badge>
+            ) : null}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -129,7 +134,10 @@ export function CIDetailPage() {
             <DetailRow label={t('form.fields.ciType')} value={ci.ci_type_id} />
             <DetailRow label={t('ci.manufacturer')} value={ci.manufacturer} />
             <DetailRow label={t('ci.model')} value={ci.model} />
-            <DetailRow label={t('ci.serialNumber')} value={ci.serial_number} />
+            <DetailRow
+              label={ci.asset ? t('ci.observedSerialNumber') : t('ci.serialNumber')}
+              value={ci.serial_number}
+            />
             <DetailRow label={t('ci.managementIp')} value={ci.management_ip} />
             <DetailRow label={t('ci.firmware')} value={ci.firmware_version} />
             <DetailRow label={t('ci.source')} value={ci.discovery_source} />
@@ -148,6 +156,23 @@ export function CIDetailPage() {
             </pre>
           )}
         </Card>
+
+        {ci.asset && (
+          <Card title={t('ci.assetCanonical')}>
+            <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+              {t('ci.assetCanonicalHint')}
+            </p>
+            <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+              <DetailRow label={t('ci.assetTag')} value={ci.asset.asset_tag} />
+              <DetailRow label={t('ci.serialNumber')} value={ci.asset.serial_number} />
+              <DetailRow label={t('ci.location')} value={ci.asset.location_id} />
+              <DetailRow label={t('ci.physicalLifecycle')} value={ci.asset.lifecycle_state} />
+              <DetailRow label={t('ci.barcode')} value={ci.asset.barcode} />
+              <DetailRow label={t('ci.supplier')} value={ci.asset.supplier} />
+              <DetailRow label={t('ci.warrantyEnd')} value={ci.asset.warranty_end} />
+            </dl>
+          </Card>
+        )}
 
         <CIParentAssetCard ciId={ci.id} />
 
@@ -201,17 +226,26 @@ export function CIDetailPage() {
           serverError={updateCI.error as Error | null}
         />
         <ProvenanceSection ciId={ci.id} />
-        <LifecycleSection
-          entityType="cis"
-          entityId={ci.id}
-          currentState={(ci as { lifecycle_state?: string }).lifecycle_state}
-        />
+        <LifecycleSection entityType="cis" entityId={ci.id} currentState={ci.lifecycle_state} />
         <ImpactSection ciId={ci.id} />
       </div>
 
       <CIFormModal open={isEditOpen} onOpenChange={setIsEditOpen} ci={ci} />
     </div>
   );
+}
+
+function healthBadgeVariant(health: string) {
+  switch (health) {
+    case 'critical':
+      return 'danger' as const;
+    case 'warning':
+      return 'warning' as const;
+    case 'ok':
+      return 'success' as const;
+    default:
+      return 'neutral' as const;
+  }
 }
 
 function DetailRow({ label, value }: { label: string; value?: string }) {

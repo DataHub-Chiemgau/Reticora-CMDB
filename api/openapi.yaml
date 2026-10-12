@@ -745,6 +745,11 @@ paths:
       operationId: createRelationship
       tags: [Relationships]
       summary: Create a relationship
+      description: >-
+        contains, contained_by, parent_of, child_of, mounted_in and located_in
+        are projected and cannot be stored (422, REL-01, CH27): containment is
+        the CI's parent_ci_id, mounted_in follows from the rack mount,
+        located_in from the CI's location.
       requestBody:
         required: true
         content:
@@ -762,6 +767,11 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Structural relationship type, which is projected and cannot be stored
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -4325,6 +4335,9 @@ paths:
       operationId: createRackMount
       tags: [Racks]
       summary: Mount a CI into a rack
+      description: >-
+        The location of the CI, or of its asset, becomes the rack; ci_change
+        and the audit record the mount (RCK-03, DB-05).
       requestBody:
         required: true
         content:
@@ -4367,6 +4380,10 @@ paths:
       operationId: updateRackMount
       tags: [Racks]
       summary: Update a rack mount
+      description: >-
+        Repositions the mount (another rack included). The location of the
+        CI, or of its asset, becomes the rack; ci_change and the audit record
+        the change (RCK-03, DB-05).
       requestBody:
         required: true
         content:
@@ -4390,6 +4407,9 @@ paths:
       operationId: deleteRackMount
       tags: [Racks]
       summary: Delete a rack mount
+      description: >-
+        Unmounts the CI. Its location, or its asset's, becomes the rack's
+        room; ci_change and the audit record the change (RCK-03, DB-05).
       responses:
         '204':
           description: Rack mount deleted
@@ -4646,6 +4666,214 @@ paths:
       responses:
         '204':
           description: CI-contact link removed
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/vrfs:
+    get:
+      operationId: listVRFs
+      tags: [IPAM]
+      summary: List the VRFs of the organization, the default first
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of VRFs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VRFListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createVRF
+      tags: [IPAM]
+      summary: Create a VRF (vrf:manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVRFRequest'
+      responses:
+        '201':
+          description: VRF created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VRF'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/vrfs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getVRF
+      tags: [IPAM]
+      summary: Get a VRF
+      responses:
+        '200':
+          description: VRF
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VRF'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateVRF
+      tags: [IPAM]
+      summary: Rename a VRF or change its description (vrf:manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateVRFRequest'
+      responses:
+        '200':
+          description: VRF updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VRF'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      operationId: deleteVRF
+      tags: [IPAM]
+      summary: Delete a VRF (vrf:manage)
+      description: The default VRF and VRFs with subnets or addresses cannot be deleted (422).
+      responses:
+        '204':
+          description: VRF deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Default VRF or VRF still in use
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
+  /api/v1/vlans:
+    get:
+      operationId: listVLANs
+      tags: [IPAM]
+      summary: List the VLAN catalog
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: site_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of VLANs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VLANListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createVLAN
+      tags: [IPAM]
+      summary: Create a VLAN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVLANRequest'
+      responses:
+        '201':
+          description: VLAN created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VLAN'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/vlans/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getVLAN
+      tags: [IPAM]
+      summary: Get a VLAN
+      responses:
+        '200':
+          description: VLAN
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VLAN'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateVLAN
+      tags: [IPAM]
+      summary: Update a VLAN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateVLANRequest'
+      responses:
+        '200':
+          description: VLAN updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VLAN'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      operationId: deleteVLAN
+      tags: [IPAM]
+      summary: Delete a VLAN; subnets and interfaces lose the reference
+      responses:
+        '204':
+          description: VLAN deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -8625,7 +8853,43 @@ components:
           description: CI version, also the ETag (API-07).
         location_id:
           type: string
-          description: Node of the canonical location tree (DB-05); site_id and room_id are derived from it.
+          description: >-
+            Node of the canonical location tree (DB-05); site_id and room_id
+            are derived from it. For a CI linked to an asset it mirrors the
+            asset's location and cannot be written (422).
+        asset_id:
+          type: string
+          description: >-
+            Asset the CI is linked to (DB-05, AST-04). The asset is canonical
+            for serial number, location, physical lifecycle and inventory
+            data; they appear read-only under asset.
+        asset:
+          $ref: '#/components/schemas/CIAssetFacts'
+        parent_ci_id:
+          type: string
+          description: >-
+            CI this one is physically part of (chassis → blade, AST-05); the
+            relationship contains is projected from it. Cycles are rejected
+            (422).
+        lifecycle_state:
+          type: string
+          readOnly: true
+          description: >-
+            Software lifecycle; only CI types with a lifecycle model have one,
+            and it changes through lifecycle transitions (DB-05).
+        health:
+          type: string
+          readOnly: true
+          enum: [ok, warning, critical, unknown]
+          description: >-
+            Computed from the monitoring state: critical or warning when the
+            latest sample of a metric breaches an enabled alert rule of that
+            severity, ok with samples and no breach, unknown without recent
+            samples (DB-05).
+        health_updated_at:
+          type: string
+          format: date-time
+          readOnly: true
         site_id:
           type: string
           readOnly: true
@@ -8646,6 +8910,11 @@ components:
           type: string
         serial_number:
           type: string
+          description: >-
+            Observed serial number used for identity resolution. For a linked
+            CI the canonical serial number is asset.serial_number; a
+            difference opens a review item serial_mismatch, a manual write is
+            rejected (422).
         rfid_tag:
           type: string
           description: RFID tag for direct-access labels and scan flows.
@@ -8693,6 +8962,26 @@ components:
           type: string
           format: date-time
 
+    CIAssetFacts:
+      type: object
+      readOnly: true
+      description: Canonical data of the linked asset, shown read-only on the CI (DB-05).
+      required: [id, asset_tag, name, status]
+      properties:
+        id: { type: string }
+        asset_tag: { type: string }
+        name: { type: string }
+        serial_number: { type: string }
+        location_id: { type: string }
+        lifecycle_state: { type: string, description: Physical lifecycle of the asset. }
+        status: { type: string }
+        barcode: { type: string }
+        rfid_tag: { type: string }
+        purchase_date: { type: string, format: date }
+        warranty_end: { type: string, format: date }
+        supplier: { type: string }
+        invoice_number: { type: string }
+
     CreateCIRequest:
       type: object
       required: [ci_type_id, name]
@@ -8704,6 +8993,15 @@ components:
         location_id:
           type: string
           description: Node of the location tree; site and room of the CI follow from it.
+        asset_id:
+          type: string
+          description: >-
+            Links the CI to an asset (empty string unlinks on update); the CI
+            then takes the asset's location, a location in the same request
+            is rejected (422).
+        parent_ci_id:
+          type: string
+          description: Containing CI (empty string clears it on update); cycles are rejected (422).
         name:
           type: string
         status:
@@ -8757,6 +9055,15 @@ components:
         location_id:
           type: string
           description: Node of the location tree; site and room of the CI follow from it.
+        asset_id:
+          type: string
+          description: >-
+            Links the CI to an asset (empty string unlinks on update); the CI
+            then takes the asset's location, a location in the same request
+            is rejected (422).
+        parent_ci_id:
+          type: string
+          description: Containing CI (empty string clears it on update); cycles are rejected (422).
         manufacturer:
           type: string
         model:
@@ -8910,6 +9217,18 @@ components:
           type: string
         target_ci_id:
           type: string
+          description: Empty for mounted_in and located_in, whose target is target_location_id.
+        projected:
+          type: boolean
+          readOnly: true
+          description: >-
+            Structural relationship derived from parent_ci_id (contains),
+            rack_mount (mounted_in) or the CI's location (located_in); it
+            cannot be changed through this API (DB-05, CH27).
+        target_location_id:
+          type: string
+          readOnly: true
+          description: Rack (mounted_in) or location (located_in) of a projected relationship.
         rel_type:
           $ref: '#/components/schemas/RelationshipType'
         attributes:
@@ -12364,6 +12683,9 @@ components:
     UpdateRackMountRequest:
       type: object
       properties:
+        rack_id:
+          type: string
+          description: Moves the mount to another rack; the CI's location follows (RCK-03).
         position_u:
           type: integer
           minimum: 1
@@ -12613,10 +12935,14 @@ components:
           type: string
         cidr:
           type: string
+        vrf_id:
+          type: string
+          description: VRF of the subnet (CH10); the CIDR is unique per VRF.
         name:
           type: string
         vlan_id:
-          type: integer
+          type: string
+          description: VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update.
         gateway:
           type: string
         dns_servers:
@@ -12644,10 +12970,14 @@ components:
           type: string
         cidr:
           type: string
+        vrf_id:
+          type: string
+          description: VRF of the subnet; the organization's default VRF when omitted.
         name:
           type: string
         vlan_id:
-          type: integer
+          type: string
+          description: VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update.
         gateway:
           type: string
         dns_servers:
@@ -12668,8 +12998,12 @@ components:
           type: string
         name:
           type: string
+        vrf_id:
+          type: string
+          description: Moves the subnet and its addresses to another VRF (empty string = default VRF).
         vlan_id:
-          type: integer
+          type: string
+          description: VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update.
         gateway:
           type: string
         dns_servers:
@@ -12680,6 +13014,93 @@ components:
           type: string
         is_management:
           type: boolean
+
+    VRF:
+      type: object
+      required: [id, organization_id, name, is_default, created_at, updated_at]
+      description: >-
+        VRF of the organization (TEN-10, CH10). Every organization has exactly
+        one default VRF "global", created with the organization; it cannot be
+        deleted.
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        is_default: { type: boolean, readOnly: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateVRFRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+
+    UpdateVRFRequest:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+
+    VRFListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/VRF'
+
+    VLAN:
+      type: object
+      required: [id, organization_id, vlan_id, name, created_at, updated_at]
+      description: >-
+        Entry of the VLAN catalog (NET-08). The number is unique per site, or
+        per organization for VLANs without site (E-24).
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        client_id:
+          type: string
+          readOnly: true
+          description: Client of the site.
+        site_id: { type: string }
+        vlan_id: { type: integer, minimum: 1, maximum: 4094 }
+        name: { type: string }
+        description: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateVLANRequest:
+      type: object
+      required: [vlan_id, name]
+      properties:
+        site_id: { type: string }
+        vlan_id: { type: integer, minimum: 1, maximum: 4094 }
+        name: { type: string }
+        description: { type: string }
+
+    UpdateVLANRequest:
+      type: object
+      properties:
+        vlan_id: { type: integer, minimum: 1, maximum: 4094 }
+        name: { type: string }
+        description: { type: string }
+
+    VLANListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/VLAN'
 
     SubnetListResponse:
       allOf:
@@ -12706,6 +13127,10 @@ components:
           type: string
         address:
           type: string
+        vrf_id:
+          type: string
+          readOnly: true
+          description: VRF of the subnet; addresses are unique per VRF and interface (NET-03).
         status:
           type: string
           enum: [active, reserved, deprecated, dhcp, available]
@@ -12786,6 +13211,9 @@ components:
           enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
         speed_mbps:
           type: integer
+        vlan_id:
+          type: string
+          description: VLAN of the VLAN catalog (NET-01).
         is_management:
           type: boolean
         is_uplink:
@@ -12816,6 +13244,9 @@ components:
           enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
         speed_mbps:
           type: integer
+        vlan_id:
+          type: string
+          description: VLAN of the VLAN catalog (NET-01).
         is_management:
           type: boolean
         is_uplink:
@@ -12839,6 +13270,9 @@ components:
           enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
         speed_mbps:
           type: integer
+        vlan_id:
+          type: string
+          description: VLAN of the VLAN catalog (NET-01).
         is_management:
           type: boolean
         is_uplink:

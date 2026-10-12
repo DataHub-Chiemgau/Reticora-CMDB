@@ -201,7 +201,22 @@
     "protected": "geschützt",
     "instanceFields": "Instanzfelder",
     "provenanceHint": "Discovery-Wert vs. effektiver Wert. Geschützte manuelle Overrides werden nie von Discovery überschrieben.",
-    "discovered": "Discovery"
+    "discovered": "Discovery",
+    "assetCanonical": "Asset (kanonische Daten)",
+    "assetCanonicalHint": "Seriennummer, Standort, physischer Lebenszyklus und Inventardaten stammen aus dem Asset und sind hier schreibgeschützt.",
+    "observedSerialNumber": "Beobachtete Seriennummer",
+    "assetTag": "Inventarnummer",
+    "physicalLifecycle": "Physischer Lebenszyklus",
+    "location": "Standort",
+    "barcode": "Barcode",
+    "warrantyEnd": "Garantieende",
+    "supplier": "Lieferant",
+    "healthState": {
+      "ok": "Zustand: OK",
+      "warning": "Zustand: Warnung",
+      "critical": "Zustand: kritisch",
+      "unknown": "Zustand: unbekannt"
+    }
   },
   "form": {
     "createCI": "CI erstellen",
@@ -890,6 +905,7 @@
       "verified": "Bestätigt",
       "disputed": "Widersprochen",
       "stale": "Veraltet"
-    }
+    },
+    "projected": "projiziert (Struktur)"
   }
 }

@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -21,6 +22,10 @@ type StateStore interface {
 	StateReader
 	StateWriter
 }
+
+// ErrNoLifecycleModel: the entity's type has no lifecycle model, so it has
+// no lifecycle state (DB-05).
+var ErrNoLifecycleModel = errors.New("the type has no lifecycle model")
 
 // NewService creates a lifecycle service.
 func NewService(repo Repository, states StateStore, changes ChangeRecorder) *Service {
