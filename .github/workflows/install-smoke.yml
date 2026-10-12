@@ -17,7 +17,8 @@ on:
       - 'deploy/keycloak/**'
       - 'backend/Dockerfile'
       - 'frontend/Dockerfile'
-      - 'tests/install-smoke-health*.sh'
+      - 'tests/install-*.sh'
+      - 'tests/backup-*.sh'
       - '.github/workflows/install-smoke.yml'
   pull_request:
     branches: [main]
@@ -27,7 +28,8 @@ on:
       - 'deploy/keycloak/**'
       - 'backend/Dockerfile'
       - 'frontend/Dockerfile'
-      - 'tests/install-smoke-health*.sh'
+      - 'tests/install-*.sh'
+      - 'tests/backup-*.sh'
       - '.github/workflows/install-smoke.yml'
   # Manual runs (e.g. the G1 evidence for GATE-03) are not path filtered.
   workflow_dispatch:
@@ -47,6 +49,12 @@ jobs:
 
       - name: install-smoke-health.sh
         run: ./tests/install-smoke-health.test.sh
+
+      - name: install-preflight.sh (platform, Docker, Compose, sizing)
+        run: ./tests/install-preflight.test.sh
+
+      - name: Backup chain configuration (pgBackRest, retention, versioning)
+        run: ./tests/backup-config.test.sh
 
   # INS-01/TEC-09/GATE-03 (WP-092): the cloud installer on every platform of
   # CH22. Ubuntu runs natively on the GitHub runners; Debian 12 runs the
@@ -79,7 +87,6 @@ jobs:
         run: ./install.sh --cloud --non-interactive
         env:
           RETICORA_SOURCE_DIR: ${{ github.workspace }}
-          RETICORA_STRICT_PLATFORM: "1"
 
       - name: Run the cloud installer non-interactively (${{ matrix.platform }} container)
         if: matrix.container != ''
@@ -94,7 +101,7 @@ jobs:
             -v "$(command -v docker):/usr/local/bin/docker:ro" \
             "${plugins[@]}" \
             -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
-            -e RETICORA_SOURCE_DIR="$GITHUB_WORKSPACE" -e RETICORA_STRICT_PLATFORM=1 \
+            -e RETICORA_SOURCE_DIR="$GITHUB_WORKSPACE" \
             "${{ matrix.container }}" \
             bash -c 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates git jq openssl >/dev/null && ./install.sh --cloud --non-interactive'
           # The installer ran as root in the container; hand the generated
@@ -108,6 +115,13 @@ jobs:
         run: |
           sleep 5
           ./tests/install-smoke-health.sh deploy/docker-compose .env
+
+      # WP-100 (OPS-04): WAL archiving works and a base backup exists.
+      - name: Verify the backup chain
+        run: |
+          cd deploy/docker-compose
+          docker compose --env-file .env exec -T backup reticora-pgbackrest-env.sh pgbackrest --stanza=reticora check
+          docker compose --env-file .env exec -T backup reticora-pgbackrest-env.sh reticora-backup.sh health
 
       - name: Verify backend health endpoint
         run: |

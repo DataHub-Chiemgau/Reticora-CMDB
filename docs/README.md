@@ -13,6 +13,15 @@ Reticora CMDB is a multi-tenant Configuration Management Database designed for M
 - **Cache**: Redis 7
 - **Observability**: OpenTelemetry, Prometheus metrics
 
+### Installation requirements
+
+`install.sh` supports Ubuntu 22.04 LTS, Ubuntu 24.04 LTS and Debian 12 with
+Docker Engine ≥ 24 and Docker Compose v2, and refuses other systems. The
+minimum for the central cloud is 4 vCPU, 8 GB RAM and 100 GB SSD for up to
+10,000 objects; the sizing table up to 50,000 objects is in
+[ops/sizing.md](ops/sizing.md). Installation problems:
+[troubleshooting-installation.md](troubleshooting-installation.md).
+
 ### Monorepo Structure
 
 ```
@@ -807,6 +816,13 @@ Dashboards in `deploy/grafana/` (`dashboard-overview.json`, plus
 `deploy/monitoring/slo-rules.yaml` (99.9 % availability, p95 read latency
 < 500 ms), carrying the `organization_id` label when tenant metrics are
 enabled.
+Background workers export `reticora_worker_enabled`, `reticora_worker_up`,
+`reticora_worker_runs_total`, `reticora_worker_errors_total`,
+`reticora_worker_last_success_timestamp_seconds` and `reticora_worker_backlog`
+per worker (OPS-05). The rules for stopped workers, errors, missing
+successful runs and backlog are in `deploy/monitoring/worker-rules.yaml`.
+`deploy/monitoring/alertmanager.yaml` routes all alerts to the operators;
+see [`docs/ops/workers.md`](ops/workers.md).
 
 **Tenant-aware observability (Epic H3):** the server exports
 `reticora_http_requests_total` and `reticora_http_request_duration_seconds`
@@ -847,6 +863,7 @@ The server is configured via environment variables:
 - `RETICORA_METRICS_TENANT_LABEL` — set to `true` to add the `organization_id` label to HTTP request metrics (default `false`; multiplies series by tenant count).
 - `RETICORA_EGRESS_ALLOW_PRIVATE` — set to `true` to let webhooks and IGA connectors reach private, loopback and link-local destinations (on-premises installations; default `false`). Cloud metadata endpoints stay blocked; DNS pinning and the 3-redirect limit always apply (SEC-08).
 - `RETICORA_PREAUTH_RATE_LIMIT_RPM` — authentication attempts per client IP and minute before any credential check (default `20`, AUT-10): requests to `/auth/callback`, `/auth/refresh` and `/collectors/enroll` and every failed authentication count; once spent, the IP gets 429 until the minute is over.
+- `RETICORA_WORKER_<NAME>_ENABLED` — operator switch per background worker (OPS-02, default `true`): `WEBHOOK_DISPATCHER`, `EXPORT`, `INGEST`, `MONITORING`, `RESERVATION_SWEEPER`. A disabled worker is not started in that process; see [`docs/ops/workers.md`](ops/workers.md).
 - `RETICORA_TRUSTED_PROXIES` — comma-separated CIDRs of reverse proxies whose `X-Real-IP` header names the client for IP-based limits (default loopback and private networks; empty trusts none).
 - Endpoint agent channel (AGT-03): the agent sends telemetry only over TLS — to the collector relay (`RETICORA_COLLECTOR_RELAY`, host:port) or directly to an `https://` `RETICORA_SERVER_URL`; there is no plaintext fallback. It authenticates with the `agent_token` returned once by `POST /api/v1/agents/enroll` (`RETICORA_AGENT_TOKEN` or `RETICORA_AGENT_TOKEN_FILE`); `RETICORA_TLS_CA_FILE` adds a private CA. The collector relay listens on `RETICORA_AGENT_RELAY_ADDR` (default `:9443`) only when `RETICORA_AGENT_RELAY_TLS_CERT_FILE` and `RETICORA_AGENT_RELAY_TLS_KEY_FILE` are set, and forwards each message with the agent's token to `/api/v1/agents/telemetry`.
 
@@ -873,9 +890,42 @@ Continuous Integration runs on **GitHub Actions** (`.github/workflows/ci.yml`), 
 6. `npm test` — Vitest unit and component tests.
 7. `npm run build` — Production build.
 
+**Signed releases (`.github/workflows/release.yml`, TEC-15, COL-06):**
+
+A version tag `v*` starts the release workflow. Tools follow E-31.
+
+1. It builds the edge binaries `reticora-collector` and `reticora-agent` for linux/amd64 and linux/arm64.
+2. It builds the images `reticora-server`, `reticora-collector` and `reticora-frontend` and pushes them to `ghcr.io/datahub-chiemgau`.
+3. Syft generates an SPDX SBOM for every binary and every image, plus one for the source tree.
+4. Everything is signed keyless with cosign: a Fulcio certificate for the identity of the release workflow and an entry in the Rekor log.
+   - Binaries and SBOMs get a Sigstore bundle (`<file>.sigstore.json`).
+   - Images are signed, and their SBOM is attached as a cosign attestation (`spdxjson`).
+5. The workflow verifies its own signatures. It then publishes the files on the GitHub release, together with `SHA256SUMS` and one updater manifest per binary (`<binary>.release.json`, holding `downloadUrl`, `signatureBundleUrl` and `checksums.sha256`).
+
+Mandatory signature check in the updater (`edgecore/update`):
+
+- `Checker.Apply` installs an artifact only after its signature has been verified.
+- The updater refuses, and leaves the running binary untouched, in these cases:
+  - the release has no `signatureBundleUrl`;
+  - the bundle cannot be loaded;
+  - verification fails;
+  - no verifier is configured.
+- `CosignVerifier` calls `cosign verify-blob --bundle`. It pins the signer to `release.yml` of this repository on a `v*` tag, with the GitHub Actions OIDC issuer.
+
+Check a signature by hand:
+
+```bash
+cosign verify-blob --bundle reticora-collector-linux-amd64.sigstore.json \
+  --certificate-identity-regexp '^https://github\.com/DataHub-Chiemgau/Reticora-CMDB/\.github/workflows/release\.yml@refs/tags/v.+$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  reticora-collector-linux-amd64
+cosign verify ghcr.io/datahub-chiemgau/reticora-server:<tag> \
+  --certificate-identity-regexp '…release\.yml@refs/tags/v.+$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 **Planned additions:**
 
-- Docker image build and push to container registry on tag/release.
 - Kubernetes deployment via GitOps (ArgoCD or Flux).
 - Database migration validation in CI.
 - Integration tests against docker-compose services.

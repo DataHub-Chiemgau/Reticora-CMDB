@@ -1,0 +1,80 @@
+# Daily full base backup with pgBackRest (WP-100, OPS-04): together with
+# the continuous WAL archive (archive_timeout 300 s) the restore point
+# objective stays below 15 minutes (NFR-05); each backup expires backups
+# older than 35 days (NFR-06). Requires the reticora-pgbackrest secret:
+#   kubectl create secret generic reticora-pgbackrest \
+#     --from-literal=cipher-pass=... \
+#     --from-literal=s3-key=... --from-literal=s3-key-secret=... \
+#     --from-file=ca.crt --from-file=tls.crt --from-file=tls.key
+# The cipher pass must equal the one of the database host; without it no
+# backup can be restored.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: reticora-pgbackrest-full
+spec:
+  schedule: "0 2 * * *" # daily at 02:00
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsUser: 70 # postgres in the Alpine image
+            runAsGroup: 70
+            runAsNonRoot: true
+          containers:
+            - name: pgbackrest
+              # deploy/docker-compose/postgres, published by release.yml.
+              image: reticora-cmdb/postgres:latest
+              command: ["pgbackrest", "--stanza=reticora", "--type=full", "backup"]
+              env:
+                - name: PGBACKREST_REPO1_CIPHER_PASS
+                  valueFrom:
+                    secretKeyRef:
+                      name: reticora-pgbackrest
+                      key: cipher-pass
+                - name: PGBACKREST_REPO1_S3_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: reticora-pgbackrest
+                      key: s3-key
+                - name: PGBACKREST_REPO1_S3_KEY_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: reticora-pgbackrest
+                      key: s3-key-secret
+              volumeMounts:
+                - name: config
+                  mountPath: /etc/pgbackrest/pgbackrest.conf
+                  subPath: pgbackrest.conf
+                  readOnly: true
+                - name: tls
+                  mountPath: /etc/pgbackrest/tls
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "2"
+                  memory: 1Gi
+          volumes:
+            - name: config
+              configMap:
+                name: reticora-pgbackrest
+            - name: tls
+              secret:
+                secretName: reticora-pgbackrest
+                items:
+                  - key: ca.crt
+                    path: ca.crt
+                  - key: tls.crt
+                    path: tls.crt
+                  - key: tls.key
+                    path: tls.key
+                defaultMode: 0400

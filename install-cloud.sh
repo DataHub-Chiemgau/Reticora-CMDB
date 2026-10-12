@@ -83,6 +83,10 @@ success() { printf '%s✔%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
 warn()    { printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
 die()     { printf '%s✘ Error:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 
+# Platform, Docker/Compose and sizing checks (INS-07).
+# shellcheck source=install-preflight.sh
+. "$SCRIPT_DIR/install-preflight.sh"
+
 # ─── Generic helpers ──────────────────────────────────────────────────────────
 trim() {
     local s="$1"
@@ -101,11 +105,10 @@ if [ "$(id -u)" -ne 0 ] && have_cmd sudo; then
     SUDO="sudo"
 fi
 
+# Only the package manager of the supported platforms (Ubuntu, Debian; CH22)
+# is used; other systems install the prerequisites themselves.
 pkg_manager() {
-    local mgr
-    for mgr in apt-get dnf yum zypper pacman apk; do
-        if have_cmd "$mgr"; then printf '%s' "$mgr"; return 0; fi
-    done
+    if have_cmd apt-get; then printf 'apt-get'; return 0; fi
     return 1
 }
 
@@ -119,10 +122,6 @@ install_packages() {
             $SUDO apt-get update -qq || true
             DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y "$@"
             ;;
-        dnf|yum)  $SUDO "$mgr" install -y "$@" ;;
-        zypper)   $SUDO zypper --non-interactive install -y "$@" ;;
-        pacman)   $SUDO pacman -Sy --noconfirm "$@" ;;
-        apk)      $SUDO apk add --no-cache "$@" ;;
     esac
 }
 
@@ -201,6 +200,10 @@ detect_container_tooling() {
     else
         die "Docker Compose (plugin or docker-compose binary) is required but could not be installed automatically."
     fi
+
+    # Docker Engine >= 24 and Compose v2 (INS-07).
+    check_docker_engine "$DOCKER"
+    check_compose_v2 "${COMPOSE[@]}"
 }
 
 compose_cmd() {
@@ -416,6 +419,10 @@ RETICORA_OIDC_CLIENT_SECRET=$RETICORA_OIDC_CLIENT_SECRET
 # Credential envelope encryption (32-byte key, base64-encoded)
 RETICORA_MASTER_KEY=$RETICORA_MASTER_KEY
 
+# Encryption passphrase of the pgBackRest backups (docs/backup-dr.md). Keep a
+# copy outside this host: without it no backup can be restored.
+RETICORA_BACKUP_CIPHER_PASS=$RETICORA_BACKUP_CIPHER_PASS
+
 # Public URLs
 RETICORA_PUBLIC_BASE_URL=$RETICORA_PUBLIC_BASE_URL
 RETICORA_OIDC_ISSUER_URL=$RETICORA_OIDC_ISSUER_URL
@@ -425,6 +432,8 @@ RETICORA_OIDC_REDIRECT_URL=$RETICORA_OIDC_REDIRECT_URL
 # HTTPS / Let's Encrypt (empty = plain HTTP)
 RETICORA_TLS_DOMAIN=$RETICORA_TLS_DOMAIN
 RETICORA_CERT_EMAIL=$RETICORA_CERT_EMAIL
+# nginx TLS template mounted into the frontend (empty one without a domain)
+RETICORA_NGINX_TLS_TEMPLATE=$(tls_template_source)
 
 # Extra CA bundle the server trusts when it calls the OIDC issuer. The server
 # reaches Keycloak through the public HTTPS endpoint, so while only the
@@ -448,13 +457,36 @@ RETICORA_IMAGE_TAG=$RETICORA_IMAGE_TAG
 # Container image garbage collection
 RETICORA_GC_KEEP_IMAGES=$RETICORA_GC_KEEP_IMAGES
 EOF
+    merge_env_extras "$tmp"
     mv "$tmp" "$ENV_FILE"
     chmod 600 "$ENV_FILE"
+}
+
+# merge_env_extras <new env file> — appends every KEY=value of the existing
+# .env that the installer does not write itself (e.g. RETICORA_HTTP_BIND), so
+# a re-run merges instead of dropping additional configuration (INS-05).
+merge_env_extras() {
+    local new="$1" line key extras=()
+    [ -f "$ENV_FILE" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in ''|'#'*) continue ;; esac
+        key="${line%%=*}"
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        grep -q "^${key}=" "$new" && continue
+        extras+=("$line")
+    done < "$ENV_FILE"
+    [ "${#extras[@]}" -gt 0 ] || return 0
+    {
+        printf '\n# Additional settings kept from the previous .env\n'
+        printf '%s\n' "${extras[@]}"
+    } >> "$new"
 }
 
 # ─── Preflight checks ─────────────────────────────────────────────────────────
 preflight() {
     info "Checking prerequisites …"
+
+    check_platform
 
     # Tools the installer itself needs; missing ones are installed automatically.
     ensure_command curl curl ca-certificates
@@ -462,6 +494,7 @@ preflight() {
 
     detect_container_tooling
     success "Container tooling: ${COMPOSE[*]}"
+    check_sizing cloud "$($DOCKER info --format '{{.DockerRootDir}}' 2>/dev/null || printf '/var/lib/docker')"
 
     if [ ! -f "$COMPOSE_FILE" ]; then
         die "Compose file not found at $COMPOSE_FILE — run this script from a full checkout, or use ./install.sh which downloads the sources for you."
@@ -496,6 +529,11 @@ collect_config() {
     def_client_secret="${def_client_secret:-$(openssl rand -hex 24)}"
     def_master_key="$(env_get RETICORA_MASTER_KEY || true)"
     def_master_key="${def_master_key:-$(openssl rand -base64 32)}"
+    # Passphrase of the encrypted pgBackRest repositories (WP-100). It is
+    # generated once and never asked for: changing it makes the existing
+    # backups unreadable.
+    RETICORA_BACKUP_CIPHER_PASS="$(env_get RETICORA_BACKUP_CIPHER_PASS || true)"
+    RETICORA_BACKUP_CIPHER_PASS="${RETICORA_BACKUP_CIPHER_PASS:-$(openssl rand -hex 32)}"
 
     ask_validated RETICORA_DB_PASSWORD "Database password (PostgreSQL)" "$def_db_pw" valid_password
     ask RETICORA_S3_ACCESS_KEY "S3/MinIO access key" "$def_s3_key"
@@ -543,8 +581,19 @@ collect_config() {
         issuer_host="$(printf '%s' "$RETICORA_PUBLIC_BASE_URL" | sed -E 's|^https?://||; s|[:/].*$||')"
         def_kc_port="$(env_get RETICORA_KEYCLOAK_PORT || true)"
         case "$issuer_host" in
-            localhost|127.*|0.0.0.0|[0-9]*.[0-9]*.[0-9]*.[0-9]*)
-                # Local/literal-IP install: Keycloak is published directly on
+            localhost|127.*|0.0.0.0)
+                # Loopback install: the backend container cannot reach a
+                # localhost issuer (INS-02), so Keycloak is addressed via the
+                # host's primary IP — reachable from the host, the containers
+                # and browsers on the network alike.
+                ensure_command ip iproute2
+                def_issuer="${issuer_scheme}://$(host_primary_ip || true):${def_kc_port:-8180}/realms/reticora"
+                case "$def_issuer" in
+                    *://:*) def_issuer="${issuer_scheme}://${issuer_host}:${def_kc_port:-8180}/realms/reticora" ;;
+                esac
+                ;;
+            [0-9]*.[0-9]*.[0-9]*.[0-9]*)
+                # Literal-IP install: Keycloak is published directly on
                 # its host port (8180 unless already configured in .env).
                 def_issuer="${issuer_scheme}://${issuer_host}:${def_kc_port:-8180}/realms/reticora"
                 ;;
@@ -728,16 +777,35 @@ tls_cert_expires_soon() {
     ! openssl x509 -in "$cert" -noout -checkend 86400 >/dev/null 2>&1
 }
 
-# tls_cert_is_selfsigned — returns 0 when the current certificate is the
-# bootstrap placeholder (issuer == subject) or no certificate exists yet.
+# tls_cert_is_trusted <fullchain> — returns 0 when the leaf certificate
+# verifies against the system trust store with the intermediates of the
+# chain file (INS-03). openssl verify reads the first certificate of the file
+# as the leaf; RETICORA_TLS_CA_BUNDLE adds a CA file (tests, private CAs).
+tls_cert_is_trusted() {
+    local cert="$1"
+    [ -f "$cert" ] || return 1
+    local -a ca_args=()
+    [ -n "${RETICORA_TLS_CA_BUNDLE:-}" ] && ca_args=(-CAfile "$RETICORA_TLS_CA_BUNDLE")
+    openssl verify "${ca_args[@]}" -untrusted "$cert" "$cert" >/dev/null 2>&1
+}
+
+# tls_cert_is_selfsigned — returns 0 when no trusted certificate is served
+# yet: none exists, it is the self-signed bootstrap placeholder, or its chain
+# does not verify (INS-03). The installer then requests a Let's Encrypt
+# certificate.
 tls_cert_is_selfsigned() {
-    local cert
-    cert="$(tls_live_dir)/fullchain.pem"
-    [ -f "$cert" ] || return 0
-    local subject issuer
-    subject="$(openssl x509 -in "$cert" -noout -subject 2>/dev/null || true)"
-    issuer="$(openssl x509 -in "$cert" -noout -issuer 2>/dev/null || true)"
-    [ -z "$subject" ] || [ "$subject" = "$issuer" ]
+    ! tls_cert_is_trusted "$(tls_live_dir)/fullchain.pem"
+}
+
+# tls_template_source — the nginx TLS template mounted into the frontend
+# container: the TLS server blocks with a domain, an empty template without
+# one, so no TLS configuration is rendered (INS-03).
+tls_template_source() {
+    if [ -n "$RETICORA_TLS_DOMAIN" ]; then
+        printf './nginx-tls.conf.template'
+    else
+        printf './nginx-no-tls.conf.template'
+    fi
 }
 
 # Set to 1 when an existing bootstrap certificate was replaced, so an already
@@ -798,13 +866,15 @@ bootstrap_tls_cert() {
     success "Bootstrap certificate created (will be replaced by Let's Encrypt)"
 }
 
-# validate_tls_material <domain> — verifies that the certificate chain and
-# private key under letsencrypt/live/<domain> form a consistent, usable pair:
-# the certificate must parse, carry a SAN for the domain, be unexpired, and
-# match the private key. Called after bootstrap generation and again after
-# certbot issuance so TLS problems surface at install time.
+# validate_tls_material <domain> [chain] — verifies that the certificate chain
+# and private key under letsencrypt/live/<domain> form a consistent, usable
+# pair: the certificate must parse, carry a SAN for the domain, be unexpired,
+# and match the private key. With chain=1 the chain must also verify against
+# the trust store (INS-03). Called after bootstrap generation and again
+# (with chain=1) after certbot issuance so TLS problems surface at install
+# time.
 validate_tls_material() {
-    local domain="$1"
+    local domain="$1" chain="${2:-0}"
     local live_dir; live_dir="$(tls_live_dir)"
     local cert="$live_dir/fullchain.pem" key="$live_dir/privkey.pem"
 
@@ -831,6 +901,12 @@ validate_tls_material() {
     key_pub="$(openssl pkey -in "$key" -pubout 2>/dev/null | openssl sha256)"
     [ -n "$cert_pub" ] && [ "$cert_pub" = "$key_pub" ] \
         || die "TLS certificate $cert and private key $key do not match."
+    if [ "$chain" = "1" ]; then
+        tls_cert_is_trusted "$cert" \
+            || die "TLS certificate chain $cert does not verify against the system trust store (incomplete chain or untrusted issuer)."
+        success "TLS material for $domain is consistent (parses, SAN present, key matches, chain verifies)"
+        return 0
+    fi
     success "TLS material for $domain is consistent (parses, SAN present, key matches)"
 }
 
@@ -861,13 +937,14 @@ issue_tls_certificate() {
     # The certbot container shares the webroot volume with the frontend, and
     # ./letsencrypt is bind-mounted as /etc/letsencrypt in both. nginx is
     # already running with the bootstrap certificate, serving the challenge
-    # directory over plain HTTP on port 80.
-    if compose_cmd run --rm --no-deps certbot certonly \
+    # directory over plain HTTP on port 80. The service's entrypoint is the
+    # renewal loop shell, so the one-off run selects the certbot binary.
+    if compose_cmd run --rm --no-deps --entrypoint certbot certbot certonly \
         --webroot -w /var/www/certbot \
         -d "$RETICORA_TLS_DOMAIN" \
         --non-interactive --agree-tos \
         "${email_args[@]}"; then
-        validate_tls_material "$RETICORA_TLS_DOMAIN"
+        validate_tls_material "$RETICORA_TLS_DOMAIN" 1
         compose_cmd exec -T frontend nginx -s reload >/dev/null 2>&1 \
             || warn "Could not reload nginx automatically; restart the frontend to activate the certificate: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE restart frontend"
         success "Let's Encrypt certificate issued for $RETICORA_TLS_DOMAIN"
@@ -980,17 +1057,11 @@ validate_realm_json() {
 validate_keycloak_bootstrap() {
     info "Validating the Keycloak bootstrap …"
 
-    # The issuer URL must not point at localhost when the UI is served from a
-    # different host — the browser resolves it, not the server.
-    case "$RETICORA_OIDC_ISSUER_URL" in
-        http://localhost:*|http://localhost/*|https://localhost:*|https://localhost/*|http://127.*|https://127.*)
-            case "$RETICORA_PUBLIC_BASE_URL" in
-                http://localhost*|https://localhost*|http://127.*|https://127.*) : ;;
-                *) warn "RETICORA_OIDC_ISSUER_URL ($RETICORA_OIDC_ISSUER_URL) points at localhost but the public base URL is $RETICORA_PUBLIC_BASE_URL."
-                   warn "Remote browsers cannot reach a localhost issuer — sign-in will fail for every user not on this machine." ;;
-            esac
-            ;;
-    esac
+    # A localhost issuer resolves to the backend container itself, not to
+    # Keycloak: the backend could not verify any token (INS-02).
+    if issuer_is_loopback "$RETICORA_OIDC_ISSUER_URL"; then
+        die "RETICORA_OIDC_ISSUER_URL ($RETICORA_OIDC_ISSUER_URL) points at localhost, which the backend container cannot reach. Set it to an address reachable from this host, the containers and the users' browsers, e.g. http://$(host_primary_ip || printf '<host-ip>'):${RETICORA_KEYCLOAK_PORT:-8180}/realms/reticora (see docs/troubleshooting-installation.md, 'OIDC issuer check failed')."
+    fi
 
     # Verify the realm's OIDC discovery document is served (proves the realm
     # import succeeded). The issuer may be a public URL not resolvable from
@@ -1028,6 +1099,75 @@ validate_keycloak_bootstrap() {
         die "Keycloak answered the discovery document without an 'issuer' field — the realm import is incomplete."
     fi
     success "Keycloak realm 'reticora' is imported and serving OIDC discovery"
+
+    check_issuer_from_host
+    check_issuer_from_container
+}
+
+# host_primary_ip — the host's primary IPv4 address (the source address of
+# its default route); RETICORA_HOST_IP overrides it.
+host_primary_ip() {
+    if [ -n "${RETICORA_HOST_IP:-}" ]; then printf '%s' "$RETICORA_HOST_IP"; return 0; fi
+    local addr=""
+    if command -v ip >/dev/null 2>&1; then
+        addr="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
+    fi
+    if [ -z "$addr" ] && command -v hostname >/dev/null 2>&1; then
+        addr="$(hostname -I 2>/dev/null | awk '{ print $1 }')"
+    fi
+    [ -n "$addr" ] || return 1
+    printf '%s' "$addr"
+}
+
+# issuer_is_loopback <url> — returns 0 for an issuer on localhost/127.x.
+issuer_is_loopback() {
+    case "$1" in
+        http://localhost:*|http://localhost/*|https://localhost:*|https://localhost/*|http://127.*|https://127.*|http://0.0.0.0*|https://0.0.0.0*) return 0 ;;
+    esac
+    return 1
+}
+
+# discovery_issuer — prints the "issuer" of the discovery document on stdin.
+discovery_issuer() {
+    tr -d '\n' | sed -nE 's/.*"issuer"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p'
+}
+
+ISSUER_TROUBLESHOOTING="see docs/troubleshooting-installation.md, 'OIDC issuer check failed'"
+
+# check_issuer_from_host — the configured issuer serves its discovery
+# document to this host and announces exactly itself (INS-02). A
+# self-signed certificate of the installation is trusted explicitly.
+check_issuer_from_host() {
+    local issuer="${RETICORA_OIDC_ISSUER_URL%/}" doc="" announced cert ca_args=()
+    cert="$(tls_live_dir)/fullchain.pem"
+    if [ -n "$RETICORA_TLS_DOMAIN" ] && [ -f "$cert" ] && tls_cert_is_selfsigned "$cert"; then
+        ca_args=(--cacert "$cert")
+    fi
+    for _ in 1 2 3; do
+        doc="$(curl -fsS --max-time 5 "${ca_args[@]}" "$issuer/.well-known/openid-configuration" 2>/dev/null)" && break
+        doc=""
+        sleep "${RETICORA_ISSUER_RETRY_DELAY:-3}"
+    done
+    if [ -z "$doc" ]; then
+        die "The OIDC issuer $issuer is not reachable from this host (no discovery document at $issuer/.well-known/openid-configuration). Check DNS, firewall and RETICORA_OIDC_ISSUER_URL ($ISSUER_TROUBLESHOOTING)."
+    fi
+    announced="$(printf '%s' "$doc" | discovery_issuer)"
+    if [ "${announced%/}" != "$issuer" ]; then
+        die "The OIDC issuer $issuer announces itself as '${announced:-<none>}' — tokens would not match the configured issuer. Align RETICORA_OIDC_ISSUER_URL with the address Keycloak is published under ($ISSUER_TROUBLESHOOTING)."
+    fi
+    success "OIDC issuer $issuer is reachable from this host"
+}
+
+# check_issuer_from_container — the backend container reaches the same
+# issuer through the client it uses for sign-in (including
+# RETICORA_OIDC_CA_CERT_FILE); the server binary checks it and exits.
+check_issuer_from_container() {
+    local out
+    if ! out="$(compose_cmd run --rm --no-deps --entrypoint server server -check-oidc-issuer 2>&1)"; then
+        printf '%s\n' "$out" | tail -n 5 >&2
+        die "The backend container cannot reach the OIDC issuer $RETICORA_OIDC_ISSUER_URL — sign-in would fail. The issuer must resolve to Keycloak from inside the containers as well ($ISSUER_TROUBLESHOOTING)."
+    fi
+    success "OIDC issuer is reachable from the backend container"
 }
 
 # ─── Images: build / pull ─────────────────────────────────────────────────────
@@ -1051,6 +1191,9 @@ provide_images() {
         info "Building the Reticora images (this can take a few minutes) …"
         compose_cmd build server frontend || die "Image build failed."
     fi
+    # PostgreSQL with pgBackRest is always built locally (WP-100).
+    info "Building the PostgreSQL image with pgBackRest …"
+    compose_cmd build postgres || die "Building the PostgreSQL image failed."
     if [ -n "$RETICORA_TLS_DOMAIN" ]; then
         compose_cmd pull certbot || die "Pulling the certbot image failed."
     fi
@@ -1088,12 +1231,13 @@ show_service_logs() {
     compose_cmd logs --tail 40 "$service" >&2 || true
 }
 
-# db_volume_name — prints the name of the Docker volume holding the main
-# PostgreSQL data directory (<project>_pgdata), resolved from the running
-# postgres container's mounts (falling back to the compose project name).
+# db_volume_name [service] [volume suffix] — prints the name of the Docker
+# volume holding the data directory of a PostgreSQL service (default: the
+# main database, <project>_pgdata), resolved from the running container's
+# mounts (falling back to the compose project name).
 db_volume_name() {
-    local cid project name
-    cid="$(compose_cmd ps -q postgres 2>/dev/null || true)"
+    local service="${1:-postgres}" suffix="${2:-pgdata}" cid project name
+    cid="$(compose_cmd ps -q "$service" 2>/dev/null || true)"
     if [ -n "$cid" ]; then
         name="$($DOCKER inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' \
             "$cid" 2>/dev/null || true)"
@@ -1104,86 +1248,105 @@ db_volume_name() {
     fi
     project="$("${COMPOSE[@]}" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config --format json 2>/dev/null \
         | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
-    printf '%s_pgdata' "${project:-docker-compose}"
+    printf '%s_%s' "${project:-docker-compose}" "$suffix"
 }
 
-# db_image — prints the container image configured for the postgres service,
-# so the temporary password-reset instance runs exactly the same PostgreSQL
-# version as the real stack (an older binary refuses a newer data directory).
+# db_image [service] — prints the container image configured for a
+# PostgreSQL service, so the temporary password-reset instance runs exactly
+# the same PostgreSQL version as the real stack (an older binary refuses a
+# newer data directory).
 db_image() {
-    local img
+    local service="${1:-postgres}" fallback img
+    case "$service" in
+        postgres) fallback="reticora-postgres:latest" ;;
+        *) fallback="postgres:16-alpine" ;;
+    esac
     img="$("${COMPOSE[@]}" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config 2>/dev/null \
-        | awk '/^[[:space:]]*postgres:/{f=1} f && /^[[:space:]]*image:/{print $2; exit}')"
-    printf '%s' "${img:-timescale/timescaledb:latest-pg16}"
+        | awk -v svc="$service" '$0 == "  " svc ":" {f=1; next} f && /^  [^ ]/ {exit} f && /^    image:/ {print $2; exit}')"
+    printf '%s' "${img:-$fallback}"
+}
+
+# db_password_matches <service> <role> <database> <password> — probes the
+# password over TCP (INS-05). The postgres images trust every connection on
+# the local socket and on 127.0.0.1, so only a connection to the service's
+# network address proves the password.
+db_password_matches() {
+    local service="$1" role="$2" database="$3" password="$4"
+    compose_cmd exec -T -e PGPASSWORD="$password" -e PGCONNECT_TIMEOUT=5 "$service" \
+        psql -h "$service" -U "$role" -d "$database" -tAc 'SELECT 1' >/dev/null 2>&1
 }
 
 # sync_db_password — the postgres image applies POSTGRES_PASSWORD only when it
 # initializes an *empty* data directory. When the installer is re-run with a
-# changed RETICORA_DB_PASSWORD, the persistent pgdata volume still carries the
-# previous password, so every connection fails with SQLSTATE 28P01
-# (password authentication failed) and the server container never becomes
-# healthy ("dependency failed to start: container docker-compose-server-1 is
-# unhealthy"). Probe the authentication here and, on mismatch, resync the
-# stored password so the database matches .env again.
+# changed password, the persistent volume still carries the previous one, so
+# every connection fails with SQLSTATE 28P01 (password authentication failed)
+# and the server or Keycloak never becomes healthy. Both databases — the
+# CMDB (RETICORA_DB_PASSWORD) and Keycloak's (KEYCLOAK_DB_PASSWORD) — are
+# probed and, on mismatch, resynced to .env (INS-05).
 sync_db_password() {
-    info "Checking database authentication …"
-    if compose_cmd exec -T -e PGPASSWORD="$RETICORA_DB_PASSWORD" postgres \
-        psql -U reticora -d reticora -tAc 'SELECT 1' >/dev/null 2>&1; then
-        success "Database password matches the configuration"
+    sync_role_password postgres reticora reticora "$RETICORA_DB_PASSWORD" pgdata
+    sync_role_password keycloak-db keycloak keycloak "$KEYCLOAK_DB_PASSWORD" keycloakdb
+}
+
+# sync_role_password <service> <role> <database> <password> <volume suffix>
+sync_role_password() {
+    local service="$1" role="$2" database="$3" password="$4" suffix="$5"
+    info "Checking the password of database role '$role' ($service) …"
+    if db_password_matches "$service" "$role" "$database" "$password"; then
+        success "Password of '$role' matches the configuration"
         return 0
     fi
 
-    warn "The existing PostgreSQL volume still uses a different password (SQLSTATE 28P01);"
+    warn "The existing '$service' volume still uses a different password for '$role' (SQLSTATE 28P01);"
     warn "PostgreSQL ignores POSTGRES_PASSWORD once its data directory is initialized."
-    info "Updating the password of database role 'reticora' to the configured value …"
+    info "Updating the password of database role '$role' to the configured value …"
 
     # Start a temporary PostgreSQL instance on the same data volume, but with
     # 'trust' authentication for local connections (via a throwaway hba config
     # outside the volume) so the role password can be changed without knowing
     # the old one. The new password is passed through the PGPASSWORD
     # environment variable and a psql variable, never on a command line.
-    local hba_vol image
-    hba_vol="$(db_volume_name)"
-    image="$(db_image)"
-    compose_cmd rm -sf postgres >/dev/null 2>&1 || true
-    $DOCKER run -d --rm --name reticora-db-pwreset \
+    local data_vol image container="reticora-db-pwreset"
+    data_vol="$(db_volume_name "$service" "$suffix")"
+    image="$(db_image "$service")"
+    compose_cmd rm -sf "$service" >/dev/null 2>&1 || true
+    $DOCKER run -d --rm --name "$container" \
         --entrypoint sh \
-        -v "$hba_vol:/var/lib/postgresql/data" \
-        -e POSTGRES_PASSWORD="$RETICORA_DB_PASSWORD" \
+        -v "$data_vol:/var/lib/postgresql/data" \
+        -e POSTGRES_PASSWORD="$password" \
         -e RESET_HBA='local all all trust
 host all all all scram-sha-256' \
         "$image" \
         -c 'mkdir -p /etc/reticora-pwreset && printf "%s\n" "$RESET_HBA" > /etc/reticora-pwreset/pg_hba.conf && chmod 644 /etc/reticora-pwreset/pg_hba.conf && exec docker-entrypoint.sh postgres -c hba_file=/etc/reticora-pwreset/pg_hba.conf' \
         >/dev/null 2>&1 \
-        || die "Cannot start the temporary PostgreSQL instance on volume '$hba_vol' — is another postgres container still running?"
+        || die "Cannot start the temporary PostgreSQL instance on volume '$data_vol' — is another postgres container still running?"
 
     local ok=1
     for _ in $(seq 1 30); do
         # The password travels only via stdin: the \set meta-command reads it
         # from the PGPASSWORD environment variable inside psql, so it never
         # appears in a process list or on a command line.
-        if printf '%s\n' '\set pw `printenv PGPASSWORD`' "ALTER ROLE reticora WITH PASSWORD :'pw'" | \
-            $DOCKER exec -i -e PGPASSWORD="$RETICORA_DB_PASSWORD" reticora-db-pwreset \
-                psql -U reticora -d reticora -v ON_ERROR_STOP=1 -q >/dev/null 2>&1; then
+        if printf '%s\n' '\set pw `printenv PGPASSWORD`' "ALTER ROLE \"$role\" WITH PASSWORD :'pw'" | \
+            $DOCKER exec -i -e PGPASSWORD="$password" "$container" \
+                psql -U "$role" -d "$database" -v ON_ERROR_STOP=1 -q >/dev/null 2>&1; then
             ok=0
             break
         fi
         sleep 2
     done
-    $DOCKER rm -f reticora-db-pwreset >/dev/null 2>&1 || true
+    $DOCKER rm -f "$container" >/dev/null 2>&1 || true
     if [ "$ok" -ne 0 ]; then
-        die "Could not reset the database password. Remove the stale volume with '$DOCKER volume rm $hba_vol' (all CMDB data is lost) and re-run this installer."
+        die "Could not reset the password of '$role'. Remove the stale volume with '$DOCKER volume rm $data_vol' (its data is lost) and re-run this installer."
     fi
-    success "Database password updated"
+    success "Password of '$role' updated"
 
-    info "Restarting PostgreSQL with normal authentication …"
-    compose_cmd up -d postgres
-    wait_for_service postgres || die "PostgreSQL did not become healthy."
-    if compose_cmd exec -T -e PGPASSWORD="$RETICORA_DB_PASSWORD" postgres \
-        psql -U reticora -d reticora -tAc 'SELECT 1' >/dev/null 2>&1; then
-        success "Database authentication verified"
+    info "Restarting $service with normal authentication …"
+    compose_cmd up -d "$service"
+    wait_for_service "$service" || die "$service did not become healthy."
+    if db_password_matches "$service" "$role" "$database" "$password"; then
+        success "Authentication of '$role' verified over TCP"
     else
-        die "Database authentication still fails after the password reset. Remove the stale volume with '$DOCKER volume rm $hba_vol' (all CMDB data is lost) and re-run this installer."
+        die "Authentication of '$role' still fails after the password reset. Remove the stale volume with '$DOCKER volume rm $data_vol' (its data is lost) and re-run this installer."
     fi
 }
 
@@ -1198,6 +1361,14 @@ start_stack() {
 
     run_migrations
     seed_default_organization
+
+    info "Starting the backup service (pgBackRest) …"
+    compose_cmd up -d backup
+    wait_for_service backup || {
+        show_service_logs backup
+        die "The backup service did not become healthy — no base backup could be taken. See docs/backup-dr.md."
+    }
+    success "WAL archiving and base backups are active"
 
     info "Starting Keycloak …"
     compose_cmd up -d keycloak

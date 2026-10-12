@@ -50,9 +50,14 @@ var version = "dev"
 func main() {
 	noDB := flag.Bool("no-db", false,
 		"run with in-memory repositories for local development; all data is lost on restart")
+	checkIssuer := flag.Bool("check-oidc-issuer", false,
+		"check that the configured OIDC issuer is reachable from this container and announces itself, then exit (used by the installer)")
 	flag.Parse()
 
 	cfg := config.Load()
+	if *checkIssuer {
+		os.Exit(runIssuerCheck(cfg))
+	}
 
 	// Every record passes the redaction handler: secret attributes and URL
 	// passwords never reach the log (SEC-01).
@@ -304,6 +309,8 @@ func main() {
 		// object the account may read (RBA-08).
 		Access:     user.ServiceAccountAccess{Repo: repos.ServiceAccounts},
 		Deliveries: repos.WebhookDeliveries,
+		// The retry worker runs under its operator switch below (OPS-02).
+		PollInterval: -1,
 	})
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -348,43 +355,65 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Process queued asynchronous export jobs until shutdown. All replicas
-	// share the queue via FOR UPDATE SKIP LOCKED, so jobs are never run twice.
+	// Background workers, each under its operator switch
+	// RETICORA_WORKER_<NAME>_ENABLED (OPS-02), so they can run on dedicated
+	// instances.
+	workers := []server.Worker{{
+		// Re-send persisted webhook deliveries that are due for a retry.
+		Name: config.WorkerWebhookDispatcher,
+		Run:  func(ctx context.Context) { webhookDispatcher.RunRetries(ctx, 15*time.Second) },
+		Backlog: backlogOf(repos.WebhookDeliveries, func(ctx context.Context, c dueCounter) (int, error) {
+			return c.CountDue(ctx, time.Now().UTC())
+		}),
+	}, {
+		// Release expired reservations (spec §10). The sweeper is
+		// interval-driven and shares no state with request handling.
+		Name: config.WorkerReservationSweeper,
+		Run:  reservation.NewSweeper(repos.Reservation, webhookDispatcher, time.Minute).Run,
+	}}
+	// Process queued asynchronous export jobs. All replicas share the queue
+	// via FOR UPDATE SKIP LOCKED, so jobs are never run twice.
 	if blobStore != nil {
 		exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, blobStore)
-		workerCtx, stopWorker := context.WithCancel(context.Background())
-		defer stopWorker()
-		go exportWorker.Run(workerCtx, 2*time.Second)
+		workers = append(workers, server.Worker{
+			Name: config.WorkerExport,
+			Run:  func(ctx context.Context) { exportWorker.Run(ctx, 2*time.Second) },
+			Backlog: backlogOf(repos.ExportJobs, func(ctx context.Context, c pendingCounter) (int, error) {
+				return c.CountPending(ctx)
+			}),
+		})
 	}
-
-	// Consume ingest.> until shutdown (REC-01).
+	// Consume ingest.> (REC-01).
 	if ingestQueue != nil {
-		consumerCtx, stopConsumer := context.WithCancel(context.Background())
-		defer stopConsumer()
-		go ingestQueue.Run(consumerCtx)
+		workers = append(workers, server.Worker{Name: config.WorkerIngest, Run: ingestQueue.Run, Backlog: ingestQueue.Backlog})
 	}
-
-	// Evaluate monitoring alert rules against the metric store until shutdown.
-	// Fired alerts are logged via the default notifier; evaluation state is
-	// persisted in the alert store so restarts neither re-notify nor lose
-	// pending durations.
+	// Evaluate monitoring alert rules against the metric store. Fired alerts
+	// are logged via the default notifier; evaluation state is persisted in
+	// the alert store so restarts neither re-notify nor lose pending
+	// durations.
 	if alertStore, ok := repos.Metrics.(monitoring.EvaluatingStore); ok {
 		evaluator := monitoring.NewEvaluator(repos.Metrics, alertStore.AlertStore(), nil)
 		// The health of the CIs follows the monitoring state (DB-05).
 		if refresher, ok := repos.Metrics.(monitoring.HealthRefreshingStore); ok {
 			evaluator.WithHealth(refresher.HealthRefresher())
 		}
-		evalCtx, stopEvaluator := context.WithCancel(context.Background())
-		defer stopEvaluator()
-		go evaluator.Run(evalCtx, time.Minute)
+		workers = append(workers, server.Worker{
+			Name: config.WorkerMonitoring,
+			Run:  func(ctx context.Context) { evaluator.Run(ctx, time.Minute) },
+		})
 	}
-
-	// Release expired reservations until shutdown (spec §10). The sweeper is
-	// interval-driven and shares no state with request handling.
-	sweeper := reservation.NewSweeper(repos.Reservation, webhookDispatcher, time.Minute)
-	sweepCtx, stopSweeper := context.WithCancel(context.Background())
-	defer stopSweeper()
-	go sweeper.Run(sweepCtx)
+	workerSet, err := server.StartWorkers(cfg.WorkerEnabled, workers...)
+	if err != nil {
+		slog.Error("worker registration failed", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := workerSet.Stop(ctx); err != nil {
+			slog.Error("worker shutdown error", "error", err)
+		}
+	}()
 
 	// Session tokens are always verified cryptographically unless the operator
 	// explicitly opted into the insecure development mode. API keys are
@@ -552,6 +581,11 @@ func setupObjectStorage(cfg *config.Config) (*blob.S3Store, error) {
 		if err := store.EnsureBucket(context.Background(), bucket); err != nil {
 			return nil, err
 		}
+		// Versioned buckets keep overwritten and deleted objects (NFR-05).
+		// A store without versioning support keeps working, loudly.
+		if err := store.EnableVersioning(context.Background(), bucket); err != nil {
+			slog.Error("object storage: bucket versioning could not be enabled", "bucket", bucket, "error", err)
+		}
 	}
 	return store, nil
 }
@@ -570,4 +604,44 @@ func hostPort(rawURL, defaultPort string) (string, error) {
 		port = defaultPort
 	}
 	return net.JoinHostPort(u.Hostname(), port), nil
+}
+
+// runIssuerCheck fetches the discovery document of the configured issuer
+// through the same HTTP client the server uses for sign-in (including
+// RETICORA_OIDC_CA_CERT_FILE) and reports the result on stdout/stderr
+// (INS-02). The installer runs it inside the backend container.
+func runIssuerCheck(cfg *config.Config) int {
+	client, err := identity.NewHTTPClientWithCA(cfg.OIDCCACertFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "OIDC CA bundle %s: %v\n", cfg.OIDCCACertFile, err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if _, err = identity.CheckIssuer(ctx, client, cfg.OIDCIssuerURL); err != nil {
+		fmt.Fprintf(os.Stderr, "OIDC issuer check failed: %v\n", err)
+		return 1
+	}
+	fmt.Printf("OIDC issuer %s is reachable\n", cfg.OIDCIssuerURL)
+	return 0
+}
+
+// Backlog sources of the workers (OPS-05); the PostgreSQL repositories
+// implement them, the in-memory ones of --no-db report no backlog.
+type (
+	pendingCounter interface {
+		CountPending(ctx context.Context) (int, error)
+	}
+	dueCounter interface {
+		CountDue(ctx context.Context, now time.Time) (int, error)
+	}
+)
+
+// backlogOf returns count bound to repo when repo implements C, else nil.
+func backlogOf[C any](repo any, count func(context.Context, C) (int, error)) func(context.Context) (int, error) {
+	c, ok := repo.(C)
+	if !ok {
+		return nil
+	}
+	return func(ctx context.Context) (int, error) { return count(ctx, c) }
 }

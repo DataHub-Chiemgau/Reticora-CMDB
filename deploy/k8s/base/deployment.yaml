@@ -54,6 +54,19 @@ spec:
                   name: reticora-secrets
                   key: master-key
                   optional: false
+            # Operator switches of the background workers (OPS-02,
+            # docs/ops/workers.md). A dedicated worker deployment keeps them
+            # on and the API deployment switches them off, or vice versa.
+            - name: RETICORA_WORKER_WEBHOOK_DISPATCHER_ENABLED
+              value: "true"
+            - name: RETICORA_WORKER_EXPORT_ENABLED
+              value: "true"
+            - name: RETICORA_WORKER_INGEST_ENABLED
+              value: "true"
+            - name: RETICORA_WORKER_MONITORING_ENABLED
+              value: "true"
+            - name: RETICORA_WORKER_RESERVATION_SWEEPER_ENABLED
+              value: "true"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session

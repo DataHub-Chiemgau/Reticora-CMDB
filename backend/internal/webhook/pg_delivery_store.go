@@ -104,6 +104,21 @@ func (s *PGDeliveryStore) Update(ctx context.Context, rec DeliveryRecord) error 
 	})
 }
 
+// CountDue counts the deliveries of all organizations that are due for an
+// attempt: the backlog of the retry worker (OPS-05).
+func (s *PGDeliveryStore) CountDue(ctx context.Context, now time.Time) (int, error) {
+	var n int
+	err := database.WithSystem(ctx, s.pool, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			SELECT count(*) FROM webhook_delivery
+			WHERE status IN ('pending', 'retrying') AND next_retry_at IS NOT NULL AND next_retry_at <= $1`, now).Scan(&n)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count due webhook deliveries: %w", err)
+	}
+	return n, nil
+}
+
 // ClaimDue leases due deliveries across all tenants for the dispatcher worker.
 // The system flag only finds the organizations with due deliveries; each
 // organization's deliveries are then leased in its own tenant transaction,

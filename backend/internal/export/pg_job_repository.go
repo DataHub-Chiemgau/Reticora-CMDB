@@ -182,6 +182,19 @@ func (r *PGJobRepository) FailJob(ctx context.Context, orgID, id, message string
 	})
 }
 
+// CountPending counts the queued jobs of all organizations: the backlog of
+// the export worker (OPS-05).
+func (r *PGJobRepository) CountPending(ctx context.Context) (int, error) {
+	var n int
+	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM export_job WHERE status = $1`, JobStatusPending).Scan(&n)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count pending export jobs: %w", err)
+	}
+	return n, nil
+}
+
 // ClaimPending marks up to limit pending jobs across all tenants as running
 // and returns them oldest first; it is used exclusively by the export worker.
 // The system flag only finds the organizations with pending jobs; each

@@ -17,6 +17,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
 
@@ -374,16 +375,32 @@ func (d *Dispatcher) Shutdown(ctx context.Context) error {
 
 // retryLoop claims deliveries whose retry time has come and re-sends them.
 func (d *Dispatcher) retryLoop(interval time.Duration) {
+	// background worker: no request context
+	d.RunRetries(context.Background(), interval)
+}
+
+// RunRetries runs the retry worker until ctx is cancelled or the dispatcher
+// shuts down. A dispatcher created with a negative PollInterval starts no
+// retry worker of its own; the server then runs it under its operator
+// switch (OPS-02).
+func (d *Dispatcher) RunRetries(ctx context.Context, interval time.Duration) {
+	if d == nil || d.store == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = defaultPollInterval
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case <-d.stop:
 			return
 		case <-ticker.C:
-			// background worker: no request context
-			d.ProcessDue(context.Background())
+			d.ProcessDue(ctx)
 		}
 	}
 }
@@ -397,9 +414,11 @@ func (d *Dispatcher) ProcessDue(ctx context.Context) {
 
 	records, err := d.store.ClaimDue(ctx, d.now(), defaultClaimBatch, defaultClaimLease)
 	if err != nil {
+		observability.ObserveWorkerRun("webhook_dispatcher", 1)
 		slog.Error("claim due webhook deliveries failed", "error", err)
 		return
 	}
+	observability.ObserveWorkerRun("webhook_dispatcher", 0)
 
 	for _, rec := range records {
 		sub, err := d.repo.GetByID(orgScoped(ctx, rec.OrganizationID), rec.OrganizationID, rec.SubscriptionID)

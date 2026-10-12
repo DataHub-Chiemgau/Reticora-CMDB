@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/md5"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -257,6 +259,47 @@ func (s *S3Store) EnsureBucket(ctx context.Context, bucket string) error {
 	return fmt.Errorf("blob: ensure bucket %s returned %s: %s", bucket, resp.Status, strings.TrimSpace(string(bodyBytes)))
 }
 
+// versioningEnabled is the PutBucketVersioning body that enables versioning.
+const versioningEnabled = `<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>Enabled</Status></VersioningConfiguration>`
+
+// EnableVersioning switches on object versioning for bucket (NFR-05,
+// OPS-04): an overwritten or deleted document or export keeps its previous
+// versions and stays recoverable. The call is idempotent.
+func (s *S3Store) EnableVersioning(ctx context.Context, bucket string) error {
+	if strings.TrimSpace(bucket) == "" {
+		return fmt.Errorf("blob: bucket is required")
+	}
+	scheme := "http"
+	if s.useSSL {
+		scheme = "https"
+	}
+	body := []byte(versioningEnabled)
+	versioningURL := (&url.URL{Scheme: scheme, Host: s.endpoint, Path: "/" + bucket, RawQuery: "versioning="}).String()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, versioningURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("blob: create versioning request: %w", err)
+	}
+	sum := md5.Sum(body) //nolint:gosec // Content-MD5 is the integrity header S3 requires here, not a security hash.
+	req.Header.Set("Content-Type", "application/xml")
+	req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(sum[:]))
+	if err = s.signRequest(req, payloadSHA256(body)); err != nil {
+		return fmt.Errorf("blob: sign versioning request: %w", err)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("blob: enable versioning on %s: %w", bucket, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	return fmt.Errorf("blob: enable versioning on %s returned %s: %s", bucket, resp.Status, strings.TrimSpace(string(bodyBytes)))
+}
+
 // Get downloads an object from the S3-compatible backend.
 func (s *S3Store) Get(ctx context.Context, bucket, key string) (io.ReadCloser, error) {
 	resp, err := s.doRequest(ctx, http.MethodGet, bucket, key, nil, "", emptyPayloadSHA256, nil)
@@ -372,7 +415,7 @@ func (s *S3Store) signRequest(req *http.Request, payloadHash string) error {
 	canonicalRequest := strings.Join([]string{
 		req.Method,
 		req.URL.EscapedPath(),
-		"",
+		canonicalQueryString(req.URL.Query()),
 		canonicalHeaders,
 		signedHeaders,
 		payloadHash,

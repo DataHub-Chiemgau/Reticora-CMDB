@@ -1,0 +1,165 @@
+# Signed releases (WP-102, TEC-15, COL-06; tools per E-31).
+#
+# A version tag v* builds the edge binaries and the container images,
+# generates an SPDX SBOM for each, and signs everything keyless with cosign
+# (Fulcio certificate for this workflow's identity, Rekor log entry). The
+# edge updater (edgecore/update) installs a binary only after
+# `cosign verify-blob` accepted its bundle for exactly this workflow on a
+# version tag.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  COSIGN_VERSION: v2.4.1
+  REGISTRY: ghcr.io/datahub-chiemgau
+
+jobs:
+  # A release is only published when the outage suite passes (OPS-06).
+  outage:
+    uses: ./.github/workflows/outage.yml
+
+  binaries:
+    needs: outage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # attach the files to the GitHub release
+      id-token: write   # keyless signing (Fulcio)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.9"
+
+      - uses: sigstore/cosign-installer@v3.7.0
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+
+      - uses: anchore/sbom-action/download-syft@v0.17.8
+
+      - name: Build edge binaries
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            (cd collector && CGO_ENABLED=0 GOOS=linux GOARCH=$arch \
+              go build -trimpath -ldflags="-s -w" -o "../dist/reticora-collector-linux-$arch" ./cmd/collector)
+            (cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=$arch \
+              go build -trimpath -ldflags="-s -w" -o "../dist/reticora-agent-linux-$arch" ./cmd/agent)
+          done
+
+      - name: Generate SBOMs
+        run: |
+          set -euo pipefail
+          for bin in dist/reticora-*-linux-*; do
+            syft scan "file:$bin" -o "spdx-json=$bin.spdx.json"
+          done
+          syft scan dir:. -o spdx-json=dist/reticora-source.spdx.json
+
+      - name: Sign binaries and SBOMs (cosign keyless)
+        run: |
+          set -euo pipefail
+          for file in dist/*; do
+            cosign sign-blob --yes --bundle "$file.sigstore.json" "$file"
+          done
+
+      - name: Verify the signatures as the updater does
+        run: |
+          set -euo pipefail
+          identity="^https://github\.com/${GITHUB_REPOSITORY//./\\.}/\.github/workflows/release\.yml@refs/tags/v.+$"
+          for bundle in dist/*.sigstore.json; do
+            cosign verify-blob --bundle "$bundle" \
+              --certificate-identity-regexp "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "${bundle%.sigstore.json}"
+          done
+
+      - name: Write updater release manifests
+        run: |
+          set -euo pipefail
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          for bin in dist/reticora-*-linux-amd64 dist/reticora-*-linux-arm64; do
+            name="$(basename "$bin")"
+            jq -n --arg version "$GITHUB_REF_NAME" --arg url "$base/$name" \
+              --arg bundle "$base/$name.sigstore.json" --arg sha "$(sha256sum "$bin" | cut -d' ' -f1)" \
+              --arg published "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              '{version: $version, downloadUrl: $url, signatureBundleUrl: $bundle, checksums: {sha256: $sha}, publishedAt: $published}' \
+              > "$bin.release.json"
+          done
+          (cd dist && sha256sum reticora-* > SHA256SUMS)
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/*
+
+  images:
+    needs: outage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # push to ghcr.io
+      id-token: write   # keyless signing (Fulcio)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: reticora-server
+            context: .
+            dockerfile: backend/Dockerfile
+          - image: reticora-collector
+            context: .
+            dockerfile: collector/Dockerfile
+          - image: reticora-frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile
+          - image: reticora-postgres
+            context: deploy/docker-compose/postgres
+            dockerfile: deploy/docker-compose/postgres/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: sigstore/cosign-installer@v3.7.0
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ matrix.image }}:${{ github.ref_name }}
+
+      - name: Generate the image SBOM
+        uses: anchore/sbom-action@v0.17.8
+        with:
+          image: ${{ env.REGISTRY }}/${{ matrix.image }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: ${{ matrix.image }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Sign the image and attest its SBOM (cosign keyless)
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ matrix.image }}@${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes "$IMAGE"
+          cosign attest --yes --type spdxjson --predicate "${{ matrix.image }}.spdx.json" "$IMAGE"
+          cosign verify "$IMAGE" \
+            --certificate-identity-regexp "^https://github\.com/${GITHUB_REPOSITORY//./\\.}/\.github/workflows/release\.yml@refs/tags/v.+$" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null

@@ -15,6 +15,21 @@ docker compose --env-file .env -f docker-compose.yml ps
 
 ---
 
+## 0. Preflight refusals
+
+The installers check the host before they change anything
+(`install-preflight.sh`, INS-07).
+
+| Message | Cause | Fix |
+|---|---|---|
+| `Platform … is not supported` | Not Ubuntu 22.04/24.04 LTS or Debian 12 (CH22) | Install on a supported system. `RETICORA_ALLOW_UNSUPPORTED_PLATFORM=1` continues, without support. |
+| `Docker Engine … is too old` | Docker Engine below 24 | Upgrade Docker Engine (https://docs.docker.com/engine/install/), re-run. |
+| `Docker Compose … is not supported` | The Python `docker-compose` v1 | Install the compose plugin (`apt-get install docker-compose-plugin`), re-run. |
+| `… is required but could not be installed automatically` | No `apt-get` (not Debian/Ubuntu) | Install the named tool yourself, re-run. |
+| `Only … available; the … minimum is …` (warning) | Host below the minimum sizing | The installation continues; see [ops/sizing.md](ops/sizing.md). |
+
+---
+
 ## 1. Container health failures
 
 ### `container docker-compose-server-1 is unhealthy`
@@ -27,7 +42,7 @@ healthy".
 | Cause | Diagnosis | Fix |
 |---|---|---|
 | Session key unreadable | `docker compose logs server` shows `read session key: permission denied` or `is a directory` | Re-run the installer — `ensure_session_key` removes Docker-created directories and fixes ownership (`uid:65534`, mode `0640`). |
-| Database password mismatch | `logs postgres` / `logs server` show `SQLSTATE 28P01` (password authentication failed) | Re-run the installer — `sync_db_password` resets the stored role password to the value in `.env` using a temporary trust-auth instance. **Manual alternative (data loss):** `docker compose down -v` removes the stale volume. |
+| Database password mismatch | `logs postgres` / `logs server` show `SQLSTATE 28P01` (password authentication failed) | Re-run the installer — `sync_db_password` probes both databases (CMDB and Keycloak) over TCP and resets a stale role password to the value in `.env` using a temporary trust-auth instance. **Manual alternative (data loss):** `docker compose down -v` removes the stale volume. |
 | Migrations not applied | `logs server` shows missing tables/columns | Re-run the installer; migrations run before the server starts. |
 
 **General diagnosis:**
@@ -83,13 +98,52 @@ letting the login fail later in the browser.
 `http://localhost:8180/...` on a remote machine.
 
 **Cause:** `RETICORA_OIDC_ISSUER_URL` points at localhost — the browser
-resolves it, not the server. The installer derives the issuer from the public
-base URL and warns when the two disagree.
+resolves it, not the server, and inside the backend container localhost is the
+container itself. The installer therefore refuses a localhost issuer; for a
+localhost base URL it proposes `http://<host-ip>:8180/realms/reticora`.
 
 **Fix:** Edit `.env`, set `RETICORA_OIDC_ISSUER_URL` to the publicly reachable
 Keycloak URL (`https://<domain>/realms/reticora` behind the reverse proxy, or
 `http://<host-ip>:8180/realms/reticora` for direct port publishing), then
 re-run the installer.
+
+### OIDC issuer check failed
+
+**Symptom:** The installer stops after the Keycloak start with one of
+
+- `The OIDC issuer … is not reachable from this host`
+- `The OIDC issuer … announces itself as '…'`
+- `The backend container cannot reach the OIDC issuer …`
+
+**Cause:** The issuer must be one and the same URL for the users' browsers,
+this host and the backend container (INS-02): the browser fetches tokens from
+it, the backend verifies them against the issuer they name. The installer
+fetches `<issuer>/.well-known/openid-configuration` from the host and — via
+`server -check-oidc-issuer` — from inside the backend container, and requires
+the document to announce exactly the configured issuer.
+
+**Fix:**
+
+- *Not reachable from this host:* check DNS for the issuer's hostname, the
+  firewall for the Keycloak port (default 8180) and the reverse proxy.
+- *Announces another issuer:* Keycloak names itself after the address it is
+  called under. Use the address it is published under (behind the reverse
+  proxy `https://<domain>/realms/reticora`, else
+  `http://<host-ip>:8180/realms/reticora`), not an alias.
+- *Not reachable from the container:* the issuer's hostname must resolve to
+  this host from inside Docker as well (no `/etc/hosts`-only entries, no
+  split-horizon DNS without the containers), and a host firewall must allow
+  the Docker bridge to reach the published port. With a private CA, set
+  `RETICORA_OIDC_CA_CERT_FILE` to a CA bundle mounted into the container.
+
+Run the container check manually:
+
+```bash
+cd deploy/docker-compose
+docker compose --env-file .env run --rm --no-deps --entrypoint server server -check-oidc-issuer
+```
+
+Then correct `RETICORA_OIDC_ISSUER_URL` in `.env` and re-run the installer.
 
 ### Login fails with "Invalid redirect uri"
 
@@ -173,9 +227,9 @@ The installer is safe to re-run and reuses existing `.env` values as defaults:
 
 | Resource | Behaviour on re-run |
 |---|---|
-| `.env` | Existing values are defaults; secrets are regenerated only when absent. |
+| `.env` | Existing values are defaults; secrets are regenerated only when absent. Settings the installer does not write itself (e.g. `RETICORA_HTTP_BIND`) are kept in a section at the end. |
 | Session key | Reused; a Docker-created directory or zero-byte file is removed and regenerated. |
-| Database password | Probed; on `28P01` mismatch the stored role password is resynced automatically. |
+| Database passwords | `RETICORA_DB_PASSWORD` (CMDB) and `KEYCLOAK_DB_PASSWORD` (Keycloak) are probed over TCP — the images trust the local socket and 127.0.0.1 regardless of the password — and on mismatch the stored role password is resynced automatically. |
 | TLS bootstrap cert | Reused; regenerated when SAN-less or expiring within a day. |
 | Let's Encrypt cert | Not re-issued when a real certificate is present. |
 | Realm file | Re-rendered and validated on every run. |

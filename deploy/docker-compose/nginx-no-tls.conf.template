@@ -1,0 +1,5 @@
+# Reticora frontend — no TLS configuration.
+#
+# Mounted instead of nginx-tls.conf.template when RETICORA_TLS_DOMAIN is empty
+# (RETICORA_NGINX_TLS_TEMPLATE in .env, written by install-cloud.sh): the
+# frontend then serves plain HTTP from nginx.conf only (INS-03).

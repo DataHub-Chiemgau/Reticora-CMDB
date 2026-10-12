@@ -1,13 +1,21 @@
 name: Restore Test
 
-# Nightly proof that a PostgreSQL backup restores cleanly and that the restored
-# audit hash chain still verifies. Runs on a schedule (and on demand); it is
-# intentionally not part of the per-PR CI because it is slow and uses no real
-# data — only generated fixtures.
+# Nightly proof that the backups restore cleanly (only generated fixtures,
+# never real data):
+#   - restore-test: logical dump → restore, audit hash chain still verifies;
+#   - pitr: the pgBackRest chain (WP-101, NFR-05/OPS-04) — point in time
+#     restore and restore after losing the data volume, with measured RPO
+#     (limit 15 min) and RTO (limit 4 h); exceeding a limit fails the job.
+# Also runs when the backup chain or the proof changes.
 on:
   schedule:
     - cron: "0 3 * * *" # nightly at 03:00 UTC
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "deploy/docker-compose/postgres/**"
+      - "tests/restore-pitr.sh"
+      - ".github/workflows/restore-test.yml"
 
 # The job only reads the checked-out repository and runs against a throwaway
 # database; it needs no write access to the repo.
@@ -34,8 +42,8 @@ jobs:
           --health-retries 10
     env:
       PGPASSWORD: reticora
-      DATABASE_URL: "******localhost:5432/reticora_restore?sslmode=disable"
-      RESTORE_DATABASE_URL: "******localhost:5432/reticora_restored?sslmode=disable"
+      DATABASE_URL: "postgres://reticora@localhost:5432/reticora_restore?sslmode=disable"
+      RESTORE_DATABASE_URL: "postgres://reticora@localhost:5432/reticora_restored?sslmode=disable"
     steps:
       - uses: actions/checkout@v4
 
@@ -86,3 +94,27 @@ jobs:
 
       - name: "Integrity check: audit hash chain verifies after restore"
         run: /tmp/audit-verify -database-url "$RESTORE_DATABASE_URL" -org "$ORG_ID"
+
+  pitr:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Point in time restore and RPO/RTO measurement
+        run: ./tests/restore-pitr.sh
+        env:
+          RESTORE_REPORT: ${{ github.workspace }}/restore-pitr-report.md
+
+      - name: Publish the protocol
+        if: always()
+        run: |
+          [ -f restore-pitr-report.md ] && cat restore-pitr-report.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload the protocol
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-pitr-report
+          path: restore-pitr-report.md
+          retention-days: 90

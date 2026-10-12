@@ -1,0 +1,35 @@
+# Alertmanager routing for the Reticora alerts (WP-103, OPS-05): every alert
+# of slo-rules.yaml and worker-rules.yaml reaches the operators; critical
+# alerts repeat hourly. Replace the receiver endpoints with the operators'
+# addresses. The NTF channel of the product (WP-137) is added as another
+# receiver once it exists.
+route:
+  receiver: operators
+  group_by: [alertname, worker, organization_id]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: [severity="critical"]
+      receiver: operators-critical
+      repeat_interval: 1h
+
+receivers:
+  - name: operators
+    email_configs:
+      - to: ops@example.invalid
+        send_resolved: true
+  - name: operators-critical
+    email_configs:
+      - to: ops@example.invalid
+        send_resolved: true
+    webhook_configs:
+      # On-call pager or chat bridge.
+      - url: https://oncall.example.invalid/alertmanager
+        send_resolved: true
+
+inhibit_rules:
+  # A stopped worker explains its missing runs.
+  - source_matchers: [alertname="ReticoraWorkerStopped"]
+    target_matchers: [alertname="ReticoraWorkerNoSuccess"]
+    equal: [worker]

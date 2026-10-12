@@ -66,7 +66,7 @@ variable "backup_region" {
   default     = null
 
   validation {
-    condition     = var.backup_region == null || contains(local.eu_regions, var.backup_region)
+    condition     = var.backup_region == null ? true : contains(local.eu_regions, var.backup_region)
     error_message = "backup_region must be an EU region (NFR-09: backups stay in the EU)."
   }
 }
@@ -77,7 +77,7 @@ variable "log_region" {
   default     = null
 
   validation {
-    condition     = var.log_region == null || contains(local.eu_regions, var.log_region)
+    condition     = var.log_region == null ? true : contains(local.eu_regions, var.log_region)
     error_message = "log_region must be an EU region (NFR-09: logs stay in the EU)."
   }
 }
@@ -88,7 +88,32 @@ variable "search_region" {
   default     = null
 
   validation {
-    condition     = var.search_region == null || contains(local.eu_regions, var.search_region)
+    condition     = var.search_region == null ? true : contains(local.eu_regions, var.search_region)
     error_message = "search_region must be an EU region (NFR-09: the search index stays in the EU)."
+  }
+}
+
+# Backup chain (WP-100, OPS-04, NFR-05/06): pgBackRest writes the WAL
+# archive and the daily base backups to a versioned bucket in the backup
+# region that is replicated to a second EU region.
+variable "backup_retention_days" {
+  description = "Days the base backups and their WAL are kept (NFR-06: 35)"
+  type        = number
+  default     = 35
+
+  validation {
+    condition     = var.backup_retention_days >= 35
+    error_message = "backup_retention_days must be at least 35 (NFR-06)."
+  }
+}
+
+variable "backup_replica_region" {
+  description = "EU region the versioned backup and document buckets are replicated to (NFR-05); must differ from the backup region"
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.backup_replica_region == null ? true : contains(local.eu_regions, var.backup_replica_region)
+    error_message = "backup_replica_region must be an EU region (NFR-09: backup replicas stay in the EU)."
   }
 }

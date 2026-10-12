@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -440,6 +441,7 @@ func runIngestConsumer(ctx context.Context, src ingestSource, h *Handler) {
 		deliveries, err := src.Fetch(ctx, ingestBatch)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, nats.ErrTimeout) &&
 			!errors.Is(err, context.DeadlineExceeded) && len(deliveries) == 0 {
+			observability.ObserveWorkerRun("ingest", 1)
 			slog.Warn("ingest consumer fetch failed", "error", err)
 			select {
 			case <-ctx.Done():
@@ -449,7 +451,18 @@ func runIngestConsumer(ctx context.Context, src ingestSource, h *Handler) {
 			continue
 		}
 		consumeBatch(ctx, h, deliveries)
+		observability.ObserveWorkerRun("ingest", 0)
 	}
+}
+
+// Backlog reports the messages waiting for the ingest worker: not yet
+// delivered plus delivered but unacknowledged (OPS-05).
+func (q *NATSIngestQueue) Backlog(ctx context.Context) (int, error) {
+	info, err := q.consumer.Info(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("ingest consumer info: %w", err)
+	}
+	return int(info.NumPending) + info.NumAckPending, nil
 }
 
 // consumeBatch processes one fetched batch. Undecodable messages are

@@ -18,6 +18,7 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 # `main "$@"`; dropping the last line removes that call.
 HARNESS="$TMP_ROOT/harness.sh"
 head -n -1 install-cloud.sh > "$HARNESS"
+cp install-preflight.sh "$TMP_ROOT/"
 
 PASS=0
 FAIL=0
@@ -128,6 +129,295 @@ test_tls_unparseable() {
 run_test   "validate_tls_material accepts a consistent cert/key pair" test_tls_valid
 expect_fail "validate_tls_material rejects a mismatched key"          test_tls_key_mismatch
 expect_fail "validate_tls_material rejects an unparseable cert"       test_tls_unparseable
+
+# ─── TLS detection, ACME path and template (WP-094, INS-03) ──────────────────
+
+# make_ca_chain <dir> <domain> — a private CA (ca.pem) and a leaf certificate
+# for <domain> signed by an intermediate, written as fullchain.pem (leaf +
+# intermediate) and privkey.pem like certbot does.
+make_ca_chain() {
+    local dir="$1" domain="$2"
+    mkdir -p "$dir"
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout "$dir/ca.key" -out "$dir/ca.pem" -days 30 \
+        -subj "/CN=Test Root" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
+    openssl req -newkey rsa:2048 -nodes -keyout "$dir/int.key" -out "$dir/int.csr" -subj "/CN=Test Intermediate" 2>/dev/null
+    printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' > "$dir/int.ext"
+    openssl x509 -req -in "$dir/int.csr" -CA "$dir/ca.pem" -CAkey "$dir/ca.key" -CAcreateserial -days 30 \
+        -extfile "$dir/int.ext" -out "$dir/int.pem" 2>/dev/null
+    openssl req -newkey rsa:2048 -nodes -keyout "$dir/privkey.pem" -out "$dir/leaf.csr" -subj "/CN=$domain" 2>/dev/null
+    printf 'subjectAltName=DNS:%s\n' "$domain" > "$dir/leaf.ext"
+    openssl x509 -req -in "$dir/leaf.csr" -CA "$dir/int.pem" -CAkey "$dir/int.key" -CAcreateserial -days 30 \
+        -extfile "$dir/leaf.ext" -out "$dir/leaf.pem" 2>/dev/null
+    cat "$dir/leaf.pem" "$dir/int.pem" > "$dir/fullchain.pem"
+}
+
+# The bootstrap placeholder is self-signed: ACME must run. (The former
+# subject=/issuer= comparison never matched and skipped ACME.)
+test_tls_placeholder_detected() {
+    RETICORA_TLS_DOMAIN="placeholder.example.com"
+    local live="$TMP_ROOT/tls-placeholder/live/$RETICORA_TLS_DOMAIN"
+    make_cert "$live" "$RETICORA_TLS_DOMAIN"
+    tls_live_dir() { printf '%s' "$live"; }
+    tls_cert_is_selfsigned
+}
+
+test_tls_missing_counts_as_placeholder() {
+    RETICORA_TLS_DOMAIN="missing.example.com"
+    tls_live_dir() { printf '%s' "$TMP_ROOT/tls-none"; }
+    tls_cert_is_selfsigned
+}
+
+# A certificate whose chain verifies is a real one: no new request.
+test_tls_trusted_chain_detected() {
+    RETICORA_TLS_DOMAIN="real.example.com"
+    local live="$TMP_ROOT/tls-real/live/$RETICORA_TLS_DOMAIN"
+    make_ca_chain "$live" "$RETICORA_TLS_DOMAIN"
+    tls_live_dir() { printf '%s' "$live"; }
+    RETICORA_TLS_CA_BUNDLE="$live/ca.pem"
+    ! tls_cert_is_selfsigned && validate_tls_material "$RETICORA_TLS_DOMAIN" 1
+}
+
+# Without its intermediate the chain does not verify: rejected after issuance.
+test_tls_incomplete_chain_rejected() {
+    RETICORA_TLS_DOMAIN="chain.example.com"
+    local live="$TMP_ROOT/tls-chain/live/$RETICORA_TLS_DOMAIN"
+    make_ca_chain "$live" "$RETICORA_TLS_DOMAIN"
+    cp "$live/leaf.pem" "$live/fullchain.pem"
+    tls_live_dir() { printf '%s' "$live"; }
+    RETICORA_TLS_CA_BUNDLE="$live/ca.pem"
+    validate_tls_material "$RETICORA_TLS_DOMAIN" 1
+}
+
+# The ACME request runs certbot itself, not the renewal-loop entrypoint.
+test_tls_acme_uses_certbot_entrypoint() {
+    RETICORA_TLS_DOMAIN="acme.example.com"
+    RETICORA_CERT_EMAIL="ops@example.com"
+    local live="$TMP_ROOT/tls-acme/live/$RETICORA_TLS_DOMAIN" calls="$TMP_ROOT/compose-calls"
+    make_ca_chain "$TMP_ROOT/tls-acme-issued" "$RETICORA_TLS_DOMAIN"
+    make_cert "$live" "$RETICORA_TLS_DOMAIN"
+    tls_live_dir() { printf '%s' "$live"; }
+    compose_cmd() {
+        printf '%s\n' "$*" >> "$calls"
+        # certbot "issues" the real chain.
+        if [ "$1" = "run" ]; then cp "$TMP_ROOT/tls-acme-issued/fullchain.pem" "$TMP_ROOT/tls-acme-issued/privkey.pem" "$live/"; fi
+        return 0
+    }
+    RETICORA_TLS_CA_BUNDLE="$TMP_ROOT/tls-acme-issued/ca.pem"
+    issue_tls_certificate
+    grep -q -- "run --rm --no-deps --entrypoint certbot certbot certonly --webroot -w /var/www/certbot -d acme.example.com" "$calls" \
+        && grep -q -- "--email ops@example.com" "$calls" && grep -q -- "exec -T frontend nginx -s reload" "$calls"
+}
+
+# A served real certificate is not requested again.
+test_tls_acme_skipped_with_real_certificate() {
+    RETICORA_TLS_DOMAIN="kept.example.com"
+    local live="$TMP_ROOT/tls-kept/live/$RETICORA_TLS_DOMAIN"
+    make_ca_chain "$live" "$RETICORA_TLS_DOMAIN"
+    tls_live_dir() { printf '%s' "$live"; }
+    RETICORA_TLS_CA_BUNDLE="$live/ca.pem"
+    compose_cmd() { return 1; }
+    issue_tls_certificate
+}
+
+test_tls_template_selection() {
+    RETICORA_TLS_DOMAIN=""
+    [ "$(tls_template_source)" = "./nginx-no-tls.conf.template" ] || return 1
+    RETICORA_TLS_DOMAIN="cmdb.example.com"
+    [ "$(tls_template_source)" = "./nginx-tls.conf.template" ] || return 1
+    # Both templates exist next to the compose file, and the no-TLS one
+    # declares no server block.
+    [ -f "$REPO_ROOT/deploy/docker-compose/nginx-tls.conf.template" ] &&
+        [ -f "$REPO_ROOT/deploy/docker-compose/nginx-no-tls.conf.template" ] &&
+        ! grep -q 'server' <(grep -v '^#' "$REPO_ROOT/deploy/docker-compose/nginx-no-tls.conf.template") &&
+        grep -q 'RETICORA_NGINX_TLS_TEMPLATE' "$REPO_ROOT/deploy/docker-compose/docker-compose.yml"
+}
+
+run_test   "tls: the self-signed placeholder is detected"                 test_tls_placeholder_detected
+run_test   "tls: a missing certificate counts as placeholder"              test_tls_missing_counts_as_placeholder
+run_test   "tls: a verifying chain is a real certificate"                  test_tls_trusted_chain_detected
+expect_fail "tls: an incomplete chain is rejected after issuance"          test_tls_incomplete_chain_rejected
+run_test   "tls: ACME runs certbot with the webroot and reloads nginx"     test_tls_acme_uses_certbot_entrypoint
+run_test   "tls: no new request while a real certificate is served"        test_tls_acme_skipped_with_real_certificate
+run_test   "tls: the TLS template is mounted only with a domain"           test_tls_template_selection
+
+# ─── OIDC issuer from the host and the container (WP-095, INS-02) ───────────
+
+ISSUER="http://192.0.2.10:8180/realms/reticora"
+
+# curl stub: serves a discovery document announcing $STUB_ANNOUNCED, or
+# fails when it is empty.
+stub_discovery() {
+    STUB_ANNOUNCED="$1"
+    RETICORA_ISSUER_RETRY_DELAY=0
+    curl() {
+        [ -n "$STUB_ANNOUNCED" ] || return 7
+        printf '{\n  "issuer": "%s",\n  "jwks_uri": "x"\n}\n' "$STUB_ANNOUNCED"
+    }
+}
+
+test_issuer_host_matches() {
+    RETICORA_OIDC_ISSUER_URL="$ISSUER/"
+    RETICORA_TLS_DOMAIN=""
+    stub_discovery "$ISSUER"
+    check_issuer_from_host
+}
+
+test_issuer_host_other_issuer() {
+    RETICORA_OIDC_ISSUER_URL="$ISSUER"
+    RETICORA_TLS_DOMAIN=""
+    stub_discovery "http://localhost:8180/realms/reticora"
+    local out
+    out="$( (check_issuer_from_host) 2>&1)" && return 1
+    printf '%s' "$out" | grep -q "announces itself as 'http://localhost:8180/realms/reticora'" &&
+        printf '%s' "$out" | grep -q "docs/troubleshooting-installation.md"
+}
+
+test_issuer_host_unreachable() {
+    RETICORA_OIDC_ISSUER_URL="$ISSUER"
+    RETICORA_TLS_DOMAIN=""
+    stub_discovery ""
+    local out
+    out="$( (check_issuer_from_host) 2>&1)" && return 1
+    printf '%s' "$out" | grep -q "not reachable from this host" &&
+        printf '%s' "$out" | grep -q "docs/troubleshooting-installation.md"
+}
+
+test_issuer_container_check_runs_server() {
+    RETICORA_OIDC_ISSUER_URL="$ISSUER"
+    local calls="$TMP_ROOT/issuer-compose-calls"
+    compose_cmd() { printf '%s\n' "$*" >> "$calls"; }
+    check_issuer_from_container
+    grep -qx -- "run --rm --no-deps --entrypoint server server -check-oidc-issuer" "$calls"
+}
+
+test_issuer_container_unreachable() {
+    RETICORA_OIDC_ISSUER_URL="$ISSUER"
+    compose_cmd() { echo "OIDC issuer check failed: dial tcp 192.0.2.10:8180: connect: connection refused"; return 1; }
+    local out
+    out="$( (check_issuer_from_container) 2>&1)" && return 1
+    printf '%s' "$out" | grep -q "connection refused" &&
+        printf '%s' "$out" | grep -q "backend container cannot reach the OIDC issuer" &&
+        printf '%s' "$out" | grep -q "docs/troubleshooting-installation.md"
+}
+
+test_issuer_loopback_refused() {
+    RETICORA_OIDC_ISSUER_URL="http://localhost:8180/realms/reticora"
+    RETICORA_HOST_IP="192.0.2.10"
+    local out
+    out="$( (validate_keycloak_bootstrap) 2>&1)" && return 1
+    printf '%s' "$out" | grep -q "backend container cannot reach" &&
+        printf '%s' "$out" | grep -q "http://192.0.2.10:8180/realms/reticora"
+}
+
+test_host_primary_ip() {
+    RETICORA_HOST_IP="198.51.100.7"
+    [ "$(host_primary_ip)" = "198.51.100.7" ] || return 1
+    issuer_is_loopback "http://127.0.0.1:8180/realms/reticora" &&
+        issuer_is_loopback "https://localhost/realms/reticora" &&
+        ! issuer_is_loopback "$ISSUER"
+}
+
+test_issuer_troubleshooting_documented() {
+    grep -q "OIDC issuer check failed" "$REPO_ROOT/docs/troubleshooting-installation.md"
+}
+
+run_test   "issuer: discovery from the host announces the configured issuer" test_issuer_host_matches
+run_test   "issuer: another announced issuer is refused with a hint"         test_issuer_host_other_issuer
+run_test   "issuer: an unreachable issuer is refused with a hint"            test_issuer_host_unreachable
+run_test   "issuer: the backend container checks the issuer itself"          test_issuer_container_check_runs_server
+run_test   "issuer: unreachable from the container is refused with a hint"   test_issuer_container_unreachable
+run_test   "issuer: a localhost issuer is refused, the host IP suggested"    test_issuer_loopback_refused
+run_test   "issuer: host IP and loopback detection"                          test_host_primary_ip
+run_test   "issuer: the troubleshooting guide covers the check"              test_issuer_troubleshooting_documented
+
+# ─── re-run: .env merge and password probes (WP-096, INS-05) ─────────────────
+
+set_env_values() {
+    local v
+    for v in KEYCLOAK_ADMIN KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD RETICORA_CERT_EMAIL RETICORA_DB_PASSWORD \
+        RETICORA_FRONTEND_PORT RETICORA_GC_KEEP_IMAGES RETICORA_IMAGE_REGISTRY RETICORA_IMAGE_TAG \
+        RETICORA_INITIAL_ADMIN_EMAIL RETICORA_KEYCLOAK_PORT RETICORA_MASTER_KEY RETICORA_OIDC_CLIENT_ID \
+        RETICORA_OIDC_CLIENT_SECRET RETICORA_OIDC_ISSUER_URL RETICORA_OIDC_REDIRECT_URL RETICORA_PUBLIC_BASE_URL \
+        RETICORA_S3_ACCESS_KEY RETICORA_S3_SECRET_KEY RETICORA_SERVER_PORT RETICORA_BACKUP_CIPHER_PASS; do
+        printf -v "$v" '%s' "new-$v"
+    done
+    RETICORA_TLS_DOMAIN=""
+}
+
+# A re-run keeps settings the installer does not write itself, replaces the
+# ones it writes and does not duplicate the kept ones on the next run.
+test_env_merge_keeps_extra_settings() {
+    ENV_FILE="$TMP_ROOT/merge.env"
+    printf '# old header\nRETICORA_DB_PASSWORD=old\nRETICORA_HTTP_BIND=127.0.0.1\nRETICORA_EXTRA="a=b"\n\n# comment\n' > "$ENV_FILE"
+    set_env_values
+    write_env
+    write_env
+    grep -qx 'RETICORA_HTTP_BIND=127.0.0.1' "$ENV_FILE" &&
+        grep -qx 'RETICORA_EXTRA="a=b"' "$ENV_FILE" &&
+        grep -qx 'RETICORA_DB_PASSWORD=new-RETICORA_DB_PASSWORD' "$ENV_FILE" &&
+        [ "$(grep -c '^RETICORA_DB_PASSWORD=' "$ENV_FILE")" -eq 1 ] &&
+        [ "$(grep -c '^RETICORA_HTTP_BIND=' "$ENV_FILE")" -eq 1 ] &&
+        [ "$(grep -c 'kept from the previous .env' "$ENV_FILE")" -eq 1 ] &&
+        [ "$(stat -c %a "$ENV_FILE")" = "600" ]
+}
+
+test_env_first_run_has_no_extras() {
+    ENV_FILE="$TMP_ROOT/fresh.env"
+    rm -f "$ENV_FILE"
+    set_env_values
+    write_env
+    ! grep -q 'kept from the previous .env' "$ENV_FILE"
+}
+
+# The probe connects over TCP to the service address: the postgres images
+# trust the local socket and 127.0.0.1 regardless of the password.
+test_password_probe_uses_tcp() {
+    local calls="$TMP_ROOT/probe-calls"
+    compose_cmd() { printf '%s\n' "$*" >> "$calls"; }
+    db_password_matches keycloak-db keycloak keycloak secret
+    grep -qx -- "exec -T -e PGPASSWORD=secret -e PGCONNECT_TIMEOUT=5 keycloak-db psql -h keycloak-db -U keycloak -d keycloak -tAc SELECT 1" "$calls"
+}
+
+test_password_sync_covers_both_databases() {
+    local calls="$TMP_ROOT/sync-calls"
+    RETICORA_DB_PASSWORD="cmdb-pw"
+    KEYCLOAK_DB_PASSWORD="kc-pw"
+    db_password_matches() { printf '%s\n' "$*" >> "$calls"; }
+    sync_db_password
+    grep -qx "postgres reticora reticora cmdb-pw" "$calls" && grep -qx "keycloak-db keycloak keycloak kc-pw" "$calls"
+}
+
+# A mismatching Keycloak DB password is reset on the keycloakdb volume with
+# the Keycloak image and verified over TCP afterwards.
+test_password_sync_resets_keycloak_db() {
+    local calls="$TMP_ROOT/reset-calls" probes="$TMP_ROOT/reset-probes"
+    : > "$probes"
+    db_password_matches() { printf 'x\n' >> "$probes"; [ "$(wc -l < "$probes")" -gt 1 ]; }
+    compose_cmd() { printf 'compose %s\n' "$*" >> "$calls"; }
+    wait_for_service() { return 0; }
+    db_volume_name() { printf 'proj_%s' "$2"; }
+    db_image() { printf 'image-of-%s' "$1"; }
+    fake_docker() {
+        printf 'docker %s\n' "$*" >> "$calls"
+        if [ "$1" = "exec" ]; then cat >> "$calls"; fi
+        return 0
+    }
+    DOCKER=fake_docker
+    sync_role_password keycloak-db keycloak keycloak kc-pw keycloakdb
+    grep -q -- "compose rm -sf keycloak-db" "$calls" &&
+        grep -q -- "-v proj_keycloakdb:/var/lib/postgresql/data" "$calls" &&
+        grep -q -- "image-of-keycloak-db" "$calls" &&
+        grep -q -- 'ALTER ROLE "keycloak" WITH PASSWORD' "$calls" &&
+        ! grep -q -- "kc-pw" <(grep '^docker run\|ALTER' "$calls" | grep -v 'POSTGRES_PASSWORD') &&
+        grep -q -- "compose up -d keycloak-db" "$calls" &&
+        [ "$(wc -l < "$probes")" -eq 2 ]
+}
+
+run_test   "re-run: .env keeps extra settings such as RETICORA_HTTP_BIND"   test_env_merge_keeps_extra_settings
+run_test   "re-run: a fresh .env has no kept section"                       test_env_first_run_has_no_extras
+run_test   "re-run: the password probe connects over TCP"                   test_password_probe_uses_tcp
+run_test   "re-run: CMDB and Keycloak database passwords are both probed"   test_password_sync_covers_both_databases
+run_test   "re-run: a stale Keycloak DB password is reset and re-verified"  test_password_sync_resets_keycloak_db
 
 # ─── realm files and initial administrator (WP-044, AUT-09) ───────────────────
 

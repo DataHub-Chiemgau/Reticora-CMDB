@@ -1,0 +1,61 @@
+# Alert rules for the background workers (WP-103, OPS-05). The workers
+# export reticora_worker_{enabled,up,runs_total,errors_total,
+# last_success_timestamp_seconds,backlog} per worker name of their operator
+# switch (docs/ops/workers.md). Alerts route to the operators through
+# deploy/monitoring/alertmanager.yaml; the NTF channel follows with WP-137.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: reticora-workers
+  labels:
+    app.kubernetes.io/name: reticora-cmdb
+spec:
+  groups:
+    - name: reticora.workers
+      rules:
+        - alert: ReticoraWorkerStopped
+          # Switched on but its loop is not running in this instance.
+          expr: reticora_worker_enabled == 1 and on (instance, worker) reticora_worker_up == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Worker {{ $labels.worker }} stopped on {{ $labels.instance }}"
+            description: "The worker is switched on (RETICORA_WORKER_*_ENABLED) but its loop has stopped. Restart the instance and check its log for 'worker stopped unexpectedly'."
+        - alert: ReticoraWorkerErrors
+          expr: sum by (worker) (increase(reticora_worker_errors_total[15m])) > 5
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Worker {{ $labels.worker }} keeps failing"
+            description: "More than 5 failures in 15 minutes; the worker log names the failing step."
+        - alert: ReticoraWorkerNoSuccess
+          # Running, but no cycle without error for 30 minutes.
+          expr: |
+            (time() - max by (worker) (reticora_worker_last_success_timestamp_seconds) > 1800)
+              and on (worker) max by (worker) (reticora_worker_up) == 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Worker {{ $labels.worker }} has not completed a run for 30 minutes"
+            description: "Every cycle of the worker failed for 30 minutes (for example database, object storage or NATS unreachable)."
+        - alert: ReticoraWorkerBacklog
+          # Items keep waiting: queued exports, due webhook deliveries or
+          # pending ingest messages.
+          expr: max by (worker) (reticora_worker_backlog) > 1000
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Backlog of worker {{ $labels.worker }} above 1000"
+            description: "{{ $value }} items are waiting. Check the worker's errors, or run more instances with the worker switched on."
+        - alert: ReticoraWorkerBacklogGrowing
+          expr: max by (worker) (deriv(reticora_worker_backlog[30m])) > 0 and max by (worker) (reticora_worker_backlog) > 100
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Backlog of worker {{ $labels.worker }} keeps growing"
+            description: "The backlog has grown for 30 minutes; the worker does not keep up."
