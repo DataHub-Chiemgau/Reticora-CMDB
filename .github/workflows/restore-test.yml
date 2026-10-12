@@ -42,8 +42,8 @@ jobs:
           --health-retries 10
     env:
       PGPASSWORD: reticora
-      DATABASE_URL: "******localhost:5432/reticora_restore?sslmode=disable"
-      RESTORE_DATABASE_URL: "******localhost:5432/reticora_restored?sslmode=disable"
+      DATABASE_URL: "postgres://reticora@localhost:5432/reticora_restore?sslmode=disable"
+      RESTORE_DATABASE_URL: "postgres://reticora@localhost:5432/reticora_restored?sslmode=disable"
     steps:
       - uses: actions/checkout@v4
 
