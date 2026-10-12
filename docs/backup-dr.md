@@ -107,7 +107,7 @@ PITR takes the place of pgBackRest, with the same RPO, RTO and retention.
    ```bash
    docker compose --env-file .env run --rm --no-deps --user postgres \
      --entrypoint reticora-pgbackrest-env.sh postgres \
-     sh -c 'rm -rf /var/lib/postgresql/data/* && pgbackrest --stanza=reticora \
+     sh -c 'find /var/lib/postgresql/data -mindepth 1 -delete && pgbackrest --stanza=reticora \
        --type=time --target="2026-10-12 09:30:00+00" --target-action=promote restore'
    ```
 
