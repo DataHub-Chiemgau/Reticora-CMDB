@@ -236,3 +236,5 @@ DIS-05;[B];D;backend/internal/discovery/devicerecord_test.go;WP-083
 GLO-12;[B];D;backend/internal/discovery/devicerecord_test.go;WP-083
 GLO-12;[B];D;backend/internal/override/decide_test.go;WP-084
 REC-05;[B];D;backend/internal/override/decide_test.go;WP-084
+REC-01;[B];D;backend/internal/discovery/consumer_test.go;WP-085
+NFR-03;[B], Teilumfang [P5];D;backend/internal/discovery/consumer_test.go;WP-085

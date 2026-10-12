@@ -81,12 +81,13 @@ type IngestItem struct {
 
 	// RecordID, ObservedAt and the scope fields come from a DeviceRecord
 	// (DIS-05); the deprecated items contract cannot set them.
-	RecordID   string    `json:"-"`
-	ObservedAt time.Time `json:"-"`
-	VRFID      string    `json:"-"`
-	ScopeID    string    `json:"-"`
-	SiteID     string    `json:"-"`
-	ClientID   string    `json:"-"`
+	RecordID    string    `json:"-"`
+	CollectorID string    `json:"-"`
+	ObservedAt  time.Time `json:"-"`
+	VRFID       string    `json:"-"`
+	ScopeID     string    `json:"-"`
+	SiteID      string    `json:"-"`
+	ClientID    string    `json:"-"`
 
 	// Attributes carries dynamic discovery attributes (spec §1 hybrid model).
 	// They feed per-field provenance records (spec §13) without being forced
@@ -108,6 +109,12 @@ type BulkIngestResponse struct {
 	// ProtectedInstanceFields counts matched CIs where discovered values for
 	// instance attributes were not written (MET-14).
 	ProtectedInstanceFields int `json:"protected_instance_fields,omitempty"`
+	// Duplicates counts records whose record_id was processed within the
+	// last 48 hours; they change nothing (REC-01).
+	Duplicates int `json:"duplicates,omitempty"`
+	// Queued counts records published to the ingest.> queue; they are
+	// processed asynchronously (REC-01).
+	Queued int `json:"queued,omitempty"`
 	// RejectedFuture counts records observed more than five minutes in the
 	// future; they change nothing (GLO-12).
 	RejectedFuture int `json:"rejected_future,omitempty"`
@@ -152,6 +159,7 @@ type MemoryRepository struct {
 	ciTypes      map[string]string
 	enrollCodes  map[string]*EnrollmentCode
 	enrollHashes map[string]string
+	records      map[string]time.Time
 	seq          int
 }
 
@@ -328,6 +336,10 @@ type Handler struct {
 	typeLookup CITypeLookup
 	provenance ProvenanceRecorder
 	instance   InstanceFieldSource
+	queue      IngestQueue
+	// serial holds one mutex per organization: the ingests of an
+	// organization run one after another in this process (REC-01).
+	serial sync.Map
 }
 
 // CITypeLookup resolves a CI type name or UUID to the canonical ci_type id.
@@ -459,7 +471,7 @@ func isUUID(value string) bool {
 // resolveCITypeIDs maps each item's ci_type_name to the canonical ci_type UUID.
 // Entries that are already UUIDs pass through. Items whose type cannot be
 // resolved get an empty string so the caller can queue them for review.
-func (h *Handler) resolveCITypeIDs(r *http.Request, items []IngestItem) []string {
+func (h *Handler) resolveCITypeIDs(ctx context.Context, orgID string, items []IngestItem) []string {
 	ids := make([]string, len(items))
 	missing := map[string]struct{}{}
 	for i, item := range items {
@@ -473,12 +485,11 @@ func (h *Handler) resolveCITypeIDs(r *http.Request, items []IngestItem) []string
 	if len(missing) == 0 {
 		return ids
 	}
-	t := tenant.FromContext(r.Context())
 	for name := range missing {
 		if h.typeLookup == nil {
 			continue
 		}
-		id, err := h.typeLookup.LookupCITypeID(r.Context(), t.OrganizationID, name)
+		id, err := h.typeLookup.LookupCITypeID(ctx, orgID, name)
 		if err != nil {
 			continue
 		}
@@ -745,13 +756,37 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 	// from the future are rejected and counted.
 	received := len(items)
 	items, rejected := admitObservedAt(items, time.Now().UTC())
-	req := BulkIngestRequest{Items: items}
 
-	resp := BulkIngestResponse{Received: received, RejectedFuture: rejected}
-	if h.ciRepo == nil {
-		api.WriteJSON(w, http.StatusAccepted, resp)
+	// Every record goes the path of the ingest.> consumer (REC-01): with a
+	// queue it is published and processed asynchronously, without one it is
+	// processed in this request.
+	msgs := newIngestMessages(r.Context(), t, r.Header.Get("X-Collector-ID"), items)
+	resp, err := h.dispatch(r.Context(), msgs)
+	if err != nil {
+		api.WriteRepoError(w, err)
 		return
 	}
+	resp.Received, resp.RejectedFuture = received, rejected
+	api.WriteJSON(w, http.StatusAccepted, resp)
+}
+
+// processItems reconciles the items of one organization; ctx carries that
+// organization's tenant scope. Records processed within 48 hours are skipped
+// (REC-01).
+func (h *Handler) processItems(ctx context.Context, orgID string, items []IngestItem) (BulkIngestResponse, error) {
+	var resp BulkIngestResponse
+	if h.ciRepo == nil {
+		return resp, nil
+	}
+	items, duplicates, err := h.skipProcessed(ctx, orgID, items)
+	if err != nil {
+		return resp, err
+	}
+	resp.Duplicates = duplicates
+	if len(items) == 0 {
+		return resp, nil
+	}
+	req := BulkIngestRequest{Items: items}
 
 	// Resolve ci_type_name to the canonical ci_type UUID before
 	// reconciliation. Collectors send the type name (e.g. "switch"); the CI
@@ -759,13 +794,13 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 	// (organization_id IS NULL) and org-specific types. Items whose type can
 	// be resolved neither as UUID nor by name are queued for review instead of
 	// failing the whole batch with a 500.
-	typeIDs := h.resolveCITypeIDs(r, req.Items)
+	typeIDs := h.resolveCITypeIDs(ctx, orgID, req.Items)
 	for i, item := range req.Items {
 		if typeIDs[i] != "" {
 			continue
 		}
 		reviewItem := &ReviewItem{
-			OrganizationID: t.OrganizationID,
+			OrganizationID: orgID,
 			Kind:           ReviewKindUnclassifiedDevice,
 			Status:         ReviewStatusOpen,
 			Payload: map[string]any{
@@ -780,17 +815,15 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 				"raw_data":      item.RawData,
 			},
 		}
-		if err := h.repo.CreateReviewItem(r.Context(), reviewItem); err != nil {
-			api.WriteRepoError(w, err)
-			return
+		if createErr := h.repo.CreateReviewItem(ctx, reviewItem); createErr != nil {
+			return resp, createErr
 		}
 		resp.ReviewItems++
 	}
 
-	existing, total, err := h.ciRepo.List(r.Context(), t.OrganizationID, ci.FilterParams{}, api.PaginationParams{Limit: 10000, Offset: 0})
+	existing, total, err := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 10000, Offset: 0})
 	if err != nil {
-		api.WriteRepoError(w, err)
-		return
+		return resp, err
 	}
 
 	// Reconciliation compares stored CIs (UUID type) against the incoming
@@ -828,20 +861,18 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			// Over max_cis the device is held as unlicensed_ci instead of
 			// becoming a CI (ENT-03, CH21); existing CIs keep updating.
 			if h.limits != nil {
-				queued, admitErr := h.admitNewCI(r.Context(), t.OrganizationID, int64(total), &item, typeIDs[i], source, &unlicensed)
+				queued, admitErr := h.admitNewCI(ctx, orgID, int64(total), &item, typeIDs[i], source, &unlicensed)
 				if admitErr != nil {
-					api.WriteRepoError(w, admitErr)
-					return
+					return resp, admitErr
 				}
 				if queued {
 					resp.Unlicensed++
 					continue
 				}
 			}
-			newItem, err := h.createDiscoveredCI(r.Context(), t.OrganizationID, &item, typeIDs[i], source)
+			newItem, err := h.createDiscoveredCI(ctx, orgID, &item, typeIDs[i], source)
 			if err != nil {
-				api.WriteRepoError(w, err)
-				return
+				return resp, err
 			}
 			total++
 			existing = append(existing, newItem)
@@ -858,14 +889,14 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			// decide the rest, unreadable state writes nothing.
 			conflict, refused := false, false
 			decide := func(field string, value, current any) bool {
-				d := h.decide(r.Context(), &override.Write{
-					OrganizationID: t.OrganizationID, CIID: matched.ID, Field: field, Value: value,
+				d := h.decide(ctx, &override.Write{
+					OrganizationID: orgID, CIID: matched.ID, Field: field, Value: value,
 					Source: source, ObservedAt: observedAt, Current: current, FallbackSource: matched.DiscoverySource,
 				})
 				if d.Write || d.Conflict || d.Reason == override.ReasonOverride {
 					// Observed under an override or written: the provenance
 					// keeps the reported value (REC-12, REC-10).
-					h.recordDiscovered(r.Context(), t.OrganizationID, matched.ID, field, value, source, observedAt)
+					h.recordDiscovered(ctx, orgID, matched.ID, field, value, source, observedAt)
 				}
 				switch d.Reason {
 				case override.ReasonLowerRank, override.ReasonStale, override.ReasonError:
@@ -873,7 +904,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 				}
 				if d.Conflict {
 					conflict = true
-					if h.queueOverrideConflict(r.Context(), t.OrganizationID, matched.ID, field, value, source) {
+					if h.queueOverrideConflict(ctx, orgID, matched.ID, field, value, source) {
 						resp.ReviewItems++
 					}
 				}
@@ -920,14 +951,13 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 				update.DiscoverySource = &source
 			}
 			// Instance attributes of this CI are never written (MET-14).
-			if h.stripInstanceFields(r.Context(), t.OrganizationID, matched.ID, writes, item.Attributes) {
+			if h.stripInstanceFields(ctx, orgID, matched.ID, writes, item.Attributes) {
 				resp.ProtectedInstanceFields++
 			}
 			update.Attributes = writes
-			updated, err := h.ciRepo.Update(r.Context(), t.OrganizationID, result.MatchedCIID, update)
+			updated, err := h.ciRepo.Update(ctx, orgID, result.MatchedCIID, update)
 			if err != nil {
-				api.WriteRepoError(w, err)
-				return
+				return resp, err
 			}
 			if conflict {
 				resp.ProtectedOverrides++
@@ -944,29 +974,26 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 			// serial number) are queued for operator review instead of being
 			// silently applied (spec §5.3: Unklarheiten in Review-Queue).
 			if len(result.ValueConflicts) > 0 && matched != nil {
-				if reviewItem := reviewItemFromValueConflicts(t.OrganizationID, *matched, item, result); reviewItem != nil {
-					if err := h.repo.CreateReviewItem(r.Context(), reviewItem); err != nil {
-						api.WriteRepoError(w, err)
-						return
+				if reviewItem := reviewItemFromValueConflicts(orgID, *matched, item, result); reviewItem != nil {
+					if err := h.repo.CreateReviewItem(ctx, reviewItem); err != nil {
+						return resp, err
 					}
 					resp.ReviewItems++
 				}
 			}
 		case ReconcileConflict:
 			resp.Conflicts++
-			if reviewItem := reviewItemFromConflict(t.OrganizationID, item, result); reviewItem != nil {
-				if err := h.repo.CreateReviewItem(r.Context(), reviewItem); err != nil {
-					api.WriteRepoError(w, err)
-					return
+			if reviewItem := reviewItemFromConflict(orgID, item, result); reviewItem != nil {
+				if err := h.repo.CreateReviewItem(ctx, reviewItem); err != nil {
+					return resp, err
 				}
 				resp.ReviewItems++
 			}
 		}
 	}
 
-	resp.Relationships = h.deriveTopology(r.Context(), t.OrganizationID, req.Items, resolvedCIID, existing)
-
-	api.WriteJSON(w, http.StatusAccepted, resp)
+	resp.Relationships = h.deriveTopology(ctx, orgID, req.Items, resolvedCIID, existing)
+	return resp, h.markProcessed(ctx, orgID, req.Items)
 }
 
 func stringPtr(value string) *string {

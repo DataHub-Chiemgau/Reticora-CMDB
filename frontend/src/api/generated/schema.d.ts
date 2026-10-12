@@ -5781,6 +5781,10 @@ export interface components {
       created: number;
       updated: number;
       conflicts: number;
+      /** @description Records published to the ingest.> queue (REC-01); with NATS the records are processed asynchronously and the other counters stay 0. */
+      queued?: number;
+      /** @description Records whose record_id was processed within the last 48 hours (REC-01). */
+      duplicates?: number;
       /** @description Records whose observed_at lies more than five minutes in the future; they are rejected and counted (GLO-12). */
       rejected_future?: number;
       /** @description New devices held as unlicensed_ci review items because max_cis is reached (ENT-03, CH21). */

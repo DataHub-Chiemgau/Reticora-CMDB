@@ -23,6 +23,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -217,8 +218,9 @@ func main() {
 			slog.Warn("object storage not configured (RETICORA_S3_*); asynchronous export jobs are disabled")
 		}
 	}
-	// The server does not use NATS yet; a configured NATS is still part of the
-	// platform and reported by /readyz.
+	// With NATS the discovery ingest runs over ingest.> (REC-01): HTTP
+	// ingest publishes, the consumer processes. NATS is reported by /readyz.
+	var ingestQueue *discovery.NATSIngestQueue
 	if cfg.IsSet("RETICORA_NATS_URL") {
 		addr, natsErr := hostPort(cfg.NATSUrl, "4222")
 		if natsErr != nil {
@@ -226,6 +228,14 @@ func main() {
 			os.Exit(1)
 		}
 		readiness = append(readiness, server.TCPReadiness("nats", addr))
+		queueCtx, cancelQueue := context.WithTimeout(context.Background(), 30*time.Second)
+		ingestQueue, natsErr = discovery.NewNATSIngestQueue(queueCtx, cfg.NATSUrl)
+		cancelQueue()
+		if natsErr != nil {
+			slog.Error("failed to set up the ingest queue on NATS", "error", natsErr)
+			os.Exit(1)
+		}
+		defer ingestQueue.Close()
 	}
 	if strings.EqualFold(cfg.SearchBackend, "opensearch") {
 		if cfg.OpenSearchURL == "" {
@@ -330,7 +340,8 @@ func main() {
 			middleware.OpenAPIValidation,
 			middleware.IdempotencyWithStore(cacheStore),
 		},
-		Readiness: readiness,
+		Readiness:   readiness,
+		IngestQueue: ingestQueue,
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -344,6 +355,13 @@ func main() {
 		workerCtx, stopWorker := context.WithCancel(context.Background())
 		defer stopWorker()
 		go exportWorker.Run(workerCtx, 2*time.Second)
+	}
+
+	// Consume ingest.> until shutdown (REC-01).
+	if ingestQueue != nil {
+		consumerCtx, stopConsumer := context.WithCancel(context.Background())
+		defer stopConsumer()
+		go ingestQueue.Run(consumerCtx)
 	}
 
 	// Evaluate monitoring alert rules against the metric store until shutdown.

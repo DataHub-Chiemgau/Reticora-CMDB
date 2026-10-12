@@ -9700,6 +9700,14 @@ components:
           type: integer
         conflicts:
           type: integer
+        queued:
+          type: integer
+          description: >-
+            Records published to the ingest.> queue (REC-01); with NATS the
+            records are processed asynchronously and the other counters stay 0.
+        duplicates:
+          type: integer
+          description: Records whose record_id was processed within the last 48 hours (REC-01).
         rejected_future:
           type: integer
           description: >-

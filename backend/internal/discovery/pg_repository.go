@@ -639,3 +639,45 @@ func (r *PGRepository) RedeemEnrollmentCode(ctx context.Context, rawCode, collec
 // errEnrollmentCodeInvalid is returned for unknown, expired and used codes
 // alike, so a caller learns nothing about which case applies.
 var errEnrollmentCodeInvalid = fmt.Errorf("enrollment code invalid, expired or already used")
+
+// ProcessedRecords returns the record_ids processed within the dedupe window
+// (REC-01, RecordLedger).
+func (r *PGRepository) ProcessedRecords(ctx context.Context, orgID string, recordIDs []string) (map[string]bool, error) {
+	seen := map[string]bool{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT record_id::text FROM ingest_record
+			WHERE organization_id = $1 AND record_id = ANY($2::uuid[]) AND processed_at > now() - $3::interval`,
+			orgID, recordIDs, RecordDedupeWindow.String())
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			seen[id] = true
+		}
+		return rows.Err()
+	})
+	return seen, err
+}
+
+// MarkRecordsProcessed remembers processed records and forgets those older
+// than the dedupe window (REC-01, RecordLedger).
+func (r *PGRepository) MarkRecordsProcessed(ctx context.Context, orgID string, records []ProcessedRecord) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		for _, rec := range records {
+			if _, err := tx.Exec(ctx, `INSERT INTO ingest_record (organization_id, record_id, collector_id, observed_at)
+				VALUES ($1, $2, NULLIF($3, ''), $4)
+				ON CONFLICT (organization_id, record_id) DO UPDATE SET processed_at = now(), observed_at = EXCLUDED.observed_at`,
+				orgID, rec.RecordID, rec.CollectorID, rec.ObservedAt); err != nil {
+				return fmt.Errorf("record processed ingest record: %w", err)
+			}
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM ingest_record WHERE organization_id = $1 AND processed_at <= now() - $2::interval`,
+			orgID, RecordDedupeWindow.String())
+		return err
+	})
+}

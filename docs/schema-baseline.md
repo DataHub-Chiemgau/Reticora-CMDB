@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000093_field_provenance_observed_at
+Stand: Migration 000094_ingest_record_dedupe
 
 ## Prüfung
 
@@ -209,6 +209,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `iga_drift_finding` | ja | ja | iga_drift_tenant_isolation (ALL) |
 | `iga_lifecycle_policy` | ja | ja | iga_lifecycle_tenant_isolation (ALL) |
 | `iga_provisioning_task` | ja | ja | iga_task_tenant_isolation (ALL) |
+| `ingest_record` | ja | ja | ingest_record_isolation (ALL) |
 | `internal_order` | ja | ja | internal_order_isolation (ALL), internal_order_scoped_delete (DELETE), internal_order_scoped_update (UPDATE) |
 | `internal_order_item` | ja | ja | internal_order_item_isolation (ALL) |
 | `ip_address` | ja | ja | ip_address_scoped_delete (DELETE), ip_address_scoped_update (UPDATE), org_isolation (ALL) |
