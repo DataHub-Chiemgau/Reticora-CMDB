@@ -119,6 +119,9 @@ jobs:
           - image: reticora-frontend
             context: frontend
             dockerfile: frontend/Dockerfile
+          - image: reticora-postgres
+            context: deploy/docker-compose/postgres
+            dockerfile: deploy/docker-compose/postgres/Dockerfile
     steps:
       - uses: actions/checkout@v4
 

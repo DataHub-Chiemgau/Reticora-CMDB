@@ -10,42 +10,113 @@ holds both.
 
 | Tier    | Data                       | RPO        | RTO      |
 | ------- | -------------------------- | ---------- | -------- |
-| PITR    | All PostgreSQL data        | ≤ 5 min    | ≤ 1 h    |
+| PITR    | All PostgreSQL data        | ≤ 15 min (WAL archived at least every 5 min) | ≤ 4 h |
 | Logical | All PostgreSQL data        | 24 h       | ≤ 4 h    |
+| Objects | Documents, exports (S3)    | versioned  | minutes  |
 | Search  | OpenSearch index           | none       | minutes  |
 
-The OpenSearch index is **not** backed up: PostgreSQL `search_document` is the
+The targets are those of NFR-05 (RPO 15 min, RTO 4 h). The OpenSearch index is **not** backed up: PostgreSQL `search_document` is the
 source of truth and the index is rebuilt online with
 `POST /api/v1/search/reindex` (see `docs/opensearch.md`).
 
-## PITR configuration
+## Backup chain: pgBackRest (OPS-04, E-29)
 
-Use WAL archiving with a base backup. Two supported approaches:
+The chain runs on pgBackRest; E-29 decided for it. It has two parts:
 
-- **Managed database** (recommended): enable the provider's PITR (continuous
-  WAL archiving + point-in-time restore). Set the retention window (e.g. 7–35
-  days). No in-cluster components needed.
-- **Self-hosted** (WAL-G or pgBackRest): archive WAL and take periodic base
-  backups to S3. Example WAL-G environment on the database pod:
+- **WAL archiving:** PostgreSQL archives every completed WAL segment with
+  `archive_command = 'pgbackrest --stanza=reticora archive-push %p'`. With
+  `archive_timeout = 300`, at the latest every 5 minutes.
+- **Base backups:** a full backup every day. Each backup expires the backups
+  older than **35 days** together with their WAL
+  (`repo1-retention-full-type=time`, `repo1-retention-full=35`; NFR-06).
+
+The repositories are encrypted with AES-256 (`repo1-cipher-type`). The
+passphrase `RETICORA_BACKUP_CIPHER_PASS` is generated once by
+`install-cloud.sh` and stored in `.env`. **Keep a copy outside the host:**
+without it no backup can be restored.
+
+### Docker Compose
+
+- `postgres` runs the image `deploy/docker-compose/postgres`: TimescaleDB
+  plus pgBackRest, with WAL archiving switched on. Configuration:
+  `deploy/docker-compose/postgres/pgbackrest.conf`.
+- `backup` runs the same image, `reticora-backup.sh run`:
+  - it creates the stanza, checks the archiving and takes a first full
+    backup;
+  - then it takes one full backup per day at `RETICORA_BACKUP_HOUR` (UTC,
+    default 2);
+  - it is healthy while the newest backup is younger than 26 hours.
+- Repository `repo1`: the `pgbackrest` volume on the same host.
+- Offsite repository `repo2` (S3 over HTTPS, recommended): set these in
+  `.env`; the installer keeps them on re-runs:
+
   ```
-  WALG_S3_PREFIX=s3://reticora-backup/wal
-  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY   # from the backup secret
-  archive_command = 'wal-g wal-push %p'
-  restore_command = 'wal-g wal-fetch %f %p'
+  RETICORA_BACKUP_S3_BUCKET=reticora-backup
+  RETICORA_BACKUP_S3_ENDPOINT=s3.eu-central-1.amazonaws.com
+  RETICORA_BACKUP_S3_REGION=eu-central-1
+  RETICORA_BACKUP_S3_KEY=…
+  RETICORA_BACKUP_S3_KEY_SECRET=…
   ```
-  Base backup nightly: `wal-g backup-push $PGDATA`. Encrypt backups
-  (`WALG_PGP_KEY` or SSE) — they contain all tenant data.
+
+  WAL and backups then go to both repositories. The bucket must have
+  versioning and replication into a second EU region (see below).
+
+Commands, with the environment of the container:
+
+```bash
+cd deploy/docker-compose
+docker compose --env-file .env exec backup reticora-pgbackrest-env.sh pgbackrest --stanza=reticora info
+docker compose --env-file .env exec backup reticora-pgbackrest-env.sh reticora-backup.sh health
+```
+
+### Kubernetes
+
+The component `deploy/k8s/base/components/backup` contains:
+
+- the `reticora-pgbackrest` ConfigMap: S3 repository, encryption, 35 days
+  retention;
+- the CronJob `reticora-pgbackrest-full`: a daily full backup over the
+  pgBackRest TLS connection to the database host.
+
+On the database host, PostgreSQL archives with the same repository
+configuration and runs `pgbackrest server`. Secret: `reticora-pgbackrest`
+(cipher pass, S3 keys, TLS client certificate). With a managed database, its
+PITR takes the place of pgBackRest, with the same RPO, RTO and retention.
+
+### Object storage: versioning and replication (NFR-05)
+
+- The server enables versioning on every bucket it uses at start
+  (`reticora-documents`, `exports`, `RETICORA_S3_BUCKET`). An overwritten or
+  deleted document keeps its previous versions.
+- If the object store refuses, the server logs `bucket versioning could not
+  be enabled`.
+- Replication into a second EU region is part of the provider setup:
+  - Terraform: `backup_replica_region`, output `backup_policy`; production
+    requires it;
+  - MinIO: `mc replicate add`.
 
 ## Restore procedure (PITR)
 
-1. Provision a fresh PostgreSQL/TimescaleDB instance (same major version).
-2. Restore the latest base backup, then replay WAL to the target time:
-   `wal-g backup-fetch $PGDATA LATEST` and set
-   `recovery_target_time` / `restore_command` before starting.
-3. Run `make migrate-up` (or `migrate ... up`) to apply any migrations newer
+1. Stop the server so that nothing writes during the restore. Stop
+   PostgreSQL: `docker compose stop server backup postgres`.
+2. Restore into an empty data directory, up to the target time:
+
+   ```bash
+   docker compose --env-file .env run --rm --no-deps --user postgres \
+     --entrypoint reticora-pgbackrest-env.sh postgres \
+     sh -c 'rm -rf /var/lib/postgresql/data/* && pgbackrest --stanza=reticora \
+       --type=time --target="2026-10-12 09:30:00+00" --target-action=promote restore'
+   ```
+
+   Without `--type`/`--target`, the restore replays the whole archive.
+3. Start PostgreSQL: `docker compose up -d postgres`. It replays the WAL up to
+   the target and promotes.
+4. Start the backup service again; it takes a new full backup on the new
+   timeline. Then start the server.
+5. Run `make migrate-up` (or `migrate ... up`) to apply any migrations newer
    than the backup.
-4. Rebuild the search index per tenant: `POST /api/v1/search/reindex`.
-5. Verify the audit hash chain: `backend/cmd/audit-verify` (see below).
+6. Rebuild the search index per tenant: `POST /api/v1/search/reindex`.
+7. Verify the audit hash chain: `backend/cmd/audit-verify` (see below).
 
 ## Logical backup (portable safety net)
 

@@ -419,6 +419,10 @@ RETICORA_OIDC_CLIENT_SECRET=$RETICORA_OIDC_CLIENT_SECRET
 # Credential envelope encryption (32-byte key, base64-encoded)
 RETICORA_MASTER_KEY=$RETICORA_MASTER_KEY
 
+# Encryption passphrase of the pgBackRest backups (docs/backup-dr.md). Keep a
+# copy outside this host: without it no backup can be restored.
+RETICORA_BACKUP_CIPHER_PASS=$RETICORA_BACKUP_CIPHER_PASS
+
 # Public URLs
 RETICORA_PUBLIC_BASE_URL=$RETICORA_PUBLIC_BASE_URL
 RETICORA_OIDC_ISSUER_URL=$RETICORA_OIDC_ISSUER_URL
@@ -525,6 +529,11 @@ collect_config() {
     def_client_secret="${def_client_secret:-$(openssl rand -hex 24)}"
     def_master_key="$(env_get RETICORA_MASTER_KEY || true)"
     def_master_key="${def_master_key:-$(openssl rand -base64 32)}"
+    # Passphrase of the encrypted pgBackRest repositories (WP-100). It is
+    # generated once and never asked for: changing it makes the existing
+    # backups unreadable.
+    RETICORA_BACKUP_CIPHER_PASS="$(env_get RETICORA_BACKUP_CIPHER_PASS || true)"
+    RETICORA_BACKUP_CIPHER_PASS="${RETICORA_BACKUP_CIPHER_PASS:-$(openssl rand -hex 32)}"
 
     ask_validated RETICORA_DB_PASSWORD "Database password (PostgreSQL)" "$def_db_pw" valid_password
     ask RETICORA_S3_ACCESS_KEY "S3/MinIO access key" "$def_s3_key"
@@ -1182,6 +1191,9 @@ provide_images() {
         info "Building the Reticora images (this can take a few minutes) …"
         compose_cmd build server frontend || die "Image build failed."
     fi
+    # PostgreSQL with pgBackRest is always built locally (WP-100).
+    info "Building the PostgreSQL image with pgBackRest …"
+    compose_cmd build postgres || die "Building the PostgreSQL image failed."
     if [ -n "$RETICORA_TLS_DOMAIN" ]; then
         compose_cmd pull certbot || die "Pulling the certbot image failed."
     fi
@@ -1246,7 +1258,7 @@ db_volume_name() {
 db_image() {
     local service="${1:-postgres}" fallback img
     case "$service" in
-        postgres) fallback="timescale/timescaledb:latest-pg16" ;;
+        postgres) fallback="reticora-postgres:latest" ;;
         *) fallback="postgres:16-alpine" ;;
     esac
     img="$("${COMPOSE[@]}" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config 2>/dev/null \
@@ -1349,6 +1361,14 @@ start_stack() {
 
     run_migrations
     seed_default_organization
+
+    info "Starting the backup service (pgBackRest) …"
+    compose_cmd up -d backup
+    wait_for_service backup || {
+        show_service_logs backup
+        die "The backup service did not become healthy — no base backup could be taken. See docs/backup-dr.md."
+    }
+    success "WAL archiving and base backups are active"
 
     info "Starting Keycloak …"
     compose_cmd up -d keycloak

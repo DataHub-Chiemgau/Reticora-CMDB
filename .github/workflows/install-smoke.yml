@@ -18,6 +18,7 @@ on:
       - 'backend/Dockerfile'
       - 'frontend/Dockerfile'
       - 'tests/install-*.sh'
+      - 'tests/backup-*.sh'
       - '.github/workflows/install-smoke.yml'
   pull_request:
     branches: [main]
@@ -28,6 +29,7 @@ on:
       - 'backend/Dockerfile'
       - 'frontend/Dockerfile'
       - 'tests/install-*.sh'
+      - 'tests/backup-*.sh'
       - '.github/workflows/install-smoke.yml'
   # Manual runs (e.g. the G1 evidence for GATE-03) are not path filtered.
   workflow_dispatch:
@@ -50,6 +52,9 @@ jobs:
 
       - name: install-preflight.sh (platform, Docker, Compose, sizing)
         run: ./tests/install-preflight.test.sh
+
+      - name: Backup chain configuration (pgBackRest, retention, versioning)
+        run: ./tests/backup-config.test.sh
 
   # INS-01/TEC-09/GATE-03 (WP-092): the cloud installer on every platform of
   # CH22. Ubuntu runs natively on the GitHub runners; Debian 12 runs the
@@ -110,6 +115,13 @@ jobs:
         run: |
           sleep 5
           ./tests/install-smoke-health.sh deploy/docker-compose .env
+
+      # WP-100 (OPS-04): WAL archiving works and a base backup exists.
+      - name: Verify the backup chain
+        run: |
+          cd deploy/docker-compose
+          docker compose --env-file .env exec -T backup reticora-pgbackrest-env.sh pgbackrest --stanza=reticora check
+          docker compose --env-file .env exec -T backup reticora-pgbackrest-env.sh reticora-backup.sh health
 
       - name: Verify backend health endpoint
         run: |

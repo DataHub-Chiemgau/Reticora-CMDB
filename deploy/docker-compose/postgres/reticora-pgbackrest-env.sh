@@ -1,0 +1,27 @@
+#!/bin/sh
+# reticora-pgbackrest-env.sh <command …> — runs the command with the
+# pgBackRest settings derived from the RETICORA_BACKUP_* variables:
+# RETICORA_BACKUP_CIPHER_PASS encrypts repo1; RETICORA_BACKUP_S3_BUCKET
+# (with _ENDPOINT, _REGION, _KEY, _KEY_SECRET) adds the offsite repo2.
+# Used as entrypoint of the postgres and backup containers, so the
+# archive_command and the backups see the same repositories.
+set -eu
+
+if [ -n "${RETICORA_BACKUP_CIPHER_PASS:-}" ]; then
+    export PGBACKREST_REPO1_CIPHER_PASS="$RETICORA_BACKUP_CIPHER_PASS"
+fi
+if [ -n "${RETICORA_BACKUP_S3_BUCKET:-}" ]; then
+    export PGBACKREST_REPO2_TYPE=s3
+    export PGBACKREST_REPO2_PATH="${RETICORA_BACKUP_S3_PATH:-/reticora}"
+    export PGBACKREST_REPO2_S3_BUCKET="$RETICORA_BACKUP_S3_BUCKET"
+    export PGBACKREST_REPO2_S3_ENDPOINT="${RETICORA_BACKUP_S3_ENDPOINT:?RETICORA_BACKUP_S3_ENDPOINT is required with RETICORA_BACKUP_S3_BUCKET}"
+    export PGBACKREST_REPO2_S3_REGION="${RETICORA_BACKUP_S3_REGION:?RETICORA_BACKUP_S3_REGION is required with RETICORA_BACKUP_S3_BUCKET}"
+    export PGBACKREST_REPO2_S3_KEY="${RETICORA_BACKUP_S3_KEY:?RETICORA_BACKUP_S3_KEY is required with RETICORA_BACKUP_S3_BUCKET}"
+    export PGBACKREST_REPO2_S3_KEY_SECRET="${RETICORA_BACKUP_S3_KEY_SECRET:?RETICORA_BACKUP_S3_KEY_SECRET is required with RETICORA_BACKUP_S3_BUCKET}"
+    export PGBACKREST_REPO2_S3_URI_STYLE="${RETICORA_BACKUP_S3_URI_STYLE:-host}"
+    export PGBACKREST_REPO2_CIPHER_TYPE=aes-256-cbc
+    export PGBACKREST_REPO2_CIPHER_PASS="${RETICORA_BACKUP_CIPHER_PASS:?RETICORA_BACKUP_CIPHER_PASS is required}"
+    export PGBACKREST_REPO2_RETENTION_FULL_TYPE=time
+    export PGBACKREST_REPO2_RETENTION_FULL=35
+fi
+exec "$@"

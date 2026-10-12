@@ -120,7 +120,7 @@ Der Auftraggeber hat angewiesen, nach den Empfehlungen in `entscheidungen.md` vo
 - **G1-Umfang** ([E-03](entscheidungen.md#e-03), deaktivieren): WP-214 (`m-gates`) ist G1-Pflicht und schaltet Spätphasen-Module standardmäßig ab. WP-215 bis WP-239 sind verschoben. Die M0-WPs in Spätphasen-Modulen bleiben verpflichtend; ihre Kriterien „Alternative nach E-03“ entfallen.
 - **Epics und Traceability** ([E-06](entscheidungen.md#e-06), [E-07](entscheidungen.md#e-07)): Die Epic-Zuordnung ist bestätigt; M0-WPs tragen ihr fachliches Epic.
 - **Festgelegte Umsetzungsregeln:** fail-closed-Scopes und `WithSystem` ([E-08](entscheidungen.md#e-08)), NULL-Scope-Schreiben nur org-weit ([E-09](entscheidungen.md#e-09)), globale Kataloge read-only ([E-10](entscheidungen.md#e-10)), Team-Scope als Schnittmenge (vorläufig, [E-11](entscheidungen.md#e-11)), CH21/CH26–CH30 bestätigt ([E-14](entscheidungen.md#e-14), [E-18](entscheidungen.md#e-18) bis [E-22](entscheidungen.md#e-22)), VLAN-Eindeutigkeit über zwei Teilindizes ([E-24](entscheidungen.md#e-24)), API-05-Pfade wörtlich mit Deprecation/Sunset ([E-25](entscheidungen.md#e-25)), Quarantäne in 000056 ([E-26](entscheidungen.md#e-26)), Install-Matrix nach CH22 ([E-27](entscheidungen.md#e-27)), externer Pentest ([E-28](entscheidungen.md#e-28)), Traceability stufenweise blockierend ([E-30](entscheidungen.md#e-30)), Werkzeuge govulncheck/npm audit/Trivy/cosign keyless/k6 ([E-31](entscheidungen.md#e-31)), DB-05 nur [B]-Zeilen für G1 ([E-36](entscheidungen.md#e-36)).
-- **Offen mit Termin:** E-02, E-04, E-15, E-17, E-29, E-32, E-33 und E-35 (E-01 und E-23 sind seit der Lieferung vom 2026-10-01 entschieden). Die WP-Blöcke zeigen den Status jeder verwiesenen Entscheidung im Feld „Entscheidungsbedarf“.
+- **Offen mit Termin:** E-02, E-04, E-15, E-17, E-32, E-33 und E-35 (E-01 und E-23 sind seit der Lieferung vom 2026-10-01 entschieden, E-29 seit 2026-10-12). Die WP-Blöcke zeigen den Status jeder verwiesenen Entscheidung im Feld „Entscheidungsbedarf“.
 
 ## Konventionen für alle WPs
 
@@ -4956,7 +4956,7 @@ OPS-04;[B], [P5];A;tests/backup-config.test.sh;WP-100
 NFR-05;[B];A;tests/backup-config.test.sh;WP-100
 ```
 
-**Entscheidungsbedarf:** [E-29](entscheidungen.md#e-29) OPS-04: Werkzeug für WAL-Archivierung und Basisbackups (offen)
+**Entscheidungsbedarf:** [E-29](entscheidungen.md#e-29) OPS-04: Werkzeug für WAL-Archivierung und Basisbackups (entschieden: pgBackRest)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 

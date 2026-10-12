@@ -42,7 +42,7 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 | [E-26](#e-26) | Änderung der bereits ausgelieferten Migration 000056 | entschieden | WP-052 (`mig56`). | 1 |
 | [E-27](#e-27) | GATE-03 „beide Plattformen“ und Umgang mit WARN (GATE-02) | entschieden | WP-092 (`a-matrix`), WP-211 (`g1-install`), WP-213 (`g1-gate`). | 3 |
 | [E-28](#e-28) | Pentest: Dienstleister, Umfang, Termin; NFR-08 | entschieden | WP-210 (`sr-pentest`). | 1 |
-| [E-29](#e-29) | OPS-04: Werkzeug für WAL-Archivierung und Basisbackups | offen | WP-100 (`a-backup`), WP-101 (`a-restore`). | 1 |
+| [E-29](#e-29) | OPS-04: Werkzeug für WAL-Archivierung und Basisbackups | entschieden | WP-100 (`a-backup`), WP-101 (`a-restore`). | 1 |
 | [E-30](#e-30) | Traceability-Prüfung: ab wann blockierend? | entschieden | WP-005 (`trace`), WP-213 (`g1-gate`). | 2 |
 | [E-31](#e-31) | Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest | entschieden | WP-004 (`dep-scan`), WP-102 (`a-release`), WP-204 (`lt-harness`), WP-209 (`sr-review`). | 4 |
 | [E-32](#e-32) | REC-03: Rang der Quelle IPMI | entschieden | WP-058 (`rec-decide`), WP-220 (`m-srcpolicy`). | 2 |
@@ -772,11 +772,11 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 
 **Thema:** OPS-04: Werkzeug für WAL-Archivierung und Basisbackups
 
-**Status:** offen (2026-10-01)
+**Status:** entschieden (2026-10-12)
 
-**Festlegung:** Laut Empfehlung entscheidet der Betrieb; der Plan legt kein Werkzeug fest.
+**Festlegung:** Option 1: pgBackRest. Umgesetzt mit WP-100 (`a-backup`): WAL-Archivierung per `archive-push`, tägliches Vollbackup, Aufbewahrung 35 Tage, verschlüsseltes Repository; Compose und Kubernetes (`docs/backup-dr.md`).
 
-**Aufgabe:** Werkzeug für WAL-Archivierung und Basisbackups wählen (pgBackRest, WAL-G oder Managed-Postgres). Zuständig: Betrieb. Termin: vor WP-100 (`a-backup`).
+**Aufgabe:** erledigt.
 
 **Frage:** Für die Backup-Kette ist ein Werkzeug zu wählen (z. B. pgBackRest, WAL-G oder Operator-eigene Lösung in Kubernetes).
 
@@ -991,7 +991,7 @@ Diese Aufgaben folgen aus den Empfehlungen. Die betroffenen WPs starten erst, we
 | A-05 | [E-17](#e-17) | Skalierungsziel CH15 bestätigen (1.000–10.000 Objekte, Headroom 50.000) oder anderen Wert festlegen | Product Owner | vor WP-093 (`a-preflight`), spätestens vor WP-203 (`lt-seed`) |
 | A-06 | [E-23](#e-23) | **erledigt 2026-10-01** (durch CI-10/GLO-13): Abgrenzung GLO-13/CI-10 mit den Texten aus E-01 nachliefern | Auftraggeber/Product Owner | vor WP-091 (`glo13-ns`) |
 | A-07 | [E-28](#e-28) | Pentest-Dienstleister beauftragen, Umfang und Termin festlegen | Auftraggeber | parallel zu Epic C, vor WP-210 |
-| A-08 | [E-29](#e-29) | Werkzeug für WAL-Archivierung und Basisbackups wählen (pgBackRest, WAL-G oder Managed-Postgres) | Betrieb | vor WP-100 (`a-backup`) |
+| A-08 | [E-29](#e-29) | **erledigt 2026-10-12** (pgBackRest): Werkzeug für WAL-Archivierung und Basisbackups wählen (pgBackRest, WAL-G oder Managed-Postgres) | Betrieb | vor WP-100 (`a-backup`) |
 | A-09 | [E-32](#e-32) | REC-03-Rang für IPMI festlegen (der am 2026-10-01 gelieferte REC-03-Text nennt IPMI nicht) | Auftraggeber/Product Owner | vor WP-058 (`rec-decide`) |
 | A-10 | [E-33](#e-33) | Captcha-Anbieter, Wegwerf-Domain-Liste und Trial-Werte festlegen | Produkt/Datenschutz | vor WP-111 (`b-signup`) |
 | A-11 | [E-35](#e-35) | Subprozessorenliste liefern | Betreiber | vor WP-105 (`a-reference`) |

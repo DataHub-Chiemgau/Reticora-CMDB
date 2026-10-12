@@ -581,6 +581,11 @@ func setupObjectStorage(cfg *config.Config) (*blob.S3Store, error) {
 		if err := store.EnsureBucket(context.Background(), bucket); err != nil {
 			return nil, err
 		}
+		// Versioned buckets keep overwritten and deleted objects (NFR-05).
+		// A store without versioning support keeps working, loudly.
+		if err := store.EnableVersioning(context.Background(), bucket); err != nil {
+			slog.Error("object storage: bucket versioning could not be enabled", "bucket", bucket, "error", err)
+		}
 	}
 	return store, nil
 }

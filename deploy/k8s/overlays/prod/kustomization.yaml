@@ -20,6 +20,8 @@ commonLabels:
 images:
   - name: reticora-cmdb/server
     newTag: "1.0.0"
+  - name: reticora-cmdb/postgres
+    newTag: "1.0.0"
 
 patches:
   # Scale out for production and raise the resource envelope. The base already

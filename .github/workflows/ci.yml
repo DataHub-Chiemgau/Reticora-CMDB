@@ -515,7 +515,8 @@ jobs:
         run: |
           set -u
           for var in region=us-east-1 region=eu-west-2 region=eu-central-2 region=europe-west6 \
-                     backup_region=us-west-2 log_region=eastus search_region=switzerlandnorth; do
+                     backup_region=us-west-2 log_region=eastus search_region=switzerlandnorth \
+                     backup_replica_region=us-east-1 backup_retention_days=30; do
             if terraform plan -input=false -var "$var" > /dev/null 2>&1; then
               echo "::error::terraform accepted the non-EU setting $var"
               exit 1
