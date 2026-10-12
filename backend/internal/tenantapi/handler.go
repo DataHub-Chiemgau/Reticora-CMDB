@@ -1,7 +1,6 @@
 package tenantapi
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -59,36 +58,9 @@ func orgOrUnauthorized(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return t.OrganizationID, true
 }
 
-// fieldProblem is the RFC 7807 body of a rejected or conflicting field.
-type fieldProblem struct {
-	api.ProblemDetail
-	Field string `json:"field"`
-}
-
-// writeFieldError answers a *FieldError with 400 and a *ConflictError with
-// 409, both naming the field (LOC-01–LOC-03), and reports whether err was
-// one of them.
-func writeFieldError(w http.ResponseWriter, err error) bool {
-	var fe *FieldError
-	if errors.As(err, &fe) {
-		api.WriteJSON(w, http.StatusBadRequest, fieldProblem{
-			ProblemDetail: api.ProblemDetail{Type: "urn:reticora:problem:invalid-field", Title: "Bad Request",
-				Status: http.StatusBadRequest, Detail: fe.Error()},
-			Field: fe.Field,
-		})
-		return true
-	}
-	var ce *ConflictError
-	if errors.As(err, &ce) {
-		api.WriteJSON(w, http.StatusConflict, fieldProblem{
-			ProblemDetail: api.ProblemDetail{Type: "urn:reticora:problem:conflict", Title: "Conflict",
-				Status: http.StatusConflict, Detail: ce.Error()},
-			Field: ce.Field,
-		})
-		return true
-	}
-	return false
-}
+// writeFieldError answers field errors (400) and conflicts (409) naming the
+// field (LOC-01–LOC-06) and reports whether err was one of them.
+func writeFieldError(w http.ResponseWriter, err error) bool { return api.WriteFieldError(w, err) }
 
 // writeWriteError reports a failed create or update: field errors and
 // conflicts with their field, "not found" as 404, the rest sanitized.
@@ -99,6 +71,18 @@ func writeWriteError(w http.ResponseWriter, err error, notFound string) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", notFound)
 	default:
 		api.WriteRepoError(w, err)
+	}
+}
+
+// writeCreateError reports a failed create of a building or room: field
+// errors and conflicts with their field (LOC-04, LOC-05), database errors
+// sanitized, an unknown or invisible parent as 400.
+func writeCreateError(w http.ResponseWriter, err error) {
+	switch {
+	case writeFieldError(w, err):
+	case api.WriteDBError(w, err):
+	default:
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 	}
 }
 
@@ -429,7 +413,7 @@ func (h *Handler) CreateBuilding(w http.ResponseWriter, r *http.Request) {
 		FloorplanObjectKey: req.FloorplanObjectKey,
 	}
 	if err := h.repo.CreateBuilding(r.Context(), b); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		writeCreateError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, b)
@@ -462,7 +446,7 @@ func (h *Handler) UpdateBuilding(w http.ResponseWriter, r *http.Request) {
 	}
 	b, err := h.repo.UpdateBuilding(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "building not found")
+		writeWriteError(w, err, "building not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, b)
@@ -524,7 +508,7 @@ func (h *Handler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 		RoomType:       req.RoomType,
 	}
 	if err := h.repo.CreateRoom(r.Context(), rm); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		writeCreateError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, rm)
@@ -557,7 +541,7 @@ func (h *Handler) UpdateRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	rm, err := h.repo.UpdateRoom(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "room not found")
+		writeWriteError(w, err, "room not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, rm)

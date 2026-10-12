@@ -57,12 +57,25 @@ func writeRepoError(w http.ResponseWriter, err error, notFoundMsg string) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", notFoundMsg)
 	case errors.Is(err, ErrValidation):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+	case api.WriteFieldError(w, err):
 	default:
 		api.WriteRepoError(w, err)
 	}
 }
 
 // --- Racks ---
+
+// DefaultHeightUnits is the height of a rack created without one (LOC-06).
+const DefaultHeightUnits = 42
+
+// validHeightUnits accepts 1–60 height units; anything else, an explicit 0
+// included, is 422 naming height_units (LOC-06).
+func validHeightUnits(h int) error {
+	if h < 1 || h > 60 {
+		return &api.FieldError{Field: "height_units", Message: "must be between 1 and 60", Status: http.StatusUnprocessableEntity}
+	}
+	return nil
+}
 
 // ListRacks handles GET /api/v1/racks
 func (h *Handler) ListRacks(w http.ResponseWriter, r *http.Request) {
@@ -97,12 +110,12 @@ func (h *Handler) CreateRack(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "room_id and name are required")
 		return
 	}
-	height := req.HeightU
-	if height == 0 {
-		height = 42
+	height := DefaultHeightUnits
+	if req.HeightUnits != nil {
+		height = *req.HeightUnits
 	}
-	if height < 1 || height > 60 {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "height_u must be between 1 and 60")
+	if err := validHeightUnits(height); err != nil {
+		api.WriteFieldError(w, err)
 		return
 	}
 	width := req.WidthMM
@@ -117,7 +130,7 @@ func (h *Handler) CreateRack(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: orgID,
 		RoomID:         req.RoomID,
 		Name:           req.Name,
-		HeightU:        height,
+		HeightUnits:    height,
 		WidthMM:        width,
 		DepthMM:        depth,
 		Notes:          req.Notes,
@@ -154,13 +167,19 @@ func (h *Handler) UpdateRack(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if req.HeightU != nil && (*req.HeightU < 1 || *req.HeightU > 60) {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "height_u must be between 1 and 60")
+	if req.HeightUnits != nil {
+		if err := validHeightUnits(*req.HeightUnits); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
+	if req.Name != nil && *req.Name == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name must not be empty")
 		return
 	}
 	rk, err := h.repo.UpdateRack(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "rack not found")
+		writeRepoError(w, err, "rack not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, rk)

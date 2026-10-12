@@ -45,7 +45,7 @@ const rack = {
   organization_id: 'org-1',
   room_id: 'room-1',
   name: 'Rack A1',
-  height_u: 42,
+  height_units: 42,
   width_mm: 600,
   depth_mm: 1000,
   created_at: '2026-01-01T00:00:00Z',

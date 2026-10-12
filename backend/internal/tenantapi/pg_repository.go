@@ -3,7 +3,6 @@ package tenantapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -11,7 +10,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -43,30 +41,14 @@ var constraintFields = map[string]string{
 	"organization_currency_iso4217":   "currency",
 	"organization_locale_bcp47":       "locale",
 	"site_client_id_fkey":             "client_id",
+	"building_site_name_key":          "name",
+	"building_site_id_fkey":           "site_id",
+	"room_building_name_key":          "name",
+	"room_building_id_fkey":           "building_id",
 }
 
-// fieldDBError turns a unique violation into a *ConflictError (409) and a
-// check violation into a *FieldError (400) naming the field; other errors
-// pass through.
-func fieldDBError(err error) error {
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		return err
-	}
-	field, known := constraintFields[pgErr.ConstraintName]
-	if !known {
-		return err
-	}
-	switch pgErr.Code {
-	case "23505":
-		return &ConflictError{Field: field, Message: "the value is already taken"}
-	case "23514":
-		return &FieldError{Field: field, Message: "the value is not allowed"}
-	case "23503":
-		return &FieldError{Field: field, Message: "the referenced record does not exist"}
-	}
-	return err
-}
+// fieldDBError maps constraint violations onto their request field.
+func fieldDBError(err error) error { return api.FieldDBError(err, constraintFields) }
 
 // nullable stores an empty optional text as NULL.
 func nullable(v *string) any {
@@ -513,7 +495,7 @@ func (r *PGRepository) CreateBuilding(ctx context.Context, b *Building) error {
 			 VALUES ($1,$2,$3,$4,$5) RETURNING id::text, created_at, updated_at`,
 			b.OrganizationID, b.SiteID, b.Name, b.Floors, nilIfEmpty(b.FloorplanObjectKey),
 		).Scan(&b.ID, &b.CreatedAt, &b.UpdatedAt); err != nil {
-			return err
+			return fieldDBError(err)
 		}
 		return requireVisible(ctx, tx, "building", buildingVisible, b.ID)
 	})
@@ -552,7 +534,7 @@ func (r *PGRepository) UpdateBuilding(ctx context.Context, orgID, id string, req
 			return fmt.Errorf("not found")
 		}
 		if err != nil {
-			return err
+			return fieldDBError(err)
 		}
 		// The update may move the row under an object outside the scope.
 		return requireVisible(ctx, tx, "building", buildingVisible, id)
@@ -639,7 +621,7 @@ func (r *PGRepository) CreateRoom(ctx context.Context, rm *Room) error {
 			 VALUES ($1,$2,$3,$4,$5) RETURNING id::text, created_at, updated_at`,
 			rm.OrganizationID, rm.BuildingID, rm.Name, rm.Floor, rm.RoomType,
 		).Scan(&rm.ID, &rm.CreatedAt, &rm.UpdatedAt); err != nil {
-			return err
+			return fieldDBError(err)
 		}
 		return requireVisible(ctx, tx, "room", roomVisible, rm.ID)
 	})
@@ -687,7 +669,7 @@ func (r *PGRepository) UpdateRoom(ctx context.Context, orgID, id string, req Upd
 			return fmt.Errorf("not found")
 		}
 		if err != nil {
-			return err
+			return fieldDBError(err)
 		}
 		// The update may move the row under an object outside the scope.
 		return requireVisible(ctx, tx, "room", roomVisible, id)

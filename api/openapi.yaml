@@ -4241,6 +4241,8 @@ paths:
                 $ref: '#/components/schemas/Building'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -4283,6 +4285,8 @@ paths:
                 $ref: '#/components/schemas/Building'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -4343,6 +4347,8 @@ paths:
                 $ref: '#/components/schemas/Room'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -4385,6 +4391,8 @@ paths:
                 $ref: '#/components/schemas/Room'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -4445,6 +4453,10 @@ paths:
                 $ref: '#/components/schemas/Rack'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -4487,6 +4499,10 @@ paths:
                 $ref: '#/components/schemas/Rack'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -8784,6 +8800,12 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/ProblemDetail'
+    UnprocessableEntity:
+      description: A field value is outside its allowed range; `field` names it.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
     BadGateway:
       description: Upstream delivery failed
       content:
@@ -12887,6 +12909,7 @@ components:
 
     Building:
       type: object
+      description: Building of a site (LOC-04); the name is unique per site.
       required: [id, organization_id, site_id, name, created_at, updated_at]
       properties:
         id:
@@ -12944,6 +12967,7 @@ components:
 
     Room:
       type: object
+      description: Room of a building (LOC-05); the name is unique per building.
       required: [id, organization_id, building_id, name, created_at, updated_at]
       properties:
         id:
@@ -13020,7 +13044,8 @@ components:
 
     Rack:
       type: object
-      required: [id, organization_id, room_id, name, height_u, width_mm, depth_mm, created_at, updated_at]
+      description: Rack of a room (LOC-06); the name is unique per room.
+      required: [id, organization_id, room_id, name, height_units, width_mm, depth_mm, created_at, updated_at]
       properties:
         id:
           type: string
@@ -13030,7 +13055,7 @@ components:
           type: string
         name:
           type: string
-        height_u:
+        height_units:
           type: integer
           minimum: 1
           maximum: 60
@@ -13055,10 +13080,9 @@ components:
           type: string
         name:
           type: string
-        height_u:
+        height_units:
           type: integer
-          minimum: 1
-          maximum: 60
+          description: 1–60 height units; absent means 42 on create. Any other value, an explicit 0 included, answers 422.
         width_mm:
           type: integer
         depth_mm:
@@ -13071,10 +13095,9 @@ components:
       properties:
         name:
           type: string
-        height_u:
+        height_units:
           type: integer
-          minimum: 1
-          maximum: 60
+          description: 1–60 height units; absent means 42 on create. Any other value, an explicit 0 included, answers 422.
         width_mm:
           type: integer
         depth_mm:

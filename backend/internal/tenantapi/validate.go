@@ -6,25 +6,16 @@ import (
 	"time"
 	_ "time/tzdata" // IANA zone names validate without the host's zoneinfo
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"golang.org/x/text/language"
 )
 
-// FieldError rejects the value of one field (400 with the field name).
-type FieldError struct {
-	Field   string
-	Message string
-}
-
-func (e *FieldError) Error() string { return e.Field + ": " + e.Message }
-
-// ConflictError reports a unique field that is already taken (409, LOC-01–
-// LOC-03).
-type ConflictError struct {
-	Field   string
-	Message string
-}
-
-func (e *ConflictError) Error() string { return e.Field + ": " + e.Message }
+// FieldError and ConflictError are the shared field errors of the API: 400
+// and 409 naming the field (LOC-01–LOC-06).
+type (
+	FieldError    = api.FieldError
+	ConflictError = api.ConflictError
+)
 
 // validTimezone checks an IANA time zone name (LOC-01–LOC-03). "UTC" is a
 // name of the tz database; "Local" and abbreviations are not.

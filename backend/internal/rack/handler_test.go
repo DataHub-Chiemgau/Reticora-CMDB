@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -44,7 +45,7 @@ func TestRackCRUD(t *testing.T) {
 	}
 	var rk Rack
 	json.Unmarshal(w.Body.Bytes(), &rk)
-	if rk.HeightU != 42 || rk.WidthMM != 600 || rk.DepthMM != 1000 {
+	if rk.HeightUnits != 42 || rk.WidthMM != 600 || rk.DepthMM != 1000 {
 		t.Errorf("unexpected defaults: %+v", rk)
 	}
 
@@ -52,9 +53,37 @@ func TestRackCRUD(t *testing.T) {
 	if w := do(mux, "POST", "/api/v1/racks", `{"name":"x"}`, "org-1"); w.Code != http.StatusBadRequest {
 		t.Errorf("missing room_id: expected 400, got %d", w.Code)
 	}
-	// invalid height
-	if w := do(mux, "POST", "/api/v1/racks", `{"room_id":"r","name":"x","height_u":99}`, "org-1"); w.Code != http.StatusBadRequest {
-		t.Errorf("bad height: expected 400, got %d", w.Code)
+	// height_units outside 1–60, an explicit 0 included, is 422 naming
+	// the field (LOC-06); the old field name is rejected.
+	for _, body := range []string{
+		`{"room_id":"r","name":"x","height_units":99}`,
+		`{"room_id":"r","name":"x","height_units":0}`,
+		`{"room_id":"r","name":"x","height_units":-1}`,
+	} {
+		if w := do(mux, "POST", "/api/v1/racks", body, "org-1"); w.Code != http.StatusUnprocessableEntity ||
+			!strings.Contains(w.Body.String(), `"field":"height_units"`) {
+			t.Errorf("%s: expected 422 for height_units, got %d %s", body, w.Code, w.Body.String())
+		}
+	}
+	if w := do(mux, "POST", "/api/v1/racks", `{"room_id":"r","name":"x","height_u":20}`, "org-1"); w.Code != http.StatusBadRequest {
+		t.Errorf("old field height_u: expected 400, got %d", w.Code)
+	}
+	for _, body := range []string{`{"height_units":0}`, `{"height_units":61}`} {
+		if w := do(mux, "PATCH", "/api/v1/racks/"+rk.ID, body, "org-1"); w.Code != http.StatusUnprocessableEntity {
+			t.Errorf("PATCH %s: expected 422, got %d", body, w.Code)
+		}
+	}
+	if w := do(mux, "PATCH", "/api/v1/racks/"+rk.ID, `{"height_units":48}`, "org-1"); w.Code != http.StatusOK ||
+		!strings.Contains(w.Body.String(), `"height_units":48`) {
+		t.Errorf("PATCH height_units 48: %d %s", w.Code, w.Body.String())
+	}
+	// Rack names are unique per room (409 on name).
+	if w := do(mux, "POST", "/api/v1/racks", `{"room_id":"room-1","name":"R1"}`, "org-1"); w.Code != http.StatusConflict ||
+		!strings.Contains(w.Body.String(), `"field":"name"`) {
+		t.Errorf("duplicate rack name: %d %s", w.Code, w.Body.String())
+	}
+	if w := do(mux, "POST", "/api/v1/racks", `{"room_id":"room-2","name":"R1"}`, "org-1"); w.Code != http.StatusCreated {
+		t.Errorf("same name in another room: %d", w.Code)
 	}
 
 	if w := do(mux, "GET", "/api/v1/racks/"+rk.ID, "", "org-1"); w.Code != http.StatusOK {
@@ -70,7 +99,7 @@ func TestRackCRUD(t *testing.T) {
 
 func TestRackTenantIsolation(t *testing.T) {
 	repo, mux := newMux()
-	rk := &Rack{OrganizationID: "org-1", RoomID: "room-1", Name: "R1", HeightU: 42, WidthMM: 600, DepthMM: 1000}
+	rk := &Rack{OrganizationID: "org-1", RoomID: "room-1", Name: "R1", HeightUnits: 42, WidthMM: 600, DepthMM: 1000}
 	repo.CreateRack(context.Background(), rk)
 	if w := do(mux, "GET", "/api/v1/racks/"+rk.ID, "", "org-2"); w.Code != http.StatusNotFound {
 		t.Errorf("cross-tenant: expected 404, got %d", w.Code)
@@ -79,7 +108,7 @@ func TestRackTenantIsolation(t *testing.T) {
 
 func TestMountFitAndOverlap(t *testing.T) {
 	repo, mux := newMux()
-	rk := &Rack{OrganizationID: "org-1", RoomID: "room-1", Name: "R1", HeightU: 10, WidthMM: 600, DepthMM: 1000}
+	rk := &Rack{OrganizationID: "org-1", RoomID: "room-1", Name: "R1", HeightUnits: 10, WidthMM: 600, DepthMM: 1000}
 	repo.CreateRack(context.Background(), rk)
 	base := "/api/v1/racks/" + rk.ID + "/mounts"
 

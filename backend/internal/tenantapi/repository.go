@@ -174,6 +174,27 @@ func (r *MemoryRepository) siteConflict(orgID, clientID, id, name string) error 
 	return nil
 }
 
+// buildingConflict and roomConflict report another building of the site
+// or room of the building with the name (LOC-04, LOC-05). Callers hold the
+// lock.
+func (r *MemoryRepository) buildingConflict(siteID, id, name string) error {
+	for _, existing := range r.buildings {
+		if existing.SiteID == siteID && existing.ID != id && existing.Name == name {
+			return &ConflictError{Field: "name", Message: "a building with this name already exists at the site"}
+		}
+	}
+	return nil
+}
+
+func (r *MemoryRepository) roomConflict(buildingID, id, name string) error {
+	for _, existing := range r.rooms {
+		if existing.BuildingID == buildingID && existing.ID != id && existing.Name == name {
+			return &ConflictError{Field: "name", Message: "a room with this name already exists in the building"}
+		}
+	}
+	return nil
+}
+
 // --- Clients ---
 
 func (r *MemoryRepository) ListClients(_ context.Context, orgID string, page api.PaginationParams) ([]Client, int, error) {
@@ -384,6 +405,9 @@ func (r *MemoryRepository) CreateBuilding(_ context.Context, b *Building) error 
 	if s, ok := r.sites[b.SiteID]; !ok || s.OrganizationID != b.OrganizationID {
 		return fmt.Errorf("site not found")
 	}
+	if err := r.buildingConflict(b.SiteID, "", b.Name); err != nil {
+		return err
+	}
 	b.ID = r.nextID("building")
 	now := time.Now().UTC()
 	b.CreatedAt, b.UpdatedAt = now, now
@@ -400,6 +424,9 @@ func (r *MemoryRepository) UpdateBuilding(_ context.Context, orgID, id string, r
 		return nil, fmt.Errorf("not found")
 	}
 	if req.Name != nil {
+		if err := r.buildingConflict(b.SiteID, id, *req.Name); err != nil {
+			return nil, err
+		}
 		b.Name = *req.Name
 	}
 	if req.Floors != nil {
@@ -461,6 +488,9 @@ func (r *MemoryRepository) CreateRoom(_ context.Context, rm *Room) error {
 	if b, ok := r.buildings[rm.BuildingID]; !ok || b.OrganizationID != rm.OrganizationID {
 		return fmt.Errorf("building not found")
 	}
+	if err := r.roomConflict(rm.BuildingID, "", rm.Name); err != nil {
+		return err
+	}
 	rm.ID = r.nextID("room")
 	now := time.Now().UTC()
 	rm.CreatedAt, rm.UpdatedAt = now, now
@@ -480,6 +510,9 @@ func (r *MemoryRepository) UpdateRoom(_ context.Context, orgID, id string, req U
 		return nil, fmt.Errorf("not found")
 	}
 	if req.Name != nil {
+		if err := r.roomConflict(rm.BuildingID, id, *req.Name); err != nil {
+			return nil, err
+		}
 		rm.Name = *req.Name
 	}
 	if req.Floor != nil {

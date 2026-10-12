@@ -7777,6 +7777,7 @@ export interface components {
     SiteListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Site'][];
     };
+    /** @description Building of a site (LOC-04); the name is unique per site. */
     Building: {
       id: string;
       organization_id: string;
@@ -7803,6 +7804,7 @@ export interface components {
     BuildingListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Building'][];
     };
+    /** @description Room of a building (LOC-05); the name is unique per building. */
     Room: {
       id: string;
       organization_id: string;
@@ -7843,12 +7845,13 @@ export interface components {
     RoomListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Room'][];
     };
+    /** @description Rack of a room (LOC-06); the name is unique per room. */
     Rack: {
       id: string;
       organization_id: string;
       room_id: string;
       name: string;
-      height_u: number;
+      height_units: number;
       width_mm: number;
       depth_mm: number;
       notes?: string;
@@ -7860,14 +7863,16 @@ export interface components {
     CreateRackRequest: {
       room_id: string;
       name: string;
-      height_u?: number;
+      /** @description 1–60 height units; absent means 42 on create. Any other value, an explicit 0 included, answers 422. */
+      height_units?: number;
       width_mm?: number;
       depth_mm?: number;
       notes?: string;
     };
     UpdateRackRequest: {
       name?: string;
-      height_u?: number;
+      /** @description 1–60 height units; absent means 42 on create. Any other value, an explicit 0 included, answers 422. */
+      height_units?: number;
       width_mm?: number;
       depth_mm?: number;
       notes?: string;
@@ -8488,6 +8493,15 @@ export interface components {
     };
     /** @description Conflict */
     Conflict: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description A field value is outside its allowed range; `field` names it. */
+    UnprocessableEntity: {
       headers: {
         [name: string]: unknown;
       };
@@ -13742,6 +13756,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13822,6 +13837,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listRooms: {
@@ -13879,6 +13895,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13959,6 +13976,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listRacks: {
@@ -14016,6 +14034,8 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -14096,6 +14116,8 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listRackMounts: {

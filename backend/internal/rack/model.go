@@ -9,7 +9,7 @@ type Rack struct {
 	OrganizationID string    `json:"organization_id"`
 	RoomID         string    `json:"room_id"`
 	Name           string    `json:"name"`
-	HeightU        int       `json:"height_u"`
+	HeightUnits    int       `json:"height_units"`
 	WidthMM        int       `json:"width_mm"`
 	DepthMM        int       `json:"depth_mm"`
 	Notes          string    `json:"notes,omitempty"`
@@ -17,23 +17,24 @@ type Rack struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-// CreateRackRequest is the payload for creating a rack.
+// CreateRackRequest is the payload for creating a rack (LOC-06). An absent
+// height_units means 42; an explicit value must lie in 1–60.
 type CreateRackRequest struct {
-	RoomID  string `json:"room_id"`
-	Name    string `json:"name"`
-	HeightU int    `json:"height_u,omitempty"`
-	WidthMM int    `json:"width_mm,omitempty"`
-	DepthMM int    `json:"depth_mm,omitempty"`
-	Notes   string `json:"notes,omitempty"`
+	RoomID      string `json:"room_id"`
+	Name        string `json:"name"`
+	HeightUnits *int   `json:"height_units,omitempty"`
+	WidthMM     int    `json:"width_mm,omitempty"`
+	DepthMM     int    `json:"depth_mm,omitempty"`
+	Notes       string `json:"notes,omitempty"`
 }
 
 // UpdateRackRequest is the payload for updating a rack.
 type UpdateRackRequest struct {
-	Name    *string `json:"name,omitempty"`
-	HeightU *int    `json:"height_u,omitempty"`
-	WidthMM *int    `json:"width_mm,omitempty"`
-	DepthMM *int    `json:"depth_mm,omitempty"`
-	Notes   *string `json:"notes,omitempty"`
+	Name        *string `json:"name,omitempty"`
+	HeightUnits *int    `json:"height_units,omitempty"`
+	WidthMM     *int    `json:"width_mm,omitempty"`
+	DepthMM     *int    `json:"depth_mm,omitempty"`
+	Notes       *string `json:"notes,omitempty"`
 }
 
 // RackMount represents a CI mounted into a rack at a given position.

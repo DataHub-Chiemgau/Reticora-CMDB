@@ -132,9 +132,23 @@ func (r *MemoryRepository) GetRack(_ context.Context, orgID, id string) (*Rack, 
 	return &cp, nil
 }
 
+// rackNameTaken reports another rack of the room with the name (LOC-06).
+// Callers hold the lock.
+func (r *MemoryRepository) rackNameTaken(orgID, roomID, id, name string) error {
+	for _, existing := range r.racks {
+		if existing.OrganizationID == orgID && existing.RoomID == roomID && existing.ID != id && existing.Name == name {
+			return &api.ConflictError{Field: "name", Message: "a rack with this name already exists in the room"}
+		}
+	}
+	return nil
+}
+
 func (r *MemoryRepository) CreateRack(_ context.Context, rk *Rack) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.rackNameTaken(rk.OrganizationID, rk.RoomID, "", rk.Name); err != nil {
+		return err
+	}
 	r.seq++
 	rk.ID = fmt.Sprintf("rack-%d", r.seq)
 	now := time.Now().UTC()
@@ -152,10 +166,13 @@ func (r *MemoryRepository) UpdateRack(_ context.Context, orgID, id string, req U
 		return nil, ErrNotFound
 	}
 	if req.Name != nil {
+		if err := r.rackNameTaken(orgID, rk.RoomID, id, *req.Name); err != nil {
+			return nil, err
+		}
 		rk.Name = *req.Name
 	}
-	if req.HeightU != nil {
-		rk.HeightU = *req.HeightU
+	if req.HeightUnits != nil {
+		rk.HeightUnits = *req.HeightUnits
 	}
 	if req.WidthMM != nil {
 		rk.WidthMM = *req.WidthMM
@@ -224,7 +241,7 @@ func (r *MemoryRepository) CreateMount(_ context.Context, m *RackMount) error {
 			return fmt.Errorf("%w: ci already mounted", ErrValidation)
 		}
 	}
-	if err := validateMountFit(rk.HeightU, m.PositionU, m.HeightU, m.Face, r.mountsForRack(m.RackID), ""); err != nil {
+	if err := validateMountFit(rk.HeightUnits, m.PositionU, m.HeightU, m.Face, r.mountsForRack(m.RackID), ""); err != nil {
 		return err
 	}
 	r.seq++
@@ -276,7 +293,7 @@ func (r *MemoryRepository) UpdateMount(_ context.Context, orgID, id string, req 
 		}
 	}
 	if rk != nil {
-		if err := validateMountFit(rk.HeightU, pos, height, face, r.mountsForRack(rackID), id); err != nil {
+		if err := validateMountFit(rk.HeightUnits, pos, height, face, r.mountsForRack(rackID), id); err != nil {
 			return nil, err
 		}
 	}
