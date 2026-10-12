@@ -5678,6 +5678,100 @@ export interface components {
       serial_number?: string;
       management_ip?: string;
     };
+    DeviceRecordBatch: {
+      records: components['schemas']['DeviceRecord'][];
+    };
+    /** @description One device observation (DIS-05). Mirrors api/devicerecord.schema.json, the normative schema; observed_at is the source time (GLO-12). */
+    DeviceRecord: {
+      /** Format: uuid */
+      record_id: string;
+      /** Format: date-time */
+      observed_at: string;
+      /** @enum {string} */
+      source:
+        | 'redfish'
+        | 'ipmi'
+        | 'agent'
+        | 'snmp'
+        | 'api'
+        | 'integration'
+        | 'wmi'
+        | 'ssh'
+        | 'nas'
+        | 'sweep';
+      target_ip: string;
+      /** Format: uuid */
+      vrf_id?: string;
+      /** Format: uuid */
+      scope_id?: string;
+      /** Format: uuid */
+      site_id?: string;
+      /** Format: uuid */
+      client_id?: string;
+      identity: {
+        serial_number?: string;
+        /** Format: uuid */
+        hardware_uuid?: string;
+        primary_mac?: string;
+        hostname?: string;
+        fqdn?: string;
+      };
+      classification: {
+        ci_type: string;
+        manufacturer?: string;
+        model?: string;
+        sys_object_id?: string;
+        profile?: string;
+      };
+      system: {
+        name?: string;
+        description?: string;
+        os_name?: string;
+        os_version?: string;
+        firmware_version?: string;
+        uptime_seconds?: number;
+      };
+      attributes?: {
+        [key: string]: unknown;
+      };
+      interfaces?: {
+        name: string;
+        if_index?: number;
+        mac?: string;
+        speed_mbps?: number;
+        mtu?: number;
+        /** @enum {string} */
+        admin_status?: 'up' | 'down' | 'unknown';
+        /** @enum {string} */
+        oper_status?: 'up' | 'down' | 'unknown';
+        vlan_id?: number;
+        ips?: {
+          address: string;
+          prefix_length?: number;
+        }[];
+      }[];
+      neighbors?: {
+        /** @enum {string} */
+        protocol: 'lldp' | 'cdp' | 'arp' | 'fdb';
+        local_interface?: string;
+        remote_mac?: string;
+        remote_ip?: string;
+        remote_hostname?: string;
+        remote_interface?: string;
+      }[];
+      power?: {
+        device_type?: string;
+        draw_watts?: number;
+        outlets?: {
+          name: string;
+          state?: string;
+        }[];
+      };
+    };
+    /**
+     * @deprecated
+     * @description Deprecated ingest request; use DeviceRecordBatch (DIS-05).
+     */
     DiscoveryIngestRequest: {
       collector_id: string;
       items: components['schemas']['DiscoveryIngestItem'][];
@@ -9321,19 +9415,27 @@ export interface operations {
   ingestDiscoveryData: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description Collectors send the body gzip-compressed. */
+        'Content-Encoding'?: 'gzip';
+      };
       path?: never;
       cookie?: never;
     };
+    /** @description A DeviceRecord batch (DIS-05, normative schema api/devicerecord.schema.json). The collector_id/items request is deprecated and answered with a Deprecation header. */
     requestBody: {
       content: {
-        'application/json': components['schemas']['DiscoveryIngestRequest'];
+        'application/json':
+          | components['schemas']['DeviceRecordBatch']
+          | components['schemas']['DiscoveryIngestRequest'];
       };
     };
     responses: {
       /** @description Discovery payload accepted */
       202: {
         headers: {
+          /** @description Set (RFC 9745) when the deprecated collector_id/items request was used. */
+          Deprecation?: string;
           [name: string]: unknown;
         };
         content: {
@@ -9343,6 +9445,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      /** @description Decompressed body larger than 64 MiB */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field) */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -15110,19 +15230,27 @@ export interface operations {
   bulkIngest: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description Collectors send the body gzip-compressed. */
+        'Content-Encoding'?: 'gzip';
+      };
       path?: never;
       cookie?: never;
     };
+    /** @description A DeviceRecord batch (DIS-05, normative schema api/devicerecord.schema.json). The collector_id/items request is deprecated and answered with a Deprecation header. */
     requestBody: {
       content: {
-        'application/json': components['schemas']['DiscoveryIngestRequest'];
+        'application/json':
+          | components['schemas']['DeviceRecordBatch']
+          | components['schemas']['DiscoveryIngestRequest'];
       };
     };
     responses: {
       /** @description Discovery payload accepted */
       202: {
         headers: {
+          /** @description Set (RFC 9745) when the deprecated collector_id/items request was used. */
+          Deprecation?: string;
           [name: string]: unknown;
         };
         content: {
@@ -15132,6 +15260,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      /** @description Decompressed body larger than 64 MiB */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field) */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };

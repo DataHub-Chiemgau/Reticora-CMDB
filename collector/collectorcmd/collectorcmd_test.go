@@ -38,7 +38,7 @@ func testConfig(serverURL, spoolDir string) collectorConfig {
 	}
 }
 
-func TestUploadResults_PlainHTTPSuccess(t *testing.T) {
+func TestUploadRecords_PlainHTTPSuccess(t *testing.T) {
 	var gotHeaders http.Header
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotHeaders = r.Header.Clone()
@@ -57,9 +57,8 @@ func TestUploadResults_PlainHTTPSuccess(t *testing.T) {
 		t.Error("expected plain HTTP client when no certificate material is configured")
 	}
 
-	results := []plugins.Result{{}}
-	if err := up.uploadResults(context.Background(), results); err != nil {
-		t.Fatalf("uploadResults: %v", err)
+	if err := up.uploadRecords(context.Background(), testRecords("r")); err != nil {
+		t.Fatalf("uploadRecords: %v", err)
 	}
 	if gotHeaders.Get("Content-Encoding") != "gzip" {
 		t.Errorf("expected gzip content encoding, got %q", gotHeaders.Get("Content-Encoding"))
@@ -69,7 +68,7 @@ func TestUploadResults_PlainHTTPSuccess(t *testing.T) {
 	}
 }
 
-func TestUploadResults_FailureSpoolsAndFlushDelivers(t *testing.T) {
+func TestUploadRecords_FailureSpoolsAndFlushDelivers(t *testing.T) {
 	spoolDir := t.TempDir()
 
 	// First attempt against an unreachable server spools the batch.
@@ -81,7 +80,7 @@ func TestUploadResults_FailureSpoolsAndFlushDelivers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newUploader: %v", err)
 	}
-	if err := up.uploadResults(context.Background(), []plugins.Result{{}}); err == nil {
+	if err := up.uploadRecords(context.Background(), testRecords("r")); err == nil {
 		t.Fatal("expected upload error against unreachable server")
 	}
 	spool := &buffer.DiskBuffer{Dir: spoolDir}
@@ -107,7 +106,7 @@ func TestUploadResults_FailureSpoolsAndFlushDelivers(t *testing.T) {
 	}
 }
 
-func TestUploadResults_WithoutSpoolDirReturnsErrorOnly(t *testing.T) {
+func TestUploadRecords_WithoutSpoolDirReturnsErrorOnly(t *testing.T) {
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	downURL := down.URL
 	down.Close()
@@ -116,7 +115,7 @@ func TestUploadResults_WithoutSpoolDirReturnsErrorOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newUploader: %v", err)
 	}
-	if err := up.uploadResults(context.Background(), []plugins.Result{{}}); err == nil {
+	if err := up.uploadRecords(context.Background(), testRecords("r")); err == nil {
 		t.Fatal("expected upload error against unreachable server")
 	}
 }
@@ -214,7 +213,7 @@ func selfSignedCert(t *testing.T, cn string) (certPEM, keyPEM []byte) {
 		pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 }
 
-// Ensure the upload payload round-trips as JSON for plugins.Result.
+// Ensure the upload payload round-trips as a DeviceRecord batch.
 func TestPostPayload_SendsCompressedJSON(t *testing.T) {
 	var raw []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -236,16 +235,16 @@ func TestPostPayload_SendsCompressedJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newUploader: %v", err)
 	}
-	payload, _ := json.Marshal([]plugins.Result{{}})
+	payload, _ := json.Marshal(plugins.DeviceRecordBatch{Records: testRecords("r")})
 	if err := up.postPayload(context.Background(), payload); err != nil {
 		t.Fatalf("postPayload: %v", err)
 	}
-	var decoded []plugins.Result
+	var decoded plugins.DeviceRecordBatch
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("server received invalid JSON: %v", err)
 	}
-	if len(decoded) != 1 {
-		t.Errorf("expected 1 result, got %d", len(decoded))
+	if len(decoded.Records) != 1 {
+		t.Errorf("expected 1 record, got %d", len(decoded.Records))
 	}
 }
 
@@ -297,7 +296,7 @@ func TestParseRedfishTLSScopes(t *testing.T) {
 
 // COL-05: new results queue behind the spool backlog, so the backend receives
 // batches in source-time order; one flush delivers more than 16 batches.
-func TestUploadResults_BacklogFirstAndUnboundedFlush(t *testing.T) {
+func TestUploadRecords_BacklogFirstAndUnboundedFlush(t *testing.T) {
 	spoolDir := t.TempDir()
 	var order []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -306,12 +305,12 @@ func TestUploadResults_BacklogFirstAndUnboundedFlush(t *testing.T) {
 			t.Errorf("gzip: %v", err)
 			return
 		}
-		var results []plugins.Result
-		if err := json.NewDecoder(gz).Decode(&results); err != nil {
+		var batch plugins.DeviceRecordBatch
+		if err := json.NewDecoder(gz).Decode(&batch); err != nil {
 			t.Errorf("decode: %v", err)
 			return
 		}
-		order = append(order, results[0].Name)
+		order = append(order, batch.Records[0].System.Name)
 		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer srv.Close()
@@ -322,13 +321,13 @@ func TestUploadResults_BacklogFirstAndUnboundedFlush(t *testing.T) {
 	}
 	base := time.Now().Add(-time.Hour)
 	for i := 0; i < 20; i++ {
-		payload, _ := json.Marshal([]plugins.Result{{Name: fmt.Sprintf("old-%02d", i)}})
+		payload, _ := json.Marshal(plugins.DeviceRecordBatch{Records: testRecords(fmt.Sprintf("old-%02d", i))})
 		if err := up.spoolResults(context.Background(), payload, base.Add(time.Duration(i)*time.Second)); err != nil {
 			t.Fatalf("spool: %v", err)
 		}
 	}
 
-	if err := up.uploadResults(context.Background(), []plugins.Result{{Name: "new"}}); err != nil {
+	if err := up.uploadRecords(context.Background(), testRecords("new")); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 	if len(order) != 21 || order[0] != "old-00" || order[19] != "old-19" || order[20] != "new" {
@@ -418,7 +417,7 @@ func TestLicenseExpiryPausesDiscovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err = up.uploadResults(ctx, []plugins.Result{{Name: "a"}}); !errors.Is(err, errLicenseExpired) {
+	if err = up.uploadRecords(ctx, testRecords("a")); !errors.Is(err, errLicenseExpired) {
 		t.Fatalf("upload after expiry: %v, want errLicenseExpired", err)
 	}
 	if !up.paused.Load() {
@@ -427,7 +426,7 @@ func TestLicenseExpiryPausesDiscovery(t *testing.T) {
 	if n, _ := up.spool.Len(ctx); n != 0 {
 		t.Fatalf("refused batch spooled: %d messages", n)
 	}
-	if err = up.uploadResults(ctx, []plugins.Result{{Name: "b"}}); !errors.Is(err, errLicenseExpired) || ingests.Load() != 1 {
+	if err = up.uploadRecords(ctx, testRecords("b")); !errors.Is(err, errLicenseExpired) || ingests.Load() != 1 {
 		t.Fatalf("paused upload: %v after %d ingests, want no further request", err, ingests.Load())
 	}
 
@@ -454,7 +453,7 @@ func TestLicenseExpiryPausesDiscovery(t *testing.T) {
 	if up.paused.Load() {
 		t.Fatal("collector still paused after the license was renewed")
 	}
-	if err = up.uploadResults(ctx, []plugins.Result{{Name: "c"}}); err != nil {
+	if err = up.uploadRecords(ctx, testRecords("c")); err != nil {
 		t.Fatalf("upload after renewal: %v", err)
 	}
 	loopCtx, cancel = context.WithTimeout(ctx, 30*time.Millisecond)
@@ -463,4 +462,9 @@ func TestLicenseExpiryPausesDiscovery(t *testing.T) {
 	if plugin.runs.Load() == 0 {
 		t.Fatal("resumed collector did not scan")
 	}
+}
+
+// testRecords returns one valid DeviceRecord named name.
+func testRecords(name string) []plugins.DeviceRecord {
+	return []plugins.DeviceRecord{plugins.RecordFromResult("sweep", &plugins.Result{CIType: "server", Name: name, IP: "192.0.2.10"}, time.Now())}
 }

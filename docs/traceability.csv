@@ -232,3 +232,5 @@ NET-02;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-081
 TEN-10;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
 NET-02;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
 NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-082
+DIS-05;[B];D;backend/internal/discovery/devicerecord_test.go;WP-083
+GLO-12;[B];D;backend/internal/discovery/devicerecord_test.go;WP-083

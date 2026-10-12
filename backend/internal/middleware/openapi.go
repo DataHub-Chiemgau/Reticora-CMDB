@@ -87,7 +87,10 @@ func (v *OpenAPIValidator) Middleware(next http.Handler) http.Handler {
 				httpx.ValidationError(w, r, "request body is required")
 				return
 			}
-			if !json.Valid(body) {
+			// A compressed body (collector ingest, DIS-05) is checked by its
+			// handler after decompression.
+			compressed := r.Header.Get("Content-Encoding") != "" && !strings.EqualFold(r.Header.Get("Content-Encoding"), "identity")
+			if !compressed && !json.Valid(body) {
 				httpx.ValidationError(w, r, "request body must be valid JSON")
 				return
 			}

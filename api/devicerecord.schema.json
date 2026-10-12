@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reticora.io/schemas/devicerecord.schema.json",
+  "title": "DeviceRecord",
+  "description": "One device observation sent from a collector to the server (DIS-05). Times are the source time of the observation (GLO-12). The Go type is collector/plugins.DeviceRecord.",
+  "type": "object",
+  "required": ["record_id", "observed_at", "source", "target_ip", "identity", "classification", "system"],
+  "additionalProperties": false,
+  "properties": {
+    "record_id": { "$ref": "#/$defs/uuid", "description": "Identifies the observation; the server deduplicates on it." },
+    "observed_at": { "type": "string", "format": "date-time", "description": "Source time of the observation, not the upload time." },
+    "source": { "type": "string", "enum": ["redfish", "ipmi", "agent", "snmp", "api", "integration", "wmi", "ssh", "nas", "sweep"] },
+    "target_ip": { "$ref": "#/$defs/ip" },
+    "vrf_id": { "$ref": "#/$defs/uuid" },
+    "scope_id": { "$ref": "#/$defs/uuid" },
+    "site_id": { "$ref": "#/$defs/uuid", "description": "Site of the discovery scope." },
+    "client_id": { "$ref": "#/$defs/uuid", "description": "Client of the discovery scope." },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "serial_number": { "type": "string" },
+        "hardware_uuid": { "$ref": "#/$defs/uuid" },
+        "primary_mac": { "$ref": "#/$defs/mac" },
+        "hostname": { "type": "string" },
+        "fqdn": { "type": "string" }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "required": ["ci_type"],
+      "additionalProperties": false,
+      "properties": {
+        "ci_type": { "type": "string", "minLength": 1 },
+        "manufacturer": { "type": "string" },
+        "model": { "type": "string" },
+        "sys_object_id": { "type": "string" },
+        "profile": { "type": "string" }
+      }
+    },
+    "system": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "os_name": { "type": "string" },
+        "os_version": { "type": "string" },
+        "firmware_version": { "type": "string" },
+        "uptime_seconds": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "attributes": { "type": "object" },
+    "interfaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "if_index": { "type": "integer" },
+          "mac": { "$ref": "#/$defs/mac" },
+          "speed_mbps": { "type": "integer" },
+          "mtu": { "type": "integer" },
+          "admin_status": { "$ref": "#/$defs/status" },
+          "oper_status": { "$ref": "#/$defs/status" },
+          "vlan_id": { "type": "integer", "minimum": 1, "maximum": 4094 },
+          "ips": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["address"],
+              "additionalProperties": false,
+              "properties": {
+                "address": { "$ref": "#/$defs/ip" },
+                "prefix_length": { "type": "integer", "minimum": 0, "maximum": 128 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "neighbors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["protocol"],
+        "additionalProperties": false,
+        "anyOf": [
+          { "required": ["remote_mac"] },
+          { "required": ["remote_ip"] },
+          { "required": ["remote_hostname"] }
+        ],
+        "properties": {
+          "protocol": { "type": "string", "enum": ["lldp", "cdp", "arp", "fdb"] },
+          "local_interface": { "type": "string" },
+          "remote_mac": { "$ref": "#/$defs/mac" },
+          "remote_ip": { "$ref": "#/$defs/ip" },
+          "remote_hostname": { "type": "string" },
+          "remote_interface": { "type": "string" }
+        }
+      }
+    },
+    "power": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "device_type": { "type": "string" },
+        "draw_watts": { "type": "number", "minimum": 0 },
+        "outlets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "state": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+    "mac": { "type": "string", "pattern": "^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$" },
+    "ip": { "type": "string", "anyOf": [{ "format": "ipv4" }, { "format": "ipv6" }] },
+    "status": { "type": "string", "enum": ["up", "down", "unknown"] }
+  }
+}

@@ -981,15 +981,33 @@ paths:
       operationId: ingestDiscoveryData
       tags: [Discovery]
       summary: Ingest discovery results in bulk
+      parameters:
+        - name: Content-Encoding
+          in: header
+          description: Collectors send the body gzip-compressed.
+          schema:
+            type: string
+            enum: [gzip]
       requestBody:
         required: true
+        description: >-
+          A DeviceRecord batch (DIS-05, normative schema
+          api/devicerecord.schema.json). The collector_id/items request is
+          deprecated and answered with a Deprecation header.
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DiscoveryIngestRequest'
+              oneOf:
+                - $ref: '#/components/schemas/DeviceRecordBatch'
+                - $ref: '#/components/schemas/DiscoveryIngestRequest'
       responses:
         '202':
           description: Discovery payload accepted
+          headers:
+            Deprecation:
+              description: Set (RFC 9745) when the deprecated collector_id/items request was used.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -1000,6 +1018,16 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          description: Decompressed body larger than 64 MiB
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: A record breaks the DeviceRecord contract; the detail names each field (records[i].field)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -5451,15 +5479,33 @@ paths:
         endpoint that `/api/v1/discovery/ingest` aliases. Both require the
         discovery feature; after the discovery license expired they answer
         403 with the problem type license-expired (CH21).
+      parameters:
+        - name: Content-Encoding
+          in: header
+          description: Collectors send the body gzip-compressed.
+          schema:
+            type: string
+            enum: [gzip]
       requestBody:
         required: true
+        description: >-
+          A DeviceRecord batch (DIS-05, normative schema
+          api/devicerecord.schema.json). The collector_id/items request is
+          deprecated and answered with a Deprecation header.
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DiscoveryIngestRequest'
+              oneOf:
+                - $ref: '#/components/schemas/DeviceRecordBatch'
+                - $ref: '#/components/schemas/DiscoveryIngestRequest'
       responses:
         '202':
           description: Discovery payload accepted
+          headers:
+            Deprecation:
+              description: Set (RFC 9745) when the deprecated collector_id/items request was used.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -5470,6 +5516,16 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          description: Decompressed body larger than 64 MiB
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: A record breaks the DeviceRecord contract; the detail names each field (records[i].field)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -9506,8 +9562,123 @@ components:
         management_ip:
           type: string
 
+    DeviceRecordBatch:
+      type: object
+      required: [records]
+      properties:
+        records:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/DeviceRecord'
+
+    DeviceRecord:
+      type: object
+      description: >-
+        One device observation (DIS-05). Mirrors api/devicerecord.schema.json,
+        the normative schema; observed_at is the source time (GLO-12).
+      required: [record_id, observed_at, source, target_ip, identity, classification, system]
+      additionalProperties: false
+      properties:
+        record_id: { type: string, format: uuid }
+        observed_at: { type: string, format: date-time }
+        source:
+          type: string
+          enum: [redfish, ipmi, agent, snmp, api, integration, wmi, ssh, nas, sweep]
+        target_ip: { type: string }
+        vrf_id: { type: string, format: uuid }
+        scope_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        client_id: { type: string, format: uuid }
+        identity:
+          type: object
+          additionalProperties: false
+          properties:
+            serial_number: { type: string }
+            hardware_uuid: { type: string, format: uuid }
+            primary_mac: { type: string }
+            hostname: { type: string }
+            fqdn: { type: string }
+        classification:
+          type: object
+          required: [ci_type]
+          additionalProperties: false
+          properties:
+            ci_type: { type: string, minLength: 1 }
+            manufacturer: { type: string }
+            model: { type: string }
+            sys_object_id: { type: string }
+            profile: { type: string }
+        system:
+          type: object
+          additionalProperties: false
+          properties:
+            name: { type: string }
+            description: { type: string }
+            os_name: { type: string }
+            os_version: { type: string }
+            firmware_version: { type: string }
+            uptime_seconds: { type: integer, minimum: 0 }
+        attributes:
+          type: object
+          additionalProperties: true
+        interfaces:
+          type: array
+          items:
+            type: object
+            required: [name]
+            additionalProperties: false
+            properties:
+              name: { type: string, minLength: 1 }
+              if_index: { type: integer }
+              mac: { type: string }
+              speed_mbps: { type: integer }
+              mtu: { type: integer }
+              admin_status: { type: string, enum: [up, down, unknown] }
+              oper_status: { type: string, enum: [up, down, unknown] }
+              vlan_id: { type: integer, minimum: 1, maximum: 4094 }
+              ips:
+                type: array
+                items:
+                  type: object
+                  required: [address]
+                  additionalProperties: false
+                  properties:
+                    address: { type: string }
+                    prefix_length: { type: integer, minimum: 0, maximum: 128 }
+        neighbors:
+          type: array
+          items:
+            type: object
+            required: [protocol]
+            additionalProperties: false
+            properties:
+              protocol: { type: string, enum: [lldp, cdp, arp, fdb] }
+              local_interface: { type: string }
+              remote_mac: { type: string }
+              remote_ip: { type: string }
+              remote_hostname: { type: string }
+              remote_interface: { type: string }
+        power:
+          type: object
+          additionalProperties: false
+          properties:
+            device_type: { type: string }
+            draw_watts: { type: number, minimum: 0 }
+            outlets:
+              type: array
+              items:
+                type: object
+                required: [name]
+                additionalProperties: false
+                properties:
+                  name: { type: string, minLength: 1 }
+                  state: { type: string }
+
     DiscoveryIngestRequest:
       type: object
+      deprecated: true
+      description: Deprecated ingest request; use DeviceRecordBatch (DIS-05).
       required: [collector_id, items]
       properties:
         collector_id:

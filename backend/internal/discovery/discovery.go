@@ -41,7 +41,8 @@ type Collector struct {
 	UpdatedAt      string         `json:"updated_at"`
 }
 
-// BulkIngestRequest is the payload sent by a collector for bulk CI data.
+// BulkIngestRequest is the deprecated collector_id/items ingest payload; new
+// collectors send DeviceRecords (DIS-05, DeviceRecordBatch).
 type BulkIngestRequest struct {
 	CollectorID string       `json:"collector_id"`
 	Items       []IngestItem `json:"items"`
@@ -77,6 +78,15 @@ type IngestItem struct {
 
 	// Relationships discovered from the CI toward neighbors (L2/L3 topology).
 	Relationships []wire.IngestRelationship `json:"relationships,omitempty"`
+
+	// RecordID, ObservedAt and the scope fields come from a DeviceRecord
+	// (DIS-05); the deprecated items contract cannot set them.
+	RecordID   string    `json:"-"`
+	ObservedAt time.Time `json:"-"`
+	VRFID      string    `json:"-"`
+	ScopeID    string    `json:"-"`
+	SiteID     string    `json:"-"`
+	ClientID   string    `json:"-"`
 
 	// Attributes carries dynamic discovery attributes (spec §1 hybrid model).
 	// They feed per-field provenance records (spec §13) without being forced
@@ -723,15 +733,11 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req BulkIngestRequest
-	if err := api.ReadJSON(r, &req); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+	items, ok := readIngestItems(w, r)
+	if !ok {
 		return
 	}
-	if len(req.Items) == 0 {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "items cannot be empty")
-		return
-	}
+	req := BulkIngestRequest{Items: items}
 
 	resp := BulkIngestResponse{Received: len(req.Items)}
 	if h.ciRepo == nil {

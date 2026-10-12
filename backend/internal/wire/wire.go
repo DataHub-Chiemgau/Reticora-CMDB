@@ -65,6 +65,8 @@ type IngestInterface struct {
 	Description string `json:"description,omitempty"`
 	VlanID      int    `json:"vlan_id,omitempty"`
 	Management  bool   `json:"is_management,omitempty"`
+	// IPs are the interface addresses in CIDR notation (address/prefix).
+	IPs []string `json:"ips,omitempty"`
 }
 
 // IngestMetric represents a collected metric sample.
