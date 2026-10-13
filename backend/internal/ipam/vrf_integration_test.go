@@ -70,11 +70,11 @@ func TestVRFModel(t *testing.T) {
 	}
 
 	// IP addresses: VRF of the subnet, unique per VRF.
-	a1 := &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: defaultSubnet.ID, Address: "10.75.0.10", Status: "active"}
+	a1 := &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: defaultSubnet.ID, Address: "10.75.0.10", Type: "static"}
 	if err = repo.CreateIPAddress(ctx, a1); err != nil {
 		t.Fatal(err)
 	}
-	a2 := &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: customerSubnet.ID, Address: "10.75.0.10", Status: "active"}
+	a2 := &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: customerSubnet.ID, Address: "10.75.0.10", Type: "static"}
 	if err = repo.CreateIPAddress(ctx, a2); err != nil {
 		t.Errorf("same address in another VRF: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestVRFModel(t *testing.T) {
 		t.Errorf("address VRFs: %q, %q", a1.VRFID, a2.VRFID)
 	}
 	if err = repo.CreateIPAddress(ctx, &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: defaultSubnet.ID,
-		Address: "10.75.0.10", Status: "active"}); err == nil {
+		Address: "10.75.0.10", Type: "static"}); err == nil {
 		t.Error("duplicate address in the same VRF accepted")
 	}
 

@@ -270,12 +270,12 @@ func (h *Handler) CreateIPAddress(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	status := req.Status
-	if status == "" {
-		status = "active"
+	ipType := req.Type
+	if ipType == "" {
+		ipType = IPTypeStatic
 	}
-	if !ValidIPStatuses[status] {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid status")
+	if !ValidIPTypes[ipType] {
+		api.WriteFieldError(w, &api.FieldError{Field: "type", Message: "invalid ip address type"})
 		return
 	}
 	if req.SubnetID != "" {
@@ -299,7 +299,7 @@ func (h *Handler) CreateIPAddress(w http.ResponseWriter, r *http.Request) {
 		SubnetID:       req.SubnetID,
 		InterfaceID:    req.InterfaceID,
 		Address:        normalized,
-		Status:         status,
+		Type:           ipType,
 		DNSName:        req.DNSName,
 		Description:    req.Description,
 	}
@@ -335,8 +335,8 @@ func (h *Handler) UpdateIPAddress(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if req.Status != nil && !ValidIPStatuses[*req.Status] {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid status")
+	if req.Type != nil && !ValidIPTypes[*req.Type] {
+		api.WriteFieldError(w, &api.FieldError{Field: "type", Message: "invalid ip address type"})
 		return
 	}
 	// Validate address still belongs to a newly-assigned subnet.

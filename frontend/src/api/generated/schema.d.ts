@@ -8652,6 +8652,11 @@ export interface components {
     SubnetListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Subnet'][];
     };
+    /**
+     * @description Origin of the address (NET-03): discovered by discovery, reserved, configured statically or assigned by DHCP. A manual address defaults to static.
+     * @enum {string}
+     */
+    IPAddressType: 'discovered' | 'reserved' | 'static' | 'dhcp';
     IPAddress: {
       id: string;
       organization_id: string;
@@ -8659,9 +8664,8 @@ export interface components {
       interface_id?: string;
       address: string;
       /** @description VRF of the subnet; addresses are unique per VRF and interface (NET-03). */
-      readonly vrf_id?: string;
-      /** @enum {string} */
-      status: 'active' | 'reserved' | 'deprecated' | 'dhcp' | 'available';
+      readonly vrf_id: string;
+      type: components['schemas']['IPAddressType'];
       dns_name?: string;
       description?: string;
       /** Format: date-time */
@@ -8675,16 +8679,14 @@ export interface components {
       subnet_id?: string;
       interface_id?: string;
       address: string;
-      /** @enum {string} */
-      status?: 'active' | 'reserved' | 'deprecated' | 'dhcp' | 'available';
+      type?: components['schemas']['IPAddressType'];
       dns_name?: string;
       description?: string;
     };
     UpdateIPAddressRequest: {
       subnet_id?: string;
       interface_id?: string;
-      /** @enum {string} */
-      status?: 'active' | 'reserved' | 'deprecated' | 'dhcp' | 'available';
+      type?: components['schemas']['IPAddressType'];
       dns_name?: string;
       description?: string;
     };

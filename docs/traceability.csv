@@ -297,3 +297,4 @@ CI-01;[B], Teilfelder [P2]/[P3];B;backend/internal/ci/handler_test.go;WP-120
 CI-02;[B];B;backend/internal/ci/indexes_integration_test.go;WP-121
 LCY-01;[B];B;backend/internal/lifecycle/status_separation_integration_test.go;WP-122
 NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-123
+NET-03;[B];B;backend/internal/ipam/ip_integration_test.go;WP-124

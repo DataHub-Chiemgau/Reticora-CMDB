@@ -261,8 +261,8 @@ func (r *MemoryRepository) UpdateIPAddress(_ context.Context, orgID, id string, 
 	if req.InterfaceID != nil {
 		a.InterfaceID = *req.InterfaceID
 	}
-	if req.Status != nil {
-		a.Status = *req.Status
+	if req.Type != nil {
+		a.Type = *req.Type
 	}
 	if req.DNSName != nil {
 		a.DNSName = *req.DNSName

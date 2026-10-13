@@ -230,12 +230,12 @@ func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, visible, id
 // --- IP Addresses ---
 
 const ipCols = `id::text, organization_id::text, COALESCE(subnet_id::text,''), COALESCE(interface_id::text,''),
-	address::text, vrf_id::text, status, COALESCE(dns_name,''), COALESCE(description,''), last_seen_at, created_at, updated_at`
+	address::text, vrf_id::text, type, COALESCE(dns_name,''), COALESCE(description,''), last_seen_at, created_at, updated_at`
 
 func scanIP(s scanner) (*IPAddress, error) {
 	a := &IPAddress{}
 	var lastSeen *time.Time
-	if err := s.Scan(&a.ID, &a.OrganizationID, &a.SubnetID, &a.InterfaceID, &a.Address, &a.VRFID, &a.Status,
+	if err := s.Scan(&a.ID, &a.OrganizationID, &a.SubnetID, &a.InterfaceID, &a.Address, &a.VRFID, &a.Type,
 		&a.DNSName, &a.Description, &lastSeen, &a.CreatedAt, &a.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -296,9 +296,9 @@ func (r *PGRepository) GetIPAddress(ctx context.Context, orgID, id string) (*IPA
 func (r *PGRepository) CreateIPAddress(ctx context.Context, a *IPAddress) error {
 	return database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
-			`INSERT INTO ip_address (organization_id, subnet_id, interface_id, address, status, dns_name, description)
+			`INSERT INTO ip_address (organization_id, subnet_id, interface_id, address, type, dns_name, description)
 			 VALUES ($1,$2,$3,$4::inet,$5,$6,$7) RETURNING id::text, vrf_id::text, created_at, updated_at`,
-			a.OrganizationID, nilIfEmpty(a.SubnetID), nilIfEmpty(a.InterfaceID), a.Address, a.Status,
+			a.OrganizationID, nilIfEmpty(a.SubnetID), nilIfEmpty(a.InterfaceID), a.Address, a.Type,
 			nilIfEmpty(a.DNSName), nilIfEmpty(a.Description),
 		).Scan(&a.ID, &a.VRFID, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return err
@@ -323,9 +323,9 @@ func (r *PGRepository) UpdateIPAddress(ctx context.Context, orgID, id string, re
 			args = append(args, nilIfEmpty(*req.InterfaceID))
 			pos++
 		}
-		if req.Status != nil {
-			sets = append(sets, fmt.Sprintf("status = $%d", pos))
-			args = append(args, *req.Status)
+		if req.Type != nil {
+			sets = append(sets, fmt.Sprintf("type = $%d", pos))
+			args = append(args, *req.Type)
 			pos++
 		}
 		if req.DNSName != nil {
@@ -605,8 +605,8 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 				err = tx.QueryRow(ctx, `UPDATE ip_address SET miss_count = 0, last_seen_at = now(), updated_at = now()
 					WHERE interface_id = $1 AND host(address) = host($2::inet) RETURNING id::text`, id, address).Scan(&ipID)
 				if errors.Is(err, pgx.ErrNoRows) {
-					err = tx.QueryRow(ctx, `INSERT INTO ip_address (organization_id, interface_id, address, status, last_seen_at)
-						VALUES ($1, $2, $3::inet, 'active', now()) RETURNING id::text`, orgID, id, address).Scan(&ipID)
+					err = tx.QueryRow(ctx, `INSERT INTO ip_address (organization_id, interface_id, address, type, last_seen_at)
+						VALUES ($1, $2, $3::inet, 'discovered', now()) RETURNING id::text`, orgID, id, address).Scan(&ipID)
 				}
 				if err != nil {
 					return fmt.Errorf("sync address %s: %w", address, err)

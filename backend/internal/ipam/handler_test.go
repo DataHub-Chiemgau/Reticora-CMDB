@@ -92,8 +92,8 @@ func TestIPAddressSubnetMembership(t *testing.T) {
 	}
 	var a IPAddress
 	json.Unmarshal(w.Body.Bytes(), &a)
-	if a.Status != "active" {
-		t.Errorf("expected default status active, got %q", a.Status)
+	if a.Type != IPTypeStatic {
+		t.Errorf("expected default type static, got %q", a.Type)
 	}
 
 	// list subnet addresses
@@ -111,15 +111,15 @@ func TestIPAddressSubnetMembership(t *testing.T) {
 		t.Errorf("missing subnet addresses: expected 404, got %d", w.Code)
 	}
 
-	// invalid status
-	if w := do(mux, "POST", "/api/v1/ip-addresses", `{"address":"10.0.0.6","status":"bogus"}`, "org-1"); w.Code != http.StatusBadRequest {
-		t.Errorf("bad status: expected 400, got %d", w.Code)
+	// invalid type
+	if w := do(mux, "POST", "/api/v1/ip-addresses", `{"address":"10.0.0.6","type":"active"}`, "org-1"); w.Code != http.StatusBadRequest {
+		t.Errorf("bad type: expected 400, got %d", w.Code)
 	}
 
 	if w := do(mux, "GET", "/api/v1/ip-addresses/"+a.ID, "", "org-1"); w.Code != http.StatusOK {
 		t.Errorf("get: expected 200, got %d", w.Code)
 	}
-	if w := do(mux, "PATCH", "/api/v1/ip-addresses/"+a.ID, `{"status":"reserved"}`, "org-1"); w.Code != http.StatusOK {
+	if w := do(mux, "PATCH", "/api/v1/ip-addresses/"+a.ID, `{"type":"reserved"}`, "org-1"); w.Code != http.StatusOK {
 		t.Errorf("patch: expected 200, got %d", w.Code)
 	}
 	if w := do(mux, "DELETE", "/api/v1/ip-addresses/"+a.ID, "", "org-1"); w.Code != http.StatusNoContent {

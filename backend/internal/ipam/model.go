@@ -62,8 +62,9 @@ type IPAddress struct {
 	Address        string `json:"address"`
 	// VRFID is the VRF of the subnet (read-only); addresses are unique per
 	// VRF and interface (NET-03).
-	VRFID       string    `json:"vrf_id"`
-	Status      string    `json:"status"`
+	VRFID string `json:"vrf_id"`
+	// Type is discovered, reserved, static or dhcp (NET-03).
+	Type        string    `json:"type"`
 	DNSName     string    `json:"dns_name,omitempty"`
 	Description string    `json:"description,omitempty"`
 	LastSeenAt  *string   `json:"last_seen_at,omitempty"`
@@ -76,7 +77,7 @@ type CreateIPAddressRequest struct {
 	SubnetID    string `json:"subnet_id,omitempty"`
 	InterfaceID string `json:"interface_id,omitempty"`
 	Address     string `json:"address"`
-	Status      string `json:"status,omitempty"`
+	Type        string `json:"type,omitempty"`
 	DNSName     string `json:"dns_name,omitempty"`
 	Description string `json:"description,omitempty"`
 }
@@ -85,7 +86,7 @@ type CreateIPAddressRequest struct {
 type UpdateIPAddressRequest struct {
 	SubnetID    *string `json:"subnet_id,omitempty"`
 	InterfaceID *string `json:"interface_id,omitempty"`
-	Status      *string `json:"status,omitempty"`
+	Type        *string `json:"type,omitempty"`
 	DNSName     *string `json:"dns_name,omitempty"`
 	Description *string `json:"description,omitempty"`
 }
@@ -154,7 +155,15 @@ var ValidInterfaceTypes = map[string]bool{
 	"loopback": true, "serial": true, "management": true,
 }
 
-// ValidIPStatuses lists allowed IP address statuses.
-var ValidIPStatuses = map[string]bool{
-	"active": true, "reserved": true, "deprecated": true, "dhcp": true, "available": true,
+// IP address types of NET-03.
+const (
+	IPTypeDiscovered = "discovered"
+	IPTypeReserved   = "reserved"
+	IPTypeStatic     = "static"
+	IPTypeDHCP       = "dhcp"
+)
+
+// ValidIPTypes lists the IP address types (NET-03).
+var ValidIPTypes = map[string]bool{
+	IPTypeDiscovered: true, IPTypeReserved: true, IPTypeStatic: true, IPTypeDHCP: true,
 }

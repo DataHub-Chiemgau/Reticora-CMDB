@@ -38,7 +38,7 @@ func TestIPAMRepositoryClientScope(t *testing.T) {
 	if err := repo.CreateInterface(orgCtx, foreignNIC); err != nil {
 		t.Fatalf("org-wide interface: %v", err)
 	}
-	foreignIP := &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: foreignNet.ID, Address: "10.31.2.10", Status: "active"}
+	foreignIP := &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: foreignNet.ID, Address: "10.31.2.10", Type: "static"}
 	if err := repo.CreateIPAddress(orgCtx, foreignIP); err != nil {
 		t.Fatalf("org-wide address: %v", err)
 	}
@@ -71,10 +71,10 @@ func TestIPAMRepositoryClientScope(t *testing.T) {
 	}
 
 	// Addresses created or moved by client 1 must stay within client 1.
-	if err = repo.CreateIPAddress(ctx, &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: foreignNet.ID, Address: "10.31.2.11", Status: "active"}); err == nil {
+	if err = repo.CreateIPAddress(ctx, &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: foreignNet.ID, Address: "10.31.2.11", Type: "static"}); err == nil {
 		t.Fatal("client-1 principal created an address in a client-2 subnet")
 	}
-	ownIP := &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: ownNet.ID, Address: "10.31.1.10", Status: "active"}
+	ownIP := &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: ownNet.ID, Address: "10.31.1.10", Type: "static"}
 	if err = repo.CreateIPAddress(ctx, ownIP); err != nil {
 		t.Fatalf("client-1 address in own subnet: %v", err)
 	}

@@ -14456,9 +14456,17 @@ components:
               items:
                 $ref: '#/components/schemas/Subnet'
 
+    IPAddressType:
+      type: string
+      enum: [discovered, reserved, static, dhcp]
+      description: >-
+        Origin of the address (NET-03): discovered by discovery, reserved,
+        configured statically or assigned by DHCP. A manual address
+        defaults to static.
+
     IPAddress:
       type: object
-      required: [id, organization_id, address, status, created_at, updated_at]
+      required: [id, organization_id, address, vrf_id, type, created_at, updated_at]
       properties:
         id:
           type: string
@@ -14474,9 +14482,8 @@ components:
           type: string
           readOnly: true
           description: VRF of the subnet; addresses are unique per VRF and interface (NET-03).
-        status:
-          type: string
-          enum: [active, reserved, deprecated, dhcp, available]
+        type:
+          $ref: '#/components/schemas/IPAddressType'
         dns_name:
           type: string
         description:
@@ -14501,9 +14508,8 @@ components:
           type: string
         address:
           type: string
-        status:
-          type: string
-          enum: [active, reserved, deprecated, dhcp, available]
+        type:
+          $ref: '#/components/schemas/IPAddressType'
         dns_name:
           type: string
         description:
@@ -14516,9 +14522,8 @@ components:
           type: string
         interface_id:
           type: string
-        status:
-          type: string
-          enum: [active, reserved, deprecated, dhcp, available]
+        type:
+          $ref: '#/components/schemas/IPAddressType'
         dns_name:
           type: string
         description:
