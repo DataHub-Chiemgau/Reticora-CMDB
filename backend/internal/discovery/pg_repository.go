@@ -410,32 +410,31 @@ func scanJob(scanner collectorScanner) (*Job, error) {
 
 // ─── Reconciliation review items ────────────────────────────────────────────
 
-// SuppressedPairs returns the set of suppressed (source|target) CI pairs for the
-// organization, used to skip discovery-derived topology edges.
+// SuppressedPairs returns the suppressed edges (source|target|type key) of
+// the organization; discovery does not recreate them (REL-03).
 func (r *PGRepository) SuppressedPairs(ctx context.Context, orgID string) (map[string]bool, error) {
 	pairs := make(map[string]bool)
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
-			"SELECT source_ci_id::text, target_ci_id::text FROM relationship_suppression WHERE organization_id = $1 AND "+suppressionVisible,
+			`SELECT relationship_suppression.source_ci_id::text, relationship_suppression.target_ci_id::text, rt.key
+			FROM relationship_suppression JOIN relationship_type rt ON rt.id = relationship_suppression.relationship_type_id
+			WHERE relationship_suppression.organization_id = $1 AND `+suppressionVisible,
 			orgID,
 		)
 		if err != nil {
-			return fmt.Errorf("list suppressed pairs: %w", err)
+			return fmt.Errorf("list suppressed edges: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var src, tgt string
-			if err := rows.Scan(&src, &tgt); err != nil {
-				return fmt.Errorf("scan suppressed pair: %w", err)
+			var src, tgt, key string
+			if err := rows.Scan(&src, &tgt, &key); err != nil {
+				return fmt.Errorf("scan suppressed edge: %w", err)
 			}
-			pairs[src+"|"+tgt] = true
+			pairs[src+"|"+tgt+"|"+key] = true
 		}
 		return rows.Err()
 	})
-	if err != nil {
-		return nil, err
-	}
-	return pairs, nil
+	return pairs, err
 }
 
 // LookupCITypeID resolves a CI type name or key to its canonical UUID inside

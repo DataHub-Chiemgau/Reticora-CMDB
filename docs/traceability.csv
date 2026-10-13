@@ -354,3 +354,6 @@ LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-157
 TOP-01;[B];D;backend/internal/discovery/topology_test.go;WP-158
 TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-159
 REL-08;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-159
+REL-03;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-160
+REL-04;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-160
+REL-05;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-160

@@ -966,5 +966,9 @@
       "stale": "Stale"
     },
     "projected": "projected (structure)"
+  },
+  "relationshipCard": {
+    "suppress": "Remove and suppress",
+    "suppressHint": "Discovery edge: removed and not recreated by discovery."
   }
 }

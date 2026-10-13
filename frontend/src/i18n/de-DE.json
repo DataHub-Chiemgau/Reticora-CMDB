@@ -966,5 +966,9 @@
       "stale": "Veraltet"
     },
     "projected": "projiziert (Struktur)"
+  },
+  "relationshipCard": {
+    "suppress": "Entfernen und unterdrücken",
+    "suppressHint": "Discovery-Kante: wird entfernt und von der Discovery nicht wieder angelegt."
   }
 }

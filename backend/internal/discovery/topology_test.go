@@ -1,10 +1,14 @@
 package discovery
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/wire"
 )
 
@@ -57,7 +61,7 @@ func TestDeriveRelationships(t *testing.T) {
 		name       string
 		source     string
 		rels       []wire.IngestRelationship
-		suppressed func(string, string) bool
+		suppressed func(string, string, string) bool
 		want       []DerivedRelationship
 	}{
 		{
@@ -97,7 +101,7 @@ func TestDeriveRelationships(t *testing.T) {
 			name:       "suppressed pair skipped",
 			source:     "ci-src",
 			rels:       []wire.IngestRelationship{{TargetIP: "10.0.0.2", TypeKey: "powered_by"}},
-			suppressed: func(s, tgt string) bool { return s == "ci-src" && tgt == "ci-pdu" },
+			suppressed: func(s, tgt, typ string) bool { return s == "ci-src" && tgt == "ci-pdu" && typ == "powered_by" },
 			want:       nil,
 		},
 	}
@@ -200,5 +204,33 @@ func TestDeriveTopologyRules(t *testing.T) {
 	}
 	if derived, _ = DeriveTopology("ci-sw", noPort[1:], resolve, nil); len(derived) != 1 || derived[0].Confidence != fdbConfidence {
 		t.Errorf("FDB without LLDP: %+v", derived)
+	}
+}
+
+// brokenSuppressions fails to load the suppressions.
+type brokenSuppressions struct{ *MemoryRepository }
+
+func (brokenSuppressions) SuppressedPairs(context.Context, string) (map[string]bool, error) {
+	return nil, errors.New("database down")
+}
+
+// TestTopologyFailsClosed covers WP-160 (REL-03): when the suppressions
+// cannot be loaded no edge is written, so a suppressed edge never comes
+// back by accident.
+func TestTopologyFailsClosed(t *testing.T) {
+	rels := relationship.NewMemoryRepository()
+	h := NewHandler(brokenSuppressions{NewMemoryRepository()}, nil, rels)
+	items := []IngestItem{{Relationships: []wire.IngestRelationship{{TargetIP: "10.0.0.2", Protocol: "lldp"}}}}
+	existing := []ci.Item{{ID: "ci-peer", ManagementIP: "10.0.0.2"}}
+	if n := h.deriveTopology(context.Background(), "org-1", items, []string{"ci-src"}, existing); n != 0 {
+		t.Fatalf("edges written without suppressions: %d", n)
+	}
+	if list, _, _ := rels.List(context.Background(), "org-1", "", api.PaginationParams{Limit: 10}); len(list) != 0 {
+		t.Errorf("relationships = %+v", list)
+	}
+	// With the suppressions loaded the edge is written.
+	h2 := NewHandler(NewMemoryRepository(), nil, rels)
+	if n := h2.deriveTopology(context.Background(), "org-1", items, []string{"ci-src"}, existing); n != 1 {
+		t.Errorf("edges with suppressions loaded: %d", n)
 	}
 }

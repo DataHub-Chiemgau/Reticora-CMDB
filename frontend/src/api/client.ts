@@ -442,8 +442,8 @@ export const relationshipApi = {
     });
   },
 
-  delete(id: string): Promise<void> {
-    return fetchAPI(`/relationships/${id}`, { method: 'DELETE' });
+  delete(id: string, force = false): Promise<void> {
+    return fetchAPI(`/relationships/${id}${force ? '?force=true' : ''}`, { method: 'DELETE' });
   },
 };
 

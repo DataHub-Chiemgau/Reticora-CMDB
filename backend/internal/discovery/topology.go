@@ -111,7 +111,7 @@ func DeriveRelationships(
 	sourceCIID string,
 	rels []wire.IngestRelationship,
 	resolve func(ip, mac, hostname string) (string, bool),
-	suppressed func(sourceID, targetID string) bool,
+	suppressed func(sourceID, targetID, relType string) bool,
 ) []DerivedRelationship {
 	derived, _ := DeriveTopology(sourceCIID, rels, resolve, suppressed)
 	return derived
@@ -123,13 +123,14 @@ func DeriveRelationships(
 // entries give connected_to with 0.6 only on ports without an LLDP/CDP
 // neighbor and with at most four MACs (more is a trunk); ARP entries only
 // enrich, they give no edge. resolve maps (ip, mac, hostname) to a CI id;
-// suppressed skips (source, target) pairs. The result is deduplicated and
+// suppressed skips (source, target, type) edges a user removed (REL-03).
+// The result is deduplicated and
 // free of self-loops.
 func DeriveTopology(
 	sourceCIID string,
 	rels []wire.IngestRelationship,
 	resolve func(ip, mac, hostname string) (string, bool),
-	suppressed func(sourceID, targetID string) bool,
+	suppressed func(sourceID, targetID, relType string) bool,
 ) ([]DerivedRelationship, []UnknownRelationship) {
 	if sourceCIID == "" || resolve == nil {
 		return nil, nil
@@ -177,7 +178,7 @@ func DeriveTopology(
 		if !ok || targetID == "" || targetID == sourceCIID {
 			continue
 		}
-		if suppressed != nil && suppressed(sourceCIID, targetID) {
+		if suppressed != nil && known && suppressed(sourceCIID, targetID, relType) {
 			continue
 		}
 		if !known {
@@ -226,14 +227,19 @@ func normalizeMAC(value string) string {
 }
 
 // deriveTopology resolves and upserts topology relationships for a bulk ingest
-// batch, returning the number of relationships created.
+// batch, returning the number of relationships created. When the
+// suppressions cannot be loaded no edge is written (fail-closed, REL-03).
 func (h *Handler) deriveTopology(ctx context.Context, orgID string, items []IngestItem, resolvedCIID []string, existing []ci.Item) int {
 	if h.relRepo == nil {
 		return 0
 	}
 
 	index := BuildNeighborIndex(existing)
-	suppressed := h.suppressionChecker(ctx, orgID)
+	suppressed, err := h.suppressionChecker(ctx, orgID)
+	if err != nil {
+		slog.Error("topology skipped: suppressions not loaded", "event", "discovery.topology.failed", "organization_id", orgID, "error", err)
+		return 0
+	}
 
 	created := 0
 	for i, item := range items {
@@ -254,25 +260,29 @@ func (h *Handler) deriveTopology(ctx context.Context, orgID string, items []Inge
 	return created
 }
 
-// suppressionChecker returns a predicate that reports whether a (source,target)
-// pair is suppressed. Returns nil when the repository does not expose
-// suppression data (e.g. the in-memory repository).
-func (h *Handler) suppressionChecker(ctx context.Context, orgID string) func(sourceID, targetID string) bool {
+// suppressionChecker returns a predicate that reports whether an edge
+// (source, target, type) is suppressed, in either direction. It returns
+// nil without suppression data (e.g. the in-memory repository) and an error
+// when the suppressions cannot be loaded.
+func (h *Handler) suppressionChecker(ctx context.Context, orgID string) (func(sourceID, targetID, relType string) bool, error) {
 	provider, ok := h.repo.(suppressionProvider)
 	if !ok {
-		return nil
+		return nil, nil
 	}
-	pairs, err := provider.SuppressedPairs(ctx, orgID)
-	if err != nil || len(pairs) == 0 {
-		return nil
+	edges, err := provider.SuppressedPairs(ctx, orgID)
+	if err != nil {
+		return nil, err
 	}
-	return func(sourceID, targetID string) bool {
-		return pairs[sourceID+"|"+targetID] || pairs[targetID+"|"+sourceID]
+	if len(edges) == 0 {
+		return nil, nil
 	}
+	return func(sourceID, targetID, relType string) bool {
+		return edges[sourceID+"|"+targetID+"|"+relType] || edges[targetID+"|"+sourceID+"|"+relType]
+	}, nil
 }
 
 // suppressionProvider is optionally implemented by repositories that persist a
-// relationship_suppression table.
+// relationship_suppression table; the keys are source|target|type.
 type suppressionProvider interface {
 	SuppressedPairs(ctx context.Context, orgID string) (map[string]bool, error)
 }

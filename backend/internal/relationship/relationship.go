@@ -4,6 +4,7 @@ package relationship
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -134,6 +135,28 @@ var ValidRelTypes = map[string]bool{
 var ValidSources = map[string]bool{
 	"manual": true, "discovery": true, "agent": true, "import": true,
 	"api": true, "integration": true, "workflow": true, "rule": true,
+}
+
+// ErrForceRequired refuses deleting a discovery edge without force=true
+// (REL-04): discovery would find it again, so the deletion also records a
+// suppression.
+var ErrForceRequired = errors.New("a discovery edge is deleted only with force=true; discovery then no longer recreates it")
+
+// PolicyDeleter deletes an edge by the source policy (REL-03, REL-04): a
+// discovery edge only with force, then suppressed for its CIs and type.
+type PolicyDeleter interface {
+	DeleteWithPolicy(ctx context.Context, orgID, id string, force bool) error
+}
+
+// DeleteWithPolicy implements PolicyDeleter (without suppression storage).
+func (r *MemoryRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, force bool) error {
+	r.mu.RLock()
+	rel, ok := r.items[id]
+	r.mu.RUnlock()
+	if ok && rel.OrganizationID == orgID && rel.Source == "discovery" && !force {
+		return ErrForceRequired
+	}
+	return r.Delete(ctx, orgID, id)
 }
 
 // Confirmer re-confirms a discovery edge seen again (TOP-02).
@@ -577,7 +600,19 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
+	var err error
+	if deleter, ok := h.repo.(PolicyDeleter); ok {
+		// A discovery edge goes only with force and is then suppressed
+		// (REL-03, REL-04); manual edges are deleted as asked.
+		err = deleter.DeleteWithPolicy(r.Context(), t.OrganizationID, id, r.URL.Query().Get("force") == "true")
+	} else {
+		err = h.repo.Delete(r.Context(), t.OrganizationID, id)
+	}
+	if errors.Is(err, ErrForceRequired) {
+		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		return
+	}
+	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "relationship not found")
 		return
 	}

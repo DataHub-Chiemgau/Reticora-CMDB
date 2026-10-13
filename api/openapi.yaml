@@ -1002,6 +1002,18 @@ paths:
       operationId: deleteRelationship
       tags: [Relationships]
       summary: Delete a relationship
+      description: >-
+        Manual and other edges are deleted as asked. A discovery edge is
+        deleted only with force=true (409 otherwise) and is then recorded as
+        suppression for its CIs and type, so discovery does not recreate it
+        (REL-03, REL-04). Discovery never changes or removes manual edges
+        (REL-05).
+      parameters:
+        - name: force
+          in: query
+          description: Required to delete a discovery edge; creates its suppression.
+          schema:
+            type: boolean
       responses:
         '204':
           description: Relationship deleted
@@ -1009,6 +1021,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/webhooks:
     get:

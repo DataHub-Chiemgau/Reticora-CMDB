@@ -121,7 +121,11 @@ export function useUpdateRelationship(ciId: string) {
 export function useDeleteRelationship(ciId: string) {
   const invalidate = useRelationshipInvalidation(ciId);
   return useMutation({
-    mutationFn: (id: string) => relationshipApi.delete(id),
+    // A discovery edge is deleted with force and then suppressed (REL-04).
+    mutationFn: (arg: string | { id: string; force?: boolean }) =>
+      typeof arg === 'string'
+        ? relationshipApi.delete(arg)
+        : relationshipApi.delete(arg.id, arg.force ?? false),
     onSuccess: invalidate,
   });
 }

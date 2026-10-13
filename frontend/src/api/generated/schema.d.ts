@@ -524,7 +524,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete a relationship */
+    /**
+     * Delete a relationship
+     * @description Manual and other edges are deleted as asked. A discovery edge is deleted only with force=true (409 otherwise) and is then recorded as suppression for its CIs and type, so discovery does not recreate it (REL-03, REL-04). Discovery never changes or removes manual edges (REL-05).
+     */
     delete: operations['deleteRelationship'];
     options?: never;
     head?: never;
@@ -10673,7 +10676,10 @@ export interface operations {
   };
   deleteRelationship: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Required to delete a discovery edge; creates its suppression. */
+        force?: boolean;
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -10692,6 +10698,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   updateRelationship: {
