@@ -10526,8 +10526,11 @@ components:
           items: { $ref: '#/components/schemas/SCIMResource' }
     ProblemDetail:
       type: object
-      description: RFC 7807 Problem Details object.
-      required: [type, title, status]
+      description: >-
+        RFC 7807 Problem Details object (API-03). Every error response
+        (4xx/5xx) is `application/problem+json` and carries `trace_id`, the
+        request id also returned in the `X-Request-ID` header.
+      required: [type, title, status, trace_id]
       properties:
         type:
           type: string
@@ -10543,6 +10546,7 @@ components:
           format: uri
         trace_id:
           type: string
+          description: Request id of the failed request (equals the X-Request-ID response header).
         field:
           type: string
           description: Request field a 400 or 409 refers to (e.g. the unique `name` of a client).

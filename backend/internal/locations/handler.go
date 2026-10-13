@@ -185,7 +185,6 @@ func writeFieldProblem(w http.ResponseWriter, r *http.Request, fe *FieldError) {
 			Status:   http.StatusUnprocessableEntity,
 			Detail:   fe.Error(),
 			Instance: r.URL.Path,
-			TraceID:  r.Header.Get("X-Request-ID"),
 		},
 		Violations: []violation{{Field: fe.Field, Detail: fe.Message}},
 	})

@@ -49,6 +49,7 @@ describe('ApiError', () => {
               { field: 'ram_gb', detail: 'field is required' },
               { field: 'ilo_ip', detail: 'must be a valid IP address' },
             ],
+            trace_id: 'req-422',
           },
           422,
         ),
@@ -61,6 +62,7 @@ describe('ApiError', () => {
     expect(error).toBeInstanceOf(ApiError);
     const apiError = error as InstanceType<typeof ApiError>;
     expect(apiError.status).toBe(422);
+    expect(apiError.traceId).toBe('req-422');
     expect(apiError.hasViolations).toBe(true);
     expect(apiError.violations).toHaveLength(2);
     expect(apiError.violationsByField()).toEqual({

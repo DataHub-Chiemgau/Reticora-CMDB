@@ -6233,7 +6233,7 @@ export interface components {
       itemsPerPage: number;
       Resources: components['schemas']['SCIMResource'][];
     };
-    /** @description RFC 7807 Problem Details object. */
+    /** @description RFC 7807 Problem Details object (API-03). Every error response (4xx/5xx) is `application/problem+json` and carries `trace_id`, the request id also returned in the `X-Request-ID` header. */
     ProblemDetail: {
       /** Format: uri */
       type: string;
@@ -6242,7 +6242,8 @@ export interface components {
       detail?: string;
       /** Format: uri */
       instance?: string;
-      trace_id?: string;
+      /** @description Request id of the failed request (equals the X-Request-ID response header). */
+      trace_id: string;
       /** @description Request field a 400 or 409 refers to (e.g. the unique `name` of a client). */
       field?: string;
     };

@@ -275,11 +275,18 @@ export class ApiError extends Error {
   readonly title?: string;
   readonly detail?: string;
   readonly violations: FieldViolation[];
+  /** traceId is the request id of the failed request (API-03), for support. */
+  readonly traceId?: string;
 
   constructor(
     status: number,
     message: string,
-    options: { title?: string; detail?: string; violations?: FieldViolation[] } = {},
+    options: {
+      title?: string;
+      detail?: string;
+      violations?: FieldViolation[];
+      traceId?: string;
+    } = {},
   ) {
     super(message);
     this.name = 'ApiError';
@@ -287,6 +294,7 @@ export class ApiError extends Error {
     this.title = options.title;
     this.detail = options.detail;
     this.violations = options.violations ?? [];
+    this.traceId = options.traceId;
   }
 
   /** Whether the failure carries per-field violations that a form can render. */
@@ -317,9 +325,11 @@ export class ApiError extends Error {
       title?: unknown;
       detail?: unknown;
       violations?: unknown;
+      trace_id?: unknown;
     };
 
     const title = typeof problem.title === 'string' ? problem.title : undefined;
+    const traceId = typeof problem.trace_id === 'string' ? problem.trace_id : undefined;
     const detail = typeof problem.detail === 'string' ? problem.detail : undefined;
 
     const violations: FieldViolation[] = Array.isArray(problem.violations)
@@ -336,7 +346,12 @@ export class ApiError extends Error {
         })
       : [];
 
-    return new ApiError(status, detail || title || statusText, { title, detail, violations });
+    return new ApiError(status, detail || title || statusText, {
+      title,
+      detail,
+      violations,
+      traceId,
+    });
   }
 }
 

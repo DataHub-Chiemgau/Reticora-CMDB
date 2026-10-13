@@ -2,13 +2,13 @@ package locations
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"slices"
 	"strings"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -116,7 +116,6 @@ func WriteDependencyConflict(w http.ResponseWriter, r *http.Request, err error) 
 			Status:   http.StatusConflict,
 			Detail:   "the location is still referenced; move or remove the dependent objects first",
 			Instance: r.URL.Path,
-			TraceID:  r.Header.Get("X-Request-ID"),
 		},
 		Dependencies: de.Kinds,
 	})
@@ -125,7 +124,5 @@ func WriteDependencyConflict(w http.ResponseWriter, r *http.Request, err error) 
 
 // respondProblem writes an RFC 7807 problem with extension members.
 func respondProblem(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	api.WriteProblemBody(w, status, body)
 }

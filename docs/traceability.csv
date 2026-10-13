@@ -359,3 +359,4 @@ REL-04;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-16
 REL-05;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-160
 IMP-09;[B];D;backend/internal/discovery/power_test.go;WP-161
 SIM-02;[B];D;collector/plugins/simulate/simulate_test.go;WP-162
+API-03;[B];C;backend/internal/api/problem_test.go;WP-163
