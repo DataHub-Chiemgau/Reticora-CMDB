@@ -319,3 +319,4 @@ EVT-02;[B];B;backend/internal/events/outbox_integration_test.go;WP-136
 NTF-01;[B];B;backend/internal/notify/channel_test.go;WP-137
 TEC-13;[B];B;backend/internal/notify/channel_test.go;WP-137
 REP-01;[B];B;backend/internal/notify/channel_test.go;WP-137
+NTF-03;[B];B;backend/internal/notify/recipients_integration_test.go;WP-138
