@@ -4639,10 +4639,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List and create CI types */
+    /**
+     * List CI types
+     * @description The organization's types and the system types (MET-01 – MET-03).
+     */
     get: operations['listCiTypes'];
     put?: never;
-    /** List and create CI types */
+    /**
+     * Create a CI type
+     * @description `display_name` is a map of languages (de, en); a missing language takes the other one or the name, a plain string is accepted for both. `is_observable` defaults to true for physical and false for logical types (MET-01).
+     */
     post: operations['createCiTypes'];
     delete?: never;
     options?: never;
@@ -4657,7 +4663,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List built-in CI type templates */
+    /**
+     * List built-in CI type templates
+     * @description Editable starting points; network, vlan and contract are no CI types and never offered (MET-03, DB-05).
+     */
     get: operations['listCiTypesTemplates'];
     put?: never;
     post?: never;
@@ -4674,14 +4683,14 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read and update a CI type */
+    /** Read a CI type */
     get: operations['getCiTypesId'];
     put?: never;
     post?: never;
     delete?: never;
     options?: never;
     head?: never;
-    /** Read and update a CI type */
+    /** Update a CI type */
     patch: operations['updateCiTypesId'];
     trace?: never;
   };
@@ -5407,6 +5416,100 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** @description A label per language (MET-01). */
+    LocalizedText: {
+      de?: string;
+      en?: string;
+    };
+    CIType: {
+      id: string;
+      /** @description Empty for system types. */
+      organization_id?: string;
+      key: string;
+      name: string;
+      display_name: components['schemas']['LocalizedText'];
+      icon?: string;
+      description?: string;
+      category?: string;
+      is_builtin: boolean;
+      is_system: boolean;
+      is_active: boolean;
+      is_logical: boolean;
+      /** @description The offline detector watches CIs of the type (LCY-05); true for physical, false for logical types by default. */
+      is_observable: boolean;
+      /** @description Version of the generated attribute schema. */
+      schema_version: number;
+      version: number;
+      cloned_from_id?: string;
+      template_key?: string;
+      lifecycle_definition_id?: string;
+      capabilities: {
+        [key: string]: unknown;
+      };
+      allowed_relationship_types: string[];
+      ui_schema: {
+        [key: string]: unknown;
+      };
+      compliance_rules: unknown[];
+      discovery_mappings: unknown[];
+      fields?: {
+        [key: string]: unknown;
+      }[];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CITypeListResponse: {
+      data: components['schemas']['CIType'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    CITypeCreateRequest: {
+      key?: string;
+      name: string;
+      display_name?: components['schemas']['LocalizedText'] | string;
+      icon?: string;
+      description?: string;
+      category?: string;
+      is_logical?: boolean;
+      is_observable?: boolean;
+      template_key?: string;
+      lifecycle_definition_id?: string;
+      capabilities?: {
+        [key: string]: unknown;
+      };
+      allowed_relationship_types?: string[];
+      ui_schema?: {
+        [key: string]: unknown;
+      };
+      compliance_rules?: unknown[];
+      discovery_mappings?: unknown[];
+      fields?: {
+        [key: string]: unknown;
+      }[];
+    };
+    CITypeUpdateRequest: {
+      name?: string;
+      display_name?: components['schemas']['LocalizedText'] | string;
+      icon?: string;
+      description?: string;
+      category?: string;
+      is_logical?: boolean;
+      is_observable?: boolean;
+      lifecycle_definition_id?: string;
+      capabilities?: {
+        [key: string]: unknown;
+      };
+      allowed_relationship_types?: string[];
+      ui_schema?: {
+        [key: string]: unknown;
+      };
+      compliance_rules?: unknown[];
+      discovery_mappings?: unknown[];
+    };
     InvitationRequest: {
       email: string;
       /** Format: uuid */
@@ -20419,12 +20522,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List and create CI types */
+      /** @description CI types */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CITypeListResponse'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -20442,15 +20547,22 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CITypeCreateRequest'];
+      };
+    };
     responses: {
-      /** @description List and create CI types */
+      /** @description CI type created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIType'];
+        };
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -20469,12 +20581,16 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List built-in CI type templates */
+      /** @description Templates */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': {
+            data: components['schemas']['CIType'][];
+          };
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -20494,12 +20610,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Read and update a CI type */
+      /** @description CI type */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIType'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -20517,15 +20635,22 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CITypeUpdateRequest'];
+      };
+    };
     responses: {
-      /** @description Read and update a CI type */
+      /** @description CI type updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIType'];
+        };
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {

@@ -281,3 +281,6 @@ TLC-01;[B];B;backend/internal/signup/protect_test.go;WP-112
 TLC-02;[B], Reseller [P4];B;backend/internal/operator/orgs_test.go;WP-113
 TLC-03;[B];B;backend/internal/user/invitation_integration_test.go;WP-114
 API-05;[B];B;backend/internal/user/invitation_integration_test.go;WP-114
+MET-01;B/G1, Teil P2/G2;B;backend/internal/citype/seed_integration_test.go;WP-115
+MET-02;B/G1;B;backend/internal/citype/seed_integration_test.go;WP-115
+MET-03;B/G1;B;backend/internal/citype/seed_integration_test.go;WP-115

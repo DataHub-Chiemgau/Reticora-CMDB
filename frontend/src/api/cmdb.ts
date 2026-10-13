@@ -19,12 +19,22 @@ function qs(params: Record<string, string | number | boolean | undefined> = {}):
 
 // ─── CI types (§1) ───────────────────────────────────────────────────────────
 
+/** A label per language (MET-01). */
+export type LocalizedText = Partial<Record<'de' | 'en', string>>;
+
+/** The label in the UI language, falling back to the other language. */
+export function localizedText(text: LocalizedText | undefined, language: string): string {
+  if (!text) return '';
+  const lang = language.toLowerCase().startsWith('de') ? 'de' : 'en';
+  return text[lang] ?? text.de ?? text.en ?? '';
+}
+
 export interface CIType {
   id: string;
   organization_id?: string;
   key: string;
   name: string;
-  display_name?: string;
+  display_name: LocalizedText;
   icon?: string;
   description?: string;
   category?: string;
@@ -32,6 +42,10 @@ export interface CIType {
   is_system: boolean;
   is_active: boolean;
   is_logical: boolean;
+  /** Watched by the offline detector (LCY-05). */
+  is_observable: boolean;
+  /** Version of the generated attribute schema. */
+  schema_version: number;
   version: number;
   cloned_from_id?: string;
   template_key?: string;
@@ -47,11 +61,12 @@ export interface CIType {
 export interface CITypeCreateRequest {
   key?: string;
   name: string;
-  display_name?: string;
+  display_name?: LocalizedText;
   icon?: string;
   description?: string;
   category?: string;
   is_logical?: boolean;
+  is_observable?: boolean;
   lifecycle_definition_id?: string;
   capabilities?: Record<string, unknown>;
   allowed_relationship_types?: string[];

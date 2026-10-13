@@ -8241,18 +8241,40 @@ paths:
   /api/v1/ci-types:
     get:
       operationId: listCiTypes
-      summary: List and create CI types
+      summary: List CI types
+      description: The organization's types and the system types (MET-01 – MET-03).
       responses:
         '200':
-          description: List and create CI types
+          description: CI types
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CITypeListResponse'
         '401':
           description: Unauthorized
     post:
       operationId: createCiTypes
-      summary: List and create CI types
+      summary: Create a CI type
+      description: >-
+        `display_name` is a map of languages (de, en); a missing language
+        takes the other one or the name, a plain string is accepted for both.
+        `is_observable` defaults to true for physical and false for logical
+        types (MET-01).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CITypeCreateRequest'
       responses:
         '201':
-          description: List and create CI types
+          description: CI type created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIType'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
 
@@ -8260,27 +8282,54 @@ paths:
     get:
       operationId: listCiTypesTemplates
       summary: List built-in CI type templates
+      description: Editable starting points; network, vlan and contract are no CI types and never offered (MET-03, DB-05).
       responses:
         '200':
-          description: List built-in CI type templates
+          description: Templates
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CIType'
         '401':
           description: Unauthorized
 
   /api/v1/ci-types/{id}:
     get:
       operationId: getCiTypesId
-      summary: Read and update a CI type
+      summary: Read a CI type
       responses:
         '200':
-          description: Read and update a CI type
+          description: CI type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIType'
         '401':
           description: Unauthorized
     patch:
       operationId: updateCiTypesId
-      summary: Read and update a CI type
+      summary: Update a CI type
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CITypeUpdateRequest'
       responses:
         '200':
-          description: Read and update a CI type
+          description: CI type updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIType'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
 
@@ -9147,6 +9196,126 @@ components:
             $ref: '#/components/schemas/ProblemDetail'
 
   schemas:
+    LocalizedText:
+      type: object
+      description: A label per language (MET-01).
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        de: { type: string, minLength: 1, maxLength: 200 }
+        en: { type: string, minLength: 1, maxLength: 200 }
+    CIType:
+      type: object
+      required: [id, key, name, display_name, is_builtin, is_system, is_active, is_logical, is_observable, schema_version, version, capabilities, allowed_relationship_types, ui_schema, compliance_rules, discovery_mappings, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string, description: Empty for system types. }
+        key: { type: string }
+        name: { type: string }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        icon: { type: string }
+        description: { type: string }
+        category: { type: string }
+        is_builtin: { type: boolean }
+        is_system: { type: boolean }
+        is_active: { type: boolean }
+        is_logical: { type: boolean }
+        is_observable:
+          type: boolean
+          description: The offline detector watches CIs of the type (LCY-05); true for physical, false for logical types by default.
+        schema_version:
+          type: integer
+          minimum: 1
+          description: Version of the generated attribute schema.
+        version: { type: integer }
+        cloned_from_id: { type: string }
+        template_key: { type: string }
+        lifecycle_definition_id: { type: string }
+        capabilities: { type: object, additionalProperties: true }
+        allowed_relationship_types:
+          type: array
+          items: { type: string }
+        ui_schema: { type: object, additionalProperties: true }
+        compliance_rules:
+          type: array
+          items: {}
+        discovery_mappings:
+          type: array
+          items: {}
+        fields:
+          type: array
+          items: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CITypeListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CIType'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    CITypeCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        key: { type: string }
+        name: { type: string, minLength: 1 }
+        display_name:
+          oneOf:
+            - $ref: '#/components/schemas/LocalizedText'
+            - type: string
+        icon: { type: string }
+        description: { type: string }
+        category: { type: string }
+        is_logical: { type: boolean }
+        is_observable: { type: boolean }
+        template_key: { type: string }
+        lifecycle_definition_id: { type: string }
+        capabilities: { type: object, additionalProperties: true }
+        allowed_relationship_types:
+          type: array
+          items: { type: string }
+        ui_schema: { type: object, additionalProperties: true }
+        compliance_rules:
+          type: array
+          items: {}
+        discovery_mappings:
+          type: array
+          items: {}
+        fields:
+          type: array
+          items: { type: object, additionalProperties: true }
+    CITypeUpdateRequest:
+      type: object
+      properties:
+        name: { type: string }
+        display_name:
+          oneOf:
+            - $ref: '#/components/schemas/LocalizedText'
+            - type: string
+        icon: { type: string }
+        description: { type: string }
+        category: { type: string }
+        is_logical: { type: boolean }
+        is_observable: { type: boolean }
+        lifecycle_definition_id: { type: string }
+        capabilities: { type: object, additionalProperties: true }
+        allowed_relationship_types:
+          type: array
+          items: { type: string }
+        ui_schema: { type: object, additionalProperties: true }
+        compliance_rules:
+          type: array
+          items: {}
+        discovery_mappings:
+          type: array
+          items: {}
     InvitationRequest:
       type: object
       required: [email, role_id]

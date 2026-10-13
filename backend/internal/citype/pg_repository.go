@@ -22,7 +22,7 @@ const typeSelectColumns = `
 	COALESCE(organization_id::text, ''),
 	COALESCE(key, ''),
 	name,
-	COALESCE(display_name, ''),
+	display_name,
 	COALESCE(icon, ''),
 	COALESCE(description, ''),
 	COALESCE(category, ''),
@@ -30,6 +30,8 @@ const typeSelectColumns = `
 	is_system,
 	is_active,
 	is_logical,
+	is_observable,
+	schema_version,
 	version,
 	COALESCE(cloned_from_id::text, ''),
 	COALESCE(template_key, ''),
@@ -71,7 +73,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			pos++
 		}
 		if filter.Search != "" {
-			where = append(where, fmt.Sprintf("(name ILIKE $%d OR display_name ILIKE $%d)", pos, pos))
+			where = append(where, fmt.Sprintf("(name ILIKE $%d OR display_name ->> 'de' ILIKE $%d OR display_name ->> 'en' ILIKE $%d)", pos, pos, pos))
 			args = append(args, "%"+filter.Search+"%")
 			pos++
 		}
@@ -133,17 +135,18 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 				organization_id, key, name, display_name, icon, description, category,
 				is_builtin, is_system, is_active, is_logical, version, template_key,
 				lifecycle_definition_id, capabilities, allowed_relationship_types,
-				ui_schema, compliance_rules, discovery_mappings
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,1,$9,$10,$11,$12,$13,$14,$15)
-			RETURNING id::text, is_active, version, created_at, updated_at`,
-			nilIfEmpty(typ.OrganizationID), typ.Key, typ.Name, nilIfEmpty(typ.DisplayName),
+				ui_schema, compliance_rules, discovery_mappings, is_observable
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,1,$9,$10,$11,$12,$13,$14,$15,$16)
+			RETURNING id::text, is_active, version, schema_version, created_at, updated_at`,
+			nilIfEmpty(typ.OrganizationID), typ.Key, typ.Name, typ.DisplayName.WithFallback(typ.Name),
 			nilIfEmpty(typ.Icon), nilIfEmpty(typ.Description), nilIfEmpty(typ.Category),
 			typ.IsLogical, nilIfEmpty(typ.TemplateKey), nilIfEmpty(typ.LifecycleDefinitionID),
 			jsonOrDefault(typ.Capabilities, emptyObject), jsonOrDefault(typ.AllowedRelationshipTypes, emptyArray),
 			jsonOrDefault(typ.UISchema, emptyObject), jsonOrDefault(typ.ComplianceRules, emptyArray),
-			jsonOrDefault(typ.DiscoveryMappings, emptyArray),
+			jsonOrDefault(typ.DiscoveryMappings, emptyArray), typ.IsObservable,
 		)
-		if err := row.Scan(&typ.ID, &typ.IsActive, &typ.Version, &typ.CreatedAt, &typ.UpdatedAt); err != nil {
+		typ.DisplayName = typ.DisplayName.WithFallback(typ.Name)
+		if err := row.Scan(&typ.ID, &typ.IsActive, &typ.Version, &typ.SchemaVersion, &typ.CreatedAt, &typ.UpdatedAt); err != nil {
 			return fmt.Errorf("create ci type: %w", err)
 		}
 		for _, f := range typ.Fields {
@@ -177,7 +180,12 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 			add("name", *req.Name)
 		}
 		if req.DisplayName != nil {
-			add("display_name", nilIfEmpty(*req.DisplayName))
+			// Missing languages fall back to the given one; an empty map
+			// resets the label to the name (trigger ci_type_defaults).
+			add("display_name", req.DisplayName.WithFallback(""))
+		}
+		if req.IsObservable != nil {
+			add("is_observable", *req.IsObservable)
 		}
 		if req.Icon != nil {
 			add("icon", nilIfEmpty(*req.Icon))
@@ -267,14 +275,15 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 				organization_id, key, name, display_name, icon, description, category,
 				is_builtin, is_system, is_active, is_logical, version, cloned_from_id,
 				template_key, lifecycle_definition_id, capabilities,
-				allowed_relationship_types, ui_schema, compliance_rules, discovery_mappings
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,$9,$10,NULL,$11,$12,$13,$14,$15,$16)
+				allowed_relationship_types, ui_schema, compliance_rules, discovery_mappings,
+				is_observable
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,$9,$10,NULL,$11,$12,$13,$14,$15,$16,$17)
 			RETURNING id::text`,
-			orgID, key, name, name, nilIfEmpty(src.Icon), nilIfEmpty(src.Description),
+			orgID, key, name, LocalizedText{}.WithFallback(name), nilIfEmpty(src.Icon), nilIfEmpty(src.Description),
 			nilIfEmpty(src.Category), src.IsLogical, src.Version+1, src.ID,
 			nilIfEmpty(src.LifecycleDefinitionID), src.Capabilities,
 			src.AllowedRelationshipTypes, src.UISchema, src.ComplianceRules,
-			src.DiscoveryMappings,
+			src.DiscoveryMappings, src.IsObservable,
 		).Scan(&cloneID)
 		if err != nil {
 			return fmt.Errorf("clone ci type: %w", err)
@@ -406,7 +415,8 @@ func ensureGlobalCarrierTx(ctx context.Context, tx pgx.Tx, orgID string) (string
 		return "", fmt.Errorf("lookup global attribute carrier: %w", err)
 	}
 	if err := tx.QueryRow(ctx,
-		"INSERT INTO ci_type (organization_id, key, name, display_name, is_active) VALUES ($1, $2, $2, 'Global Attributes', false) RETURNING id::text",
+		`INSERT INTO ci_type (organization_id, key, name, display_name, is_active)
+		VALUES ($1, $2, $2, '{"de": "Globale Attribute", "en": "Global Attributes"}', false) RETURNING id::text`,
 		orgID, globalCarrierKey).Scan(&id); err != nil {
 		return "", fmt.Errorf("create global attribute carrier: %w", err)
 	}
@@ -829,15 +839,18 @@ type typeScanner interface {
 
 func scanType(scanner typeScanner) (*Type, error) {
 	t := &Type{}
-	var capabilities, allowedRels, uiSchema, compliance, discovery []byte
+	var capabilities, allowedRels, uiSchema, compliance, discovery, displayName []byte
 	if err := scanner.Scan(
-		&t.ID, &t.OrganizationID, &t.Key, &t.Name, &t.DisplayName, &t.Icon,
+		&t.ID, &t.OrganizationID, &t.Key, &t.Name, &displayName, &t.Icon,
 		&t.Description, &t.Category, &t.IsBuiltin, &t.IsSystem, &t.IsActive,
-		&t.IsLogical, &t.Version, &t.ClonedFromID, &t.TemplateKey,
+		&t.IsLogical, &t.IsObservable, &t.SchemaVersion, &t.Version, &t.ClonedFromID, &t.TemplateKey,
 		&t.LifecycleDefinitionID, &capabilities, &allowedRels, &uiSchema,
 		&compliance, &discovery, &t.CreatedAt, &t.UpdatedAt,
 	); err != nil {
 		return nil, err
+	}
+	if err := json.Unmarshal(displayName, &t.DisplayName); err != nil {
+		return nil, fmt.Errorf("decode display_name: %w", err)
 	}
 	t.Capabilities = map[string]any{}
 	t.UISchema = map[string]any{}

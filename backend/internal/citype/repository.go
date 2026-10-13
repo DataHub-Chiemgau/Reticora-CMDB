@@ -105,7 +105,7 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 		}
 		if filter.Search != "" &&
 			!strings.Contains(strings.ToLower(t.Name), strings.ToLower(filter.Search)) &&
-			!strings.Contains(strings.ToLower(t.DisplayName), strings.ToLower(filter.Search)) {
+			!t.DisplayName.Contains(filter.Search) {
 			continue
 		}
 		out = append(out, *t)
@@ -170,7 +170,10 @@ func applyTypeUpdate(t *Type, req UpdateTypeRequest) {
 		t.Name = *req.Name
 	}
 	if req.DisplayName != nil {
-		t.DisplayName = *req.DisplayName
+		t.DisplayName = req.DisplayName.WithFallback(t.Name)
+	}
+	if req.IsObservable != nil {
+		t.IsObservable = *req.IsObservable
 	}
 	if req.Icon != nil {
 		t.Icon = *req.Icon
@@ -229,7 +232,7 @@ func (r *MemoryRepository) Clone(_ context.Context, orgID, id string, req CloneR
 	clone.OrganizationID = orgID
 	clone.Name = name
 	clone.Key = key
-	clone.DisplayName = name
+	clone.DisplayName = LocalizedText{}.WithFallback(name)
 	clone.IsBuiltin = false
 	clone.IsSystem = false
 	clone.IsActive = true

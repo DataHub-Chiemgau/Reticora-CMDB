@@ -799,7 +799,9 @@
     "select": "Typ auswählen, um Felder zu bearbeiten.",
     "name": "Name",
     "fields": "Felder",
-    "fromTemplate": "Aus Vorlage"
+    "fromTemplate": "Aus Vorlage",
+    "observable": "beobachtet",
+    "schemaVersion": "Schema"
   },
   "inventory": {
     "assigned": "Zugewiesen",

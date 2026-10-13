@@ -128,6 +128,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name is required")
 		return
 	}
+	if err := req.DisplayName.Validate(); err != nil {
+		api.WriteFieldError(w, &api.FieldError{Field: "display_name", Message: err.Error()})
+		return
+	}
 	for _, f := range req.Fields {
 		if err := validateField(f); err != nil {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -138,11 +142,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		OrganizationID:           t.OrganizationID,
 		Key:                      req.Key,
 		Name:                     req.Name,
-		DisplayName:              req.DisplayName,
+		DisplayName:              req.DisplayName.WithFallback(req.Name),
 		Icon:                     req.Icon,
 		Description:              req.Description,
 		Category:                 req.Category,
 		IsLogical:                req.IsLogical,
+		IsObservable:             observableDefault(req.IsObservable, req.IsLogical),
 		TemplateKey:              req.TemplateKey,
 		LifecycleDefinitionID:    req.LifecycleDefinitionID,
 		Capabilities:             req.Capabilities,
@@ -172,6 +177,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	var req UpdateTypeRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if err := req.DisplayName.Validate(); err != nil {
+		api.WriteFieldError(w, &api.FieldError{Field: "display_name", Message: err.Error()})
 		return
 	}
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)

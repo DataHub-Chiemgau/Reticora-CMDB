@@ -118,7 +118,7 @@ func Templates() []Type {
 				field("version", "Version", fieldmeta.TypeText, false, "software"),
 				field("size_gb", "Size (GB)", fieldmeta.TypeDecimal, false, "capacity"),
 			)),
-		template("vm", "VM", "infrastructure", true,
+		template("vm", "VM", "infrastructure", false,
 			fields(
 				field("hypervisor", "Hypervisor", fieldmeta.TypeCIRef, false, "virtualization").withReference("ci"),
 				field("vcpu", "vCPU", fieldmeta.TypeInteger, false, "virtualization"),
@@ -147,19 +147,11 @@ func Templates() []Type {
 				field("region", "Region", fieldmeta.TypeText, false, "cloud"),
 				field("resource_id", "Resource ID", fieldmeta.TypeText, false, "cloud"),
 			)),
-		template("software_license", "Software License", "software", true,
+		template("software", "Software (Product)", "software", true,
 			fields(
-				field("license_key", "License Key", fieldmeta.TypeText, false, "license"),
-				field("seats", "Seats", fieldmeta.TypeInteger, false, "license"),
-				field("expires_at", "Expires At", fieldmeta.TypeDate, false, "license"),
-				field("contract", "Contract", fieldmeta.TypeContractRef, false, "license").withReference("contract"),
-			)),
-		template("contract", "Contract", "commercial", true,
-			fields(
-				field("contract_number", "Contract Number", fieldmeta.TypeText, false, "contract"),
-				field("vendor", "Vendor", fieldmeta.TypeText, false, "contract"),
-				field("start_date", "Start Date", fieldmeta.TypeDate, false, "contract"),
-				field("end_date", "End Date", fieldmeta.TypeDate, false, "contract"),
+				field("vendor", "Vendor", fieldmeta.TypeText, false, "software"),
+				field("version", "Version", fieldmeta.TypeText, false, "software"),
+				field("edition", "Edition", fieldmeta.TypeText, false, "software"),
 			)),
 		template("generic_asset", "Generic Asset", "generic", false,
 			fields(
@@ -219,11 +211,33 @@ func manufacturerModelSerial() []Field {
 	}
 }
 
+// ExcludedTypeKeys are no CI types (MET-03, DB-05): networks and VLANs are
+// IPAM objects, contracts are commercial records.
+var ExcludedTypeKeys = []string{"network", "vlan", "contract"}
+
+// germanLabels are the German display names of the templates (MET-01).
+var germanLabels = map[string]string{
+	"physical_server": "Physischer Server", "virtual_server": "Virtueller Server",
+	"client_laptop": "Client / Laptop", "mobile_device": "Mobilgerät", "switch": "Switch",
+	"router": "Router", "firewall": "Firewall", "access_point": "Access Point", "pdu": "PDU",
+	"ups": "USV", "storage": "Speicher", "printer": "Drucker", "camera": "Kamera",
+	"iot_device": "IoT-Gerät", "application": "Anwendung", "database": "Datenbank",
+	"vm": "VM", "hypervisor": "Hypervisor", "cluster": "Cluster",
+	"business_service": "Geschäftsdienst", "cloud_resource": "Cloud-Ressource",
+	"software": "Software (Produkt)", "generic_asset": "Generisches Asset",
+}
+
 func template(key, displayName, category string, logical bool, flds []Field, opts ...func(*Type)) Type {
+	de := germanLabels[key]
+	if de == "" {
+		de = displayName
+	}
 	t := Type{
 		Key:                      key,
 		Name:                     key,
-		DisplayName:              displayName,
+		DisplayName:              LocalizedText{"de": de, "en": displayName},
+		IsObservable:             !logical,
+		SchemaVersion:            1,
 		Category:                 category,
 		IsLogical:                logical,
 		IsBuiltin:                true,
