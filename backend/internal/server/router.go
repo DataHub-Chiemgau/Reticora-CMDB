@@ -189,6 +189,9 @@ type Options struct {
 	IngestQueue *discovery.NATSIngestQueue
 	// Signup is the self-signup flow (TLC-01); nil answers 503.
 	Signup *signup.Service
+	// SignupProtection is the captcha, blocklist and per-IP limit of the
+	// signup (WP-112); without it signups answer 503.
+	SignupProtection *signup.Protection
 }
 
 // registrar is implemented by every domain handler.
@@ -338,7 +341,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
 		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),
-		signup.NewHandler(opts.Signup),
+		signup.NewHandler(opts.Signup).WithProtection(opts.SignupProtection),
 	}
 	for _, h := range registrars {
 		h.RegisterRoutes(protected)

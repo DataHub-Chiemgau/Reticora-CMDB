@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 )
 
@@ -285,7 +286,8 @@ func TestSlugify(t *testing.T) {
 
 func TestHandlerStatusCodes(t *testing.T) {
 	repo, mailer, accounts := newStubRepo(), &stubMailer{}, &stubAccounts{}
-	h := NewHandler(newTestService(repo, mailer, accounts))
+	prot := newTestProtection(t, cache.NewMemoryStore())
+	h := NewHandler(newTestService(repo, mailer, accounts)).WithProtection(prot)
 	call := func(handler http.HandlerFunc, body string) int {
 		w := httptest.NewRecorder()
 		handler(w, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)))
@@ -295,7 +297,11 @@ func TestHandlerStatusCodes(t *testing.T) {
 	if code := call(NewHandler(nil).Submit, `{"organization_name":"Acme","email":"a@example.com"}`); code != http.StatusServiceUnavailable {
 		t.Errorf("unconfigured submit = %d, want 503", code)
 	}
-	if code := call(h.Submit, `{"organization_name":"Acme","email":"a@example.com"}`); code != http.StatusAccepted {
+	unprotected := NewHandler(newTestService(repo, mailer, accounts))
+	if code := call(unprotected.Submit, `{"organization_name":"Acme","email":"a@example.com"}`); code != http.StatusServiceUnavailable {
+		t.Errorf("submit without protection = %d, want 503", code)
+	}
+	if code := call(h.Submit, `{"organization_name":"Acme","email":"a@example.com","altcha":"`+solve(t, prot)+`"}`); code != http.StatusAccepted {
 		t.Errorf("submit = %d, want 202", code)
 	}
 	if code := call(h.Submit, `{`); code != http.StatusBadRequest {

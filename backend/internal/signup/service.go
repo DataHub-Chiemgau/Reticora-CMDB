@@ -97,6 +97,8 @@ type Request struct {
 	OrganizationName string `json:"organization_name"`
 	Email            string `json:"email"`
 	DisplayName      string `json:"display_name,omitempty"`
+	// Altcha is the ALTCHA solution (base64 JSON), checked by Protection.
+	Altcha string `json:"altcha"`
 }
 
 // Verification completes a signup (POST /api/v1/signup/verify).

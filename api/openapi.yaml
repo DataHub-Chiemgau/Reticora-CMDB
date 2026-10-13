@@ -323,6 +323,31 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/signup/challenge:
+    get:
+      operationId: getSignupChallenge
+      tags: [Auth]
+      security: []
+      summary: ALTCHA challenge for the signup form (TLC-01, E-33)
+      description: >-
+        A signed proof-of-work challenge of the self-hosted ALTCHA. The
+        solution is sent as `altcha` with the signup request; it is valid
+        for ten minutes and accepted once.
+      responses:
+        '200':
+          description: Challenge
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AltchaChallenge'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/signup:
     post:
       operationId: submitSignup
@@ -332,8 +357,11 @@ paths:
       description: >-
         Stores a signup request and sends a verification link to the
         address. The answer is 202 whether or not the address already has an
-        account. 503 while no e-mail channel or IdP administration is
-        configured.
+        account. The request passes the pre-auth limit (AUT-10), at most five
+        signups per client IP and hour (429), the ALTCHA solution (400,
+        `field` = `altcha`) and the disposable-domain blocklist (422,
+        `field` = `email`). 503 while no e-mail channel, IdP administration
+        or protection store is available.
       requestBody:
         required: true
         content:
@@ -352,6 +380,8 @@ paths:
                   status: { type: string, enum: [verification_sent] }
         '400':
           $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -8931,12 +8961,24 @@ components:
   schemas:
     SignupRequest:
       type: object
-      required: [organization_name, email]
+      required: [organization_name, email, altcha]
       additionalProperties: false
       properties:
         organization_name: { type: string, minLength: 1, maxLength: 200 }
         email: { type: string, maxLength: 254 }
         display_name: { type: string, maxLength: 200 }
+        altcha:
+          type: string
+          description: Base64-encoded JSON solution of a challenge from GET /api/v1/signup/challenge.
+    AltchaChallenge:
+      type: object
+      required: [algorithm, challenge, maxnumber, salt, signature]
+      properties:
+        algorithm: { type: string, enum: [SHA-256] }
+        challenge: { type: string }
+        maxnumber: { type: integer }
+        salt: { type: string }
+        signature: { type: string }
     SignupVerification:
       type: object
       required: [token, password]

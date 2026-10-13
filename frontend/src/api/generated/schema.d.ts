@@ -177,6 +177,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/signup/challenge': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * ALTCHA challenge for the signup form (TLC-01, E-33)
+     * @description A signed proof-of-work challenge of the self-hosted ALTCHA. The solution is sent as `altcha` with the signup request; it is valid for ten minutes and accepted once.
+     */
+    get: operations['getSignupChallenge'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/signup': {
     parameters: {
       query?: never;
@@ -188,7 +208,7 @@ export interface paths {
     put?: never;
     /**
      * Request a self-signup (TLC-01)
-     * @description Stores a signup request and sends a verification link to the address. The answer is 202 whether or not the address already has an account. 503 while no e-mail channel or IdP administration is configured.
+     * @description Stores a signup request and sends a verification link to the address. The answer is 202 whether or not the address already has an account. The request passes the pre-auth limit (AUT-10), at most five signups per client IP and hour (429), the ALTCHA solution (400, `field` = `altcha`) and the disposable-domain blocklist (422, `field` = `email`). 503 while no e-mail channel, IdP administration or protection store is available.
      */
     post: operations['submitSignup'];
     delete?: never;
@@ -5297,6 +5317,16 @@ export interface components {
       organization_name: string;
       email: string;
       display_name?: string;
+      /** @description Base64-encoded JSON solution of a challenge from GET /api/v1/signup/challenge. */
+      altcha: string;
+    };
+    AltchaChallenge: {
+      /** @enum {string} */
+      algorithm: 'SHA-256';
+      challenge: string;
+      maxnumber: number;
+      salt: string;
+      signature: string;
     };
     SignupVerification: {
       token: string;
@@ -8917,6 +8947,29 @@ export interface operations {
       503: components['responses']['ServiceUnavailable'];
     };
   };
+  getSignupChallenge: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Challenge */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AltchaChallenge'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
   submitSignup: {
     parameters: {
       query?: never;
@@ -8943,6 +8996,7 @@ export interface operations {
         };
       };
       400: components['responses']['BadRequest'];
+      422: components['responses']['UnprocessableEntity'];
       429: components['responses']['TooManyRequests'];
       500: components['responses']['InternalServerError'];
       503: components['responses']['ServiceUnavailable'];

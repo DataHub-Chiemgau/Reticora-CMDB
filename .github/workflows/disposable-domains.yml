@@ -1,0 +1,54 @@
+# Monthly update of the disposable-domain blocklist of the self-signup
+# (WP-112, TLC-01, E-33).
+#
+# Copies disposable_email_blocklist.conf of disposable-email-domains (CC0)
+# unchanged into backend/internal/signup/disposable/blocklist.conf and opens
+# a pull request when it changed; the list is never edited by hand.
+name: Disposable domains
+
+on:
+  schedule:
+    - cron: "17 4 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the upstream list
+        run: |
+          set -euo pipefail
+          curl -sSfL -o /tmp/blocklist.conf \
+            https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/main/disposable_email_blocklist.conf
+          # Sanity check: one lower-case domain per line, no shrink to nothing.
+          if grep -qv '^[a-z0-9.-]*$' /tmp/blocklist.conf || [ "$(wc -l < /tmp/blocklist.conf)" -lt 1000 ]; then
+            echo "unexpected upstream content" >&2
+            exit 1
+          fi
+          cp /tmp/blocklist.conf backend/internal/signup/disposable/blocklist.conf
+
+      - name: Open a pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "blocklist unchanged"
+            exit 0
+          fi
+          branch="chore/disposable-domains-$(date -u +%Y-%m)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -am "Wegwerf-Domains aktualisiert ($(date -u +%Y-%m))"
+          git push -f origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "Wegwerf-Domains aktualisiert ($(date -u +%Y-%m))" \
+            --body "Monatliche Aktualisierung von backend/internal/signup/disposable/blocklist.conf aus disposable-email-domains (CC0, E-33)." \
+            || echo "pull request already exists"

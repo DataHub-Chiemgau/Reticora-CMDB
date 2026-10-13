@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -41,7 +42,7 @@ func WriteFieldError(w http.ResponseWriter, err error) bool {
 		if status == 0 {
 			status = http.StatusBadRequest
 		}
-		WriteJSON(w, status, FieldProblem{
+		writeProblem(w, status, FieldProblem{
 			ProblemDetail: ProblemDetail{Type: "urn:reticora:problem:invalid-field", Title: http.StatusText(status),
 				Status: status, Detail: fe.Error()},
 			Field: fe.Field,
@@ -50,7 +51,7 @@ func WriteFieldError(w http.ResponseWriter, err error) bool {
 	}
 	var ce *ConflictError
 	if errors.As(err, &ce) {
-		WriteJSON(w, http.StatusConflict, FieldProblem{
+		writeProblem(w, http.StatusConflict, FieldProblem{
 			ProblemDetail: ProblemDetail{Type: "urn:reticora:problem:conflict", Title: "Conflict",
 				Status: http.StatusConflict, Detail: ce.Error()},
 			Field: ce.Field,
@@ -58,6 +59,13 @@ func WriteFieldError(w http.ResponseWriter, err error) bool {
 		return true
 	}
 	return false
+}
+
+// writeProblem writes an RFC 7807 body with its media type.
+func writeProblem(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // FieldDBError maps a unique, check or foreign-key violation of a

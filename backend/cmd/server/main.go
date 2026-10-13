@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -348,9 +349,10 @@ func main() {
 			middleware.OpenAPIValidation,
 			middleware.IdempotencyWithStore(cacheStore),
 		},
-		Readiness:   readiness,
-		IngestQueue: ingestQueue,
-		Signup:      signupService(cfg, auditPool),
+		Readiness:        readiness,
+		IngestQueue:      ingestQueue,
+		Signup:           signupService(cfg, auditPool),
+		SignupProtection: signupProtection(cfg, cacheStore),
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -682,4 +684,40 @@ func signupService(cfg *config.Config, pool *pgxpool.Pool) *signup.Service {
 	svc := signup.NewService(repo, nil, accounts, sc)
 	slog.Info("self-signup configured", "available", svc.Available())
 	return svc
+}
+
+// signupProtection builds the captcha, the disposable-domain policy and the
+// per-IP limit of the signup (WP-112, E-33). Without a configured key a
+// random one is drawn: challenges then verify only on this instance.
+func signupProtection(cfg *config.Config, store cache.Store) *signup.Protection {
+	key := []byte(cfg.SignupCaptchaKey)
+	if len(key) == 0 {
+		key = make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			slog.Error("self-signup protection disabled", "error", err)
+			return nil
+		}
+		slog.Warn("RETICORA_SIGNUP_CAPTCHA_KEY not set; signup challenges verify only on this instance")
+	}
+	domains, err := signup.NewDomainPolicy(splitList(cfg.SignupBlockedDomains), splitList(cfg.SignupAllowedDomains))
+	if err != nil {
+		slog.Error("self-signup protection disabled", "error", err)
+		return nil
+	}
+	p, err := signup.NewProtection(key, store, domains)
+	if err != nil {
+		slog.Error("self-signup protection disabled", "error", err)
+		return nil
+	}
+	return p
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

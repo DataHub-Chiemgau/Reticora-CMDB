@@ -103,9 +103,15 @@ type Config struct {
 	SignupVerifyURL           string
 	KeycloakAdminClientID     string
 	KeycloakAdminClientSecret string
-	TrialPlan                 string // ENT-07: standard
-	TrialDays                 int    // ENT-07: 30
-	TrialMaxCIs               int    // ENT-07: 100
+	// SignupCaptchaKey signs the ALTCHA challenges (at least 32 bytes, the
+	// same on every instance); SignupBlockedDomains/SignupAllowedDomains
+	// extend the disposable-domain lists (E-33).
+	SignupCaptchaKey     string
+	SignupBlockedDomains string
+	SignupAllowedDomains string
+	TrialPlan            string // ENT-07: standard
+	TrialDays            int    // ENT-07: 30
+	TrialMaxCIs          int    // ENT-07: 100
 
 	// PreAuthRateLimitRPM is the budget of authentication attempts per
 	// client IP and minute (AUT-10, default 20).
@@ -180,6 +186,9 @@ func Load() *Config {
 		SignupVerifyURL:           l.str("RETICORA_SIGNUP_VERIFY_URL", ""),
 		KeycloakAdminClientID:     l.str("RETICORA_KEYCLOAK_ADMIN_CLIENT_ID", ""),
 		KeycloakAdminClientSecret: l.str("RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET", ""),
+		SignupCaptchaKey:          l.str("RETICORA_SIGNUP_CAPTCHA_KEY", ""),
+		SignupBlockedDomains:      l.str("RETICORA_SIGNUP_BLOCKED_DOMAINS", ""),
+		SignupAllowedDomains:      l.str("RETICORA_SIGNUP_ALLOWED_DOMAINS", ""),
 		TrialPlan:                 l.str("RETICORA_TRIAL_PLAN", "standard"),
 		TrialDays:                 l.integer("RETICORA_TRIAL_DAYS", 30),
 		TrialMaxCIs:               l.integer("RETICORA_TRIAL_MAX_CIS", 100),
@@ -324,6 +333,9 @@ func (c *Config) Validate(noDB bool) error {
 	case "essential", "standard", "pro", "enterprise":
 	default:
 		errs = append(errs, fmt.Errorf("RETICORA_TRIAL_PLAN=%q is not one of essential, standard, pro, enterprise", c.TrialPlan))
+	}
+	if c.SignupCaptchaKey != "" && len(c.SignupCaptchaKey) < 32 {
+		errs = append(errs, fmt.Errorf("RETICORA_SIGNUP_CAPTCHA_KEY must have at least 32 characters"))
 	}
 	if c.TrialDays <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_TRIAL_DAYS must be positive, got %d", c.TrialDays))

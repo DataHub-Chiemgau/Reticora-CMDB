@@ -194,6 +194,7 @@ GET /api/v1/security/findings/summary security:read
 GET /api/v1/security/findings/{id} security:read
 GET /api/v1/service-accounts user:read
 GET /api/v1/service-accounts/{id} user:read
+GET /api/v1/signup/challenge public
 GET /api/v1/sites location:read
 GET /api/v1/sites/{id} location:read
 GET /api/v1/slas sla:read
