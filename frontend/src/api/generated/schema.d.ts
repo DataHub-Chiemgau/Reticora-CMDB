@@ -3206,6 +3206,96 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/invitations': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the organization's invitations (TLC-03)
+     * @description Status is derived from acceptance and expiry (pending, accepted, expired). Requires user:manage.
+     */
+    get: operations['listInvitations'];
+    put?: never;
+    /**
+     * Invite an address with a predefined role and scope (TLC-03)
+     * @description The invitation is valid for seven days. The response carries the token once; only its hash is stored. Role and scope must exist in the organization (422 otherwise); a pending invitation for the same address is a conflict (renew it instead). Requires user:manage.
+     */
+    post: operations['issueInvitation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/invitations/accept': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Accept an invitation (TLC-03)
+     * @description The token is the credential; the request passes the pre-auth limit (AUT-10). The invitation is consumed atomically and once: it creates the user with the invited role and scope. With the IdP admin client the password creates the IdP account (never stored by Reticora); otherwise the user signs in with an existing IdP account of the address, which the first login links. 404 for an unknown, revoked or used token, 410 for an expired one, 409 when the organization already has a user with the address.
+     */
+    post: operations['acceptInvitation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/invitations/{id}/renew': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Renew a pending or expired invitation (TLC-03)
+     * @description A new token and seven more days; the old token stops working. An accepted invitation is 409. Requires user:manage.
+     */
+    post: operations['renewInvitation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/invitations/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Revoke a pending or expired invitation (TLC-03)
+     * @description An accepted invitation stays as a record (409). Requires user:manage.
+     */
+    delete: operations['revokeInvitation'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/service-accounts': {
     parameters: {
       query?: never;
@@ -5317,6 +5407,67 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    InvitationRequest: {
+      email: string;
+      /** Format: uuid */
+      role_id: string;
+      /**
+       * @default org
+       * @enum {string}
+       */
+      scope_type: 'org' | 'client' | 'site';
+      /**
+       * Format: uuid
+       * @description The client or site of a scoped invitation; omitted for org.
+       */
+      scope_id?: string;
+    };
+    Invitation: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      email: string;
+      /** Format: uuid */
+      role_id: string;
+      /** @enum {string} */
+      scope_type: 'org' | 'client' | 'site';
+      /** Format: uuid */
+      scope_id?: string;
+      /** Format: uuid */
+      invited_by: string;
+      /** @enum {string} */
+      status: 'pending' | 'accepted' | 'expired';
+      /** Format: date-time */
+      expires_at: string;
+      /** Format: date-time */
+      accepted_at?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** @description Only in the response of issue and renewal; shown once. */
+      token?: string;
+    };
+    InvitationListResponse: {
+      data: components['schemas']['Invitation'][];
+      total: number;
+      limit: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    InvitationAcceptance: {
+      token: string;
+      /** @description Required (at least 12 characters) when the IdP admin client is configured; set directly in the IdP. */
+      password?: string;
+      display_name?: string;
+    };
+    AcceptedInvitation: {
+      /** Format: uuid */
+      user_id: string;
+      /** Format: uuid */
+      organization_id: string;
+      email: string;
+      account_created: boolean;
+    };
     OperatorCreateOrganizationRequest: {
       name: string;
       /** @description Optional; derived from the name (with -2, -3 … on collision) when omitted. A given, taken slug is 409. */
@@ -16183,6 +16334,152 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  listInvitations: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Invitations, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['InvitationListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  issueInvitation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['InvitationRequest'];
+      };
+    };
+    responses: {
+      /** @description Invitation issued, with its token */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Invitation'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  acceptInvitation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['InvitationAcceptance'];
+      };
+    };
+    responses: {
+      /** @description Invitation accepted, user created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AcceptedInvitation'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description The invitation has expired */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
+      429: components['responses']['TooManyRequests'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  renewInvitation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Invitation renewed, with its new token */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Invitation'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  revokeInvitation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Invitation revoked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listServiceAccounts: {

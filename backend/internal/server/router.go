@@ -110,15 +110,17 @@ type Repositories struct {
 	APIKeys identity.APIKeyRepository
 	// ServiceAccounts holds the non-human principals (RBA-08).
 	ServiceAccounts user.ServiceAccountRepository
-	SLA             sla.Repository
-	Form            form.Repository
-	Workflow        workflow.Repository
-	Compliance      compliance.Repository
-	IGA             iga.Repository
-	Search          search.Backend
-	AI              ai.Repository
-	ExportJobs      export.JobRepository
-	Privacy         privacy.Repository
+	// Invitations are the user invitations (TLC-03); nil answers 503.
+	Invitations user.InvitationRepository
+	SLA         sla.Repository
+	Form        form.Repository
+	Workflow    workflow.Repository
+	Compliance  compliance.Repository
+	IGA         iga.Repository
+	Search      search.Backend
+	AI          ai.Repository
+	ExportJobs  export.JobRepository
+	Privacy     privacy.Repository
 	// Enterprise CMDB + asset/inventory extension (additive modules).
 	CIType            citype.Repository
 	RelationshipType  relationshiptype.Repository
@@ -192,6 +194,8 @@ type Options struct {
 	// SignupProtection is the captcha, blocklist and per-IP limit of the
 	// signup (WP-112); without it signups answer 503.
 	SignupProtection *signup.Protection
+	// InvitationAccounts creates the IdP account of an accepted invitation.
+	InvitationAccounts user.InvitationAccounts
 }
 
 // registrar is implemented by every domain handler.
@@ -232,6 +236,16 @@ func operatorHandler(opts *Options) *operator.Handler {
 		WithEntitlements(opts.Entitlements)
 	if opts.Signup != nil {
 		h.WithOrgCreator(opts.Signup)
+	}
+	return h
+}
+
+// invitationHandler builds the invitations (TLC-03); with an IdP admin
+// client the acceptance creates the account.
+func invitationHandler(repos *Repositories, opts *Options) *user.InvitationHandler {
+	h := user.NewInvitationHandler(repos.Invitations)
+	if opts.InvitationAccounts != nil {
+		h.WithAccounts(opts.InvitationAccounts)
 	}
 	return h
 }
@@ -295,6 +309,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		operatorHandler(&opts),
 		identity.NewAPIKeyHandler(repos.APIKeys),
 		user.NewServiceAccountHandler(repos.ServiceAccounts),
+		invitationHandler(&repos, &opts),
 		entitlement.NewHandler(opts.Entitlements),
 		ci.NewHandler(opts.CIService, opts.Dispatcher),
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),

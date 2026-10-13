@@ -237,6 +237,8 @@ var preAuthPaths = map[string]bool{
 	"/api/v1/auth/callback":     true,
 	"/api/v1/auth/refresh":      true,
 	"/api/v1/collectors/enroll": true,
+	// Invitation acceptance (TLC-03).
+	"/api/v1/invitations/accept": true,
 	// Self-signup request and verification (TLC-01).
 	"/api/v1/signup":        true,
 	"/api/v1/signup/verify": true,

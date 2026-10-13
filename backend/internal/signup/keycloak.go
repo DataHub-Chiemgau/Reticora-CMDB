@@ -77,6 +77,17 @@ func (k *KeycloakAccounts) CreateAccount(ctx context.Context, a Account) (string
 	})
 }
 
+// CreateInvitedAccount creates the account of an accepted invitation
+// (user.InvitationAccounts, TLC-03): like a signup, with the password the
+// invited person chose; an existing account is a conflict on email.
+func (k *KeycloakAccounts) CreateInvitedAccount(ctx context.Context, email, displayName, password, orgID string) (string, error) {
+	id, err := k.CreateAccount(ctx, Account{Email: email, DisplayName: displayName, Password: password, OrganizationID: orgID})
+	if errors.Is(err, ErrAccountExists) {
+		return "", &api.ConflictError{Field: "email", Message: err.Error()}
+	}
+	return id, err
+}
+
 // InviteAccount creates the user without a password and lets Keycloak mail
 // the link to set one and verify the address (execute-actions-email; the
 // realm's SMTP settings apply). Used by the operator path (TLC-02).

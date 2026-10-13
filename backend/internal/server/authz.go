@@ -48,8 +48,11 @@ var readPermissionFor = map[string]identity.Permission{
 	"slas":                 identity.PermSLARead,
 	"users":                identity.PermUserRead,
 	"service-accounts":     identity.PermUserRead,
-	"teams":                identity.PermUserRead,
-	"clients":              identity.PermUserRead,
+	// Invitations name addresses and grant roles: read and write need
+	// user:manage (TLC-03).
+	"invitations": identity.PermUserManage,
+	"teams":       identity.PermUserRead,
+	"clients":     identity.PermUserRead,
 	// The organization is the root of the location hierarchy (LOC-01).
 	"org":                identity.PermLocationRead,
 	"roles":              identity.PermRoleRead,
@@ -122,6 +125,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"users":       identity.PermUserManage,
 	// Service accounts are principals like users (RBA-08).
 	"service-accounts": identity.PermUserManage,
+	"invitations":      identity.PermUserManage,
 	"teams":            identity.PermTeamManage,
 	// RBA-01: collectors and discovery jobs have their own manage keys.
 	"collectors": identity.PermCollectorManage,
@@ -297,6 +301,10 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 	case "/api/v1/collectors/enroll":
 		// Zero-config onboarding: the single-use enrollment code is the
 		// credential; the collector has no bearer token before enrolling.
+		return "", routePublic
+	case "/api/v1/invitations/accept":
+		// The invitation token is the credential; the invited person has no
+		// account yet (TLC-03).
 		return "", routePublic
 	case "/api/v1/signup", "/api/v1/signup/verify", "/api/v1/signup/challenge":
 		// Self-signup (TLC-01): no account exists yet; the verification

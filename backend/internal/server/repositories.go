@@ -162,6 +162,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Permission:        permission.NewPGRepository(pool),
 		APIKeys:           identity.NewPGAPIKeyStore(pool),
 		ServiceAccounts:   user.NewPGServiceAccounts(pool),
+		Invitations:       user.NewPGInvitations(pool),
 		SLA:               sla.NewPGRepository(pool),
 		Form:              form.NewPGRepository(pool),
 		Workflow:          workflow.NewPGRepository(pool),

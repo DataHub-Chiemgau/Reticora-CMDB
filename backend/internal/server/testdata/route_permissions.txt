@@ -20,6 +20,7 @@ DELETE /api/v1/documents/{id} document:write
 DELETE /api/v1/forms/{id} form:write
 DELETE /api/v1/iga/connectors/{id} iga:write
 DELETE /api/v1/inventory/items/{id} inventory:manage
+DELETE /api/v1/invitations/{id} user:manage
 DELETE /api/v1/ip-addresses/{id} ipam:write
 DELETE /api/v1/keys/{id} key:write
 DELETE /api/v1/lifecycle-definitions/{id} lifecycle:manage
@@ -145,6 +146,7 @@ GET /api/v1/iga/tasks/{id} iga:read
 GET /api/v1/inventory/availability asset:read
 GET /api/v1/inventory/items asset:read
 GET /api/v1/inventory/items/{id} asset:read
+GET /api/v1/invitations user:manage
 GET /api/v1/ip-addresses ipam:read
 GET /api/v1/ip-addresses/{id} ipam:read
 GET /api/v1/keys key:read
@@ -364,6 +366,9 @@ POST /api/v1/iga/tasks/{id}/retry iga:write
 POST /api/v1/ingest/bulk discovery:ingest
 POST /api/v1/inventory/items inventory:manage
 POST /api/v1/inventory/items/{id}/convert inventory:manage
+POST /api/v1/invitations user:manage
+POST /api/v1/invitations/accept public
+POST /api/v1/invitations/{id}/renew user:manage
 POST /api/v1/ip-addresses ipam:write
 POST /api/v1/keys key:write
 POST /api/v1/keys/{id}/issue key:write

@@ -353,6 +353,8 @@ func main() {
 		IngestQueue:      ingestQueue,
 		Signup:           signupService(cfg, auditPool),
 		SignupProtection: signupProtection(cfg, cacheStore),
+		// Invitations need the database; in --no-db mode they answer 503.
+		InvitationAccounts: invitationAccounts(cfg),
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -673,17 +675,36 @@ func signupService(cfg *config.Config, pool *pgxpool.Pool) *signup.Service {
 	if pool != nil {
 		repo = signup.NewPGRepository(pool)
 	}
-	if cfg.KeycloakAdminClientID != "" {
-		kc, err := signup.NewKeycloakAccounts(cfg.OIDCIssuerURL, cfg.KeycloakAdminClientID, cfg.KeycloakAdminClientSecret, nil)
-		if err != nil {
-			slog.Error("self-signup: Keycloak admin client disabled", "error", err)
-		} else {
-			accounts = kc
-		}
+	if kc := keycloakAccounts(cfg); kc != nil {
+		accounts = kc
 	}
 	svc := signup.NewService(repo, nil, accounts, sc)
 	slog.Info("self-signup configured", "available", svc.Available())
 	return svc
+}
+
+// keycloakAccounts is the Keycloak admin client that creates the accounts
+// of signups, operator-created organizations and accepted invitations; nil
+// without RETICORA_KEYCLOAK_ADMIN_CLIENT_ID.
+func keycloakAccounts(cfg *config.Config) *signup.KeycloakAccounts {
+	if cfg.KeycloakAdminClientID == "" {
+		return nil
+	}
+	kc, err := signup.NewKeycloakAccounts(cfg.OIDCIssuerURL, cfg.KeycloakAdminClientID, cfg.KeycloakAdminClientSecret, nil)
+	if err != nil {
+		slog.Error("Keycloak admin client disabled", "error", err)
+		return nil
+	}
+	return kc
+}
+
+// invitationAccounts lets accepted invitations create their IdP account
+// (TLC-03); nil leaves the account to the IdP.
+func invitationAccounts(cfg *config.Config) user.InvitationAccounts {
+	if kc := keycloakAccounts(cfg); kc != nil {
+		return kc
+	}
+	return nil
 }
 
 // signupProtection builds the captcha, the disposable-domain policy and the

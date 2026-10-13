@@ -302,6 +302,9 @@ func requiresAuth(r *http.Request) bool {
 		// The enrollment code is the credential; the collector has no session
 		// or API key before it enrolls.
 		return false
+	case "/api/v1/invitations/accept":
+		// The invitation token is the credential (TLC-03).
+		return false
 	case "/api/v1/signup", "/api/v1/signup/verify", "/api/v1/signup/challenge":
 		// Self-signup: no account exists yet (TLC-01).
 		return false

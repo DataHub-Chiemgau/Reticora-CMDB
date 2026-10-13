@@ -6107,6 +6107,155 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/invitations:
+    get:
+      operationId: listInvitations
+      tags: [Users]
+      summary: List the organization's invitations (TLC-03)
+      description: Status is derived from acceptance and expiry (pending, accepted, expired). Requires user:manage.
+      responses:
+        '200':
+          description: Invitations, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: issueInvitation
+      tags: [Users]
+      summary: Invite an address with a predefined role and scope (TLC-03)
+      description: >-
+        The invitation is valid for seven days. The response carries the
+        token once; only its hash is stored. Role and scope must exist in
+        the organization (422 otherwise); a pending invitation for the same
+        address is a conflict (renew it instead). Requires user:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvitationRequest'
+      responses:
+        '201':
+          description: Invitation issued, with its token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/invitations/accept:
+    post:
+      operationId: acceptInvitation
+      tags: [Users]
+      security: []
+      summary: Accept an invitation (TLC-03)
+      description: >-
+        The token is the credential; the request passes the pre-auth limit
+        (AUT-10). The invitation is consumed atomically and once: it creates
+        the user with the invited role and scope. With the IdP admin client
+        the password creates the IdP account (never stored by Reticora);
+        otherwise the user signs in with an existing IdP account of the
+        address, which the first login links. 404 for an unknown, revoked
+        or used token, 410 for an expired one, 409 when the organization
+        already has a user with the address.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvitationAcceptance'
+      responses:
+        '201':
+          description: Invitation accepted, user created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptedInvitation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '410':
+          description: The invitation has expired
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/invitations/{id}/renew:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: renewInvitation
+      tags: [Users]
+      summary: Renew a pending or expired invitation (TLC-03)
+      description: A new token and seven more days; the old token stops working. An accepted invitation is 409. Requires user:manage.
+      responses:
+        '200':
+          description: Invitation renewed, with its new token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/invitations/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    delete:
+      operationId: revokeInvitation
+      tags: [Users]
+      summary: Revoke a pending or expired invitation (TLC-03)
+      description: An accepted invitation stays as a record (409). Requires user:manage.
+      responses:
+        '204':
+          description: Invitation revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/service-accounts:
     get:
       operationId: listServiceAccounts
@@ -8998,6 +9147,66 @@ components:
             $ref: '#/components/schemas/ProblemDetail'
 
   schemas:
+    InvitationRequest:
+      type: object
+      required: [email, role_id]
+      additionalProperties: false
+      properties:
+        email: { type: string, maxLength: 254 }
+        role_id: { type: string, format: uuid }
+        scope_type: { type: string, enum: [org, client, site], default: org }
+        scope_id:
+          type: string
+          format: uuid
+          description: The client or site of a scoped invitation; omitted for org.
+    Invitation:
+      type: object
+      required: [id, organization_id, email, role_id, scope_type, invited_by, status, expires_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        email: { type: string }
+        role_id: { type: string, format: uuid }
+        scope_type: { type: string, enum: [org, client, site] }
+        scope_id: { type: string, format: uuid }
+        invited_by: { type: string, format: uuid }
+        status: { type: string, enum: [pending, accepted, expired] }
+        expires_at: { type: string, format: date-time }
+        accepted_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        token:
+          type: string
+          description: Only in the response of issue and renewal; shown once.
+    InvitationListResponse:
+      type: object
+      required: [data, total, limit]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Invitation'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    InvitationAcceptance:
+      type: object
+      required: [token]
+      additionalProperties: false
+      properties:
+        token: { type: string, minLength: 1 }
+        password:
+          type: string
+          description: Required (at least 12 characters) when the IdP admin client is configured; set directly in the IdP.
+        display_name: { type: string, maxLength: 200 }
+    AcceptedInvitation:
+      type: object
+      required: [user_id, organization_id, email, account_created]
+      properties:
+        user_id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        email: { type: string }
+        account_created: { type: boolean }
     OperatorCreateOrganizationRequest:
       type: object
       required: [name, plan, admin_email]
