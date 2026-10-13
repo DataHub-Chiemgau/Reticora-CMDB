@@ -643,13 +643,23 @@ export const impactApi = {
 
 // ─── Saved views + filter query (§17) ────────────────────────────────────────
 
+export interface SavedViewSortKey {
+  field: string;
+  dir?: 'asc' | 'desc';
+}
+
 export interface SavedView {
   id: string;
   owner_id?: string;
   name: string;
   entity_kind: string;
   filter_spec: Record<string, unknown>;
+  /** Sort keys and columns of the view (VIE-01). */
+  sort?: SavedViewSortKey[];
+  columns?: string[];
   shared: boolean;
+  /** Role ids whose holders may read the view. */
+  shared_with_roles?: string[];
   created_at: string;
 }
 
@@ -672,7 +682,10 @@ export const savedViewApi = {
     name: string;
     entity_kind: string;
     filter_spec: Record<string, unknown>;
+    sort?: SavedViewSortKey[];
+    columns?: string[];
     shared?: boolean;
+    shared_with_roles?: string[];
   }) {
     return fetchAPI('/saved-views', { method: 'POST', body: JSON.stringify(data) });
   },

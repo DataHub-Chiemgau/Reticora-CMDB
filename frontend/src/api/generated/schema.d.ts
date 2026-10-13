@@ -6242,10 +6242,13 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage saved views */
+    /**
+     * Saved views the caller may read (VIE-01)
+     * @description Own views, views shared org-wide and views shared with a role of the caller.
+     */
     get: operations['listSavedViews'];
     put?: never;
-    /** Manage saved views */
+    /** Create a saved view (VIE-01) */
     post: operations['createSavedViews'];
     delete?: never;
     options?: never;
@@ -6277,15 +6280,21 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read, update or delete a saved view */
+    /**
+     * Read a saved view
+     * @description A private view of somebody else, or a view shared with roles the caller does not hold, is 404 (VIE-01).
+     */
     get: operations['getSavedViewsId'];
     put?: never;
     post?: never;
-    /** Read, update or delete a saved view */
+    /** Delete a saved view */
     delete: operations['deleteSavedViewsId'];
     options?: never;
     head?: never;
-    /** Read, update or delete a saved view */
+    /**
+     * Update a saved view
+     * @description The owner changes the view; a view shared org-wide is editable by everybody, a role-shared one only by its owner.
+     */
     patch: operations['updateSavedViewsId'];
     trace?: never;
   };
@@ -6866,6 +6875,47 @@ export interface components {
       op?: 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'like' | 'in' | 'exists';
       /** @description A string, number or boolean; a list for in. */
       value?: unknown;
+    };
+    SavedViewSortKey: {
+      field: string;
+      /**
+       * @default asc
+       * @enum {string}
+       */
+      dir: 'asc' | 'desc';
+    };
+    SavedView: {
+      id: string;
+      organization_id: string;
+      owner_id?: string;
+      name: string;
+      /** @enum {string} */
+      entity_kind: 'ci' | 'asset';
+      /** @description The filter spec; where holds the filter AST (FilterExpr). */
+      filter_spec: {
+        [key: string]: unknown;
+      };
+      sort: components['schemas']['SavedViewSortKey'][];
+      columns: string[];
+      shared: boolean;
+      /** @description Role or custom role ids whose holders may read the view. */
+      shared_with_roles: string[];
+      /** Format: date-time */
+      created_at?: string;
+      /** Format: date-time */
+      updated_at?: string;
+    };
+    SavedViewRequest: {
+      name?: string;
+      /** @enum {string} */
+      entity_kind?: 'ci' | 'asset';
+      filter_spec?: {
+        [key: string]: unknown;
+      };
+      sort?: components['schemas']['SavedViewSortKey'][];
+      columns?: string[];
+      shared?: boolean;
+      shared_with_roles?: string[];
     };
     ImpactAnalysis: {
       /** @description The failed CI (single-CI short form only). */
@@ -26080,12 +26130,21 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Manage saved views */
+      /** @description Saved views */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': {
+            data?: components['schemas']['SavedView'][];
+            total?: number;
+            limit?: number;
+            offset?: number;
+            has_more?: boolean;
+            next_cursor?: string;
+          };
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -26103,21 +26162,37 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SavedViewRequest'];
+      };
+    };
     responses: {
-      /** @description Manage saved views */
+      /** @description The created view */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['SavedView'];
+        };
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Invalid filter AST, sort key, column or role id. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };
@@ -26155,12 +26230,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Read, update or delete a saved view */
+      /** @description The view */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['SavedView'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -26169,6 +26246,7 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   deleteSavedViewsId: {
@@ -26180,7 +26258,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Read, update or delete a saved view */
+      /** @description Deleted */
       204: {
         headers: {
           [name: string]: unknown;
@@ -26194,6 +26272,7 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   updateSavedViewsId: {
@@ -26203,14 +26282,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SavedViewRequest'];
+      };
+    };
     responses: {
-      /** @description Read, update or delete a saved view */
+      /** @description The updated view */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['SavedView'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -26218,6 +26303,16 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      404: components['responses']['NotFound'];
+      /** @description Invalid filter AST, sort key, column or role id. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };

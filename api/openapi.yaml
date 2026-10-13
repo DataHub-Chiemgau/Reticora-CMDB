@@ -10942,20 +10942,49 @@ paths:
   /api/v1/saved-views:
     get:
       operationId: listSavedViews
-      summary: Manage saved views
+      summary: Saved views the caller may read (VIE-01)
+      description: Own views, views shared org-wide and views shared with a role of the caller.
       responses:
         '200':
-          description: Manage saved views
+          description: Saved views
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/SavedView' }
+                  total: { type: integer }
+                  limit: { type: integer }
+                  offset: { type: integer }
+                  has_more: { type: boolean }
+                  next_cursor: { type: string }
         '401':
           description: Unauthorized
     post:
       operationId: createSavedViews
-      summary: Manage saved views
+      summary: Create a saved view (VIE-01)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SavedViewRequest' }
       responses:
         '201':
-          description: Manage saved views
+          description: The created view
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SavedView' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '422':
+          description: Invalid filter AST, sort key, column or role id.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/saved-views/presets:
     get:
@@ -10970,28 +10999,52 @@ paths:
   /api/v1/saved-views/{id}:
     get:
       operationId: getSavedViewsId
-      summary: Read, update or delete a saved view
+      summary: Read a saved view
+      description: A private view of somebody else, or a view shared with roles the caller does not hold, is 404 (VIE-01).
       responses:
         '200':
-          description: Read, update or delete a saved view
+          description: The view
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SavedView' }
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
     patch:
       operationId: updateSavedViewsId
-      summary: Read, update or delete a saved view
+      summary: Update a saved view
+      description: The owner changes the view; a view shared org-wide is editable by everybody, a role-shared one only by its owner.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SavedViewRequest' }
       responses:
         '200':
-          description: Read, update or delete a saved view
+          description: The updated view
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SavedView' }
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Invalid filter AST, sort key, column or role id.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
     delete:
       operationId: deleteSavedViewsId
-      summary: Read, update or delete a saved view
+      summary: Delete a saved view
       responses:
         '204':
-          description: Read, update or delete a saved view
+          description: Deleted
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/stock-movements:
     get:
@@ -11936,6 +11989,57 @@ components:
           enum: [eq, ne, lt, lte, gt, gte, like, in, exists]
         value:
           description: A string, number or boolean; a list for in.
+    SavedViewSortKey:
+      type: object
+      required: [field]
+      properties:
+        field: { type: string }
+        dir: { type: string, enum: [asc, desc], default: asc }
+    SavedView:
+      type: object
+      required: [id, organization_id, name, entity_kind, filter_spec, sort, columns, shared, shared_with_roles]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        owner_id: { type: string }
+        name: { type: string }
+        entity_kind: { type: string, enum: [ci, asset] }
+        filter_spec:
+          type: object
+          additionalProperties: true
+          description: The filter spec; where holds the filter AST (FilterExpr).
+        sort:
+          type: array
+          items: { $ref: '#/components/schemas/SavedViewSortKey' }
+        columns:
+          type: array
+          items: { type: string }
+        shared: { type: boolean }
+        shared_with_roles:
+          type: array
+          description: Role or custom role ids whose holders may read the view.
+          items: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SavedViewRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        entity_kind: { type: string, enum: [ci, asset] }
+        filter_spec:
+          type: object
+          additionalProperties: true
+        sort:
+          type: array
+          items: { $ref: '#/components/schemas/SavedViewSortKey' }
+        columns:
+          type: array
+          items: { type: string }
+        shared: { type: boolean }
+        shared_with_roles:
+          type: array
+          items: { type: string }
     ImpactAnalysis:
       type: object
       required: [failed_cis, impacted, count, summary]

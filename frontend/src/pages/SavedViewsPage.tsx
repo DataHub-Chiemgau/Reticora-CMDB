@@ -98,6 +98,14 @@ export function SavedViewsPage() {
                         {t('savedviews.shared', 'geteilt')}
                       </Badge>
                     ) : null}
+                    {!v.shared && (v.shared_with_roles?.length ?? 0) > 0 ? (
+                      <Badge variant="info" className="ml-2">
+                        {t('savedviews.sharedWithRoles', {
+                          count: v.shared_with_roles?.length ?? 0,
+                          defaultValue: 'für {{count}} Rollen',
+                        })}
+                      </Badge>
+                    ) : null}
                   </button>
                   <button
                     onClick={() => deleteView.mutate(v.id)}

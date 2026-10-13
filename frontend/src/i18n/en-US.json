@@ -944,6 +944,7 @@
     }
   },
   "savedviews": {
+    "sharedWithRoles": "for {{count}} roles",
     "title": "Saved views",
     "presets": "Presets",
     "hint": "Select a view on the left.",

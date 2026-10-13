@@ -393,3 +393,4 @@ SEC-10;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-184
 GQL-02;[B];C;backend/internal/graphqlbff/resolver_test.go;WP-185
 SRC-01;[B];C;backend/internal/search/search_test.go;WP-186
 SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/filter_test.go;WP-187
+VIE-01;[B];C;backend/internal/savedview/savedview_integration_test.go;WP-188

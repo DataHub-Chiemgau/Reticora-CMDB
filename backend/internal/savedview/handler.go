@@ -95,7 +95,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), ownerID(r))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "saved view not found")
 		return
@@ -118,13 +118,20 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name is required")
 		return
 	}
+	if err := ValidateView(req.EntityKind, &req); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	view := &View{
-		OrganizationID: t.OrganizationID,
-		OwnerID:        ownerID(r),
-		Name:           req.Name,
-		EntityKind:     req.EntityKind,
-		FilterSpec:     req.FilterSpec,
-		Shared:         req.Shared,
+		OrganizationID:  t.OrganizationID,
+		OwnerID:         ownerID(r),
+		Name:            req.Name,
+		EntityKind:      req.EntityKind,
+		FilterSpec:      req.FilterSpec,
+		Sort:            req.Sort,
+		Columns:         req.Columns,
+		Shared:          req.Shared,
+		SharedWithRoles: req.SharedWithRoles,
 	}
 	if err := h.repo.Create(r.Context(), view); err != nil {
 		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
@@ -142,6 +149,19 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	var req UpsertRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	current, err := h.repo.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), ownerID(r))
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "saved view not found")
+		return
+	}
+	kind := req.EntityKind
+	if kind == "" {
+		kind = current.EntityKind
+	}
+	if verr := ValidateView(kind, &req); verr != nil {
+		api.WriteFieldError(w, verr)
 		return
 	}
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), ownerID(r), req)

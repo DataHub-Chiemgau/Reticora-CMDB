@@ -130,4 +130,24 @@ describe('SavedViewsPage', () => {
       expect(String(call![0])).toContain(`/saved-views/${ownView.id}`);
     });
   });
+
+  it('marks a view shared with roles', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockApi({
+        views: [
+          {
+            ...ownView,
+            sort: [{ field: 'name' }],
+            columns: ['name'],
+            shared_with_roles: ['r1', 'r2'],
+          },
+        ],
+      }),
+    );
+
+    renderWithProviders(<SavedViewsPage />);
+
+    expect(await screen.findByText('für 2 Rollen')).toBeInTheDocument();
+  });
 });

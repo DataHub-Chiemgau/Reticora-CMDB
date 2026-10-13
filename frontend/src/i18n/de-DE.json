@@ -944,6 +944,7 @@
     }
   },
   "savedviews": {
+    "sharedWithRoles": "für {{count}} Rollen",
     "title": "Gespeicherte Ansichten",
     "presets": "Vorlagen",
     "hint": "Wählen Sie links eine Ansicht aus.",
