@@ -322,9 +322,24 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// unlicensed_ci and adopted once the limit is raised (ENT-03, CH21).
 	// Export and discovery jobs register in the generic job model (JOB-01).
 	var jobTracker jobs.Tracker
+	// The generic job API (API-09) serves in both profiles; without a
+	// database it has an empty in-memory job table.
+	jobAPI := jobs.NewAPIHandler(jobs.NewService(jobs.NewMemoryRepository()))
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService
+		jobs.SetBacklogSource(repos.Jobs)
+		jobAPI = jobs.NewAPIHandler(jobService).
+			WithKind(ci.BulkJobKind, identity.PermCIWrite, nil).
+			WithKind("export", identity.PermExportRun, nil).
+			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
+			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) error {
+				if opts.CIService == nil {
+					return ci.ErrMergeUnsupported
+				}
+				_, err := opts.CIService.RevertMerge(ctx, job.OrganizationID, job.RefID)
+				return err
+			})
 		// A CI merge is a job (CI-12, JOB-01); bulk operations from 100
 		// ids on as well (API-08, JOB-04).
 		jobService.Register(jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute})
@@ -365,6 +380,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		invitationHandler(&repos, &opts),
 		entitlement.NewHandler(opts.Entitlements),
 		ciHandler(&repos, &opts),
+		jobAPI,
 		notifyHandler(&opts),
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
@@ -560,6 +576,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 
 	registry.MustRegister(collectors.NewGoCollector())
 	observability.RegisterWorkerMetrics(registry)
+	jobs.RegisterMetrics(registry)
 	override.RegisterMetrics(registry)
 	operator.RegisterMetrics(registry)
 	entitlement.RegisterMetrics(registry)

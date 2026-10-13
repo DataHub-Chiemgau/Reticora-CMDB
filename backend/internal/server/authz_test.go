@@ -294,9 +294,7 @@ var catalogResources = []string{
 
 // catalogResourcePending names catalog resources a later work package of
 // the plan introduces, with that package.
-var catalogResourcePending = map[string]string{
-	"jobs": "WP-182 (generic job API)",
-}
+var catalogResourcePending = map[string]string{}
 
 // TestCatalogResourcesAreServed covers API-05: every resource of the
 // catalog is served under its catalog path /api/v1/<resource> (the

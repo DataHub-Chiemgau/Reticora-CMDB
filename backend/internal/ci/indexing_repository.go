@@ -137,6 +137,15 @@ func (r *indexingRepository) Unmerge(ctx context.Context, orgID, victimID string
 	return result, nil
 }
 
+// MergeVictim forwards the merge lookup of the job revert (CI-12).
+func (r *indexingRepository) MergeVictim(ctx context.Context, orgID, mergeID string) (string, error) {
+	reader, ok := r.Repository.(mergeVictimReader)
+	if !ok {
+		return "", ErrMergeUnsupported
+	}
+	return reader.MergeVictim(ctx, orgID, mergeID)
+}
+
 // MergedInto forwards the tombstone lookup (CI-12).
 func (r *indexingRepository) MergedInto(ctx context.Context, orgID, victimID string) (survivorID string, found bool, err error) {
 	reader, ok := r.Repository.(TombstoneReader)

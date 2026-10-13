@@ -37,6 +37,8 @@ tags:
     description: Webhook subscription management
   - name: Discovery
     description: Discovery ingest and job tracking
+  - name: Jobs
+    description: Generic job model (export, bulk, merge, system jobs)
   - name: Reviews
     description: Review queue of reconciliation (REC-08)
   - name: Collectors
@@ -1813,6 +1815,145 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/jobs:
+    get:
+      operationId: listJobs
+      tags: [Jobs]
+      summary: List the jobs of the organization (API-09, JOB-03)
+      description: >-
+        Export, import, bulk, merge, template migration and the system jobs
+        share one job model (JOB-01). Requires job:read.
+      parameters:
+        - name: kind
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [queued, running, succeeded, failed, cancelled]
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: Unknown status.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
+  /api/v1/jobs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getJob
+      tags: [Jobs]
+      summary: A job with its status, progress and result
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: cancelJob
+      tags: [Jobs]
+      summary: Cancel a queued or running job
+      description: >-
+        Allowed for the creator of the job and for holders of the permission
+        of its kind (ci.bulk ci:write, ci.merge ci:delete, export
+        export:run). A finished job is 409.
+      responses:
+        '200':
+          description: The cancelled job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The job is finished already.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
+  /api/v1/jobs/{id}/result:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getJobResult
+      tags: [Jobs]
+      summary: The result of a succeeded job
+      responses:
+        '200':
+          description: The result of the job (its shape depends on the kind)
+          content:
+            application/json:
+              schema: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The job has no result yet.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
+  /api/v1/jobs/{id}/revert:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: revertJob
+      tags: [Jobs]
+      summary: Revert a succeeded job where the revert is defined (E-25)
+      description: >-
+        Phase 1 defines the revert of ci.merge (the unmerge within 30 days,
+        CI-12); every other kind, and a job that did not succeed, is 409.
+        The bulk revert follows with BLK-02.
+      responses:
+        '200':
+          description: The job was reverted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, reverted]
+                properties:
+                  job_id: { type: string }
+                  reverted: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The kind defines no revert or the job did not succeed.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/exports:
     get:
@@ -13088,6 +13229,44 @@ components:
         filters:
           $ref: '#/components/schemas/ExportJobFilters'
 
+    Job:
+      type: object
+      required: [id, kind, status, progress, attempts, max_attempts, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        kind: { type: string }
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed, cancelled]
+        progress: { type: integer }
+        params: {}
+        result: {}
+        error: { type: string }
+        idempotency_key: { type: string }
+        created_by: { type: string }
+        attempts: { type: integer }
+        max_attempts: { type: integer }
+        run_after: { type: string, format: date-time }
+        timeout_seconds: { type: integer }
+        ref_table: { type: string }
+        ref_id: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+    JobListResponse:
+      type: object
+      required: [data, total, limit, offset, has_more]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Job' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+        next_cursor: { type: string }
     ExportJob:
       type: object
       required: [id, organization_id, format, status, filters, created_at, updated_at]

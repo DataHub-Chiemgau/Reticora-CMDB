@@ -385,3 +385,5 @@ IMP-05;[B];C;backend/internal/topology/multi_integration_test.go;WP-180
 IMP-06;[B];C;backend/internal/topology/multi_integration_test.go;WP-180
 API-08;[B];C;backend/internal/ci/bulk_test.go;WP-181
 BLK-01;[B];C;backend/internal/ci/bulk_test.go;WP-181
+API-09;[B];C;backend/internal/jobs/handler_test.go;WP-182
+JOB-03;[B];C;backend/internal/jobs/handler_test.go;WP-182

@@ -66,8 +66,10 @@ var readPermissionFor = map[string]identity.Permission{
 	"audit":        identity.PermAuditRead,
 	"audit-log":    identity.PermAuditRead,
 	// Catalog paths of API-05.
-	"impact":           identity.PermTopologyRead,
-	"exports":          identity.PermCIRead,
+	"impact":  identity.PermTopologyRead,
+	"exports": identity.PermCIRead,
+	// Jobs (API-09): cancel and revert check the permission of the kind.
+	"jobs":             identity.PermJobRead,
 	"role-assignments": identity.PermRoleRead,
 	"webhooks":         identity.PermWebhookRead,
 	// Notification channels and their deliveries are administered like
@@ -168,6 +170,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"audit-log": identity.PermAuditRead,
 	"impact":    identity.PermTopologyRead,
 	"exports":   identity.PermExportRun,
+	"jobs":      identity.PermJobRead,
 	// Assigning a role is managing roles (RBA-01).
 	"role-assignments": identity.PermRoleManage,
 	// Topology is read-only; the graph is derived from CIs and relationships.

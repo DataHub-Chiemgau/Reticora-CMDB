@@ -762,3 +762,34 @@ func (r *PGRepository) Unmerge(ctx context.Context, orgID, victimID string) (*Un
 	}
 	return result, nil
 }
+
+// mergeVictimReader resolves a merge id to its victim.
+type mergeVictimReader interface {
+	MergeVictim(ctx context.Context, orgID, mergeID string) (string, error)
+}
+
+// RevertMerge reverts the merge mergeID (the job ci.merge, JOB-03 revert)
+// through the unmerge of its victim.
+func (s *Service) RevertMerge(ctx context.Context, orgID, mergeID string) (*UnmergeResult, error) {
+	reader, ok := s.repo.(mergeVictimReader)
+	if !ok {
+		return nil, ErrMergeUnsupported
+	}
+	victim, err := reader.MergeVictim(ctx, orgID, mergeID)
+	if err != nil {
+		return nil, err
+	}
+	return s.Unmerge(ctx, orgID, victim)
+}
+
+// MergeVictim implements mergeVictimReader.
+func (r *PGRepository) MergeVictim(ctx context.Context, orgID, mergeID string) (string, error) {
+	var victim string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, "SELECT victim_id::text FROM ci_merge WHERE organization_id = $1 AND id = $2", orgID, mergeID).Scan(&victim)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("not found")
+	}
+	return victim, err
+}

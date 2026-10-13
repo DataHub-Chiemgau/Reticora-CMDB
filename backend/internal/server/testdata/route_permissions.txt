@@ -25,6 +25,7 @@ DELETE /api/v1/inventory/items/{id} inventory:manage
 DELETE /api/v1/invitations/{id} user:manage
 DELETE /api/v1/ip-addresses/{id} ipam:write
 DELETE /api/v1/ips/{id} ipam:write
+DELETE /api/v1/jobs/{id} job:read
 DELETE /api/v1/keys/{id} key:write
 DELETE /api/v1/lifecycle-definitions/{id} lifecycle:manage
 DELETE /api/v1/locations/{id} location:write
@@ -168,6 +169,9 @@ GET /api/v1/ip-addresses ipam:read
 GET /api/v1/ip-addresses/{id} ipam:read
 GET /api/v1/ips ipam:read
 GET /api/v1/ips/{id} ipam:read
+GET /api/v1/jobs job:read
+GET /api/v1/jobs/{id} job:read
+GET /api/v1/jobs/{id}/result job:read
 GET /api/v1/keys key:read
 GET /api/v1/keys/{id} key:read
 GET /api/v1/keys/{id}/assignments key:read
@@ -416,6 +420,7 @@ POST /api/v1/invitations/accept public
 POST /api/v1/invitations/{id}/renew user:manage
 POST /api/v1/ip-addresses ipam:write
 POST /api/v1/ips ipam:write
+POST /api/v1/jobs/{id}/revert job:read
 POST /api/v1/keys key:write
 POST /api/v1/keys/{id}/issue key:write
 POST /api/v1/keys/{id}/return key:write

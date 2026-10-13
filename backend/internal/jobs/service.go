@@ -155,8 +155,12 @@ func (s *Service) Succeed(ctx context.Context, orgID, id string, result any) (*J
 		return nil, fmt.Errorf("encode job result: %w", err)
 	}
 	done, now := 100, s.now()
-	return s.repo.Transition(ctx, orgID, id, []Status{StatusRunning},
+	job, err := s.repo.Transition(ctx, orgID, id, []Status{StatusRunning},
 		&Update{Status: StatusSucceeded, Progress: &done, Result: raw, FinishedAt: &now})
+	if err == nil {
+		observeEnd(job)
+	}
+	return job, err
 }
 
 // Fail records a failed attempt: the job goes back to the queue after the
@@ -168,6 +172,7 @@ func (s *Service) Fail(ctx context.Context, orgID, id string, cause error) (*Job
 	}
 	msg := cause.Error()
 	now := s.now()
+	JobFailures.WithLabelValues(job.Kind).Inc()
 	if job.Attempts < job.MaxAttempts {
 		backoff := DefaultBackoff
 		if k, kerr := s.kind(job.Kind); kerr == nil {
@@ -179,6 +184,9 @@ func (s *Service) Fail(ctx context.Context, orgID, id string, cause error) (*Job
 	}
 	failed, err := s.repo.Transition(ctx, orgID, id, []Status{StatusRunning},
 		&Update{Status: StatusFailed, Error: &msg, FinishedAt: &now})
+	if err == nil {
+		observeEnd(failed)
+	}
 	if err == nil && s.events != nil {
 		if eerr := s.events.Emit(ctx, &events.Event{OrgID: orgID, Type: events.JobFailed, EntityID: failed.ID,
 			Data: map[string]any{"id": failed.ID, "kind": failed.Kind, "error": msg, "attempts": failed.Attempts,
@@ -192,8 +200,12 @@ func (s *Service) Fail(ctx context.Context, orgID, id string, cause error) (*Job
 // Cancel stops a queued or running job.
 func (s *Service) Cancel(ctx context.Context, orgID, id string) (*Job, error) {
 	now := s.now()
-	return s.repo.Transition(ctx, orgID, id, []Status{StatusQueued, StatusRunning},
+	job, err := s.repo.Transition(ctx, orgID, id, []Status{StatusQueued, StatusRunning},
 		&Update{Status: StatusCancelled, FinishedAt: &now})
+	if err == nil {
+		observeEnd(job)
+	}
+	return job, err
 }
 
 // ErrTimeout is the error of an attempt that exceeded its timeout.
@@ -295,9 +307,15 @@ func (s *Service) Mirror(ctx context.Context, orgID, refTable, refID string, sta
 	if !CanTransition(job.Status, status) && (job.Status != StatusQueued || !status.Terminal()) {
 		return nil
 	}
-	_, err = s.repo.Transition(ctx, orgID, job.ID, from, u)
+	moved, err := s.repo.Transition(ctx, orgID, job.ID, from, u)
 	if errors.Is(err, ErrTransition) {
 		return nil
+	}
+	if err == nil {
+		if status == StatusFailed {
+			JobFailures.WithLabelValues(moved.Kind).Inc()
+		}
+		observeEnd(moved)
 	}
 	return err
 }

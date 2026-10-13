@@ -958,6 +958,93 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/jobs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the jobs of the organization (API-09, JOB-03)
+     * @description Export, import, bulk, merge, template migration and the system jobs share one job model (JOB-01). Requires job:read.
+     */
+    get: operations['listJobs'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/jobs/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** A job with its status, progress and result */
+    get: operations['getJob'];
+    put?: never;
+    post?: never;
+    /**
+     * Cancel a queued or running job
+     * @description Allowed for the creator of the job and for holders of the permission of its kind (ci.bulk ci:write, ci.merge ci:delete, export export:run). A finished job is 409.
+     */
+    delete: operations['cancelJob'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/jobs/{id}/result': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** The result of a succeeded job */
+    get: operations['getJobResult'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/jobs/{id}/revert': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Revert a succeeded job where the revert is defined (E-25)
+     * @description Phase 1 defines the revert of ci.merge (the unmerge within 30 days, CI-12); every other kind, and a job that did not succeed, is 409. The bulk revert follows with BLK-02.
+     */
+    post: operations['revertJob'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/exports': {
     parameters: {
       query?: never;
@@ -7566,6 +7653,42 @@ export interface components {
       format: 'csv' | 'json' | 'datev';
       filters?: components['schemas']['ExportJobFilters'];
     };
+    Job: {
+      id: string;
+      organization_id?: string;
+      kind: string;
+      /** @enum {string} */
+      status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+      progress: number;
+      params?: unknown;
+      result?: unknown;
+      error?: string;
+      idempotency_key?: string;
+      created_by?: string;
+      attempts: number;
+      max_attempts: number;
+      /** Format: date-time */
+      run_after?: string;
+      timeout_seconds?: number;
+      ref_table?: string;
+      ref_id?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+      /** Format: date-time */
+      started_at?: string;
+      /** Format: date-time */
+      finished_at?: string;
+    };
+    JobListResponse: {
+      data: components['schemas']['Job'][];
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+      next_cursor?: string;
+    };
     ExportJob: {
       id: string;
       organization_id: string;
@@ -12281,6 +12404,187 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listJobs: {
+    parameters: {
+      query?: {
+        kind?: string;
+        status?: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of jobs */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description Unknown status. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  getJob: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The job */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Job'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  cancelJob: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The cancelled job */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Job'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description The job is finished already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  getJobResult: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The result of the job (its shape depends on the kind) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': unknown;
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description The job has no result yet. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  revertJob: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The job was reverted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            job_id: string;
+            reverted: boolean;
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description The kind defines no revert or the job did not succeed. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listExportJobs: {
