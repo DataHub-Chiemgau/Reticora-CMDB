@@ -9973,6 +9973,15 @@ components:
           type: string
           format: date-time
           readOnly: true
+        schema_version:
+          type: integer
+          readOnly: true
+          description: >-
+            Version of the materialized attribute schema of the CI type
+            (ci_type.schema_version) the CI was last written against: the
+            system base composed with the type's attributes (MET-16). Set by
+            the server when the CI is created or its type or attributes
+            change.
         site_id:
           type: string
           readOnly: true

@@ -291,3 +291,5 @@ MET-11;B/G1, Teil P2/G2;B;backend/internal/fieldmeta/fieldmeta_test.go;WP-117
 CI-03;[B];B;backend/internal/fieldmeta/fieldmeta_test.go;WP-117
 MET-45;Phase 1 im Fokus, voller Tag fehlt;B;backend/internal/rules/rules_test.go;WP-118
 REP-01;[B];B;backend/internal/rules/rules_test.go;WP-118
+MET-16;B/G1, Teil P2/G2;B;backend/internal/citype/compose_test.go;WP-119
+MET-04;B/G1;B;backend/internal/citype/compose_test.go;WP-119

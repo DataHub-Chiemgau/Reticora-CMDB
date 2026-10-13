@@ -75,6 +75,8 @@ export interface ValidationRules {
   min_length?: number;
   max_length?: number;
   pattern?: string;
+  /** Further patterns that apply as well (allOf, MET-16 composition). */
+  patterns?: string[];
   options?: string[];
 }
 
@@ -207,7 +209,7 @@ export function evaluateField(def: FieldDefinition, values: Record<string, unkno
 /**
  * ruleOf is the rule AST (MET-45, src/rules) of a definition, built exactly
  * like FieldDefinition.Rule in backend/internal/fieldmeta: required (when
- * withRequired), the allowed values, the pattern and the value and length
+ * withRequired), the allowed values, the patterns and the value and length
  * ranges.
  */
 export function ruleOf(def: FieldDefinition, withRequired: boolean): Rule {
@@ -216,7 +218,8 @@ export function ruleOf(def: FieldDefinition, withRequired: boolean): Rule {
   const v = def.validation;
   const allowed = v?.options && v.options.length > 0 ? v.options : def.enum_values;
   if (allowed && allowed.length > 0) rules.push({ op: 'enum', values: allowed });
-  if (v?.pattern) rules.push({ op: 'pattern', pattern: v.pattern });
+  for (const pattern of [v?.pattern, ...(v?.patterns ?? [])])
+    if (pattern) rules.push({ op: 'pattern', pattern });
   if (v?.min !== undefined || v?.max !== undefined)
     rules.push({ op: 'range', min: v?.min, max: v?.max });
   if (v?.min_length !== undefined || v?.max_length !== undefined)

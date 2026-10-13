@@ -70,6 +70,9 @@ type Field struct {
 	Validation      *fieldmeta.ValidationRules  `json:"validation,omitempty"`
 	Conditional     *fieldmeta.ConditionalRules `json:"conditional,omitempty"`
 	ReferenceTarget string                      `json:"reference_target,omitempty"`
+	// IsSystem marks a system definition (no organization), the base
+	// layer of the composition (MET-16).
+	IsSystem bool `json:"is_system,omitempty"`
 }
 
 // InstanceField is a field definition scoped to a single CI instance (spec §2).

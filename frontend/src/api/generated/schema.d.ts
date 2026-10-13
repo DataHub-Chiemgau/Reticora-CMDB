@@ -5960,6 +5960,8 @@ export interface components {
       readonly health?: 'ok' | 'warning' | 'critical' | 'unknown';
       /** Format: date-time */
       readonly health_updated_at?: string;
+      /** @description Version of the materialized attribute schema of the CI type (ci_type.schema_version) the CI was last written against: the system base composed with the type's attributes (MET-16). Set by the server when the CI is created or its type or attributes change. */
+      readonly schema_version?: number;
       /** @description Site of location_id, derived by the server. */
       readonly site_id?: string;
       /** @description Room of location_id (the location or its nearest room ancestor), derived by the server. */

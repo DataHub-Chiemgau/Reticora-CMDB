@@ -130,7 +130,24 @@ type ValidationRules struct {
 	MinLength *int     `json:"min_length,omitempty"`
 	MaxLength *int     `json:"max_length,omitempty"`
 	Pattern   string   `json:"pattern,omitempty"`
-	Options   []string `json:"options,omitempty"`
+	// Patterns are further patterns that apply as well (allOf); composing
+	// layers that each set a pattern produces them (MET-16).
+	Patterns []string `json:"patterns,omitempty"`
+	Options  []string `json:"options,omitempty"`
+}
+
+// AllPatterns returns Pattern and Patterns, the empty ones left out.
+func (v *ValidationRules) AllPatterns() []string {
+	if v == nil {
+		return nil
+	}
+	var out []string
+	for _, p := range append([]string{v.Pattern}, v.Patterns...) {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // ConditionalRules describe how a field reacts to the values of other fields
@@ -181,8 +198,8 @@ func ValidateDefinition(def FieldDefinition) error {
 	if def.ReferenceTarget != "" && !ReferenceTargets[def.ReferenceTarget] {
 		return fmt.Errorf("unsupported reference target %q", def.ReferenceTarget)
 	}
-	if def.Validation != nil && def.Validation.Pattern != "" {
-		if _, err := regexp.Compile(def.Validation.Pattern); err != nil {
+	for _, p := range def.Validation.AllPatterns() {
+		if _, err := regexp.Compile(p); err != nil {
 			return fmt.Errorf("invalid validation pattern: %w", err)
 		}
 	}
@@ -445,8 +462,8 @@ func (def *FieldDefinition) Rule(withRequired bool) rules.Rule {
 		list = append(list, rules.Rule{Op: rules.OpEnum, Values: values})
 	}
 	if v != nil {
-		if v.Pattern != "" {
-			list = append(list, rules.Rule{Op: rules.OpPattern, Pattern: v.Pattern})
+		for _, p := range v.AllPatterns() {
+			list = append(list, rules.Rule{Op: rules.OpPattern, Pattern: p})
 		}
 		if v.Min != nil || v.Max != nil {
 			list = append(list, rules.Rule{Op: rules.OpRange, Min: v.Min, Max: v.Max})

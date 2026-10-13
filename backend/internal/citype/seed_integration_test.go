@@ -69,7 +69,9 @@ func TestSystemTypeSeedsAndFields(t *testing.T) {
 		if observe == isLogical {
 			t.Errorf("%s: is_observable %v for is_logical %v", key, observe, isLogical)
 		}
-		if schemaVersion != 1 {
+		// Every change of the system base raises the version of every
+		// type (MET-16), so a seed starts at 1 but need not stay there.
+		if schemaVersion < 1 {
 			t.Errorf("%s: schema_version %d", key, schemaVersion)
 		}
 		if isLogical {

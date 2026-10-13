@@ -55,7 +55,8 @@ const ciSelectColumns = `
 	COALESCE(parent_ci_id::text, ''),
 	COALESCE(lifecycle_state, ''),
 	health,
-	health_updated_at
+	health_updated_at,
+	schema_version
 `
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
@@ -252,7 +253,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				$21, $22, $23, $24, $25
 			)
 			RETURNING id::text, COALESCE(site_id::text, ''), COALESCE(room_id::text, ''),
-				COALESCE(location_id::text, ''), health, version, created_at, updated_at
+				COALESCE(location_id::text, ''), health, version, schema_version, created_at, updated_at
 		`
 
 		var createdAt time.Time
@@ -283,7 +284,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 			item.IsManual,
 			nilIfEmpty(item.AssetID),
 			nilIfEmpty(item.ParentCIID),
-		).Scan(&item.ID, &item.SiteID, &item.RoomID, &item.LocationID, &item.Health, &item.Version, &createdAt, &updatedAt); err != nil {
+		).Scan(&item.ID, &item.SiteID, &item.RoomID, &item.LocationID, &item.Health, &item.Version, &item.SchemaVersion, &createdAt, &updatedAt); err != nil {
 			return locationError(fmt.Errorf("create ci: %w", err))
 		}
 
@@ -633,6 +634,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		&item.LifecycleState,
 		&item.Health,
 		&healthUpdated,
+		&item.SchemaVersion,
 	); err != nil {
 		return nil, err
 	}

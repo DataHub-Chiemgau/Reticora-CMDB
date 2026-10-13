@@ -127,7 +127,7 @@ describe('ruleOf', () => {
       data_type: 'integer',
       required: true,
       enum_values: ['a'],
-      validation: { min: 1, max: 9, min_length: 2, pattern: '^x' },
+      validation: { min: 1, max: 9, min_length: 2, pattern: '^x', patterns: ['y$'] },
     };
     expect(ruleOf(def, true)).toEqual({
       op: 'all',
@@ -135,6 +135,7 @@ describe('ruleOf', () => {
         { op: 'required' },
         { op: 'enum', values: ['a'] },
         { op: 'pattern', pattern: '^x' },
+        { op: 'pattern', pattern: 'y$' },
         { op: 'range', min: 1, max: 9 },
         { op: 'range', of: 'length', min: 2, max: undefined },
       ],
