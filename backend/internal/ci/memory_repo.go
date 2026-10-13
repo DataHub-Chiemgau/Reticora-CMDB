@@ -16,12 +16,17 @@ type MemoryRepository struct {
 	mu    sync.RWMutex
 	items map[string]*Item
 	seq   int
+	// deleted keeps what a restore brings back (CI-05).
+	deleted map[string]deletedState
 }
+
+type deletedState struct{ status, assetID string }
 
 // NewMemoryRepository creates a new in-memory repository.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		items: make(map[string]*Item),
+		items:   make(map[string]*Item),
+		deleted: make(map[string]deletedState),
 	}
 }
 
@@ -194,9 +199,13 @@ func (r *MemoryRepository) Delete(ctx context.Context, orgID, id string) error {
 	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
 		return fmt.Errorf("not found")
 	}
-	// A deleted CI is kept for the retention like in PostgreSQL (CI-05).
+	// A deleted CI is kept for the retention like in PostgreSQL (CI-05):
+	// decommissioned, without its asset link.
 	now := time.Now().UTC()
+	r.deleted[id] = deletedState{status: item.Status, assetID: item.AssetID}
 	item.DeletedAt = &now
+	item.Status = StatusDecommissioned
+	item.AssetID = ""
 	return nil
 }
 
@@ -212,6 +221,13 @@ func (r *MemoryRepository) RestoreDeleted(_ context.Context, orgID, id string, r
 		return nil, ErrRetentionExpired
 	}
 	item.DeletedAt = nil
+	if prev, ok := r.deleted[id]; ok {
+		item.Status, item.AssetID = prev.status, prev.assetID
+		if item.Status == "" || item.Status == StatusDecommissioned {
+			item.Status = StatusActive
+		}
+		delete(r.deleted, id)
+	}
 	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	item.Version++
 	return item, nil

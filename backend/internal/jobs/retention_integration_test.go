@@ -19,7 +19,7 @@ import (
 //     verifies; the database refuses to delete younger entries and any
 //     entry outside a retention run;
 //   - CI, entity history older than three years, CIs soft-deleted longer
-//     than 90 days (referenced ones stay) and review items resolved more
+//     than 90 days (references are released, CI-05) and review items resolved more
 //     than a year ago are deleted, younger data stays;
 //   - each run that deleted something writes its own audit entry.
 //
@@ -152,8 +152,13 @@ func TestRetentionRunsAgainstPostgres(t *testing.T) {
 	if n := count(`SELECT count(*) FROM entity_change WHERE organization_id = $1`, f.OrgA); n != 1 {
 		t.Errorf("entity_change rows: %d, want the young one", n)
 	}
-	if n := count(`SELECT count(*) FROM ci WHERE id = ANY($1::uuid[])`, []string{expired, young, referenced}); n != 2 {
-		t.Errorf("CIs after the soft-delete run: %d, want young and referenced", n)
+	// CI-05: the hard delete also removes a CI an asset still pointed to;
+	// the asset stays and loses the link.
+	if n := count(`SELECT count(*) FROM ci WHERE id = ANY($1::uuid[])`, []string{expired, young, referenced}); n != 1 {
+		t.Errorf("CIs after the soft-delete run: %d, want the young one", n)
+	}
+	if n := count(`SELECT count(*) FROM asset WHERE id = $1 AND ci_id IS NULL`, asset); n != 1 {
+		t.Errorf("the asset of the referenced CI is gone or still linked")
 	}
 	if n := count(`SELECT count(*) FROM ci WHERE id = $1`, expired); n != 0 {
 		t.Error("the expired CI stays")

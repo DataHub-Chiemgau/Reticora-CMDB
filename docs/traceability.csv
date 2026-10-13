@@ -367,3 +367,5 @@ API-01;[B];C;backend/internal/middleware/openapi_test.go;WP-167
 API-05;[B];C;backend/internal/server/authz_test.go;WP-168
 API-05;[B];C;backend/internal/ci/handler_test.go;WP-169
 CI-05;[B];C;backend/internal/ci/handler_test.go;WP-169
+CI-05;[B];C;backend/internal/ci/delete_integration_test.go;WP-170
+LCY-01;[B];C;backend/internal/ci/delete_integration_test.go;WP-170

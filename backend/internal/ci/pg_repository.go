@@ -561,14 +561,31 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 			return fmt.Errorf("get ci for delete: %w", err)
 		}
 
-		cmdTag, err := tx.Exec(ctx, "UPDATE ci SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL", id, orgID)
+		// CI-05: the CI is decommissioned (its operative status; the
+		// lifecycle state stays, LCY-01) and its asset link is released;
+		// the change row keeps what a restore brings back.
+		var assetPrimary bool
+		if before.AssetID != "" {
+			tag, uerr := tx.Exec(ctx, "UPDATE asset SET ci_id = NULL WHERE id = $1 AND ci_id = $2", before.AssetID, id)
+			if uerr != nil {
+				return fmt.Errorf("release asset link: %w", uerr)
+			}
+			assetPrimary = tag.RowsAffected() > 0
+		}
+		cmdTag, err := tx.Exec(ctx, `UPDATE ci SET deleted_at = NOW(), updated_at = NOW(), status = 'decommissioned', asset_id = NULL
+			WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`, id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete ci: %w", err)
 		}
 		if cmdTag.RowsAffected() == 0 {
 			return fmt.Errorf("not found")
 		}
-		if err := r.recordCIChange(ctx, tx, orgID, id, before.Version, "delete", "", before, nil); err != nil {
+		released := map[string]any{"status": StatusDecommissioned}
+		if before.AssetID != "" {
+			released["unlinked_asset_id"] = before.AssetID
+			released["asset_primary"] = assetPrimary
+		}
+		if err := r.recordCIChange(ctx, tx, orgID, id, before.Version, "delete", "", before, released); err != nil {
 			return err
 		}
 		if err := r.recordAudit(ctx, tx, "ci.deleted", before, map[string]interface{}{"before": before}); err != nil {
@@ -609,7 +626,22 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 		if retention > 0 && time.Since(*deletedAt) > retention {
 			return ErrRetentionExpired
 		}
-		tag, err := tx.Exec(ctx, "UPDATE ci SET deleted_at = NULL, updated_at = NOW(), version = version + 1 WHERE id = $1 AND organization_id = $2 AND deleted_at IS NOT NULL", id, orgID)
+		// The status and the asset link of the deletion come back (CI-05).
+		var status, assetID string
+		var primary bool
+		err := tx.QueryRow(ctx, `SELECT COALESCE(old_value->>'status', ''), COALESCE(new_value->>'unlinked_asset_id', ''),
+				COALESCE((new_value->>'asset_primary')::boolean, false)
+			FROM ci_change WHERE ci_id = $1 AND change_type = 'delete' ORDER BY created_at DESC LIMIT 1`, id).Scan(&status, &assetID, &primary)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("read deletion: %w", err)
+		}
+		if status == "" || status == StatusDecommissioned {
+			status = StatusActive
+		}
+		tag, err := tx.Exec(ctx, `UPDATE ci SET deleted_at = NULL, updated_at = NOW(), version = version + 1,
+				status = CASE WHEN status = 'decommissioned' THEN $3 ELSE status END,
+				asset_id = COALESCE(asset_id, (SELECT a.id FROM asset a WHERE a.id = NULLIF($4, '')::uuid))
+			WHERE id = $1 AND organization_id = $2 AND deleted_at IS NOT NULL`, id, orgID, status, assetID)
 		if err != nil {
 			// A reactivated CI may hold a value of a unique attribute that
 			// another CI took in the meantime (MET-15).
@@ -617,6 +649,11 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 		}
 		if tag.RowsAffected() == 0 {
 			return fmt.Errorf("not found")
+		}
+		if primary && assetID != "" {
+			if _, err = tx.Exec(ctx, "UPDATE asset SET ci_id = $1 WHERE id = $2 AND ci_id IS NULL", id, assetID); err != nil {
+				return fmt.Errorf("restore asset link: %w", err)
+			}
 		}
 		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2", ciSelectColumns)
 		if restored, err = scanCI(tx.QueryRow(ctx, query, id, orgID)); err != nil {

@@ -1,6 +1,14 @@
 package topology
 
-import "testing"
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+)
 
 func TestComputeImpactFollowsDirectedEdges(t *testing.T) {
 	edges := []Edge{
@@ -42,5 +50,38 @@ func TestComputeImpactNoBackward(t *testing.T) {
 	got := computeImpact("vm", edges, "")
 	if len(got) != 0 {
 		t.Fatalf("failure of a dependent must not propagate upstream, got %v", got)
+	}
+}
+
+// TestImpactSkipsDeletedCIs covers CI-05: a deleted CI is no node of the
+// impact walk, so what is only reachable through it is not impacted
+// either.
+func TestImpactSkipsDeletedCIs(t *testing.T) {
+	ciRepo, relRepo, ids := seed(t)
+	mux := chi.NewRouter()
+	NewHandler(ciRepo, relRepo).RegisterRoutes(mux)
+	impacted := func() map[string]bool {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantReq("GET", "/api/v1/impact/"+ids["sw1"]))
+		var body struct {
+			Impacted []Node `json:"impacted"`
+		}
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &body) != nil {
+			t.Fatalf("impact: %d %s", w.Code, w.Body.String())
+		}
+		out := map[string]bool{}
+		for _, n := range body.Impacted {
+			out[n.ID] = true
+		}
+		return out
+	}
+	if before := impacted(); !before[ids["srv1"]] || !before[ids["pdu1"]] {
+		t.Fatalf("seed graph: impacted %v", before)
+	}
+	if err := ciRepo.Delete(context.Background(), "org-1", ids["srv1"]); err != nil {
+		t.Fatal(err)
+	}
+	if after := impacted(); len(after) != 0 {
+		t.Errorf("impact passes through a deleted CI: %v", after)
 	}
 }

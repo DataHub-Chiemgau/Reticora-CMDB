@@ -376,7 +376,10 @@ export interface paths {
     get: operations['getCI'];
     put?: never;
     post?: never;
-    /** Delete a configuration item */
+    /**
+     * Delete a configuration item
+     * @description Soft delete (CI-05): sets deleted_at and the operative status decommissioned (the lifecycle state stays, LCY-01) and releases the asset link; relationships stay, traversal and impact skip the CI. POST /cis/{id}/restore brings it back within 90 days, afterwards the retention run deletes it with its interfaces and IP addresses.
+     */
     delete: operations['deleteCI'];
     options?: never;
     head?: never;
