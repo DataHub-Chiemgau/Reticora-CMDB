@@ -757,6 +757,22 @@ paths:
       operationId: listAuditEntries
       tags: [Audit]
       summary: List audit log entries
+      description: >-
+        Newest first; requires audit:read (AUD-05). The filters combine with
+        AND; `from` is inclusive, `to` exclusive.
+      parameters:
+        - {name: action, in: query, schema: {type: string}}
+        - {name: resource_type, in: query, schema: {type: string}}
+        - {name: resource_id, in: query, schema: {type: string, format: uuid}}
+        - {name: actor_id, in: query, schema: {type: string, format: uuid}}
+        - name: source
+          in: query
+          schema:
+            $ref: '#/components/schemas/AuditSource'
+        - {name: request_id, in: query, schema: {type: string}}
+        - {name: correlation_id, in: query, schema: {type: string}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
       responses:
         '200':
           description: Paginated audit log
@@ -764,6 +780,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuditEntryListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -10332,7 +10350,7 @@ components:
 
     AuditEntry:
       type: object
-      required: [id, organization_id, seq, timestamp, action, resource_type, hash]
+      required: [id, organization_id, seq, timestamp, action, resource_type, source, hash]
       properties:
         id:
           type: string
@@ -10359,10 +10377,27 @@ components:
         changes:
           type: object
           additionalProperties: true
+          description: >-
+            What changed. Domain entries carry old and new values; the entry
+            of a write request names the route, the response status, the
+            written fields and, for resources without a UUID, resource_key.
+        source:
+          $ref: '#/components/schemas/AuditSource'
+        request_id:
+          type: string
+          description: The X-Request-ID of the request that made the change.
+        correlation_id:
+          type: string
+          description: The X-Correlation-ID of the operation (the request id when the caller sent none).
         previous_hash:
           type: string
         hash:
           type: string
+
+    AuditSource:
+      type: string
+      enum: [ui, api, collector, import, system]
+      description: Where a change came from (AUD-07).
 
     AuditEntryListResponse:
       allOf:

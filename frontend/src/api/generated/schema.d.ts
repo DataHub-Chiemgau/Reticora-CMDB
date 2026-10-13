@@ -413,7 +413,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List audit log entries */
+    /**
+     * List audit log entries
+     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive.
+     */
     get: operations['listAuditEntries'];
     put?: never;
     post?: never;
@@ -6126,12 +6129,23 @@ export interface components {
       action: string;
       resource_type: string;
       resource_id?: string;
+      /** @description What changed. Domain entries carry old and new values; the entry of a write request names the route, the response status, the written fields and, for resources without a UUID, resource_key. */
       changes?: {
         [key: string]: unknown;
       };
+      source: components['schemas']['AuditSource'];
+      /** @description The X-Request-ID of the request that made the change. */
+      request_id?: string;
+      /** @description The X-Correlation-ID of the operation (the request id when the caller sent none). */
+      correlation_id?: string;
       previous_hash?: string;
       hash: string;
     };
+    /**
+     * @description Where a change came from (AUD-07).
+     * @enum {string}
+     */
+    AuditSource: 'ui' | 'api' | 'collector' | 'import' | 'system';
     AuditEntryListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['AuditEntry'][];
     };
@@ -9920,6 +9934,15 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
+        action?: string;
+        resource_type?: string;
+        resource_id?: string;
+        actor_id?: string;
+        source?: components['schemas']['AuditSource'];
+        request_id?: string;
+        correlation_id?: string;
+        from?: string;
+        to?: string;
       };
       header?: never;
       path?: never;
@@ -9936,6 +9959,7 @@ export interface operations {
           'application/json': components['schemas']['AuditEntryListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
     };
   };

@@ -109,7 +109,8 @@ func TestChainFormulaAndSequence(t *testing.T) {
 	e := Entry{OrganizationID: "org-1", Seq: 1, Timestamp: ts, ActorID: "u-1", ActorType: "user", Action: "ci.created",
 		ResourceType: "ci", ResourceID: "ci-1", Changes: map[string]interface{}{"name": "a"}, PreviousHash: GenesisHash}
 	canonical := `{"organization_id":"org-1","seq":1,"timestamp":"2026-10-13T12:00:00.123456Z","actor_id":"u-1",` +
-		`"actor_type":"user","action":"ci.created","resource_type":"ci","resource_id":"ci-1","changes":{"name":"a"}}`
+		`"actor_type":"user","action":"ci.created","resource_type":"ci","resource_id":"ci-1","changes":{"name":"a"},` +
+		`"source":"system","request_id":"","correlation_id":""}`
 	inner := sha256.Sum256([]byte(canonical))
 	want := sha256.Sum256(append(make([]byte, 32), inner[:]...))
 	if got := ComputeHash(&e); got != hex.EncodeToString(want[:]) {

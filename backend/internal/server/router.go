@@ -7,6 +7,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
@@ -70,6 +72,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -175,9 +178,13 @@ type Options struct {
 	// Audit is registered only when a database-backed audit trail exists.
 	Audit *audit.Handler
 	// AuditPool enables the security report to include audit-chain integrity;
-	// it is the same pool the audit handler serves from.
-	AuditPool  *pgxpool.Pool
-	AIProvider ai.Provider
+	// it is the same pool the audit handler serves from. With it, every
+	// successful write request is audited (AUD-07).
+	AuditPool *pgxpool.Pool
+	// RouteAuditor replaces the audit of write requests (tests); nil uses
+	// AuditPool.
+	RouteAuditor middleware.RouteAuditor
+	AIProvider   ai.Provider
 	// Blobs persists asynchronous export results; nil disables export-job
 	// creation (the streaming export endpoint stays available).
 	Blobs blob.Store
@@ -285,7 +292,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// attaches the permission middleware resolved from the route table.
 	// Routes without a mapping fail closed; the router test locks in that
 	// every route is mapped.
-	protected := authorizingRouter{Router: mux, after: opts.RouteMiddleware}
+	protected := authorizingRouter{Router: mux, after: opts.RouteMiddleware, auditor: routeAuditor(&opts)}
 
 	identityHandler := identity.NewHandler(opts.OIDC, opts.Sessions).
 		WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole).
@@ -518,4 +525,31 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 
 	return promhttp.HandlerFor(registry, promhttp.HandlerOpts{}), httpMetrics
+}
+
+// routeAuditor stores the audit entries of write requests in the
+// organization's chain; without a database nothing is stored.
+func routeAuditor(opts *Options) middleware.RouteAuditor {
+	if opts.RouteAuditor != nil {
+		return opts.RouteAuditor
+	}
+	if opts.AuditPool == nil {
+		return nil
+	}
+	return pgRouteAuditor{pool: opts.AuditPool, recorder: audit.NewPGRecorder()}
+}
+
+// pgRouteAuditor writes a route's audit entry org-wide on behalf of the
+// organization: the entry belongs to the organization's chain (E-08).
+type pgRouteAuditor struct {
+	pool     *pgxpool.Pool
+	recorder *audit.PGRecorder
+}
+
+func (a pgRouteAuditor) RecordRoute(ctx context.Context, entry *audit.Entry) error {
+	scope := database.OrgWideScope(entry.OrganizationID, "")
+	return database.WithTenant(ctx, a.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := a.recorder.Record(ctx, tx, *entry)
+		return err
+	})
 }

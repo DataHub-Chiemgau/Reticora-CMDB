@@ -266,21 +266,24 @@ func TestAuditChainPerOrganizationPG(t *testing.T) {
 
 	// Migration 000117 re-chains existing entries: back to the former
 	// chain, add entries, forward again.
-	down, err := os.ReadFile("../../migrations/000117_audit_chain_per_org.down.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	up, err := os.ReadFile("../../migrations/000117_audit_chain_per_org.up.sql")
-	if err != nil {
-		t.Fatal(err)
+	// 000118 (audit fields, WP-133) sits on top and is undone and redone
+	// around it.
+	read := func(name string) string {
+		b, readErr := os.ReadFile("../../migrations/" + name)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		return string(b)
 	}
 	mtx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = mtx.Rollback(ctx) }()
-	if _, err = mtx.Exec(ctx, string(down)); err != nil {
-		t.Fatalf("down: %v", err)
+	for _, name := range []string{"000118_audit_fields.down.sql", "000117_audit_chain_per_org.down.sql"} {
+		if _, err = mtx.Exec(ctx, read(name)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
 	}
 	for i := range 3 {
 		if _, err = mtx.Exec(ctx, `INSERT INTO audit_log (organization_id, timestamp, action, resource_type, previous_hash, hash)
@@ -288,13 +291,15 @@ func TestAuditChainPerOrganizationPG(t *testing.T) {
 			t.Fatalf("legacy entry: %v", err)
 		}
 	}
-	if _, err = mtx.Exec(ctx, string(up)); err != nil {
-		t.Fatalf("up: %v", err)
+	for _, name := range []string{"000117_audit_chain_per_org.up.sql", "000118_audit_fields.up.sql"} {
+		if _, err = mtx.Exec(ctx, read(name)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
 	}
 	var legacy, chained int
 	if err = mtx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE action = 'legacy'),
 		count(*) FILTER (WHERE hash = audit_entry_hash(organization_id, seq, timestamp, actor_id, actor_type, action,
-			resource_type, resource_id, changes, previous_hash))
+			resource_type, resource_id, changes, source, request_id, correlation_id, previous_hash))
 		FROM audit_log WHERE organization_id = $1`, orgs[0]).Scan(&legacy, &chained); err != nil {
 		t.Fatal(err)
 	}
