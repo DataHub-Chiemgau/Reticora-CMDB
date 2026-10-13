@@ -32,7 +32,16 @@ type Relationship struct {
 	VerificationState string   `json:"verification_state,omitempty"`
 	SourceSystem      string   `json:"source_system,omitempty"`
 	Notes             string   `json:"notes,omitempty"`
-	CreatedAt         string   `json:"created_at"`
+	// SourceInterfaceID and TargetInterfaceID are the port endpoints of
+	// the edge: interfaces of its source and target CI (REL-02).
+	SourceInterfaceID string `json:"source_interface_id,omitempty"`
+	TargetInterfaceID string `json:"target_interface_id,omitempty"`
+	// LastConfirmedAt is the last time the source of the edge confirmed
+	// it; VerifiedBy/VerifiedAt name who verified it and when (REL-02).
+	LastConfirmedAt string `json:"last_confirmed_at,omitempty"`
+	VerifiedBy      string `json:"verified_by,omitempty"`
+	VerifiedAt      string `json:"verified_at,omitempty"`
+	CreatedAt       string `json:"created_at"`
 	UpdatedAt         string   `json:"updated_at"`
 	// Projected marks a structural relationship that is not stored but
 	// derived (DB-05, CH27): contains from ci.parent_ci_id, mounted_in from
@@ -64,6 +73,8 @@ type CreateRequest struct {
 	VerificationState string         `json:"verification_state,omitempty"`
 	SourceSystem      string         `json:"source_system,omitempty"`
 	Notes             string         `json:"notes,omitempty"`
+	SourceInterfaceID string         `json:"source_interface_id,omitempty"`
+	TargetInterfaceID string         `json:"target_interface_id,omitempty"`
 }
 
 // UpdateRequest is the payload for editing a relationship's provenance and
@@ -77,6 +88,9 @@ type UpdateRequest struct {
 	VerificationState *string        `json:"verification_state,omitempty"`
 	SourceSystem      *string        `json:"source_system,omitempty"`
 	Notes             *string        `json:"notes,omitempty"`
+	// ActorID is the user who changes the edge; a change of the
+	// verification state records it as verified_by (set by the handler).
+	ActorID string `json:"-"`
 }
 
 // ValidVerificationStates lists the verification vocabulary for relationships.
@@ -185,6 +199,10 @@ func (r *MemoryRepository) Create(_ context.Context, rel *Relationship) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	rel.CreatedAt = now
 	rel.UpdatedAt = now
+	rel.LastConfirmedAt = now
+	if rel.VerificationState == "verified" {
+		rel.VerifiedAt = now
+	}
 	r.items[rel.ID] = rel
 	return nil
 }
@@ -210,6 +228,10 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 	}
 	if req.VerificationState != nil {
 		rel.VerificationState = *req.VerificationState
+		rel.VerifiedBy, rel.VerifiedAt = "", ""
+		if rel.VerificationState == "verified" {
+			rel.VerifiedBy, rel.VerifiedAt = req.ActorID, time.Now().UTC().Format(time.RFC3339Nano)
+		}
 	}
 	if req.SourceSystem != nil {
 		rel.SourceSystem = *req.SourceSystem
@@ -425,6 +447,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Confidence:     req.Confidence,
 		SourceSystem:   req.SourceSystem,
 		Notes:          req.Notes,
+
+		SourceInterfaceID: req.SourceInterfaceID,
+		TargetInterfaceID: req.TargetInterfaceID,
 	}
 	if rel.Attributes == nil {
 		rel.Attributes = make(map[string]any)
@@ -447,6 +472,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if !ValidVerificationStates[rel.VerificationState] {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid verification_state")
 		return
+	}
+	if rel.VerificationState == "verified" {
+		rel.VerifiedBy = t.UserID
 	}
 
 	if err := h.repo.Create(r.Context(), rel); err != nil {
@@ -492,6 +520,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.ActorID = t.UserID
 	rel, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {

@@ -191,6 +191,7 @@ type suppressionProvider interface {
 // upsertRelationship creates a discovery-sourced relationship if an equivalent
 // edge does not already exist. Returns true when a new edge was created.
 func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d DerivedRelationship) bool {
+	confidence := d.Confidence
 	existing, _, err := h.relRepo.List(ctx, orgID, d.SourceCIID, api.PaginationParams{Limit: 10000, Offset: 0})
 	if err == nil {
 		for _, rel := range existing {
@@ -205,7 +206,8 @@ func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d Derive
 		TargetCIID:     d.TargetCIID,
 		RelType:        d.RelType,
 		Source:         RelationshipSource,
-		Attributes:     map[string]any{"confidence": d.Confidence},
+		Attributes:     map[string]any{},
+		Confidence:     &confidence,
 	}
 	if err := h.relRepo.Create(ctx, rel); err != nil {
 		return false

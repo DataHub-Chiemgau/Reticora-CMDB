@@ -1,9 +1,19 @@
 package relationship_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
@@ -108,4 +118,144 @@ func TestTraverseFromProjectsRelTypePG(t *testing.T) {
 	if len(relsD1) != 2 {
 		t.Fatalf("expected 2 edges at depth 1 (chain start + cycle edge), got %d", len(relsD1))
 	}
+}
+
+// TestRelationshipEdgesFollowREL02 covers REL-02 (WP-128) against
+// PostgreSQL: interface endpoints (interfaces of the edge's CIs), the edge
+// is unique per (org, source, target, type, interfaces), confidence is a
+// column limited to 0–1 and takes over attributes.confidence (migration
+// 000114), last_confirmed_at is set, verifying records verified_by and
+// verified_at; indexes (org, source) and (org, target) exist.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRelationshipEdgesFollowREL02(t *testing.T) {
+	f := scopetest.Seed(t, "91")
+	bg := context.Background()
+	user := f.AppUser(t, f.OrgA, "rel02-verifier")
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: user})
+	sw1, sw2 := f.CI(t, f.OrgA, "", "rel02-sw1"), f.CI(t, f.OrgA, "", "rel02-sw2")
+	iface := func(ciID, name string) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO network_interface (organization_id, ci_id, name) VALUES ($1, $2, $3) RETURNING id::text`,
+			f.OrgA, ciID, name).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	sw1p1, sw1p2, sw2p1 := iface(sw1, "Gi1/0/1"), iface(sw1, "Gi1/0/2"), iface(sw2, "Gi1/0/1")
+
+	var defs []string
+	if err := f.Admin.QueryRow(bg, `SELECT array_agg(d) FROM (
+			SELECT indexdef AS d FROM pg_indexes WHERE tablename = 'ci_relationship'
+			UNION ALL SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'ci_relationship'::regclass) x`).Scan(&defs); err != nil {
+		t.Fatal(err)
+	}
+	all := strings.Join(defs, "\n")
+	for _, want := range []string{
+		"(organization_id, source_ci_id, target_ci_id, rel_type, COALESCE(source_interface_id, '00000000-0000-0000-0000-000000000000'::uuid), COALESCE(target_interface_id, '00000000-0000-0000-0000-000000000000'::uuid))",
+		"USING btree (organization_id, source_ci_id)",
+		"USING btree (organization_id, target_ci_id)",
+		"CHECK (((confidence IS NULL) OR ((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))))",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %q in\n%s", want, all)
+		}
+	}
+
+	mux := chi.NewRouter()
+	relationship.NewHandler(relationship.NewPGRepository(f.App)).RegisterRoutes(mux)
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, bytes.NewBufferString(body)).WithContext(ctx)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	edge := func(src, dst string) string {
+		body := `{"source_ci_id":"` + sw1 + `","target_ci_id":"` + sw2 + `","rel_type":"connected_to","confidence":0.9`
+		if src != "" {
+			body += `,"source_interface_id":"` + src + `"`
+		}
+		if dst != "" {
+			body += `,"target_interface_id":"` + dst + `"`
+		}
+		return body + "}"
+	}
+	w := call(http.MethodPost, "/api/v1/relationships", edge(sw1p1, sw2p1))
+	var first relationship.Relationship
+	_ = json.Unmarshal(w.Body.Bytes(), &first)
+	if w.Code != http.StatusCreated || first.SourceInterfaceID != sw1p1 || first.TargetInterfaceID != sw2p1 ||
+		first.VerifiedBy != user || first.VerifiedAt == "" || first.LastConfirmedAt == "" || first.Confidence == nil || *first.Confidence != 0.9 {
+		t.Fatalf("manual edge with ports: %d %s", w.Code, w.Body.String())
+	}
+	for name, tc := range map[string]struct {
+		body   string
+		status int
+	}{
+		"other port pair":     {edge(sw1p2, sw2p1), http.StatusCreated},
+		"same ports again":    {edge(sw1p1, sw2p1), http.StatusConflict},
+		"without ports":       {edge("", ""), http.StatusCreated},
+		"without ports again": {edge("", ""), http.StatusConflict},
+		"port of another CI":  {edge(sw2p1, ""), http.StatusUnprocessableEntity},
+		"confidence above 1":  {strings.Replace(edge(sw1p2, ""), "0.9", "1.5", 1), http.StatusBadRequest},
+	} {
+		if got := call(http.MethodPost, "/api/v1/relationships", tc.body); got.Code != tc.status {
+			t.Errorf("%s: %d %s, want %d", name, got.Code, got.Body.String(), tc.status)
+		}
+	}
+	if _, err := f.Admin.Exec(bg, `UPDATE ci_relationship SET confidence = 1.5 WHERE id = $1`, first.ID); err == nil {
+		t.Error("the database accepted confidence 1.5")
+	}
+
+	// Verification: leaving the verified state clears the actor, verifying
+	// records it again.
+	w = call(http.MethodPatch, "/api/v1/relationships/"+first.ID, `{"verification_state":"disputed"}`)
+	var disputed relationship.Relationship
+	_ = json.Unmarshal(w.Body.Bytes(), &disputed)
+	if w.Code != http.StatusOK || disputed.VerifiedBy != "" || disputed.VerifiedAt != "" {
+		t.Errorf("disputed: %d %s", w.Code, w.Body.String())
+	}
+	w = call(http.MethodPatch, "/api/v1/relationships/"+first.ID, `{"verification_state":"verified"}`)
+	var verified relationship.Relationship
+	_ = json.Unmarshal(w.Body.Bytes(), &verified)
+	if verified.VerifiedBy != user || verified.VerifiedAt == "" || verified.SourceInterfaceID != sw1p1 {
+		t.Errorf("verified again: %s", w.Body.String())
+	}
+
+	// Data transfer of migration 000114: attributes.confidence becomes the
+	// column.
+	t.Run("data transfer", func(t *testing.T) {
+		down, err := os.ReadFile("../../migrations/000114_relationship_rel02.down.sql")
+		if err != nil {
+			t.Fatal(err)
+		}
+		up, err := os.ReadFile("../../migrations/000114_relationship_rel02.up.sql")
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := f.Admin.Begin(bg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(bg) }()
+		if _, err = tx.Exec(bg, `DELETE FROM ci_relationship WHERE organization_id = $1`, f.OrgA); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = tx.Exec(bg, string(down)); err != nil {
+			t.Fatalf("down: %v", err)
+		}
+		if _, err = tx.Exec(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type, source, attributes)
+			VALUES ($1, $2, $3, 'uplink_to', 'discovery', '{"confidence": 0.6, "port": "x"}')`, f.OrgA, sw1, sw2); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = tx.Exec(bg, string(up)); err != nil {
+			t.Fatalf("up: %v", err)
+		}
+		var confidence float64
+		var attrs string
+		if err = tx.QueryRow(bg, `SELECT confidence, attributes::text FROM ci_relationship WHERE organization_id = $1 AND rel_type = 'uplink_to'`,
+			f.OrgA).Scan(&confidence, &attrs); err != nil || confidence != 0.6 || attrs != `{"port": "x"}` {
+			t.Errorf("after the transfer: confidence %v attributes %s (%v)", confidence, attrs, err)
+		}
+	})
 }

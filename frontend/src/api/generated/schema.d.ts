@@ -6208,7 +6208,24 @@ export interface components {
       attributes: {
         [key: string]: unknown;
       };
+      /** @description Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow. */
       source: string;
+      confidence?: number;
+      /** @description Port of the source CI the edge starts at (REL-02). */
+      source_interface_id?: string;
+      /** @description Port of the target CI the edge ends at (REL-02). */
+      target_interface_id?: string;
+      /** @enum {string} */
+      verification_state?: 'unverified' | 'verified' | 'disputed' | 'stale';
+      /**
+       * Format: date-time
+       * @description Last time the source of the edge confirmed it.
+       */
+      readonly last_confirmed_at?: string;
+      /** @description User who verified the edge; cleared when it leaves the verified state. */
+      readonly verified_by?: string;
+      /** Format: date-time */
+      readonly verified_at?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -6223,6 +6240,11 @@ export interface components {
       };
       /** @default manual */
       source: string;
+      confidence?: number;
+      /** @description An interface of the source CI; the edge is unique per (source, target, type, interfaces), a taken one is 409. */
+      source_interface_id?: string;
+      /** @description An interface of the target CI; an interface of another CI is 422. */
+      target_interface_id?: string;
     };
     /** @description All properties are optional; only the supplied ones are changed. */
     UpdateRelationshipRequest: {

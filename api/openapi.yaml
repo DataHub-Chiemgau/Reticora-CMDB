@@ -10476,6 +10476,33 @@ components:
           additionalProperties: true
         source:
           type: string
+          description: Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow.
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        source_interface_id:
+          type: string
+          description: Port of the source CI the edge starts at (REL-02).
+        target_interface_id:
+          type: string
+          description: Port of the target CI the edge ends at (REL-02).
+        verification_state:
+          type: string
+          enum: [unverified, verified, disputed, stale]
+        last_confirmed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Last time the source of the edge confirmed it.
+        verified_by:
+          type: string
+          readOnly: true
+          description: User who verified the edge; cleared when it leaves the verified state.
+        verified_at:
+          type: string
+          format: date-time
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -10499,6 +10526,16 @@ components:
         source:
           type: string
           default: manual
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        source_interface_id:
+          type: string
+          description: An interface of the source CI; the edge is unique per (source, target, type, interfaces), a taken one is 409.
+        target_interface_id:
+          type: string
+          description: An interface of the target CI; an interface of another CI is 422.
 
     UpdateRelationshipRequest:
       type: object

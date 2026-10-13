@@ -302,3 +302,4 @@ NET-05;[B];B;backend/internal/ipam/handler_test.go;WP-125
 API-05;[B];B;backend/internal/ipam/handler_test.go;WP-125
 RCK-01;[B];B;backend/internal/rack/rules_integration_test.go;WP-126
 REL-01;[B];B;backend/internal/relationshiptype/seed_integration_test.go;WP-127
+REL-02;[B];B;backend/internal/relationship/pg_repository_integration_test.go;WP-128
