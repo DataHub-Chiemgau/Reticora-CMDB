@@ -2800,6 +2800,54 @@ export interface paths {
     patch: operations['updateRack'];
     trace?: never;
   };
+  '/api/v1/racks/{id}/layout': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Occupancy of a rack (RCK-02)
+     * @description The rack, its mounts ordered by position and the free units of the front and the rear (a mount on both faces occupies both).
+     */
+    get: operations['getRackLayout'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/racks/{id}/mounts/{ci_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        ci_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Mount a CI at a position or move its mount (RCK-02)
+     * @description Mounts the CI into this rack (201) or moves its mount here (200); a CI has at most one mount. The location of the CI, or of its asset, becomes the rack; ci_change and the audit record the mount (RCK-03, DB-05).
+     */
+    put: operations['putRackMount'];
+    post?: never;
+    /** Unmount a CI from this rack (RCK-03) */
+    delete: operations['deleteRackMountByCI'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/racks/{id}/mounts': {
     parameters: {
       query?: never;
@@ -2810,11 +2858,15 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** List mounts in a rack */
+    /**
+     * List mounts in a rack
+     * @deprecated
+     */
     get: operations['listRackMounts'];
     put?: never;
     /**
      * Mount a CI into a rack
+     * @deprecated
      * @description The location of the CI, or of its asset, becomes the rack; ci_change and the audit record the mount (RCK-03, DB-05).
      */
     post: operations['createRackMount'];
@@ -6644,6 +6696,24 @@ export interface components {
       merge_id: string;
       survivor: components['schemas']['CI'];
       victim: components['schemas']['CI'];
+    };
+    RackLayout: {
+      rack: components['schemas']['Rack'];
+      mounts: components['schemas']['RackMount'][];
+      /** @description Free units per face (front, rear). */
+      free: {
+        [key: string]: number[];
+      };
+    };
+    PutRackMountRequest: {
+      position_u: number;
+      /** @default 1 */
+      height_u: number;
+      /**
+       * @default front
+       * @enum {string}
+       */
+      face: 'front' | 'rear' | 'both';
     };
     CITypeChangeResult: {
       ci: components['schemas']['CI'];
@@ -16663,6 +16733,104 @@ export interface operations {
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  getRackLayout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The rack layout */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackLayout'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  putRackMount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        ci_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PutRackMountRequest'];
+      };
+    };
+    responses: {
+      /** @description The mount was moved */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMount'];
+        };
+      };
+      /** @description The CI was mounted */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMount'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description The mount collides with another on an overlapping face, exceeds the rack height or mounts a child CI of a composition (RCK-01, RCK-02). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  deleteRackMountByCI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        ci_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The CI was unmounted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listRackMounts: {

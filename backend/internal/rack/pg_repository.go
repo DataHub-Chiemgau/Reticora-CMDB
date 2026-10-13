@@ -321,6 +321,20 @@ func (r *PGRepository) GetMount(ctx context.Context, orgID, id string) (*RackMou
 	return m, err
 }
 
+// MountByCI implements Repository.
+func (r *PGRepository) MountByCI(ctx context.Context, orgID, ciID string) (*RackMount, error) {
+	var m *RackMount
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		m, err = scanMount(tx.QueryRow(ctx, "SELECT "+mountCols+" FROM rack_mount WHERE organization_id = $1 AND ci_id = $2 AND "+mountVisible, orgID, ciID))
+		if err == pgx.ErrNoRows {
+			return ErrNotFound
+		}
+		return err
+	})
+	return m, err
+}
+
 func (r *PGRepository) UpdateMount(ctx context.Context, orgID, id string, req UpdateMountRequest) (*RackMount, error) {
 	var m *RackMount
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {

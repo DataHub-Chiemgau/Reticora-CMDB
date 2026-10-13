@@ -5233,11 +5233,98 @@ paths:
         '409':
           $ref: '#/components/responses/LocationInUse'
 
+  /api/v1/racks/{id}/layout:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getRackLayout
+      tags: [Racks]
+      summary: Occupancy of a rack (RCK-02)
+      description: >-
+        The rack, its mounts ordered by position and the free units of the
+        front and the rear (a mount on both faces occupies both).
+      responses:
+        '200':
+          description: The rack layout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RackLayout'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/racks/{id}/mounts/{ci_id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: ci_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      operationId: putRackMount
+      tags: [Racks]
+      summary: Mount a CI at a position or move its mount (RCK-02)
+      description: >-
+        Mounts the CI into this rack (201) or moves its mount here (200);
+        a CI has at most one mount. The location of the CI, or of its
+        asset, becomes the rack; ci_change and the audit record the mount
+        (RCK-03, DB-05).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutRackMountRequest'
+      responses:
+        '200':
+          description: The mount was moved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RackMount'
+        '201':
+          description: The CI was mounted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RackMount'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The mount collides with another on an overlapping face, exceeds
+            the rack height or mounts a child CI of a composition (RCK-01,
+            RCK-02).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+    delete:
+      operationId: deleteRackMountByCI
+      tags: [Racks]
+      summary: Unmount a CI from this rack (RCK-03)
+      responses:
+        '204':
+          description: The CI was unmounted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/racks/{id}/mounts:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listRackMounts
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/racks/{id}/layout'
       tags: [Racks]
       summary: List mounts in a rack
       parameters:
@@ -5257,6 +5344,10 @@ paths:
           $ref: '#/components/responses/NotFound'
     post:
       operationId: createRackMount
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/racks/{id}/mounts/{ci_id}'
       tags: [Racks]
       summary: Mount a CI into a rack
       description: >-
@@ -11466,6 +11557,30 @@ components:
         merge_id: { type: string, format: uuid }
         survivor: { $ref: '#/components/schemas/CI' }
         victim: { $ref: '#/components/schemas/CI' }
+    RackLayout:
+      type: object
+      required: [rack, mounts, free]
+      properties:
+        rack: { $ref: '#/components/schemas/Rack' }
+        mounts:
+          type: array
+          items: { $ref: '#/components/schemas/RackMount' }
+        free:
+          type: object
+          description: Free units per face (front, rear).
+          additionalProperties:
+            type: array
+            items: { type: integer }
+    PutRackMountRequest:
+      type: object
+      required: [position_u]
+      properties:
+        position_u: { type: integer, minimum: 1 }
+        height_u: { type: integer, minimum: 1, default: 1 }
+        face:
+          type: string
+          enum: [front, rear, both]
+          default: front
     CITypeChangeResult:
       type: object
       required: [ci, findings, changed]

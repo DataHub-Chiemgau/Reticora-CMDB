@@ -3,6 +3,7 @@ package rack
 import (
 	"errors"
 	"net/http"
+	"sort"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
@@ -28,6 +29,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Patch("/api/v1/racks/{id}", h.UpdateRack)
 	r.Delete("/api/v1/racks/{id}", h.DeleteRack)
 
+	// layout and PUT/DELETE mounts/{ci_id} are the rack contract of RCK-02;
+	// the list and POST on racks/{id}/mounts stay until their sunset.
+	r.Get("/api/v1/racks/{id}/layout", h.GetLayout)
+	r.Put("/api/v1/racks/{id}/mounts/{ci_id}", h.PutMount)
+	r.Delete("/api/v1/racks/{id}/mounts/{ci_id}", h.UnmountCI)
 	r.Get("/api/v1/racks/{id}/mounts", h.ListMounts)
 	r.Post("/api/v1/racks/{id}/mounts", h.CreateMount)
 	// mounts is the catalog path (API-05): the rack is a query parameter
@@ -210,6 +216,135 @@ func (h *Handler) DeleteRack(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- Mounts ---
+
+// Layout is the occupancy of a rack (RCK-02): its mounts ordered by
+// position and the free units of each face.
+type Layout struct {
+	Rack   *Rack            `json:"rack"`
+	Mounts []RackMount      `json:"mounts"`
+	Free   map[string][]int `json:"free"`
+}
+
+// maxLayoutMounts bounds the mounts of a layout: a rack has at most 60
+// units on two faces.
+const maxLayoutMounts = 200
+
+// GetLayout handles GET /api/v1/racks/{id}/layout.
+func (h *Handler) GetLayout(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	rk, err := h.repo.GetRack(r.Context(), orgID, chi.URLParam(r, "id"))
+	if err != nil {
+		writeRepoError(w, err, "rack not found")
+		return
+	}
+	mounts, _, err := h.repo.ListMounts(r.Context(), orgID, rk.ID, api.PaginationParams{Limit: maxLayoutMounts})
+	if err != nil {
+		writeRepoError(w, err, "rack not found")
+		return
+	}
+	sort.Slice(mounts, func(i, j int) bool { return mounts[i].PositionU < mounts[j].PositionU })
+	api.WriteJSON(w, http.StatusOK, Layout{Rack: rk, Mounts: mounts, Free: freeUnits(rk.HeightUnits, mounts)})
+}
+
+// freeUnits lists the units of each face no mount occupies; a mount on
+// both faces occupies front and rear.
+func freeUnits(height int, mounts []RackMount) map[string][]int {
+	free := map[string][]int{}
+	for _, face := range []string{"front", "rear"} {
+		taken := map[int]bool{}
+		for i := range mounts {
+			if facesOverlap(face, mounts[i].Face) {
+				for u := mounts[i].PositionU; u < mounts[i].PositionU+mounts[i].HeightU; u++ {
+					taken[u] = true
+				}
+			}
+		}
+		units := []int{}
+		for u := 1; u <= height; u++ {
+			if !taken[u] {
+				units = append(units, u)
+			}
+		}
+		free[face] = units
+	}
+	return free
+}
+
+// PutMountRequest places a CI in a rack (RCK-02).
+type PutMountRequest struct {
+	PositionU int    `json:"position_u"`
+	HeightU   int    `json:"height_u,omitempty"`
+	Face      string `json:"face,omitempty"`
+}
+
+// PutMount handles PUT /api/v1/racks/{id}/mounts/{ci_id}: it mounts the CI
+// at the position (201) or moves its mount there (200). A collision or a
+// position beyond the rack height is 409.
+func (h *Handler) PutMount(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	var req PutMountRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if req.HeightU == 0 {
+		req.HeightU = 1
+	}
+	if req.Face == "" {
+		req.Face = "front"
+	}
+	if !ValidFaces[req.Face] {
+		api.WriteFieldError(w, &api.FieldError{Field: "face", Message: "must be front, rear or both"})
+		return
+	}
+	rackID, ciID := chi.URLParam(r, "id"), chi.URLParam(r, "ci_id")
+	current, err := h.repo.MountByCI(r.Context(), orgID, ciID)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		m := &RackMount{OrganizationID: orgID, RackID: rackID, CIID: ciID, PositionU: req.PositionU, HeightU: req.HeightU, Face: req.Face}
+		if cerr := h.repo.CreateMount(r.Context(), m); cerr != nil {
+			writeRepoError(w, cerr, "rack not found")
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, m)
+		return
+	case err != nil:
+		writeRepoError(w, err, "rack not found")
+		return
+	}
+	m, err := h.repo.UpdateMount(r.Context(), orgID, current.ID, UpdateMountRequest{
+		RackID: &rackID, PositionU: &req.PositionU, HeightU: &req.HeightU, Face: &req.Face,
+	})
+	if err != nil {
+		writeRepoError(w, err, "rack not found")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, m)
+}
+
+// UnmountCI handles DELETE /api/v1/racks/{id}/mounts/{ci_id}.
+func (h *Handler) UnmountCI(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	m, err := h.repo.MountByCI(r.Context(), orgID, chi.URLParam(r, "ci_id"))
+	if err != nil || m.RackID != chi.URLParam(r, "id") {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "the CI is not mounted in this rack")
+		return
+	}
+	if err = h.repo.DeleteMount(r.Context(), orgID, m.ID); err != nil {
+		writeRepoError(w, err, "rack mount not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
 
 // ListMounts handles GET /api/v1/racks/{id}/mounts
 func (h *Handler) ListMounts(w http.ResponseWriter, r *http.Request) {

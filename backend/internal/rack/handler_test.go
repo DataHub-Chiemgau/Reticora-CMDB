@@ -244,3 +244,62 @@ func TestMountsCatalogPath(t *testing.T) {
 		}
 	}
 }
+
+// TestLayoutAndPutMount covers the rack contract of RCK-02 (WP-175):
+// GET /racks/{id}/layout with the mounts and free units of each face;
+// PUT /racks/{id}/mounts/{ci_id} mounts (201) or moves (200) a CI and
+// answers 409 on a collision or beyond the rack height; DELETE unmounts.
+func TestLayoutAndPutMount(t *testing.T) {
+	_, mux := newMux()
+	w := do(mux, "POST", "/api/v1/racks", `{"room_id":"room-1","name":"L1","height_units":4}`, "org-1")
+	var rk Rack
+	if err := json.Unmarshal(w.Body.Bytes(), &rk); err != nil || w.Code != http.StatusCreated {
+		t.Fatalf("create rack: %d %s", w.Code, w.Body.String())
+	}
+	put := func(ci, body string) int {
+		return do(mux, "PUT", "/api/v1/racks/"+rk.ID+"/mounts/"+ci, body, "org-1").Code
+	}
+	if code := put("ci-1", `{"position_u":1,"height_u":2}`); code != http.StatusCreated {
+		t.Fatalf("mount ci-1: %d", code)
+	}
+	if code := put("ci-2", `{"position_u":3,"face":"rear"}`); code != http.StatusCreated {
+		t.Fatalf("mount ci-2: %d", code)
+	}
+	for body, want := range map[string]int{
+		`{"position_u":2}`:                   http.StatusConflict, // collides with ci-1
+		`{"position_u":4,"height_u":2}`:      http.StatusConflict, // beyond 4U
+		`{"position_u":3,"face":"both"}`:     http.StatusConflict, // both collides with the rear of ci-2
+		`{"position_u":1,"face":"sideways"}`: http.StatusBadRequest,
+	} {
+		if code := put("ci-3", body); code != want {
+			t.Errorf("ci-3 %s: %d, want %d", body, code, want)
+		}
+	}
+	// Moving ci-1 up is 200 and keeps the one mount of the CI.
+	if code := put("ci-1", `{"position_u":3,"height_u":2}`); code != http.StatusOK {
+		t.Errorf("move ci-1: %d", code)
+	}
+	w = do(mux, "GET", "/api/v1/racks/"+rk.ID+"/layout", "", "org-1")
+	var layout Layout
+	if err := json.Unmarshal(w.Body.Bytes(), &layout); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("layout: %d %s", w.Code, w.Body.String())
+	}
+	if len(layout.Mounts) != 2 || layout.Rack.ID != rk.ID {
+		t.Errorf("layout mounts %+v", layout.Mounts)
+	}
+	if got := layout.Free["front"]; len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Errorf("free front %v", got)
+	}
+	if got := layout.Free["rear"]; len(got) != 3 || got[0] != 1 || got[2] != 4 {
+		t.Errorf("free rear %v", got)
+	}
+	if w = do(mux, "GET", "/api/v1/racks/missing/layout", "", "org-1"); w.Code != http.StatusNotFound {
+		t.Errorf("layout of a missing rack: %d", w.Code)
+	}
+	if w = do(mux, "DELETE", "/api/v1/racks/"+rk.ID+"/mounts/ci-2", "", "org-1"); w.Code != http.StatusNoContent {
+		t.Errorf("unmount: %d", w.Code)
+	}
+	if w = do(mux, "DELETE", "/api/v1/racks/"+rk.ID+"/mounts/ci-2", "", "org-1"); w.Code != http.StatusNotFound {
+		t.Errorf("second unmount: %d", w.Code)
+	}
+}

@@ -603,10 +603,28 @@ export const rackApi = {
   get(id: string): Promise<Rack> {
     return fetchAPI(`/racks/${id}`);
   },
-  listMounts(rackId: string, params: ListParams = {}): Promise<PaginatedResponse<RackMount>> {
-    return fetchAPI(`/racks/${rackId}/mounts${buildQuery(params)}`);
+  /** Occupancy of a rack: mounts by position and free units per face (RCK-02). */
+  layout(rackId: string): Promise<RackLayout> {
+    return fetchAPI(`/racks/${rackId}/layout`);
+  },
+  /** Mounts a CI at a position or moves its mount (RCK-02); 409 on a collision. */
+  putMount(
+    rackId: string,
+    ciId: string,
+    body: { position_u: number; height_u?: number; face?: string },
+  ): Promise<RackMount> {
+    return fetchAPI(`/racks/${rackId}/mounts/${ciId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
   },
 };
+
+export interface RackLayout {
+  rack: Rack;
+  mounts: RackMount[];
+  free: Record<string, number[]>;
+}
 
 // --- Phase 2: Asset Management ---
 

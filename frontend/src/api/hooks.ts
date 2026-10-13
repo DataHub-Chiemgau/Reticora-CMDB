@@ -215,10 +215,10 @@ export function useRackList(params: RackListParams = {}) {
   });
 }
 
-export function useRackMounts(rackId: string) {
+export function useRackLayout(rackId: string) {
   return useQuery({
-    queryKey: ['rack-mounts', rackId],
-    queryFn: () => rackApi.listMounts(rackId, { limit: 100 }),
+    queryKey: ['rack-layout', rackId],
+    queryFn: () => rackApi.layout(rackId),
     enabled: !!rackId,
   });
 }
