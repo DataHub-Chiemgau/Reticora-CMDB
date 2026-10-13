@@ -297,6 +297,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		WithInstanceFields(repos.CIType).
 		WithLimits(opts.Entitlements)
 	opts.Entitlements.WithUnlicensed(discoveryHandler)
+	// Discovered values pass the field rules of manual writes (CI-03).
+	if opts.CIService != nil {
+		discoveryHandler.WithObservedValidator(opts.CIService)
+	}
 	// Discovered interfaces and addresses are kept in IPAM (REC-07).
 	if syncer, ok := repos.IPAM.(discovery.InterfaceSyncer); ok {
 		discoveryHandler.WithInterfaces(syncer)

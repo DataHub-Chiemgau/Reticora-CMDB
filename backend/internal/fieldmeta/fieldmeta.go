@@ -19,9 +19,17 @@ import (
 	"time"
 )
 
-// Field types supported by the metadata-driven CI type system (spec §1).
+// Field types of MET-11. Phase 1: text, multiline, integer, decimal,
+// boolean, date, datetime, enum, multiselect, ip, mac, url, email, uuid;
+// phase 2: file, json and the references.
 const (
 	TypeText        = "text"
+	TypeMultiline   = "multiline"
+	TypeMultiselect = "multiselect"
+	TypeUUID        = "uuid"
+	TypeReference   = "reference"
+	// TypeTextarea and TypeMultiEnum are the former names of multiline and
+	// multiselect; stored definitions keep validating.
 	TypeTextarea    = "textarea"
 	TypeInteger     = "integer"
 	TypeDecimal     = "decimal"
@@ -48,6 +56,7 @@ const (
 // from the original data_type CHECK constraint (migration 000002) are
 // accepted as aliases so existing metadata keeps validating.
 var ValidFieldTypes = map[string]bool{
+	TypeMultiline: true, TypeMultiselect: true, TypeUUID: true, TypeReference: true,
 	TypeText: true, TypeTextarea: true, TypeInteger: true, TypeDecimal: true,
 	TypeBoolean: true, TypeDate: true, TypeDatetime: true, TypeEnum: true,
 	TypeMultiEnum: true, TypeIP: true, TypeMAC: true, TypeURL: true,
@@ -57,6 +66,35 @@ var ValidFieldTypes = map[string]bool{
 	// Legacy aliases
 	"string": true, "number": true,
 }
+
+// Phase1Types are the data types of MET-11 phase 1, exactly.
+var Phase1Types = []string{
+	TypeText, TypeMultiline, TypeInteger, TypeDecimal, TypeBoolean, TypeDate, TypeDatetime,
+	TypeEnum, TypeMultiselect, TypeIP, TypeMAC, TypeURL, TypeEmail, TypeUUID,
+}
+
+// Phase2Types are the data types of MET-11 phase 2 (file in the document
+// module, json, references to CI, asset, user, team, location, contract).
+var Phase2Types = []string{TypeFile, TypeJSON, TypeReference}
+
+// aliases map former and specific type names onto the MET-11 type.
+var aliases = map[string]string{
+	TypeTextarea: TypeMultiline, TypeMultiEnum: TypeMultiselect, "string": TypeText, "number": TypeDecimal,
+	TypeUser: TypeReference, TypeTeam: TypeReference, TypeLocation: TypeReference,
+	TypeCIRef: TypeReference, TypeAssetRef: TypeReference, TypeContractRef: TypeReference,
+}
+
+// CanonicalType returns the MET-11 data type of a (possibly former) type
+// name.
+func CanonicalType(dataType string) string {
+	if c, ok := aliases[dataType]; ok {
+		return c
+	}
+	return dataType
+}
+
+// IsMultiValue reports whether a type holds a list of values.
+func IsMultiValue(dataType string) bool { return CanonicalType(dataType) == TypeMultiselect }
 
 // ReferenceTargets lists the valid reference_target values for reference-typed
 // fields.
@@ -369,7 +407,7 @@ func ValidateValue(def FieldDefinition, value any) error {
 	}
 	v := def.Validation
 	if v == nil {
-		if def.DataType == TypeEnum || def.DataType == TypeMultiEnum {
+		if def.DataType == TypeEnum || IsMultiValue(def.DataType) {
 			return checkEnum(def, value)
 		}
 		return nil
@@ -395,15 +433,27 @@ func ValidateValue(def FieldDefinition, value any) error {
 		}
 		return nil
 	}
-	if def.DataType == TypeEnum || def.DataType == TypeMultiEnum {
+	if def.DataType == TypeEnum || IsMultiValue(def.DataType) {
 		return checkEnum(def, value)
 	}
 	return nil
 }
 
+// uuidPattern is the textual form of a UUID (any version).
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// checkType checks a value against its MET-11 data type.
 func checkType(dataType string, value any) error {
-	switch dataType {
-	case TypeText, TypeTextarea, TypeFile, "string":
+	switch CanonicalType(dataType) {
+	case TypeText:
+		str, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("expected string")
+		}
+		if strings.ContainsAny(str, "\r\n") {
+			return fmt.Errorf("expected a single line (use multiline for line breaks)")
+		}
+	case TypeMultiline:
 		if _, ok := value.(string); !ok {
 			return fmt.Errorf("expected string")
 		}
@@ -412,7 +462,7 @@ func checkType(dataType string, value any) error {
 		if !ok || f != float64(int64(f)) {
 			return fmt.Errorf("expected integer")
 		}
-	case TypeDecimal, "number":
+	case TypeDecimal:
 		if _, ok := toFloat(value); !ok {
 			return fmt.Errorf("expected number")
 		}
@@ -440,9 +490,21 @@ func checkType(dataType string, value any) error {
 		if _, ok := value.(string); !ok {
 			return fmt.Errorf("expected enum string")
 		}
-	case TypeMultiEnum:
-		if _, ok := value.([]any); !ok {
+	case TypeMultiselect:
+		items, ok := value.([]any)
+		if !ok {
 			return fmt.Errorf("expected array of enum values")
+		}
+		seen := map[string]bool{}
+		for _, item := range items {
+			s, ok := item.(string)
+			if !ok {
+				return fmt.Errorf("expected array of enum strings")
+			}
+			if seen[s] {
+				return fmt.Errorf("value %q is selected twice", s)
+			}
+			seen[s] = true
 		}
 	case TypeIP:
 		str, ok := value.(string)
@@ -454,8 +516,8 @@ func checkType(dataType string, value any) error {
 		if !ok {
 			return fmt.Errorf("expected MAC string")
 		}
-		if _, err := net.ParseMAC(str); err != nil {
-			return fmt.Errorf("expected valid MAC address")
+		if hw, err := net.ParseMAC(str); err != nil || (len(hw) != 6 && len(hw) != 8) {
+			return fmt.Errorf("expected valid MAC address (EUI-48 or EUI-64)")
 		}
 	case TypeURL:
 		str, ok := value.(string)
@@ -471,13 +533,18 @@ func checkType(dataType string, value any) error {
 		if !ok {
 			return fmt.Errorf("expected email string")
 		}
-		if _, err := mail.ParseAddress(str); err != nil {
+		if addr, err := mail.ParseAddress(str); err != nil || addr.Address != str {
 			return fmt.Errorf("expected valid email address")
+		}
+	case TypeUUID:
+		str, ok := value.(string)
+		if !ok || !uuidPattern.MatchString(str) {
+			return fmt.Errorf("expected UUID")
 		}
 	case TypeJSON:
 		// Any JSON value is valid.
-	case TypeUser, TypeTeam, TypeLocation, TypeCIRef, TypeAssetRef, TypeContractRef:
-		// Reference fields store the referenced entity's UUID.
+	case TypeFile, TypeReference:
+		// Files and references store the referenced entity's id.
 		if _, ok := value.(string); !ok {
 			return fmt.Errorf("expected reference id string")
 		}
@@ -523,7 +590,7 @@ func checkOptions(def FieldDefinition, value any, options []string) error {
 	for _, o := range options {
 		allowed[o] = true
 	}
-	if def.DataType == TypeMultiEnum {
+	if IsMultiValue(def.DataType) {
 		items, ok := value.([]any)
 		if !ok {
 			return fmt.Errorf("field %s: expected array", def.Name)

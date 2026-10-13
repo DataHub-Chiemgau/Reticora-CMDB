@@ -101,6 +101,7 @@ function DynamicField({ def, state, value, error, options, onChange }: DynamicFi
   const textValue = value === undefined || value === null ? '' : String(value);
 
   switch (def.data_type) {
+    case 'multiline':
     case 'textarea':
       return (
         <div className="space-y-1.5">

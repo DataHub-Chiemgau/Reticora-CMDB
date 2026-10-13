@@ -153,17 +153,19 @@ export function InstanceFieldsSection({
             label={t('citypes.fieldType', 'Typ')}
             options={[
               'text',
-              'textarea',
+              'multiline',
               'integer',
               'decimal',
               'boolean',
               'date',
               'datetime',
               'enum',
+              'multiselect',
               'ip',
               'mac',
               'url',
               'email',
+              'uuid',
               'json',
             ].map((ft) => ({ value: ft, label: ft }))}
             value={draft.data_type}

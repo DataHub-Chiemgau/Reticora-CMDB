@@ -1,6 +1,9 @@
 package fieldmeta
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValidateDefinition(t *testing.T) {
 	valid := FieldDefinition{Name: "rack", DataType: TypeText}
@@ -206,5 +209,75 @@ func TestValidateValueRules(t *testing.T) {
 	}
 	if err := ValidateValue(pat, "abc"); err == nil {
 		t.Fatal("pattern-violating value accepted")
+	}
+}
+
+// TestPhase1TypesFollowMET11 pins the data types of MET-11 (WP-117): phase
+// 1 exactly, phase 2 file/json/reference; the former names are aliases.
+func TestPhase1TypesFollowMET11(t *testing.T) {
+	want := []string{"text", "multiline", "integer", "decimal", "boolean", "date", "datetime",
+		"enum", "multiselect", "ip", "mac", "url", "email", "uuid"}
+	if strings.Join(Phase1Types, ",") != strings.Join(want, ",") {
+		t.Fatalf("Phase1Types = %v, want %v", Phase1Types, want)
+	}
+	if strings.Join(Phase2Types, ",") != "file,json,reference" {
+		t.Fatalf("Phase2Types = %v", Phase2Types)
+	}
+	for _, typ := range append(append([]string{}, Phase1Types...), Phase2Types...) {
+		if !ValidFieldTypes[typ] {
+			t.Errorf("%s is not a valid field type", typ)
+		}
+	}
+	for alias, canonical := range map[string]string{"textarea": "multiline", "multi_enum": "multiselect",
+		"string": "text", "number": "decimal", "ci_ref": "reference", "user": "reference"} {
+		if got := CanonicalType(alias); got != canonical {
+			t.Errorf("CanonicalType(%s) = %s, want %s", alias, got, canonical)
+		}
+	}
+}
+
+// TestValidateValuePerMET11Type checks one valid and one invalid value for
+// every data type of MET-11.
+func TestValidateValuePerMET11Type(t *testing.T) {
+	for _, tc := range []struct {
+		dataType string
+		enum     []string
+		valid    any
+		invalid  any
+	}{
+		{"text", nil, "edge-router-01", "line one\nline two"},
+		{"multiline", nil, "line one\nline two", 42.0},
+		{"integer", nil, 48.0, 4.5},
+		{"decimal", nil, 4.5, "four"},
+		{"boolean", nil, true, "yes"},
+		{"date", nil, "2026-10-13", "13.10.2026"},
+		{"datetime", nil, "2026-10-13T07:00:00Z", "2026-10-13 07:00"},
+		{"enum", []string{"low", "high"}, "high", "medium"},
+		{"multiselect", []string{"a", "b", "c"}, []any{"a", "c"}, []any{"a", "a"}},
+		{"ip", nil, "2001:db8::1", "300.1.1.1"},
+		{"mac", nil, "00:1a:2b:3c:4d:5e", "00:1a:2b:3c:4d"},
+		{"url", nil, "https://example.com/x", "example.com"},
+		{"email", nil, "ops@example.com", "Ops <ops@example.com>"},
+		{"uuid", nil, "c0de1170-0000-4000-8000-000000000001", "c0de1170-0000"},
+		{"json", nil, map[string]any{"a": 1.0}, nil},
+		{"file", nil, "c0de1170-0000-4000-8000-000000000002", 1.0},
+		{"reference", nil, "c0de1170-0000-4000-8000-000000000003", true},
+		// Former names keep validating like their MET-11 type.
+		{"textarea", nil, "a\nb", 1.0},
+		{"multi_enum", []string{"x"}, []any{"x"}, "x"},
+	} {
+		def := FieldDefinition{Name: "f", DataType: tc.dataType, EnumValues: tc.enum}
+		if err := ValidateDefinition(def); err != nil {
+			t.Errorf("%s: definition rejected: %v", tc.dataType, err)
+		}
+		if err := ValidateValue(def, tc.valid); err != nil {
+			t.Errorf("%s: valid value %v rejected: %v", tc.dataType, tc.valid, err)
+		}
+		if tc.invalid == nil {
+			continue
+		}
+		if err := ValidateValue(def, tc.invalid); err == nil {
+			t.Errorf("%s: invalid value %v accepted", tc.dataType, tc.invalid)
+		}
 	}
 }

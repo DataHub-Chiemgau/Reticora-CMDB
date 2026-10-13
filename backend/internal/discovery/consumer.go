@@ -215,6 +215,7 @@ func (r *BulkIngestResponse) add(o *BulkIngestResponse) {
 	r.Relationships += o.Relationships
 	r.ProtectedOverrides += o.ProtectedOverrides
 	r.ProtectedInstanceFields += o.ProtectedInstanceFields
+	r.InvalidValues += o.InvalidValues
 	r.Unlicensed += o.Unlicensed
 	r.Duplicates += o.Duplicates
 	r.Resurrected += o.Resurrected

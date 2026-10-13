@@ -246,3 +246,84 @@ func TestReservedNamespaces(t *testing.T) {
 		t.Errorf("namespaces in the write form: %v", out)
 	}
 }
+
+// TestTypedColumnsTakePartInValidation covers WP-117 (CI-03, MET-11): a
+// typed column fulfils the field definition of its name (create and
+// PATCH), its own data type is checked, a manual create keeps every typed
+// field, and observed values are checked with the same rules.
+func TestTypedColumnsTakePartInValidation(t *testing.T) {
+	defs := []fieldmeta.FieldDefinition{
+		{Name: "hostname", DataType: fieldmeta.TypeText, Required: true,
+			Validation: &fieldmeta.ValidationRules{Pattern: `^[a-z0-9-]+$`}},
+		{Name: "os_name", DataType: fieldmeta.TypeEnum, EnumValues: []string{"linux", "windows"}},
+		{Name: "rack_unit", DataType: fieldmeta.TypeInteger},
+	}
+	repo := NewMemoryRepository()
+	svc := NewService(repo).WithFieldResolver(stubResolver{defs: defs})
+	ctx := context.Background()
+
+	// Required: the typed hostname counts, an attribute is not needed.
+	missing := &Item{OrganizationID: "org-1", CITypeID: "t", Name: "srv", Attributes: map[string]any{}}
+	if got := fieldsOf(svc.Create(ctx, missing)); len(got) != 1 || got[0] != "hostname" {
+		t.Fatalf("missing hostname: %v", got)
+	}
+	item := &Item{OrganizationID: "org-1", CITypeID: "t", Name: "srv", Hostname: "srv-01", OSName: "linux", Attributes: map[string]any{}}
+	if err := svc.Create(ctx, item); err != nil {
+		t.Fatalf("typed hostname rejected: %v", err)
+	}
+
+	// The definition's rules apply to the typed column.
+	bad := "SRV_01"
+	if got := fieldsOf(updateErr(svc.Update(ctx, "org-1", item.ID, UpdateRequest{Hostname: &bad}))); len(got) != 1 || got[0] != "hostname" {
+		t.Errorf("hostname pattern: %v", got)
+	}
+	empty := ""
+	if got := fieldsOf(updateErr(svc.Update(ctx, "org-1", item.ID, UpdateRequest{Hostname: &empty}))); len(got) != 1 || got[0] != "hostname" {
+		t.Errorf("clearing a required typed column: %v", got)
+	}
+	bsd := "freebsd"
+	if got := fieldsOf(updateErr(svc.Update(ctx, "org-1", item.ID, UpdateRequest{OSName: &bsd}))); len(got) != 1 || got[0] != "os_name" {
+		t.Errorf("os_name enum: %v", got)
+	}
+
+	// The typed columns' own data types, with or without definitions.
+	plain := NewService(NewMemoryRepository())
+	for field, item := range map[string]*Item{
+		"management_ip": {OrganizationID: "org-1", CITypeID: "t", Name: "a", ManagementIP: "10.0.0.300"},
+		"primary_mac":   {OrganizationID: "org-1", CITypeID: "t", Name: "b", PrimaryMAC: "not-a-mac"},
+		"hardware_uuid": {OrganizationID: "org-1", CITypeID: "t", Name: "c", HardwareUUID: "1234"},
+		"name":          {OrganizationID: "org-1", CITypeID: "t", Name: "two\nlines"},
+	} {
+		if got := fieldsOf(plain.Create(ctx, item)); len(got) != 1 || got[0] != field {
+			t.Errorf("%s: %v", field, got)
+		}
+	}
+
+	// A manual create keeps every typed field of the request.
+	mux := chi.NewRouter()
+	NewHandler(plain).RegisterRoutes(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/cis", strings.NewReader(`{"ci_type_id":"t","name":"sw-01",
+		"hostname":"sw-01","fqdn":"sw-01.example","os_name":"ios","os_version":"17","primary_mac":"00:1a:2b:3c:4d:5e",
+		"hardware_uuid":"c0de1170-0000-4000-8000-000000000009","sys_object_id":"1.3.6.1.4.1.9"}`))
+	req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	for _, want := range []string{`"hostname":"sw-01"`, `"fqdn":"sw-01.example"`, `"os_name":"ios"`, `"os_version":"17"`,
+		`"primary_mac":"00:1a:2b:3c:4d:5e"`, `"hardware_uuid":"c0de1170-0000-4000-8000-000000000009"`, `"sys_object_id":"1.3.6.1.4.1.9"`} {
+		if w.Code != http.StatusCreated || !strings.Contains(w.Body.String(), want) {
+			t.Errorf("create dropped %s: %d %s", want, w.Code, w.Body.String())
+		}
+	}
+
+	// Observed values: the same value rules, required fields do not apply.
+	invalid, err := svc.InvalidObserved(ctx, "org-1", "t", "", map[string]any{
+		"hostname": "Bad Host", "os_name": "linux", "rack_unit": "high", "unknown": "kept"})
+	if err != nil || strings.Join(invalid, ",") != "hostname,rack_unit" {
+		t.Errorf("InvalidObserved = %v, %v", invalid, err)
+	}
+	if invalid, _ := svc.InvalidObserved(ctx, "org-1", "t", "", map[string]any{"os_name": "windows"}); len(invalid) != 0 {
+		t.Errorf("missing required observed field reported: %v", invalid)
+	}
+}
+
+func updateErr(_ *Item, err error) error { return err }

@@ -5515,7 +5515,7 @@ export interface components {
       key: string;
       display_name?: components['schemas']['LocalizedText'] | string;
       description?: string;
-      /** @description Field type of the fieldmeta registry (text, integer, enum, ip, …). */
+      /** @description Data type of MET-11 — phase 1: text, multiline, integer, decimal, boolean, date, datetime, enum, multiselect, ip, mac, url, email, uuid; phase 2: file, json, reference (former names textarea, multi_enum and the specific reference types stay valid). */
       data_type: string;
       required?: boolean;
       /** @description Any JSON value valid for the data type. */
@@ -5541,7 +5541,7 @@ export interface components {
     AttributeDefinitionPatch: {
       display_name?: components['schemas']['LocalizedText'] | string;
       description?: string;
-      /** @description Field type of the fieldmeta registry (text, integer, enum, ip, …). */
+      /** @description Data type of MET-11 — phase 1: text, multiline, integer, decimal, boolean, date, datetime, enum, multiselect, ip, mac, url, email, uuid; phase 2: file, json, reference (former names textarea, multi_enum and the specific reference types stay valid). */
       data_type?: string;
       required?: boolean;
       /** @description Any JSON value valid for the data type. */

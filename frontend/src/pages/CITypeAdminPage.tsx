@@ -21,20 +21,22 @@ import { Modal } from '../components/ui/Modal';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
 
+// Data types of MET-11: phase 1, then phase 2 (file, json, references).
 const FIELD_TYPES = [
   'text',
-  'textarea',
+  'multiline',
   'integer',
   'decimal',
   'boolean',
   'date',
   'datetime',
   'enum',
-  'multi_enum',
+  'multiselect',
   'ip',
   'mac',
   'url',
   'email',
+  'uuid',
   'json',
   'file',
   'user',

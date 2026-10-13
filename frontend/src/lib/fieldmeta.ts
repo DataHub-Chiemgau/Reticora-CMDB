@@ -5,8 +5,15 @@
  * see the underlying rule model (spec §3, §18).
  */
 
+// Data types of MET-11 (phase 1: text … uuid; phase 2: file, json,
+// reference); the former names textarea, multi_enum and the specific
+// reference types stay valid.
 export type FieldDataType =
   | 'text'
+  | 'multiline'
+  | 'multiselect'
+  | 'uuid'
+  | 'reference'
   | 'textarea'
   | 'integer'
   | 'decimal'
@@ -254,6 +261,18 @@ export function validateValue(
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(value)))
         return `${def.label || def.name} must be a valid email`;
       break;
+    case 'text':
+    case 'string':
+      if (/[\r\n]/.test(String(value))) return `${def.label || def.name} must be a single line`;
+      break;
+    case 'uuid':
+      if (
+        !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+          String(value),
+        )
+      )
+        return `${def.label || def.name} must be a UUID`;
+      break;
   }
   const v = def.validation;
   if (v) {
@@ -278,8 +297,9 @@ export function validateValue(
     }
   }
   const options = v?.options && v.options.length > 0 ? v.options : def.enum_values;
-  if ((t === 'enum' || t === 'multi_enum') && options && options.length > 0) {
-    if (t === 'multi_enum' && Array.isArray(value)) {
+  const multi = t === 'multi_enum' || t === 'multiselect';
+  if ((t === 'enum' || multi) && options && options.length > 0) {
+    if (multi && Array.isArray(value)) {
       const bad = value.find((item) => !options.includes(String(item)));
       if (bad !== undefined) return `${def.label || def.name}: ${String(bad)} is not allowed`;
     } else if (!options.includes(String(value))) {

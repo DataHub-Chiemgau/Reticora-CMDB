@@ -293,3 +293,59 @@ func WithoutInstanceFields(attributes map[string]any, instance []string) []strin
 	sort.Strings(removed)
 	return removed
 }
+
+// ObservedValidator checks observed values against the field metadata of
+// the CI type with the rules of a manual write (CI-03, MET-11);
+// ci.Service implements it.
+type ObservedValidator interface {
+	InvalidObserved(ctx context.Context, orgID, ciTypeID, ciID string, values map[string]any) ([]string, error)
+}
+
+// WithObservedValidator makes ingest validate discovered values: a value
+// the field metadata rejects is dropped instead of stored.
+func (h *Handler) WithObservedValidator(v ObservedValidator) *Handler {
+	h.observed = v
+	return h
+}
+
+// observedTypedFields are the typed CI columns of an ingest item by field
+// name.
+func observedTypedFields(item *IngestItem) map[string]*string {
+	return map[string]*string{
+		"name": &item.Name, "manufacturer": &item.Manufacturer, "model": &item.Model,
+		"serial_number": &item.SerialNumber, "hardware_uuid": &item.HardwareUUID,
+		"management_ip": &item.ManagementIP, "primary_mac": &item.PrimaryMAC,
+		"hostname": &item.Hostname, "fqdn": &item.FQDN, "sys_object_id": &item.SysObjectID,
+	}
+}
+
+// dropInvalidObserved removes the discovered values that violate the field
+// metadata of the CI type (typed columns and attributes alike) and returns
+// how many were dropped. Required fields do not apply to observations.
+func (h *Handler) dropInvalidObserved(ctx context.Context, orgID, typeID, ciID string, item *IngestItem) (int, error) {
+	if h.observed == nil || typeID == "" {
+		return 0, nil
+	}
+	typed := observedTypedFields(item)
+	values := map[string]any{}
+	for k, v := range item.Attributes {
+		values[k] = v
+	}
+	for name, ptr := range typed {
+		if *ptr != "" {
+			values[name] = *ptr
+		}
+	}
+	invalid, err := h.observed.InvalidObserved(ctx, orgID, typeID, ciID, values)
+	if err != nil {
+		return 0, err
+	}
+	for _, field := range invalid {
+		if ptr, ok := typed[field]; ok {
+			*ptr = ""
+		}
+		delete(item.Attributes, field)
+		slog.WarnContext(ctx, "discovery value rejected by the field metadata", "field", field, "ci_type_id", typeID)
+	}
+	return len(invalid), nil
+}
