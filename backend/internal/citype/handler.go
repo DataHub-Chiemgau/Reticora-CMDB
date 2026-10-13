@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
@@ -42,6 +43,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/ci-types", h.List)
 	r.Post("/api/v1/ci-types", h.Create)
 	r.Get("/api/v1/ci-types/templates", h.ListTemplates)
+	r.Get("/api/v1/ci-types/export", h.Export)
 	r.Get("/api/v1/ci-types/{id}", h.Get)
 	r.Patch("/api/v1/ci-types/{id}", h.Update)
 	r.Post("/api/v1/ci-types/{id}/clone", h.Clone)
@@ -238,6 +240,23 @@ func (h *Handler) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{"data": Templates()})
+}
+
+// Export handles GET /api/v1/ci-types/export: the metamodel as a JSON
+// download (MET-54).
+func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return
+	}
+	now := time.Now().UTC()
+	out, err := BuildExport(r.Context(), h.repo, t.OrganizationID, now)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="metamodel-`+now.Format("20060102")+`.json"`)
+	api.WriteJSON(w, http.StatusOK, out)
 }
 
 // Get handles GET /api/v1/ci-types/{id}

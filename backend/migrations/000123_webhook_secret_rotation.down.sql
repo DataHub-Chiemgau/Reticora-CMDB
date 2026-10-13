@@ -1,0 +1,3 @@
+ALTER TABLE webhook_subscription DROP CONSTRAINT webhook_subscription_previous_secret_check;
+ALTER TABLE webhook_subscription DROP COLUMN previous_secret_expires_at;
+ALTER TABLE webhook_subscription DROP COLUMN previous_secret;

@@ -4,6 +4,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  attributeDefinitionApi,
   ciTypeApi,
   ciFieldApi,
   relationshipTypeApi,
@@ -17,6 +18,7 @@ import {
   historyApi,
   impactApi,
   savedViewApi,
+  type AttributeIndexFlags,
   type CITypeCreateRequest,
 } from './cmdb';
 import type { FieldDefinition } from '../lib/fieldmeta';
@@ -64,8 +66,22 @@ export function useSetCITypeActive() {
 export function useUpsertCITypeField() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ typeId, field }: { typeId: string; field: FieldDefinition }) =>
-      ciTypeApi.upsertField(typeId, field),
+    mutationFn: async ({
+      typeId,
+      field,
+      index,
+    }: {
+      typeId: string;
+      field: FieldDefinition;
+      index?: AttributeIndexFlags;
+    }) => {
+      const saved = await ciTypeApi.upsertField(typeId, field);
+      const id = (saved as FieldDefinition & { id?: string }).id;
+      if (index && id) {
+        await attributeDefinitionApi.setIndexFlags(id, index);
+      }
+      return saved;
+    },
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ['ci-types', v.typeId] });
       qc.invalidateQueries({ queryKey: ['ci-types'] });

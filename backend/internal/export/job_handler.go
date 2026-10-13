@@ -1,6 +1,7 @@
 package export
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -85,6 +86,12 @@ func (h *JobHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	if err := h.jobs.CreateJob(r.Context(), t.OrganizationID, job); err != nil {
 		api.WriteRepoError(w, err)
 		return
+	}
+	if h.worker != nil && h.worker.Tracker != nil {
+		// The generic job model lists the export too (JOB-01).
+		if err := h.worker.Tracker.Track(r.Context(), t.OrganizationID, "export", "export_job", job.ID, job.InitiatedBy); err != nil {
+			slog.Warn("track export job", "job", job.ID, "error", err)
+		}
 	}
 
 	api.WriteJSON(w, http.StatusAccepted, h.toResponse(r, job))

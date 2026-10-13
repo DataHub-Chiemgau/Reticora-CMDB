@@ -112,7 +112,7 @@ func seed(t *testing.T, ctx context.Context, dsn string) {
 		{`INSERT INTO ci (id, organization_id, ci_type_id, name) VALUES ($1,$2,$3,'ci-b')`, []any{ciB, orgB, typeB}},
 		{`INSERT INTO asset (id, organization_id, asset_tag, name) VALUES ($1,$2,'RLS-ISO-A','asset-a')`, []any{assetA, orgA}},
 		{`INSERT INTO asset (id, organization_id, asset_tag, name) VALUES ($1,$2,'RLS-ISO-B','asset-b')`, []any{assetB, orgB}},
-		{`INSERT INTO relationship_type (id, organization_id, key, forward_label, reverse_label) VALUES ($1,$2,'rls-isolation-runs-on','runs on','hosts')`, []any{relTypA, orgA}},
+		{`INSERT INTO relationship_type (id, organization_id, key, display_name, reverse_name) VALUES ($1,$2,'rls-isolation-runs-on','runs on','hosts')`, []any{relTypA, orgA}},
 	}
 	for _, s := range stmts {
 		if _, err := admin.Exec(ctx, s.sql, s.args...); err != nil {

@@ -86,6 +86,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Role:           req.Role,
 		Department:     req.Department,
 		Notes:          req.Notes,
+		Is247:          req.Is247,
 	}
 	if err := h.repo.Create(r.Context(), c); err != nil {
 		api.WriteRepoError(w, err)

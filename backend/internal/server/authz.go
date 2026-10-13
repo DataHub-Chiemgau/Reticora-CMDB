@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -54,27 +57,31 @@ var readPermissionFor = map[string]identity.Permission{
 	"teams":       identity.PermUserRead,
 	"clients":     identity.PermUserRead,
 	// The organization is the root of the location hierarchy (LOC-01).
-	"org":                identity.PermLocationRead,
-	"roles":              identity.PermRoleRead,
-	"permissions":        identity.PermPermissionRead,
-	"entitlements":       identity.PermEntitlementRead,
-	"audit":              identity.PermAuditRead,
-	"webhooks":           identity.PermWebhookRead,
-	"credentials":        identity.PermCredentialRead,
-	"export":             identity.PermCIRead,
-	"ip-addresses":       identity.PermIPAMRead,
-	"subnets":            identity.PermIPAMRead,
-	"vlans":              identity.PermIPAMRead,
-	"vrfs":               identity.PermIPAMRead,
-	"network-interfaces": identity.PermIPAMRead,
-	"cables":             identity.PermRackRead,
-	"forms":              identity.PermFormRead,
-	"form-submissions":   identity.PermFormRead,
-	"workflows":          identity.PermWorkflowRead,
-	"workflow-runs":      identity.PermWorkflowRead,
-	"compliance":         identity.PermComplianceRead,
-	"security":           identity.PermSecurityRead,
-	"monitoring":         identity.PermMonitoringRead,
+	"org":          identity.PermLocationRead,
+	"roles":        identity.PermRoleRead,
+	"permissions":  identity.PermPermissionRead,
+	"entitlements": identity.PermEntitlementRead,
+	"audit":        identity.PermAuditRead,
+	"webhooks":     identity.PermWebhookRead,
+	// Notification channels and their deliveries are administered like
+	// webhooks (NTF-01, NTF-04).
+	"notification-channels":   identity.PermWebhookRead,
+	"notification-deliveries": identity.PermWebhookRead,
+	"credentials":             identity.PermCredentialRead,
+	"export":                  identity.PermCIRead,
+	"ip-addresses":            identity.PermIPAMRead,
+	"subnets":                 identity.PermIPAMRead,
+	"vlans":                   identity.PermIPAMRead,
+	"vrfs":                    identity.PermIPAMRead,
+	"network-interfaces":      identity.PermIPAMRead,
+	"cables":                  identity.PermRackRead,
+	"forms":                   identity.PermFormRead,
+	"form-submissions":        identity.PermFormRead,
+	"workflows":               identity.PermWorkflowRead,
+	"workflow-runs":           identity.PermWorkflowRead,
+	"compliance":              identity.PermComplianceRead,
+	"security":                identity.PermSecurityRead,
+	"monitoring":              identity.PermMonitoringRead,
 	// Privacy/DSGVO acts on other people's personal data; even the read-side
 	// retention policy requires the manage permission.
 	"privacy": identity.PermUserManage,
@@ -115,6 +122,9 @@ var readPermissionFor = map[string]identity.Permission{
 var writePermissionOverrides = map[string]identity.Permission{
 	// VRFs are managed with their own key (TEN-10, RBA-01).
 	"vrfs": identity.PermVRFManage,
+	// Channels hold provider credentials; deliveries are only read.
+	"notification-channels":   identity.PermWebhookManage,
+	"notification-deliveries": identity.PermWebhookManage,
 	// Review items are only written by resolving them (REC-08).
 	"review-items": identity.PermReviewResolve,
 
@@ -348,6 +358,10 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 	case "auth":
 		// /auth/me requires authentication but no specific permission.
 		return "", routeProtected
+	case "notifications":
+		// The notification center serves the signed-in user's own inbox
+		// and preferences (NTF-04).
+		return "", routeProtected
 	case "graphql":
 		// The GraphQL BFF only reads; each resolver checks its own read
 		// permission and entitlement (GQL-04), so the route requires an
@@ -423,10 +437,67 @@ type authorizingRouter struct {
 	// after runs behind the route authorization, in order (API-04:
 	// Authz -> Validation -> Idempotency -> Handler).
 	after []func(http.Handler) http.Handler
+	// auditor stores the audit entry of each successful write (AUD-07).
+	auditor middleware.RouteAuditor
 }
 
 func (a authorizingRouter) With(middlewares ...func(http.Handler) http.Handler) chi.Router {
-	return authorizingRouter{Router: a.Router.With(middlewares...), prefix: a.prefix, after: a.after}
+	return authorizingRouter{Router: a.Router.With(middlewares...), prefix: a.prefix, after: a.after, auditor: a.auditor}
+}
+
+// auditExemptions are the write routes that write no audit entry of their
+// own, with the reason (AUD-07, WP-133). Every other write route records
+// one entry per successful request; audit_coverage_test.go keeps this list
+// and the route table in step.
+var auditExemptions = map[string]string{
+	"POST /api/v1/audit/verify": "reads the chain",
+	"POST /api/v1/search/query": "a search, reads",
+	"POST /api/v1/ai/ask":       "a question to the assistant, reads",
+	"POST /api/v1/graphql":      "the BFF refuses mutations, reads",
+	// Marking one's own notifications read changes no shared state.
+	"POST /api/v1/notifications/{id}/read": "marks the own inbox read",
+	"POST /api/v1/notifications/read-all":  "marks the own inbox read",
+	// No tenant context: sign-in, sign-up and enrollment precede the
+	// organization or the session; the identity provider logs sign-ins.
+	"POST /api/v1/auth/callback":      "sign-in, no tenant context",
+	"POST /api/v1/auth/logout":        "sign-out, no tenant context",
+	"POST /api/v1/auth/refresh":       "session refresh, no tenant context",
+	"POST /api/v1/signup":             "self-signup before the organization exists",
+	"POST /api/v1/signup/verify":      "self-signup before the organization exists",
+	"POST /api/v1/collectors/enroll":  "enrollment code exchange, no tenant context",
+	"POST /api/v1/invitations/accept": "public acceptance link, no tenant context",
+	// The operator path has its own chain (operator_audit, SEC-07).
+	"POST /api/v1/admin/auth/callback":          "operator path, operator_audit",
+	"POST /api/v1/admin/orgs":                   "operator path, operator_audit",
+	"POST /api/v1/admin/orgs/{id}/entitlements": "operator path, operator_audit",
+	// Measurements and heartbeats are not history (AUD-03); the CI changes
+	// of an ingest are audited by the CI repository with source collector.
+	"POST /api/v1/agents/telemetry":          "measurements; CI changes audited by the CI repository",
+	"POST /api/v1/agents/{id}/heartbeat":     "heartbeat",
+	"POST /api/v1/collectors/{id}/heartbeat": "heartbeat",
+	"POST /api/v1/monitoring/metrics":        "measurements",
+	"POST /api/v1/discovery/ingest":          "ingest; CI changes audited by the CI repository",
+	"POST /api/v1/ingest/bulk":               "ingest; CI changes audited by the CI repository",
+}
+
+// collectorRoutes are the write routes whose changes come from collectors
+// and agents (source collector).
+var collectorRoutes = map[string]bool{
+	"POST /api/v1/agents/telemetry": true, "POST /api/v1/agents/{id}/heartbeat": true,
+	"POST /api/v1/collectors/{id}/heartbeat": true, "POST /api/v1/discovery/ingest": true,
+	"POST /api/v1/ingest/bulk": true,
+}
+
+// auditedRoutes records, per write route registered through an
+// authorizingRouter, whether it writes an audit entry (coverage test).
+var auditedRoutes sync.Map
+
+func isWriteMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	}
+	return false
 }
 
 func (a authorizingRouter) fullPattern(pattern string) string {
@@ -437,7 +508,19 @@ func (a authorizingRouter) fullPattern(pattern string) string {
 }
 
 func (a authorizingRouter) handle(method, pattern string, h http.Handler) {
-	chain := append([]func(http.Handler) http.Handler{AuthorizeRoute(method, a.fullPattern(pattern))}, a.after...)
+	full := a.fullPattern(pattern)
+	chain := append([]func(http.Handler) http.Handler{AuthorizeRoute(method, full)}, a.after...)
+	if isWriteMethod(method) {
+		// Behind idempotency: a replayed response writes no second entry.
+		key := method + " " + full
+		_, exempt := auditExemptions[key]
+		source := ""
+		if collectorRoutes[key] {
+			source = audit.SourceCollector
+		}
+		chain = append(chain, middleware.AuditRoute(method, full, a.auditor, !exempt, source))
+		auditedRoutes.Store(key, !exempt)
+	}
 	a.Router.With(chain...).Method(method, pattern, h)
 }
 
@@ -474,7 +557,7 @@ func (a authorizingRouter) Connect(pattern string, h http.HandlerFunc) {
 
 func (a authorizingRouter) Route(pattern string, fn func(r chi.Router)) chi.Router {
 	return a.Router.Route(pattern, func(r chi.Router) {
-		fn(authorizingRouter{Router: r, prefix: a.fullPattern(pattern), after: a.after})
+		fn(authorizingRouter{Router: r, prefix: a.fullPattern(pattern), after: a.after, auditor: a.auditor})
 	})
 }
 

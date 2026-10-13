@@ -28,7 +28,12 @@ const relationshipSelectColumns = `
 	COALESCE(source_system, ''),
 	COALESCE(notes, ''),
 	created_at,
-	updated_at
+	updated_at,
+	COALESCE(source_interface_id::text, ''),
+	COALESCE(target_interface_id::text, ''),
+	last_confirmed_at,
+	COALESCE(verified_by::text, ''),
+	verified_at
 `
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
@@ -59,7 +64,9 @@ const projectedEdges = `
 	       '{}'::jsonb AS attributes, 'projection'::text AS source, NULL::numeric AS confidence,
 	       NULL::timestamptz AS first_seen_at, NULL::timestamptz AS last_seen_at,
 	       'verified'::text AS verification_state, NULL::text AS source_system, NULL::text AS notes,
-	       src.created_at, src.updated_at, true AS projected, e.target_location_id
+	       src.created_at, src.updated_at, NULL::uuid AS source_interface_id, NULL::uuid AS target_interface_id,
+	       NULL::timestamptz AS last_confirmed_at, NULL::uuid AS verified_by, NULL::timestamptz AS verified_at,
+	       true AS projected, e.target_location_id
 	FROM ci_structure_edge e
 	JOIN ci src ON src.id = e.source_ci_id
 	WHERE e.target_ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = e.target_ci_id)`
@@ -90,6 +97,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, ciID string, page
 		edges := fmt.Sprintf(`
 			SELECT id, organization_id, source_ci_id, target_ci_id, rel_type, attributes, source, confidence,
 			       first_seen_at, last_seen_at, verification_state, source_system, notes, created_at, updated_at,
+			       source_interface_id, target_interface_id, last_confirmed_at, verified_by, verified_at,
 			       false AS projected, NULL::uuid AS target_location_id
 			FROM ci_relationship WHERE organization_id = $1 AND %s AND %s
 			UNION ALL
@@ -103,6 +111,8 @@ func (r *PGRepository) List(ctx context.Context, orgID string, ciID string, page
 		query := fmt.Sprintf(`SELECT id::text, organization_id::text, source_ci_id::text, COALESCE(target_ci_id::text, ''),
 				rel_type, attributes, source, confidence, first_seen_at, last_seen_at, verification_state,
 				COALESCE(source_system, ''), COALESCE(notes, ''), created_at, updated_at,
+				COALESCE(source_interface_id::text, ''), COALESCE(target_interface_id::text, ''), last_confirmed_at,
+				COALESCE(verified_by::text, ''), verified_at,
 				projected, COALESCE(target_location_id::text, '')
 			FROM (%s) e ORDER BY projected, created_at DESC, id LIMIT $%d OFFSET $%d`, edges, limitPos, limitPos+1)
 		rows, err := tx.Query(ctx, query, append(args, page.Limit, page.Offset)...)
@@ -148,16 +158,24 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 				last_seen_at,
 				verification_state,
 				source_system,
-				notes
+				notes,
+				source_interface_id,
+				target_interface_id,
+				last_confirmed_at,
+				verified_by,
+				verified_at
 			)
 			SELECT $1::uuid, $2::uuid, $3::uuid, $4::text, $5::jsonb, $6::text, $7::numeric,
-				$8::timestamptz, $9::timestamptz, $10::text, $11::text, $12::text
+				$8::timestamptz, $9::timestamptz, $10::text, $11::text, $12::text,
+				$13::uuid, $14::uuid, now(),
+				(SELECT id FROM app_user WHERE id::text = $15::text),
+				CASE WHEN $10::text = 'verified' THEN now() END
 			WHERE EXISTS (SELECT 1 FROM ci WHERE ci.id = $2)
 			  AND EXISTS (SELECT 1 FROM ci WHERE ci.id = $3)
-			RETURNING id::text, created_at, updated_at
+			RETURNING id::text, created_at, updated_at, last_confirmed_at, COALESCE(verified_by::text, ''), verified_at
 		`
-		var createdAt time.Time
-		var updatedAt time.Time
+		var createdAt, updatedAt, confirmedAt time.Time
+		var verifiedAt *time.Time
 		firstSeen := any(nil)
 		if rel.Source != "manual" {
 			firstSeen = time.Now().UTC()
@@ -179,7 +197,10 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 			verification,
 			nilIfEmptyStr(rel.SourceSystem),
 			nilIfEmptyStr(rel.Notes),
-		).Scan(&rel.ID, &createdAt, &updatedAt); err != nil {
+			nilIfEmptyStr(rel.SourceInterfaceID),
+			nilIfEmptyStr(rel.TargetInterfaceID),
+			rel.VerifiedBy,
+		).Scan(&rel.ID, &createdAt, &updatedAt, &confirmedAt, &rel.VerifiedBy, &verifiedAt); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("not found")
 			}
@@ -187,6 +208,8 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 		}
 		rel.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		rel.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+		rel.LastConfirmedAt = confirmedAt.UTC().Format(time.RFC3339Nano)
+		rel.VerifiedAt = formatTime(verifiedAt)
 		return nil
 	})
 }
@@ -210,9 +233,13 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			pos++
 		}
 		if req.VerificationState != nil {
-			sets = append(sets, fmt.Sprintf("verification_state = $%d", pos))
-			args = append(args, *req.VerificationState)
-			pos++
+			// Verifying records who and when; leaving the verified state
+			// clears both (REL-02).
+			sets = append(sets, fmt.Sprintf("verification_state = $%d", pos),
+				fmt.Sprintf("verified_by = CASE WHEN $%d = 'verified' THEN (SELECT id FROM app_user WHERE id::text = $%d) END", pos, pos+1),
+				fmt.Sprintf("verified_at = CASE WHEN $%d = 'verified' THEN now() END", pos))
+			args = append(args, *req.VerificationState, req.ActorID)
+			pos += 2
 		}
 		if req.SourceSystem != nil {
 			sets = append(sets, fmt.Sprintf("source_system = $%d", pos))
@@ -343,7 +370,7 @@ func scanRelationship(scanner relationshipScanner, withProjection ...bool) (*Rel
 	var createdAt time.Time
 	var updatedAt time.Time
 	var confidence *float64
-	var firstSeen, lastSeen *time.Time
+	var firstSeen, lastSeen, confirmedAt, verifiedAt *time.Time
 	var verification *string
 	dest := []any{
 		&item.ID,
@@ -361,6 +388,11 @@ func scanRelationship(scanner relationshipScanner, withProjection ...bool) (*Rel
 		&item.Notes,
 		&createdAt,
 		&updatedAt,
+		&item.SourceInterfaceID,
+		&item.TargetInterfaceID,
+		&confirmedAt,
+		&item.VerifiedBy,
+		&verifiedAt,
 	}
 	if len(withProjection) > 0 && withProjection[0] {
 		dest = append(dest, &item.Projected, &item.TargetLocationID)
@@ -383,7 +415,16 @@ func scanRelationship(scanner relationshipScanner, withProjection ...bool) (*Rel
 	}
 	item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 	item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+	item.LastConfirmedAt = formatTime(confirmedAt)
+	item.VerifiedAt = formatTime(verifiedAt)
 	return item, nil
+}
+
+func formatTime(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
 func nilIfEmptyStr(value string) any {

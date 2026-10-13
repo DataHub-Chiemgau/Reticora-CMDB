@@ -17,6 +17,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
@@ -68,6 +69,9 @@ type DispatcherOptions struct {
 	// PollInterval controls how often the retry worker looks for due
 	// deliveries. A negative value disables the worker.
 	PollInterval time.Duration
+	// Events reports a delivery moved to the dead-letter queue as
+	// webhook.dead (NTF-05); optional.
+	Events events.Emitter
 	// Access decides for a subscription bound to a service account whether
 	// the account may read the event's object (RBA-08). Without it, bound
 	// subscriptions receive nothing (fail-closed).
@@ -216,6 +220,35 @@ func orgScoped(ctx context.Context, orgID string) context.Context {
 
 // Dispatch persists and queues webhook deliveries for matching subscriptions.
 func (d *Dispatcher) Dispatch(ctx context.Context, orgID, event string, payload any) {
+	d.dispatchAs(ctx, orgID, event, nil, payload)
+}
+
+// legacyNames are the former names of the events of EVT-02 that existing
+// subscriptions still use: they receive the event under its new name.
+var legacyNames = map[string][]string{
+	events.CIChanged:           {"ci.updated"},
+	events.RelationshipRemoved: {"relationship.deleted"},
+}
+
+// Consume implements events.Consumer: the outbox publisher hands every
+// committed domain event to the subscriptions of its type and of its
+// former names (WP-136). A status-only change also reaches the
+// subscriptions of ci.status_changed.
+func (d *Dispatcher) Consume(ctx context.Context, env *events.Envelope) error {
+	aliases := append([]string(nil), legacyNames[env.Type]...)
+	if env.Type == events.CIChanged {
+		var data struct {
+			ChangedFields []string `json:"changed_fields"`
+		}
+		if json.Unmarshal(env.Data, &data) == nil && len(data.ChangedFields) == 1 && data.ChangedFields[0] == "status" {
+			aliases = append(aliases, "ci.status_changed")
+		}
+	}
+	d.dispatchAs(ctx, env.OrgID, env.Type, aliases, env.Data)
+	return nil
+}
+
+func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliases []string, payload any) {
 	if d == nil || d.repo == nil {
 		return
 	}
@@ -224,10 +257,20 @@ func (d *Dispatcher) Dispatch(ctx context.Context, orgID, event string, payload 
 	// the acting principal's client scope: the lookup runs org-wide on behalf
 	// of the organization (E-08; WP-022 moves the dispatcher to a system
 	// principal per organization).
-	subs, err := d.repo.ListByEvent(orgScoped(ctx, orgID), orgID, event)
-	if err != nil {
-		slog.Error("list webhook subscriptions failed", "error", err, "organization_id", orgID, "event", event)
-		return
+	var subs []Subscription
+	seen := map[string]bool{}
+	for _, name := range append([]string{event}, aliases...) {
+		named, err := d.repo.ListByEvent(orgScoped(ctx, orgID), orgID, name)
+		if err != nil {
+			slog.Error("list webhook subscriptions failed", "error", err, "organization_id", orgID, "event", name)
+			return
+		}
+		for i := range named {
+			if !seen[named[i].ID] {
+				seen[named[i].ID] = true
+				subs = append(subs, named[i])
+			}
+		}
 	}
 	if len(subs) == 0 {
 		return
@@ -253,7 +296,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, orgID, event string, payload 
 		}
 
 		if d.store != nil {
-			now := d.now()
+			// The first attempt is claimed by this process like a retry
+			// claim (TEC-14): the delivery is stored with a lease, so the
+			// retry worker of no replica sends it in parallel, and takes it
+			// over only when this process dies before recording the attempt.
+			leased := d.now().Add(defaultClaimLease)
 			rec, err := d.store.Enqueue(ctx, DeliveryRecord{
 				OrganizationID: orgID,
 				SubscriptionID: sub.ID,
@@ -261,7 +308,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, orgID, event string, payload 
 				Payload:        body,
 				Status:         StatusPending,
 				MaxAttempts:    d.opts.MaxAttempts,
-				NextRetryAt:    &now,
+				NextRetryAt:    &leased,
 			})
 			if err != nil {
 				// The delivery could not be persisted; dropping it is safer
@@ -289,7 +336,8 @@ func (d *Dispatcher) enqueueJob(job deliveryJob) {
 	case <-d.stop:
 	default:
 		// The in-process queue is saturated. Persisted deliveries are picked up
-		// by the retry worker, so only the memory-only mode needs to block.
+		// by the retry worker once their lease ends, so only the memory-only
+		// mode needs to block.
 		if d.store == nil {
 			select {
 			case d.queue <- job:
@@ -517,6 +565,13 @@ func (d *Dispatcher) finalize(ctx context.Context, rec DeliveryRecord, statusCod
 					"error", updateErr, "delivery_id", rec.ID, "organization_id", rec.OrganizationID)
 			}
 		}
+		if d.opts.Events != nil {
+			if err := d.opts.Events.Emit(ctx, &events.Event{OrgID: rec.OrganizationID, Type: events.WebhookDead, EntityID: rec.SubscriptionID,
+				Data: map[string]any{"delivery_id": rec.ID, "subscription_id": rec.SubscriptionID, "event": rec.Event,
+					"attempts": rec.Attempt, "last_error": rec.Error}}); err != nil {
+				slog.Error("report dead webhook delivery", "error", err, "delivery_id", rec.ID)
+			}
+		}
 		return
 	}
 
@@ -552,6 +607,11 @@ func (d *Dispatcher) send(job deliveryJob) (int, time.Duration, error) {
 	req.Header.Set("X-Webhook-Event", job.event)
 	req.Header.Set("X-Webhook-ID", job.deliveryID)
 	req.Header.Set("X-Webhook-Signature", signPayload(job.sub.Secret, job.payload))
+	// During the overlap after a rotation the old secret signs as well
+	// (SEC-06).
+	if job.sub.PreviousSecret != "" && job.sub.PreviousSecretExpiresAt != nil && d.now().Before(*job.sub.PreviousSecretExpiresAt) {
+		req.Header.Set("X-Webhook-Signature-Previous", signPayload(job.sub.PreviousSecret, job.payload))
+	}
 	for key, value := range job.sub.Headers {
 		req.Header.Set(key, value)
 	}

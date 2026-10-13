@@ -637,6 +637,13 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: >-
+            Another active CI holds the value of a unique attribute (MET-15);
+            `violations` names the attributes.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -703,10 +710,16 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Fields of the request changed since the If-Match version
+          description: >-
+            Fields of the request changed since the If-Match version, or
+            another active CI holds the value of a unique attribute (MET-15,
+            `violations` names the attributes)
           content:
             application/problem+json:
-              schema: { $ref: '#/components/schemas/VersionConflictProblem' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/VersionConflictProblem' }
+                  - { $ref: '#/components/schemas/ProblemDetail' }
         '412':
           description: If-Match missing although required, or not a version of the CI
           content:
@@ -757,6 +770,24 @@ paths:
       operationId: listAuditEntries
       tags: [Audit]
       summary: List audit log entries
+      description: >-
+        Newest first; requires audit:read (AUD-05). The filters combine with
+        AND; `from` is inclusive, `to` exclusive. Personal values (e-mail,
+        names, phone) are stored as PII-vault surrogates and resolved here;
+        a deleted vault entry shows as null (SEC-05).
+      parameters:
+        - {name: action, in: query, schema: {type: string}}
+        - {name: resource_type, in: query, schema: {type: string}}
+        - {name: resource_id, in: query, schema: {type: string, format: uuid}}
+        - {name: actor_id, in: query, schema: {type: string, format: uuid}}
+        - name: source
+          in: query
+          schema:
+            $ref: '#/components/schemas/AuditSource'
+        - {name: request_id, in: query, schema: {type: string}}
+        - {name: correlation_id, in: query, schema: {type: string}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
       responses:
         '200':
           description: Paginated audit log
@@ -764,6 +795,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuditEntryListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -773,8 +806,11 @@ paths:
       tags: [Audit]
       summary: Verify the audit hash chain
       description: >-
-        Walks the organization's audit log in chain order and reports whether the
-        `previous_hash`/`hash` linkage is intact.
+        Walks the organization's audit chain in `seq` order and reports the
+        first violation (AUD-04): a gap in the sequence, a broken
+        `previous_hash` link (the first entry links to 32 zero bytes) or a
+        hash that does not match SHA-256(previous_hash || SHA-256(canonical
+        JSON)) of the stored entry.
       responses:
         '200':
           description: Verification result
@@ -1046,6 +1082,46 @@ paths:
       responses:
         '204':
           description: Webhook subscription deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/webhooks/{id}/rotate-secret:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      operationId: rotateWebhookSecret
+      tags: [Webhooks]
+      summary: Rotate the signing secret
+      description: >-
+        A new secret (generated, or the one given) replaces the current one;
+        for 24 hours deliveries are signed with both
+        (X-Webhook-Signature, X-Webhook-Signature-Previous), so the receiver
+        can switch without losing deliveries (SEC-06). The new secret is
+        returned only here.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                secret: {type: string, minLength: 16}
+      responses:
+        '200':
+          description: The new secret
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, secret, previous_secret_expires_at]
+                properties:
+                  id: {type: string}
+                  secret: {type: string}
+                  previous_secret_expires_at: {type: string, format: date-time}
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -4722,6 +4798,14 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The mount collides with another on an overlapping face (front,
+            rear, both), exceeds the rack height, mounts a CI that is
+            mounted already or a child CI of a composition (RCK-01, RCK-02).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/rack-mounts/{id}:
     parameters:
@@ -4768,6 +4852,14 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The mount collides with another on an overlapping face (front,
+            rear, both), exceeds the rack height, mounts a CI that is
+            mounted already or a child CI of a composition (RCK-01, RCK-02).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
     delete:
       operationId: deleteRackMount
       tags: [Racks]
@@ -5035,6 +5127,222 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/notifications:
+    get:
+      operationId: listNotifications
+      tags: [Notifications]
+      summary: The signed-in user's in-app notifications
+      description: Newest first (NTF-04, UI-16); `unread=true` lists the unread ones only.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - {name: unread, in: query, schema: {type: boolean}}
+      responses:
+        '200':
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InAppNotificationListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/notifications/read-all:
+    post:
+      operationId: markAllNotificationsRead
+      tags: [Notifications]
+      summary: Mark all own notifications read
+      responses:
+        '200':
+          description: Number of notifications marked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [marked]
+                properties:
+                  marked: {type: integer}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/notifications/{id}/read:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      operationId: markNotificationRead
+      tags: [Notifications]
+      summary: Mark an own notification read
+      responses:
+        '204':
+          description: Marked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/notifications/preferences:
+    get:
+      operationId: getNotificationPreferences
+      tags: [Notifications]
+      summary: The signed-in user's quiet hours and muted categories
+      responses:
+        '200':
+          description: Preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreference'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      operationId: setNotificationPreferences
+      tags: [Notifications]
+      summary: Set quiet hours and muted categories
+      description: Critical notifications ignore both (NTF-04).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationPreference'
+      responses:
+        '200':
+          description: Stored preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreference'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/notification-channels:
+    get:
+      operationId: listNotificationChannels
+      tags: [Notifications]
+      summary: Notification channels of the organization
+      description: Secrets (password, secret) are returned as `********`.
+      responses:
+        '200':
+          description: Channels
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NotificationChannel'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createNotificationChannel
+      tags: [Notifications]
+      summary: Create a notification channel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationChannelRequest'
+      responses:
+        '201':
+          description: Created channel
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationChannel'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/notification-channels/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      operationId: getNotificationChannel
+      tags: [Notifications]
+      summary: Get a notification channel
+      responses:
+        '200':
+          description: Channel
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationChannel'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateNotificationChannel
+      tags: [Notifications]
+      summary: Update name, configuration or enabled flag
+      description: >-
+        A configuration replaces the stored one; a secret sent back as
+        `********` keeps its value. Kind and provider cannot change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationChannelRequest'
+      responses:
+        '200':
+          description: Updated channel
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationChannel'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      operationId: deleteNotificationChannel
+      tags: [Notifications]
+      summary: Delete a notification channel
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/notification-deliveries:
+    get:
+      operationId: listNotificationDeliveries
+      tags: [Notifications]
+      summary: Latest notification deliveries with their status
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Deliveries, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NotificationDelivery'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /api/v1/vrfs:
     get:
@@ -5981,6 +6289,9 @@ paths:
                   rotated:
                     type: integer
                     description: Number of credential ciphertexts re-encrypted
+                  pii_subjects:
+                    type: integer
+                    description: Number of PII vault entries re-encrypted with the new data key (SEC-05)
                 required: [key_version, rotated]
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -8320,7 +8631,12 @@ paths:
     patch:
       operationId: updateAttributeDefinition
       summary: Update an attribute definition
-      description: Key, CI type and scope are immutable; system definitions are read-only (403).
+      description: >-
+        Key, CI type and scope are immutable; system definitions are
+        read-only (403). Changing `searchable`, `unique` or `unique_scope`
+        queues an `attribute.index` job that builds the index concurrently
+        (DB-04); making an attribute unique while active CIs share a value is
+        409.
       requestBody:
         required: true
         content:
@@ -8342,6 +8658,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     delete:
@@ -8417,6 +8735,25 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/CIType'
+        '401':
+          description: Unauthorized
+
+  /api/v1/ci-types/export:
+    get:
+      operationId: exportMetamodel
+      summary: Export the metamodel
+      description: >-
+        The organization's metamodel as one JSON document (MET-54, phase 1):
+        every CI type it sees — system and own, active or not — with its
+        attribute definitions, and the global attribute definitions. Served
+        as a download (Content-Disposition attachment).
+      responses:
+        '200':
+          description: Metamodel export
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelExport'
         '401':
           description: Unauthorized
 
@@ -8964,46 +9301,96 @@ paths:
   /api/v1/relationship-types:
     get:
       operationId: listRelationshipTypes
-      summary: Manage relationship type metadata
+      summary: List the relationship types (system catalogue and the organization's)
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Manage relationship type metadata
+          description: Paginated relationship types
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationEnvelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/RelationshipTypeDefinition' }
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
     post:
       operationId: createRelationshipTypes
-      summary: Manage relationship type metadata
+      summary: Create a relationship type of the organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RelationshipTypeUpsert' }
       responses:
         '201':
-          description: Manage relationship type metadata
+          description: Relationship type created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RelationshipTypeDefinition' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/relationship-types/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
     get:
       operationId: getRelationshipTypesKey
-      summary: Read, update or delete a relationship type
+      summary: Get a relationship type
       responses:
         '200':
-          description: Read, update or delete a relationship type
+          description: Relationship type
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RelationshipTypeDefinition' }
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     patch:
       operationId: updateRelationshipTypesKey
-      summary: Read, update or delete a relationship type
+      summary: Update a relationship type of the organization (system types are read-only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RelationshipTypeUpsert' }
       responses:
         '200':
-          description: Read, update or delete a relationship type
+          description: Relationship type updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RelationshipTypeDefinition' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       operationId: deleteRelationshipTypesKey
-      summary: Read, update or delete a relationship type
+      summary: Delete a relationship type of the organization (system types stay)
       responses:
         '204':
-          description: Read, update or delete a relationship type
+          description: Relationship type deleted
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/reservations:
     get:
@@ -9336,9 +9723,21 @@ components:
           type: array
           items: { type: string }
         multi_value: { type: boolean }
-        searchable: { type: boolean }
-        unique: { type: boolean }
-        unique_scope: { type: string, enum: [org, client] }
+        searchable:
+          type: boolean
+          description: >-
+            Indexed for search: an `attribute.index` job builds
+            `idx_attr_<id>` concurrently (DB-04).
+        unique:
+          type: boolean
+          description: >-
+            The value is unique among the active CIs (MET-15), enforced by the
+            server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do
+            not count.
+        unique_scope:
+          type: string
+          enum: [org, client]
+          description: Unique per organization or per client (CIs without a client count as one client).
         inheritable: { type: boolean }
         validation: { type: object, additionalProperties: true }
         conditional: { type: object, additionalProperties: true }
@@ -9424,6 +9823,143 @@ components:
       properties:
         de: { type: string, minLength: 1, maxLength: 200 }
         en: { type: string, minLength: 1, maxLength: 200 }
+    NotificationRecipient:
+      type: object
+      properties:
+        user_id: {type: string}
+        email: {type: string}
+        name: {type: string}
+
+    InAppNotification:
+      type: object
+      required: [id, organization_id, user_id, category, subject, body, created_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        user_id: {type: string}
+        category: {type: string}
+        subject: {type: string}
+        body: {type: string}
+        data:
+          type: object
+          additionalProperties: true
+        created_at: {type: string, format: date-time}
+        read_at: {type: string, format: date-time}
+
+    InAppNotificationListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/InAppNotification'
+
+    NotificationPreference:
+      type: object
+      required: [time_zone, muted_categories]
+      properties:
+        quiet_start: {type: string, pattern: '^[0-2][0-9]:[0-5][0-9]$', description: Start of the quiet hours (HH:MM).}
+        quiet_end: {type: string, pattern: '^[0-2][0-9]:[0-5][0-9]$', description: End of the quiet hours; may be on the next day.}
+        time_zone: {type: string, example: Europe/Berlin}
+        muted_categories:
+          type: array
+          items: {type: string}
+
+    NotificationChannel:
+      type: object
+      required: [id, organization_id, name, kind, provider, enabled, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        name: {type: string}
+        kind:
+          type: string
+          enum: [email, inapp, webhook, sms, pager]
+        provider:
+          type: string
+          enum: [central_smtp, smtp, inapp, webhook]
+        config:
+          type: object
+          additionalProperties: true
+          description: >-
+            central_smtp: sender_name, reply_to; smtp: host, port, tls
+            (starttls|tls|none), username, password, from; webhook: url,
+            secret. Secrets are returned as `********`.
+        enabled: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    NotificationChannelRequest:
+      type: object
+      properties:
+        name: {type: string}
+        kind:
+          type: string
+          enum: [email, inapp, webhook]
+        provider:
+          type: string
+          enum: [central_smtp, smtp, inapp, webhook]
+        config:
+          type: object
+          additionalProperties: true
+        enabled: {type: boolean}
+
+    NotificationDelivery:
+      type: object
+      required: [id, organization_id, channel_id, recipient, category, critical, subject, body, status, attempts, max_attempts, next_attempt_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        channel_id: {type: string}
+        recipient:
+          $ref: '#/components/schemas/NotificationRecipient'
+        recipients:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationRecipient'
+        category: {type: string}
+        critical: {type: boolean}
+        subject: {type: string}
+        body: {type: string}
+        data:
+          type: object
+          additionalProperties: true
+        dedup_key: {type: string}
+        status:
+          type: string
+          enum: [pending, sending, sent, failed, suppressed]
+        attempts: {type: integer}
+        max_attempts: {type: integer}
+        next_attempt_at: {type: string, format: date-time}
+        last_error: {type: string}
+        provider_id: {type: string}
+        sent_at: {type: string, format: date-time}
+
+    MetamodelExport:
+      type: object
+      required: [format_version, exported_at, organization_id, ci_types, attribute_definitions]
+      properties:
+        format_version:
+          type: integer
+          enum: [1]
+        exported_at:
+          type: string
+          format: date-time
+        organization_id:
+          type: string
+        ci_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/CIType'
+        attribute_definitions:
+          type: array
+          description: Global attribute definitions of the organization and the system.
+          items:
+            $ref: '#/components/schemas/AttributeDefinition'
+
     CIType:
       type: object
       required: [id, key, name, display_name, is_builtin, is_system, is_active, is_logical, is_observable, schema_version, version, capabilities, allowed_relationship_types, ui_schema, compliance_rules, discovery_mappings, created_at, updated_at]
@@ -10263,12 +10799,16 @@ components:
 
     AuditEntry:
       type: object
-      required: [id, organization_id, timestamp, action, resource_type, hash]
+      required: [id, organization_id, seq, timestamp, action, resource_type, source, hash]
       properties:
         id:
           type: string
         organization_id:
           type: string
+        seq:
+          type: integer
+          format: int64
+          description: Position in the organization's audit chain, without gaps from 1 (AUD-04).
         timestamp:
           type: string
           format: date-time
@@ -10286,10 +10826,27 @@ components:
         changes:
           type: object
           additionalProperties: true
+          description: >-
+            What changed. Domain entries carry old and new values; the entry
+            of a write request names the route, the response status, the
+            written fields and, for resources without a UUID, resource_key.
+        source:
+          $ref: '#/components/schemas/AuditSource'
+        request_id:
+          type: string
+          description: The X-Request-ID of the request that made the change.
+        correlation_id:
+          type: string
+          description: The X-Correlation-ID of the operation (the request id when the caller sent none).
         previous_hash:
           type: string
         hash:
           type: string
+
+    AuditSource:
+      type: string
+      enum: [ui, api, collector, import, system]
+      description: Where a change came from (AUD-07).
 
     AuditEntryListResponse:
       allOf:
@@ -10315,8 +10872,67 @@ components:
           type: string
         broken_at:
           type: integer
+          description: Chain position (seq) where the first violation was found.
         broken_reason:
           type: string
+          description: '`sequence gap`, `previous_hash mismatch` or `hash mismatch`.'
+
+    RelationshipTypeCategory:
+      type: string
+      enum: [network, power, hosting, logical, physical]
+
+    RelationshipImpactDirection:
+      type: string
+      enum: [source_depends_on_target, target_depends_on_source, none, undirected]
+      description: >-
+        Which end of an edge depends on the other (REL-01, CH27): the
+        source on the target (powered_by, hosted_on, depends_on), the
+        target on the source (powers, contains), none (no impact) or
+        undirected (connected_to, a heuristic both ways).
+
+    RelationshipTypeDefinition:
+      type: object
+      description: Relationship type metadata (REL-01). contains, mounted_in and located_in are projected, not stored (CH27).
+      required: [id, key, display_name, reverse_name, directed, category, impact_direction, redundant,
+        allowed_source_types, allowed_target_types, cardinality, is_system, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string, description: Empty for a system type. }
+        key: { type: string }
+        display_name: { type: string }
+        reverse_name: { type: string }
+        directed: { type: boolean }
+        category: { $ref: '#/components/schemas/RelationshipTypeCategory' }
+        impact_direction: { $ref: '#/components/schemas/RelationshipImpactDirection' }
+        redundant:
+          type: boolean
+          description: Edges of the type are redundant feeds (powered_by, member_of_cluster); impact needs all of them to fail.
+        allowed_source_types: { type: array, items: { type: string } }
+        allowed_target_types: { type: array, items: { type: string } }
+        cardinality: { type: string }
+        is_system: { type: boolean, readOnly: true }
+        description: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    RelationshipTypeUpsert:
+      type: object
+      description: >-
+        Create (key, display_name, reverse_name required; defaults directed,
+        logical, source_depends_on_target) or change a relationship type.
+        impact_direction undirected belongs to undirected types only.
+      properties:
+        key: { type: string }
+        display_name: { type: string }
+        reverse_name: { type: string }
+        directed: { type: boolean }
+        category: { $ref: '#/components/schemas/RelationshipTypeCategory' }
+        impact_direction: { $ref: '#/components/schemas/RelationshipImpactDirection' }
+        redundant: { type: boolean }
+        allowed_source_types: { type: array, items: { type: string } }
+        allowed_target_types: { type: array, items: { type: string } }
+        cardinality: { type: string }
+        description: { type: string }
 
     RelationshipType:
       type: string
@@ -10353,6 +10969,33 @@ components:
           additionalProperties: true
         source:
           type: string
+          description: Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow.
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        source_interface_id:
+          type: string
+          description: Port of the source CI the edge starts at (REL-02).
+        target_interface_id:
+          type: string
+          description: Port of the target CI the edge ends at (REL-02).
+        verification_state:
+          type: string
+          enum: [unverified, verified, disputed, stale]
+        last_confirmed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Last time the source of the edge confirmed it.
+        verified_by:
+          type: string
+          readOnly: true
+          description: User who verified the edge; cleared when it leaves the verified state.
+        verified_at:
+          type: string
+          format: date-time
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -10376,6 +11019,16 @@ components:
         source:
           type: string
           default: manual
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        source_interface_id:
+          type: string
+          description: An interface of the source CI; the edge is unique per (source, target, type, interfaces), a taken one is 409.
+        target_interface_id:
+          type: string
+          description: An interface of the target CI; an interface of another CI is 422.
 
     UpdateRelationshipRequest:
       type: object
@@ -10440,6 +11093,10 @@ components:
             each header name with the value "***" (SEC-01).
           additionalProperties:
             type: string
+        previous_secret_expires_at:
+          type: string
+          format: date-time
+          description: Until when the previous secret still signs after a rotation (SEC-06).
         service_account_id:
           type: string
           description: >-
@@ -14143,7 +14800,11 @@ components:
 
     Contact:
       type: object
-      required: [id, organization_id, display_name, created_at, updated_at]
+      description: >-
+        Contact (AUD-01). Name, phone and e-mail are stored in the PII vault
+        (SEC-05) and resolved when the contact is read; deleting the contact
+        deletes its vault entry.
+      required: [id, organization_id, display_name, is_24_7, created_at, updated_at]
       properties:
         id:
           type: string
@@ -14163,6 +14824,9 @@ components:
           type: string
         notes:
           type: string
+        is_24_7:
+          type: boolean
+          description: Reachable around the clock.
         created_at:
           type: string
           format: date-time
@@ -14194,6 +14858,8 @@ components:
           type: string
         notes:
           type: string
+        is_24_7:
+          type: boolean
 
     UpdateContactRequest:
       type: object
@@ -14212,6 +14878,8 @@ components:
           type: string
         notes:
           type: string
+        is_24_7:
+          type: boolean
 
     ContactListResponse:
       allOf:

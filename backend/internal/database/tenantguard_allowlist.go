@@ -16,4 +16,17 @@ var tenantGuardAllowlist = map[string]string{
 	// gen_random_uuid() before the organization exists; all tenant writes run
 	// in WithTenant.
 	"cmd/audit-seed/main.go": "organization id before the tenant exists",
+
+	// Scheduler leader (JOB-02, WP-131): a session advisory lock lives on a
+	// dedicated connection for as long as it is held; the connection runs
+	// only pg_try_advisory_lock, pg_advisory_unlock and SELECT 1 and reads
+	// no tenant data.
+	"internal/jobs/scheduler.go": "advisory locks of the scheduler",
+
+	// Attribute index job (DB-04, WP-142): CREATE INDEX CONCURRENTLY cannot
+	// run in a transaction, so the job takes a dedicated connection that
+	// switches to the owner role, runs only index DDL and catalog lookups
+	// (pg_class, pg_index) and is closed afterwards; the definition is read
+	// in WithTenant.
+	"internal/citype/ddl_job.go": "index DDL outside a transaction",
 }

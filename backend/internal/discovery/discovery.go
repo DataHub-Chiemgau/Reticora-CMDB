@@ -20,6 +20,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
@@ -350,6 +351,8 @@ type Handler struct {
 	interfaces InterfaceSyncer
 	// observed validates discovered values against the field metadata.
 	observed ObservedValidator
+	// jobs registers discovery jobs in the generic job model (JOB-01).
+	jobs jobs.Tracker
 	// The review queue (package reviews), built on first use.
 	reviewsOnce    sync.Once
 	reviews        *reviews.Service

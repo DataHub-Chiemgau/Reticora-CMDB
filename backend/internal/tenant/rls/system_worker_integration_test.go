@@ -75,7 +75,9 @@ func TestSystemWorkersPerOrganization(t *testing.T) {
 			t.Fatalf("seed reservation: %v", err)
 		}
 	}
-	reservation.NewSweeper(reservation.NewPGRepository(f.App), nil, time.Minute).SweepOnce(bg)
+	if err := reservation.NewSweeper(reservation.NewPGRepository(f.App), nil).SweepOnce(bg); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
 	var active int
 	if err := f.Admin.QueryRow(bg,
 		`SELECT count(*) FROM reservation WHERE organization_id = ANY($1::uuid[]) AND state = 'active'`, orgs).Scan(&active); err != nil {

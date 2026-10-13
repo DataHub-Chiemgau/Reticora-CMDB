@@ -113,8 +113,8 @@ func TestMountFitAndOverlap(t *testing.T) {
 	base := "/api/v1/racks/" + rk.ID + "/mounts"
 
 	// exceeds rack height
-	if w := do(mux, "POST", base, `{"ci_id":"ci-1","position_u":9,"height_u":5}`, "org-1"); w.Code != http.StatusBadRequest {
-		t.Errorf("out-of-range: expected 400, got %d: %s", w.Code, w.Body.String())
+	if w := do(mux, "POST", base, `{"ci_id":"ci-1","position_u":9,"height_u":5}`, "org-1"); w.Code != http.StatusConflict {
+		t.Errorf("out-of-range: expected 409 (RCK-02), got %d: %s", w.Code, w.Body.String())
 	}
 	// valid mount 1-2U
 	w := do(mux, "POST", base, `{"ci_id":"ci-1","position_u":1,"height_u":2}`, "org-1")
@@ -127,16 +127,24 @@ func TestMountFitAndOverlap(t *testing.T) {
 		t.Errorf("expected default face front, got %q", m1.Face)
 	}
 	// overlapping mount 2-3U front
-	if w := do(mux, "POST", base, `{"ci_id":"ci-2","position_u":2,"height_u":2}`, "org-1"); w.Code != http.StatusBadRequest {
-		t.Errorf("overlap: expected 400, got %d: %s", w.Code, w.Body.String())
+	if got := do(mux, "POST", base, `{"ci_id":"ci-2","position_u":2,"height_u":2}`, "org-1"); got.Code != http.StatusConflict {
+		t.Errorf("overlap: expected 409, got %d: %s", got.Code, got.Body.String())
 	}
 	// non-overlapping on rear face is fine
 	if w := do(mux, "POST", base, `{"ci_id":"ci-3","position_u":1,"height_u":2,"face":"rear"}`, "org-1"); w.Code != http.StatusCreated {
 		t.Errorf("rear face: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
+	// both faces overlap front and rear at the same units (RCK-01)
+	if got := do(mux, "POST", base, `{"ci_id":"ci-4","position_u":2,"height_u":1,"face":"both"}`, "org-1"); got.Code != http.StatusConflict {
+		t.Errorf("both over front/rear: expected 409, got %d: %s", got.Code, got.Body.String())
+	}
 	// duplicate ci
-	if w := do(mux, "POST", base, `{"ci_id":"ci-1","position_u":5,"height_u":1}`, "org-1"); w.Code != http.StatusBadRequest {
-		t.Errorf("dup ci: expected 400, got %d", w.Code)
+	if got := do(mux, "POST", base, `{"ci_id":"ci-1","position_u":5,"height_u":1}`, "org-1"); got.Code != http.StatusConflict {
+		t.Errorf("dup ci: expected 409, got %d", got.Code)
+	}
+	// invalid position stays a bad request
+	if got := do(mux, "POST", base, `{"ci_id":"ci-5","position_u":0,"height_u":1}`, "org-1"); got.Code != http.StatusBadRequest {
+		t.Errorf("position 0: expected 400, got %d", got.Code)
 	}
 
 	// list mounts
@@ -154,9 +162,9 @@ func TestMountFitAndOverlap(t *testing.T) {
 		t.Errorf("missing rack mounts: expected 404, got %d", w.Code)
 	}
 
-	// update mount to overlap -> 400
-	if w := do(mux, "PATCH", "/api/v1/rack-mounts/"+m1.ID, `{"position_u":1,"height_u":11}`, "org-1"); w.Code != http.StatusBadRequest {
-		t.Errorf("patch overlap: expected 400, got %d", w.Code)
+	// update mount beyond the rack -> 409
+	if w := do(mux, "PATCH", "/api/v1/rack-mounts/"+m1.ID, `{"position_u":1,"height_u":11}`, "org-1"); w.Code != http.StatusConflict {
+		t.Errorf("patch beyond the rack: expected 409, got %d", w.Code)
 	}
 	// valid update
 	if w := do(mux, "PATCH", "/api/v1/rack-mounts/"+m1.ID, `{"position_u":8}`, "org-1"); w.Code != http.StatusOK {

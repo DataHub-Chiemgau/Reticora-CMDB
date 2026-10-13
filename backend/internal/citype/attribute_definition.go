@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -471,24 +472,35 @@ func (r *PGRepository) CreateAttributeDefinition(ctx context.Context, orgID stri
 	if err := d.Validate(); err != nil {
 		return err
 	}
-	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if d.CITypeID != "" {
 			if err := checkAttributeType(ctx, tx, d.CITypeID); err != nil {
 				return err
 			}
 		}
-		return insertAttributeTx(ctx, tx, orgID, d)
+		if err := insertAttributeTx(ctx, tx, orgID, d); err != nil {
+			return err
+		}
+		if err := checkUniqueValuesTx(ctx, tx, nil, d); err != nil {
+			return err
+		}
+		return recordAttributeAudit(ctx, tx, orgID, nil, d)
 	})
+	if err == nil {
+		r.scheduleIndex(ctx, orgID, nil, d)
+	}
+	return err
 }
 
 // UpdateAttributeDefinition implements AttributeDefinitionStore.
 func (r *PGRepository) UpdateAttributeDefinition(ctx context.Context, orgID, id string, patch *AttributeDefinitionPatch) (*AttributeDefinition, error) {
-	var out *AttributeDefinition
+	var out, prev *AttributeDefinition
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		d, err := lockOwnAttributeTx(ctx, tx, id)
 		if err != nil {
 			return err
 		}
+		before := *d
 		patch.apply(d)
 		if verr := d.Validate(); verr != nil {
 			return verr
@@ -496,23 +508,79 @@ func (r *PGRepository) UpdateAttributeDefinition(ctx context.Context, orgID, id 
 		if uerr := updateAttributeTx(ctx, tx, d); uerr != nil {
 			return uerr
 		}
-		out = d
-		return nil
+		if uerr := checkUniqueValuesTx(ctx, tx, &before, d); uerr != nil {
+			return uerr
+		}
+		out, prev = d, &before
+		return recordAttributeAudit(ctx, tx, orgID, &before, d)
 	})
+	if err == nil {
+		r.scheduleIndex(ctx, orgID, prev, out)
+	}
 	return out, err
 }
 
 // DeleteAttributeDefinition implements AttributeDefinitionStore.
 func (r *PGRepository) DeleteAttributeDefinition(ctx context.Context, orgID, id string) error {
-	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := lockOwnAttributeTx(ctx, tx, id); err != nil {
+	var deleted *AttributeDefinition
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		before, err := lockOwnAttributeTx(ctx, tx, id)
+		if err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM attribute_definition WHERE id = $1`, id); err != nil {
 			return fmt.Errorf("delete attribute definition: %w", err)
 		}
-		return nil
+		deleted = before
+		return recordAttributeAudit(ctx, tx, orgID, before, nil)
 	})
+	if err == nil {
+		r.scheduleIndex(ctx, orgID, deleted, nil)
+	}
+	return err
+}
+
+// scheduleIndex starts the index job when the change touches the index
+// (DB-04). The change is stored already; a job that cannot be queued is
+// logged, and the server-side check of the CI service keeps the values
+// unique in the meantime (MET-15).
+func (r *PGRepository) scheduleIndex(ctx context.Context, orgID string, before, after *AttributeDefinition) {
+	if r.indexes == nil || !indexRelevant(before, after) {
+		return
+	}
+	id := ""
+	if after != nil {
+		id = after.ID
+	} else {
+		id = before.ID
+	}
+	if err := r.indexes.ScheduleIndex(context.WithoutCancel(ctx), orgID, id); err != nil {
+		slog.Error("schedule attribute index job", "definition", id, "error", err)
+	}
+}
+
+// checkUniqueValuesTx refuses to make an attribute unique while CIs share
+// a value of it in the scope (MET-15); the unique index could not be built.
+func checkUniqueValuesTx(ctx context.Context, tx pgx.Tx, before, d *AttributeDefinition) error {
+	if !d.Unique || (before != nil && before.Unique && before.UniqueScope == d.UniqueScope) {
+		return nil
+	}
+	var duplicate bool
+	err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM ci
+			WHERE deleted_at IS NULL AND attributes ->> $1 IS NOT NULL
+			  AND ($2::uuid IS NULL OR ci_type_id = $2::uuid)
+			GROUP BY organization_id, CASE WHEN $3 = 'client' THEN client_id END, attributes ->> $1
+			HAVING count(*) > 1)`, d.Key, nilIfEmpty(d.CITypeID), d.UniqueScope).Scan(&duplicate)
+	if err != nil {
+		return fmt.Errorf("check attribute values: %w", err)
+	}
+	if duplicate {
+		return &api.FieldError{Field: "unique", Message: "CIs already share a value of this attribute; resolve the duplicates first",
+			Status: http.StatusConflict}
+	}
+	return nil
 }
 
 func isUUIDText(s string) bool {

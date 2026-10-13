@@ -18,6 +18,9 @@ var (
 	ErrNotFound     = errors.New("not found")
 	ErrRackNotFound = errors.New("rack not found")
 	ErrValidation   = errors.New("validation failed")
+	// ErrConflict: the mount collides with another, exceeds the rack or
+	// mounts a child CI of a composition (RCK-01, RCK-02: 409).
+	ErrConflict = errors.New("conflict")
 )
 
 // Repository defines persistence operations for racks, mounts, and cables.
@@ -41,9 +44,15 @@ type Repository interface {
 	DeleteCable(ctx context.Context, orgID, id string) error
 }
 
+// facesOverlap reports whether two faces share rack space: front and rear
+// are separate, both covers either (RCK-01 face ranges).
+func facesOverlap(a, b string) bool {
+	return a == b || a == "both" || b == "both"
+}
+
 // validateMountFit ensures the proposed mount fits within the rack height and
-// does not overlap any existing mount on the same face. existing excludes the
-// mount being updated (pass "" when creating).
+// does not overlap any existing mount on an overlapping face. existing
+// excludes the mount being updated (pass "" when creating).
 func validateMountFit(rackHeight, positionU, heightU int, face string, existing []RackMount, selfID string) error {
 	if positionU < 1 {
 		return fmt.Errorf("%w: position_u must be >= 1", ErrValidation)
@@ -52,19 +61,16 @@ func validateMountFit(rackHeight, positionU, heightU int, face string, existing 
 		return fmt.Errorf("%w: height_u must be >= 1", ErrValidation)
 	}
 	if positionU+heightU-1 > rackHeight {
-		return fmt.Errorf("%w: mount exceeds rack height of %dU", ErrValidation, rackHeight)
-	}
-	if face == "both" {
-		return nil
+		return fmt.Errorf("%w: mount exceeds rack height of %dU", ErrConflict, rackHeight)
 	}
 	start, end := positionU, positionU+heightU
 	for _, e := range existing {
-		if e.ID == selfID || e.Face == "both" || e.Face != face {
+		if e.ID == selfID || !facesOverlap(face, e.Face) {
 			continue
 		}
 		eStart, eEnd := e.PositionU, e.PositionU+e.HeightU
 		if start < eEnd && eStart < end {
-			return fmt.Errorf("%w: overlaps mount at position %dU", ErrValidation, e.PositionU)
+			return fmt.Errorf("%w: overlaps mount at position %dU (%s)", ErrConflict, e.PositionU, e.Face)
 		}
 	}
 	return nil
@@ -238,7 +244,7 @@ func (r *MemoryRepository) CreateMount(_ context.Context, m *RackMount) error {
 	}
 	for _, e := range r.mounts {
 		if e.CIID == m.CIID {
-			return fmt.Errorf("%w: ci already mounted", ErrValidation)
+			return fmt.Errorf("%w: ci already mounted", ErrConflict)
 		}
 	}
 	if err := validateMountFit(rk.HeightUnits, m.PositionU, m.HeightU, m.Face, r.mountsForRack(m.RackID), ""); err != nil {

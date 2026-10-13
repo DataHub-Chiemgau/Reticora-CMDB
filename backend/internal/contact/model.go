@@ -5,17 +5,23 @@ import "time"
 
 // Contact represents a person or organization associated with CIs.
 type Contact struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	ClientID       string    `json:"client_id,omitempty"`
-	DisplayName    string    `json:"display_name"`
-	Email          string    `json:"email,omitempty"`
-	Phone          string    `json:"phone,omitempty"`
-	Role           string    `json:"role,omitempty"`
-	Department     string    `json:"department,omitempty"`
-	Notes          string    `json:"notes,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	ClientID       string `json:"client_id,omitempty"`
+	DisplayName    string `json:"display_name"`
+	Email          string `json:"email,omitempty"`
+	Phone          string `json:"phone,omitempty"`
+	Role           string `json:"role,omitempty"`
+	Department     string `json:"department,omitempty"`
+	Notes          string `json:"notes,omitempty"`
+	// Is247 marks a contact reachable around the clock (AUD-01).
+	Is247     bool      `json:"is_24_7"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// subject is the PII-vault entry holding name, phone and e-mail
+	// (SEC-05).
+	subject string
 }
 
 // CreateContactRequest is the payload for creating a contact.
@@ -30,6 +36,7 @@ type CreateContactRequest struct {
 	Role       string `json:"role,omitempty"`
 	Department string `json:"department,omitempty"`
 	Notes      string `json:"notes,omitempty"`
+	Is247      bool   `json:"is_24_7,omitempty"`
 }
 
 // UpdateContactRequest is the payload for updating a contact.
@@ -41,6 +48,7 @@ type UpdateContactRequest struct {
 	Role        *string `json:"role,omitempty"`
 	Department  *string `json:"department,omitempty"`
 	Notes       *string `json:"notes,omitempty"`
+	Is247       *bool   `json:"is_24_7,omitempty"`
 }
 
 // CIContact links a contact to a configuration item.

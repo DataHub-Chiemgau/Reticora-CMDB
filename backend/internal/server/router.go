@@ -7,7 +7,9 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
@@ -23,11 +25,13 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
@@ -35,6 +39,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
@@ -43,6 +48,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/order"
@@ -55,6 +61,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
@@ -69,6 +76,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -77,7 +85,11 @@ import (
 
 // Repositories bundles every persistence port the API depends on.
 type Repositories struct {
-	CI                ci.Repository
+	CI ci.Repository
+	// EventOutbox reports that the CI repository writes its domain events
+	// into the outbox, from which the publisher feeds the webhooks
+	// (WP-136); the CI handler then dispatches nothing itself.
+	EventOutbox       bool
 	Relationship      relationship.Repository
 	Webhook           webhook.Repository
 	WebhookDeliveries webhook.DeliveryStore
@@ -120,7 +132,9 @@ type Repositories struct {
 	Search      search.Backend
 	AI          ai.Repository
 	ExportJobs  export.JobRepository
-	Privacy     privacy.Repository
+	// Jobs is the generic job model (JOB-01).
+	Jobs    jobs.Repository
+	Privacy privacy.Repository
 	// Enterprise CMDB + asset/inventory extension (additive modules).
 	CIType            citype.Repository
 	RelationshipType  relationshiptype.Repository
@@ -172,9 +186,13 @@ type Options struct {
 	// Audit is registered only when a database-backed audit trail exists.
 	Audit *audit.Handler
 	// AuditPool enables the security report to include audit-chain integrity;
-	// it is the same pool the audit handler serves from.
-	AuditPool  *pgxpool.Pool
-	AIProvider ai.Provider
+	// it is the same pool the audit handler serves from. With it, every
+	// successful write request is audited (AUD-07).
+	AuditPool *pgxpool.Pool
+	// RouteAuditor replaces the audit of write requests (tests); nil uses
+	// AuditPool.
+	RouteAuditor middleware.RouteAuditor
+	AIProvider   ai.Provider
 	// Blobs persists asynchronous export results; nil disables export-job
 	// creation (the streaming export endpoint stays available).
 	Blobs blob.Store
@@ -194,6 +212,12 @@ type Options struct {
 	// SignupProtection is the captcha, blocklist and per-IP limit of the
 	// signup (WP-112); without it signups answer 503.
 	SignupProtection *signup.Protection
+	// Events reports facts after their commit into the event outbox
+	// (review.created, export.completed, job.failed; NTF-05); optional.
+	Events events.Emitter
+	// Notifications are the notification stores (NTF-04); nil keeps them
+	// in memory.
+	Notifications *notify.Center
 	// InvitationAccounts creates the IdP account of an accepted invitation.
 	InvitationAccounts user.InvitationAccounts
 }
@@ -282,7 +306,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// attaches the permission middleware resolved from the route table.
 	// Routes without a mapping fail closed; the router test locks in that
 	// every route is mapped.
-	protected := authorizingRouter{Router: mux, after: opts.RouteMiddleware}
+	protected := authorizingRouter{Router: mux, after: opts.RouteMiddleware, auditor: routeAuditor(&opts)}
 
 	identityHandler := identity.NewHandler(opts.OIDC, opts.Sessions).
 		WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole).
@@ -292,6 +316,13 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	}
 	// New discovered CIs respect max_cis; over the limit they are held as
 	// unlicensed_ci and adopted once the limit is raised (ENT-03, CH21).
+	// Export and discovery jobs register in the generic job model (JOB-01).
+	var jobTracker jobs.Tracker
+	if repos.Jobs != nil {
+		jobTracker = jobs.NewService(repos.Jobs)
+	}
+	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
+	exportWorker.Tracker = jobTracker
 	discoveryHandler := discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
 		WithProvenance(overrideProvenance{repo: repos.Override}).
 		WithInstanceFields(repos.CIType).
@@ -308,6 +339,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.IngestQueue != nil {
 		opts.IngestQueue.Attach(discoveryHandler)
 	}
+	if opts.Events != nil {
+		discoveryHandler.WithReviewNotifier(reviewEvents{emitter: opts.Events})
+		exportWorker.Events = opts.Events
+	}
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -315,13 +350,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		user.NewServiceAccountHandler(repos.ServiceAccounts),
 		invitationHandler(&repos, &opts),
 		entitlement.NewHandler(opts.Entitlements),
-		ci.NewHandler(opts.CIService, opts.Dispatcher),
+		ciHandler(&repos, &opts),
+		notifyHandler(&opts),
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
 		discoveryHandler,
 		topology.NewHandler(repos.CI, repos.Relationship),
 		export.NewHandler(repos.CI),
-		export.NewJobHandler(repos.ExportJobs, export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs), opts.Blobs),
+		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs),
 		asset.NewHandler(repos.Asset).
 			WithComposition(compositionParentLookup{repo: repos.Composition}).
 			WithCIs(ciLookup{repo: repos.CI}),
@@ -508,4 +544,58 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 
 	return promhttp.HandlerFor(registry, promhttp.HandlerOpts{}), httpMetrics
+}
+
+// routeAuditor stores the audit entries of write requests in the
+// organization's chain; without a database nothing is stored.
+func routeAuditor(opts *Options) middleware.RouteAuditor {
+	if opts.RouteAuditor != nil {
+		return opts.RouteAuditor
+	}
+	if opts.AuditPool == nil {
+		return nil
+	}
+	return pgRouteAuditor{pool: opts.AuditPool, recorder: audit.NewPGRecorder()}
+}
+
+// pgRouteAuditor writes a route's audit entry org-wide on behalf of the
+// organization: the entry belongs to the organization's chain (E-08).
+type pgRouteAuditor struct {
+	pool     *pgxpool.Pool
+	recorder *audit.PGRecorder
+}
+
+func (a pgRouteAuditor) RecordRoute(ctx context.Context, entry *audit.Entry) error {
+	scope := database.OrgWideScope(entry.OrganizationID, "")
+	return database.WithTenant(ctx, a.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := a.recorder.Record(ctx, tx, *entry)
+		return err
+	})
+}
+
+// ciHandler builds the CI handler; without the event outbox it hands CI
+// events to the webhook dispatcher directly.
+func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
+	if repos.EventOutbox || opts.Dispatcher == nil {
+		return ci.NewHandler(opts.CIService)
+	}
+	return ci.NewHandler(opts.CIService, opts.Dispatcher)
+}
+
+// notifyHandler serves the notification center and the channels.
+func notifyHandler(opts *Options) *notify.Handler {
+	if opts.Notifications == nil {
+		opts.Notifications = notify.NewMemoryCenter()
+	}
+	return notify.NewHandler(opts.Notifications)
+}
+
+// reviewEvents reports opened review items as review.created (NTF-05).
+type reviewEvents struct{ emitter events.Emitter }
+
+func (r reviewEvents) ReviewOpened(ctx context.Context, item *reviews.Item) {
+	if err := r.emitter.Emit(ctx, &events.Event{OrgID: item.OrganizationID, Type: events.ReviewCreated, EntityID: item.ID,
+		Data: map[string]any{"id": item.ID, "kind": item.Kind, "object_key": item.ObjectKey}}); err != nil {
+		slog.Error("report opened review item", "item", item.ID, "error", err)
+	}
 }

@@ -83,6 +83,10 @@ type Config struct {
 
 	// Encryption
 	MasterKey string // 32-byte base64-encoded master key for envelope encryption
+	// MasterKeyPrevious lists the master keys being rotated out
+	// (comma-separated): their data keys stay readable until the rewrap job
+	// has moved them to MasterKey (SEC-06).
+	MasterKeyPrevious string
 
 	// Observability
 	OTelEndpoint string
@@ -122,6 +126,23 @@ type Config struct {
 
 	// Rate Limiting
 	RateLimitRPM int // requests per minute per key/user (default 600)
+
+	// Central SMTP server of the installation (TEC-13): e-mail of the
+	// central_smtp channels and of the self-signup. Empty host: none.
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
+	SMTPTLS      string // starttls (default), tls or none
+
+	// Retention (NFR-06, AUD-09): how long the retention runs keep each
+	// kind of data. The defaults are the minimums; a shorter value is a
+	// start error.
+	RetentionAuditYears     int // audit_log, 10 years
+	RetentionHistoryDays    int // ci_change, entity_change, location_change, 3 years
+	RetentionSoftDeleteDays int // soft-deleted CIs, 90 days
+	RetentionReviewItemDays int // resolved review items, 1 year
 
 	// Search
 	SearchBackend      string
@@ -195,16 +216,29 @@ func Load() *Config {
 		DefaultProvisionRole:      l.str("RETICORA_DEFAULT_PROVISION_ROLE", "viewer"),
 		EntitlementEnforcement:    l.str("RETICORA_ENTITLEMENT_ENFORCEMENT", "true") != "false",
 
-		MasterKey: l.str("RETICORA_MASTER_KEY", ""),
+		MasterKey:         l.str("RETICORA_MASTER_KEY", ""),
+		MasterKeyPrevious: l.str("RETICORA_MASTER_KEY_PREVIOUS", ""),
 
 		OTelEndpoint: l.str("RETICORA_OTEL_ENDPOINT", ""),
 		// Opt-in: the organization_id label multiplies the HTTP metric series
 		// by the tenant count. Default off; enable for bounded-tenant setups.
-		MetricsTenantLabel:  l.boolean("RETICORA_METRICS_TENANT_LABEL", false),
-		RateLimitRPM:        l.integer("RETICORA_RATE_LIMIT_RPM", 600),
-		EgressAllowPrivate:  l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
-		PreAuthRateLimitRPM: l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
-		TrustedProxies:      l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),
+		MetricsTenantLabel: l.boolean("RETICORA_METRICS_TENANT_LABEL", false),
+		RateLimitRPM:       l.integer("RETICORA_RATE_LIMIT_RPM", 600),
+
+		SMTPHost:     l.str("RETICORA_SMTP_HOST", ""),
+		SMTPPort:     l.integer("RETICORA_SMTP_PORT", 587),
+		SMTPUsername: l.str("RETICORA_SMTP_USERNAME", ""),
+		SMTPPassword: l.str("RETICORA_SMTP_PASSWORD", ""),
+		SMTPFrom:     l.str("RETICORA_SMTP_FROM", ""),
+		SMTPTLS:      l.str("RETICORA_SMTP_TLS", "starttls"),
+
+		RetentionAuditYears:     l.integer("RETICORA_RETENTION_AUDIT_YEARS", MinRetentionAuditYears),
+		RetentionHistoryDays:    l.integer("RETICORA_RETENTION_HISTORY_DAYS", MinRetentionHistoryDays),
+		RetentionSoftDeleteDays: l.integer("RETICORA_RETENTION_SOFT_DELETE_DAYS", MinRetentionSoftDeleteDays),
+		RetentionReviewItemDays: l.integer("RETICORA_RETENTION_REVIEW_ITEM_DAYS", MinRetentionReviewItemDays),
+		EgressAllowPrivate:      l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
+		PreAuthRateLimitRPM:     l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
+		TrustedProxies:          l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),
 
 		SearchBackend:      l.str("RETICORA_SEARCH_BACKEND", "postgres"),
 		OpenSearchURL:      l.str("RETICORA_OPENSEARCH_URL", ""),
@@ -240,17 +274,28 @@ func Load() *Config {
 	return cfg
 }
 
+// Minimum retention periods of NFR-06 and AUD-09.
+const (
+	MinRetentionAuditYears     = 10
+	MinRetentionHistoryDays    = 3 * 365
+	MinRetentionSoftDeleteDays = 90
+	MinRetentionReviewItemDays = 365
+)
+
 // Background workers with an independent operator switch (OPS-02). The
 // convention: worker <name> is switched by RETICORA_WORKER_<NAME>_ENABLED
 // (true/false, default true); a disabled worker is not started in this
 // process, so each worker can run on dedicated instances. A new worker adds
 // its name here and registers under it in the server's worker set.
 const (
-	WorkerWebhookDispatcher  = "webhook_dispatcher"
-	WorkerExport             = "export"
-	WorkerIngest             = "ingest"
-	WorkerMonitoring         = "monitoring"
-	WorkerReservationSweeper = "reservation_sweeper"
+	WorkerWebhookDispatcher = "webhook_dispatcher"
+	WorkerExport            = "export"
+	WorkerIngest            = "ingest"
+	WorkerMonitoring        = "monitoring"
+	WorkerScheduler         = "scheduler"
+	WorkerJobs              = "jobs"
+	WorkerEvents            = "events"
+	WorkerNotifier          = "notifier"
 )
 
 // WorkerNames lists every registered worker.
@@ -259,7 +304,10 @@ var WorkerNames = []string{
 	WorkerExport,
 	WorkerIngest,
 	WorkerMonitoring,
-	WorkerReservationSweeper,
+	WorkerScheduler,
+	WorkerJobs,
+	WorkerEvents,
+	WorkerNotifier,
 }
 
 // WorkerEnvKey returns the switch variable of a worker.
@@ -342,6 +390,29 @@ func (c *Config) Validate(noDB bool) error {
 	}
 	if c.TrialMaxCIs < 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_TRIAL_MAX_CIS must not be negative, got %d", c.TrialMaxCIs))
+	}
+	if c.SMTPHost != "" {
+		switch {
+		case c.SMTPFrom == "":
+			errs = append(errs, fmt.Errorf("RETICORA_SMTP_FROM is required with RETICORA_SMTP_HOST"))
+		case c.SMTPTLS != "starttls" && c.SMTPTLS != "tls" && c.SMTPTLS != "none":
+			errs = append(errs, fmt.Errorf("RETICORA_SMTP_TLS=%q is not one of starttls, tls, none", c.SMTPTLS))
+		case c.SMTPPort < 1 || c.SMTPPort > 65535:
+			errs = append(errs, fmt.Errorf("RETICORA_SMTP_PORT=%d is out of range", c.SMTPPort))
+		}
+	}
+	for _, r := range []struct {
+		key        string
+		value, min int
+	}{
+		{"RETICORA_RETENTION_AUDIT_YEARS", c.RetentionAuditYears, MinRetentionAuditYears},
+		{"RETICORA_RETENTION_HISTORY_DAYS", c.RetentionHistoryDays, MinRetentionHistoryDays},
+		{"RETICORA_RETENTION_SOFT_DELETE_DAYS", c.RetentionSoftDeleteDays, MinRetentionSoftDeleteDays},
+		{"RETICORA_RETENTION_REVIEW_ITEM_DAYS", c.RetentionReviewItemDays, MinRetentionReviewItemDays},
+	} {
+		if r.value < r.min {
+			errs = append(errs, fmt.Errorf("%s must be at least %d (NFR-06), got %d", r.key, r.min, r.value))
+		}
 	}
 	if c.RateLimitRPM <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_RPM must be positive, got %d", c.RateLimitRPM))

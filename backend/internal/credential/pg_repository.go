@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -240,7 +242,7 @@ func (r *PGRepository) UpdateOrgDEK(ctx context.Context, orgID string, encrypted
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		query := fmt.Sprintf(`
 			UPDATE org_dek
-			SET encrypted_dek = $2, key_version = $3
+			SET encrypted_dek = $2, key_version = $3, created_at = now()
 			WHERE organization_id = $1
 			RETURNING %s
 		`, orgDEKSelectColumns)
@@ -302,4 +304,119 @@ func nilIfEmpty(value string) any {
 		return nil
 	}
 	return value
+}
+
+// KeyRotator rotates and rewraps an organization's DEK in one transaction
+// (SEC-06): a failure leaves DEK and credentials as they were.
+type KeyRotator interface {
+	RotateOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (*RotationResult, error)
+	RewrapOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (bool, error)
+}
+
+// RotateOrgDEK implements KeyRotator: a fresh DEK, every credential and
+// PII vault entry of the organization re-encrypted under it with the new key version, the old
+// DEK replaced — all in one transaction, so the old DEK is retired exactly
+// when nothing depends on it anymore. The DEK's created_at records the
+// rotation.
+func (r *PGRepository) RotateOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (*RotationResult, error) {
+	var result *RotationResult
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var wrapped []byte
+		var version int
+		err := tx.QueryRow(ctx, `SELECT encrypted_dek, key_version FROM org_dek WHERE organization_id = $1 FOR UPDATE`, orgID).
+			Scan(&wrapped, &version)
+		if err == pgx.ErrNoRows {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("lock org dek: %w", err)
+		}
+		oldDEK, err := enc.UnwrapDEK(wrapped)
+		if err != nil {
+			return fmt.Errorf("unwrap org dek: %w", err)
+		}
+		newDEK, err := crypto.GenerateDEK()
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT id::text, ciphertext FROM credential WHERE organization_id = $1 FOR UPDATE`, orgID)
+		if err != nil {
+			return fmt.Errorf("lock credentials: %w", err)
+		}
+		type stored struct {
+			id         string
+			ciphertext []byte
+		}
+		creds, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (stored, error) {
+			var c stored
+			scanErr := row.Scan(&c.id, &c.ciphertext)
+			return c, scanErr
+		})
+		if err != nil {
+			return fmt.Errorf("lock credentials: %w", err)
+		}
+		version++
+		for _, c := range creds {
+			plain, decErr := crypto.Decrypt(oldDEK, c.ciphertext)
+			if decErr != nil {
+				return fmt.Errorf("credential %s: %w", c.id, decErr)
+			}
+			ciphertext, encErr := crypto.Encrypt(newDEK, plain)
+			if encErr != nil {
+				return fmt.Errorf("credential %s: %w", c.id, encErr)
+			}
+			if _, err = tx.Exec(ctx, `UPDATE credential SET ciphertext = $2, key_version = $3, updated_at = now() WHERE id = $1`,
+				c.id, ciphertext, version); err != nil {
+				return fmt.Errorf("credential %s: %w", c.id, err)
+			}
+		}
+		// The PII vault shares the data key (SEC-05).
+		subjects, err := pii.ReencryptTx(ctx, tx, orgID, oldDEK, newDEK, version)
+		if err != nil {
+			return err
+		}
+		newWrapped, err := enc.WrapDEK(newDEK)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE org_dek SET encrypted_dek = $2, key_version = $3, created_at = now() WHERE organization_id = $1`,
+			orgID, newWrapped, version); err != nil {
+			return fmt.Errorf("replace org dek: %w", err)
+		}
+		result = &RotationResult{KeyVersion: version, Rotated: len(creds), Subjects: subjects}
+		return nil
+	})
+	return result, err
+}
+
+// RewrapOrgDEK implements KeyRotator: the DEK wrapped with a previous
+// master key is wrapped with the current one; it reports whether it
+// changed anything.
+func (r *PGRepository) RewrapOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (bool, error) {
+	changed := false
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var wrapped []byte
+		err := tx.QueryRow(ctx, `SELECT encrypted_dek FROM org_dek WHERE organization_id = $1 FOR UPDATE`, orgID).Scan(&wrapped)
+		if err == pgx.ErrNoRows {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("lock org dek: %w", err)
+		}
+		if enc.IsCurrent(wrapped) {
+			return nil
+		}
+		rewrapped, err := enc.Rewrap(wrapped)
+		if err != nil {
+			return fmt.Errorf("rewrap org dek: %w", err)
+		}
+		if _, err = tx.Exec(ctx, `UPDATE org_dek SET encrypted_dek = $2 WHERE organization_id = $1`, orgID, rewrapped); err != nil {
+			return fmt.Errorf("store rewrapped org dek: %w", err)
+		}
+		changed = true
+		return nil
+	})
+	return changed, err
 }

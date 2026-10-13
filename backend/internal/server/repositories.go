@@ -18,12 +18,14 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
@@ -122,6 +124,7 @@ func MemoryRepositories() Repositories {
 		Search:            search.NewMemoryRepository(),
 		AI:                ai.NewMemoryRepository(),
 		ExportJobs:        export.NewMemoryJobRepository(),
+		Jobs:              jobs.NewMemoryRepository(),
 		Privacy:           privacy.NewMemoryRepository(),
 	}
 }
@@ -131,7 +134,8 @@ func MemoryRepositories() Repositories {
 // the same transaction as the mutation.
 func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Repositories {
 	return Repositories{
-		CI:                ci.NewPGRepositoryWithAudit(pool, recorder),
+		CI:                ci.NewPGRepositoryWithAudit(pool, recorder).WithEvents(events.NewOutbox()),
+		EventOutbox:       true,
 		Relationship:      relationship.NewPGRepository(pool),
 		Webhook:           webhook.NewPGRepository(pool),
 		WebhookDeliveries: webhook.NewPGDeliveryStore(pool),
@@ -171,6 +175,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Search:            search.NewPGRepository(pool),
 		AI:                ai.NewPGRepository(pool),
 		ExportJobs:        export.NewPGJobRepository(pool),
+		Jobs:              jobs.NewPGRepository(pool),
 		Privacy:           privacy.NewPGRepository(pool),
 		CIType:            citype.NewPGRepository(pool),
 		RelationshipType:  relationshiptype.NewPGRepository(pool),

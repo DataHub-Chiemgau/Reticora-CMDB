@@ -9,10 +9,13 @@
 package crypto
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -34,27 +37,96 @@ var (
 	ErrMasterKeyRequired = errors.New("crypto: master key is required")
 )
 
-// EnvelopeEncryptor provides envelope encryption using AES-256-GCM.
+// EnvelopeEncryptor provides envelope encryption using AES-256-GCM. It
+// holds the current master key and, during a master-key rotation (SEC-06),
+// the previous ones: DEKs are wrapped with the current key and marked with
+// its key id; DEKs of a previous key stay readable until the rewrap job has
+// moved them to the current key, after which the previous key is retired.
 type EnvelopeEncryptor struct {
 	masterKey []byte
+	keyID     [keyIDSize]byte
+	previous  []masterKey
 }
 
-// NewEnvelopeEncryptor creates a new encryptor from a base64-encoded master key.
-func NewEnvelopeEncryptor(masterKeyBase64 string) (*EnvelopeEncryptor, error) {
+type masterKey struct {
+	key []byte
+	id  [keyIDSize]byte
+}
+
+// keyIDSize is the length of a master key id: the first bytes of the
+// SHA-256 of the key.
+const keyIDSize = 8
+
+// wrapMagic marks a wrapped DEK with the id of its master key:
+// "RK" 0x01 || key id || nonce || ciphertext+tag. Older DEKs carry no
+// marker and are tried against every known key.
+var wrapMagic = []byte{'R', 'K', 0x01}
+
+func parseMasterKey(masterKeyBase64 string) (masterKey, error) {
 	if masterKeyBase64 == "" {
-		return nil, ErrMasterKeyRequired
+		return masterKey{}, ErrMasterKeyRequired
 	}
-
-	masterKey, err := base64.StdEncoding.DecodeString(masterKeyBase64)
+	key, err := base64.StdEncoding.DecodeString(masterKeyBase64)
 	if err != nil {
-		return nil, fmt.Errorf("crypto: invalid base64 master key: %w", err)
+		return masterKey{}, fmt.Errorf("crypto: invalid base64 master key: %w", err)
 	}
-
-	if len(masterKey) != KeySize {
-		return nil, ErrInvalidKeySize
+	if len(key) != KeySize {
+		return masterKey{}, ErrInvalidKeySize
 	}
+	sum := sha256.Sum256(key)
+	var id [keyIDSize]byte
+	copy(id[:], sum[:keyIDSize])
+	return masterKey{key: key, id: id}, nil
+}
 
-	return &EnvelopeEncryptor{masterKey: masterKey}, nil
+// NewEnvelopeEncryptor creates a new encryptor from a base64-encoded master
+// key and, during a rotation, the previous master keys.
+func NewEnvelopeEncryptor(masterKeyBase64 string, previousBase64 ...string) (*EnvelopeEncryptor, error) {
+	current, err := parseMasterKey(masterKeyBase64)
+	if err != nil {
+		return nil, err
+	}
+	e := &EnvelopeEncryptor{masterKey: current.key, keyID: current.id}
+	for _, p := range previousBase64 {
+		if p == "" {
+			continue
+		}
+		prev, err := parseMasterKey(p)
+		if err != nil {
+			return nil, fmt.Errorf("crypto: previous master key: %w", err)
+		}
+		if prev.id != current.id {
+			e.previous = append(e.previous, prev)
+		}
+	}
+	return e, nil
+}
+
+// KeyID returns the id of the current master key (hex).
+func (e *EnvelopeEncryptor) KeyID() string { return hex.EncodeToString(e.keyID[:]) }
+
+// IsCurrent reports whether a wrapped DEK is wrapped with the current
+// master key; the rewrap job moves the others.
+func (e *EnvelopeEncryptor) IsCurrent(wrappedDEK []byte) bool {
+	id, _, ok := splitWrapped(wrappedDEK)
+	return ok && id == e.keyID
+}
+
+// Rewrap returns the DEK wrapped with the current master key.
+func (e *EnvelopeEncryptor) Rewrap(wrappedDEK []byte) ([]byte, error) {
+	dek, err := e.UnwrapDEK(wrappedDEK)
+	if err != nil {
+		return nil, err
+	}
+	return e.WrapDEK(dek)
+}
+
+func splitWrapped(wrapped []byte) (id [keyIDSize]byte, body []byte, ok bool) {
+	if len(wrapped) < len(wrapMagic)+keyIDSize || !bytes.Equal(wrapped[:len(wrapMagic)], wrapMagic) {
+		return id, wrapped, false
+	}
+	copy(id[:], wrapped[len(wrapMagic):len(wrapMagic)+keyIDSize])
+	return id, wrapped[len(wrapMagic)+keyIDSize:], true
 }
 
 // GenerateDEK creates a new random 32-byte data encryption key.
@@ -77,24 +149,42 @@ func GenerateMasterKey() (string, error) {
 	return base64.StdEncoding.EncodeToString(key), nil
 }
 
-// WrapDEK encrypts a DEK with the master key (AES-256-GCM).
+// WrapDEK encrypts a DEK with the current master key (AES-256-GCM) and
+// marks it with the key id.
 func (e *EnvelopeEncryptor) WrapDEK(dek []byte) ([]byte, error) {
 	if len(dek) != KeySize {
 		return nil, ErrInvalidKeySize
 	}
-	return encrypt(e.masterKey, dek)
+	body, err := encrypt(e.masterKey, dek)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 0, len(wrapMagic)+keyIDSize+len(body))
+	out = append(out, wrapMagic...)
+	out = append(out, e.keyID[:]...)
+	return append(out, body...), nil
 }
 
-// UnwrapDEK decrypts a wrapped DEK using the master key.
+// UnwrapDEK decrypts a wrapped DEK with the master key that wrapped it: the
+// one its key id names, or for an unmarked DEK the current and then each
+// previous key.
 func (e *EnvelopeEncryptor) UnwrapDEK(wrappedDEK []byte) ([]byte, error) {
-	dek, err := decrypt(e.masterKey, wrappedDEK)
-	if err != nil {
-		return nil, ErrDecryptionFailed
+	keys := append([]masterKey{{key: e.masterKey, id: e.keyID}}, e.previous...)
+	id, body, marked := splitWrapped(wrappedDEK)
+	for _, k := range keys {
+		if marked && k.id != id {
+			continue
+		}
+		dek, err := decrypt(k.key, body)
+		if err != nil {
+			continue
+		}
+		if len(dek) != KeySize {
+			return nil, ErrInvalidKeySize
+		}
+		return dek, nil
 	}
-	if len(dek) != KeySize {
-		return nil, ErrInvalidKeySize
-	}
-	return dek, nil
+	return nil, ErrDecryptionFailed
 }
 
 // Encrypt encrypts plaintext using the provided DEK with AES-256-GCM.

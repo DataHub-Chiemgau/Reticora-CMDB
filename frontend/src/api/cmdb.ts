@@ -121,6 +121,23 @@ export const ciTypeApi = {
   },
 };
 
+// Index flags of an attribute definition (MET-15, DB-04): a change queues
+// the attribute.index job that builds idx_attr_<id> or idx_attr_<id>_u.
+export interface AttributeIndexFlags {
+  searchable: boolean;
+  unique: boolean;
+  unique_scope: 'org' | 'client';
+}
+
+export const attributeDefinitionApi = {
+  setIndexFlags(id: string, flags: AttributeIndexFlags): Promise<unknown> {
+    return fetchAPI(`/attribute-definitions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(flags),
+    });
+  },
+};
+
 // ─── Global + instance field definitions (§2) ────────────────────────────────
 
 export const ciFieldApi = {
@@ -151,17 +168,19 @@ export const ciFieldApi = {
 
 // ─── Relationship types (§11) ────────────────────────────────────────────────
 
+/** Relationship type metadata (REL-01, CH27). */
 export interface RelationshipType {
   id: string;
   key: string;
-  forward_label: string;
-  reverse_label: string;
-  source_ci_types: string[];
-  target_ci_types: string[];
-  direction: string;
+  display_name: string;
+  reverse_name: string;
+  directed: boolean;
+  category: 'network' | 'power' | 'hosting' | 'logical' | 'physical';
+  impact_direction: 'source_depends_on_target' | 'target_depends_on_source' | 'none' | 'undirected';
+  redundant: boolean;
+  allowed_source_types: string[];
+  allowed_target_types: string[];
   cardinality: string;
-  category?: string;
-  impact_participation: boolean;
   is_system: boolean;
   description?: string;
 }
@@ -174,7 +193,7 @@ export const relationshipTypeApi = {
     return fetchAPI(`/relationship-types/${encodeURIComponent(key)}`);
   },
   create(
-    data: Partial<RelationshipType> & { key: string; forward_label: string; reverse_label: string },
+    data: Partial<RelationshipType> & { key: string; display_name: string; reverse_name: string },
   ) {
     return fetchAPI('/relationship-types', { method: 'POST', body: JSON.stringify(data) });
   },

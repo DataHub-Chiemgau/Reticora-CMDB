@@ -3,11 +3,13 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -186,7 +188,20 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
+	if h.jobs != nil {
+		// The generic job model lists the discovery job too (JOB-01); a
+		// failure leaves the discovery job in place.
+		if err := h.jobs.Track(r.Context(), t.OrganizationID, "discovery."+job.JobType, "discovery_job", job.ID, t.UserID); err != nil {
+			slog.Warn("track discovery job", "job", job.ID, "error", err)
+		}
+	}
 	api.WriteJSON(w, http.StatusCreated, job)
+}
+
+// WithJobTracker registers discovery jobs in the generic job model.
+func (h *Handler) WithJobTracker(tracker jobs.Tracker) *Handler {
+	h.jobs = tracker
+	return h
 }
 
 // GetJob handles GET /api/v1/discovery/jobs/{id}

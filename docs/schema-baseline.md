@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000111_ip_address_net03
+Stand: Migration 000126_contact_pii
 
 ## Prüfung
 
@@ -225,6 +225,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `endpoint_agent` | ja | ja | endpoint_agent_isolation (ALL), endpoint_agent_scoped_delete (DELETE), endpoint_agent_scoped_update (UPDATE) |
 | `entitlement` | ja | ja | entitlement_isolation (ALL) |
 | `entity_change` | ja | ja | entity_change_isolation (ALL) |
+| `event_outbox` | ja | ja | event_outbox_isolation (ALL), event_outbox_system_select (SELECT) |
 | `export_job` | ja | ja | export_job_isolation (ALL), export_job_system_select (SELECT) |
 | `form_def` | ja | ja | form_def_scoped_delete (DELETE), form_def_scoped_update (UPDATE), form_def_tenant_isolation (ALL) |
 | `form_submission` | ja | ja | form_submission_tenant_isolation (ALL) |
@@ -239,6 +240,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `internal_order` | ja | ja | internal_order_isolation (ALL), internal_order_scoped_delete (DELETE), internal_order_scoped_update (UPDATE) |
 | `internal_order_item` | ja | ja | internal_order_item_isolation (ALL) |
 | `ip_address` | ja | ja | ip_address_scoped_delete (DELETE), ip_address_scoped_update (UPDATE), org_isolation (ALL) |
+| `job` | ja | ja | job_isolation (ALL), job_system_select (SELECT) |
 | `key_assignment` | ja | ja | key_assignment_isolation (ALL), key_assignment_scoped_delete (DELETE), key_assignment_scoped_update (UPDATE) |
 | `key_item` | ja | ja | key_item_isolation (ALL), key_item_scoped_delete (DELETE), key_item_scoped_update (UPDATE) |
 | `lifecycle_definition` | ja | ja | lifecycle_definition_isolation_delete (DELETE), lifecycle_definition_isolation_insert (INSERT), lifecycle_definition_isolation_select (SELECT), lifecycle_definition_isolation_update (UPDATE) |
@@ -254,10 +256,15 @@ SECURITY`), Policies mit ihrem Kommando.
 | `metric_sample` | nein | nein | – |
 | `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |
 | `network_interface` | ja | ja | network_interface_scoped_delete (DELETE), network_interface_scoped_update (UPDATE), org_isolation (ALL) |
+| `notification_channel` | ja | ja | notification_channel_isolation (ALL) |
+| `notification_delivery` | ja | ja | notification_delivery_isolation (ALL), notification_delivery_system_select (SELECT) |
+| `notification_inbox` | ja | ja | notification_inbox_isolation (ALL) |
+| `notification_preference` | ja | ja | notification_preference_isolation (ALL) |
 | `operator_audit` | ja | ja | operator_audit_operator (ALL) |
 | `org_dek` | ja | ja | org_dek_isolation (ALL) |
 | `organization` | ja | ja | org_isolation (ALL), organization_system_select (SELECT) |
 | `permission` | nein | nein | – |
+| `pii_subject` | ja | ja | pii_subject_isolation (ALL) |
 | `privacy_retention_policy` | ja | ja | privacy_retention_isolation (ALL) |
 | `quantity_item` | ja | ja | quantity_item_isolation (ALL), quantity_item_scoped_delete (DELETE), quantity_item_scoped_update (UPDATE) |
 | `rack` | ja | ja | rack_isolation (ALL) |
@@ -271,6 +278,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `role_permission` | ja | ja | role_permission_tenant_isolation (ALL) |
 | `room` | ja | ja | room_isolation (ALL) |
 | `saved_view` | ja | ja | saved_view_isolation (ALL) |
+| `scheduler_run` | ja | ja | scheduler_run_operator (ALL) |
 | `search_document` | ja | ja | search_document_scoped_delete (DELETE), search_document_scoped_update (UPDATE), search_document_tenant_isolation (ALL) |
 | `security_finding` | ja | ja | security_finding_isolation (ALL), security_finding_scoped_delete (DELETE), security_finding_scoped_update (UPDATE) |
 | `service_account` | ja | ja | service_account_isolation (ALL) |

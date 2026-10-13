@@ -221,6 +221,8 @@ type RotationResult struct {
 	KeyVersion int `json:"key_version"`
 	// Rotated is the number of credential ciphertexts re-encrypted.
 	Rotated int `json:"rotated"`
+	// Subjects is the number of PII vault entries re-encrypted (SEC-05).
+	Subjects int `json:"pii_subjects"`
 }
 
 // RotateKeys generates a fresh DEK for the organization, re-encrypts every
@@ -228,6 +230,13 @@ type RotationResult struct {
 // Existing plaintext secrets never leave the platform — re-encryption happens
 // in-process under the envelope-encryption boundary.
 func (s *Service) RotateKeys(ctx context.Context, orgID string) (*RotationResult, error) {
+	// The database store rotates in one transaction (SEC-06).
+	if rotator, ok := s.repo.(KeyRotator); ok {
+		if _, err := s.getOrCreateDEK(ctx, orgID); err != nil {
+			return nil, err
+		}
+		return rotator.RotateOrgDEK(ctx, orgID, s.encryptor)
+	}
 	lister, ok := s.repo.(StoredLister)
 	if !ok {
 		return nil, fmt.Errorf("credential store does not support key rotation")

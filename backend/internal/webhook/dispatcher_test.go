@@ -13,6 +13,9 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 func TestDispatcherDeliversSignedWebhook(t *testing.T) {
@@ -306,5 +309,267 @@ func TestDispatcherFiltersBoundSubscriptions(t *testing.T) {
 	}
 	if got = run(access, "workflow.custom", "c1"); len(got["/bound"]) != 0 || len(got["/unbound"]) != 1 {
 		t.Errorf("event without known object: %v", got)
+	}
+}
+
+// TestDispatcherClaimsTheFirstAttempt covers TEC-14 (WP-130): the first
+// attempt of a delivery is leased to the dispatching process, so a retry
+// worker running meanwhile does not send it a second time; when the
+// process dies before recording the attempt, the retry worker takes the
+// delivery over after the lease.
+func TestDispatcherClaimsTheFirstAttempt(t *testing.T) {
+	repo := NewMemoryRepository()
+	store := NewMemoryDeliveryStore()
+	var attempts int32
+	release := make(chan struct{})
+	inFlight := make(chan struct{}, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		inFlight <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	if err := repo.Create(context.Background(), &Subscription{
+		OrganizationID: "org-1", Name: "hook", URL: server.URL,
+		Secret: "secret", Events: []string{"ci.created"}, IsActive: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher := NewDispatcher(repo, server.Client(), DispatcherOptions{Deliveries: store, PollInterval: -1})
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = dispatcher.Shutdown(ctx)
+	}()
+
+	dispatcher.Dispatch(context.Background(), "org-1", "ci.created", map[string]any{"id": "ci-1"})
+	<-inFlight
+	// The retry worker runs while the first attempt is in flight.
+	dispatcher.ProcessDue(context.Background())
+	close(release)
+	page := api.PaginationParams{Limit: 10}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		records, _, err := store.ListBySubscription(context.Background(), "org-1", subscriptionID(t, repo), page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(records) == 1 && records[0].Status == StatusSuccess {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("delivery not recorded: %+v", records)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if n := atomic.LoadInt32(&attempts); n != 1 {
+		t.Errorf("HTTP attempts: %d, want 1", n)
+	}
+
+	// A process died after storing a delivery: it is due once its lease
+	// has ended.
+	leased := time.Now().UTC().Add(defaultClaimLease)
+	if _, err := store.Enqueue(context.Background(), DeliveryRecord{
+		OrganizationID: "org-1", SubscriptionID: subscriptionID(t, repo), Event: "ci.created",
+		Payload: []byte(`{"id":"ci-2"}`), Status: StatusPending, MaxAttempts: 3, NextRetryAt: &leased,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher.ProcessDue(context.Background())
+	if n := atomic.LoadInt32(&attempts); n != 1 {
+		t.Errorf("a leased delivery was sent before its lease ended (%d attempts)", n)
+	}
+	dispatcher.now = func() time.Time { return leased.Add(time.Second) }
+	dispatcher.ProcessDue(context.Background())
+	if n := atomic.LoadInt32(&attempts); n != 2 {
+		t.Errorf("HTTP attempts after the lease: %d, want 2", n)
+	}
+}
+
+// TestDispatcherConsumesOutboxEvents covers EVT-02 (WP-136): the outbox
+// publisher hands domain events to the dispatcher; subscriptions of the
+// event type and of its former names receive them once, a status-only
+// change also reaches ci.status_changed.
+func TestDispatcherConsumesOutboxEvents(t *testing.T) {
+	repo := NewMemoryRepository()
+	var mu sync.Mutex
+	received := map[string][]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		received[r.URL.Path] = append(received[r.URL.Path], r.Header.Get("X-Webhook-Event"))
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	for name, evs := range map[string][]string{
+		"/new":    {"ci.changed"},
+		"/legacy": {"ci.updated"},
+		"/both":   {"ci.changed", "ci.updated"},
+		"/status": {"ci.status_changed"},
+	} {
+		if err := repo.Create(context.Background(), &Subscription{OrganizationID: "org-1", Name: name, URL: server.URL + name,
+			Secret: "secret", Events: evs, IsActive: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := NewDispatcher(repo, server.Client())
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = d.Shutdown(ctx)
+	}()
+	for _, data := range []string{`{"id":"ci-1","changed_fields":["name"]}`, `{"id":"ci-1","changed_fields":["status"]}`} {
+		if err := d.Consume(context.Background(), &events.Envelope{ID: "e", Type: events.CIChanged, OrgID: "org-1", Data: json.RawMessage(data)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		n := len(received["/new"]) + len(received["/legacy"]) + len(received["/both"]) + len(received["/status"])
+		mu.Unlock()
+		if n >= 7 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received["/new"]) != 2 || len(received["/legacy"]) != 2 || len(received["/both"]) != 2 || len(received["/status"]) != 1 {
+		t.Errorf("deliveries: %v", received)
+	}
+	if received["/legacy"][0] != "ci.changed" {
+		t.Errorf("event name for a legacy subscription: %v", received["/legacy"])
+	}
+}
+
+// fakeEmitter records emitted events.
+type fakeEmitter struct {
+	mu     sync.Mutex
+	events []events.Event
+}
+
+func (e *fakeEmitter) Emit(_ context.Context, ev *events.Event) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, *ev)
+	return nil
+}
+
+// TestDeadDeliveryIsReported covers NTF-05 (WP-140): a delivery moved to
+// the dead-letter queue reports webhook.dead.
+func TestDeadDeliveryIsReported(t *testing.T) {
+	repo := NewMemoryRepository()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
+	defer server.Close()
+	if err := repo.Create(context.Background(), &Subscription{OrganizationID: "org-1", Name: "hook", URL: server.URL,
+		Secret: "secret", Events: []string{"ci.created"}, IsActive: true}); err != nil {
+		t.Fatal(err)
+	}
+	emitter := &fakeEmitter{}
+	d := NewDispatcher(repo, server.Client(), DispatcherOptions{Deliveries: NewMemoryDeliveryStore(), MaxAttempts: 1, PollInterval: -1, Events: emitter})
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = d.Shutdown(ctx)
+	}()
+	d.Dispatch(context.Background(), "org-1", "ci.created", map[string]any{"id": "ci-1"})
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		emitter.mu.Lock()
+		n := len(emitter.events)
+		emitter.mu.Unlock()
+		if n > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	emitter.mu.Lock()
+	defer emitter.mu.Unlock()
+	if len(emitter.events) != 1 || emitter.events[0].Type != events.WebhookDead || emitter.events[0].OrgID != "org-1" {
+		t.Fatalf("events: %+v", emitter.events)
+	}
+	data := emitter.events[0].Data.(map[string]any)
+	if data["event"] != "ci.created" || data["attempts"] != 1 || data["subscription_id"] != subscriptionID(t, repo) {
+		t.Errorf("data: %v", data)
+	}
+}
+
+// TestRotatedSecretSignsDuringOverlap covers SEC-06 (WP-141): after a
+// rotation a delivery carries the signature of the new secret and, during
+// the overlap, of the previous one; the rotate endpoint returns the new
+// secret once.
+func TestRotatedSecretSignsDuringOverlap(t *testing.T) {
+	repo := NewMemoryRepository()
+	var mu sync.Mutex
+	var headers []http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		headers = append(headers, r.Header.Clone())
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	sub := &Subscription{OrganizationID: "org-1", Name: "hook", URL: server.URL, Secret: "old-secret-123456", Events: []string{"ci.created"}, IsActive: true}
+	if err := repo.Create(context.Background(), sub); err != nil {
+		t.Fatal(err)
+	}
+	d := NewDispatcher(repo, server.Client())
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = d.Shutdown(ctx)
+	}()
+	h := NewHandler(repo, d)
+	mux := chi.NewRouter()
+	h.RegisterRoutes(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/"+sub.ID+"/rotate-secret", nil)
+	req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "u-1"}))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	var out struct {
+		Secret  string     `json:"secret"`
+		Expires *time.Time `json:"previous_secret_expires_at"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || w.Code != http.StatusOK || !strings.HasPrefix(out.Secret, "whsec_") ||
+		out.Expires == nil || time.Until(*out.Expires) < 23*time.Hour {
+		t.Fatalf("rotate: %d %s", w.Code, w.Body.String())
+	}
+
+	payload := map[string]any{"id": "ci-1"}
+	body, _ := json.Marshal(payload)
+	d.Dispatch(context.Background(), "org-1", "ci.created", payload)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		n := len(headers)
+		mu.Unlock()
+		if n > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(headers) != 1 {
+		t.Fatalf("deliveries: %d", len(headers))
+	}
+	if headers[0].Get("X-Webhook-Signature") != signPayload(out.Secret, body) ||
+		headers[0].Get("X-Webhook-Signature-Previous") != signPayload("old-secret-123456", body) {
+		t.Errorf("signatures: %v", headers[0])
+	}
+	stored, _ := repo.GetByID(context.Background(), "org-1", sub.ID)
+	expired := time.Now().Add(-time.Minute)
+	stored.PreviousSecretExpiresAt = &expired
+	d.Dispatch(context.Background(), "org-1", "ci.created", payload)
+	deadline = time.Now().Add(2 * time.Second)
+	for len(headers) < 2 && time.Now().Before(deadline) {
+		mu.Unlock()
+		time.Sleep(5 * time.Millisecond)
+		mu.Lock()
+	}
+	if len(headers) != 2 || headers[1].Get("X-Webhook-Signature-Previous") != "" {
+		t.Errorf("previous signature after the overlap: %v", headers)
 	}
 }

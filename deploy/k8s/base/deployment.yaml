@@ -65,7 +65,13 @@ spec:
               value: "true"
             - name: RETICORA_WORKER_MONITORING_ENABLED
               value: "true"
-            - name: RETICORA_WORKER_RESERVATION_SWEEPER_ENABLED
+            - name: RETICORA_WORKER_SCHEDULER_ENABLED
+              value: "true"
+            - name: RETICORA_WORKER_JOBS_ENABLED
+              value: "true"
+            - name: RETICORA_WORKER_EVENTS_ENABLED
+              value: "true"
+            - name: RETICORA_WORKER_NOTIFIER_ENABLED
               value: "true"
           volumeMounts:
             - name: session-key

@@ -62,7 +62,8 @@ func TestStructureIsProjected(t *testing.T) {
 		t.Errorf("self containment: %v, want 422 on parent_ci_id", err)
 	}
 
-	// Location and rack mount of blade 1.
+	// Location and rack mount of the chassis: the parent of a composition
+	// is mounted, its children are not (RCK-01).
 	tree := locations.NewPGRepository(f.App)
 	newLocation := func(req locations.CreateRequest) string {
 		t.Helper()
@@ -77,36 +78,41 @@ func TestStructureIsProjected(t *testing.T) {
 	room := newLocation(locations.CreateRequest{Kind: locations.KindRoom, ParentID: building, Name: "struct-r1"})
 	rackID := newLocation(locations.CreateRequest{Kind: locations.KindRack, ParentID: room, Name: "struct-k1"})
 	if _, err := f.Admin.Exec(bg, `INSERT INTO rack_mount (organization_id, rack_id, ci_id, position_u, height_u)
-		VALUES ($1, $2, $3, 1, 1)`, f.OrgA, rackID, blade1); err != nil {
+		VALUES ($1, $2, $3, 1, 1)`, f.OrgA, rackID, chassis); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cis.Update(ctx, f.OrgA, blade1, ci.UpdateRequest{LocationID: &rackID}); err != nil {
+	if _, err := cis.Update(ctx, f.OrgA, chassis, ci.UpdateRequest{LocationID: &rackID}); err != nil {
 		t.Fatal(err)
 	}
 
-	list, total, err := rels.List(ctx, f.OrgA, blade1, api.PaginationParams{Limit: 50})
+	list, total, err := rels.List(ctx, f.OrgA, chassis, api.PaginationParams{Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
 	projected := map[string]relationship.Relationship{}
+	contained := map[string]bool{}
 	for _, r := range list {
-		if r.Projected {
-			projected[r.RelType] = r
+		if !r.Projected {
+			continue
+		}
+		projected[r.RelType] = r
+		if r.RelType == "contains" && r.SourceCIID == chassis && r.Source == relationship.ProjectionSource {
+			contained[r.TargetCIID] = true
 		}
 	}
-	if c := projected["contains"]; c.SourceCIID != chassis || c.TargetCIID != blade1 || c.Source != relationship.ProjectionSource {
-		t.Errorf("projected contains %+v", c)
+	if !contained[blade1] || !contained[blade2] {
+		t.Errorf("projected contains of the chassis: %+v", list)
 	}
-	if m := projected["mounted_in"]; m.SourceCIID != blade1 || m.TargetLocationID != rackID || m.TargetCIID != "" {
+	if m := projected["mounted_in"]; m.SourceCIID != chassis || m.TargetLocationID != rackID || m.TargetCIID != "" {
 		t.Errorf("projected mounted_in %+v", m)
 	}
-	if l := projected["located_in"]; l.SourceCIID != blade1 || l.TargetLocationID != rackID {
+	if l := projected["located_in"]; l.SourceCIID != chassis || l.TargetLocationID != rackID {
 		t.Errorf("projected located_in %+v", l)
 	}
-	if total != len(list) || len(projected) != 3 {
-		t.Errorf("relationships of blade 1: total %d, %+v", total, list)
+	if total != len(list) || len(list) != 4 {
+		t.Errorf("relationships of the chassis: total %d, %+v", total, list)
 	}
-	again, _, _ := rels.List(ctx, f.OrgA, blade1, api.PaginationParams{Limit: 50})
+	again, _, _ := rels.List(ctx, f.OrgA, chassis, api.PaginationParams{Limit: 50})
 	if len(again) != len(list) || again[0].ID != list[0].ID {
 		t.Error("projected relationship ids are not stable")
 	}

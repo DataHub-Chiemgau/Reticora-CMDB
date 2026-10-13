@@ -1795,6 +1795,10 @@ export interface AuditEntry {
   entity_type?: string;
   entity_id?: string;
   details?: Record<string, unknown>;
+  seq?: number;
+  source?: 'ui' | 'api' | 'collector' | 'import' | 'system';
+  request_id?: string;
+  correlation_id?: string;
   hash?: string;
   previous_hash?: string;
   created_at: string;

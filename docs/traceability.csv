@@ -300,3 +300,33 @@ NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-123
 NET-03;[B];B;backend/internal/ipam/ip_integration_test.go;WP-124
 NET-05;[B];B;backend/internal/ipam/handler_test.go;WP-125
 API-05;[B];B;backend/internal/ipam/handler_test.go;WP-125
+RCK-01;[B];B;backend/internal/rack/rules_integration_test.go;WP-126
+REL-01;[B];B;backend/internal/relationshiptype/seed_integration_test.go;WP-127
+REL-02;[B];B;backend/internal/relationship/pg_repository_integration_test.go;WP-128
+JOB-01;[B];B;backend/internal/jobs/service_test.go;WP-129
+REP-01;[B];B;backend/internal/jobs/service_test.go;WP-129
+TEC-14;[B];B;backend/internal/jobs/queue_test.go;WP-130
+JOB-02;[B], Zusätze [P2], [P3];B;backend/internal/jobs/scheduler_test.go;WP-131
+OPS-03;[B], [P5];B;backend/internal/jobs/scheduler_test.go;WP-131
+AUD-04;[B];B;backend/internal/audit/audit_test.go;WP-132
+AUD-05;[B];B;backend/internal/server/audit_coverage_test.go;WP-133
+AUD-09;[B];B;backend/internal/server/audit_coverage_test.go;WP-133
+MET-54;B/G1, Teil P2/G2;B;backend/internal/citype/export_audit_integration_test.go;WP-134
+AUD-07;[B];B;backend/internal/citype/export_audit_integration_test.go;WP-134
+NFR-06;[B];B;backend/internal/jobs/retention_integration_test.go;WP-135
+EVT-01;[B];B;backend/internal/events/outbox_integration_test.go;WP-136
+EVT-02;[B];B;backend/internal/events/outbox_integration_test.go;WP-136
+NTF-01;[B];B;backend/internal/notify/channel_test.go;WP-137
+TEC-13;[B];B;backend/internal/notify/channel_test.go;WP-137
+REP-01;[B];B;backend/internal/notify/channel_test.go;WP-137
+NTF-03;[B];B;backend/internal/notify/recipients_integration_test.go;WP-138
+NTF-04;[B];B;backend/internal/notify/notifier_test.go;WP-139
+API-05;[B];B;backend/internal/notify/notifier_test.go;WP-139
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/notify/events_integration_test.go;WP-140
+OPS-05;[B];B;backend/internal/notify/events_integration_test.go;WP-140
+SEC-06;[B];B;backend/internal/platform/crypto/crypto_test.go;WP-141
+DB-04;nicht geliefert;B;backend/internal/citype/ddl_job_integration_test.go;WP-142
+MET-15;B/G1;B;backend/internal/citype/ddl_job_integration_test.go;WP-142
+SEC-05;[B];B;backend/internal/pii/pii_integration_test.go;WP-240
+SEC-05;[B];B;backend/internal/pii/surrogate_integration_test.go;WP-241
+AUD-01;[B];B;backend/internal/contact/pii_integration_test.go;WP-242

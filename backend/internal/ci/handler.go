@@ -315,6 +315,24 @@ func writeValidationError(w http.ResponseWriter, err error) bool {
 		})
 		return true
 	}
+	// A value of a unique attribute another CI holds (MET-15): 409 with the
+	// attributes.
+	var taken *UniqueError
+	if errors.As(err, &taken) {
+		violations := make([]Violation, len(taken.Fields))
+		for i, f := range taken.Fields {
+			violations[i] = Violation{Field: f, Detail: "another CI already holds this value of the unique attribute"}
+		}
+		api.WriteJSON(w, http.StatusConflict, struct {
+			api.ProblemDetail
+			Violations []Violation `json:"violations"`
+		}{
+			ProblemDetail: api.ProblemDetail{Type: "urn:reticora:problem:conflict", Title: "Conflict",
+				Status: http.StatusConflict, Detail: taken.Error()},
+			Violations: violations,
+		})
+		return true
+	}
 	ve, ok := AsValidationError(err)
 	if !ok {
 		return false

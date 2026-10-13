@@ -32,7 +32,7 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 }
 
 const webhookSelectColumns = `id, organization_id, name, url, secret, events, is_active, headers,
-	COALESCE(service_account_id::text, ''), created_at, updated_at`
+	COALESCE(service_account_id::text, ''), created_at, updated_at, COALESCE(previous_secret, ''), previous_secret_expires_at`
 
 // List returns paginated subscriptions.
 func (r *PGRepository) List(ctx context.Context, orgID string, page api.PaginationParams) ([]Subscription, int, error) {
@@ -257,6 +257,8 @@ func scanWebhook(scanner webhookScanner) (*Subscription, error) {
 		&sub.ServiceAccountID,
 		&createdAt,
 		&updatedAt,
+		&sub.PreviousSecret,
+		&sub.PreviousSecretExpiresAt,
 	); err != nil {
 		return nil, err
 	}
@@ -271,4 +273,54 @@ func scanWebhook(scanner webhookScanner) (*Subscription, error) {
 	}
 
 	return sub, nil
+}
+
+// RotateSecret implements SecretRotator.
+func (r *PGRepository) RotateSecret(ctx context.Context, orgID, id, secret string, validUntil time.Time) (*Subscription, error) {
+	var sub *Subscription
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		sub, err = scanWebhook(tx.QueryRow(ctx, `UPDATE webhook_subscription
+			SET previous_secret = secret, previous_secret_expires_at = $4, secret = $3, updated_at = now()
+			WHERE organization_id = $1 AND id::text = $2
+			RETURNING `+webhookSelectColumns, orgID, id, secret, validUntil.UTC()))
+		if err != nil {
+			return fmt.Errorf("rotate webhook secret: %w", err)
+		}
+		return nil
+	})
+	return sub, err
+}
+
+// ClearExpiredSecrets removes the previous secrets whose overlap has ended
+// and returns how many; the system flag only lists the organizations, the
+// subscriptions are changed in each organization's transaction.
+func (r *PGRepository) ClearExpiredSecrets(ctx context.Context, now time.Time) (int, error) {
+	var orgs []string
+	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text FROM organization`)
+		if err != nil {
+			return err
+		}
+		orgs, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, orgID := range orgs {
+		scope := database.OrgWideScope(orgID, "")
+		err = database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			tag, execErr := tx.Exec(ctx, `UPDATE webhook_subscription SET previous_secret = NULL, previous_secret_expires_at = NULL
+				WHERE organization_id = $1 AND previous_secret_expires_at <= $2`, orgID, now)
+			total += int(tag.RowsAffected())
+			return execErr
+		})
+		if err != nil {
+			return total, err
+		}
+	}
+	return total, nil
 }

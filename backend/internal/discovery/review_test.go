@@ -198,8 +198,8 @@ func TestBulkIngestDerivesTopology(t *testing.T) {
 	if edge.TargetCIID != pdu.ID || edge.RelType != "powered_by" || edge.Source != RelationshipSource {
 		t.Errorf("unexpected edge %+v", edge)
 	}
-	if edge.Attributes["confidence"] != 0.8 {
-		t.Errorf("expected confidence 0.8, got %v", edge.Attributes["confidence"])
+	if edge.Confidence == nil || *edge.Confidence != 0.8 {
+		t.Errorf("expected confidence 0.8, got %v", edge.Confidence)
 	}
 
 	// Re-ingesting the same data must not create a duplicate edge.

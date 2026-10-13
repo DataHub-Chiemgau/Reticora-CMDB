@@ -22,11 +22,13 @@ func TestRelationshipTypeRepositoryScope(t *testing.T) {
 	f := scopetest.Seed(t, "13")
 	repo := relationshiptype.NewPGRepository(f.App)
 
-	typA := &relationshiptype.Type{OrganizationID: f.OrgA, Key: "scopetest_feeds", ForwardLabel: "feeds", ReverseLabel: "fed by"}
+	typA := &relationshiptype.Type{OrganizationID: f.OrgA, Key: "scopetest_feeds", DisplayName: "feeds", ReverseName: "fed by",
+		Directed: true, Category: "logical", ImpactDirection: relationshiptype.ImpactSourceDependsOnTarget}
 	if err := repo.Create(f.OrgCtx(f.OrgA), typA); err != nil {
 		t.Fatalf("create org A type: %v", err)
 	}
-	typB := &relationshiptype.Type{OrganizationID: f.OrgB, Key: "scopetest_mirrors", ForwardLabel: "mirrors", ReverseLabel: "mirrored by"}
+	typB := &relationshiptype.Type{OrganizationID: f.OrgB, Key: "scopetest_mirrors", DisplayName: "mirrors", ReverseName: "mirrored by",
+		Directed: true, Category: "logical", ImpactDirection: relationshiptype.ImpactSourceDependsOnTarget}
 	if err := repo.Create(f.OrgCtx(f.OrgB), typB); err != nil {
 		t.Fatalf("create org B type: %v", err)
 	}

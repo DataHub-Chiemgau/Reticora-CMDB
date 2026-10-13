@@ -21,17 +21,23 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
@@ -44,6 +50,8 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // version is set at build-time via -ldflags.
@@ -99,7 +107,7 @@ func main() {
 		}
 		cfg.MasterKey = devKey
 	}
-	encryptor, err = crypto.NewEnvelopeEncryptor(cfg.MasterKey)
+	encryptor, err = crypto.NewEnvelopeEncryptor(cfg.MasterKey, strings.Split(cfg.MasterKeyPrevious, ",")...)
 	if err != nil {
 		slog.Error("failed to init envelope encryptor", "error", err)
 		os.Exit(1)
@@ -204,6 +212,9 @@ func main() {
 		repos = server.PostgresRepositories(pool, audit.NewPGRecorder())
 		auditHandler = audit.NewHandler(pool)
 		auditPool = pool
+		// Personal data in audit, CI history and events is stored as vault
+		// surrogates (SEC-05).
+		pii.SetDefault(pii.NewVault(pool, encryptor))
 
 		// Asynchronous exports render into object storage and are served via
 		// signed URLs. Without object storage, job creation answers 503 but
@@ -243,6 +254,33 @@ func main() {
 			os.Exit(1)
 		}
 		defer ingestQueue.Close()
+	}
+	// Jobs are distributed over the JOBS work queue on NATS (TEC-14); job
+	// kinds register their handlers with jobQueue.Handle.
+	var jobQueue *jobs.Queue
+	// The domain events reach RETICORA_EVENTS over the same connection.
+	var eventStream jetstream.JetStream
+	if cfg.IsSet("RETICORA_NATS_URL") && repos.Jobs != nil {
+		nc, natsErr := nats.Connect(cfg.NATSUrl, nats.Name("reticora-jobs"), nats.MaxReconnects(-1))
+		if natsErr != nil {
+			slog.Error("failed to connect to NATS for the job queue", "error", natsErr)
+			os.Exit(1)
+		}
+		defer nc.Close()
+		js, natsErr := jetstream.New(nc)
+		if natsErr != nil {
+			slog.Error("failed to open JetStream for the job queue", "error", natsErr)
+			os.Exit(1)
+		}
+		eventStream = js
+		jobQueue = jobs.NewQueue(jobs.NewService(repos.Jobs).WithEvents(emitterOf(auditPool)), js)
+		queueCtx, cancelQueue := context.WithTimeout(context.Background(), 30*time.Second)
+		natsErr = jobQueue.Setup(queueCtx)
+		cancelQueue()
+		if natsErr != nil {
+			slog.Error("failed to set up the job queue on NATS", "error", natsErr)
+			os.Exit(1)
+		}
 	}
 	if strings.EqualFold(cfg.SearchBackend, "opensearch") {
 		if cfg.OpenSearchURL == "" {
@@ -306,6 +344,25 @@ func main() {
 	// Webhook and connector destinations are user input: every outbound call
 	// goes through the egress client (SEC-08).
 	egressPolicy := egress.Options{AllowPrivate: cfg.EgressAllowPrivate}
+	// Notifications (NTF-01, NTF-04): channels with encrypted provider
+	// settings, the in-app center and the delivery queue of the notifier.
+	smtpSender := centralSMTP(cfg)
+	notifications := notify.NewMemoryCenter()
+	if auditPool != nil {
+		notifications = &notify.Center{
+			Channels:    notify.NewPGRepository(auditPool, notify.NewSealer(encryptor)),
+			Inbox:       notify.NewPGInbox(auditPool),
+			Preferences: notify.NewPGPreferences(auditPool),
+			Deliveries:  notify.NewPGDeliveryStore(auditPool),
+		}
+	}
+	notifier := notify.NewNotifier(notifications.Channels, notifications.Deliveries, notifications.Preferences,
+		notify.NewSender(map[string]notify.Provider{
+			notify.ProviderCentralSMTP: notify.NewEmailProvider(smtpSender),
+			notify.ProviderSMTP:        notify.NewEmailProvider(smtpSender),
+			notify.ProviderInApp:       notify.NewInAppProvider(notifications.Inbox),
+			notify.ProviderWebhook:     notify.NewWebhookProvider(egress.NewClient(egressPolicy)),
+		}))
 	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, egress.NewClient(egressPolicy), webhook.DispatcherOptions{
 		// Subscriptions bound to a service account receive only events whose
 		// object the account may read (RBA-08).
@@ -313,6 +370,8 @@ func main() {
 		Deliveries: repos.WebhookDeliveries,
 		// The retry worker runs under its operator switch below (OPS-02).
 		PollInterval: -1,
+		// Dead deliveries are reported (NTF-05).
+		Events: emitterOf(auditPool),
 	})
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -351,7 +410,9 @@ func main() {
 		},
 		Readiness:        readiness,
 		IngestQueue:      ingestQueue,
-		Signup:           signupService(cfg, auditPool),
+		Signup:           signupService(cfg, auditPool, smtpSender),
+		Notifications:    notifications,
+		Events:           emitterOf(auditPool),
 		SignupProtection: signupProtection(cfg, cacheStore),
 		// Invitations need the database; in --no-db mode they answer 503.
 		InvitationAccounts: invitationAccounts(cfg),
@@ -359,6 +420,40 @@ func main() {
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
 		os.Exit(1)
+	}
+
+	// The scheduler of the system jobs (JOB-02, OPS-03): advisory-lock
+	// leader and stored catch-up state on PostgreSQL, process-local with
+	// --no-db.
+	var systemScheduler *jobs.Scheduler
+	if auditPool != nil {
+		systemScheduler = jobs.NewScheduler(jobs.NewPGLocker(auditPool), jobs.NewPGStateStore(auditPool))
+	} else {
+		systemScheduler = jobs.NewScheduler(jobs.NewMemoryLocker(), jobs.NewMemoryStateStore())
+	}
+	// Release expired reservations (spec §10).
+	systemJobs := []jobs.Schedule{reservation.NewSweeper(repos.Reservation, webhookDispatcher).Schedule()}
+	// Retention runs per kind of data (NFR-06, AUD-09) and key rotation
+	// (SEC-06).
+	if auditPool != nil {
+		systemJobs = append(systemJobs, jobs.NewRotation(auditPool, encryptor, dekRotator{repo: credential.NewPGRepository(auditPool)},
+			webhook.NewPGRepository(auditPool)).Schedules()...)
+		systemJobs = append(systemJobs, jobs.NewRetention(auditPool, jobs.RetentionFromDays(cfg.RetentionAuditYears,
+			cfg.RetentionHistoryDays, cfg.RetentionSoftDeleteDays, cfg.RetentionReviewItemDays)).Schedules()...)
+		// Personal data of existing history entries into the vault (SEC-05).
+		systemJobs = append(systemJobs, jobs.NewPIIBackfill(auditPool).Schedule())
+		// Attribute indexes of searchable/unique attributes (DB-04, MET-15).
+		if typeRepo, ok := repos.CIType.(*citype.PGRepository); ok && repos.Jobs != nil {
+			ddlJob := citype.NewDDLJob(auditPool, jobs.NewService(repos.Jobs))
+			typeRepo.WithIndexScheduler(ddlJob)
+			systemJobs = append(systemJobs, ddlJob.Schedule())
+		}
+	}
+	for i := range systemJobs {
+		if err = systemScheduler.Register(&systemJobs[i]); err != nil {
+			slog.Error("failed to register a system job", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	// Background workers, each under its operator switch
@@ -372,15 +467,19 @@ func main() {
 			return c.CountDue(ctx, time.Now().UTC())
 		}),
 	}, {
-		// Release expired reservations (spec §10). The sweeper is
-		// interval-driven and shares no state with request handling.
-		Name: config.WorkerReservationSweeper,
-		Run:  reservation.NewSweeper(repos.Reservation, webhookDispatcher, time.Minute).Run,
+		// System jobs on the scheduler (JOB-02): one replica leads through
+		// a PostgreSQL advisory lock and runs the due slots.
+		Name: config.WorkerScheduler,
+		Run:  systemScheduler.Run,
 	}}
 	// Process queued asynchronous export jobs. All replicas share the queue
 	// via FOR UPDATE SKIP LOCKED, so jobs are never run twice.
 	if blobStore != nil {
 		exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, blobStore)
+		if repos.Jobs != nil {
+			exportWorker.Tracker = jobs.NewService(repos.Jobs)
+			exportWorker.Events = emitterOf(auditPool)
+		}
 		workers = append(workers, server.Worker{
 			Name: config.WorkerExport,
 			Run:  func(ctx context.Context) { exportWorker.Run(ctx, 2*time.Second) },
@@ -388,6 +487,27 @@ func main() {
 				return c.CountPending(ctx)
 			}),
 		})
+	}
+	// Publish the domain events of the outbox to RETICORA_EVENTS and the
+	// webhook subscriptions (EVT-01, WP-136).
+	if repos.EventOutbox && auditPool != nil {
+		// Subscribed events become notifications (NTF-05).
+		publisher := events.NewPublisher(auditPool, eventStream, webhookDispatcher,
+			notify.NewEventConsumer(notify.NewPGResolver(auditPool, permission.NewPGRepository(auditPool)), notifier))
+		setupCtx, cancelSetup := context.WithTimeout(context.Background(), 30*time.Second)
+		err = publisher.Setup(setupCtx)
+		cancelSetup()
+		if err != nil {
+			slog.Error("failed to set up the event stream on NATS", "error", err)
+			os.Exit(1)
+		}
+		workers = append(workers, server.Worker{Name: config.WorkerEvents, Run: publisher.Run})
+	}
+	// Deliver queued notifications with retry (NTF-04).
+	workers = append(workers, server.Worker{Name: config.WorkerNotifier, Run: func(ctx context.Context) { notifier.Run(ctx, 5*time.Second) }})
+	// Run the jobs announced on the JOBS work queue (TEC-14).
+	if jobQueue != nil {
+		workers = append(workers, server.Worker{Name: config.WorkerJobs, Run: jobQueue.Run})
 	}
 	// Consume ingest.> (REC-01).
 	if ingestQueue != nil {
@@ -658,11 +778,26 @@ func backlogOf[C any](repo any, count func(context.Context, C) (int, error)) fun
 	return func(ctx context.Context) (int, error) { return count(ctx, c) }
 }
 
+// centralSMTP is the installation's SMTP server (TEC-13); nil without
+// RETICORA_SMTP_HOST.
+func centralSMTP(cfg *config.Config) *notify.SMTPSender {
+	if cfg.SMTPHost == "" {
+		return nil
+	}
+	sender, err := notify.NewSMTPSender(&notify.SMTPConfig{Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername,
+		Password: cfg.SMTPPassword, From: cfg.SMTPFrom, TLS: cfg.SMTPTLS})
+	if err != nil {
+		slog.Error("invalid central SMTP configuration", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("central SMTP configured", "host", cfg.SMTPHost, "port", cfg.SMTPPort, "tls", cfg.SMTPTLS)
+	return sender
+}
+
 // signupService builds the self-signup flow (TLC-01). Signups need the
-// database, the Keycloak admin client and an e-mail channel; the channel
-// arrives with the notification channels (WP-137), so until then every
-// signup answers 503.
-func signupService(cfg *config.Config, pool *pgxpool.Pool) *signup.Service {
+// database, the Keycloak admin client and the central SMTP server for the
+// verification e-mail; without one of them every signup answers 503.
+func signupService(cfg *config.Config, pool *pgxpool.Pool, smtpSender *notify.SMTPSender) *signup.Service {
 	sc := signup.DefaultConfig()
 	sc.TrialPlan = entitlement.Plan(cfg.TrialPlan)
 	sc.TrialDays = cfg.TrialDays
@@ -678,7 +813,11 @@ func signupService(cfg *config.Config, pool *pgxpool.Pool) *signup.Service {
 	if kc := keycloakAccounts(cfg); kc != nil {
 		accounts = kc
 	}
-	svc := signup.NewService(repo, nil, accounts, sc)
+	var mailer signup.Mailer
+	if smtpSender != nil {
+		mailer = notify.SignupMailer{Sender: smtpSender}
+	}
+	svc := signup.NewService(repo, mailer, accounts, sc)
 	slog.Info("self-signup configured", "available", svc.Available())
 	return svc
 }
@@ -741,4 +880,28 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// emitterOf reports facts into the event outbox of the database; nil
+// without one.
+func emitterOf(pool *pgxpool.Pool) events.Emitter {
+	if pool == nil {
+		return nil
+	}
+	return events.NewPGEmitter(pool)
+}
+
+// dekRotator adapts the credential store to the rotation runs.
+type dekRotator struct{ repo *credential.PGRepository }
+
+func (d dekRotator) RotateOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (keyVersion, rotated int, err error) {
+	res, err := d.repo.RotateOrgDEK(ctx, orgID, enc)
+	if err != nil {
+		return 0, 0, err
+	}
+	return res.KeyVersion, res.Rotated, nil
+}
+
+func (d dekRotator) RewrapOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (bool, error) {
+	return d.repo.RewrapOrgDEK(ctx, orgID, enc)
 }

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -129,5 +130,35 @@ func TestExportJobRunsWithCreatorScope(t *testing.T) {
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || w.Code != http.StatusOK || list.Total != 0 {
 		t.Errorf("other user lists %d jobs (status %d), want none", list.Total, w.Code)
+	}
+
+	// Resumption after a restart (TEC-14, WP-130): a replica claimed a job
+	// and died; after StaleAfter the job is queued again and completed, and
+	// the late original run cannot complete it a second time.
+	resumed := create(&orgWide)
+	claimed, err := jobs.ClaimPending(bg, 10)
+	if err != nil || len(claimed) == 0 {
+		t.Fatalf("claim: %+v %v", claimed, err)
+	}
+	if status, _ := content(resumed); status != export.JobStatusRunning {
+		t.Fatalf("claimed job: %s", status)
+	}
+	if n := worker.ResumeStale(bg); n != 0 {
+		t.Errorf("a fresh running job was resumed (%d)", n)
+	}
+	worker.Now = func() time.Time { return time.Now().UTC().Add(export.DefaultStaleAfter + time.Minute) }
+	if n := worker.ResumeStale(bg); n < 1 {
+		t.Errorf("stale jobs resumed: %d", n)
+	}
+	if status, _ := content(resumed); status != export.JobStatusPending {
+		t.Fatalf("stale job after resumption: %s", status)
+	}
+	for worker.ProcessOne(bg) {
+	}
+	if status, out := content(resumed); status != export.JobStatusCompleted || !strings.Contains(out, "export-scope-own") {
+		t.Errorf("resumed job: %s %s", status, out)
+	}
+	if err = jobs.CompleteJob(bg, f.OrgA, resumed, "late", 0, 0, time.Now(), time.Now()); err == nil {
+		t.Error("a completed job was completed a second time")
 	}
 }

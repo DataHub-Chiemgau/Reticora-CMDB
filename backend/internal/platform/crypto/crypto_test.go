@@ -180,3 +180,62 @@ func TestEncrypt_EmptyPlaintext(t *testing.T) {
 		t.Fatalf("expected empty, got %d bytes", len(decrypted))
 	}
 }
+
+// TestMasterKeyRotation covers SEC-06 (WP-141): a wrapped DEK names its
+// master key; during a rotation the previous key still unwraps, the rewrap
+// moves the DEK to the current key, after which the previous key can be
+// retired; unmarked DEKs from before the key ids stay readable.
+func TestMasterKeyRotation(t *testing.T) {
+	oldKey, _ := GenerateMasterKey()
+	newKey, _ := GenerateMasterKey()
+	oldEnc, err := NewEnvelopeEncryptor(oldKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dek, _ := GenerateDEK()
+	wrapped, err := oldEnc.WrapDEK(dek)
+	if err != nil || !oldEnc.IsCurrent(wrapped) {
+		t.Fatalf("wrap: %v", err)
+	}
+
+	rotating, err := NewEnvelopeEncryptor(newKey, oldKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotating.KeyID() == oldEnc.KeyID() || len(rotating.KeyID()) != 16 {
+		t.Errorf("key ids: %s %s", rotating.KeyID(), oldEnc.KeyID())
+	}
+	if rotating.IsCurrent(wrapped) {
+		t.Error("a DEK of the previous key counts as current")
+	}
+	if got, unwrapErr := rotating.UnwrapDEK(wrapped); unwrapErr != nil || string(got) != string(dek) {
+		t.Fatalf("unwrap with the previous key: %v", unwrapErr)
+	}
+	rewrapped, err := rotating.Rewrap(wrapped)
+	if err != nil || !rotating.IsCurrent(rewrapped) {
+		t.Fatalf("rewrap: %v", err)
+	}
+
+	retired, _ := NewEnvelopeEncryptor(newKey)
+	if got, unwrapErr := retired.UnwrapDEK(rewrapped); unwrapErr != nil || string(got) != string(dek) {
+		t.Errorf("rewrapped DEK after retiring the previous key: %v", unwrapErr)
+	}
+	if _, unwrapErr := retired.UnwrapDEK(wrapped); unwrapErr == nil {
+		t.Error("a DEK of the retired key was unwrapped")
+	}
+
+	// An unmarked DEK from before the key ids.
+	legacy, err := encrypt(oldEnc.masterKey, dek)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotating.IsCurrent(legacy) {
+		t.Error("an unmarked DEK counts as current")
+	}
+	if got, err := rotating.UnwrapDEK(legacy); err != nil || string(got) != string(dek) {
+		t.Errorf("unmarked DEK: %v", err)
+	}
+	if _, err := NewEnvelopeEncryptor(newKey, "not base64!"); err == nil {
+		t.Error("an invalid previous key was accepted")
+	}
+}

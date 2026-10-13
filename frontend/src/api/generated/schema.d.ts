@@ -413,7 +413,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List audit log entries */
+    /**
+     * List audit log entries
+     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05).
+     */
     get: operations['listAuditEntries'];
     put?: never;
     post?: never;
@@ -434,7 +437,7 @@ export interface paths {
     put?: never;
     /**
      * Verify the audit hash chain
-     * @description Walks the organization's audit log in chain order and reports whether the `previous_hash`/`hash` linkage is intact.
+     * @description Walks the organization's audit chain in `seq` order and reports the first violation (AUD-04): a gap in the sequence, a broken `previous_hash` link (the first entry links to 32 zero bytes) or a hash that does not match SHA-256(previous_hash || SHA-256(canonical JSON)) of the stored entry.
      */
     post: operations['verifyAuditChain'];
     delete?: never;
@@ -566,6 +569,28 @@ export interface paths {
     post?: never;
     /** Delete a webhook subscription */
     delete: operations['deleteWebhook'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/webhooks/{id}/rotate-secret': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rotate the signing secret
+     * @description A new secret (generated, or the one given) replaces the current one; for 24 hours deliveries are signed with both (X-Webhook-Signature, X-Webhook-Signature-Previous), so the receiver can switch without losing deliveries (SEC-06). The new secret is returned only here.
+     */
+    post: operations['rotateWebhookSecret'];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -2697,6 +2722,145 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/notifications': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * The signed-in user's in-app notifications
+     * @description Newest first (NTF-04, UI-16); `unread=true` lists the unread ones only.
+     */
+    get: operations['listNotifications'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/notifications/read-all': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Mark all own notifications read */
+    post: operations['markAllNotificationsRead'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/notifications/{id}/read': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Mark an own notification read */
+    post: operations['markNotificationRead'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/notifications/preferences': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The signed-in user's quiet hours and muted categories */
+    get: operations['getNotificationPreferences'];
+    /**
+     * Set quiet hours and muted categories
+     * @description Critical notifications ignore both (NTF-04).
+     */
+    put: operations['setNotificationPreferences'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/notification-channels': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Notification channels of the organization
+     * @description Secrets (password, secret) are returned as `********`.
+     */
+    get: operations['listNotificationChannels'];
+    put?: never;
+    /** Create a notification channel */
+    post: operations['createNotificationChannel'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/notification-channels/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    /** Get a notification channel */
+    get: operations['getNotificationChannel'];
+    put?: never;
+    post?: never;
+    /** Delete a notification channel */
+    delete: operations['deleteNotificationChannel'];
+    options?: never;
+    head?: never;
+    /**
+     * Update name, configuration or enabled flag
+     * @description A configuration replaces the stored one; a secret sent back as `********` keeps its value. Kind and provider cannot change.
+     */
+    patch: operations['updateNotificationChannel'];
+    trace?: never;
+  };
+  '/api/v1/notification-deliveries': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Latest notification deliveries with their status */
+    get: operations['listNotificationDeliveries'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/vrfs': {
     parameters: {
       query?: never;
@@ -4676,7 +4840,7 @@ export interface paths {
     head?: never;
     /**
      * Update an attribute definition
-     * @description Key, CI type and scope are immutable; system definitions are read-only (403).
+     * @description Key, CI type and scope are immutable; system definitions are read-only (403). Changing `searchable`, `unique` or `unique_scope` queues an `attribute.index` job that builds the index concurrently (DB-04); making an attribute unique while active CIs share a value is 409.
      */
     patch: operations['updateAttributeDefinition'];
     trace?: never;
@@ -4717,6 +4881,26 @@ export interface paths {
      * @description Editable starting points; network, vlan and contract are no CI types and never offered (MET-03, DB-05).
      */
     get: operations['listCiTypesTemplates'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ci-types/export': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Export the metamodel
+     * @description The organization's metamodel as one JSON document (MET-54, phase 1): every CI type it sees — system and own, active or not — with its attribute definitions, and the global attribute definitions. Served as a download (Content-Disposition attachment).
+     */
+    get: operations['exportMetamodel'];
     put?: never;
     post?: never;
     delete?: never;
@@ -5273,10 +5457,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage relationship type metadata */
+    /** List the relationship types (system catalogue and the organization's) */
     get: operations['listRelationshipTypes'];
     put?: never;
-    /** Manage relationship type metadata */
+    /** Create a relationship type of the organization */
     post: operations['createRelationshipTypes'];
     delete?: never;
     options?: never;
@@ -5288,18 +5472,20 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        key: string;
+      };
       cookie?: never;
     };
-    /** Read, update or delete a relationship type */
+    /** Get a relationship type */
     get: operations['getRelationshipTypesKey'];
     put?: never;
     post?: never;
-    /** Read, update or delete a relationship type */
+    /** Delete a relationship type of the organization (system types stay) */
     delete: operations['deleteRelationshipTypesKey'];
     options?: never;
     head?: never;
-    /** Read, update or delete a relationship type */
+    /** Update a relationship type of the organization (system types are read-only) */
     patch: operations['updateRelationshipTypesKey'];
     trace?: never;
   };
@@ -5481,9 +5667,14 @@ export interface components {
       default?: unknown;
       enum_values?: string[];
       multi_value: boolean;
+      /** @description Indexed for search: an `attribute.index` job builds `idx_attr_<id>` concurrently (DB-04). */
       searchable: boolean;
+      /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. */
       unique: boolean;
-      /** @enum {string} */
+      /**
+       * @description Unique per organization or per client (CIs without a client count as one client).
+       * @enum {string}
+       */
       unique_scope: 'org' | 'client';
       inheritable: boolean;
       validation?: {
@@ -5568,6 +5759,102 @@ export interface components {
     LocalizedText: {
       de?: string;
       en?: string;
+    };
+    NotificationRecipient: {
+      user_id?: string;
+      email?: string;
+      name?: string;
+    };
+    InAppNotification: {
+      id: string;
+      organization_id: string;
+      user_id: string;
+      category: string;
+      subject: string;
+      body: string;
+      data?: {
+        [key: string]: unknown;
+      };
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      read_at?: string;
+    };
+    InAppNotificationListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['InAppNotification'][];
+    };
+    NotificationPreference: {
+      /** @description Start of the quiet hours (HH:MM). */
+      quiet_start?: string;
+      /** @description End of the quiet hours; may be on the next day. */
+      quiet_end?: string;
+      /** @example Europe/Berlin */
+      time_zone: string;
+      muted_categories: string[];
+    };
+    NotificationChannel: {
+      id: string;
+      organization_id: string;
+      name: string;
+      /** @enum {string} */
+      kind: 'email' | 'inapp' | 'webhook' | 'sms' | 'pager';
+      /** @enum {string} */
+      provider: 'central_smtp' | 'smtp' | 'inapp' | 'webhook';
+      /** @description central_smtp: sender_name, reply_to; smtp: host, port, tls (starttls|tls|none), username, password, from; webhook: url, secret. Secrets are returned as `********`. */
+      config?: {
+        [key: string]: unknown;
+      };
+      enabled: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    NotificationChannelRequest: {
+      name?: string;
+      /** @enum {string} */
+      kind?: 'email' | 'inapp' | 'webhook';
+      /** @enum {string} */
+      provider?: 'central_smtp' | 'smtp' | 'inapp' | 'webhook';
+      config?: {
+        [key: string]: unknown;
+      };
+      enabled?: boolean;
+    };
+    NotificationDelivery: {
+      id: string;
+      organization_id: string;
+      channel_id: string;
+      recipient: components['schemas']['NotificationRecipient'];
+      recipients?: components['schemas']['NotificationRecipient'][];
+      category: string;
+      critical: boolean;
+      subject: string;
+      body: string;
+      data?: {
+        [key: string]: unknown;
+      };
+      dedup_key?: string;
+      /** @enum {string} */
+      status: 'pending' | 'sending' | 'sent' | 'failed' | 'suppressed';
+      attempts: number;
+      max_attempts: number;
+      /** Format: date-time */
+      next_attempt_at: string;
+      last_error?: string;
+      provider_id?: string;
+      /** Format: date-time */
+      sent_at?: string;
+    };
+    MetamodelExport: {
+      /** @enum {integer} */
+      format_version: 1;
+      /** Format: date-time */
+      exported_at: string;
+      organization_id: string;
+      ci_types: components['schemas']['CIType'][];
+      /** @description Global attribute definitions of the organization and the system. */
+      attribute_definitions: components['schemas']['AttributeDefinition'][];
     };
     CIType: {
       id: string;
@@ -6111,6 +6398,11 @@ export interface components {
     AuditEntry: {
       id: string;
       organization_id: string;
+      /**
+       * Format: int64
+       * @description Position in the organization's audit chain, without gaps from 1 (AUD-04).
+       */
+      seq: number;
       /** Format: date-time */
       timestamp: string;
       actor_id?: string;
@@ -6119,12 +6411,23 @@ export interface components {
       action: string;
       resource_type: string;
       resource_id?: string;
+      /** @description What changed. Domain entries carry old and new values; the entry of a write request names the route, the response status, the written fields and, for resources without a UUID, resource_key. */
       changes?: {
         [key: string]: unknown;
       };
+      source: components['schemas']['AuditSource'];
+      /** @description The X-Request-ID of the request that made the change. */
+      request_id?: string;
+      /** @description The X-Correlation-ID of the operation (the request id when the caller sent none). */
+      correlation_id?: string;
       previous_hash?: string;
       hash: string;
     };
+    /**
+     * @description Where a change came from (AUD-07).
+     * @enum {string}
+     */
+    AuditSource: 'ui' | 'api' | 'collector' | 'import' | 'system';
     AuditEntryListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['AuditEntry'][];
     };
@@ -6133,8 +6436,55 @@ export interface components {
       /** @description Number of entries verified before the chain broke, or the total when intact. */
       checked: number;
       broken_id?: string;
+      /** @description Chain position (seq) where the first violation was found. */
       broken_at?: number;
+      /** @description `sequence gap`, `previous_hash mismatch` or `hash mismatch`. */
       broken_reason?: string;
+    };
+    /** @enum {string} */
+    RelationshipTypeCategory: 'network' | 'power' | 'hosting' | 'logical' | 'physical';
+    /**
+     * @description Which end of an edge depends on the other (REL-01, CH27): the source on the target (powered_by, hosted_on, depends_on), the target on the source (powers, contains), none (no impact) or undirected (connected_to, a heuristic both ways).
+     * @enum {string}
+     */
+    RelationshipImpactDirection:
+      'source_depends_on_target' | 'target_depends_on_source' | 'none' | 'undirected';
+    /** @description Relationship type metadata (REL-01). contains, mounted_in and located_in are projected, not stored (CH27). */
+    RelationshipTypeDefinition: {
+      id: string;
+      /** @description Empty for a system type. */
+      organization_id?: string;
+      key: string;
+      display_name: string;
+      reverse_name: string;
+      directed: boolean;
+      category: components['schemas']['RelationshipTypeCategory'];
+      impact_direction: components['schemas']['RelationshipImpactDirection'];
+      /** @description Edges of the type are redundant feeds (powered_by, member_of_cluster); impact needs all of them to fail. */
+      redundant: boolean;
+      allowed_source_types: string[];
+      allowed_target_types: string[];
+      cardinality: string;
+      readonly is_system: boolean;
+      description?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @description Create (key, display_name, reverse_name required; defaults directed, logical, source_depends_on_target) or change a relationship type. impact_direction undirected belongs to undirected types only. */
+    RelationshipTypeUpsert: {
+      key?: string;
+      display_name?: string;
+      reverse_name?: string;
+      directed?: boolean;
+      category?: components['schemas']['RelationshipTypeCategory'];
+      impact_direction?: components['schemas']['RelationshipImpactDirection'];
+      redundant?: boolean;
+      allowed_source_types?: string[];
+      allowed_target_types?: string[];
+      cardinality?: string;
+      description?: string;
     };
     /** @enum {string} */
     RelationshipType:
@@ -6161,7 +6511,24 @@ export interface components {
       attributes: {
         [key: string]: unknown;
       };
+      /** @description Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow. */
       source: string;
+      confidence?: number;
+      /** @description Port of the source CI the edge starts at (REL-02). */
+      source_interface_id?: string;
+      /** @description Port of the target CI the edge ends at (REL-02). */
+      target_interface_id?: string;
+      /** @enum {string} */
+      verification_state?: 'unverified' | 'verified' | 'disputed' | 'stale';
+      /**
+       * Format: date-time
+       * @description Last time the source of the edge confirmed it.
+       */
+      readonly last_confirmed_at?: string;
+      /** @description User who verified the edge; cleared when it leaves the verified state. */
+      readonly verified_by?: string;
+      /** Format: date-time */
+      readonly verified_at?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -6176,6 +6543,11 @@ export interface components {
       };
       /** @default manual */
       source: string;
+      confidence?: number;
+      /** @description An interface of the source CI; the edge is unique per (source, target, type, interfaces), a taken one is 409. */
+      source_interface_id?: string;
+      /** @description An interface of the target CI; an interface of another CI is 422. */
+      target_interface_id?: string;
     };
     /** @description All properties are optional; only the supplied ones are changed. */
     UpdateRelationshipRequest: {
@@ -6214,6 +6586,11 @@ export interface components {
       headers?: {
         [key: string]: string;
       };
+      /**
+       * Format: date-time
+       * @description Until when the previous secret still signs after a rotation (SEC-06).
+       */
+      previous_secret_expires_at?: string;
       /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose object the account may read. */
       service_account_id?: string;
       /** Format: date-time */
@@ -8492,6 +8869,7 @@ export interface components {
     CableListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Cable'][];
     };
+    /** @description Contact (AUD-01). Name, phone and e-mail are stored in the PII vault (SEC-05) and resolved when the contact is read; deleting the contact deletes its vault entry. */
     Contact: {
       id: string;
       organization_id: string;
@@ -8502,6 +8880,8 @@ export interface components {
       role?: string;
       department?: string;
       notes?: string;
+      /** @description Reachable around the clock. */
+      is_24_7: boolean;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -8519,6 +8899,7 @@ export interface components {
       role?: string;
       department?: string;
       notes?: string;
+      is_24_7?: boolean;
     };
     UpdateContactRequest: {
       client_id?: string;
@@ -8528,6 +8909,7 @@ export interface components {
       role?: string;
       department?: string;
       notes?: string;
+      is_24_7?: boolean;
     };
     ContactListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Contact'][];
@@ -9695,6 +10077,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Another active CI holds the value of a unique attribute (MET-15); `violations` names the attributes. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -9781,13 +10172,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description Fields of the request changed since the If-Match version */
+      /** @description Fields of the request changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15, `violations` names the attributes) */
       409: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/problem+json': components['schemas']['VersionConflictProblem'];
+          'application/problem+json':
+            | components['schemas']['VersionConflictProblem']
+            | components['schemas']['ProblemDetail'];
         };
       };
       /** @description If-Match missing although required, or not a version of the CI */
@@ -9844,6 +10237,15 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
+        action?: string;
+        resource_type?: string;
+        resource_id?: string;
+        actor_id?: string;
+        source?: components['schemas']['AuditSource'];
+        request_id?: string;
+        correlation_id?: string;
+        from?: string;
+        to?: string;
       };
       header?: never;
       path?: never;
@@ -9860,6 +10262,7 @@ export interface operations {
           'application/json': components['schemas']['AuditEntryListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
     };
   };
@@ -10185,6 +10588,42 @@ export interface operations {
         };
         content?: never;
       };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  rotateWebhookSecret: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': {
+          secret?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description The new secret */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            id: string;
+            secret: string;
+            /** Format: date-time */
+            previous_secret_expires_at: string;
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
     };
@@ -14857,6 +15296,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   getRackMount: {
@@ -14935,6 +15383,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listCables: {
@@ -15292,6 +15749,280 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+    };
+  };
+  listNotifications: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        unread?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Notifications */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['InAppNotificationListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  markAllNotificationsRead: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Number of notifications marked */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            marked: number;
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  markNotificationRead: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Marked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  getNotificationPreferences: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Preferences */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NotificationPreference'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  setNotificationPreferences: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NotificationPreference'];
+      };
+    };
+    responses: {
+      /** @description Stored preferences */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NotificationPreference'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  listNotificationChannels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Channels */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            data: components['schemas']['NotificationChannel'][];
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createNotificationChannel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NotificationChannelRequest'];
+      };
+    };
+    responses: {
+      /** @description Created channel */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NotificationChannel'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  getNotificationChannel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Channel */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NotificationChannel'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteNotificationChannel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateNotificationChannel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NotificationChannelRequest'];
+      };
+    };
+    responses: {
+      /** @description Updated channel */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NotificationChannel'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  listNotificationDeliveries: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deliveries, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            data: components['schemas']['NotificationDelivery'][];
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
     };
   };
   listVRFs: {
@@ -16447,6 +17178,8 @@ export interface operations {
             key_version: number;
             /** @description Number of credential ciphertexts re-encrypted */
             rotated: number;
+            /** @description Number of PII vault entries re-encrypted with the new data key (SEC-05) */
+            pii_subjects?: number;
           };
         };
       };
@@ -20814,6 +21547,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -20894,6 +21628,33 @@ export interface operations {
           'application/json': {
             data: components['schemas']['CIType'][];
           };
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  exportMetamodel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Metamodel export */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelExport'];
         };
       };
       /** @description Unauthorized */
@@ -22069,27 +22830,33 @@ export interface operations {
   };
   listRelationshipTypes: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Manage relationship type metadata */
+      /** @description Paginated relationship types */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['PaginationEnvelope'] & {
+            data: components['schemas']['RelationshipTypeDefinition'][];
+          };
         };
-        content?: never;
       };
+      401: components['responses']['Unauthorized'];
     };
   };
   createRelationshipTypes: {
@@ -22099,97 +22866,99 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RelationshipTypeUpsert'];
+      };
+    };
     responses: {
-      /** @description Manage relationship type metadata */
+      /** @description Relationship type created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['RelationshipTypeDefinition'];
         };
-        content?: never;
       };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
     };
   };
   getRelationshipTypesKey: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        key: string;
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Read, update or delete a relationship type */
+      /** @description Relationship type */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['RelationshipTypeDefinition'];
         };
-        content?: never;
       };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   deleteRelationshipTypesKey: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        key: string;
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Read, update or delete a relationship type */
+      /** @description Relationship type deleted */
       204: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
       };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   updateRelationshipTypesKey: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        key: string;
+      };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RelationshipTypeUpsert'];
+      };
+    };
     responses: {
-      /** @description Read, update or delete a relationship type */
+      /** @description Relationship type updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['RelationshipTypeDefinition'];
         };
-        content?: never;
       };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listReservations: {
