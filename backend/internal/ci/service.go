@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 )
 
 // Repository defines persistence operations for CIs.
@@ -143,6 +144,7 @@ type Service struct {
 	repo   Repository
 	limit  LimitGuard
 	fields FieldResolver
+	jobs   jobs.Tracker
 }
 
 // NewService creates a CI service.

@@ -89,6 +89,33 @@ func (r *indexingRepository) ChangeType(ctx context.Context, orgID, ciID, typeID
 	return result, nil
 }
 
+// Merge forwards the merge (CI-12): the survivor is indexed again, the
+// victim leaves the index.
+func (r *indexingRepository) Merge(ctx context.Context, orgID, survivorID, victimID, mergeID string) (*MergeResult, error) {
+	merger, ok := r.Repository.(Merger)
+	if !ok {
+		return nil, ErrMergeUnsupported
+	}
+	result, err := merger.Merge(ctx, orgID, survivorID, victimID, mergeID)
+	if err != nil {
+		return nil, err
+	}
+	r.index(ctx, result.Survivor)
+	if derr := r.indexer.DeleteDocument(ctx, orgID, EntityTypeCI, victimID); derr != nil {
+		slog.WarnContext(ctx, "search index delete failed; rebuild via POST /api/v1/search/reindex", "ci_id", victimID, "error", derr)
+	}
+	return result, nil
+}
+
+// MergedInto forwards the tombstone lookup (CI-12).
+func (r *indexingRepository) MergedInto(ctx context.Context, orgID, victimID string) (survivorID string, found bool, err error) {
+	reader, ok := r.Repository.(TombstoneReader)
+	if !ok {
+		return "", false, nil
+	}
+	return reader.MergedInto(ctx, orgID, victimID)
+}
+
 // ListChanges forwards change-history reads when the wrapped repository
 // supports them (used by ci.Service.ListChanges).
 func (r *indexingRepository) ListChanges(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Change, int, error) {

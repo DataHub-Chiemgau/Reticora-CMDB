@@ -614,7 +614,9 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 	var restored *Item
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var deletedAt *time.Time
-		if err := tx.QueryRow(ctx, "SELECT deleted_at FROM ci WHERE id = $1 AND organization_id = $2", id, orgID).Scan(&deletedAt); err != nil {
+		var mergedInto string
+		if err := tx.QueryRow(ctx, "SELECT deleted_at, COALESCE(merged_into_id::text, '') FROM ci WHERE id = $1 AND organization_id = $2",
+			id, orgID).Scan(&deletedAt, &mergedInto); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("not found")
 			}
@@ -622,6 +624,10 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 		}
 		if deletedAt == nil {
 			return fmt.Errorf("not found")
+		}
+		// A merged CI comes back only through the unmerge (CI-12).
+		if mergedInto != "" {
+			return ErrMergeConflict
 		}
 		if retention > 0 && time.Since(*deletedAt) > retention {
 			return ErrRetentionExpired

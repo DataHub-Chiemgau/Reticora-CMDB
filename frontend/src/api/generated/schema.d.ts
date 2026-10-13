@@ -436,6 +436,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/cis/{id}/merge': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Merge a victim CI into this CI (CI-12)
+     * @description Moves relationships, interfaces with their IP addresses, contacts, history, document links and the asset link of the victim to this CI (the survivor). Attributes follow the provenance rank of the discovery sources, tags are united; field values and overrides of both CIs stay, contradicting overrides open an override_conflict review. The victim is soft-deleted with merged_into_id; GET on it answers 301 to the survivor for 12 months. A snapshot allows the unmerge within 30 days. The merge runs as a job of kind ci.merge (reference ci_merge/merge_id). Requires ci:delete.
+     */
+    post: operations['mergeCI'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/cis/{id}/changes': {
     parameters: {
       query?: {
@@ -6576,6 +6599,23 @@ export interface components {
       itemsPerPage: number;
       Resources: components['schemas']['SCIMResource'][];
     };
+    CIMergeResult: {
+      /** Format: uuid */
+      merge_id: string;
+      survivor: components['schemas']['CI'];
+      /** Format: uuid */
+      victim_id: string;
+      /** @description Moved rows per reference kind. */
+      moved: {
+        [key: string]: number;
+      };
+      /** @description Fields whose overrides contradict; each opened an override_conflict review. */
+      override_conflicts: string[];
+      /** Format: date-time */
+      tombstone_until: string;
+      /** Format: date-time */
+      snapshot_until: string;
+    };
     CITypeChangeResult: {
       ci: components['schemas']['CI'];
       /** @description False when the CI already had the type. */
@@ -10851,6 +10891,14 @@ export interface operations {
           'application/json': components['schemas']['CI'];
         };
       };
+      /** @description The CI was merged into another; Location names the survivor (12 months, CI-12). */
+      301: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       /** @description Unknown include name. */
@@ -11010,6 +11058,58 @@ export interface operations {
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       /** @description The target type does not exist. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  mergeCI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** Format: uuid */
+          victim_id: string;
+        };
+      };
+    };
+    responses: {
+      /** @description The merge result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CIMergeResult'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description One of the CIs is part of another merge. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Survivor and victim are the same CI. */
       422: {
         headers: {
           [name: string]: unknown;

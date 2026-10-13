@@ -323,6 +323,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	var jobTracker jobs.Tracker
 	if repos.Jobs != nil {
 		jobTracker = jobs.NewService(repos.Jobs)
+		// A CI merge is a job (CI-12, JOB-01).
+		if opts.CIService != nil {
+			opts.CIService.WithJobs(jobTracker)
+		}
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker

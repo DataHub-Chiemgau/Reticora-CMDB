@@ -226,6 +226,8 @@ var routeRules = []routeRule{
 	// undoes a deletion and needs the same right (CI-05).
 	{http.MethodDelete, "cis/*", identity.PermCIDelete},
 	{http.MethodPost, "cis/*/restore", identity.PermCIDelete},
+	// A merge deletes the victim (CI-12).
+	{http.MethodPost, "cis/*/merge", identity.PermCIDelete},
 	// Instance attributes (MET-14, CI-10) and manual overrides (CI-10).
 	{http.MethodPut, "cis/*/field-definitions", identity.PermCIInstanceAttributeManage},
 	{http.MethodDelete, "cis/*/field-definitions/*", identity.PermCIInstanceAttributeManage},

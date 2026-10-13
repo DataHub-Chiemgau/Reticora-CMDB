@@ -65,6 +65,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Delete("/api/v1/cis/{id}", h.Delete)
 	r.Post("/api/v1/cis/{id}/restore", h.Restore)
 	r.Post("/api/v1/cis/{id}/type", h.ChangeType)
+	r.Post("/api/v1/cis/{id}/merge", h.Merge)
 }
 
 // List handles GET /api/v1/cis
@@ -151,6 +152,12 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	item, err := h.svc.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
+		// A merged CI points to its survivor for 12 months (CI-12).
+		if survivor, ok, merr := h.svc.MergedInto(r.Context(), t.OrganizationID, id); merr == nil && ok {
+			w.Header().Set("Location", "/api/v1/cis/"+survivor)
+			api.WriteError(w, http.StatusMovedPermanently, "Moved Permanently", "the CI was merged into "+survivor)
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
 		return
 	}
@@ -223,6 +230,9 @@ func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, ErrRetentionExpired):
 		api.WriteError(w, http.StatusGone, "Gone", err.Error())
 		return
+	case errors.Is(err, ErrMergeConflict):
+		api.WriteError(w, http.StatusConflict, "Conflict", "the CI was merged; use the unmerge")
+		return
 	case err != nil && err.Error() == "not found":
 		api.WriteError(w, http.StatusNotFound, "Not Found", "no deleted CI with this id")
 		return
@@ -265,6 +275,46 @@ func (h *Handler) ChangeType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("ETag", api.ETag(result.CI.Version))
+	api.WriteJSON(w, http.StatusOK, result)
+}
+
+// Merge handles POST /api/v1/cis/{id}/merge {victim_id}: the victim is
+// merged into the CI of the path (CI-12).
+func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	var body struct {
+		VictimID string `json:"victim_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.VictimID) == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "victim_id is required")
+		return
+	}
+	result, err := h.svc.Merge(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), strings.TrimSpace(body.VictimID))
+	switch {
+	case errors.Is(err, ErrMergeConflict):
+		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		return
+	case errors.Is(err, ErrMergeSelf):
+		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		return
+	case errors.Is(err, ErrMergeUnsupported):
+		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", err.Error())
+		return
+	case err != nil && err.Error() == "not found":
+		api.WriteError(w, http.StatusNotFound, "Not Found", "survivor or victim not found")
+		return
+	case err != nil:
+		if api.WriteFieldError(w, err) {
+			return
+		}
+		api.WriteRepoError(w, err)
+		return
+	}
+	w.Header().Set("ETag", api.ETag(result.Survivor.Version))
 	api.WriteJSON(w, http.StatusOK, result)
 }
 

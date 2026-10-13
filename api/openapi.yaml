@@ -713,6 +713,11 @@ paths:
                 $ref: '#/components/schemas/CI'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '301':
+          description: The CI was merged into another; Location names the survivor (12 months, CI-12).
+          headers:
+            Location:
+              schema: { type: string }
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -864,6 +869,58 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           description: The target type does not exist.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
+  /api/v1/cis/{id}/merge:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: mergeCI
+      tags: [CIs]
+      summary: Merge a victim CI into this CI (CI-12)
+      description: >-
+        Moves relationships, interfaces with their IP addresses, contacts,
+        history, document links and the asset link of the victim to this CI
+        (the survivor). Attributes follow the provenance rank of the
+        discovery sources, tags are united; field values and overrides of
+        both CIs stay, contradicting overrides open an override_conflict
+        review. The victim is soft-deleted with merged_into_id; GET on it
+        answers 301 to the survivor for 12 months. A snapshot allows the
+        unmerge within 30 days. The merge runs as a job of kind ci.merge
+        (reference ci_merge/merge_id). Requires ci:delete.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [victim_id]
+              properties:
+                victim_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The merge result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIMergeResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: One of the CIs is part of another merge.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: Survivor and victim are the same CI.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -11348,6 +11405,23 @@ components:
         Resources:
           type: array
           items: { $ref: '#/components/schemas/SCIMResource' }
+    CIMergeResult:
+      type: object
+      required: [merge_id, survivor, victim_id, moved, override_conflicts, tombstone_until, snapshot_until]
+      properties:
+        merge_id: { type: string, format: uuid }
+        survivor: { $ref: '#/components/schemas/CI' }
+        victim_id: { type: string, format: uuid }
+        moved:
+          type: object
+          description: Moved rows per reference kind.
+          additionalProperties: { type: integer }
+        override_conflicts:
+          type: array
+          description: Fields whose overrides contradict; each opened an override_conflict review.
+          items: { type: string }
+        tombstone_until: { type: string, format: date-time }
+        snapshot_until: { type: string, format: date-time }
     CITypeChangeResult:
       type: object
       required: [ci, findings, changed]

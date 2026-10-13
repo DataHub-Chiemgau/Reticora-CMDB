@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000130_review_unknown_relationship
+Stand: Migration 000131_ci_merge_tombstone
 
 ## Prüfung
 
@@ -203,6 +203,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ci_contact` | ja | ja | ci_contact_scoped_delete (DELETE), ci_contact_scoped_update (UPDATE), org_isolation (ALL) |
 | `ci_field_value` | ja | ja | ci_field_value_isolation (ALL), ci_field_value_scoped_delete (DELETE), ci_field_value_scoped_update (UPDATE) |
 | `ci_instance_field_definition` | ja | ja | ci_instance_field_definition_isolation (ALL), ci_instance_field_definition_scoped_delete (DELETE), ci_instance_field_definition_scoped_update (UPDATE) |
+| `ci_merge` | ja | ja | ci_merge_isolation (ALL), ci_merge_scoped_delete (DELETE), ci_merge_scoped_update (UPDATE) |
 | `ci_relationship` | ja | ja | ci_relationship_isolation (ALL), ci_relationship_scoped_delete (DELETE), ci_relationship_scoped_update (UPDATE) |
 | `ci_type` | ja | ja | ci_type_isolation_delete (DELETE), ci_type_isolation_insert (INSERT), ci_type_isolation_select (SELECT), ci_type_isolation_update (UPDATE) |
 | `client` | ja | ja | client_isolation (ALL) |
