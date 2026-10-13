@@ -71,6 +71,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/topology", h.GetTopology)
 	r.Get("/api/v1/topology/cis/{id}/neighbors", h.GetNeighbors)
 	r.Get("/api/v1/topology/cis/{id}/impact", h.GetImpact)
+	// impact is the catalog path (API-05); the topology path stays until
+	// its sunset (API-01).
+	r.Get("/api/v1/impact/{ci_id}", func(w http.ResponseWriter, r *http.Request) {
+		chi.RouteContext(r.Context()).URLParams.Add("id", chi.URLParam(r, "ci_id"))
+		h.GetImpact(w, r)
+	})
 	// Directed dependency/impact analysis (spec §15).
 	r.Get("/api/v1/cis/{id}/dependencies", h.GetDependencies)
 	r.Get("/api/v1/cis/{id}/blast-radius", h.GetBlastRadius)

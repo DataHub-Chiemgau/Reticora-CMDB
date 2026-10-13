@@ -251,3 +251,23 @@ func TestParseDepth(t *testing.T) {
 		}
 	}
 }
+
+// TestImpactCatalogPath covers API-05: /impact/{ci_id} answers like the
+// legacy /topology/cis/{id}/impact.
+func TestImpactCatalogPath(t *testing.T) {
+	ciRepo, relRepo, ids := seed(t)
+	mux := chi.NewRouter()
+	NewHandler(ciRepo, relRepo).RegisterRoutes(mux)
+	bodies := map[string]string{}
+	for _, path := range []string{"/api/v1/impact/" + ids["pdu1"], "/api/v1/topology/cis/" + ids["pdu1"] + "/impact"} {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantReq("GET", path))
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+		bodies[path] = w.Body.String()
+	}
+	if bodies["/api/v1/impact/"+ids["pdu1"]] != bodies["/api/v1/topology/cis/"+ids["pdu1"]+"/impact"] {
+		t.Errorf("answers differ: %v", bodies)
+	}
+}

@@ -28,11 +28,15 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Delete("/api/v1/subnets/{id}", h.DeleteSubnet)
 	r.Get("/api/v1/subnets/{id}/addresses", h.ListSubnetAddresses)
 
-	r.Get("/api/v1/ip-addresses", h.ListIPAddresses)
-	r.Post("/api/v1/ip-addresses", h.CreateIPAddress)
-	r.Get("/api/v1/ip-addresses/{id}", h.GetIPAddress)
-	r.Patch("/api/v1/ip-addresses/{id}", h.UpdateIPAddress)
-	r.Delete("/api/v1/ip-addresses/{id}", h.DeleteIPAddress)
+	// ips is the catalog path (API-05); ip-addresses stays until its
+	// sunset (API-01).
+	for _, base := range []string{"/api/v1/ips", "/api/v1/ip-addresses"} {
+		r.Get(base, h.ListIPAddresses)
+		r.Post(base, h.CreateIPAddress)
+		r.Get(base+"/{id}", h.GetIPAddress)
+		r.Patch(base+"/{id}", h.UpdateIPAddress)
+		r.Delete(base+"/{id}", h.DeleteIPAddress)
+	}
 
 	r.Get("/api/v1/cis/{id}/interfaces", h.ListInterfaces)
 	r.Post("/api/v1/cis/{id}/interfaces", h.CreateInterface)

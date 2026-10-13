@@ -98,10 +98,10 @@ func TestDeprecatedOperationsCarryLifecycleHeaders(t *testing.T) {
 	h := OpenAPIValidation(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/discovery/review-items/7b0c6e1a-0000-4000-8000-000000000001/resolve", nil))
-	if got := w.Header().Get("Sunset"); got != "Thu, 14 Oct 2027 00:00:00 GMT" {
+	if got := w.Header().Get("Sunset"); got != "Wed, 13 Oct 2027 00:00:00 GMT" {
 		t.Errorf("Sunset %q", got)
 	}
-	if got := w.Header().Get("Deprecation"); got != "@1791849600" {
+	if got := w.Header().Get("Deprecation"); got != "@1791763200" {
 		t.Errorf("Deprecation %q", got)
 	}
 	if got := w.Header().Get("Link"); got != `</api/v1/review-items/{id}/resolve>; rel="successor-version"` {

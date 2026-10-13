@@ -625,7 +625,7 @@ export interface BlastRadius {
 
 export const impactApi = {
   impact(ciId: string, params: { depth?: number; rel_type?: string } = {}) {
-    return fetchAPI<ImpactResult>(`/topology/cis/${ciId}/impact${qs(params)}`);
+    return fetchAPI<ImpactResult>(`/impact/${ciId}${qs(params)}`);
   },
   dependencies(ciId: string, direction: 'upstream' | 'downstream', depth?: number) {
     return fetchAPI<{ nodes: Array<{ id: string; name: string }>; count: number }>(

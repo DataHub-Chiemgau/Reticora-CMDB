@@ -559,7 +559,7 @@ export const topologyApi = {
     return fetchAPI(`/topology/cis/${ciId}/neighbors`);
   },
   impact(ciId: string, params: { depth?: number; rel_type?: string } = {}): Promise<ImpactResult> {
-    return fetchAPI(`/topology/cis/${ciId}/impact${buildQuery(params)}`);
+    return fetchAPI(`/impact/${ciId}${buildQuery(params)}`);
   },
 };
 
@@ -1196,7 +1196,7 @@ export const roleApi = {
     scope_type?: string;
     scope_id?: string;
   }): Promise<unknown> {
-    return fetchAPI('/roles/assign', { method: 'POST', body: JSON.stringify(data) });
+    return fetchAPI('/role-assignments', { method: 'POST', body: JSON.stringify(data) });
   },
 };
 
@@ -1831,13 +1831,13 @@ export interface ExportJobCreateRequest {
 
 export const exportApi = {
   listJobs(params: ListParams = {}): Promise<PaginatedResponse<ExportJob>> {
-    return fetchAPI(`/export/jobs${buildQuery(params)}`);
+    return fetchAPI(`/exports${buildQuery(params)}`);
   },
   createJob(data: ExportJobCreateRequest): Promise<ExportJob> {
-    return fetchAPI('/export/jobs', { method: 'POST', body: JSON.stringify(data) });
+    return fetchAPI('/exports', { method: 'POST', body: JSON.stringify(data) });
   },
   getJob(id: string): Promise<ExportJob> {
-    return fetchAPI(`/export/jobs/${id}`);
+    return fetchAPI(`/exports/${id}`);
   },
 };
 
@@ -1925,10 +1925,10 @@ export interface AuditVerifyResult {
 
 export const auditApi = {
   list(params: ListParams = {}): Promise<PaginatedResponse<AuditEntry>> {
-    return fetchAPI(`/audit${buildQuery(params)}`);
+    return fetchAPI(`/audit-log${buildQuery(params)}`);
   },
   verify(): Promise<AuditVerifyResult> {
-    return fetchAPI('/audit/verify', { method: 'POST' });
+    return fetchAPI('/audit-log/verify', { method: 'POST' });
   },
 };
 

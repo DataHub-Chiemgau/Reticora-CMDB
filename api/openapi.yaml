@@ -576,6 +576,29 @@ paths:
 
   /api/v1/auth/me:
     get:
+      operationId: getCurrentSessionLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/me'
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+      summary: Get the currently authenticated session claims
+      responses:
+        '200':
+          description: Current session claims
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionClaims'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/me:
+    get:
       operationId: getCurrentSession
       tags: [Auth]
       security:
@@ -783,6 +806,50 @@ paths:
       - $ref: '#/components/parameters/Limit'
       - $ref: '#/components/parameters/Offset'
     get:
+      operationId: listAuditEntriesLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/audit-log'
+      tags: [Audit]
+      summary: List audit log entries
+      description: >-
+        Newest first; requires audit:read (AUD-05). The filters combine with
+        AND; `from` is inclusive, `to` exclusive. Personal values (e-mail,
+        names, phone) are stored as PII-vault surrogates and resolved here;
+        a deleted vault entry shows as null (SEC-05).
+      parameters:
+        - {name: action, in: query, schema: {type: string}}
+        - {name: resource_type, in: query, schema: {type: string}}
+        - {name: resource_id, in: query, schema: {type: string, format: uuid}}
+        - {name: actor_id, in: query, schema: {type: string, format: uuid}}
+        - name: source
+          in: query
+          schema:
+            $ref: '#/components/schemas/AuditSource'
+        - {name: request_id, in: query, schema: {type: string}}
+        - {name: correlation_id, in: query, schema: {type: string}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+      responses:
+        '200':
+          description: Paginated audit log
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEntryListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/audit-log:
+    parameters:
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Offset'
+    get:
       operationId: listAuditEntries
       tags: [Audit]
       summary: List audit log entries
@@ -819,6 +886,33 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/audit/verify:
+    post:
+      operationId: verifyAuditChainLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/audit-log/verify'
+      tags: [Audit]
+      summary: Verify the audit hash chain
+      description: >-
+        Walks the organization's audit chain in `seq` order and reports the
+        first violation (AUD-04): a gap in the sequence, a broken
+        `previous_hash` link (the first entry links to 32 zero bytes) or a
+        hash that does not match SHA-256(previous_hash || SHA-256(canonical
+        JSON)) of the stored entry.
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditVerifyResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/audit-log/verify:
     post:
       operationId: verifyAuditChain
       tags: [Audit]
@@ -1412,6 +1506,65 @@ paths:
 
   /api/v1/export/jobs:
     get:
+      operationId: listExportJobsLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/exports'
+      tags: [Export]
+      summary: List asynchronous export jobs
+      description: Returns the caller's own export jobs newest first; jobs of
+        other users are not listed. Completed, unexpired jobs carry a
+        time-limited signed download URL.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Export jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportJobListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createExportJobLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/exports'
+      tags: [Export]
+      summary: Queue an asynchronous CI export
+      description: |
+        Queues an asynchronous export. The job records the caller's tenant
+        scope (`scope`); a background worker renders the CI set visible in
+        exactly this scope in the requested format into object storage. Once
+        the job is `completed` it exposes a signed download URL until
+        `expires_at`. Requires blob storage to be configured — otherwise 503.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExportJobRequest'
+      responses:
+        '202':
+          description: Export job queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportJob'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/exports:
+    get:
       operationId: listExportJobs
       tags: [Export]
       summary: List asynchronous export jobs
@@ -1462,6 +1615,31 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/export/jobs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getExportJobLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/exports/{id}'
+      tags: [Export]
+      summary: Get an export job
+      description: Only the job's creator reads it; for anyone else the job
+        does not exist (404).
+      responses:
+        '200':
+          description: Export job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportJob'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/exports/{id}:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4066,8 +4244,8 @@ paths:
     get:
       operationId: listDiscoveryReviewItems
       deprecated: true
-      x-deprecated-at: '2026-10-13'
-      x-sunset: '2027-10-14'
+      x-deprecated-at: '2026-10-12'
+      x-sunset: '2027-10-13'
       x-successor: '/api/v1/review-items'
       tags: [Discovery]
       summary: List reconciliation review items (deprecated, use /api/v1/review-items)
@@ -4103,8 +4281,8 @@ paths:
     post:
       operationId: resolveDiscoveryReviewItem
       deprecated: true
-      x-deprecated-at: '2026-10-13'
-      x-sunset: '2027-10-14'
+      x-deprecated-at: '2026-10-12'
+      x-sunset: '2027-10-13'
       x-successor: '/api/v1/review-items/{id}/resolve'
       tags: [Discovery]
       summary: Resolve a reconciliation review item (deprecated, use /api/v1/review-items/{id}/resolve)
@@ -4205,6 +4383,56 @@ paths:
   /api/v1/topology/cis/{id}/impact:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
+      - name: depth
+        in: query
+        schema: { type: integer, default: 10, maximum: 10 }
+        description: Traversal depth; defaults to the maximum for impact analysis.
+      - name: rel_type
+        in: query
+        schema: { type: string }
+        description: Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on).
+    get:
+      operationId: getCIImpactLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/impact/{ci_id}'
+      tags: [Topology]
+      summary: Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
+      description: >-
+        Follows directed edges (source supports/powers/connects target) from the
+        failed CI and returns the transitively impacted CI set. Powers the
+        Ausfallsimulation in the topology view (spec §4).
+      responses:
+        '200':
+          description: Impact analysis result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  failed_ci_id: { type: string }
+                  failed_ci: { $ref: '#/components/schemas/TopologyNode' }
+                  rel_type: { type: string }
+                  depth: { type: integer }
+                  impacted:
+                    type: array
+                    items: { $ref: '#/components/schemas/TopologyNode' }
+                  count: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/impact/{ci_id}:
+    parameters:
+      - name: ci_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+        description: The CI whose outage is simulated.
       - name: depth
         in: query
         schema: { type: integer, default: 10, maximum: 10 }
@@ -4876,7 +5104,145 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
 
+  /api/v1/mounts:
+    get:
+      operationId: listMounts
+      tags: [Racks]
+      summary: List the mounts of a rack (API-05)
+      parameters:
+        - name: rack_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of rack mounts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RackMountListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createMount
+      tags: [Racks]
+      summary: Mount a CI into a rack (API-05)
+      description: >-
+        Like POST /racks/{id}/mounts with the rack in `rack_id`; the location
+        of the CI, or of its asset, becomes the rack (RCK-03, DB-05).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRackMountRequest'
+      responses:
+        '201':
+          description: Rack mount created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RackMount'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The mount collides or is not allowed (RCK-01, RCK-02).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
   /api/v1/rack-mounts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getRackMountLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/mounts/{id}'
+      tags: [Racks]
+      summary: Get a rack mount
+      responses:
+        '200':
+          description: Rack mount details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RackMount'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateRackMountLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/mounts/{id}'
+      tags: [Racks]
+      summary: Update a rack mount
+      description: >-
+        Repositions the mount (another rack included). The location of the
+        CI, or of its asset, becomes the rack; ci_change and the audit record
+        the change (RCK-03, DB-05).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRackMountRequest'
+      responses:
+        '200':
+          description: Rack mount updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RackMount'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The mount collides with another on an overlapping face (front,
+            rear, both), exceeds the rack height, mounts a CI that is
+            mounted already or a child CI of a composition (RCK-01, RCK-02).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+    delete:
+      operationId: deleteRackMountLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/mounts/{id}'
+      tags: [Racks]
+      summary: Delete a rack mount
+      description: >-
+        Unmounts the CI. Its location, or its asset's, becomes the rack's
+        room; ci_change and the audit record the change (RCK-03, DB-05).
+      responses:
+        '204':
+          description: Rack mount deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/mounts/{id}:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -5761,6 +6127,62 @@ paths:
 
   /api/v1/ip-addresses:
     get:
+      operationId: listIPAddressesLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/ips'
+      tags: [IPAM]
+      summary: List IP addresses
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+        - name: subnet_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of IP addresses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAddressListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createIPAddressLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/ips'
+      tags: [IPAM]
+      summary: Create an IP address
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIPAddressRequest'
+      responses:
+        '201':
+          description: IP address created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAddress'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/ips:
+    get:
       operationId: listIPAddresses
       tags: [IPAM]
       summary: List IP addresses
@@ -5808,6 +6230,71 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/ip-addresses/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getIPAddressLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/ips/{id}'
+      tags: [IPAM]
+      summary: Get an IP address
+      responses:
+        '200':
+          description: IP address details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAddress'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateIPAddressLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/ips/{id}'
+      tags: [IPAM]
+      summary: Update an IP address
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateIPAddressRequest'
+      responses:
+        '200':
+          description: IP address updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAddress'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteIPAddressLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/ips/{id}'
+      tags: [IPAM]
+      summary: Delete an IP address
+      responses:
+        '204':
+          description: IP address deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/ips/{id}:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -7285,9 +7772,68 @@ paths:
 
   /api/v1/roles/assign:
     post:
-      operationId: assignRole
+      operationId: assignRoleLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/role-assignments'
       tags: [Roles]
       summary: Assign a custom role to a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignRoleRequest'
+      responses:
+        '201':
+          description: Role assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleAssignment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/role-assignments:
+    get:
+      operationId: listRoleAssignments
+      tags: [Roles]
+      summary: List the role assignments of a user (API-05)
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Role assignments of the user
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RoleAssignment'
+                  next_cursor:
+                    type: string
+                    description: Always absent; the assignments of a user are returned in full.
+                  total: { type: integer }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createRoleAssignment
+      tags: [Roles]
+      summary: Assign a role to a user (API-05)
       requestBody:
         required: true
         content:
@@ -7451,7 +7997,11 @@ paths:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
-      operationId: listUserRoles
+      operationId: listUserRolesLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/role-assignments'
       tags: [Users]
       summary: List custom role assignments for a user
       responses:

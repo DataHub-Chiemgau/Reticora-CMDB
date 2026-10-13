@@ -314,6 +314,26 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
+    /**
+     * Get the currently authenticated session claims
+     * @deprecated
+     */
+    get: operations['getCurrentSessionLegacy'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/me': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
     /** Get the currently authenticated session claims */
     get: operations['getCurrentSession'];
     put?: never;
@@ -415,6 +435,35 @@ export interface paths {
     };
     /**
      * List audit log entries
+     * @deprecated
+     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05).
+     */
+    get: operations['listAuditEntriesLegacy'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/audit-log': {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List audit log entries
      * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05).
      */
     get: operations['listAuditEntries'];
@@ -427,6 +476,27 @@ export interface paths {
     trace?: never;
   };
   '/api/v1/audit/verify': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Verify the audit hash chain
+     * @deprecated
+     * @description Walks the organization's audit chain in `seq` order and reports the first violation (AUD-04): a gap in the sequence, a broken `previous_hash` link (the first entry links to 32 zero bytes) or a hash that does not match SHA-256(previous_hash || SHA-256(canonical JSON)) of the stored entry.
+     */
+    post: operations['verifyAuditChainLegacy'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/audit-log/verify': {
     parameters: {
       query?: never;
       header?: never;
@@ -752,6 +822,36 @@ export interface paths {
     };
     /**
      * List asynchronous export jobs
+     * @deprecated
+     * @description Returns the caller's own export jobs newest first; jobs of other users are not listed. Completed, unexpired jobs carry a time-limited signed download URL.
+     */
+    get: operations['listExportJobsLegacy'];
+    put?: never;
+    /**
+     * Queue an asynchronous CI export
+     * @deprecated
+     * @description Queues an asynchronous export. The job records the caller's tenant
+     *     scope (`scope`); a background worker renders the CI set visible in
+     *     exactly this scope in the requested format into object storage. Once
+     *     the job is `completed` it exposes a signed download URL until
+     *     `expires_at`. Requires blob storage to be configured — otherwise 503.
+     */
+    post: operations['createExportJobLegacy'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/exports': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List asynchronous export jobs
      * @description Returns the caller's own export jobs newest first; jobs of other users are not listed. Completed, unexpired jobs carry a time-limited signed download URL.
      */
     get: operations['listExportJobs'];
@@ -772,6 +872,30 @@ export interface paths {
     trace?: never;
   };
   '/api/v1/export/jobs/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get an export job
+     * @deprecated
+     * @description Only the job's creator reads it; for anyone else the job does not exist (404).
+     */
+    get: operations['getExportJobLegacy'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/exports/{id}': {
     parameters: {
       query?: never;
       header?: never;
@@ -2320,6 +2444,35 @@ export interface paths {
     };
     /**
      * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
+     * @deprecated
+     * @description Follows directed edges (source supports/powers/connects target) from the failed CI and returns the transitively impacted CI set. Powers the Ausfallsimulation in the topology view (spec §4).
+     */
+    get: operations['getCIImpactLegacy'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/impact/{ci_id}': {
+    parameters: {
+      query?: {
+        /** @description Traversal depth; defaults to the maximum for impact analysis. */
+        depth?: number;
+        /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
+        rel_type?: string;
+      };
+      header?: never;
+      path: {
+        /** @description The CI whose outage is simulated. */
+        ci_id: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
      * @description Follows directed edges (source supports/powers/connects target) from the failed CI and returns the transitively impacted CI set. Powers the Ausfallsimulation in the topology view (spec §4).
      */
     get: operations['getCIImpact'];
@@ -2576,7 +2729,61 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/mounts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the mounts of a rack (API-05) */
+    get: operations['listMounts'];
+    put?: never;
+    /**
+     * Mount a CI into a rack (API-05)
+     * @description Like POST /racks/{id}/mounts with the rack in `rack_id`; the location of the CI, or of its asset, becomes the rack (RCK-03, DB-05).
+     */
+    post: operations['createMount'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/rack-mounts/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get a rack mount
+     * @deprecated
+     */
+    get: operations['getRackMountLegacy'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a rack mount
+     * @deprecated
+     * @description Unmounts the CI. Its location, or its asset's, becomes the rack's room; ci_change and the audit record the change (RCK-03, DB-05).
+     */
+    delete: operations['deleteRackMountLegacy'];
+    options?: never;
+    head?: never;
+    /**
+     * Update a rack mount
+     * @deprecated
+     * @description Repositions the mount (another rack included). The location of the CI, or of its asset, becomes the rack; ci_change and the audit record the change (RCK-03, DB-05).
+     */
+    patch: operations['updateRackMountLegacy'];
+    trace?: never;
+  };
+  '/api/v1/mounts/{id}': {
     parameters: {
       query?: never;
       header?: never;
@@ -3014,6 +3221,30 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
+    /**
+     * List IP addresses
+     * @deprecated
+     */
+    get: operations['listIPAddressesLegacy'];
+    put?: never;
+    /**
+     * Create an IP address
+     * @deprecated
+     */
+    post: operations['createIPAddressLegacy'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ips': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
     /** List IP addresses */
     get: operations['listIPAddresses'];
     put?: never;
@@ -3026,6 +3257,37 @@ export interface paths {
     trace?: never;
   };
   '/api/v1/ip-addresses/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get an IP address
+     * @deprecated
+     */
+    get: operations['getIPAddressLegacy'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete an IP address
+     * @deprecated
+     */
+    delete: operations['deleteIPAddressLegacy'];
+    options?: never;
+    head?: never;
+    /**
+     * Update an IP address
+     * @deprecated
+     */
+    patch: operations['updateIPAddressLegacy'];
+    trace?: never;
+  };
+  '/api/v1/ips/{id}': {
     parameters: {
       query?: never;
       header?: never;
@@ -3751,8 +4013,29 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Assign a custom role to a user */
-    post: operations['assignRole'];
+    /**
+     * Assign a custom role to a user
+     * @deprecated
+     */
+    post: operations['assignRoleLegacy'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/role-assignments': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the role assignments of a user (API-05) */
+    get: operations['listRoleAssignments'];
+    put?: never;
+    /** Assign a role to a user (API-05) */
+    post: operations['createRoleAssignment'];
     delete?: never;
     options?: never;
     head?: never;
@@ -3837,8 +4120,11 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** List custom role assignments for a user */
-    get: operations['listUserRoles'];
+    /**
+     * List custom role assignments for a user
+     * @deprecated
+     */
+    get: operations['listUserRolesLegacy'];
     put?: never;
     post?: never;
     delete?: never;
@@ -10289,6 +10575,28 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
+  getCurrentSessionLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current session claims */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SessionClaims'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
   getCurrentSession: {
     parameters: {
       query?: never;
@@ -10560,6 +10868,46 @@ export interface operations {
       404: components['responses']['NotFound'];
     };
   };
+  listAuditEntriesLegacy: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        action?: string;
+        resource_type?: string;
+        resource_id?: string;
+        actor_id?: string;
+        source?: components['schemas']['AuditSource'];
+        request_id?: string;
+        correlation_id?: string;
+        from?: string;
+        to?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated audit log */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AuditEntryListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
   listAuditEntries: {
     parameters: {
       query?: {
@@ -10596,6 +10944,28 @@ export interface operations {
         };
       };
       400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  verifyAuditChainLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Verification result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AuditVerifyResult'];
+        };
+      };
       401: components['responses']['Unauthorized'];
       503: components['responses']['ServiceUnavailable'];
     };
@@ -11266,6 +11636,70 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
+  listExportJobsLegacy: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Export jobs */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ExportJobListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createExportJobLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateExportJobRequest'];
+      };
+    };
+    responses: {
+      /** @description Export job queued */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ExportJob'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
   listExportJobs: {
     parameters: {
       query?: {
@@ -11328,6 +11762,31 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getExportJobLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Export job */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ExportJob'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   getExportJob: {
@@ -14988,7 +15447,7 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
-  getCIImpact: {
+  getCIImpactLegacy: {
     parameters: {
       query?: {
         /** @description Traversal depth; defaults to the maximum for impact analysis. */
@@ -15000,6 +15459,44 @@ export interface operations {
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Impact analysis result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            failed_ci_id?: string;
+            failed_ci?: components['schemas']['TopologyNode'];
+            rel_type?: string;
+            depth?: number;
+            impacted?: components['schemas']['TopologyNode'][];
+            count?: number;
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getCIImpact: {
+    parameters: {
+      query?: {
+        /** @description Traversal depth; defaults to the maximum for impact analysis. */
+        depth?: number;
+        /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
+        rel_type?: string;
+      };
+      header?: never;
+      path: {
+        /** @description The CI whose outage is simulated. */
+        ci_id: string;
       };
       cookie?: never;
     };
@@ -15869,6 +16366,169 @@ export interface operations {
     responses: {
       /** @description Rack mount created */
       201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMount'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  listMounts: {
+    parameters: {
+      query: {
+        rack_id: string;
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of rack mounts */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMountListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  createMount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateRackMountRequest'];
+      };
+    };
+    responses: {
+      /** @description Rack mount created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMount'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description The mount collides or is not allowed (RCK-01, RCK-02). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  getRackMountLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rack mount details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMount'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteRackMountLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rack mount deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateRackMountLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateRackMountRequest'];
+      };
+    };
+    responses: {
+      /** @description Rack mount updated */
+      200: {
         headers: {
           [name: string]: unknown;
         };
@@ -17137,6 +17797,72 @@ export interface operations {
       404: components['responses']['NotFound'];
     };
   };
+  listIPAddressesLegacy: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        subnet_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of IP addresses */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAddressListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createIPAddressLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateIPAddressRequest'];
+      };
+    };
+    responses: {
+      /** @description IP address created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAddress'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
   listIPAddresses: {
     parameters: {
       query?: {
@@ -17201,6 +17927,84 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  getIPAddressLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description IP address details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAddress'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteIPAddressLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description IP address deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateIPAddressLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateIPAddressRequest'];
+      };
+    };
+    responses: {
+      /** @description IP address updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAddress'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   getIPAddress: {
@@ -18914,7 +19718,63 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
-  assignRole: {
+  assignRoleLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AssignRoleRequest'];
+      };
+    };
+    responses: {
+      /** @description Role assigned */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RoleAssignment'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listRoleAssignments: {
+    parameters: {
+      query: {
+        user_id: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Role assignments of the user */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            data: components['schemas']['RoleAssignment'][];
+            /** @description Always absent; the assignments of a user are returned in full. */
+            next_cursor?: string;
+            total?: number;
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createRoleAssignment: {
     parameters: {
       query?: never;
       header?: never;
@@ -19083,7 +19943,7 @@ export interface operations {
       404: components['responses']['NotFound'];
     };
   };
-  listUserRoles: {
+  listUserRolesLegacy: {
     parameters: {
       query?: never;
       header?: never;

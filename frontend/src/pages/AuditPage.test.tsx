@@ -11,7 +11,7 @@ afterEach(() => {
 describe('AuditPage', () => {
   it('lists audit entries', async () => {
     stubFetchRoutes({
-      '/audit': {
+      '/audit-log': {
         data: [
           {
             id: 'entry-1',
@@ -38,8 +38,8 @@ describe('AuditPage', () => {
 
   it('shows an intact result after verification', async () => {
     stubFetchRoutes({
-      '/audit/verify': { intact: true, checked: 42 },
-      '/audit': { data: [], total: 0, limit: 50, offset: 0, has_more: false },
+      '/audit-log/verify': { intact: true, checked: 42 },
+      '/audit-log': { data: [], total: 0, limit: 50, offset: 0, has_more: false },
     });
 
     renderWithProviders(<AuditPage />, { route: '/audit' });
@@ -53,14 +53,14 @@ describe('AuditPage', () => {
 
   it('surfaces a broken chain with its position', async () => {
     stubFetchRoutes({
-      '/audit/verify': {
+      '/audit-log/verify': {
         intact: false,
         checked: 17,
         broken_id: 'entry-99',
         broken_at: 18,
         broken_reason: 'hash mismatch',
       },
-      '/audit': { data: [], total: 0, limit: 50, offset: 0, has_more: false },
+      '/audit-log': { data: [], total: 0, limit: 50, offset: 0, has_more: false },
     });
 
     renderWithProviders(<AuditPage />, { route: '/audit' });

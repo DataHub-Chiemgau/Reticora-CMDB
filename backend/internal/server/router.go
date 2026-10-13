@@ -428,8 +428,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		unavailable := func(w http.ResponseWriter, _ *http.Request) {
 			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "the audit trail needs PostgreSQL; it is not available with --no-db")
 		}
-		protected.Get("/api/v1/audit", unavailable)
-		protected.Post("/api/v1/audit/verify", unavailable)
+		for _, base := range []string{"/api/v1/audit-log", "/api/v1/audit"} {
+			protected.Get(base, unavailable)
+			protected.Post(base+"/verify", unavailable)
+		}
 	}
 
 	return mux, httpMetrics, nil

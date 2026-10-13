@@ -40,9 +40,13 @@ func NewJobHandler(jobs JobRepository, worker *JobWorker, blobs blob.Store) *Job
 
 // RegisterRoutes registers the export job routes.
 func (h *JobHandler) RegisterRoutes(r chi.Router) {
-	r.Post("/api/v1/export/jobs", h.CreateJob)
-	r.Get("/api/v1/export/jobs", h.ListJobs)
-	r.Get("/api/v1/export/jobs/{id}", h.GetJob)
+	// exports is the catalog path (API-05); export/jobs stays until its
+	// sunset (API-01).
+	for _, base := range []string{"/api/v1/exports", "/api/v1/export/jobs"} {
+		r.Post(base, h.CreateJob)
+		r.Get(base, h.ListJobs)
+		r.Get(base+"/{id}", h.GetJob)
+	}
 }
 
 // CreateJob handles POST /api/v1/export/jobs and queues an asynchronous

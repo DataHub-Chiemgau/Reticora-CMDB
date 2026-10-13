@@ -28,6 +28,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"rooms":                identity.PermLocationRead,
 	"racks":                identity.PermRackRead,
 	"rack-mounts":          identity.PermRackRead,
+	"mounts":               identity.PermRackRead,
 	"contacts":             identity.PermContactRead,
 	"ci-contacts":          identity.PermContactRead,
 	"collectors":           identity.PermDiscoveryRead,
@@ -63,7 +64,12 @@ var readPermissionFor = map[string]identity.Permission{
 	"permissions":  identity.PermPermissionRead,
 	"entitlements": identity.PermEntitlementRead,
 	"audit":        identity.PermAuditRead,
-	"webhooks":     identity.PermWebhookRead,
+	"audit-log":    identity.PermAuditRead,
+	// Catalog paths of API-05.
+	"impact":           identity.PermTopologyRead,
+	"exports":          identity.PermCIRead,
+	"role-assignments": identity.PermRoleRead,
+	"webhooks":         identity.PermWebhookRead,
 	// Notification channels and their deliveries are administered like
 	// webhooks (NTF-01, NTF-04).
 	"notification-channels":   identity.PermWebhookRead,
@@ -71,6 +77,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"credentials":             identity.PermCredentialRead,
 	"export":                  identity.PermCIRead,
 	"ip-addresses":            identity.PermIPAMRead,
+	"ips":                     identity.PermIPAMRead,
 	"subnets":                 identity.PermIPAMRead,
 	"vlans":                   identity.PermIPAMRead,
 	"vrfs":                    identity.PermIPAMRead,
@@ -157,7 +164,12 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"search":         identity.PermSearchWrite,
 	// Audit integrity verification is a read-side operation; the audit trail
 	// itself is append-only and written by the system, not the API.
-	"audit": identity.PermAuditRead,
+	"audit":     identity.PermAuditRead,
+	"audit-log": identity.PermAuditRead,
+	"impact":    identity.PermTopologyRead,
+	"exports":   identity.PermExportRun,
+	// Assigning a role is managing roles (RBA-01).
+	"role-assignments": identity.PermRoleManage,
 	// Topology is read-only; the graph is derived from CIs and relationships.
 	"topology": identity.PermTopologyRead,
 	"iga":      identity.PermIGAWrite,
@@ -243,6 +255,8 @@ var routeRules = []routeRule{
 	// Reading jobs (RBA-01); starting an export stays export:run.
 	{http.MethodGet, "export/jobs", identity.PermJobRead},
 	{http.MethodGet, "export/jobs/*", identity.PermJobRead},
+	{http.MethodGet, "exports", identity.PermJobRead},
+	{http.MethodGet, "exports/*", identity.PermJobRead},
 }
 
 // matchRouteRule returns the permission of the first rule matching the
@@ -355,8 +369,11 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 		}
 		return identity.PermAgentManage, routeProtected
 	case "me":
-		// /me/permissions is read-only self-service for any authenticated
-		// principal.
+		// /me is the signed-in principal itself and needs no permission;
+		// /me/permissions is read-only self-service.
+		if len(segments) == 1 {
+			return "", routeProtected
+		}
 		return identity.PermPermissionRead, routeProtected
 	case "auth":
 		// /auth/me requires authentication but no specific permission.

@@ -211,3 +211,36 @@ func TestRackUnauthorized(t *testing.T) {
 		t.Errorf("expected 401, got %d", w.Code)
 	}
 }
+
+// TestMountsCatalogPath covers API-05: /mounts lists by rack_id, mounts
+// with rack_id in the body and serves the mount like the legacy
+// rack-mounts path.
+func TestMountsCatalogPath(t *testing.T) {
+	_, mux := newMux()
+	w := do(mux, "POST", "/api/v1/racks", `{"room_id":"room-1","name":"R-cat"}`, "org-1")
+	var rk Rack
+	_ = json.Unmarshal(w.Body.Bytes(), &rk)
+	if w = do(mux, "GET", "/api/v1/mounts", "", "org-1"); w.Code != http.StatusBadRequest {
+		t.Errorf("list without rack_id: %d", w.Code)
+	}
+	if w = do(mux, "POST", "/api/v1/mounts", `{"ci_id":"ci-1","position_u":3}`, "org-1"); w.Code != http.StatusBadRequest {
+		t.Errorf("mount without rack_id: %d %s", w.Code, w.Body.String())
+	}
+	w = do(mux, "POST", "/api/v1/mounts", `{"rack_id":"`+rk.ID+`","ci_id":"ci-1","position_u":3}`, "org-1")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("mount: %d %s", w.Code, w.Body.String())
+	}
+	var m RackMount
+	_ = json.Unmarshal(w.Body.Bytes(), &m)
+	if m.RackID != rk.ID {
+		t.Errorf("rack %q", m.RackID)
+	}
+	if w = do(mux, "GET", "/api/v1/mounts?rack_id="+rk.ID, "", "org-1"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), m.ID) {
+		t.Errorf("list: %d %s", w.Code, w.Body.String())
+	}
+	for _, path := range []string{"/api/v1/mounts/", "/api/v1/rack-mounts/"} {
+		if w = do(mux, "GET", path+m.ID, "", "org-1"); w.Code != http.StatusOK {
+			t.Errorf("GET %s: %d", path, w.Code)
+		}
+	}
+}

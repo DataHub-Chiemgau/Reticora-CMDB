@@ -113,6 +113,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/auth/refresh", h.Refresh)
 	r.Post("/api/v1/auth/logout", h.Logout)
 	r.Get("/api/v1/auth/me", h.Me)
+	// me is the catalog path (API-05); auth/me stays until its sunset.
+	r.Get("/api/v1/me", h.Me)
 }
 
 // Config exposes the browser-facing OIDC parameters so that the single-page

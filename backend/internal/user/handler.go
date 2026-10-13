@@ -114,6 +114,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Patch("/api/v1/roles/{id}", h.UpdateRole)
 	r.Delete("/api/v1/roles/{id}", h.DeleteRole)
 	r.Post("/api/v1/roles/assign", h.AssignRole)
+	// role-assignments is the catalog path (API-05); roles/assign and
+	// users/{id}/roles stay until their sunset (API-01).
+	r.Get("/api/v1/role-assignments", h.ListRoleAssignments)
+	r.Post("/api/v1/role-assignments", h.AssignRole)
 }
 
 // --- User handlers ---
@@ -377,6 +381,26 @@ func (h *Handler) ListUserRoles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	api.WriteJSON(w, http.StatusOK, roles)
+}
+
+// ListRoleAssignments handles GET /api/v1/role-assignments?user_id=….
+func (h *Handler) ListRoleAssignments(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		api.WriteFieldError(w, &api.FieldError{Field: "user_id", Message: "is required"})
+		return
+	}
+	roles, err := h.repo.ListUserRoles(r.Context(), t.OrganizationID, userID)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.CompleteList(roles))
 }
 
 // --- Team handlers ---

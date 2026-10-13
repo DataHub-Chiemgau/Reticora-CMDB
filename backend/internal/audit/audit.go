@@ -433,8 +433,12 @@ func NewHandler(pool *pgxpool.Pool) *Handler {
 
 // RegisterRoutes registers audit routes on the given mux.
 func (h *Handler) RegisterRoutes(r chi.Router) {
-	r.Get("/api/v1/audit", h.List)
-	r.Post("/api/v1/audit/verify", h.Verify)
+	// audit-log is the catalog path (API-05); audit stays until its sunset
+	// (API-01).
+	for _, base := range []string{"/api/v1/audit-log", "/api/v1/audit"} {
+		r.Get(base, h.List)
+		r.Post(base+"/verify", h.Verify)
+	}
 }
 
 // List handles GET /api/v1/audit.

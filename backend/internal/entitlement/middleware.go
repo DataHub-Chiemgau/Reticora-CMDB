@@ -44,6 +44,8 @@ var gatedRoutes = []struct {
 	{"/api/v1/exports", FeatureExportCSV},
 	{"/api/v1/export", FeatureExportCSV},
 	{"/api/v1/topology", FeatureTopology},
+	// Impact analysis is part of the topology feature (API-05 path).
+	{"/api/v1/impact", FeatureTopology},
 	{"/api/v1/monitoring", FeatureMonitoring},
 	{"/api/v1/metrics", FeatureMonitoring},
 	{"/api/v1/forms", FeatureWorkflowForms},

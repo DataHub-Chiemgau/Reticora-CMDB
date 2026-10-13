@@ -15,7 +15,7 @@ afterEach(() => {
 describe('ExportPage', () => {
   it('renders a completed job with a download link', async () => {
     stubFetchRoutes({
-      '/export/jobs': paginated([
+      '/exports': paginated([
         {
           id: 'job-1',
           organization_id: 'org-1',
@@ -41,7 +41,7 @@ describe('ExportPage', () => {
   });
 
   it('shows the empty state when no jobs exist', async () => {
-    stubFetchRoutes({ '/export/jobs': paginated([]) });
+    stubFetchRoutes({ '/exports': paginated([]) });
 
     renderWithProviders(<ExportPage />, { route: '/export' });
 

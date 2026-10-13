@@ -30,9 +30,15 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 	r.Get("/api/v1/racks/{id}/mounts", h.ListMounts)
 	r.Post("/api/v1/racks/{id}/mounts", h.CreateMount)
-	r.Get("/api/v1/rack-mounts/{id}", h.GetMount)
-	r.Patch("/api/v1/rack-mounts/{id}", h.UpdateMount)
-	r.Delete("/api/v1/rack-mounts/{id}", h.DeleteMount)
+	// mounts is the catalog path (API-05): the rack is a query parameter
+	// or part of the body; rack-mounts stays until its sunset (API-01).
+	r.Get("/api/v1/mounts", h.ListMountsByQuery)
+	r.Post("/api/v1/mounts", h.CreateMount)
+	for _, base := range []string{"/api/v1/mounts", "/api/v1/rack-mounts"} {
+		r.Get(base+"/{id}", h.GetMount)
+		r.Patch(base+"/{id}", h.UpdateMount)
+		r.Delete(base+"/{id}", h.DeleteMount)
+	}
 
 	r.Get("/api/v1/cables", h.ListCables)
 	r.Post("/api/v1/cables", h.CreateCable)
@@ -223,7 +229,19 @@ func (h *Handler) ListMounts(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// CreateMount handles POST /api/v1/racks/{id}/mounts
+// ListMountsByQuery handles GET /api/v1/mounts?rack_id=…
+func (h *Handler) ListMountsByQuery(w http.ResponseWriter, r *http.Request) {
+	rackID := r.URL.Query().Get("rack_id")
+	if rackID == "" {
+		api.WriteFieldError(w, &api.FieldError{Field: "rack_id", Message: "is required"})
+		return
+	}
+	chi.RouteContext(r.Context()).URLParams.Add("id", rackID)
+	h.ListMounts(w, r)
+}
+
+// CreateMount handles POST /api/v1/racks/{id}/mounts and POST
+// /api/v1/mounts (rack_id in the body)
 func (h *Handler) CreateMount(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := org(w, r)
 	if !ok {
@@ -236,6 +254,14 @@ func (h *Handler) CreateMount(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.CIID == "" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "ci_id is required")
+		return
+	}
+	rackID := chi.URLParam(r, "id")
+	if rackID == "" {
+		rackID = req.RackID
+	}
+	if rackID == "" {
+		api.WriteFieldError(w, &api.FieldError{Field: "rack_id", Message: "is required"})
 		return
 	}
 	height := req.HeightU
@@ -252,7 +278,7 @@ func (h *Handler) CreateMount(w http.ResponseWriter, r *http.Request) {
 	}
 	m := &RackMount{
 		OrganizationID: orgID,
-		RackID:         chi.URLParam(r, "id"),
+		RackID:         rackID,
 		CIID:           req.CIID,
 		PositionU:      req.PositionU,
 		HeightU:        height,
