@@ -298,3 +298,5 @@ CI-02;[B];B;backend/internal/ci/indexes_integration_test.go;WP-121
 LCY-01;[B];B;backend/internal/lifecycle/status_separation_integration_test.go;WP-122
 NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-123
 NET-03;[B];B;backend/internal/ipam/ip_integration_test.go;WP-124
+NET-05;[B];B;backend/internal/ipam/handler_test.go;WP-125
+API-05;[B];B;backend/internal/ipam/handler_test.go;WP-125

@@ -68,6 +68,10 @@ func writeRepoError(w http.ResponseWriter, err error, notFoundMsg string) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", notFoundMsg)
 	case errors.Is(err, ErrValidation):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+	case errors.Is(err, ErrConflict):
+		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+	case errors.Is(err, ErrInUse):
+		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
 	default:
 		api.WriteRepoError(w, err)
 	}

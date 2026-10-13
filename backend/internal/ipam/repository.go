@@ -16,6 +16,12 @@ import (
 var (
 	ErrNotFound   = errors.New("not found")
 	ErrValidation = errors.New("validation failed")
+	// ErrConflict: the value is already taken (409), as a unique
+	// violation in the database.
+	ErrConflict = errors.New("conflict")
+	// ErrInUse: the record cannot be removed (422) – the default VRF or a
+	// VRF that subnets still reference.
+	ErrInUse = errors.New("in use")
 )
 
 // SubnetFilter holds optional filters for listing subnets.
