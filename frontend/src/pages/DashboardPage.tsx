@@ -79,7 +79,7 @@ function CollectorsWidget() {
   // Guard against a malformed/legacy payload where `data` is null instead of
   // an array — `.filter` on null throws during render and blanks the page.
   const collectorList = collectors.data?.data ?? [];
-  const collectorCount = collectorList.filter((collector) => collector.status === 'online').length;
+  const collectorCount = collectorList.filter((collector) => collector.status === 'active').length;
 
   return (
     <MetricCard

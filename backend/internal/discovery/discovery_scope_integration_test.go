@@ -46,7 +46,7 @@ func TestDiscoveryRepositoryClientScope(t *testing.T) {
 	if err != nil || len(cols) != 1 || cols[0].ID != ownCol.ID {
 		t.Fatalf("client-1 collectors: %+v err=%v, want only the client-1 collector", cols, err)
 	}
-	if err = repo.Heartbeat(ctx, f.OrgA, foreignCol.ID); err == nil {
+	if _, err = repo.Heartbeat(ctx, f.OrgA, foreignCol.ID); err == nil {
 		t.Fatal("client-1 principal sent a heartbeat for a client-2 collector")
 	}
 	if err = repo.RegisterCollector(ctx, &discovery.Collector{OrganizationID: f.OrgA, ClientID: f.Client2, Name: "intruder", Config: map[string]any{}}); err == nil {

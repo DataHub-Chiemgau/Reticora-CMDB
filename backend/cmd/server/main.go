@@ -440,6 +440,14 @@ func main() {
 			webhook.NewPGRepository(auditPool)).Schedules()...)
 		systemJobs = append(systemJobs, jobs.NewRetention(auditPool, jobs.RetentionFromDays(cfg.RetentionAuditYears,
 			cfg.RetentionHistoryDays, cfg.RetentionSoftDeleteDays, cfg.RetentionReviewItemDays)).Schedules()...)
+		// Collector status: offline after five minutes without heartbeat,
+		// paused while the discovery license is not active (COL-01, COL-05).
+		collectorStatus := discovery.NewStatusMonitor(auditPool)
+		collectorStatus.Licensed = func(ctx context.Context, orgID string) (bool, error) {
+			_, status, serr := entitlementSvc.Status(ctx, orgID, entitlement.FeatureDiscovery)
+			return status == entitlement.StatusActive, serr
+		}
+		systemJobs = append(systemJobs, collectorStatus.Schedule())
 		// Personal data of existing history entries into the vault (SEC-05).
 		systemJobs = append(systemJobs, jobs.NewPIIBackfill(auditPool).Schedule())
 		// Attribute indexes of searchable/unique attributes (DB-04, MET-15).

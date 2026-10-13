@@ -330,3 +330,5 @@ MET-15;B/G1;B;backend/internal/citype/ddl_job_integration_test.go;WP-142
 SEC-05;[B];B;backend/internal/pii/pii_integration_test.go;WP-240
 SEC-05;[B];B;backend/internal/pii/surrogate_integration_test.go;WP-241
 AUD-01;[B];B;backend/internal/contact/pii_integration_test.go;WP-242
+COL-01;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-143
+COL-05;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-143

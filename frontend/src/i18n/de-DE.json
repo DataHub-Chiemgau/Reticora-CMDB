@@ -255,6 +255,13 @@
       "generate": "Code erzeugen",
       "once": "Dieser Code wird nur einmal angezeigt und läuft ab. Führen Sie im Kundennetz aus:",
       "expires": "Gültig bis"
+    },
+    "collectorStatus": {
+      "pending": "Ausstehend",
+      "active": "Aktiv",
+      "offline": "Offline",
+      "disabled": "Deaktiviert",
+      "paused": "Pausiert (Lizenz)"
     }
   },
   "webhook": {

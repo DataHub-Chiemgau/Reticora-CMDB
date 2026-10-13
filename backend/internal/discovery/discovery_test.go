@@ -38,8 +38,8 @@ func TestHandler_RegisterAndListCollectors(t *testing.T) {
 	if created.Name != "collector-site-a" {
 		t.Errorf("expected collector-site-a, got %s", created.Name)
 	}
-	if created.Status != "online" {
-		t.Errorf("expected online, got %s", created.Status)
+	if created.Status != "pending" {
+		t.Errorf("expected pending, got %s", created.Status)
 	}
 
 	// List

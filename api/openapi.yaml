@@ -6110,12 +6110,55 @@ paths:
               schema:
                 type: string
                 enum: [active, expired]
+            Reticora-Collector-Status:
+              description: Status of the collector after the heartbeat (paused stops scanning).
+              schema:
+                type: string
+                enum: [active, paused]
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/collectors/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: updateCollector
+      tags: [Collectors]
+      summary: Rename, bind to a site, disable or enable a collector
+      description: >-
+        Requires collector:manage. The site decides the client (422 for a site
+        of another client). status disabled refuses the collector's heartbeats;
+        active enables a disabled collector again (offline until its next
+        heartbeat).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollectorPatch'
+      responses:
+        '200':
+          description: Collector updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collector'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/ingest/bulk:
     post:
@@ -15362,13 +15405,30 @@ components:
           type: string
         client_id:
           type: string
+        site_id:
+          type: string
+          description: Site of the collector; it decides the client.
         name:
           type: string
         version:
           type: string
         status:
           type: string
-        last_heartbeat:
+          enum: [pending, active, offline, disabled, paused]
+          description: >-
+            pending until the first heartbeat, active while heartbeats arrive,
+            offline after five minutes without heartbeat (COL-05), disabled by an
+            administrator, paused while the discovery license is not active
+            (ENT-07).
+        status_changed_at:
+          type: string
+          format: date-time
+        last_heartbeat_at:
+          type: string
+          format: date-time
+        cert_fingerprint:
+          type: string
+        cert_not_after:
           type: string
           format: date-time
         config:
@@ -15380,6 +15440,20 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    CollectorPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+        site_id:
+          type: string
+          description: Site of the collector; empty removes the binding.
+        status:
+          type: string
+          enum: [disabled, active]
 
     RegisterCollectorRequest:
       type: object

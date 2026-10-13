@@ -3237,6 +3237,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/collectors/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Rename, bind to a site, disable or enable a collector
+     * @description Requires collector:manage. The site decides the client (422 for a site of another client). status disabled refuses the collector's heartbeats; active enables a disabled collector again (offline until its next heartbeat).
+     */
+    patch: operations['updateCollector'];
+    trace?: never;
+  };
   '/api/v1/ingest/bulk': {
     parameters: {
       query?: never;
@@ -9154,11 +9177,22 @@ export interface components {
       id: string;
       organization_id: string;
       client_id?: string;
+      /** @description Site of the collector; it decides the client. */
+      site_id?: string;
       name: string;
       version?: string;
-      status: string;
+      /**
+       * @description pending until the first heartbeat, active while heartbeats arrive, offline after five minutes without heartbeat (COL-05), disabled by an administrator, paused while the discovery license is not active (ENT-07).
+       * @enum {string}
+       */
+      status: 'pending' | 'active' | 'offline' | 'disabled' | 'paused';
       /** Format: date-time */
-      last_heartbeat?: string;
+      status_changed_at?: string;
+      /** Format: date-time */
+      last_heartbeat_at?: string;
+      cert_fingerprint?: string;
+      /** Format: date-time */
+      cert_not_after?: string;
       config: {
         [key: string]: unknown;
       };
@@ -9166,6 +9200,13 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    CollectorPatch: {
+      name?: string;
+      /** @description Site of the collector; empty removes the binding. */
+      site_id?: string;
+      /** @enum {string} */
+      status?: 'disabled' | 'active';
     };
     RegisterCollectorRequest: {
       name: string;
@@ -16997,13 +17038,48 @@ export interface operations {
         headers: {
           /** @description Discovery license status of the organization. */
           'Reticora-License-Status'?: 'active' | 'expired';
+          /** @description Status of the collector after the heartbeat (paused stops scanning). */
+          'Reticora-Collector-Status'?: 'active' | 'paused';
           [name: string]: unknown;
         };
         content?: never;
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+    };
+  };
+  updateCollector: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CollectorPatch'];
+      };
+    };
+    responses: {
+      /** @description Collector updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Collector'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   bulkIngest: {

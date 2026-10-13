@@ -262,6 +262,7 @@ PATCH /api/v1/cables/{id} rack:write
 PATCH /api/v1/ci-types/{id} ci_type:manage
 PATCH /api/v1/cis/{id} ci:write
 PATCH /api/v1/clients/{id} user:manage
+PATCH /api/v1/collectors/{id} collector:manage
 PATCH /api/v1/compliance/rules/{id} compliance:write
 PATCH /api/v1/compositions/{id} asset:write
 PATCH /api/v1/consumables/{id} consumable:write

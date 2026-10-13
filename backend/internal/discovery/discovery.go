@@ -29,18 +29,26 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Collector represents a customer-deployed collector instance.
+// Collector represents a customer-deployed collector instance (COL-01).
 type Collector struct {
-	ID             string         `json:"id"`
-	OrganizationID string         `json:"organization_id"`
-	ClientID       string         `json:"client_id,omitempty"`
-	Name           string         `json:"name"`
-	Version        string         `json:"version,omitempty"`
-	Status         string         `json:"status"`
-	LastHeartbeat  string         `json:"last_heartbeat,omitempty"`
-	Config         map[string]any `json:"config"`
-	CreatedAt      string         `json:"created_at"`
-	UpdatedAt      string         `json:"updated_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	ClientID       string `json:"client_id,omitempty"`
+	// SiteID binds the collector to a site of its client; the site decides
+	// the client.
+	SiteID  string `json:"site_id,omitempty"`
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	// Status is pending, active, offline, disabled or paused
+	// (collector_status.go).
+	Status          string         `json:"status"`
+	StatusChangedAt string         `json:"status_changed_at,omitempty"`
+	LastHeartbeatAt string         `json:"last_heartbeat_at,omitempty"`
+	CertFingerprint string         `json:"cert_fingerprint,omitempty"`
+	CertNotAfter    string         `json:"cert_not_after,omitempty"`
+	Config          map[string]any `json:"config"`
+	CreatedAt       string         `json:"created_at"`
+	UpdatedAt       string         `json:"updated_at"`
 }
 
 // BulkIngestRequest is the deprecated collector_id/items ingest payload; new
@@ -140,7 +148,12 @@ type BulkIngestResponse struct {
 type Repository interface {
 	ListCollectors(ctx context.Context, orgID string, page api.PaginationParams) ([]Collector, int, error)
 	RegisterCollector(ctx context.Context, c *Collector) error
-	Heartbeat(ctx context.Context, orgID, collectorID string) error
+	// Heartbeat records a heartbeat and returns the collector's status: a
+	// pending or offline collector becomes active, a paused one stays
+	// paused, a disabled one is refused (ErrCollectorDisabled).
+	Heartbeat(ctx context.Context, orgID, collectorID string) (status string, err error)
+	// UpdateCollector changes name, site or status (disable, enable).
+	UpdateCollector(ctx context.Context, orgID, collectorID string, patch *CollectorPatch) (*Collector, error)
 
 	// Enrollment codes (zero-config onboarding).
 	CreateEnrollmentCode(ctx context.Context, code *EnrollmentCode) error
@@ -235,10 +248,36 @@ func (r *MemoryRepository) RegisterCollector(_ context.Context, c *Collector) er
 	now := time.Now().UTC().Format(time.RFC3339)
 	c.CreatedAt = now
 	c.UpdatedAt = now
-	c.Status = "online"
-	c.LastHeartbeat = now
+	c.StatusChangedAt = now
+	if c.Status != CollectorActive {
+		c.Status = CollectorPending
+	} else {
+		c.LastHeartbeatAt = now
+	}
 	r.collectors[c.ID] = c
 	return nil
+}
+
+// UpdateCollector implements Repository.
+func (r *MemoryRepository) UpdateCollector(_ context.Context, orgID, collectorID string, patch *CollectorPatch) (*Collector, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.collectors[collectorID]
+	if !ok || c.OrganizationID != orgID {
+		return nil, fmt.Errorf("not found")
+	}
+	if patch.Name != nil {
+		c.Name = *patch.Name
+	}
+	if patch.SiteID != nil {
+		c.SiteID = *patch.SiteID
+	}
+	if patch.Status != nil {
+		c.Status = nextAdminStatus(c.Status, *patch.Status)
+	}
+	c.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	cp := *c
+	return &cp, nil
 }
 
 func (r *MemoryRepository) CreateEnrollmentCode(_ context.Context, code *EnrollmentCode) error {
@@ -278,17 +317,20 @@ func (r *MemoryRepository) RedeemEnrollmentCode(_ context.Context, rawCode, coll
 	return code.OrganizationID, nil
 }
 
-func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID string) error {
+func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	c, ok := r.collectors[collectorID]
 	if !ok || c.OrganizationID != orgID {
-		return fmt.Errorf("not found")
+		return "", fmt.Errorf("not found")
 	}
-	c.LastHeartbeat = time.Now().UTC().Format(time.RFC3339)
-	c.Status = "online"
-	return nil
+	if c.Status == CollectorDisabled {
+		return c.Status, ErrCollectorDisabled
+	}
+	c.LastHeartbeatAt = time.Now().UTC().Format(time.RFC3339)
+	c.Status = statusAfterHeartbeat(c.Status)
+	return c.Status, nil
 }
 
 // EnrollmentCode is a short-lived, single-use secret a collector presents to
@@ -523,6 +565,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/collectors", h.ListCollectors)
 	r.Post("/api/v1/collectors", h.RegisterCollector)
 	r.Post("/api/v1/collectors/{id}/heartbeat", h.Heartbeat)
+	r.Patch("/api/v1/collectors/{id}", h.UpdateCollector)
 	// Zero-config onboarding: an operator mints a short-lived enrollment code;
 	// the collector redeems it (unauthenticated, code = the credential) for its
 	// identity.
@@ -586,6 +629,8 @@ func (h *Handler) RegisterCollector(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c.OrganizationID = t.OrganizationID
+	// A created collector waits for its first heartbeat.
+	c.Status = CollectorPending
 	if c.Config == nil {
 		c.Config = make(map[string]any)
 	}
@@ -674,11 +719,13 @@ func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An enrolled collector is connected: active.
 	c := &Collector{
 		OrganizationID: orgID,
 		Name:           req.Name,
 		Version:        req.Version,
 		ClientID:       req.ClientID,
+		Status:         CollectorActive,
 		Config:         map[string]any{},
 	}
 	// The request is unauthenticated, so there is no principal scope: the
@@ -738,10 +785,18 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.repo.Heartbeat(r.Context(), t.OrganizationID, id); err != nil {
+	status, err := h.repo.Heartbeat(r.Context(), t.OrganizationID, id)
+	if errors.Is(err, ErrCollectorDisabled) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
+		return
+	}
+	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "collector not found")
 		return
 	}
+	// A paused collector stops scanning until the license is active again
+	// (ENT-07).
+	w.Header().Set(CollectorStatusHeader, status)
 	if s := req.Spool; s != nil && (s.DroppedMessages > 0 || s.Backpressure) {
 		slog.WarnContext(r.Context(), "collector reported spool data loss or backpressure",
 			"event", "collector.spool.degraded",

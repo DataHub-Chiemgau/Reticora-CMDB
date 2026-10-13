@@ -23,7 +23,7 @@ describe('DashboardPage', () => {
           id: 'c1',
           organization_id: 'org-1',
           name: 'collector-a',
-          status: 'online',
+          status: 'active',
           config: {},
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',

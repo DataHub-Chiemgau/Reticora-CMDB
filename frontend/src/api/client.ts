@@ -148,14 +148,21 @@ export interface RelationshipUpdateRequest {
   notes?: string;
 }
 
+/** Collector status (COL-01). */
+export type CollectorStatus = 'pending' | 'active' | 'offline' | 'disabled' | 'paused';
+
 export interface Collector {
   id: string;
   organization_id: string;
   client_id?: string;
+  site_id?: string;
   name: string;
   version?: string;
-  status: string;
-  last_heartbeat?: string;
+  status: CollectorStatus;
+  status_changed_at?: string;
+  last_heartbeat_at?: string;
+  cert_fingerprint?: string;
+  cert_not_after?: string;
   config: Record<string, unknown>;
   created_at: string;
   updated_at: string;

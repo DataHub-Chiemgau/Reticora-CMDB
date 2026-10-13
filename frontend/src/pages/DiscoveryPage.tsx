@@ -145,12 +145,14 @@ function getCollectorVariant(
   status: string,
 ): 'success' | 'warning' | 'danger' | 'neutral' | 'info' {
   switch (status) {
-    case 'online':
+    case 'active':
       return 'success';
     case 'offline':
       return 'danger';
-    case 'maintenance':
+    case 'paused':
       return 'warning';
+    case 'pending':
+      return 'info';
     default:
       return 'neutral';
   }
@@ -162,7 +164,11 @@ function CollectorCard({ collector }: { collector: Collector }) {
   return (
     <Card
       title={collector.name}
-      actions={<Badge variant={getCollectorVariant(collector.status)}>{collector.status}</Badge>}
+      actions={
+        <Badge variant={getCollectorVariant(collector.status)}>
+          {t(`discovery.collectorStatus.${collector.status}`, collector.status)}
+        </Badge>
+      }
     >
       <dl className="space-y-2 text-sm">
         <div className="flex justify-between gap-4">
@@ -174,7 +180,7 @@ function CollectorCard({ collector }: { collector: Collector }) {
         <div className="flex justify-between gap-4">
           <dt className="text-gray-500 dark:text-gray-400">{t('discovery.lastHeartbeat')}</dt>
           <dd className="font-medium text-right text-gray-900 dark:text-gray-100">
-            {formatHeartbeat(collector.last_heartbeat)}
+            {formatHeartbeat(collector.last_heartbeat_at)}
           </dd>
         </div>
         <div className="flex justify-between gap-4">

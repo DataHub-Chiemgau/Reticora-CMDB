@@ -3,8 +3,10 @@ package discovery
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -20,10 +23,14 @@ const collectorSelectColumns = `
 	id::text,
 	organization_id::text,
 	COALESCE(client_id::text, ''),
+	COALESCE(site_id::text, ''),
 	name,
 	COALESCE(version, ''),
 	status,
-	last_heartbeat,
+	status_changed_at,
+	last_heartbeat_at,
+	COALESCE(cert_fingerprint, ''),
+	cert_not_after,
 	config,
 	created_at,
 	updated_at
@@ -106,80 +113,128 @@ func (r *PGRepository) RegisterCollector(ctx context.Context, c *Collector) erro
 		if c.Config == nil {
 			c.Config = make(map[string]any)
 		}
-		status := c.Status
-		if status == "" {
-			status = "online"
+		// An enrolled collector is connected (active); one created by an
+		// administrator waits for its first heartbeat (COL-01).
+		status := CollectorPending
+		var heartbeat any
+		if c.Status == CollectorActive {
+			status, heartbeat = CollectorActive, time.Now().UTC()
 		}
-		now := time.Now().UTC()
-		query := `
-			INSERT INTO collector (
-				organization_id,
-				client_id,
-				name,
-				version,
-				status,
-				last_heartbeat,
-				config
-			) VALUES ($1, $2, $3, $4, $5, $6, $7)
-			RETURNING id::text, status, last_heartbeat, created_at, updated_at
-		`
-		var lastHeartbeat sql.NullTime
-		var createdAt time.Time
-		var updatedAt time.Time
-		if err := tx.QueryRow(ctx, query,
-			c.OrganizationID,
-			nilIfEmpty(c.ClientID),
-			c.Name,
-			nilIfEmpty(c.Version),
-			status,
-			now,
-			c.Config,
-		).Scan(&c.ID, &c.Status, &lastHeartbeat, &createdAt, &updatedAt); err != nil {
-			return fmt.Errorf("register collector: %w", err)
+		created, err := scanCollector(tx.QueryRow(ctx, `
+			INSERT INTO collector (organization_id, client_id, site_id, name, version, status, last_heartbeat_at, config)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			RETURNING `+collectorSelectColumns,
+			c.OrganizationID, nilIfEmpty(c.ClientID), nilIfEmpty(c.SiteID), c.Name, nilIfEmpty(c.Version), status, heartbeat, c.Config))
+		if err != nil {
+			return collectorError(fmt.Errorf("register collector: %w", err))
 		}
-		if lastHeartbeat.Valid {
-			c.LastHeartbeat = lastHeartbeat.Time.UTC().Format(time.RFC3339Nano)
-		}
-		c.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
-		c.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+		*c = *created
 		return nil
 	})
 }
 
-func (r *PGRepository) Heartbeat(ctx context.Context, orgID, collectorID string) error {
-	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmdTag, err := tx.Exec(ctx,
-			"UPDATE collector SET status = 'online', last_heartbeat = NOW(), updated_at = NOW() WHERE id = $1 AND organization_id = $2",
-			collectorID,
-			orgID,
-		)
+// collectorError maps the site binding of a collector to field errors.
+func collectorError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.ConstraintName {
+	case "collector_site_id_fkey":
+		return &api.FieldError{Field: "site_id", Message: "site not found", Status: http.StatusUnprocessableEntity}
+	case "collector_site_client":
+		return &api.FieldError{Field: "site_id", Message: "the site belongs to another client", Status: http.StatusUnprocessableEntity}
+	}
+	return err
+}
+
+// Heartbeat implements Repository.
+func (r *PGRepository) Heartbeat(ctx context.Context, orgID, collectorID string) (string, error) {
+	var status string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `UPDATE collector
+			SET last_heartbeat_at = now(),
+				status = CASE WHEN status IN ('pending', 'offline', 'active') THEN 'active' ELSE status END
+			WHERE id = $1 AND organization_id = $2 AND status <> 'disabled'
+			RETURNING status`, collectorID, orgID).Scan(&status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			var disabled bool
+			if qerr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM collector WHERE id = $1 AND organization_id = $2 AND status = 'disabled')`,
+				collectorID, orgID).Scan(&disabled); qerr != nil {
+				return qerr
+			}
+			if disabled {
+				status = CollectorDisabled
+				return ErrCollectorDisabled
+			}
+			return fmt.Errorf("not found")
+		}
 		if err != nil {
 			return fmt.Errorf("collector heartbeat: %w", err)
 		}
-		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
-		}
 		return nil
 	})
+	return status, err
+}
+
+// UpdateCollector implements Repository.
+func (r *PGRepository) UpdateCollector(ctx context.Context, orgID, collectorID string, patch *CollectorPatch) (*Collector, error) {
+	var out *Collector
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		current, err := scanCollector(tx.QueryRow(ctx, `SELECT `+collectorSelectColumns+
+			` FROM collector WHERE id = $1 AND organization_id = $2 FOR UPDATE`, collectorID, orgID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
+		}
+		if err != nil {
+			return err
+		}
+		name, site, status := current.Name, current.SiteID, current.Status
+		if patch.Name != nil {
+			name = *patch.Name
+		}
+		if patch.SiteID != nil {
+			site = *patch.SiteID
+		}
+		if patch.Status != nil {
+			status = nextAdminStatus(status, *patch.Status)
+		}
+		out, err = scanCollector(tx.QueryRow(ctx, `UPDATE collector SET name = $3, site_id = $4, status = $5
+			WHERE id = $1 AND organization_id = $2 RETURNING `+collectorSelectColumns,
+			collectorID, orgID, name, nilIfEmpty(site), status))
+		return collectorError(err)
+	})
+	return out, err
 }
 
 type collectorScanner interface {
 	Scan(dest ...any) error
 }
 
+func formatTime(t sql.NullTime) string {
+	if !t.Valid {
+		return ""
+	}
+	return t.Time.UTC().Format(time.RFC3339Nano)
+}
+
 func scanCollector(scanner collectorScanner) (*Collector, error) {
 	item := &Collector{}
-	var lastHeartbeat sql.NullTime
-	var createdAt time.Time
-	var updatedAt time.Time
+	var statusChanged time.Time
+	var lastHeartbeat, certNotAfter sql.NullTime
+	var createdAt, updatedAt time.Time
 	if err := scanner.Scan(
 		&item.ID,
 		&item.OrganizationID,
 		&item.ClientID,
+		&item.SiteID,
 		&item.Name,
 		&item.Version,
 		&item.Status,
+		&statusChanged,
 		&lastHeartbeat,
+		&item.CertFingerprint,
+		&certNotAfter,
 		&item.Config,
 		&createdAt,
 		&updatedAt,
@@ -189,9 +244,9 @@ func scanCollector(scanner collectorScanner) (*Collector, error) {
 	if item.Config == nil {
 		item.Config = make(map[string]any)
 	}
-	if lastHeartbeat.Valid {
-		item.LastHeartbeat = lastHeartbeat.Time.UTC().Format(time.RFC3339Nano)
-	}
+	item.StatusChangedAt = statusChanged.UTC().Format(time.RFC3339Nano)
+	item.LastHeartbeatAt = formatTime(lastHeartbeat)
+	item.CertNotAfter = formatTime(certNotAfter)
 	item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 	item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
 	return item, nil

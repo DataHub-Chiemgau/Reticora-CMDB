@@ -255,6 +255,13 @@
       "generate": "Generate code",
       "once": "This code is shown only once and expires. Run in the customer network:",
       "expires": "Valid until"
+    },
+    "collectorStatus": {
+      "pending": "Pending",
+      "active": "Active",
+      "offline": "Offline",
+      "disabled": "Disabled",
+      "paused": "Paused (license)"
     }
   },
   "webhook": {
