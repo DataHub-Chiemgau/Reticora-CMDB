@@ -2,8 +2,10 @@ package topology
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -372,4 +374,135 @@ func parseCategories(raw string) (map[string]bool, error) {
 		out[c] = true
 	}
 	return out, nil
+}
+
+// MaxImpactCIs bounds the failed CIs of one analysis.
+const MaxImpactCIs = 100
+
+// ImpactSummary sums up an impact analysis (IMP-05).
+type ImpactSummary struct {
+	Failed     int            `json:"failed"`
+	Impacted   int            `json:"impacted"`
+	Certain    int            `json:"certain"`
+	Heuristic  int            `json:"heuristic"`
+	ByCategory map[string]int `json:"by_category"`
+}
+
+// GetMultiImpact handles GET /api/v1/impact?ci_ids=a,b&categories=…: the
+// joint impact of several CIs failing at once (IMP-05).
+func (h *Handler) GetMultiImpact(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	var ids []string
+	seen := map[string]bool{}
+	for _, id := range strings.Split(r.URL.Query().Get("ci_ids"), ",") {
+		if id = strings.TrimSpace(id); id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	switch {
+	case len(ids) == 0:
+		api.WriteFieldError(w, &api.FieldError{Field: "ci_ids", Message: "is required (comma-separated CI ids)"})
+		return
+	case len(ids) > MaxImpactCIs:
+		api.WriteFieldError(w, &api.FieldError{Field: "ci_ids", Message: fmt.Sprintf("at most %d CIs per analysis", MaxImpactCIs),
+			Status: http.StatusUnprocessableEntity})
+		return
+	}
+	h.writeImpact(w, r, t.OrganizationID, ids, false)
+}
+
+// writeImpact analyses the failure of ids and writes the answer: the
+// failed CIs, the impacted CIs with their paths and a summary; single adds
+// the fields of the single-CI short form.
+func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID string, ids []string, single bool) {
+	ctx := r.Context()
+	q := r.URL.Query()
+	depth := parseDepth(q.Get("depth"))
+	if q.Get("depth") == "" {
+		depth = maxDepth
+	}
+	categories, err := parseCategories(q.Get("categories"))
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	failed := make([]Node, 0, len(ids))
+	nodes := map[string]Node{}
+	edges := map[string]Edge{}
+	for _, id := range ids {
+		root, gerr := h.ciRepo.GetByID(ctx, orgID, id)
+		if gerr != nil {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found: "+id)
+			return
+		}
+		failed = append(failed, nodeFromItem(*root))
+		graph, berr := h.buildFromRoot(ctx, orgID, id, depth, "")
+		if berr != nil {
+			api.WriteRepoError(w, berr)
+			return
+		}
+		for _, n := range graph.Nodes {
+			nodes[n.ID] = n
+		}
+		for _, e := range graph.Edges {
+			edges[e.ID] = e
+		}
+	}
+	edgeList := make([]Edge, 0, len(edges))
+	for _, e := range edges {
+		edgeList = append(edgeList, e)
+	}
+	sort.Slice(edgeList, func(i, j int) bool { return edgeList[i].ID < edgeList[j].ID })
+
+	relType := q.Get("rel_type")
+	impacted := computeImpact(ids, edgeList, impactQuery{relType: relType, categories: categories, depth: depth},
+		h.impactRules(ctx, orgID))
+	impactedNodes := make([]ImpactNode, 0, len(impacted))
+	summary := ImpactSummary{Failed: len(failed), ByCategory: map[string]int{}}
+	for id, hit := range impacted {
+		node, ok := nodes[id]
+		if !ok {
+			continue
+		}
+		impactedNodes = append(impactedNodes, ImpactNode{Node: node, Heuristic: hit.heuristic, Hops: len(hit.path), Path: hit.path})
+		if hit.heuristic {
+			summary.Heuristic++
+		} else {
+			summary.Certain++
+		}
+		if len(hit.path) > 0 {
+			summary.ByCategory[hit.path[len(hit.path)-1].Category]++
+		}
+	}
+	summary.Impacted = len(impactedNodes)
+	// Certain impacts first, then by name: a stable answer.
+	sort.Slice(impactedNodes, func(i, j int) bool {
+		a, b := &impactedNodes[i], &impactedNodes[j]
+		if a.Heuristic != b.Heuristic {
+			return !a.Heuristic
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return a.ID < b.ID
+	})
+	body := map[string]any{
+		"failed_cis": failed,
+		"rel_type":   relType,
+		"categories": sortedKeys(categories),
+		"depth":      depth,
+		"impacted":   impactedNodes,
+		"count":      len(impactedNodes),
+		"summary":    summary,
+	}
+	if single {
+		body["failed_ci_id"] = ids[0]
+		body["failed_ci"] = failed[0]
+	}
+	api.WriteJSON(w, http.StatusOK, body)
 }

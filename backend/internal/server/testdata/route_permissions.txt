@@ -158,6 +158,7 @@ GET /api/v1/iga/drift iga:read
 GET /api/v1/iga/jml-policies iga:read
 GET /api/v1/iga/tasks iga:read
 GET /api/v1/iga/tasks/{id} iga:read
+GET /api/v1/impact topology:read
 GET /api/v1/impact/{ci_id} topology:read
 GET /api/v1/inventory/availability asset:read
 GET /api/v1/inventory/items asset:read

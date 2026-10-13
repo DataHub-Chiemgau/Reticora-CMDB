@@ -381,3 +381,5 @@ IMP-02;[B];C;backend/internal/topology/impact_test.go;WP-177
 NFR-02;[B];C;backend/internal/topology/impact_test.go;WP-177
 CI-09;[B];C;backend/internal/ci/assetfree_integration_test.go;WP-178
 IMP-04;[B];C;backend/internal/topology/redundancy_test.go;WP-179
+IMP-05;[B];C;backend/internal/topology/multi_integration_test.go;WP-180
+IMP-06;[B];C;backend/internal/topology/multi_integration_test.go;WP-180

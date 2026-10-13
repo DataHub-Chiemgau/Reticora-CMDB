@@ -456,6 +456,7 @@
     "loadError": "Die Topologie konnte nicht geladen werden",
     "empty": "Keine Topologiedaten",
     "emptyHint": "Sobald Beziehungen erfasst oder aus Discovery abgeleitet wurden, erscheinen sie hier.",
+    "tooLarge": "Die Topologie umfasst mehr als 2.000 CIs. Wählen Sie einen CI-Typ, einen Standort oder ein Start-CI.",
     "allTypes": "Alle CI-Typen",
     "filterType": "Nach CI-Typ filtern",
     "filterDepth": "Traversierungstiefe",

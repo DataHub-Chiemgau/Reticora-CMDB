@@ -5,6 +5,7 @@ package topology
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -18,9 +19,11 @@ import (
 )
 
 const (
-	maxFetch     = 10000
-	defaultDepth = 2
-	maxDepth     = 20
+	maxFetch = 10000
+	// MaxTopologyNodes bounds GET /topology without a root (IMP-06).
+	MaxTopologyNodes = 2000
+	defaultDepth     = 2
+	maxDepth         = 20
 )
 
 // Node is a CI vertex in the topology graph.
@@ -78,6 +81,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/topology/cis/{id}/impact", h.GetImpact)
 	// impact is the catalog path (API-05); the topology path stays until
 	// its sunset (API-01).
+	// Several CIs failing at once (IMP-05): redundancy analysis and
+	// maintenance windows.
+	r.Get("/api/v1/impact", h.GetMultiImpact)
 	r.Get("/api/v1/impact/{ci_id}", func(w http.ResponseWriter, r *http.Request) {
 		chi.RouteContext(r.Context()).URLParams.Add("id", chi.URLParam(r, "ci_id"))
 		h.GetImpact(w, r)
@@ -125,7 +131,9 @@ func (h *Handler) GetTopology(w http.ResponseWriter, r *http.Request) {
 		graph, err = h.buildFull(r.Context(), t.OrganizationID, filter)
 	}
 	if err != nil {
-		api.WriteRepoError(w, err)
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, graph)
@@ -168,70 +176,22 @@ func (h *Handler) GetImpact(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-
-	id := chi.URLParam(r, "id")
-	root, err := h.ciRepo.GetByID(r.Context(), t.OrganizationID, id)
-	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
-		return
-	}
-
-	// Impact analysis walks deeper than the default 2-hop neighborhood view so
-	// transitive dependencies surface; the caller can narrow with depth and
-	// rel_type.
-	depth := parseDepth(r.URL.Query().Get("depth"))
-	if r.URL.Query().Get("depth") == "" {
-		depth = maxDepth
-	}
-	relType := r.URL.Query().Get("rel_type")
-	categories, err := parseCategories(r.URL.Query().Get("categories"))
-	if err != nil {
-		api.WriteFieldError(w, err)
-		return
-	}
-
-	graph, err := h.buildFromRoot(r.Context(), t.OrganizationID, id, depth, "")
-	if err != nil {
-		api.WriteRepoError(w, err)
-		return
-	}
-
-	impacted := computeImpact([]string{id}, graph.Edges, impactQuery{relType: relType, categories: categories, depth: depth},
-		h.impactRules(r.Context(), t.OrganizationID))
-	impactedNodes := make([]ImpactNode, 0, len(impacted))
-	for _, node := range graph.Nodes {
-		if hit, ok := impacted[node.ID]; ok {
-			impactedNodes = append(impactedNodes, ImpactNode{Node: node, Heuristic: hit.heuristic, Hops: len(hit.path), Path: hit.path})
-		}
-	}
-	// Certain impacts first, then by name: a stable answer.
-	sort.Slice(impactedNodes, func(i, j int) bool {
-		a, b := &impactedNodes[i], &impactedNodes[j]
-		if a.Heuristic != b.Heuristic {
-			return !a.Heuristic
-		}
-		if a.Name != b.Name {
-			return a.Name < b.Name
-		}
-		return a.ID < b.ID
-	})
-	api.WriteJSON(w, http.StatusOK, map[string]any{
-		"failed_ci_id": id,
-		"failed_ci":    nodeFromItem(*root),
-		"rel_type":     relType,
-		"categories":   sortedKeys(categories),
-		"depth":        depth,
-		"impacted":     impactedNodes,
-		"count":        len(impactedNodes),
-	})
+	h.writeImpact(w, r, t.OrganizationID, []string{chi.URLParam(r, "id")}, true)
 }
 
 // buildFull lists all CIs matching the filter and every edge whose endpoints are
 // both in the resulting node set.
 func (h *Handler) buildFull(ctx context.Context, orgID string, filter ci.FilterParams) (Graph, error) {
-	items, _, err := h.ciRepo.List(ctx, orgID, filter, api.PaginationParams{Limit: maxFetch, Offset: 0})
+	items, total, err := h.ciRepo.List(ctx, orgID, filter, api.PaginationParams{Limit: MaxTopologyNodes, Offset: 0})
 	if err != nil {
 		return Graph{}, err
+	}
+	// Without a root the graph holds at most 2,000 CIs (IMP-06); the UI
+	// then starts with a site or type filter.
+	if total > MaxTopologyNodes {
+		return Graph{}, &api.FieldError{Field: "root_ci_id", Status: http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("the topology holds %d CIs, more than %d without a root; set root_ci_id or narrow with site_id, client_id or ci_type (a CI type id)",
+				total, MaxTopologyNodes)}
 	}
 
 	nodeSet := make(map[string]struct{}, len(items))

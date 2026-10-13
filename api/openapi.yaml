@@ -4519,6 +4519,7 @@ paths:
             type: string
         - name: ci_type
           in: query
+          description: CI type id (ci.ci_type_id) to filter by.
           schema:
             type: string
         - name: root_ci_id
@@ -4540,6 +4541,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TopologyGraph'
+        '422':
+          description: >-
+            Without root_ci_id the filtered topology holds more than 2,000
+            CIs (IMP-06); narrow it with site_id, client_id or ci_type (a CI
+            type id) or set root_ci_id.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -4605,19 +4614,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  failed_ci_id: { type: string }
-                  failed_ci: { $ref: '#/components/schemas/TopologyNode' }
-                  rel_type: { type: string }
-                  categories:
-                    type: array
-                    items: { type: string }
-                  depth: { type: integer }
-                  impacted:
-                    type: array
-                    items: { $ref: '#/components/schemas/ImpactNode' }
-                  count: { type: integer }
+                $ref: '#/components/schemas/ImpactAnalysis'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
@@ -4629,6 +4626,54 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/impact:
+    get:
+      operationId: getMultiImpact
+      tags: [Topology]
+      summary: Joint impact of several CIs failing at once (IMP-05)
+      description: >-
+        Redundancy analysis and maintenance windows: the CIs in ci_ids fail
+        together; a CI behind a redundant type (powered_by,
+        member_of_cluster) is impacted only when all its providers are among
+        the failed or impacted CIs (IMP-04). The answer lists the failed
+        CIs, the impacted CIs with their shortest paths and a summary.
+      parameters:
+        - name: ci_ids
+          in: query
+          required: true
+          schema: { type: string }
+          description: Comma-separated ids of the failing CIs (at most 100).
+        - name: categories
+          in: query
+          schema: { type: string }
+          description: Comma-separated relationship categories to follow (network, power, hosting, logical, physical).
+        - name: rel_type
+          in: query
+          schema: { type: string }
+          description: Restrict the analysis to one relationship type.
+        - name: depth
+          in: query
+          schema: { type: integer, default: 20, maximum: 20 }
+          description: Maximum hops of the impact paths.
+      responses:
+        '200':
+          description: Impact analysis result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImpactAnalysis'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Unknown category or more than 100 CIs.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/impact/{ci_id}:
     parameters:
@@ -4669,19 +4714,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  failed_ci_id: { type: string }
-                  failed_ci: { $ref: '#/components/schemas/TopologyNode' }
-                  rel_type: { type: string }
-                  categories:
-                    type: array
-                    items: { type: string }
-                  depth: { type: integer }
-                  impacted:
-                    type: array
-                    items: { $ref: '#/components/schemas/ImpactNode' }
-                  count: { type: integer }
+                $ref: '#/components/schemas/ImpactAnalysis'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
@@ -11623,6 +11656,39 @@ components:
           type: string
           enum: [front, rear, both]
           default: front
+    ImpactAnalysis:
+      type: object
+      required: [failed_cis, impacted, count, summary]
+      properties:
+        failed_ci_id:
+          type: string
+          description: The failed CI (single-CI short form only).
+        failed_ci:
+          $ref: '#/components/schemas/TopologyNode'
+        failed_cis:
+          type: array
+          items: { $ref: '#/components/schemas/TopologyNode' }
+        rel_type: { type: string }
+        categories:
+          type: array
+          items: { type: string }
+        depth: { type: integer }
+        impacted:
+          type: array
+          items: { $ref: '#/components/schemas/ImpactNode' }
+        count: { type: integer }
+        summary:
+          type: object
+          required: [failed, impacted, certain, heuristic, by_category]
+          properties:
+            failed: { type: integer }
+            impacted: { type: integer }
+            certain: { type: integer }
+            heuristic: { type: integer }
+            by_category:
+              type: object
+              description: Impacted CIs per category of the last hop of their path.
+              additionalProperties: { type: integer }
     ImpactNode:
       allOf:
         - $ref: '#/components/schemas/TopologyNode'

@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import type { TopologyGraphData } from '../api/client';
+import { ApiError, type TopologyGraphData } from '../api/client';
+import { localizedText } from '../api/cmdb';
+import { useCITypes } from '../api/cmdbHooks';
 import { useTopology, useCIImpact } from '../api/hooks';
 import { TopologyGraph } from '../components/graph/TopologyGraph';
 import type { GraphEdge, GraphNode } from '../components/graph/TopologyGraph';
@@ -89,14 +91,15 @@ export function computeOutageImpact(failedId: string, edges: GraphEdge[]): Set<s
   return impacted;
 }
 
-const ciTypeValues = ['server', 'switch', 'router', 'firewall', 'pdu', 'ups', 'nas', 'client'];
 const depthValues = ['1', '2', '3', '4', '5'];
 // Dependency classes for the failure-simulation facet filter (spec §5.5).
 const relTypeValues = ['connected_to', 'powered_by', 'hosted_on', 'depends_on', 'member_of'];
 
 export function TopologyPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  // The type filter sends the CI type id, the value of ci.ci_type_id (IMP-06).
+  const { data: ciTypes } = useCITypes();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const rootCiId = searchParams.get('root') ?? '';
@@ -178,9 +181,9 @@ export function TopologyPage() {
             className="max-w-xs"
             options={[
               { value: '', label: t('topology.allTypes') },
-              ...ciTypeValues.map((value) => ({
-                value,
-                label: value.charAt(0).toUpperCase() + value.slice(1),
+              ...(ciTypes?.data ?? []).map((type) => ({
+                value: type.id,
+                label: localizedText(type.display_name, i18n.language) || type.name,
               })),
             ]}
           />
@@ -216,7 +219,13 @@ export function TopologyPage() {
       {error ? (
         <ErrorState
           title={t('topology.loadError')}
-          description={error instanceof Error ? error.message : undefined}
+          description={
+            error instanceof ApiError && error.status === 422
+              ? t('topology.tooLarge')
+              : error instanceof Error
+                ? error.message
+                : undefined
+          }
           retryLabel={t('common.retry')}
           onRetry={() => void refetch()}
         />

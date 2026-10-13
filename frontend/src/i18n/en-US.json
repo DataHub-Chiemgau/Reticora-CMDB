@@ -456,6 +456,7 @@
     "loadError": "The topology could not be loaded",
     "empty": "No topology data",
     "emptyHint": "Relationships appear here once they are recorded or derived from discovery.",
+    "tooLarge": "The topology holds more than 2,000 CIs. Choose a CI type, a site or a start CI.",
     "allTypes": "All CI types",
     "filterType": "Filter by CI type",
     "filterDepth": "Traversal depth",

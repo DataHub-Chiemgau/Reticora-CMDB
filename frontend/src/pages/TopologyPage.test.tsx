@@ -95,9 +95,30 @@ describe('computeOutageImpact', () => {
   });
 });
 
+const ciTypes = {
+  data: [
+    {
+      id: 'type-switch',
+      key: 'switch',
+      name: 'switch',
+      display_name: { de: 'Switch', en: 'Switch' },
+    },
+    {
+      id: 'type-server',
+      key: 'server',
+      name: 'server',
+      display_name: { de: 'Server', en: 'Server' },
+    },
+  ],
+  total: 2,
+  limit: 50,
+  offset: 0,
+  has_more: false,
+};
+
 describe('TopologyPage', () => {
   it('renders the graph and an accessible node list', async () => {
-    stubFetchRoutes({ '/topology': graph });
+    stubFetchRoutes({ '/topology': graph, '/ci-types': ciTypes });
 
     renderWithProviders(<TopologyPage />, { route: '/topology' });
 
@@ -107,7 +128,7 @@ describe('TopologyPage', () => {
   });
 
   it('shows an empty state when the tenant has no topology yet', async () => {
-    stubFetchRoutes({ '/topology': { nodes: [], edges: [] } });
+    stubFetchRoutes({ '/topology': { nodes: [], edges: [] }, '/ci-types': ciTypes });
 
     renderWithProviders(<TopologyPage />, { route: '/topology' });
 
@@ -116,19 +137,21 @@ describe('TopologyPage', () => {
   });
 
   it('passes the focused CI from the query string to the API', async () => {
-    const fetchMock = stubFetchRoutes({ '/topology': graph });
+    const fetchMock = stubFetchRoutes({ '/topology': graph, '/ci-types': ciTypes });
 
     renderWithProviders(<TopologyPage />, { route: '/topology?root=ci-1&depth=3' });
 
     await screen.findByTestId('topology-graph');
 
-    const url = String(fetchMock.mock.calls[0]?.[0]);
+    const url = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .find((entry) => entry.includes('/topology'));
     expect(url).toContain('root_ci_id=ci-1');
     expect(url).toContain('depth=3');
   });
 
   it('shows the outage impact panel when a failure is simulated', async () => {
-    stubFetchRoutes({ '/topology': graph });
+    stubFetchRoutes({ '/topology': graph, '/ci-types': ciTypes });
 
     renderWithProviders(<TopologyPage />, { route: '/topology?simulate=ci-1' });
 
@@ -136,5 +159,32 @@ describe('TopologyPage', () => {
     expect(
       screen.getByText(/Fällt „core-sw-01“ aus, sind 1 weitere CIs betroffen/),
     ).toBeInTheDocument();
+  });
+
+  it('filters by CI type id', async () => {
+    const fetchMock = stubFetchRoutes({ '/topology': graph, '/ci-types': ciTypes });
+
+    renderWithProviders(<TopologyPage />, { route: '/topology?type=type-server' });
+
+    await screen.findByTestId('topology-graph');
+    expect(await screen.findByRole('option', { name: 'Server' })).toHaveValue('type-server');
+    const topologyUrl = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .find((url) => url.includes('/topology'));
+    expect(topologyUrl).toContain('ci_type=type-server');
+  });
+
+  it('asks for a filter when the topology is too large', async () => {
+    stubFetchRoutes({
+      '/topology': new Response(
+        JSON.stringify({ title: 'Unprocessable Entity', status: 422, detail: 'too many' }),
+        { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+      ),
+      '/ci-types': ciTypes,
+    });
+
+    renderWithProviders(<TopologyPage />, { route: '/topology' });
+
+    expect(await screen.findByText(/mehr als 2.000 CIs/)).toBeInTheDocument();
   });
 });

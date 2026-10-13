@@ -2553,6 +2553,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/impact': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Joint impact of several CIs failing at once (IMP-05)
+     * @description Redundancy analysis and maintenance windows: the CIs in ci_ids fail together; a CI behind a redundant type (powered_by, member_of_cluster) is impacted only when all its providers are among the failed or impacted CIs (IMP-04). The answer lists the failed CIs, the impacted CIs with their shortest paths and a summary.
+     */
+    get: operations['getMultiImpact'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/impact/{ci_id}': {
     parameters: {
       query?: {
@@ -6721,6 +6741,27 @@ export interface components {
        * @enum {string}
        */
       face: 'front' | 'rear' | 'both';
+    };
+    ImpactAnalysis: {
+      /** @description The failed CI (single-CI short form only). */
+      failed_ci_id?: string;
+      failed_ci?: components['schemas']['TopologyNode'];
+      failed_cis: components['schemas']['TopologyNode'][];
+      rel_type?: string;
+      categories?: string[];
+      depth?: number;
+      impacted: components['schemas']['ImpactNode'][];
+      count: number;
+      summary: {
+        failed: number;
+        impacted: number;
+        certain: number;
+        heuristic: number;
+        /** @description Impacted CIs per category of the last hop of their path. */
+        by_category: {
+          [key: string]: number;
+        };
+      };
     };
     ImpactNode: components['schemas']['TopologyNode'] & {
       /** @description Reached only over an undirected network edge (connected_to), a second-class path (IMP-03). */
@@ -15846,6 +15887,7 @@ export interface operations {
       query?: {
         client_id?: string;
         site_id?: string;
+        /** @description CI type id (ci.ci_type_id) to filter by. */
         ci_type?: string;
         /** @description When set, returns a subgraph reachable from this CI. */
         root_ci_id?: string;
@@ -15868,6 +15910,15 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      /** @description Without root_ci_id the filtered topology holds more than 2,000 CIs (IMP-06); narrow it with site_id, client_id or ci_type (a CI type id) or set root_ci_id. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -15922,15 +15973,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': {
-            failed_ci_id?: string;
-            failed_ci?: components['schemas']['TopologyNode'];
-            rel_type?: string;
-            categories?: string[];
-            depth?: number;
-            impacted?: components['schemas']['ImpactNode'][];
-            count?: number;
-          };
+          'application/json': components['schemas']['ImpactAnalysis'];
         };
       };
       401: components['responses']['Unauthorized'];
@@ -15945,6 +15988,47 @@ export interface operations {
         };
       };
       500: components['responses']['InternalServerError'];
+    };
+  };
+  getMultiImpact: {
+    parameters: {
+      query: {
+        /** @description Comma-separated ids of the failing CIs (at most 100). */
+        ci_ids: string;
+        /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical). */
+        categories?: string;
+        /** @description Restrict the analysis to one relationship type. */
+        rel_type?: string;
+        /** @description Maximum hops of the impact paths. */
+        depth?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Impact analysis result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImpactAnalysis'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description Unknown category or more than 100 CIs. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   getCIImpact: {
@@ -15972,15 +16056,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': {
-            failed_ci_id?: string;
-            failed_ci?: components['schemas']['TopologyNode'];
-            rel_type?: string;
-            categories?: string[];
-            depth?: number;
-            impacted?: components['schemas']['ImpactNode'][];
-            count?: number;
-          };
+          'application/json': components['schemas']['ImpactAnalysis'];
         };
       };
       401: components['responses']['Unauthorized'];
