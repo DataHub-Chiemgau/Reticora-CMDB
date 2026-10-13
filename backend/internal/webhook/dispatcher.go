@@ -69,6 +69,9 @@ type DispatcherOptions struct {
 	// PollInterval controls how often the retry worker looks for due
 	// deliveries. A negative value disables the worker.
 	PollInterval time.Duration
+	// Events reports a delivery moved to the dead-letter queue as
+	// webhook.dead (NTF-05); optional.
+	Events events.Emitter
 	// Access decides for a subscription bound to a service account whether
 	// the account may read the event's object (RBA-08). Without it, bound
 	// subscriptions receive nothing (fail-closed).
@@ -560,6 +563,13 @@ func (d *Dispatcher) finalize(ctx context.Context, rec DeliveryRecord, statusCod
 			if updateErr := d.store.Update(ctx, rec); updateErr != nil {
 				slog.Error("update webhook delivery failed",
 					"error", updateErr, "delivery_id", rec.ID, "organization_id", rec.OrganizationID)
+			}
+		}
+		if d.opts.Events != nil {
+			if err := d.opts.Events.Emit(ctx, &events.Event{OrgID: rec.OrganizationID, Type: events.WebhookDead, EntityID: rec.SubscriptionID,
+				Data: map[string]any{"delivery_id": rec.ID, "subscription_id": rec.SubscriptionID, "event": rec.Event,
+					"attempts": rec.Attempt, "last_error": rec.Error}}); err != nil {
+				slog.Error("report dead webhook delivery", "error", err, "delivery_id", rec.ID)
 			}
 		}
 		return

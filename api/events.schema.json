@@ -30,7 +30,11 @@
         "review.resolved",
         "export.completed",
         "job.failed",
-        "entitlement.warning"
+        "entitlement.warning",
+        "entitlement.expired",
+        "invitation.created",
+        "webhook.dead",
+        "certificate.expiring"
       ]
     },
     "org_id": {

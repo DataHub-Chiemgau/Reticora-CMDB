@@ -13,6 +13,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/go-chi/chi/v5"
 )
@@ -283,3 +284,37 @@ func (failingCIRepo) List(context.Context, string, ci.FilterParams, api.Paginati
 }
 
 var errBoom = errors.New("boom")
+
+// eventRecorder records emitted events.
+type eventRecorder struct{ got []events.Event }
+
+func (e *eventRecorder) Emit(_ context.Context, ev *events.Event) error {
+	e.got = append(e.got, *ev)
+	return nil
+}
+
+// TestCompletedExportIsReported covers NTF-05 (WP-140): a completed export
+// reports export.completed for its initiator.
+func TestCompletedExportIsReported(t *testing.T) {
+	cis := ci.NewMemoryRepository()
+	seedCIs(t, cis, "org-1", 2)
+	_, worker, _, mux := newJobEnv(t, cis)
+	rec := &eventRecorder{}
+	worker.Events = rec
+	req := tenantCtx(httptest.NewRequest("POST", "/api/v1/export/jobs", strings.NewReader(`{"format":"json"}`)))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	if !worker.ProcessOne(context.Background()) {
+		t.Fatal("no job processed")
+	}
+	if len(rec.got) != 1 || rec.got[0].Type != events.ExportCompleted || rec.got[0].OrgID != "org-1" {
+		t.Fatalf("events: %+v", rec.got)
+	}
+	data := rec.got[0].Data.(map[string]any)
+	if data["format"] != "json" || data["row_count"] != 2 || data["initiated_by"] == "" {
+		t.Errorf("data: %v", data)
+	}
+}

@@ -441,3 +441,55 @@ func TestDispatcherConsumesOutboxEvents(t *testing.T) {
 		t.Errorf("event name for a legacy subscription: %v", received["/legacy"])
 	}
 }
+
+// fakeEmitter records emitted events.
+type fakeEmitter struct {
+	mu     sync.Mutex
+	events []events.Event
+}
+
+func (e *fakeEmitter) Emit(_ context.Context, ev *events.Event) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, *ev)
+	return nil
+}
+
+// TestDeadDeliveryIsReported covers NTF-05 (WP-140): a delivery moved to
+// the dead-letter queue reports webhook.dead.
+func TestDeadDeliveryIsReported(t *testing.T) {
+	repo := NewMemoryRepository()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
+	defer server.Close()
+	if err := repo.Create(context.Background(), &Subscription{OrganizationID: "org-1", Name: "hook", URL: server.URL,
+		Secret: "secret", Events: []string{"ci.created"}, IsActive: true}); err != nil {
+		t.Fatal(err)
+	}
+	emitter := &fakeEmitter{}
+	d := NewDispatcher(repo, server.Client(), DispatcherOptions{Deliveries: NewMemoryDeliveryStore(), MaxAttempts: 1, PollInterval: -1, Events: emitter})
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = d.Shutdown(ctx)
+	}()
+	d.Dispatch(context.Background(), "org-1", "ci.created", map[string]any{"id": "ci-1"})
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		emitter.mu.Lock()
+		n := len(emitter.events)
+		emitter.mu.Unlock()
+		if n > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	emitter.mu.Lock()
+	defer emitter.mu.Unlock()
+	if len(emitter.events) != 1 || emitter.events[0].Type != events.WebhookDead || emitter.events[0].OrgID != "org-1" {
+		t.Fatalf("events: %+v", emitter.events)
+	}
+	data := emitter.events[0].Data.(map[string]any)
+	if data["event"] != "ci.created" || data["attempts"] != 1 || data["subscription_id"] != subscriptionID(t, repo) {
+		t.Errorf("data: %v", data)
+	}
+}

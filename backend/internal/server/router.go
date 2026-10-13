@@ -9,6 +9,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
@@ -30,6 +31,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
@@ -59,6 +61,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
@@ -209,6 +212,9 @@ type Options struct {
 	// SignupProtection is the captcha, blocklist and per-IP limit of the
 	// signup (WP-112); without it signups answer 503.
 	SignupProtection *signup.Protection
+	// Events reports facts after their commit into the event outbox
+	// (review.created, export.completed, job.failed; NTF-05); optional.
+	Events events.Emitter
 	// Notifications are the notification stores (NTF-04); nil keeps them
 	// in memory.
 	Notifications *notify.Center
@@ -332,6 +338,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	}
 	if opts.IngestQueue != nil {
 		opts.IngestQueue.Attach(discoveryHandler)
+	}
+	if opts.Events != nil {
+		discoveryHandler.WithReviewNotifier(reviewEvents{emitter: opts.Events})
+		exportWorker.Events = opts.Events
 	}
 	registrars := []registrar{
 		identityHandler,
@@ -578,4 +588,14 @@ func notifyHandler(opts *Options) *notify.Handler {
 		opts.Notifications = notify.NewMemoryCenter()
 	}
 	return notify.NewHandler(opts.Notifications)
+}
+
+// reviewEvents reports opened review items as review.created (NTF-05).
+type reviewEvents struct{ emitter events.Emitter }
+
+func (r reviewEvents) ReviewOpened(ctx context.Context, item *reviews.Item) {
+	if err := r.emitter.Emit(ctx, &events.Event{OrgID: item.OrganizationID, Type: events.ReviewCreated, EntityID: item.ID,
+		Data: map[string]any{"id": item.ID, "kind": item.Kind, "object_key": item.ObjectKey}}); err != nil {
+		slog.Error("report opened review item", "item", item.ID, "error", err)
+	}
 }

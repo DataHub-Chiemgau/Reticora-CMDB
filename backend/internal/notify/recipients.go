@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -36,6 +37,12 @@ type Audience struct {
 	// (owner, escalation, operator, responsible, vendor).
 	CIID         string
 	ContactRoles []string
+	// DirectUserIDs are users the notification concerns personally (the
+	// initiator of an export): active users, without the permission
+	// check. Direct are addresses outside the organization's users (an
+	// invitee).
+	DirectUserIDs []string
+	Direct        []Recipient
 }
 
 // GrantSource reads the role grants of a user (permission repository).
@@ -70,7 +77,7 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 	if a.Permission == "" && (len(a.Roles) > 0 || len(a.TeamIDs) > 0 || len(a.UserIDs) > 0 || a.AllWithPermission) {
 		return nil, fmt.Errorf("an audience of users needs the object's read permission")
 	}
-	var users []candidate
+	var users, direct []candidate
 	var contacts []Recipient
 	scope := database.OrgWideScope(orgID, "")
 	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
@@ -96,6 +103,21 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 			})
 			if err != nil {
 				return fmt.Errorf("resolve users: %w", err)
+			}
+		}
+		if len(a.DirectUserIDs) > 0 {
+			rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(email, ''), COALESCE(display_name, '') FROM app_user
+				WHERE organization_id = $1 AND is_active AND id::text = ANY($2) ORDER BY display_name, id`, orgID, a.DirectUserIDs)
+			if err != nil {
+				return fmt.Errorf("resolve direct users: %w", err)
+			}
+			direct, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (candidate, error) {
+				var c candidate
+				scanErr := row.Scan(&c.id, &c.email, &c.name)
+				return c, scanErr
+			})
+			if err != nil {
+				return fmt.Errorf("resolve direct users: %w", err)
 			}
 		}
 		if a.CIID != "" && len(a.ContactRoles) > 0 {
@@ -125,6 +147,21 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 
 	out := []Recipient{}
 	seen := map[string]bool{}
+	add := func(r Recipient) {
+		if (r.UserID != "" && seen[r.UserID]) || (r.Email != "" && seen["mail:"+strings.ToLower(r.Email)]) {
+			return
+		}
+		if r.UserID != "" {
+			seen[r.UserID] = true
+		}
+		if r.Email != "" {
+			seen["mail:"+strings.ToLower(r.Email)] = true
+		}
+		out = append(out, r)
+	}
+	for _, u := range direct {
+		add(Recipient{UserID: u.id, Email: u.email, Name: u.name})
+	}
 	for _, u := range users {
 		grants, err := r.grants.AccessGrants(ctx, orgID, u.id)
 		if err != nil {
@@ -133,19 +170,14 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 		if !permission.Covers(grants, a.Permission, a.ClientID, a.SiteID) {
 			continue
 		}
-		seen[u.id] = true
-		if u.email != "" {
-			seen["mail:"+u.email] = true
-		}
-		out = append(out, Recipient{UserID: u.id, Email: u.email, Name: u.name})
+		add(Recipient{UserID: u.id, Email: u.email, Name: u.name})
 	}
 	sort.SliceStable(contacts, func(i, j int) bool { return contacts[i].Name < contacts[j].Name })
 	for _, c := range contacts {
-		if seen["mail:"+c.Email] {
-			continue
-		}
-		seen["mail:"+c.Email] = true
-		out = append(out, c)
+		add(c)
+	}
+	for _, r := range a.Direct {
+		add(r)
 	}
 	return out, nil
 }

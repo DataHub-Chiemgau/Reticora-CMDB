@@ -35,6 +35,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
@@ -267,7 +268,7 @@ func main() {
 			os.Exit(1)
 		}
 		eventStream = js
-		jobQueue = jobs.NewQueue(jobs.NewService(repos.Jobs), js)
+		jobQueue = jobs.NewQueue(jobs.NewService(repos.Jobs).WithEvents(emitterOf(auditPool)), js)
 		queueCtx, cancelQueue := context.WithTimeout(context.Background(), 30*time.Second)
 		natsErr = jobQueue.Setup(queueCtx)
 		cancelQueue()
@@ -364,6 +365,8 @@ func main() {
 		Deliveries: repos.WebhookDeliveries,
 		// The retry worker runs under its operator switch below (OPS-02).
 		PollInterval: -1,
+		// Dead deliveries are reported (NTF-05).
+		Events: emitterOf(auditPool),
 	})
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -404,6 +407,7 @@ func main() {
 		IngestQueue:      ingestQueue,
 		Signup:           signupService(cfg, auditPool, smtpSender),
 		Notifications:    notifications,
+		Events:           emitterOf(auditPool),
 		SignupProtection: signupProtection(cfg, cacheStore),
 		// Invitations need the database; in --no-db mode they answer 503.
 		InvitationAccounts: invitationAccounts(cfg),
@@ -458,6 +462,7 @@ func main() {
 		exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, blobStore)
 		if repos.Jobs != nil {
 			exportWorker.Tracker = jobs.NewService(repos.Jobs)
+			exportWorker.Events = emitterOf(auditPool)
 		}
 		workers = append(workers, server.Worker{
 			Name: config.WorkerExport,
@@ -470,7 +475,9 @@ func main() {
 	// Publish the domain events of the outbox to RETICORA_EVENTS and the
 	// webhook subscriptions (EVT-01, WP-136).
 	if repos.EventOutbox && auditPool != nil {
-		publisher := events.NewPublisher(auditPool, eventStream, webhookDispatcher)
+		// Subscribed events become notifications (NTF-05).
+		publisher := events.NewPublisher(auditPool, eventStream, webhookDispatcher,
+			notify.NewEventConsumer(notify.NewPGResolver(auditPool, permission.NewPGRepository(auditPool)), notifier))
 		setupCtx, cancelSetup := context.WithTimeout(context.Background(), 30*time.Second)
 		err = publisher.Setup(setupCtx)
 		cancelSetup()
@@ -857,4 +864,13 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// emitterOf reports facts into the event outbox of the database; nil
+// without one.
+func emitterOf(pool *pgxpool.Pool) events.Emitter {
+	if pool == nil {
+		return nil
+	}
+	return events.NewPGEmitter(pool)
 }

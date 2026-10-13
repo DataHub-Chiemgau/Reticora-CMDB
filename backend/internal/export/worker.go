@@ -9,6 +9,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
@@ -67,6 +68,9 @@ type JobWorker struct {
 	// Tracker mirrors the export job into the generic job model (JOB-01);
 	// optional.
 	Tracker jobs.Tracker
+	// Events reports a completed export as export.completed (NTF-05);
+	// optional.
+	Events events.Emitter
 }
 
 // mirror follows the status of an export job in the generic job model; a
@@ -162,6 +166,12 @@ func (w *JobWorker) process(ctx context.Context, job Job) {
 		return
 	}
 	w.mirror(ctx, &job, jobs.StatusSucceeded, "")
+	if w.Events != nil {
+		if err := w.Events.Emit(ctx, &events.Event{OrgID: job.OrganizationID, Type: events.ExportCompleted, EntityID: job.ID,
+			Data: map[string]any{"id": job.ID, "format": job.Format, "row_count": rowCount, "initiated_by": job.InitiatedBy}}); err != nil {
+			slog.Error("report completed export", "job", job.ID, "error", err)
+		}
+	}
 }
 
 func (w *JobWorker) fail(ctx context.Context, job *Job, err error) {

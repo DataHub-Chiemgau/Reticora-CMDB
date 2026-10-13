@@ -103,6 +103,9 @@ var ValidEvents = map[string]bool{
 	"export.completed":     true,
 	"job.failed":           true,
 	"entitlement.warning":  true,
+	"entitlement.expired":  true,
+	"invitation.created":   true,
+	"certificate.expiring": true,
 }
 
 // Repository defines persistence operations for webhooks.

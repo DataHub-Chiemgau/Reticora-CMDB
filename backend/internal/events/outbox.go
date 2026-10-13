@@ -6,6 +6,9 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 // Event is what a mutation records: its type, the entity it concerns and
@@ -58,4 +61,30 @@ func nilIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+// Emitter records an event outside a caller's transaction: a component
+// whose mutation has already committed (a worker, a dead letter) reports
+// what happened.
+type Emitter interface {
+	Emit(ctx context.Context, e *Event) error
+}
+
+// PGEmitter writes events into the outbox in a transaction of their
+// organization.
+type PGEmitter struct {
+	pool   *pgxpool.Pool
+	outbox *Outbox
+}
+
+// NewPGEmitter creates the emitter.
+func NewPGEmitter(pool *pgxpool.Pool) *PGEmitter { return &PGEmitter{pool: pool, outbox: NewOutbox()} }
+
+// Emit implements Emitter.
+func (e *PGEmitter) Emit(ctx context.Context, ev *Event) error {
+	scope := database.OrgWideScope(ev.OrgID, "")
+	return database.WithTenant(ctx, e.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := e.outbox.Append(ctx, tx, ev)
+		return err
+	})
 }

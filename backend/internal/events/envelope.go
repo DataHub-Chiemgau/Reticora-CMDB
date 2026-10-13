@@ -39,7 +39,7 @@ const (
 	StreamMaxBytes = 10 << 30
 )
 
-// Event types of EVT-02.
+// Event types of EVT-02, and those NTF-05 notifies of besides.
 const (
 	CICreated           = "ci.created"
 	CIChanged           = "ci.changed"
@@ -57,13 +57,19 @@ const (
 	ExportCompleted     = "export.completed"
 	JobFailed           = "job.failed"
 	EntitlementWarning  = "entitlement.warning"
+	// Further notification events of NTF-05 (WP-140).
+	EntitlementExpired  = "entitlement.expired"
+	InvitationCreated   = "invitation.created"
+	WebhookDead         = "webhook.dead"
+	CertificateExpiring = "certificate.expiring"
 )
 
-// Types lists the event types of EVT-02.
+// Types lists the event types.
 var Types = []string{
 	CICreated, CIChanged, CIDeleted, CIRestored, CIMerged, CIOffline, CIOnline,
 	RelationshipCreated, RelationshipRemoved, CollectorEnrolled, CollectorOffline,
 	ReviewCreated, ReviewResolved, ExportCompleted, JobFailed, EntitlementWarning,
+	EntitlementExpired, InvitationCreated, WebhookDead, CertificateExpiring,
 }
 
 // IsType reports whether t is an event type of EVT-02.
