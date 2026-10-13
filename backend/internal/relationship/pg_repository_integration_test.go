@@ -188,19 +188,20 @@ func TestRelationshipEdgesFollowREL02(t *testing.T) {
 		first.VerifiedBy != user || first.VerifiedAt == "" || first.LastConfirmedAt == "" || first.Confidence == nil || *first.Confidence != 0.9 {
 		t.Fatalf("manual edge with ports: %d %s", w.Code, w.Body.String())
 	}
-	for name, tc := range map[string]struct {
-		body   string
-		status int
+	// Ordered: "again" cases depend on the case before them.
+	for _, tc := range []struct {
+		name, body string
+		status     int
 	}{
-		"other port pair":     {edge(sw1p2, sw2p1), http.StatusCreated},
-		"same ports again":    {edge(sw1p1, sw2p1), http.StatusConflict},
-		"without ports":       {edge("", ""), http.StatusCreated},
-		"without ports again": {edge("", ""), http.StatusConflict},
-		"port of another CI":  {edge(sw2p1, ""), http.StatusUnprocessableEntity},
-		"confidence above 1":  {strings.Replace(edge(sw1p2, ""), "0.9", "1.5", 1), http.StatusBadRequest},
+		{"other port pair", edge(sw1p2, sw2p1), http.StatusCreated},
+		{"same ports again", edge(sw1p1, sw2p1), http.StatusConflict},
+		{"without ports", edge("", ""), http.StatusCreated},
+		{"without ports again", edge("", ""), http.StatusConflict},
+		{"port of another CI", edge(sw2p1, ""), http.StatusUnprocessableEntity},
+		{"confidence above 1", strings.Replace(edge(sw1p2, ""), "0.9", "1.5", 1), http.StatusBadRequest},
 	} {
 		if got := call(http.MethodPost, "/api/v1/relationships", tc.body); got.Code != tc.status {
-			t.Errorf("%s: %d %s, want %d", name, got.Code, got.Body.String(), tc.status)
+			t.Errorf("%s: %d %s, want %d", tc.name, got.Code, got.Body.String(), tc.status)
 		}
 	}
 	if _, err := f.Admin.Exec(bg, `UPDATE ci_relationship SET confidence = 1.5 WHERE id = $1`, first.ID); err == nil {

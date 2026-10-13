@@ -24,6 +24,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
@@ -122,6 +123,7 @@ func MemoryRepositories() Repositories {
 		Search:            search.NewMemoryRepository(),
 		AI:                ai.NewMemoryRepository(),
 		ExportJobs:        export.NewMemoryJobRepository(),
+		Jobs:              jobs.NewMemoryRepository(),
 		Privacy:           privacy.NewMemoryRepository(),
 	}
 }
@@ -171,6 +173,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Search:            search.NewPGRepository(pool),
 		AI:                ai.NewPGRepository(pool),
 		ExportJobs:        export.NewPGJobRepository(pool),
+		Jobs:              jobs.NewPGRepository(pool),
 		Privacy:           privacy.NewPGRepository(pool),
 		CIType:            citype.NewPGRepository(pool),
 		RelationshipType:  relationshiptype.NewPGRepository(pool),

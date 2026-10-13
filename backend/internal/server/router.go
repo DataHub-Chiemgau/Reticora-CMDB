@@ -35,6 +35,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
@@ -120,7 +121,9 @@ type Repositories struct {
 	Search      search.Backend
 	AI          ai.Repository
 	ExportJobs  export.JobRepository
-	Privacy     privacy.Repository
+	// Jobs is the generic job model (JOB-01).
+	Jobs    jobs.Repository
+	Privacy privacy.Repository
 	// Enterprise CMDB + asset/inventory extension (additive modules).
 	CIType            citype.Repository
 	RelationshipType  relationshiptype.Repository
@@ -292,6 +295,13 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	}
 	// New discovered CIs respect max_cis; over the limit they are held as
 	// unlicensed_ci and adopted once the limit is raised (ENT-03, CH21).
+	// Export and discovery jobs register in the generic job model (JOB-01).
+	var jobTracker jobs.Tracker
+	if repos.Jobs != nil {
+		jobTracker = jobs.NewService(repos.Jobs)
+	}
+	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
+	exportWorker.Tracker = jobTracker
 	discoveryHandler := discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
 		WithProvenance(overrideProvenance{repo: repos.Override}).
 		WithInstanceFields(repos.CIType).
@@ -321,7 +331,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		discoveryHandler,
 		topology.NewHandler(repos.CI, repos.Relationship),
 		export.NewHandler(repos.CI),
-		export.NewJobHandler(repos.ExportJobs, export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs), opts.Blobs),
+		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs),
 		asset.NewHandler(repos.Asset).
 			WithComposition(compositionParentLookup{repo: repos.Composition}).
 			WithCIs(ciLookup{repo: repos.CI}),

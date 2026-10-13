@@ -28,6 +28,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
@@ -381,6 +382,9 @@ func main() {
 	// via FOR UPDATE SKIP LOCKED, so jobs are never run twice.
 	if blobStore != nil {
 		exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, blobStore)
+		if repos.Jobs != nil {
+			exportWorker.Tracker = jobs.NewService(repos.Jobs)
+		}
 		workers = append(workers, server.Worker{
 			Name: config.WorkerExport,
 			Run:  func(ctx context.Context) { exportWorker.Run(ctx, 2*time.Second) },

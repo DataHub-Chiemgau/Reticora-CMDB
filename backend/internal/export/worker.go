@@ -9,6 +9,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 )
@@ -54,6 +55,20 @@ type JobWorker struct {
 	onError func(jobID string, err error)
 	// failures counts the errors of the current cycle (OPS-05).
 	failures int
+	// Tracker mirrors the export job into the generic job model (JOB-01);
+	// optional.
+	Tracker jobs.Tracker
+}
+
+// mirror follows the status of an export job in the generic job model; a
+// failure there does not stop the export.
+func (w *JobWorker) mirror(ctx context.Context, job *Job, status jobs.Status, errMsg string) {
+	if w.Tracker == nil {
+		return
+	}
+	if err := w.Tracker.Mirror(ctx, job.OrganizationID, "export_job", job.ID, status, errMsg); err != nil {
+		slog.Warn("mirror export job", "job", job.ID, "error", err)
+	}
 }
 
 // NewJobWorker creates a worker. A nil blobs store disables the worker: the
@@ -103,6 +118,7 @@ func (w *JobWorker) ProcessOne(ctx context.Context) bool {
 }
 
 func (w *JobWorker) process(ctx context.Context, job Job) {
+	w.mirror(ctx, &job, jobs.StatusRunning, "")
 	// The export runs with the scope its creator had when queueing it
 	// (EXP-01, TEN-06): the CI repository reads through database.WithTenant
 	// with exactly this scope. A job without a snapshot is refused rather
@@ -133,7 +149,9 @@ func (w *JobWorker) process(ctx context.Context, job Job) {
 	now := w.Now()
 	if err := w.Jobs.CompleteJob(ctx, job.OrganizationID, job.ID, key, rowCount, int64(buf.Len()), now, now.Add(w.JobTTL)); err != nil {
 		w.report(job.ID, fmt.Errorf("complete export job: %w", err))
+		return
 	}
+	w.mirror(ctx, &job, jobs.StatusSucceeded, "")
 }
 
 func (w *JobWorker) fail(ctx context.Context, job *Job, err error) {
@@ -141,6 +159,7 @@ func (w *JobWorker) fail(ctx context.Context, job *Job, err error) {
 	if ferr := w.Jobs.FailJob(ctx, job.OrganizationID, job.ID, err.Error(), w.Now()); ferr != nil {
 		w.report(job.ID, fmt.Errorf("mark export job failed: %w", ferr))
 	}
+	w.mirror(ctx, job, jobs.StatusFailed, err.Error())
 }
 
 // Run polls for pending jobs until ctx is cancelled. It is the background
