@@ -273,6 +273,7 @@ const (
 	WorkerMonitoring        = "monitoring"
 	WorkerScheduler         = "scheduler"
 	WorkerJobs              = "jobs"
+	WorkerEvents            = "events"
 )
 
 // WorkerNames lists every registered worker.
@@ -283,6 +284,7 @@ var WorkerNames = []string{
 	WorkerMonitoring,
 	WorkerScheduler,
 	WorkerJobs,
+	WorkerEvents,
 }
 
 // WorkerEnvKey returns the switch variable of a worker.

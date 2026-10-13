@@ -81,7 +81,11 @@ import (
 
 // Repositories bundles every persistence port the API depends on.
 type Repositories struct {
-	CI                ci.Repository
+	CI ci.Repository
+	// EventOutbox reports that the CI repository writes its domain events
+	// into the outbox, from which the publisher feeds the webhooks
+	// (WP-136); the CI handler then dispatches nothing itself.
+	EventOutbox       bool
 	Relationship      relationship.Repository
 	Webhook           webhook.Repository
 	WebhookDeliveries webhook.DeliveryStore
@@ -332,7 +336,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		user.NewServiceAccountHandler(repos.ServiceAccounts),
 		invitationHandler(&repos, &opts),
 		entitlement.NewHandler(opts.Entitlements),
-		ci.NewHandler(opts.CIService, opts.Dispatcher),
+		ciHandler(&repos, &opts),
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
 		discoveryHandler,
@@ -552,4 +556,13 @@ func (a pgRouteAuditor) RecordRoute(ctx context.Context, entry *audit.Entry) err
 		_, err := a.recorder.Record(ctx, tx, *entry)
 		return err
 	})
+}
+
+// ciHandler builds the CI handler; without the event outbox it hands CI
+// events to the webhook dispatcher directly.
+func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
+	if repos.EventOutbox || opts.Dispatcher == nil {
+		return ci.NewHandler(opts.CIService)
+	}
+	return ci.NewHandler(opts.CIService, opts.Dispatcher)
 }

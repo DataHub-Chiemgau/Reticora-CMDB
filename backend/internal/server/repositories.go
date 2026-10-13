@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
@@ -133,7 +134,8 @@ func MemoryRepositories() Repositories {
 // the same transaction as the mutation.
 func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Repositories {
 	return Repositories{
-		CI:                ci.NewPGRepositoryWithAudit(pool, recorder),
+		CI:                ci.NewPGRepositoryWithAudit(pool, recorder).WithEvents(events.NewOutbox()),
+		EventOutbox:       true,
 		Relationship:      relationship.NewPGRepository(pool),
 		Webhook:           webhook.NewPGRepository(pool),
 		WebhookDeliveries: webhook.NewPGDeliveryStore(pool),

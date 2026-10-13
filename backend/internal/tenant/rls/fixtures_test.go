@@ -64,6 +64,7 @@ var matrixOverrides = map[string]map[string]string{
 	"iga_connector":      {"type": "scim", "base_url": "https://scim.example"},
 	"document":           {"storage_key": ""},
 	"location":           {"kind": "site"},
+	"event_outbox":       {"type": "ci.created"},
 	// Global rows (organization_id NULL) must be system rows.
 	"lifecycle_definition":   {"is_system": "true"},
 	"relationship_type":      {"is_system": "true"},

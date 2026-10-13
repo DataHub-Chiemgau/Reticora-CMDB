@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reticora.io/schemas/events.schema.json",
+  "title": "Reticora domain event",
+  "description": "Envelope of the domain events of EVT-01/EVT-02, published on the NATS stream RETICORA_EVENTS under events.<org_id>.<type> and delivered to webhook subscriptions. Delivery is at least once: a consumer recognizes a repeated event by its id and processes the events of one entity in entity_seq order.",
+  "type": "object",
+  "required": ["id", "type", "org_id", "occurred_at", "sequence", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique id of the event; the NATS message id."
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "ci.created",
+        "ci.changed",
+        "ci.deleted",
+        "ci.restored",
+        "ci.merged",
+        "ci.offline",
+        "ci.online",
+        "relationship.created",
+        "relationship.removed",
+        "collector.enrolled",
+        "collector.offline",
+        "review.created",
+        "review.resolved",
+        "export.completed",
+        "job.failed",
+        "entitlement.warning"
+      ]
+    },
+    "org_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the mutation that raised the event was written."
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Position of the event among the organization's events, in commit order without gaps."
+    },
+    "entity_id": {
+      "type": "string",
+      "description": "The entity the event concerns (for ci.* the CI id)."
+    },
+    "entity_seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Position of the event among the events of its entity."
+    },
+    "data": {
+      "type": "object",
+      "description": "The event data; for ci.* the CI, for ci.changed with changed_fields."
+    }
+  },
+  "dependentRequired": {
+    "entity_id": ["entity_seq"],
+    "entity_seq": ["entity_id"]
+  }
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -64,6 +65,36 @@ const ciSelectColumns = `
 type PGRepository struct {
 	pool     *pgxpool.Pool
 	recorder audit.TxRecorder
+	outbox   *events.Outbox
+}
+
+// WithEvents makes every CI mutation write its domain event into the
+// outbox of its transaction (EVT-01, EVT-02).
+func (r *PGRepository) WithEvents(outbox *events.Outbox) *PGRepository {
+	r.outbox = outbox
+	return r
+}
+
+// recordEvent writes the domain event of a CI mutation in tx.
+func (r *PGRepository) recordEvent(ctx context.Context, tx pgx.Tx, eventType string, item *Item, changedFields []string) error {
+	if r.outbox == nil {
+		return nil
+	}
+	var data any = item
+	if changedFields != nil {
+		raw, err := json.Marshal(item)
+		if err != nil {
+			return fmt.Errorf("encode event data: %w", err)
+		}
+		m := map[string]any{}
+		if err = json.Unmarshal(raw, &m); err != nil {
+			return fmt.Errorf("encode event data: %w", err)
+		}
+		m["changed_fields"] = changedFields
+		data = m
+	}
+	_, err := r.outbox.Append(ctx, tx, &events.Event{OrgID: item.OrganizationID, Type: eventType, EntityID: item.ID, Data: data})
+	return err
 }
 
 // NewPGRepository creates a new PostgreSQL-backed CI repository.
@@ -300,7 +331,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 		if err := r.recordAudit(ctx, tx, "ci.created", item, map[string]interface{}{"after": item}); err != nil {
 			return err
 		}
-		return nil
+		return r.recordEvent(ctx, tx, events.CICreated, item, nil)
 	})
 }
 
@@ -439,6 +470,13 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if err := r.recordAudit(ctx, tx, action, item, map[string]interface{}{"before": before, "after": item, "fields": changes}); err != nil {
 			return err
 		}
+		changedFields := make([]string, 0, len(changes))
+		for _, change := range changes {
+			changedFields = append(changedFields, change.Field)
+		}
+		if err := r.recordEvent(ctx, tx, events.CIChanged, item, changedFields); err != nil {
+			return err
+		}
 		return nil
 	})
 
@@ -488,7 +526,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		if err := r.recordAudit(ctx, tx, "ci.deleted", before, map[string]interface{}{"before": before}); err != nil {
 			return err
 		}
-		return nil
+		return r.recordEvent(ctx, tx, events.CIDeleted, before, nil)
 	})
 }
 
@@ -512,7 +550,10 @@ func (r *PGRepository) Restore(ctx context.Context, orgID, id string) (*Item, er
 		if changeErr := r.recordCIChange(ctx, tx, orgID, id, restored.Version, "reconciliation_decision", "deleted_at", "deleted", nil); changeErr != nil {
 			return changeErr
 		}
-		return r.recordAudit(ctx, tx, "ci.restored", restored, map[string]interface{}{"reason": "resurrected_device"})
+		if err := r.recordAudit(ctx, tx, "ci.restored", restored, map[string]interface{}{"reason": "resurrected_device"}); err != nil {
+			return err
+		}
+		return r.recordEvent(ctx, tx, events.CIRestored, restored, nil)
 	})
 	return restored, err
 }

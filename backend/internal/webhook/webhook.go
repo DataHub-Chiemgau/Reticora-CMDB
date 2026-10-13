@@ -88,6 +88,21 @@ var ValidEvents = map[string]bool{
 	"composition.deleted":           true,
 	"override.changed":              true,
 	"reconciliation.policy_changed": true,
+	// The domain events of EVT-02 (WP-136); ci.updated and
+	// relationship.deleted are their former names.
+	"ci.changed":           true,
+	"ci.restored":          true,
+	"ci.merged":            true,
+	"ci.offline":           true,
+	"ci.online":            true,
+	"relationship.removed": true,
+	"collector.enrolled":   true,
+	"collector.offline":    true,
+	"review.created":       true,
+	"review.resolved":      true,
+	"export.completed":     true,
+	"job.failed":           true,
+	"entitlement.warning":  true,
 }
 
 // Repository defines persistence operations for webhooks.

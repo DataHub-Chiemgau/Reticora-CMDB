@@ -17,6 +17,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
@@ -216,6 +217,35 @@ func orgScoped(ctx context.Context, orgID string) context.Context {
 
 // Dispatch persists and queues webhook deliveries for matching subscriptions.
 func (d *Dispatcher) Dispatch(ctx context.Context, orgID, event string, payload any) {
+	d.dispatchAs(ctx, orgID, event, nil, payload)
+}
+
+// legacyNames are the former names of the events of EVT-02 that existing
+// subscriptions still use: they receive the event under its new name.
+var legacyNames = map[string][]string{
+	events.CIChanged:           {"ci.updated"},
+	events.RelationshipRemoved: {"relationship.deleted"},
+}
+
+// Consume implements events.Consumer: the outbox publisher hands every
+// committed domain event to the subscriptions of its type and of its
+// former names (WP-136). A status-only change also reaches the
+// subscriptions of ci.status_changed.
+func (d *Dispatcher) Consume(ctx context.Context, env *events.Envelope) error {
+	aliases := append([]string(nil), legacyNames[env.Type]...)
+	if env.Type == events.CIChanged {
+		var data struct {
+			ChangedFields []string `json:"changed_fields"`
+		}
+		if json.Unmarshal(env.Data, &data) == nil && len(data.ChangedFields) == 1 && data.ChangedFields[0] == "status" {
+			aliases = append(aliases, "ci.status_changed")
+		}
+	}
+	d.dispatchAs(ctx, env.OrgID, env.Type, aliases, env.Data)
+	return nil
+}
+
+func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliases []string, payload any) {
 	if d == nil || d.repo == nil {
 		return
 	}
@@ -224,10 +254,20 @@ func (d *Dispatcher) Dispatch(ctx context.Context, orgID, event string, payload 
 	// the acting principal's client scope: the lookup runs org-wide on behalf
 	// of the organization (E-08; WP-022 moves the dispatcher to a system
 	// principal per organization).
-	subs, err := d.repo.ListByEvent(orgScoped(ctx, orgID), orgID, event)
-	if err != nil {
-		slog.Error("list webhook subscriptions failed", "error", err, "organization_id", orgID, "event", event)
-		return
+	var subs []Subscription
+	seen := map[string]bool{}
+	for _, name := range append([]string{event}, aliases...) {
+		named, err := d.repo.ListByEvent(orgScoped(ctx, orgID), orgID, name)
+		if err != nil {
+			slog.Error("list webhook subscriptions failed", "error", err, "organization_id", orgID, "event", name)
+			return
+		}
+		for i := range named {
+			if !seen[named[i].ID] {
+				seen[named[i].ID] = true
+				subs = append(subs, named[i])
+			}
+		}
 	}
 	if len(subs) == 0 {
 		return

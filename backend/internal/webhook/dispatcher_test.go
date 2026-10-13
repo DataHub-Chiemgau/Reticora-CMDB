@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 )
 
 func TestDispatcherDeliversSignedWebhook(t *testing.T) {
@@ -381,5 +382,62 @@ func TestDispatcherClaimsTheFirstAttempt(t *testing.T) {
 	dispatcher.ProcessDue(context.Background())
 	if n := atomic.LoadInt32(&attempts); n != 2 {
 		t.Errorf("HTTP attempts after the lease: %d, want 2", n)
+	}
+}
+
+// TestDispatcherConsumesOutboxEvents covers EVT-02 (WP-136): the outbox
+// publisher hands domain events to the dispatcher; subscriptions of the
+// event type and of its former names receive them once, a status-only
+// change also reaches ci.status_changed.
+func TestDispatcherConsumesOutboxEvents(t *testing.T) {
+	repo := NewMemoryRepository()
+	var mu sync.Mutex
+	received := map[string][]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		received[r.URL.Path] = append(received[r.URL.Path], r.Header.Get("X-Webhook-Event"))
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	for name, evs := range map[string][]string{
+		"/new":    {"ci.changed"},
+		"/legacy": {"ci.updated"},
+		"/both":   {"ci.changed", "ci.updated"},
+		"/status": {"ci.status_changed"},
+	} {
+		if err := repo.Create(context.Background(), &Subscription{OrganizationID: "org-1", Name: name, URL: server.URL + name,
+			Secret: "secret", Events: evs, IsActive: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := NewDispatcher(repo, server.Client())
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = d.Shutdown(ctx)
+	}()
+	for _, data := range []string{`{"id":"ci-1","changed_fields":["name"]}`, `{"id":"ci-1","changed_fields":["status"]}`} {
+		if err := d.Consume(context.Background(), &events.Envelope{ID: "e", Type: events.CIChanged, OrgID: "org-1", Data: json.RawMessage(data)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		n := len(received["/new"]) + len(received["/legacy"]) + len(received["/both"]) + len(received["/status"])
+		mu.Unlock()
+		if n >= 7 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received["/new"]) != 2 || len(received["/legacy"]) != 2 || len(received["/both"]) != 2 || len(received["/status"]) != 1 {
+		t.Errorf("deliveries: %v", received)
+	}
+	if received["/legacy"][0] != "ci.changed" {
+		t.Errorf("event name for a legacy subscription: %v", received["/legacy"])
 	}
 }

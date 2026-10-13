@@ -26,6 +26,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
@@ -250,6 +251,8 @@ func main() {
 	// Jobs are distributed over the JOBS work queue on NATS (TEC-14); job
 	// kinds register their handlers with jobQueue.Handle.
 	var jobQueue *jobs.Queue
+	// The domain events reach RETICORA_EVENTS over the same connection.
+	var eventStream jetstream.JetStream
 	if cfg.IsSet("RETICORA_NATS_URL") && repos.Jobs != nil {
 		nc, natsErr := nats.Connect(cfg.NATSUrl, nats.Name("reticora-jobs"), nats.MaxReconnects(-1))
 		if natsErr != nil {
@@ -262,6 +265,7 @@ func main() {
 			slog.Error("failed to open JetStream for the job queue", "error", natsErr)
 			os.Exit(1)
 		}
+		eventStream = js
 		jobQueue = jobs.NewQueue(jobs.NewService(repos.Jobs), js)
 		queueCtx, cancelQueue := context.WithTimeout(context.Background(), 30*time.Second)
 		natsErr = jobQueue.Setup(queueCtx)
@@ -441,6 +445,19 @@ func main() {
 				return c.CountPending(ctx)
 			}),
 		})
+	}
+	// Publish the domain events of the outbox to RETICORA_EVENTS and the
+	// webhook subscriptions (EVT-01, WP-136).
+	if repos.EventOutbox && auditPool != nil {
+		publisher := events.NewPublisher(auditPool, eventStream, webhookDispatcher)
+		setupCtx, cancelSetup := context.WithTimeout(context.Background(), 30*time.Second)
+		err = publisher.Setup(setupCtx)
+		cancelSetup()
+		if err != nil {
+			slog.Error("failed to set up the event stream on NATS", "error", err)
+			os.Exit(1)
+		}
+		workers = append(workers, server.Worker{Name: config.WorkerEvents, Run: publisher.Run})
 	}
 	// Run the jobs announced on the JOBS work queue (TEC-14).
 	if jobQueue != nil {
