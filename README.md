@@ -370,3 +370,5 @@ Jede Phase ist eigenständig auslieferbar und hat ein eigenes Gate: kein offenes
 - **Phase 4 – Erweiterung (G4):** Endpoint-Agent, Mobil/Offline, SAML/SCIM, Reseller, KMS, Dedicated Instance, Management-Module (Schlüssel, Desk-Booking, Schulung, Disposition, RFID, GIS).
 - **Phase 5 – Skalierung (G5):** OpenSearch, Terraform/GitOps, Postgres-HA, PITR, Servicekosten-Analyse, Cloud-Inventar.
 - **Add-ons IGA und KI (GA):** jeweils nach G2, unabhängig voneinander.
+
+Umsetzungspläne je Phase: Phase 0/1 in [`docs/plan/implementierungsplan.md`](docs/plan/implementierungsplan.md), Phase 2 in [`docs/plan/phase2/implementierungsplan.md`](docs/plan/phase2/implementierungsplan.md) (mit [`entscheidungen.md`](docs/plan/phase2/entscheidungen.md) und [`abdeckung.csv`](docs/plan/phase2/abdeckung.csv)).
