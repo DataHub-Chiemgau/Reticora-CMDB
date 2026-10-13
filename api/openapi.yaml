@@ -11028,6 +11028,24 @@ paths:
     post:
       operationId: queryByFilterSpec
       summary: Execute a structured filter spec (saved-view DSL) against CIs or assets
+      description: >-
+        The flat fields of the filter spec are AND-ed with the filter AST in
+        where (SRC-03): groups and, or and not nest comparisons of a field
+        with eq, ne, lt, lte, gt, gte, like (* as wildcard), in or exists.
+        Fields are the whitelisted columns of the entity kind, its dynamic
+        attributes (attributes.<key>) and, for CIs, the fields of the linked
+        asset (asset.<field>). At most 10 levels and 100 nodes; an invalid
+        AST is 422 naming the node.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              properties:
+                entity_kind: { type: string, enum: [ci, asset] }
+                where: { $ref: '#/components/schemas/FilterExpr' }
       responses:
         '200':
           description: Filtered query results
@@ -11035,6 +11053,11 @@ paths:
           description: Invalid filter spec
         '401':
           description: Unauthorized
+        '422':
+          description: Invalid filter AST.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
 components:
   securitySchemes:
@@ -11892,6 +11915,27 @@ components:
           type: string
           enum: [front, rear, both]
           default: front
+    FilterExpr:
+      type: object
+      description: >-
+        One node of the filter AST (SRC-03): exactly one of and, or, not or
+        a comparison (field, op, value).
+      properties:
+        and:
+          type: array
+          items: { $ref: '#/components/schemas/FilterExpr' }
+        or:
+          type: array
+          items: { $ref: '#/components/schemas/FilterExpr' }
+        not: { $ref: '#/components/schemas/FilterExpr' }
+        field:
+          type: string
+          description: A column of the entity kind, attributes.<key> or (CIs) asset.<field>.
+        op:
+          type: string
+          enum: [eq, ne, lt, lte, gt, gte, like, in, exists]
+        value:
+          description: A string, number or boolean; a list for in.
     ImpactAnalysis:
       type: object
       required: [failed_cis, impacted, count, summary]

@@ -193,6 +193,12 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
+	if spec.Where != nil {
+		if err := spec.Where.Validate(spec.entityKind()); err != nil {
+			api.WriteFieldError(w, &api.FieldError{Field: "where", Message: err.Error(), Status: http.StatusUnprocessableEntity})
+			return
+		}
+	}
 	items, total, err := h.query.Query(r.Context(), t.OrganizationID, spec, page)
 	if err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())

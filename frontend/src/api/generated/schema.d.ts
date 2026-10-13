@@ -6333,7 +6333,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Execute a structured filter spec (saved-view DSL) against CIs or assets */
+    /**
+     * Execute a structured filter spec (saved-view DSL) against CIs or assets
+     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in or exists. Fields are the whitelisted columns of the entity kind, its dynamic attributes (attributes.<key>) and, for CIs, the fields of the linked asset (asset.<field>). At most 10 levels and 100 nodes; an invalid AST is 422 naming the node.
+     */
     post: operations['queryByFilterSpec'];
     delete?: never;
     options?: never;
@@ -6851,6 +6854,18 @@ export interface components {
        * @enum {string}
        */
       face: 'front' | 'rear' | 'both';
+    };
+    /** @description One node of the filter AST (SRC-03): exactly one of and, or, not or a comparison (field, op, value). */
+    FilterExpr: {
+      and?: components['schemas']['FilterExpr'][];
+      or?: components['schemas']['FilterExpr'][];
+      not?: components['schemas']['FilterExpr'];
+      /** @description A column of the entity kind, attributes.<key> or (CIs) asset.<field>. */
+      field?: string;
+      /** @enum {string} */
+      op?: 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'like' | 'in' | 'exists';
+      /** @description A string, number or boolean; a list for in. */
+      value?: unknown;
     };
     ImpactAnalysis: {
       /** @description The failed CI (single-CI short form only). */
@@ -26295,7 +26310,17 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': {
+          /** @enum {string} */
+          entity_kind?: 'ci' | 'asset';
+          where?: components['schemas']['FilterExpr'];
+        } & {
+          [key: string]: unknown;
+        };
+      };
+    };
     responses: {
       /** @description Filtered query results */
       200: {
@@ -26317,6 +26342,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Invalid filter AST. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };

@@ -61,6 +61,9 @@ type FilterSpec struct {
 	// instance-level values share ci.attributes).
 	Attributes map[string]any `json:"attributes,omitempty"`
 	Search     string         `json:"search,omitempty"`
+	// Where is the filter AST with and, or and not (SRC-03); it is AND-ed
+	// with the fields above.
+	Where *Expr `json:"where,omitempty"`
 }
 
 // Presets returns the standard saved views (spec §17 examples). They are
