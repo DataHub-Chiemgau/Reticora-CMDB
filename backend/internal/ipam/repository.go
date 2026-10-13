@@ -16,6 +16,12 @@ import (
 var (
 	ErrNotFound   = errors.New("not found")
 	ErrValidation = errors.New("validation failed")
+	// ErrConflict: the value is already taken (409), as a unique
+	// violation in the database.
+	ErrConflict = errors.New("conflict")
+	// ErrInUse: the record cannot be removed (422) – the default VRF or a
+	// VRF that subnets still reference.
+	ErrInUse = errors.New("in use")
 )
 
 // SubnetFilter holds optional filters for listing subnets.
@@ -261,8 +267,8 @@ func (r *MemoryRepository) UpdateIPAddress(_ context.Context, orgID, id string, 
 	if req.InterfaceID != nil {
 		a.InterfaceID = *req.InterfaceID
 	}
-	if req.Status != nil {
-		a.Status = *req.Status
+	if req.Type != nil {
+		a.Type = *req.Type
 	}
 	if req.DNSName != nil {
 		a.DNSName = *req.DNSName
@@ -317,6 +323,11 @@ func (r *MemoryRepository) GetInterface(_ context.Context, orgID, id string) (*N
 func (r *MemoryRepository) CreateInterface(_ context.Context, ni *NetworkInterface) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	for _, other := range r.interfaces {
+		if other.CIID == ni.CIID && other.Name == ni.Name {
+			return &api.ConflictError{Field: "name", Message: "the value is already taken"}
+		}
+	}
 	r.seq++
 	ni.ID = fmt.Sprintf("nic-%d", r.seq)
 	now := time.Now().UTC()
@@ -336,14 +347,20 @@ func (r *MemoryRepository) UpdateInterface(_ context.Context, orgID, id string, 
 	if req.Name != nil {
 		ni.Name = *req.Name
 	}
-	if req.MACAddress != nil {
-		ni.MACAddress = *req.MACAddress
+	if req.IfIndex != nil {
+		ni.IfIndex = req.IfIndex
 	}
-	if req.InterfaceType != nil {
-		ni.InterfaceType = *req.InterfaceType
+	if req.MAC != nil {
+		ni.MAC = *req.MAC
+	}
+	if req.IfType != nil {
+		ni.IfType = *req.IfType
 	}
 	if req.SpeedMbps != nil {
 		ni.SpeedMbps = req.SpeedMbps
+	}
+	if req.MTU != nil {
+		ni.MTU = req.MTU
 	}
 	if req.VLANID != nil {
 		ni.VLANID = *req.VLANID

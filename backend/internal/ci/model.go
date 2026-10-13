@@ -29,6 +29,9 @@ type Item struct {
 	// ParentCIID is the CI this one is physically part of (chassis → blade,
 	// AST-05); the relationship contains is projected from it (DB-05).
 	ParentCIID string `json:"parent_ci_id,omitempty"`
+	// MergedIntoID is the CI this one was merged into (CI-01, CI-12);
+	// only the merge sets it.
+	MergedIntoID string `json:"merged_into_id,omitempty"`
 	// LifecycleState is the software lifecycle; only CI types with a
 	// lifecycle model have one, and it changes through lifecycle
 	// transitions (DB-05).
@@ -59,10 +62,13 @@ type Item struct {
 	IsManual        bool           `json:"is_manual"`
 	// Version is the CI's ETag; it rises only with writes of rank >= 92
 	// (manual, import, workflow), not with observed updates (API-07).
-	Version   int64      `json:"version"`
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
-	CreatedAt string     `json:"created_at"`
-	UpdatedAt string     `json:"updated_at"`
+	Version int64 `json:"version"`
+	// SchemaVersion is the version of the materialized schema of the CI
+	// type the CI was last written against (MET-16); the database sets it.
+	SchemaVersion int        `json:"schema_version"`
+	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
+	CreatedAt     string     `json:"created_at"`
+	UpdatedAt     string     `json:"updated_at"`
 }
 
 // AssetFacts are the canonical data of the asset a CI is linked to, shown

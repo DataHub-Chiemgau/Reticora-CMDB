@@ -90,7 +90,7 @@ func TestVLANCatalog(t *testing.T) {
 		t.Errorf("subnet VLAN %+v", got)
 	}
 	ciID := f.CI(t, f.OrgA, f.Client1, "vlan-ci")
-	ni := &ipam.NetworkInterface{OrganizationID: f.OrgA, CIID: ciID, Name: "eth0", InterfaceType: "ethernet",
+	ni := &ipam.NetworkInterface{OrganizationID: f.OrgA, CIID: ciID, Name: "eth0", IfType: "ethernet",
 		AdminStatus: "up", OperStatus: "up", VLANID: global.ID}
 	if err = repo.CreateInterface(ctx, ni); err != nil {
 		t.Fatal(err)

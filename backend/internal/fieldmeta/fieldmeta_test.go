@@ -288,12 +288,12 @@ func TestValidateValuePerMET11Type(t *testing.T) {
 func TestRuleOfDefinition(t *testing.T) {
 	minLen := 2
 	def := FieldDefinition{Name: "port", DataType: TypeInteger, Required: true, EnumValues: []string{"a"},
-		Validation: &ValidationRules{Min: f64ptr(1), Max: f64ptr(9), MinLength: &minLen, Pattern: "^x"}}
+		Validation: &ValidationRules{Min: f64ptr(1), Max: f64ptr(9), MinLength: &minLen, Pattern: "^x", Patterns: []string{"y$"}}}
 	raw, err := json.Marshal(def.Rule(true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"op":"all","rules":[{"op":"required"},{"op":"enum","values":["a"]},{"op":"pattern","pattern":"^x"},` +
+	want := `{"op":"all","rules":[{"op":"required"},{"op":"enum","values":["a"]},{"op":"pattern","pattern":"^x"},{"op":"pattern","pattern":"y$"},` +
 		`{"op":"range","min":1,"max":9},{"op":"range","of":"length","min":2}]}`
 	if string(raw) != want {
 		t.Errorf("Rule = %s\nwant   %s", raw, want)

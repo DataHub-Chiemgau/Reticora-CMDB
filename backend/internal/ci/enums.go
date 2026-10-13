@@ -32,8 +32,8 @@ func IsValidStatus(value string) bool {
 	return false
 }
 
-// Discovery source values a CI may carry. Mirrors the `ci_discovery_source_check`
-// database constraint added in migration 0021.
+// Discovery source values a CI may carry (CI-01). Mirrors the
+// `ci_discovery_source_check` database constraint (migration 000108).
 const (
 	SourceSNMP    = "snmp"
 	SourceSSH     = "ssh"
@@ -44,6 +44,8 @@ const (
 	SourceAgent   = "agent"
 	SourceSweep   = "sweep"
 	SourceManual  = "manual"
+	// SourceImport marks a CI created by a user's bulk import.
+	SourceImport = "import"
 )
 
 // DiscoverySources returns every valid CI discovery source.
@@ -58,6 +60,7 @@ func DiscoverySources() []string {
 		SourceAgent,
 		SourceSweep,
 		SourceManual,
+		SourceImport,
 	}
 }
 
@@ -69,4 +72,10 @@ func IsValidDiscoverySource(value string) bool {
 		}
 	}
 	return false
+}
+
+// IsManualSource reports whether a source is a person's write: manual
+// entry or import. CIs created from it are manual (is_manual).
+func IsManualSource(value string) bool {
+	return value == SourceManual || value == SourceImport
 }

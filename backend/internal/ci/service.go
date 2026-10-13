@@ -120,7 +120,7 @@ func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, ex
 	if s.fields == nil {
 		return nil
 	}
-	defs, err := s.fields.ResolveFields(ctx, orgID, ciTypeID, ciID)
+	defs, err := resolveFields(ctx, s.fields, orgID, ciTypeID, ciID)
 	if err != nil {
 		return err
 	}

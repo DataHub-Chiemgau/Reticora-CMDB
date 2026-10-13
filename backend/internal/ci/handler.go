@@ -168,6 +168,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if item.DiscoverySource == "" {
 		item.DiscoverySource = SourceManual
 	}
+	if !IsValidDiscoverySource(item.DiscoverySource) {
+		api.WriteFieldError(w, &api.FieldError{Field: "discovery_source", Message: "unknown discovery source"})
+		return
+	}
+	// A CI a person creates — by hand or by import — is manual (CI-01).
+	item.IsManual = IsManualSource(item.DiscoverySource)
 
 	if err := h.svc.Create(r.Context(), item); err != nil {
 		if isEntitlementError(err) {

@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -104,6 +106,7 @@ func (d *AttributeDefinition) Field() Field {
 		DataType: d.DataType, Required: d.Required, DefaultValue: defaultString(d.Default),
 		EnumValues: d.EnumValues, UIGroup: d.Group, SortOrder: d.Order,
 		Validation: d.Validation, Conditional: d.Conditional, ReferenceTarget: d.ReferenceTarget,
+		IsSystem: d.IsSystem,
 	}
 }
 
@@ -296,10 +299,10 @@ func insertAttributeTx(ctx context.Context, tx pgx.Tx, orgID string, d *Attribut
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 		RETURNING `+attributeColumns, args...))
 	if err != nil {
-		return api.FieldDBError(err, attributeFields)
+		return attributeDBError(err)
 	}
 	*d = *created
-	return nil
+	return checkCompositionTx(ctx, tx, d.Key)
 }
 
 func updateAttributeTx(ctx context.Context, tx pgx.Tx, d *AttributeDefinition) error {
@@ -311,9 +314,59 @@ func updateAttributeTx(ctx context.Context, tx pgx.Tx, d *AttributeDefinition) e
 			group_name = $16, sort_order = $17, unit = $18
 		WHERE id = $1 RETURNING `+attributeColumns, args...))
 	if err != nil {
-		return api.FieldDBError(err, attributeFields)
+		return attributeDBError(err)
 	}
 	*d = *updated
+	return checkCompositionTx(ctx, tx, d.Key)
+}
+
+// compositionConstraint names the error the schema generator raises when
+// the system base and a type's definitions cannot be composed (MET-16).
+const compositionConstraint = "attribute_definition_composition"
+
+// attributeDBError maps a failed definition write onto the request.
+func attributeDBError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == compositionConstraint {
+		return &api.FieldError{Field: "key", Message: pgErr.Message, Status: http.StatusUnprocessableEntity}
+	}
+	return api.FieldDBError(err, attributeFields)
+}
+
+// checkCompositionTx publishes a definition only when every effective
+// schema that contains its key can still be composed (MET-16): the system
+// base, the organization's global attributes and each type's attributes
+// of the key. The database checks the materialized schemas (system base
+// and type) itself; this adds the organization's layer.
+func checkCompositionTx(ctx context.Context, tx pgx.Tx, key string) error {
+	rows, err := tx.Query(ctx, `SELECT `+attributeColumns+` FROM attribute_definition WHERE key = $1`, key)
+	if err != nil {
+		return fmt.Errorf("read definitions of %s: %w", key, err)
+	}
+	defs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (*AttributeDefinition, error) { return scanAttribute(row) })
+	if err != nil {
+		return fmt.Errorf("read definitions of %s: %w", key, err)
+	}
+	var system, org []fieldmeta.FieldDefinition
+	var typed [][]fieldmeta.FieldDefinition
+	for _, d := range defs {
+		switch {
+		case d.CITypeID != "":
+			typed = append(typed, []fieldmeta.FieldDefinition{d.definition()})
+		case d.IsSystem:
+			system = append(system, d.definition())
+		default:
+			org = append(org, d.definition())
+		}
+	}
+	if len(typed) == 0 {
+		typed = append(typed, nil)
+	}
+	for _, t := range typed {
+		if _, err := Compose(system, org, t); err != nil {
+			return &api.FieldError{Field: "key", Message: err.Error(), Status: http.StatusUnprocessableEntity}
+		}
+	}
 	return nil
 }
 

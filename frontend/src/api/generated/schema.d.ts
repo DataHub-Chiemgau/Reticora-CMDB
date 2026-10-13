@@ -5923,18 +5923,12 @@ export interface components {
     };
     /** @enum {string} */
     CIStatus: 'active' | 'inactive' | 'maintenance' | 'decommissioned' | 'unknown';
-    /** @enum {string} */
+    /**
+     * @description Source of the CI (CI-01): a protocol or agent of discovery, api, manual entry or a user's import.
+     * @enum {string}
+     */
     CIDiscoverySource:
-      | 'manual'
-      | 'sweep'
-      | 'snmp'
-      | 'ssh'
-      | 'redfish'
-      | 'ipmi'
-      | 'wmi'
-      | 'api'
-      | 'agent'
-      | 'discovery';
+      'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'agent' | 'sweep' | 'manual' | 'import';
     CI: {
       id: string;
       organization_id: string;
@@ -5960,6 +5954,8 @@ export interface components {
       readonly health?: 'ok' | 'warning' | 'critical' | 'unknown';
       /** Format: date-time */
       readonly health_updated_at?: string;
+      /** @description Version of the materialized attribute schema of the CI type (ci_type.schema_version) the CI was last written against: the system base composed with the type's attributes (MET-16). Set by the server when the CI is created or its type or attributes change. */
+      readonly schema_version?: number;
       /** @description Site of location_id, derived by the server. */
       readonly site_id?: string;
       /** @description Room of location_id (the location or its nearest room ancestor), derived by the server. */
@@ -5993,7 +5989,10 @@ export interface components {
       first_seen_at?: string;
       /** Format: date-time */
       last_seen_at?: string;
-      is_manual: boolean;
+      /** @description True for a CI a person created — by hand or by import (discovery_source manual or import). */
+      readonly is_manual: boolean;
+      /** @description The CI this one was merged into; only the merge sets it. */
+      readonly merged_into_id?: string;
       /** Format: date-time */
       deleted_at?: string;
       /** Format: date-time */
@@ -6047,6 +6046,7 @@ export interface components {
       attributes?: {
         [key: string]: unknown;
       };
+      /** @description Defaults to manual. With manual or import the CI is manual (is_manual); an unknown source is rejected (400 with the field). */
       discovery_source?: components['schemas']['CIDiscoverySource'];
     };
     /** @description A manual change. attributes is an RFC 7396 merge patch (nested objects merge, null removes a member). Every changed field gets a protected override that discovery does not overwrite. */
@@ -8652,6 +8652,11 @@ export interface components {
     SubnetListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Subnet'][];
     };
+    /**
+     * @description Origin of the address (NET-03): discovered by discovery, reserved, configured statically or assigned by DHCP. A manual address defaults to static.
+     * @enum {string}
+     */
+    IPAddressType: 'discovered' | 'reserved' | 'static' | 'dhcp';
     IPAddress: {
       id: string;
       organization_id: string;
@@ -8659,9 +8664,8 @@ export interface components {
       interface_id?: string;
       address: string;
       /** @description VRF of the subnet; addresses are unique per VRF and interface (NET-03). */
-      readonly vrf_id?: string;
-      /** @enum {string} */
-      status: 'active' | 'reserved' | 'deprecated' | 'dhcp' | 'available';
+      readonly vrf_id: string;
+      type: components['schemas']['IPAddressType'];
       dns_name?: string;
       description?: string;
       /** Format: date-time */
@@ -8675,32 +8679,33 @@ export interface components {
       subnet_id?: string;
       interface_id?: string;
       address: string;
-      /** @enum {string} */
-      status?: 'active' | 'reserved' | 'deprecated' | 'dhcp' | 'available';
+      type?: components['schemas']['IPAddressType'];
       dns_name?: string;
       description?: string;
     };
     UpdateIPAddressRequest: {
       subnet_id?: string;
       interface_id?: string;
-      /** @enum {string} */
-      status?: 'active' | 'reserved' | 'deprecated' | 'dhcp' | 'available';
+      type?: components['schemas']['IPAddressType'];
       dns_name?: string;
       description?: string;
     };
     IPAddressListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['IPAddress'][];
     };
+    /** @description Network interface of a CI (NET-01); the name is unique per CI. */
     NetworkInterface: {
       id: string;
       organization_id: string;
       ci_id: string;
       name: string;
-      mac_address?: string;
+      /** @description SNMP ifIndex. */
+      if_index?: number;
+      mac?: string;
       /** @enum {string} */
-      interface_type:
-        'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
+      if_type: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
+      mtu?: number;
       /** @description VLAN of the VLAN catalog (NET-01). */
       vlan_id?: string;
       is_management: boolean;
@@ -8708,6 +8713,8 @@ export interface components {
       admin_status: string;
       oper_status: string;
       description?: string;
+      /** @description Discovery runs in a row that no longer saw the interface (REC-09). */
+      readonly miss_count: number;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -8715,11 +8722,13 @@ export interface components {
     };
     CreateInterfaceRequest: {
       name: string;
-      mac_address?: string;
+      /** @description SNMP ifIndex. */
+      if_index?: number;
+      mac?: string;
       /** @enum {string} */
-      interface_type?:
-        'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
+      if_type?: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
+      mtu?: number;
       /** @description VLAN of the VLAN catalog (NET-01). */
       vlan_id?: string;
       is_management?: boolean;
@@ -8730,11 +8739,13 @@ export interface components {
     };
     UpdateInterfaceRequest: {
       name?: string;
-      mac_address?: string;
+      /** @description SNMP ifIndex. */
+      if_index?: number;
+      mac?: string;
       /** @enum {string} */
-      interface_type?:
-        'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
+      if_type?: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
+      mtu?: number;
       /** @description VLAN of the VLAN catalog (NET-01). */
       vlan_id?: string;
       is_management?: boolean;
@@ -15932,6 +15943,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -16011,6 +16023,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   returnAssignment: {

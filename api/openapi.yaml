@@ -5509,6 +5509,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -5553,6 +5555,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
     delete:
       operationId: deleteNetworkInterface
       tags: [IPAM]
@@ -9917,7 +9921,10 @@ components:
 
     CIDiscoverySource:
       type: string
-      enum: [manual, sweep, snmp, ssh, redfish, ipmi, wmi, api, agent, discovery]
+      description: >-
+        Source of the CI (CI-01): a protocol or agent of discovery, api,
+        manual entry or a user's import.
+      enum: [snmp, ssh, redfish, ipmi, wmi, api, agent, sweep, manual, import]
 
     CI:
       type: object
@@ -9973,6 +9980,15 @@ components:
           type: string
           format: date-time
           readOnly: true
+        schema_version:
+          type: integer
+          readOnly: true
+          description: >-
+            Version of the materialized attribute schema of the CI type
+            (ci_type.schema_version) the CI was last written against: the
+            system base composed with the type's attributes (MET-16). Set by
+            the server when the CI is created or its type or attributes
+            change.
         site_id:
           type: string
           readOnly: true
@@ -10037,6 +10053,14 @@ components:
           format: date-time
         is_manual:
           type: boolean
+          readOnly: true
+          description: >-
+            True for a CI a person created — by hand or by import
+            (discovery_source manual or import).
+        merged_into_id:
+          type: string
+          readOnly: true
+          description: The CI this one was merged into; only the merge sets it.
         deleted_at:
           type: string
           format: date-time
@@ -10121,7 +10145,11 @@ components:
           description: >-
             The keys _overrides, _observed, _provenance and _instance are reserved (GLO-13): 400 with the field.
         discovery_source:
-          $ref: '#/components/schemas/CIDiscoverySource'
+          allOf:
+            - $ref: '#/components/schemas/CIDiscoverySource'
+          description: >-
+            Defaults to manual. With manual or import the CI is manual
+            (is_manual); an unknown source is rejected (400 with the field).
 
     UpdateCIRequest:
       description: >-
@@ -14428,9 +14456,17 @@ components:
               items:
                 $ref: '#/components/schemas/Subnet'
 
+    IPAddressType:
+      type: string
+      enum: [discovered, reserved, static, dhcp]
+      description: >-
+        Origin of the address (NET-03): discovered by discovery, reserved,
+        configured statically or assigned by DHCP. A manual address
+        defaults to static.
+
     IPAddress:
       type: object
-      required: [id, organization_id, address, status, created_at, updated_at]
+      required: [id, organization_id, address, vrf_id, type, created_at, updated_at]
       properties:
         id:
           type: string
@@ -14446,9 +14482,8 @@ components:
           type: string
           readOnly: true
           description: VRF of the subnet; addresses are unique per VRF and interface (NET-03).
-        status:
-          type: string
-          enum: [active, reserved, deprecated, dhcp, available]
+        type:
+          $ref: '#/components/schemas/IPAddressType'
         dns_name:
           type: string
         description:
@@ -14473,9 +14508,8 @@ components:
           type: string
         address:
           type: string
-        status:
-          type: string
-          enum: [active, reserved, deprecated, dhcp, available]
+        type:
+          $ref: '#/components/schemas/IPAddressType'
         dns_name:
           type: string
         description:
@@ -14488,9 +14522,8 @@ components:
           type: string
         interface_id:
           type: string
-        status:
-          type: string
-          enum: [active, reserved, deprecated, dhcp, available]
+        type:
+          $ref: '#/components/schemas/IPAddressType'
         dns_name:
           type: string
         description:
@@ -14509,7 +14542,8 @@ components:
 
     NetworkInterface:
       type: object
-      required: [id, organization_id, ci_id, name, interface_type, is_management, is_uplink, admin_status, oper_status, created_at, updated_at]
+      description: Network interface of a CI (NET-01); the name is unique per CI.
+      required: [id, organization_id, ci_id, name, if_type, is_management, is_uplink, admin_status, oper_status, miss_count, created_at, updated_at]
       properties:
         id:
           type: string
@@ -14519,12 +14553,17 @@ components:
           type: string
         name:
           type: string
-        mac_address:
+        if_index:
+          type: integer
+          description: SNMP ifIndex.
+        mac:
           type: string
-        interface_type:
+        if_type:
           type: string
           enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
         speed_mbps:
+          type: integer
+        mtu:
           type: integer
         vlan_id:
           type: string
@@ -14539,6 +14578,10 @@ components:
           type: string
         description:
           type: string
+        miss_count:
+          type: integer
+          readOnly: true
+          description: Discovery runs in a row that no longer saw the interface (REC-09).
         created_at:
           type: string
           format: date-time
@@ -14552,12 +14595,17 @@ components:
       properties:
         name:
           type: string
-        mac_address:
+        if_index:
+          type: integer
+          description: SNMP ifIndex.
+        mac:
           type: string
-        interface_type:
+        if_type:
           type: string
           enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
         speed_mbps:
+          type: integer
+        mtu:
           type: integer
         vlan_id:
           type: string
@@ -14578,12 +14626,17 @@ components:
       properties:
         name:
           type: string
-        mac_address:
+        if_index:
+          type: integer
+          description: SNMP ifIndex.
+        mac:
           type: string
-        interface_type:
+        if_type:
           type: string
           enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
         speed_mbps:
+          type: integer
+        mtu:
           type: integer
         vlan_id:
           type: string

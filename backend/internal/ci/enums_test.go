@@ -11,7 +11,7 @@ import (
 
 var (
 	statusConstraintRe = regexp.MustCompile(`(?is)ci_status_check\s+CHECK\s*\(\s*status\s+IN\s*\(([^)]*)\)\s*\)`)
-	sourceConstraintRe = regexp.MustCompile(`(?is)discovery_source\s+TEXT\s*CHECK\s*\(\s*discovery_source\s+IN\s*\(([^)]*)\)\s*\)`)
+	sourceConstraintRe = regexp.MustCompile(`(?is)(?:discovery_source\s+TEXT|ci_discovery_source_check)\s*CHECK\s*\(\s*discovery_source\s+IN\s*\(([^)]*)\)\s*\)`)
 )
 
 // migrationConstraintValues returns the values of the last CHECK constraint in

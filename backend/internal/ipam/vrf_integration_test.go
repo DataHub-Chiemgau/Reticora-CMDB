@@ -1,13 +1,18 @@
 package ipam_test
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // TestVRFModel covers WP-082 (TEN-10, CH10, NET-02, NET-03) against
@@ -70,11 +75,11 @@ func TestVRFModel(t *testing.T) {
 	}
 
 	// IP addresses: VRF of the subnet, unique per VRF.
-	a1 := &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: defaultSubnet.ID, Address: "10.75.0.10", Status: "active"}
+	a1 := &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: defaultSubnet.ID, Address: "10.75.0.10", Type: "static"}
 	if err = repo.CreateIPAddress(ctx, a1); err != nil {
 		t.Fatal(err)
 	}
-	a2 := &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: customerSubnet.ID, Address: "10.75.0.10", Status: "active"}
+	a2 := &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: customerSubnet.ID, Address: "10.75.0.10", Type: "static"}
 	if err = repo.CreateIPAddress(ctx, a2); err != nil {
 		t.Errorf("same address in another VRF: %v", err)
 	}
@@ -82,7 +87,7 @@ func TestVRFModel(t *testing.T) {
 		t.Errorf("address VRFs: %q, %q", a1.VRFID, a2.VRFID)
 	}
 	if err = repo.CreateIPAddress(ctx, &ipam.IPAddress{OrganizationID: f.OrgA, SubnetID: defaultSubnet.ID,
-		Address: "10.75.0.10", Status: "active"}); err == nil {
+		Address: "10.75.0.10", Type: "static"}); err == nil {
 		t.Error("duplicate address in the same VRF accepted")
 	}
 
@@ -105,13 +110,43 @@ func TestVRFModel(t *testing.T) {
 		t.Errorf("rename: %+v, %v", v, renameErr)
 	}
 
+	// The HTTP contract of /api/v1/vrfs against PostgreSQL (WP-125): a taken
+	// name is 409, the default VRF and a VRF with subnets cannot be
+	// deleted (422).
+	mux := chi.NewRouter()
+	ipam.NewHandler(repo).RegisterRoutes(mux)
+	call := func(method, path, body string) int {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req = req.WithContext(tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w.Code
+	}
+	for name, tc := range map[string]struct {
+		method, path, body string
+		status             int
+	}{
+		"taken name":            {http.MethodPost, "/api/v1/vrfs", `{"name":"lab-2"}`, http.StatusConflict},
+		"rename onto taken":     {http.MethodPatch, "/api/v1/vrfs/" + third.ID, `{"name":"global"}`, http.StatusConflict},
+		"delete default":        {http.MethodDelete, "/api/v1/vrfs/" + global.ID, "", http.StatusUnprocessableEntity},
+		"delete with subnets":   {http.MethodDelete, "/api/v1/vrfs/" + third.ID, "", http.StatusUnprocessableEntity},
+		"read":                  {http.MethodGet, "/api/v1/vrfs/" + third.ID, "", http.StatusOK},
+		"read another org's id": {http.MethodGet, "/api/v1/vrfs/" + f.ID(), "", http.StatusNotFound},
+	} {
+		if got := call(tc.method, tc.path, tc.body); got != tc.status {
+			t.Errorf("%s: %d, want %d", name, got, tc.status)
+		}
+	}
+
 	// Writes need vrf:manage, reads ipam:read.
 	table, err := os.ReadFile("../server/testdata/route_permissions.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, line := range []string{"POST /api/v1/vrfs vrf:manage", "PATCH /api/v1/vrfs/{id} vrf:manage",
-		"DELETE /api/v1/vrfs/{id} vrf:manage", "GET /api/v1/vrfs ipam:read"} {
+		"DELETE /api/v1/vrfs/{id} vrf:manage", "GET /api/v1/vrfs ipam:read", "GET /api/v1/vrfs/{id} ipam:read",
+		"POST /api/v1/vlans ipam:write", "PATCH /api/v1/vlans/{id} ipam:write", "DELETE /api/v1/vlans/{id} ipam:write",
+		"GET /api/v1/vlans ipam:read", "GET /api/v1/vlans/{id} ipam:read"} {
 		if !strings.Contains(string(table), line+"\n") {
 			t.Errorf("route table lacks %q", line)
 		}

@@ -32,7 +32,7 @@ func TestCIChildTablesCarryClientScope(t *testing.T) {
 			return err
 		}
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO ip_address (organization_id, interface_id, address, status) VALUES ($1, $2, '10.42.0.1', 'active')`,
+			`INSERT INTO ip_address (organization_id, interface_id, address, type) VALUES ($1, $2, '10.42.0.1', 'static')`,
 			f.OrgA, nicID); err != nil {
 			return err
 		}

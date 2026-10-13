@@ -12,10 +12,21 @@ import (
 
 // FieldResolver returns the effective field definitions that apply to a CI:
 // global attributes, the attributes of its CI type and — when ciID is
-// non-empty — the instance-specific attributes of that single CI (spec §3).
-// Later scopes override earlier ones by field name.
+// non-empty — the instance-specific attributes of that single CI (spec §3),
+// composed by the rules of MET-16.
 type FieldResolver interface {
 	ResolveFields(ctx context.Context, orgID, ciTypeID, ciID string) ([]fieldmeta.FieldDefinition, error)
+}
+
+// resolveFields resolves the field definitions; definitions that cannot be
+// composed (MET-16) reject the write as a violation of the attribute.
+func resolveFields(ctx context.Context, fields FieldResolver, orgID, ciTypeID, ciID string) ([]fieldmeta.FieldDefinition, error) {
+	defs, err := fields.ResolveFields(ctx, orgID, ciTypeID, ciID)
+	var conflict interface{ CompositionKey() string }
+	if errors.As(err, &conflict) {
+		return nil, &ValidationError{Violations: []Violation{{Field: conflict.CompositionKey(), Detail: err.Error()}}}
+	}
+	return defs, err
 }
 
 // ValidationError reports one or more attribute values that violate the field
@@ -331,7 +342,7 @@ func (s *Service) InvalidObserved(ctx context.Context, orgID, ciTypeID, ciID str
 	if s.fields == nil || len(values) == 0 {
 		return nil, nil
 	}
-	defs, err := s.fields.ResolveFields(ctx, orgID, ciTypeID, ciID)
+	defs, err := resolveFields(ctx, s.fields, orgID, ciTypeID, ciID)
 	if err != nil {
 		return nil, err
 	}

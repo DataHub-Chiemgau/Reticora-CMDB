@@ -61,6 +61,71 @@ func TestHandler_CreateAndGet(t *testing.T) {
 	}
 }
 
+// TestHandler_CreateTakesTheFieldsOfCI01 covers CI-01 (WP-120): the
+// create path takes every declared field, defaults status and source,
+// marks a CI a person creates (manual or import) as manual and rejects an
+// unknown source.
+func TestHandler_CreateTakesTheFieldsOfCI01(t *testing.T) {
+	repo := NewMemoryRepository()
+	mux := chi.NewRouter()
+	NewHandler(NewService(repo)).RegisterRoutes(mux)
+	create := func(body string) *httptest.ResponseRecorder {
+		req := tenantCtx(httptest.NewRequest(http.MethodPost, "/api/v1/cis", bytes.NewBufferString(body)))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+
+	full := map[string]any{
+		"ci_type_id": "type-server", "name": "srv-01", "client_id": "client-1", "location_id": "loc-1",
+		"parent_ci_id": "ci-chassis", "status": "maintenance",
+		"manufacturer": "Dell", "model": "R750", "serial_number": "SN1", "hardware_uuid": "4c4c4544-0000-1000-8000-000000000001",
+		"management_ip": "10.0.0.5", "primary_mac": "00:11:22:33:44:55", "hostname": "srv-01", "fqdn": "srv-01.example.org",
+		"os_name": "Debian", "os_version": "12", "firmware_version": "2.1", "sys_object_id": "1.3.6.1.4.1.674",
+		"attributes": map[string]any{"rack_unit": 12.0},
+	}
+	raw, _ := json.Marshal(full)
+	w := create(string(raw))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range full {
+		if key == "attributes" {
+			if attrs, _ := got["attributes"].(map[string]any); attrs["rack_unit"] != 12.0 {
+				t.Errorf("attributes = %v", got["attributes"])
+			}
+			continue
+		}
+		if got[key] != want {
+			t.Errorf("%s = %v, want %v", key, got[key], want)
+		}
+	}
+	if got["discovery_source"] != SourceManual || got["is_manual"] != true {
+		t.Errorf("manual create: discovery_source %v, is_manual %v", got["discovery_source"], got["is_manual"])
+	}
+
+	for source, manual := range map[string]bool{SourceImport: true, SourceManual: true, SourceAPI: false} {
+		w = create(`{"ci_type_id":"type-server","name":"srv-` + source + `","discovery_source":"` + source + `"}`)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("%s: %d %s", source, w.Code, w.Body.String())
+		}
+		var item Item
+		_ = json.Unmarshal(w.Body.Bytes(), &item)
+		if item.IsManual != manual || item.Status != StatusActive {
+			t.Errorf("%s: is_manual %v status %q, want %v and active", source, item.IsManual, item.Status, manual)
+		}
+	}
+
+	if w = create(`{"ci_type_id":"type-server","name":"x","discovery_source":"discovery"}`); w.Code != http.StatusBadRequest ||
+		!bytes.Contains(w.Body.Bytes(), []byte(`"field":"discovery_source"`)) {
+		t.Errorf("unknown source: %d %s, want 400 with the field", w.Code, w.Body.String())
+	}
+}
+
 func TestHandler_List(t *testing.T) {
 	repo := NewMemoryRepository()
 	h := NewHandler(NewService(repo))
