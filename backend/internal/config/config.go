@@ -123,6 +123,14 @@ type Config struct {
 	// Rate Limiting
 	RateLimitRPM int // requests per minute per key/user (default 600)
 
+	// Retention (NFR-06, AUD-09): how long the retention runs keep each
+	// kind of data. The defaults are the minimums; a shorter value is a
+	// start error.
+	RetentionAuditYears     int // audit_log, 10 years
+	RetentionHistoryDays    int // ci_change, entity_change, location_change, 3 years
+	RetentionSoftDeleteDays int // soft-deleted CIs, 90 days
+	RetentionReviewItemDays int // resolved review items, 1 year
+
 	// Search
 	SearchBackend      string
 	OpenSearchURL      string
@@ -200,11 +208,16 @@ func Load() *Config {
 		OTelEndpoint: l.str("RETICORA_OTEL_ENDPOINT", ""),
 		// Opt-in: the organization_id label multiplies the HTTP metric series
 		// by the tenant count. Default off; enable for bounded-tenant setups.
-		MetricsTenantLabel:  l.boolean("RETICORA_METRICS_TENANT_LABEL", false),
-		RateLimitRPM:        l.integer("RETICORA_RATE_LIMIT_RPM", 600),
-		EgressAllowPrivate:  l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
-		PreAuthRateLimitRPM: l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
-		TrustedProxies:      l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),
+		MetricsTenantLabel: l.boolean("RETICORA_METRICS_TENANT_LABEL", false),
+		RateLimitRPM:       l.integer("RETICORA_RATE_LIMIT_RPM", 600),
+
+		RetentionAuditYears:     l.integer("RETICORA_RETENTION_AUDIT_YEARS", MinRetentionAuditYears),
+		RetentionHistoryDays:    l.integer("RETICORA_RETENTION_HISTORY_DAYS", MinRetentionHistoryDays),
+		RetentionSoftDeleteDays: l.integer("RETICORA_RETENTION_SOFT_DELETE_DAYS", MinRetentionSoftDeleteDays),
+		RetentionReviewItemDays: l.integer("RETICORA_RETENTION_REVIEW_ITEM_DAYS", MinRetentionReviewItemDays),
+		EgressAllowPrivate:      l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
+		PreAuthRateLimitRPM:     l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
+		TrustedProxies:          l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),
 
 		SearchBackend:      l.str("RETICORA_SEARCH_BACKEND", "postgres"),
 		OpenSearchURL:      l.str("RETICORA_OPENSEARCH_URL", ""),
@@ -239,6 +252,14 @@ func Load() *Config {
 
 	return cfg
 }
+
+// Minimum retention periods of NFR-06 and AUD-09.
+const (
+	MinRetentionAuditYears     = 10
+	MinRetentionHistoryDays    = 3 * 365
+	MinRetentionSoftDeleteDays = 90
+	MinRetentionReviewItemDays = 365
+)
 
 // Background workers with an independent operator switch (OPS-02). The
 // convention: worker <name> is switched by RETICORA_WORKER_<NAME>_ENABLED
@@ -344,6 +365,19 @@ func (c *Config) Validate(noDB bool) error {
 	}
 	if c.TrialMaxCIs < 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_TRIAL_MAX_CIS must not be negative, got %d", c.TrialMaxCIs))
+	}
+	for _, r := range []struct {
+		key        string
+		value, min int
+	}{
+		{"RETICORA_RETENTION_AUDIT_YEARS", c.RetentionAuditYears, MinRetentionAuditYears},
+		{"RETICORA_RETENTION_HISTORY_DAYS", c.RetentionHistoryDays, MinRetentionHistoryDays},
+		{"RETICORA_RETENTION_SOFT_DELETE_DAYS", c.RetentionSoftDeleteDays, MinRetentionSoftDeleteDays},
+		{"RETICORA_RETENTION_REVIEW_ITEM_DAYS", c.RetentionReviewItemDays, MinRetentionReviewItemDays},
+	} {
+		if r.value < r.min {
+			errs = append(errs, fmt.Errorf("%s must be at least %d (NFR-06), got %d", r.key, r.min, r.value))
+		}
 	}
 	if c.RateLimitRPM <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_RPM must be positive, got %d", c.RateLimitRPM))

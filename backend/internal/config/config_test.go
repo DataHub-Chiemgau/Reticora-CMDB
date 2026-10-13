@@ -126,6 +126,10 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 		{"unknown environment", map[string]string{"RETICORA_ENVIRONMENT": "prod"}, false, `"prod"`},
 		{"unparsable integer", map[string]string{"RETICORA_RATE_LIMIT_RPM": "many"}, false, "RETICORA_RATE_LIMIT_RPM has an invalid value"},
 		{"non-positive rate limit", map[string]string{"RETICORA_RATE_LIMIT_RPM": "0"}, false, "must be positive"},
+		{"audit retention below NFR-06", map[string]string{"RETICORA_RETENTION_AUDIT_YEARS": "9"}, false, "RETICORA_RETENTION_AUDIT_YEARS must be at least 10"},
+		{"history retention below NFR-06", map[string]string{"RETICORA_RETENTION_HISTORY_DAYS": "30"}, false, "RETICORA_RETENTION_HISTORY_DAYS must be at least 1095"},
+		{"soft-delete retention below NFR-06", map[string]string{"RETICORA_RETENTION_SOFT_DELETE_DAYS": "7"}, false, "at least 90"},
+		{"review retention below AUD-09", map[string]string{"RETICORA_RETENTION_REVIEW_ITEM_DAYS": "30"}, false, "at least 365"},
 		{"unparsable bool", map[string]string{"RETICORA_METRICS_TENANT_LABEL": "maybe"}, false, "RETICORA_METRICS_TENANT_LABEL"},
 	}
 	for _, tc := range cases {

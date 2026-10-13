@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -318,20 +319,96 @@ func VerifyEntries(entries []Entry) VerifyResult {
 // entry's stored column values must produce; for database rows it comes from
 // audit_entry_hash so the JSONB serialization cannot diverge.
 func verifyEntries(entries []Entry, expected []string) VerifyResult {
-	prevHash := GenesisHash
+	start, prevHash := int64(1), GenesisHash
+	// A chain whose oldest entries the retention run removed starts after
+	// the anchor its audit.retention entry records (AUD-09).
+	if len(entries) > 0 && entries[0].Seq != 1 {
+		if through, anchor, ok := retentionAnchor(entries, entries[0].Seq-1); ok {
+			start, prevHash = through+1, anchor
+		}
+	}
 	for i := range entries {
-		if entries[i].Seq != int64(i+1) {
-			return VerifyResult{Intact: false, Checked: i, BrokenID: entries[i].ID, BrokenAt: i + 1, BrokenReason: "sequence gap"}
+		position := i + int(start)
+		if entries[i].Seq != int64(position) {
+			return VerifyResult{Intact: false, Checked: i, BrokenID: entries[i].ID, BrokenAt: position, BrokenReason: "sequence gap"}
 		}
 		if entries[i].PreviousHash != prevHash {
-			return VerifyResult{Intact: false, Checked: i, BrokenID: entries[i].ID, BrokenAt: i + 1, BrokenReason: "previous_hash mismatch"}
+			return VerifyResult{Intact: false, Checked: i, BrokenID: entries[i].ID, BrokenAt: position, BrokenReason: "previous_hash mismatch"}
 		}
 		if expected[i] != entries[i].Hash {
-			return VerifyResult{Intact: false, Checked: i, BrokenID: entries[i].ID, BrokenAt: i + 1, BrokenReason: "hash mismatch"}
+			return VerifyResult{Intact: false, Checked: i, BrokenID: entries[i].ID, BrokenAt: position, BrokenReason: "hash mismatch"}
 		}
 		prevHash = entries[i].Hash
 	}
 	return VerifyResult{Intact: true, Checked: len(entries)}
+}
+
+// RetentionAction is the action of the entry a retention run appends: it
+// anchors the chain after the removed oldest entries (AUD-09).
+const RetentionAction = "audit.retention"
+
+// retentionAnchor finds the retention entry that removed the entries up to
+// through and returns the hash of the last removed entry. The retention
+// entry is itself part of the verified chain.
+func retentionAnchor(entries []Entry, through int64) (seq int64, anchor string, ok bool) {
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := &entries[i]
+		if e.Action != RetentionAction {
+			continue
+		}
+		deletedThrough, _ := e.Changes["deleted_through_seq"].(float64)
+		hash, _ := e.Changes["anchor_hash"].(string)
+		if int64(deletedThrough) == through && hash != "" {
+			return through, hash, true
+		}
+	}
+	return 0, "", false
+}
+
+// Purge removes the organization's entries older than cutoff — the oldest
+// part of its chain, always keeping the newest entry so the sequence goes
+// on — and appends an audit.retention entry with the number removed and the
+// anchor (seq and hash of the last removed entry), all in tx (NFR-06,
+// AUD-09). The database permits the deletion only for entries older than
+// ten years and only under app.audit_retention (migration 000119).
+func Purge(ctx context.Context, tx pgx.Tx, orgID string, cutoff time.Time) (int, error) {
+	if err := AcquireAdvisoryLock(ctx, tx, orgID); err != nil {
+		return 0, err
+	}
+	var through int64
+	var anchor string
+	err := tx.QueryRow(ctx, `
+		SELECT seq, hash FROM audit_log
+		WHERE organization_id = $1
+		  AND seq < (SELECT max(seq) FROM audit_log WHERE organization_id = $1)
+		  AND seq < COALESCE((SELECT min(seq) FROM audit_log WHERE organization_id = $1 AND timestamp >= $2),
+		                     9223372036854775807)
+		ORDER BY seq DESC LIMIT 1`, orgID, cutoff.UTC()).Scan(&through, &anchor)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("audit: find entries to remove: %w", err)
+	}
+	if _, err = tx.Exec(ctx, `SELECT set_config('app.audit_retention', 'on', true)`); err != nil {
+		return 0, fmt.Errorf("audit: declare retention: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM audit_log WHERE organization_id = $1 AND seq <= $2`, orgID, through)
+	if err != nil {
+		return 0, fmt.Errorf("audit: remove entries: %w", err)
+	}
+	if _, err = tx.Exec(ctx, `SELECT set_config('app.audit_retention', 'off', true)`); err != nil {
+		return 0, fmt.Errorf("audit: end retention: %w", err)
+	}
+	removed := int(tag.RowsAffected())
+	if _, err = (&PGRecorder{}).Record(ctx, tx, Entry{
+		OrganizationID: orgID, ActorType: "system", Action: RetentionAction, ResourceType: "audit_log", Source: SourceSystem,
+		Changes: map[string]interface{}{"deleted": removed, "deleted_through_seq": through, "anchor_hash": anchor,
+			"cutoff": cutoff.UTC().Format(time.RFC3339)},
+	}); err != nil {
+		return removed, err
+	}
+	return removed, nil
 }
 
 // Handler exposes audit read and verification endpoints.

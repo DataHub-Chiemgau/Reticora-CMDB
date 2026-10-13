@@ -313,3 +313,4 @@ AUD-05;[B];B;backend/internal/server/audit_coverage_test.go;WP-133
 AUD-09;[B];B;backend/internal/server/audit_coverage_test.go;WP-133
 MET-54;B/G1, Teil P2/G2;B;backend/internal/citype/export_audit_integration_test.go;WP-134
 AUD-07;[B];B;backend/internal/citype/export_audit_integration_test.go;WP-134
+NFR-06;[B];B;backend/internal/jobs/retention_integration_test.go;WP-135

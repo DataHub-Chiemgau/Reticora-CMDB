@@ -398,10 +398,17 @@ func main() {
 		systemScheduler = jobs.NewScheduler(jobs.NewMemoryLocker(), jobs.NewMemoryStateStore())
 	}
 	// Release expired reservations (spec §10).
-	reservationExpiry := reservation.NewSweeper(repos.Reservation, webhookDispatcher).Schedule()
-	if err = systemScheduler.Register(&reservationExpiry); err != nil {
-		slog.Error("failed to register a system job", "error", err)
-		os.Exit(1)
+	systemJobs := []jobs.Schedule{reservation.NewSweeper(repos.Reservation, webhookDispatcher).Schedule()}
+	// Retention runs per kind of data (NFR-06, AUD-09).
+	if auditPool != nil {
+		systemJobs = append(systemJobs, jobs.NewRetention(auditPool, jobs.RetentionFromDays(cfg.RetentionAuditYears,
+			cfg.RetentionHistoryDays, cfg.RetentionSoftDeleteDays, cfg.RetentionReviewItemDays)).Schedules()...)
+	}
+	for i := range systemJobs {
+		if err = systemScheduler.Register(&systemJobs[i]); err != nil {
+			slog.Error("failed to register a system job", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	// Background workers, each under its operator switch

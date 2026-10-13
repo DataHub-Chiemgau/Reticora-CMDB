@@ -144,3 +144,29 @@ func TestChainFormulaAndSequence(t *testing.T) {
 		t.Errorf("genesis: %+v", r)
 	}
 }
+
+// TestChainAfterRetention covers AUD-09 (WP-135): a chain whose oldest
+// entries a retention run removed verifies from the anchor its
+// audit.retention entry records; without the anchor the start is a gap.
+func TestChainAfterRetention(t *testing.T) {
+	log := NewLog()
+	ts := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	for i := range 4 {
+		log.Append(&Entry{ID: string(rune('a' + i)), OrganizationID: "org-1", Timestamp: ts, Action: "x", ResourceType: "ci"})
+	}
+	all := log.Entries()
+	log.Append(&Entry{ID: "r", OrganizationID: "org-1", Timestamp: ts, Action: RetentionAction, ResourceType: "audit_log",
+		Changes: map[string]interface{}{"deleted": float64(2), "deleted_through_seq": float64(2), "anchor_hash": all[1].Hash}})
+	rest := log.Entries()[2:]
+	if r := VerifyEntries(rest); !r.Intact || r.Checked != 3 {
+		t.Errorf("chain after retention: %+v", r)
+	}
+	if r := VerifyEntries(rest[:2]); r.Intact || r.BrokenReason != "sequence gap" || r.BrokenAt != 1 {
+		t.Errorf("without the anchor: %+v", r)
+	}
+	forged := append([]Entry{}, rest...)
+	forged[2].Changes = map[string]interface{}{"deleted_through_seq": float64(2), "anchor_hash": GenesisHash}
+	if r := VerifyEntries(forged); r.Intact {
+		t.Errorf("a wrong anchor verifies: %+v", r)
+	}
+}

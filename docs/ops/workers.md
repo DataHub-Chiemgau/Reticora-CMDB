@@ -26,8 +26,31 @@ stop a single worker during an incident, without touching the API.
 | `export` | `RETICORA_WORKER_EXPORT_ENABLED` | Processes queued asynchronous export jobs. Only active with object storage. A job that has been running for 15 minutes is queued again: its instance died (TEC-14). |
 | `ingest` | `RETICORA_WORKER_INGEST_ENABLED` | Consumes `ingest.>` from NATS (REC-01). The API still publishes to the queue. |
 | `monitoring` | `RETICORA_WORKER_MONITORING_ENABLED` | Evaluates alert rules and the health of the CIs. |
-| `scheduler` | `RETICORA_WORKER_SCHEDULER_ENABLED` | Runs the system jobs on their cron schedules (JOB-02). Every replica runs a scheduler; one leads through a PostgreSQL advisory lock, each job kind also runs under a lock of its own, so scaling (HPA) never runs a job twice. When the leader stops or loses its database session, another replica takes over and catches up on missed slots, at most `MaxCatchUp` per kind (state in `scheduler_run`). Registered: `reservation.expire` (every minute) releases expired reservations. |
+| `scheduler` | `RETICORA_WORKER_SCHEDULER_ENABLED` | Runs the system jobs on their cron schedules (JOB-02). Every replica runs a scheduler; one leads through a PostgreSQL advisory lock, each job kind also runs under a lock of its own, so scaling (HPA) never runs a job twice. When the leader stops or loses its database session, another replica takes over and catches up on missed slots, at most `MaxCatchUp` per kind (state in `scheduler_run`). Registered: `reservation.expire` (every minute) releases expired reservations; the retention runs (nightly, see below). |
 | `jobs` | `RETICORA_WORKER_JOBS_ENABLED` | Consumes the `JOBS` work-queue stream on NATS (`jobs.<kind>`, TEC-14): one durable consumer per job kind, the database claim runs each job once, a job whose instance died is taken over after its timeout. Only active with NATS. |
+
+## Retention runs (NFR-06, AUD-09)
+
+The scheduler deletes expired data every night, per organization and in the
+organization's transaction. A run that deleted something writes its own
+audit entry (`retention.*`).
+
+| Run | Data | Kept for | Setting (minimum) |
+|---|---|---|---|
+| `retention.audit_log` (03:17) | `audit_log` | 10 years | `RETICORA_RETENTION_AUDIT_YEARS` (10) |
+| `retention.history` (03:27) | `ci_change`, `entity_change`, `location_change` | 3 years | `RETICORA_RETENTION_HISTORY_DAYS` (1095) |
+| `retention.soft_deleted` (03:37) | soft-deleted CIs | 90 days | `RETICORA_RETENTION_SOFT_DELETE_DAYS` (90) |
+| `retention.review_items` (03:47) | resolved review items | 1 year | `RETICORA_RETENTION_REVIEW_ITEM_DAYS` (365) |
+
+A value below the minimum stops the start. The audit log keeps its chain
+verifiable: the run removes the oldest entries of a chain (never the newest)
+and appends an `audit.retention` entry with the sequence number and hash of
+the last removed entry, from which verification continues. The database
+allows the deletion only for entries older than ten years and only inside a
+retention run (migration 000119). A soft-deleted CI that is still referenced
+(asset, assignment, ticket) stays. Events (stream, 30 days), metrics
+(TimescaleDB policy, 400 days), logs (30 days) and backups (35 days) expire
+where they are kept.
 
 ## Metrics and alerts (OPS-05)
 
