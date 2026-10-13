@@ -886,6 +886,7 @@ The server is configured via environment variables:
 - `RETICORA_OPENSEARCH_URL`, `RETICORA_OPENSEARCH_USERNAME`, `RETICORA_OPENSEARCH_PASSWORD`, `RETICORA_OPENSEARCH_INDEX` — OpenSearch connection settings.
 - `RETICORA_LLM_BASE_URL`, `RETICORA_LLM_API_KEY`, `RETICORA_LLM_CHAT_MODEL`, `RETICORA_LLM_EMBEDDING_MODEL` — OpenAI-compatible chat and embedding provider settings.
 - `RETICORA_AIR_GAPPED` — `true` disables every external AI call (air-gapped profile, AI-02; default `false`).
+- `RETICORA_OFFLINE_DETECTOR_ENABLED` — the CI offline detector (scheduler run `ci.offline_detector`, every 5 min; REC-09, LCY-05): an observable, discovered CI (not `is_manual`, source not manual/import) whose `last_seen_at` is older than three times the interval of its discovery scope becomes `unknown` with the event `ci.offline`, and `active` again with `ci.online` once seen; without a scope the organization's `settings.discovery.sweep_interval` (default 24 h) applies. Default `true`.
 - `RETICORA_S3_ENDPOINT`, `RETICORA_S3_BUCKET`, `RETICORA_S3_ACCESS_KEY`, `RETICORA_S3_SECRET_KEY`, `RETICORA_S3_USE_SSL` — object storage for asynchronous export jobs (MinIO/S3).
 - `RETICORA_BLOB_DIR` — filesystem blob storage used by export jobs in `--no-db` development mode (defaults to a temp directory).
 - `RETICORA_OTEL_ENDPOINT` — OTLP HTTP collector endpoint for traces/metrics; empty (default) keeps no-op telemetry.

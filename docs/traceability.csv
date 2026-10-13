@@ -349,3 +349,5 @@ DIS-10;[B];D;collector/collectorcmd/schedule_test.go;WP-154
 NFR-03;[B], Teilumfang [P5];D;collector/collectorcmd/schedule_test.go;WP-154
 DIS-08;[Q];D;backend/internal/discovery/errors_test.go;WP-155
 INS-06;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-156
+REC-09;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-157
+LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-157

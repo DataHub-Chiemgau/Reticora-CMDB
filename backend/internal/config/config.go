@@ -167,6 +167,9 @@ type Config struct {
 	LLMEmbeddingModel string
 	// AirGapped disables every external AI call (AI-02, air-gapped profile).
 	AirGapped bool
+	// OfflineDetector switches the CI offline detector on (REC-09, LCY-05;
+	// RETICORA_OFFLINE_DETECTOR_ENABLED, default true).
+	OfflineDetector bool
 
 	// workers holds the operator switch of every registered background
 	// worker (OPS-02, see WorkerNames).
@@ -264,6 +267,7 @@ func Load() *Config {
 		LLMChatModel:      l.str("RETICORA_LLM_CHAT_MODEL", ""),
 		LLMEmbeddingModel: l.str("RETICORA_LLM_EMBEDDING_MODEL", ""),
 		AirGapped:         l.boolean("RETICORA_AIR_GAPPED", false),
+		OfflineDetector:   l.boolean("RETICORA_OFFLINE_DETECTOR_ENABLED", true),
 
 		LogLevel: slog.LevelInfo,
 	}

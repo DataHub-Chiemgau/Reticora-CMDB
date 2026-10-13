@@ -31,6 +31,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
@@ -457,6 +458,11 @@ func main() {
 			return status == entitlement.StatusActive, serr
 		}
 		systemJobs = append(systemJobs, collectorStatus.Schedule())
+		// CIs not seen for three scope intervals become unknown (REC-09,
+		// LCY-05); RETICORA_OFFLINE_DETECTOR_ENABLED switches it off.
+		if cfg.OfflineDetector {
+			systemJobs = append(systemJobs, lifecycle.NewOfflineDetector(auditPool).Schedule())
+		}
 		// Personal data of existing history entries into the vault (SEC-05).
 		systemJobs = append(systemJobs, jobs.NewPIIBackfill(auditPool).Schedule())
 		// Attribute indexes of searchable/unique attributes (DB-04, MET-15).
