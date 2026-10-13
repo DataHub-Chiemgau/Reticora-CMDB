@@ -86,7 +86,7 @@ func (h *Handler) PresetList(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"data": Presets()})
+	api.WriteJSON(w, http.StatusOK, api.CompleteList(Presets()))
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {

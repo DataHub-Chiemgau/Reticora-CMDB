@@ -157,11 +157,11 @@ func (s *PGDeliveryStore) Finish(ctx context.Context, d *QueuedDelivery) error {
 }
 
 // List implements DeliveryStore.
-func (s *PGDeliveryStore) List(ctx context.Context, orgID string, limit int) ([]QueuedDelivery, error) {
+func (s *PGDeliveryStore) List(ctx context.Context, orgID string, limit, offset int) ([]QueuedDelivery, error) {
 	var out []QueuedDelivery
 	err := inOrg(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+deliveryColumns+` FROM notification_delivery WHERE organization_id = $1
-			ORDER BY created_at DESC, id LIMIT $2`, orgID, limit)
+			ORDER BY created_at DESC, id LIMIT $2 OFFSET $3`, orgID, limit, offset)
 		if err != nil {
 			return err
 		}

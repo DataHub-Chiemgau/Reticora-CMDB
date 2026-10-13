@@ -52,7 +52,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items, "total": len(items)})
+	api.WriteJSON(w, http.StatusOK, api.CompleteList(items))
 }
 
 // Tree handles GET /api/v1/locations/tree: the visible nodes as a forest.
@@ -66,7 +66,7 @@ func (h *Handler) Tree(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"data": BuildTree(items)})
+	api.WriteJSON(w, http.StatusOK, api.CompleteList(BuildTree(items)))
 }
 
 // Get handles GET /api/v1/locations/{id}.

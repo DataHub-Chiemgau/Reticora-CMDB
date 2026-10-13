@@ -1,49 +1,115 @@
 package api
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // ErrInvalidCursor is returned when a client supplies a cursor that cannot be
-// decoded or that does not match the requested sort order.
+// decoded, whose signature does not verify, or that does not match the
+// requested sort order.
 var ErrInvalidCursor = errors.New("invalid cursor")
 
-// Cursor is the decoded form of an opaque keyset-pagination cursor. It pins the
-// sort order the cursor was created with plus the (sort value, id) tuple of the
-// last row of the previous page, so paging stays stable while rows are inserted
-// or deleted concurrently.
+// Cursor is the decoded form of an opaque pagination cursor (API-02). A
+// keyset cursor pins the sort order it was created with plus the (sort
+// value, id) tuple of the last row of the previous page, so paging stays
+// stable while rows are inserted or deleted concurrently. Lists without a
+// keyset order use an offset cursor (Offset set, no ID); ParsePagination
+// turns it into PaginationParams.Offset.
 type Cursor struct {
-	Sort  string `json:"s"`
-	Dir   string `json:"d"`
-	Value string `json:"v"`
-	ID    string `json:"i"`
+	Sort   string `json:"s,omitempty"`
+	Dir    string `json:"d,omitempty"`
+	Value  string `json:"v,omitempty"`
+	ID     string `json:"i,omitempty"`
+	Offset int    `json:"o,omitempty"`
 }
 
-// EncodeCursor serialises a cursor into an opaque, URL-safe token.
+// IsOffset reports whether c is an offset cursor rather than a keyset one.
+func (c Cursor) IsOffset() bool { return c.ID == "" && c.Offset > 0 }
+
+// cursorKey signs cursors (HMAC-SHA256). The server sets it from the master
+// key so every replica accepts the cursors of the others; until then a
+// random per-process key is used.
+var cursorKey = struct {
+	sync.RWMutex
+	key []byte
+}{key: randomCursorKey()}
+
+func randomCursorKey() []byte {
+	k := make([]byte, 32)
+	_, _ = rand.Read(k)
+	return k
+}
+
+// SetCursorKey sets the key cursors are signed and verified with. A key
+// shorter than 16 bytes is refused.
+func SetCursorKey(key []byte) error {
+	if len(key) < 16 {
+		return errors.New("cursor key must be at least 16 bytes")
+	}
+	cursorKey.Lock()
+	cursorKey.key = append([]byte(nil), key...)
+	cursorKey.Unlock()
+	return nil
+}
+
+// cursorMACLen is the length of the truncated HMAC in a cursor token.
+const cursorMACLen = 16
+
+func cursorMAC(payload []byte) []byte {
+	cursorKey.RLock()
+	mac := hmac.New(sha256.New, cursorKey.key)
+	cursorKey.RUnlock()
+	mac.Write(payload)
+	return mac.Sum(nil)[:cursorMACLen]
+}
+
+// EncodeCursor serialises a cursor into an opaque, URL-safe token: the
+// base64url payload and its HMAC, separated by a dot. Clients cannot forge
+// or alter a cursor (API-02).
 func EncodeCursor(c Cursor) string {
 	payload, err := json.Marshal(c)
 	if err != nil {
 		return ""
 	}
-	return base64.RawURLEncoding.EncodeToString(payload)
+	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(cursorMAC(payload))
 }
 
-// DecodeCursor parses an opaque cursor token.
+// EncodeOffsetCursor returns the cursor of the page starting at offset.
+func EncodeOffsetCursor(offset int) string {
+	return EncodeCursor(Cursor{Offset: offset})
+}
+
+// DecodeCursor verifies and parses an opaque cursor token.
 func DecodeCursor(raw string) (Cursor, error) {
-	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
+	body, sig, ok := strings.Cut(strings.TrimSpace(raw), ".")
+	if !ok {
+		return Cursor{}, fmt.Errorf("%w: not signed", ErrInvalidCursor)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(body)
 	if err != nil {
 		return Cursor{}, fmt.Errorf("%w: not base64url", ErrInvalidCursor)
+	}
+	mac, err := base64.RawURLEncoding.DecodeString(sig)
+	if err != nil || !hmac.Equal(mac, cursorMAC(payload)) {
+		return Cursor{}, fmt.Errorf("%w: signature does not verify", ErrInvalidCursor)
 	}
 	var c Cursor
 	if err := json.Unmarshal(payload, &c); err != nil {
 		return Cursor{}, fmt.Errorf("%w: malformed payload", ErrInvalidCursor)
 	}
-	if c.ID == "" {
+	if c.ID == "" && c.Offset <= 0 {
 		return Cursor{}, fmt.Errorf("%w: missing id", ErrInvalidCursor)
+	}
+	if c.Offset < 0 {
+		return Cursor{}, fmt.Errorf("%w: negative offset", ErrInvalidCursor)
 	}
 	return c, nil
 }

@@ -370,7 +370,7 @@ export interface paths {
   '/api/v1/cis/{id}/changes': {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -401,7 +401,7 @@ export interface paths {
   '/api/v1/audit': {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -5818,6 +5818,8 @@ export interface components {
       updated_at: string;
     };
     AttributeDefinitionListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['AttributeDefinition'][];
       total?: number;
       limit?: number;
@@ -6025,6 +6027,8 @@ export interface components {
       updated_at: string;
     };
     CITypeListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['CIType'][];
       total?: number;
       limit?: number;
@@ -6115,6 +6119,8 @@ export interface components {
       token?: string;
     };
     InvitationListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['Invitation'][];
       total: number;
       limit: number;
@@ -6217,6 +6223,8 @@ export interface components {
     };
     IGAArray: components['schemas']['IGAObject'][];
     IGAListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data?: components['schemas']['IGAObject'][];
       total?: number;
       limit?: number;
@@ -6977,6 +6985,8 @@ export interface components {
       teams: string[] | null;
     };
     ExportJobListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['ExportJob'][];
       total: number;
       limit: number;
@@ -8085,10 +8095,14 @@ export interface components {
       parent_id?: string;
     };
     LocationListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['Location'][];
       total: number;
     };
     LocationTreeResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['LocationTreeNode'][];
     };
     ValidationProblem: components['schemas']['ProblemDetail'] & {
@@ -8331,6 +8345,8 @@ export interface components {
       key: string;
     };
     APIKeyListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['APIKey'][];
       total: number;
       limit: number;
@@ -8377,6 +8393,8 @@ export interface components {
       updated_at: string;
     };
     ServiceAccountListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['ServiceAccount'][];
       total: number;
       limit: number;
@@ -8417,6 +8435,8 @@ export interface components {
       created_at: string;
     };
     OperatorOrgListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['OperatorOrg'][];
       total: number;
       limit: number;
@@ -8441,6 +8461,8 @@ export interface components {
       entry_hash: string;
     };
     OperatorAuditListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['OperatorAuditEntry'][];
       total: number;
       limit: number;
@@ -9583,6 +9605,8 @@ export interface components {
       updated_at: string;
     };
     SearchResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['SearchHit'][];
       total: number;
       limit: number;
@@ -9734,7 +9758,7 @@ export interface components {
   parameters: {
     /** @description Resource identifier. */
     ResourceID: string;
-    /** @description Maximum number of items to return. */
+    /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
     Limit: number;
     /**
      * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -9742,9 +9766,11 @@ export interface components {
      */
     Offset: number;
     /**
-     * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-     *     Cursors are bound to the sort order they were issued for; sending one
-     *     with a different `sort_by`/`sort_dir` combination yields 400.
+     * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+     *     are HMAC-signed by the server (API-02); a forged or altered cursor
+     *     yields 400. Keyset cursors are bound to the sort order they were
+     *     issued for; sending one with a different `sort_by`/`sort_dir`
+     *     combination yields 400.
      */
     Cursor: string;
     /** @description Free-text search term. */
@@ -9983,8 +10009,16 @@ export interface operations {
   listOperatorAudit: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -10250,7 +10284,7 @@ export interface operations {
   listCIs: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -10258,9 +10292,11 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         /**
-         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-         *     Cursors are bound to the sort order they were issued for; sending one
-         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
         /** @description Free-text search term. */
@@ -10439,7 +10475,7 @@ export interface operations {
   listCIChanges: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -10472,7 +10508,7 @@ export interface operations {
   listAuditEntries: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -10607,8 +10643,16 @@ export interface operations {
   listRelationships: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -10735,8 +10779,16 @@ export interface operations {
   listWebhooks: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -10903,8 +10955,16 @@ export interface operations {
   listWebhookDeliveries: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -10938,8 +10998,16 @@ export interface operations {
   listWebhookDeadLetters: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -11023,8 +11091,16 @@ export interface operations {
   listDiscoveryJobs: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -11136,8 +11212,16 @@ export interface operations {
   listExportJobs: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -11262,7 +11346,7 @@ export interface operations {
   listAssets: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -11270,9 +11354,11 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         /**
-         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-         *     Cursors are bound to the sort order they were issued for; sending one
-         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
         /** @description Free-text search term. */
@@ -11413,7 +11499,7 @@ export interface operations {
   listAssignments: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -11421,9 +11507,11 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         /**
-         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-         *     Cursors are bound to the sort order they were issued for; sending one
-         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
         /** @description Free-text search term. */
@@ -11534,7 +11622,7 @@ export interface operations {
   listDocuments: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -11542,9 +11630,11 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         /**
-         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-         *     Cursors are bound to the sort order they were issued for; sending one
-         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
         /** @description Free-text search term. */
@@ -11683,8 +11773,16 @@ export interface operations {
   listOrders: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -11925,8 +12023,16 @@ export interface operations {
   listMaintenanceWindows: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -12104,8 +12210,16 @@ export interface operations {
   listDisposalRecords: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -12187,8 +12301,16 @@ export interface operations {
   listKeys: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -12408,8 +12530,16 @@ export interface operations {
   listTrainings: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -12629,8 +12759,16 @@ export interface operations {
   listDesks: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -12904,8 +13042,16 @@ export interface operations {
   listAssetLocations: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -12936,8 +13082,16 @@ export interface operations {
   listAgents: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -13177,8 +13331,16 @@ export interface operations {
   listSecurityFindings: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -13310,8 +13472,16 @@ export interface operations {
   listConsumables: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -13449,8 +13619,16 @@ export interface operations {
   listConsumableMovements: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -13510,7 +13688,7 @@ export interface operations {
   listStocktakes: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -13518,9 +13696,11 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         /**
-         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-         *     Cursors are bound to the sort order they were issued for; sending one
-         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
         /** @description Free-text search term. */
@@ -13660,8 +13840,16 @@ export interface operations {
   listStocktakeScans: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -13723,8 +13911,16 @@ export interface operations {
   getStocktakeDifference: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -13794,7 +13990,7 @@ export interface operations {
   listTickets: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -13802,9 +13998,11 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         /**
-         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-         *     Cursors are bound to the sort order they were issued for; sending one
-         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
         /** @description Free-text search term. */
@@ -13947,8 +14145,16 @@ export interface operations {
   listTicketComments: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -14135,8 +14341,16 @@ export interface operations {
   listUsers: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -14460,8 +14674,16 @@ export interface operations {
   listReviewItems: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -14572,8 +14794,16 @@ export interface operations {
   listDiscoveryReviewItems: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -14791,8 +15021,16 @@ export interface operations {
   listClients: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -14928,8 +15166,16 @@ export interface operations {
   listSites: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -15067,8 +15313,16 @@ export interface operations {
   listBuildings: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -15206,8 +15460,16 @@ export interface operations {
   listRooms: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -15345,8 +15607,16 @@ export interface operations {
   listRacks: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -15486,8 +15756,16 @@ export interface operations {
   listRackMounts: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -15645,8 +15923,16 @@ export interface operations {
   listCables: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -15780,8 +16066,16 @@ export interface operations {
   listContacts: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -15916,8 +16210,16 @@ export interface operations {
   listCIContacts: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -16002,8 +16304,16 @@ export interface operations {
   listNotifications: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -16137,6 +16447,8 @@ export interface operations {
         };
         content: {
           'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+            next_cursor?: string;
             data: components['schemas']['NotificationChannel'][];
           };
         };
@@ -16250,8 +16562,16 @@ export interface operations {
   listNotificationDeliveries: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
       };
       header?: never;
       path?: never;
@@ -16266,6 +16586,8 @@ export interface operations {
         };
         content: {
           'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+            next_cursor?: string;
             data: components['schemas']['NotificationDelivery'][];
           };
         };
@@ -16276,8 +16598,16 @@ export interface operations {
   listVRFs: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -16421,8 +16751,16 @@ export interface operations {
   listVLANs: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -16559,8 +16897,16 @@ export interface operations {
   listSubnets: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -16696,8 +17042,16 @@ export interface operations {
   listSubnetAddresses: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -16729,8 +17083,16 @@ export interface operations {
   listIPAddresses: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -16865,8 +17227,16 @@ export interface operations {
   listCIInterfaces: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -17070,8 +17440,16 @@ export interface operations {
   listCIRelationships: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -17103,8 +17481,16 @@ export interface operations {
   listCollectors: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -17358,8 +17744,16 @@ export interface operations {
   listDiscoveryScopes: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -18176,8 +18570,16 @@ export interface operations {
   listTeams: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -18393,8 +18795,16 @@ export interface operations {
   listRoles: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -18744,8 +19154,16 @@ export interface operations {
   listSLAPolicies: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -18803,8 +19221,16 @@ export interface operations {
   listSLABreaches: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -18967,8 +19393,16 @@ export interface operations {
   listFormDefinitions: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -19104,8 +19538,16 @@ export interface operations {
   listFormSubmissions: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -19176,8 +19618,16 @@ export interface operations {
   listAllFormSubmissions: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -19235,8 +19685,16 @@ export interface operations {
   listWorkflows: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -19401,8 +19859,16 @@ export interface operations {
   listWorkflowRuns: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -19487,8 +19953,16 @@ export interface operations {
   listComplianceRules: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -19647,8 +20121,16 @@ export interface operations {
   listComplianceResults: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -21603,8 +22085,16 @@ export interface operations {
         q?: string;
         /** @description Comma-separated entity type filter. */
         type?: string;
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -22119,6 +22609,8 @@ export interface operations {
         };
         content: {
           'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+            next_cursor?: string;
             data: components['schemas']['CIType'][];
           };
         };
@@ -22536,6 +23028,8 @@ export interface operations {
         };
         content: {
           'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+            next_cursor?: string;
             data: components['schemas']['FieldProvenance'][];
           };
         };
@@ -23324,8 +23818,16 @@ export interface operations {
   listRelationshipTypes: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.

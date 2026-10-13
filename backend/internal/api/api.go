@@ -16,8 +16,9 @@ import (
 // DefaultPageLimit is used when a request does not specify a limit.
 const DefaultPageLimit = 50
 
-// MaxPageLimit caps the page size a client may request.
-const MaxPageLimit = 100
+// MaxPageLimit caps the page size a client may request (API-02); a larger
+// limit is capped to it.
+const MaxPageLimit = 200
 
 // PaginationParams holds pagination parameters. Both the legacy
 // limit/offset form and the cursor (keyset) form are supported; when Cursor is
@@ -32,14 +33,17 @@ type PaginationParams struct {
 	CursorError error
 }
 
-// ParsePagination extracts pagination parameters from the request query. A
-// malformed cursor is reported through PaginationParams.CursorError so callers
-// can reject the request instead of silently falling back to offset paging.
+// ParsePagination extracts pagination parameters from the request query
+// (API-02): limit (default 50, at most 200; a larger value is capped),
+// offset and the signed cursor. An offset cursor sets Offset; a keyset
+// cursor is returned in Cursor. A malformed or forged cursor is reported
+// through PaginationParams.CursorError so callers can reject the request
+// instead of silently falling back to the first page.
 func ParsePagination(r *http.Request) PaginationParams {
 	p := PaginationParams{Limit: DefaultPageLimit, Offset: 0}
 	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= MaxPageLimit {
-			p.Limit = n
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			p.Limit = min(n, MaxPageLimit)
 		}
 	}
 	if v := r.URL.Query().Get("offset"); v != "" {
@@ -51,6 +55,10 @@ func ParsePagination(r *http.Request) PaginationParams {
 		cursor, err := DecodeCursor(v)
 		if err != nil {
 			p.CursorError = err
+			return p
+		}
+		if cursor.IsOffset() {
+			p.Offset = cursor.Offset
 			return p
 		}
 		p.Cursor = &cursor
@@ -87,13 +95,45 @@ const ProblemContentType = "application/problem+json"
 // it is the trace_id of a problem.
 const RequestIDHeader = "X-Request-ID"
 
+// CompleteList is the ListResponse of a list that is always returned in
+// full (a small catalog, a sub-collection, a tree): one page, no
+// next_cursor.
+func CompleteList[T any](items []T) ListResponse[T] {
+	if items == nil {
+		items = []T{}
+	}
+	return ListResponse[T]{Data: items, Total: len(items), Limit: len(items)}
+}
+
+// pagedList is implemented by ListResponse: it fills next_cursor when the
+// handler did not set one.
+type pagedList interface {
+	withNextCursor() any
+}
+
+// withNextCursor sets an offset cursor for the next page when the handler
+// reports more rows (HasMore) but issued no keyset cursor, so every list
+// answers with next_cursor (API-02).
+func (l ListResponse[T]) withNextCursor() any {
+	if l.NextCursor != "" {
+		return l
+	}
+	if l.HasMore && len(l.Data) > 0 {
+		l.NextCursor = EncodeOffsetCursor(l.Offset + len(l.Data))
+	}
+	return l
+}
+
 // WriteJSON writes a JSON response. An error status (4xx/5xx) goes through
 // WriteProblemBody, so every error carries the problem media type and a
-// trace_id.
+// trace_id; a ListResponse gets its next_cursor.
 func WriteJSON(w http.ResponseWriter, status int, v any) {
 	if status >= http.StatusBadRequest {
 		WriteProblemBody(w, status, v)
 		return
+	}
+	if list, ok := v.(pagedList); ok {
+		v = list.withNextCursor()
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

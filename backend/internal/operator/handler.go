@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -164,14 +163,12 @@ func (h *Handler) ListOrgs(w http.ResponseWriter, r *http.Request) {
 
 // ListAudit lists operator_audit, newest first.
 func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
-	limit, offset := 50, 0
-	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 500 {
-		limit = v
+	page := api.ParsePagination(r)
+	if page.CursorError != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", page.CursorError.Error())
+		return
 	}
-	if v, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && v >= 0 {
-		offset = v
-	}
-	entries, total, err := h.audit.List(r.Context(), limit, offset)
+	entries, total, err := h.audit.List(r.Context(), page.Limit, page.Offset)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -179,8 +176,8 @@ func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
 	if entries == nil {
 		entries = []AuditEntry{}
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[AuditEntry]{Data: entries, Total: total, Limit: limit, Offset: offset,
-		HasMore: offset+len(entries) < total})
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[AuditEntry]{Data: entries, Total: total, Limit: page.Limit, Offset: page.Offset,
+		HasMore: page.Offset+len(entries) < total})
 }
 
 // VerifyAudit recomputes the operator audit hash chain.

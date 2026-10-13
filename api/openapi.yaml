@@ -307,6 +307,7 @@ paths:
       summary: List the operator audit, newest first
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -904,6 +905,7 @@ paths:
       summary: List relationships
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: ci_id
           in: query
@@ -1031,6 +1033,7 @@ paths:
       summary: List webhook subscriptions
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: event
           in: query
@@ -1179,6 +1182,7 @@ paths:
         reached.
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -1207,6 +1211,7 @@ paths:
         find permanently failed deliveries and replay them.
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -1284,6 +1289,7 @@ paths:
       summary: List discovery ingest jobs
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: status
           in: query
@@ -1395,6 +1401,7 @@ paths:
         time-limited signed download URL.
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -1812,6 +1819,7 @@ paths:
       summary: List internal orders
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - $ref: '#/components/parameters/Search'
         - name: status
@@ -1995,6 +2003,7 @@ paths:
       summary: List maintenance windows
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: status
           in: query
@@ -2118,6 +2127,7 @@ paths:
       summary: List revision-safe disposal records (append-only)
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: method
           in: query
@@ -2185,6 +2195,7 @@ paths:
       summary: List key items
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - $ref: '#/components/parameters/Search'
       responses:
@@ -2333,6 +2344,7 @@ paths:
       summary: List training courses
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - $ref: '#/components/parameters/Search'
       responses:
@@ -2477,6 +2489,7 @@ paths:
       summary: List desks
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - $ref: '#/components/parameters/Search'
       responses:
@@ -2667,6 +2680,7 @@ paths:
       summary: Asset GPS location history
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -2685,6 +2699,7 @@ paths:
       summary: List registered endpoint agents
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -2896,6 +2911,7 @@ paths:
       summary: List security findings (patch posture / vulnerabilities per CI)
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: ci_id
           in: query
@@ -3000,6 +3016,7 @@ paths:
       summary: List consumable stock items
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - $ref: '#/components/parameters/Search'
         - name: category
@@ -3105,6 +3122,7 @@ paths:
       summary: List stock movements of a consumable
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -3256,6 +3274,7 @@ paths:
       summary: List recorded scans for a stocktake
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -3302,6 +3321,7 @@ paths:
       description: Returns every scan whose result deviates from the expected inventory (missing, surplus, damaged, wrong_location), enriched with the asset details of the affected assets.
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -3484,6 +3504,7 @@ paths:
       summary: List comments for a ticket
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -3640,6 +3661,7 @@ paths:
       summary: List users
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - $ref: '#/components/parameters/Search'
       responses:
@@ -3921,6 +3943,7 @@ paths:
         dashboard's escalation).
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: status
           in: query
@@ -4028,6 +4051,7 @@ paths:
       summary: List reconciliation review items (deprecated, use /api/v1/review-items)
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: status
           in: query
@@ -4247,6 +4271,7 @@ paths:
       summary: List clients
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -4347,6 +4372,7 @@ paths:
       summary: List sites
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - $ref: '#/components/parameters/ClientID'
       responses:
@@ -4450,6 +4476,7 @@ paths:
       summary: List buildings
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: site_id
           in: query
@@ -4556,6 +4583,7 @@ paths:
       summary: List rooms
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: building_id
           in: query
@@ -4662,6 +4690,7 @@ paths:
       summary: List racks
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: room_id
           in: query
@@ -4774,6 +4803,7 @@ paths:
       summary: List mounts in a rack
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -4896,6 +4926,7 @@ paths:
       summary: List cables
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -4992,6 +5023,7 @@ paths:
       summary: List contacts
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - $ref: '#/components/parameters/ClientID'
       responses:
@@ -5091,6 +5123,7 @@ paths:
       summary: List contacts linked to a CI
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -5150,6 +5183,7 @@ paths:
       description: Newest first (NTF-04, UI-16); `unread=true` lists the unread ones only.
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - {name: unread, in: query, schema: {type: boolean}}
       responses:
@@ -5247,6 +5281,9 @@ paths:
                 type: object
                 required: [data]
                 properties:
+                  next_cursor:
+                    type: string
+                    description: Opaque signed cursor for the next page (API-02); absent on the last page.
                   data:
                     type: array
                     items:
@@ -5342,6 +5379,7 @@ paths:
       summary: Latest notification deliveries with their status
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
           description: Deliveries, newest first
@@ -5351,6 +5389,9 @@ paths:
                 type: object
                 required: [data]
                 properties:
+                  next_cursor:
+                    type: string
+                    description: Opaque signed cursor for the next page (API-02); absent on the last page.
                   data:
                     type: array
                     items:
@@ -5365,6 +5406,7 @@ paths:
       summary: List the VRFs of the organization, the default first
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -5469,6 +5511,7 @@ paths:
       summary: List the VLAN catalog
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: site_id
           in: query
@@ -5573,6 +5616,7 @@ paths:
       summary: List subnets
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - $ref: '#/components/parameters/ClientID'
         - name: site_id
@@ -5676,6 +5720,7 @@ paths:
       summary: List IP addresses in a subnet
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -5696,6 +5741,7 @@ paths:
       summary: List IP addresses
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: subnet_id
           in: query
@@ -5798,6 +5844,7 @@ paths:
       summary: List network interfaces of a CI
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -5968,6 +6015,7 @@ paths:
         target.
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -5988,6 +6036,7 @@ paths:
       summary: List discovery collectors
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -6260,6 +6309,7 @@ paths:
       description: Requires discovery:read (DIS-09, API-05).
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: collector_id
           in: query
@@ -7003,6 +7053,7 @@ paths:
       summary: List teams
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - $ref: '#/components/parameters/Search'
       responses:
@@ -7170,6 +7221,7 @@ paths:
       summary: List custom roles
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -7483,6 +7535,7 @@ paths:
       summary: List SLA policies
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: priority
           in: query
@@ -7535,6 +7588,7 @@ paths:
       summary: List breached or at-risk ticket SLAs
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: status
           in: query
@@ -7657,6 +7711,7 @@ paths:
       summary: List form definitions
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: client_id
           in: query
@@ -7718,6 +7773,7 @@ paths:
       summary: List submissions for a form
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: status
           in: query
@@ -7745,6 +7801,7 @@ paths:
       summary: List form submissions
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: form_id
           in: query
@@ -7779,6 +7836,7 @@ paths:
       summary: List workflow definitions
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: active
           in: query
@@ -7844,6 +7902,7 @@ paths:
       summary: List workflow runs
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: workflow_id
           in: query
@@ -7883,6 +7942,7 @@ paths:
       summary: List compliance rules
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: ci_type_id
           in: query
@@ -7951,6 +8011,7 @@ paths:
       summary: List stored compliance results
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: ci_type_id
           in: query
@@ -8663,6 +8724,7 @@ paths:
           schema: { type: string }
           description: Comma-separated entity type filter.
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -8992,6 +9054,9 @@ paths:
                 type: object
                 required: [data]
                 properties:
+                  next_cursor:
+                    type: string
+                    description: Opaque signed cursor for the next page (API-02); absent on the last page.
                   data:
                     type: array
                     items:
@@ -9189,6 +9254,9 @@ paths:
                 type: object
                 required: [data]
                 properties:
+                  next_cursor:
+                    type: string
+                    description: Opaque signed cursor for the next page (API-02); absent on the last page.
                   data:
                     type: array
                     items: { $ref: '#/components/schemas/FieldProvenance' }
@@ -9565,6 +9633,7 @@ paths:
       summary: List the relationship types (system catalogue and the organization's)
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
@@ -9823,9 +9892,9 @@ components:
       schema:
         type: integer
         minimum: 1
-        maximum: 100
+        maximum: 200
         default: 50
-      description: Maximum number of items to return.
+      description: Maximum number of items to return (API-02); a larger value is capped to 200.
     Offset:
       name: offset
       in: query
@@ -9842,9 +9911,11 @@ components:
       schema:
         type: string
       description: |
-        Opaque keyset cursor taken from `next_cursor` of the previous page.
-        Cursors are bound to the sort order they were issued for; sending one
-        with a different `sort_by`/`sort_dir` combination yields 400.
+        Opaque cursor taken from `next_cursor` of the previous page. Cursors
+        are HMAC-signed by the server (API-02); a forged or altered cursor
+        yields 400. Keyset cursors are bound to the sort order they were
+        issued for; sending one with a different `sort_by`/`sort_dir`
+        combination yields 400.
     Search:
       name: search
       in: query
@@ -10013,6 +10084,9 @@ components:
       type: object
       required: [data]
       properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
         data:
           type: array
           items:
@@ -10278,6 +10352,9 @@ components:
       type: object
       required: [data]
       properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
         data:
           type: array
           items:
@@ -10376,6 +10453,9 @@ components:
       type: object
       required: [data, total, limit]
       properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
         data:
           type: array
           items:
@@ -10501,6 +10581,9 @@ components:
     IGAListResponse:
       type: object
       properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
         data:
           type: array
           items: { $ref: '#/components/schemas/IGAObject' }
@@ -11835,6 +11918,9 @@ components:
       type: object
       required: [data, total, limit, offset, has_more]
       properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
         data:
           type: array
           items:
@@ -13528,6 +13614,9 @@ components:
       type: object
       required: [data, total]
       properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
         data:
           type: array
           items: { $ref: '#/components/schemas/Location' }
@@ -13536,6 +13625,9 @@ components:
       type: object
       required: [data]
       properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
         data:
           type: array
           items: { $ref: '#/components/schemas/LocationTreeNode' }
@@ -13842,6 +13934,9 @@ components:
       type: object
       required: [data, total, limit, offset, has_more]
       properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
         data:
           type: array
           items:
@@ -13936,6 +14031,9 @@ components:
       type: object
       required: [data, total, limit, offset, has_more]
       properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
         data:
           type: array
           items:
@@ -14023,6 +14121,9 @@ components:
       type: object
       required: [data, total, limit, offset, has_more]
       properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
         data:
           type: array
           items:
@@ -14069,6 +14170,9 @@ components:
       type: object
       required: [data, total, limit, offset, has_more]
       properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
         data:
           type: array
           items:
@@ -16170,6 +16274,9 @@ components:
       type: object
       required: [data, total, limit, offset, has_more]
       properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
         data:
           type: array
           items: { $ref: '#/components/schemas/SearchHit' }

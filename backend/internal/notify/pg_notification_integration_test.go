@@ -68,7 +68,7 @@ func TestNotificationsAgainstPostgres(t *testing.T) {
 	if len(mail.sent) != 1 || mail.sent[0].To[0].Email != "a@acme.example" {
 		t.Errorf("mail: %+v", mail.sent)
 	}
-	deliveries, err := center.Deliveries.List(bg, f.OrgA, 10)
+	deliveries, err := center.Deliveries.List(bg, f.OrgA, 10, 0)
 	if err != nil || len(deliveries) != 3 {
 		t.Fatalf("deliveries: %+v %v", deliveries, err)
 	}

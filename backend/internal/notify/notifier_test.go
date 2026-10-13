@@ -62,7 +62,7 @@ func newNotifierEnv(t *testing.T) *notifierEnv {
 
 func (e *notifierEnv) statuses(t *testing.T) map[string]int {
 	t.Helper()
-	rows, _ := e.store.List(context.Background(), "org-1", 100)
+	rows, _ := e.store.List(context.Background(), "org-1", 100, 0)
 	out := map[string]int{}
 	for _, r := range rows {
 		out[r.Status]++
@@ -126,7 +126,7 @@ func TestNotifierDeliversWithRetryAndDedup(t *testing.T) {
 		_, _ = env.n.ProcessDue(ctx)
 		*env.clock = env.clock.Add(time.Minute)
 	}
-	rows, _ := env.store.List(ctx, "org-1", 1)
+	rows, _ := env.store.List(ctx, "org-1", 1, 0)
 	if rows[0].Status != StatusFailed || rows[0].Attempts != 2 || rows[0].LastError == "" {
 		t.Errorf("final failure: %+v", rows[0])
 	}
@@ -141,7 +141,7 @@ func TestNotifierDeliversWithRetryAndDedup(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = env.n.ProcessDue(ctx)
-	if rows, _ = env.store.List(ctx, "org-1", 1); rows[0].Status != StatusSuppressed {
+	if rows, _ = env.store.List(ctx, "org-1", 1, 0); rows[0].Status != StatusSuppressed {
 		t.Errorf("disabled channel: %+v", rows[0])
 	}
 }
@@ -177,7 +177,7 @@ func TestNotifierHonoursPreferences(t *testing.T) {
 	if sent, _ := env.n.ProcessDue(ctx); sent != 1 {
 		t.Errorf("after the quiet hours: %d", sent)
 	}
-	rows, _ := env.store.List(ctx, "org-1", 10)
+	rows, _ := env.store.List(ctx, "org-1", 10, 0)
 	for _, r := range rows {
 		if r.Subject == "quiet" && (r.Status != StatusSent || r.Attempts != 1) {
 			t.Errorf("waiting is no attempt: %+v", r)

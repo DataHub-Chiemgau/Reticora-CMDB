@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -115,6 +116,12 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("envelope encryption initialized")
+	// Pagination cursors are signed with a key derived from the master key,
+	// so every replica accepts the cursors of the others (API-02).
+	if err = api.SetCursorKey(encryptor.Derive("reticora/pagination-cursor/v1")); err != nil {
+		slog.Error("failed to set the cursor key", "error", err)
+		os.Exit(1)
+	}
 
 	// Initialize OIDC provider. When RETICORA_OIDC_CA_CERT_FILE is set the
 	// provider calls (discovery, JWKS, token exchange) additionally trust that

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 )
 
@@ -53,6 +54,12 @@ func (v *OpenAPIValidator) Middleware(next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Every list accepts only cursors the server signed (API-02), even
+		// a handler that would not look at the cursor.
+		if err := api.ParsePagination(r).CursorError; err != nil {
+			httpx.ValidationError(w, r, err.Error())
+			return
+		}
 		spec, ok := v.lookup(r.Method, r.URL.Path)
 		if !ok {
 			next.ServeHTTP(w, r)
