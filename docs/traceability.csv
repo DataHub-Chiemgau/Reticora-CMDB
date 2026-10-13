@@ -278,3 +278,4 @@ AUT-03;[B];B;backend/internal/config/config_test.go;WP-110
 TLC-01;[B];B;backend/internal/signup/service_test.go;WP-111
 API-05;[B];B;backend/internal/signup/service_test.go;WP-111
 TLC-01;[B];B;backend/internal/signup/protect_test.go;WP-112
+TLC-02;[B], Reseller [P4];B;backend/internal/operator/orgs_test.go;WP-113

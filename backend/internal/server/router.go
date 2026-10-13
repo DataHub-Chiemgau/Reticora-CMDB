@@ -225,6 +225,17 @@ func agentHandler(repos *Repositories, sessions *identity.SessionIssuer) *agent.
 	return h
 }
 
+// operatorHandler builds the operator path; organizations are created with
+// the creation chain of the self-signup (TLC-02).
+func operatorHandler(opts *Options) *operator.Handler {
+	h := operator.NewHandler(opts.Operator, opts.OIDC, opts.Sessions, operator.NewAuditor(opts.OperatorPool), opts.OperatorPool).
+		WithEntitlements(opts.Entitlements)
+	if opts.Signup != nil {
+		h.WithOrgCreator(opts.Signup)
+	}
+	return h
+}
+
 // userHandler builds the user handler; with a session blacklist, deactivation
 // ends the user's sessions immediately (TLC-04).
 func userHandler(repos *Repositories, sessions *identity.SessionIssuer) *user.Handler {
@@ -281,8 +292,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	}
 	registrars := []registrar{
 		identityHandler,
-		operator.NewHandler(opts.Operator, opts.OIDC, opts.Sessions, operator.NewAuditor(opts.OperatorPool), opts.OperatorPool).
-			WithEntitlements(opts.Entitlements),
+		operatorHandler(&opts),
 		identity.NewAPIKeyHandler(repos.APIKeys),
 		user.NewServiceAccountHandler(repos.ServiceAccounts),
 		entitlement.NewHandler(opts.Entitlements),

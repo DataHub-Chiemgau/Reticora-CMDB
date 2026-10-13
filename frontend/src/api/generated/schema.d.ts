@@ -92,7 +92,11 @@ export interface paths {
     /** List every organization */
     get: operations['listOrganizationsAsOperator'];
     put?: never;
-    post?: never;
+    /**
+     * Create an organization with plan and limits (TLC-02)
+     * @description Runs the creation chain of the self-signup without verification: the organization with its slug (derived from the name unless given), the default VRF and standard roles, the first user as org_admin, and the entitlements of the plan (source manual) with the given limits in the limits of their feature. With an IdP admin client the first org_admin receives an account and the IdP's mail to set a password (`admin_invited`). The creation and its `org.create` entry in operator_audit are atomic. Reseller creation is phase 4.
+     */
+    post: operations['createOrganizationAsOperator'];
     delete?: never;
     options?: never;
     head?: never;
@@ -5313,6 +5317,38 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    OperatorCreateOrganizationRequest: {
+      name: string;
+      /** @description Optional; derived from the name (with -2, -3 … on collision) when omitted. A given, taken slug is 409. */
+      slug?: string;
+      /** @enum {string} */
+      plan: 'essential' | 'standard' | 'pro' | 'enterprise';
+      /** @description Quotas stored in the limits of their feature's entitlement (max_cis and max_users on cmdb_core, max_collectors on discovery, max_api_keys on api_access). */
+      limits?: {
+        /** Format: int64 */
+        max_cis?: number;
+        /** Format: int64 */
+        max_collectors?: number;
+        /** Format: int64 */
+        max_users?: number;
+        /** Format: int64 */
+        max_api_keys?: number;
+      };
+      admin_email: string;
+      admin_display_name?: string;
+    };
+    OperatorCreatedOrganization: {
+      /** Format: uuid */
+      id: string;
+      name: string;
+      slug: string;
+      /** @enum {string} */
+      plan: 'essential' | 'standard' | 'pro' | 'enterprise';
+      /** @description The first org_admin received an IdP account and an invitation mail; otherwise the account is provisioned in the IdP by hand and linked on first login. */
+      admin_invited: boolean;
+      /** Format: date-time */
+      created_at: string;
+    };
     SignupRequest: {
       organization_name: string;
       email: string;
@@ -8805,6 +8841,35 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  createOrganizationAsOperator: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['OperatorCreateOrganizationRequest'];
+      };
+    };
+    responses: {
+      /** @description Organization created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OperatorCreatedOrganization'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listOrganizationEntitlementsAsOperator: {

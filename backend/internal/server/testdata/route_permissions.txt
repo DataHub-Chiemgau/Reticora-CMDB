@@ -289,6 +289,7 @@ PATCH /api/v1/workflows/{id} workflow:write
 PATCH /scim/v2/Groups/{id} iga:write
 PATCH /scim/v2/Users/{id} iga:write
 POST /api/v1/admin/auth/callback operator
+POST /api/v1/admin/orgs operator
 POST /api/v1/admin/orgs/{id}/entitlements operator
 POST /api/v1/agents/enroll agent:manage
 POST /api/v1/agents/enrollment-tokens agent:manage

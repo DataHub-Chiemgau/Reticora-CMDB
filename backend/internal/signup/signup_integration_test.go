@@ -237,3 +237,97 @@ func countRows(ctx context.Context, t *testing.T, q interface {
 	}
 	return n
 }
+
+// TestOperatorCreatesOrganizationAtomically covers WP-113 (TLC-02) against
+// PostgreSQL: an operator creates an organization with plan and limits
+// through the signup's creation chain; the operator's audit entry is written
+// in the same transaction; an explicit, taken slug is a conflict and leaves
+// nothing behind.
+func TestOperatorCreatesOrganizationAtomically(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
+	}
+	ctx := context.Background()
+	appPool, err := database.NewPool(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer appPool.Close()
+	adminPool, err := database.NewMaintenancePool(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adminPool.Close()
+
+	suffix := make([]byte, 4)
+	_, _ = rand.Read(suffix)
+	slug := "op-test-" + hex.EncodeToString(suffix)
+	t.Cleanup(func() {
+		_, _ = adminPool.Exec(context.Background(), `DELETE FROM organization WHERE slug = $1`, slug)
+	})
+
+	accounts := &stubInviter{}
+	svc := NewService(NewPGRepository(appPool), nil, accounts, DefaultConfig())
+	op := operator.Identity{ID: "op-wp113", Kind: "oidc"}
+	req := &operator.NewOrganization{Name: "Operator Test", Slug: slug, Plan: "pro", AdminEmail: "admin@op.example",
+		Limits: map[string]int64{entitlement.LimitMaxCIs: 7000, entitlement.LimitMaxUsers: 40}}
+	created, err := svc.CreateOrganization(ctx, op, req)
+	if err != nil {
+		t.Fatalf("CreateOrganization: %v", err)
+	}
+	if created.Slug != slug || !created.AdminInvited || len(accounts.invited) != 1 {
+		t.Errorf("created = %+v, invited %d", created, len(accounts.invited))
+	}
+
+	var (
+		plan     string
+		settings map[string]any
+	)
+	if err = adminPool.QueryRow(ctx, `SELECT plan, settings FROM organization WHERE id = $1`, created.ID).Scan(&plan, &settings); err != nil {
+		t.Fatal(err)
+	}
+	if plan != "pro" || settings["trial"] != nil {
+		t.Errorf("organization plan %s settings %v", plan, settings)
+	}
+	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM vrf WHERE organization_id = $1 AND is_default`, created.ID); n != 1 {
+		t.Errorf("default VRFs = %d", n)
+	}
+	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM app_user u JOIN role_assignment ra ON ra.user_id = u.id
+		JOIN role r ON r.id = ra.role_id WHERE u.organization_id = $1 AND u.email = 'admin@op.example' AND r.name = 'org_admin'`, created.ID); n != 1 {
+		t.Errorf("org_admin users = %d", n)
+	}
+	var limits map[string]int64
+	if err = adminPool.QueryRow(ctx, `SELECT limits FROM entitlement WHERE organization_id = $1 AND feature_key = 'cmdb_core'
+		AND source = 'manual' AND plan = 'pro' AND valid_until IS NULL`, created.ID).Scan(&limits); err != nil {
+		t.Fatalf("cmdb_core entitlement: %v", err)
+	}
+	if limits[entitlement.LimitMaxCIs] != 7000 || limits[entitlement.LimitMaxUsers] != 40 {
+		t.Errorf("cmdb_core limits = %v", limits)
+	}
+	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM entitlement WHERE organization_id = $1`, created.ID); n != len(entitlement.PlanFeatures(entitlement.PlanPro)) {
+		t.Errorf("entitlements = %d", n)
+	}
+	var details map[string]any
+	if err = adminPool.QueryRow(ctx, `SELECT details FROM operator_audit WHERE action = 'org.create' AND target_org = $1
+		AND operator_id = 'op-wp113' AND operator_kind = 'oidc' AND status = 201`, created.ID).Scan(&details); err != nil {
+		t.Fatalf("operator_audit: %v", err)
+	}
+	if details["slug"] != slug || details["plan"] != "pro" {
+		t.Errorf("audit details = %v", details)
+	}
+
+	// The same slug again: conflict, no second organization, the invited
+	// account is removed again.
+	req.AdminEmail = "other@op.example"
+	before := countRows(ctx, t, adminPool, `SELECT count(*) FROM organization`)
+	if _, err = svc.CreateOrganization(ctx, op, req); !errors.Is(err, operator.ErrSlugTaken) {
+		t.Fatalf("taken slug: %v, want ErrSlugTaken", err)
+	}
+	if after := countRows(ctx, t, adminPool, `SELECT count(*) FROM organization`); after != before {
+		t.Errorf("organizations %d → %d after a conflict", before, after)
+	}
+	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM app_user WHERE email = 'other@op.example'`); n != 0 {
+		t.Errorf("users after conflict = %d", n)
+	}
+}

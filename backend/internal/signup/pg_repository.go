@@ -51,35 +51,11 @@ func (r *PGRepository) Complete(ctx context.Context, tokenHash string, now time.
 		if err != nil {
 			return err
 		}
-		slug, err := insertOrganization(ctx, tx, req.OrganizationName, setup)
+		slug, err := populate(ctx, tx, req.OrganizationName, "", req.Email, req.DisplayName, setup)
 		if err != nil {
 			return err
 		}
 		result.OrganizationSlug = slug
-
-		var userID string
-		if err = tx.QueryRow(ctx, `INSERT INTO app_user (organization_id, email, display_name)
-			VALUES ($1, $2, $3) RETURNING id::text`,
-			setup.OrganizationID, req.Email, req.DisplayName).Scan(&userID); err != nil {
-			return fmt.Errorf("insert first user: %w", err)
-		}
-		tag, err := tx.Exec(ctx, `INSERT INTO role_assignment (organization_id, user_id, role_id)
-			SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = 'org_admin'`,
-			setup.OrganizationID, userID)
-		if err != nil {
-			return fmt.Errorf("assign org_admin: %w", err)
-		}
-		if tag.RowsAffected() != 1 {
-			return errors.New("assign org_admin: the standard role org_admin was not seeded")
-		}
-		for i := range setup.Entitlements {
-			ent := &setup.Entitlements[i]
-			if _, err := tx.Exec(ctx, `INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limits, valid_until, source)
-				VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-				setup.OrganizationID, ent.FeatureKey, string(ent.Plan), ent.Enabled, ent.Limits, ent.ValidUntil, ent.Source); err != nil {
-				return fmt.Errorf("insert trial entitlement %s: %w", ent.FeatureKey, err)
-			}
-		}
 
 		if err := createAccount(ctx, req); err != nil {
 			return err
@@ -107,6 +83,66 @@ func (r *PGRepository) Complete(ctx context.Context, tokenHash string, now time.
 	return result, nil
 }
 
+// CreateOrganization implements Repository for the operator path (TLC-02):
+// the same creation chain as a verified signup, without a request, in one
+// transaction with createAccount and the operator's audit entry.
+func (r *PGRepository) CreateOrganization(ctx context.Context, spec *OrganizationSpec, setup *Setup,
+	createAccount func(ctx context.Context) error, audit *operator.AuditEntry) (Result, error) {
+	result := Result{OrganizationID: setup.OrganizationID, Plan: setup.Plan}
+	err := database.WithOrganizationSetup(ctx, r.pool, setup.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		slug, err := populate(ctx, tx, spec.Name, spec.Slug, spec.AdminEmail, spec.AdminDisplayName, setup)
+		if err != nil {
+			return err
+		}
+		result.OrganizationSlug = slug
+		if aerr := createAccount(ctx); aerr != nil {
+			return aerr
+		}
+		audit.TargetOrg = setup.OrganizationID
+		audit.Details["slug"] = slug
+		return operator.RecordTx(ctx, tx, audit)
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	return result, nil
+}
+
+// populate is the creation chain shared by signup and operator: the
+// organization (its triggers seed the standard roles and the default VRF),
+// the first user as org_admin and the entitlements of setup. An empty slug
+// is derived from the name.
+func populate(ctx context.Context, tx pgx.Tx, name, slug, email, displayName string, setup *Setup) (string, error) {
+	slug, err := insertOrganization(ctx, tx, name, slug, setup)
+	if err != nil {
+		return "", err
+	}
+	var userID string
+	if err = tx.QueryRow(ctx, `INSERT INTO app_user (organization_id, email, display_name)
+		VALUES ($1, $2, $3) RETURNING id::text`,
+		setup.OrganizationID, email, displayName).Scan(&userID); err != nil {
+		return "", fmt.Errorf("insert first user: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO role_assignment (organization_id, user_id, role_id)
+		SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = 'org_admin'`,
+		setup.OrganizationID, userID)
+	if err != nil {
+		return "", fmt.Errorf("assign org_admin: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return "", errors.New("assign org_admin: the standard role org_admin was not seeded")
+	}
+	for i := range setup.Entitlements {
+		ent := &setup.Entitlements[i]
+		if _, err := tx.Exec(ctx, `INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limits, valid_until, source)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			setup.OrganizationID, ent.FeatureKey, string(ent.Plan), ent.Enabled, ent.Limits, ent.ValidUntil, ent.Source); err != nil {
+			return "", fmt.Errorf("insert entitlement %s: %w", ent.FeatureKey, err)
+		}
+	}
+	return slug, nil
+}
+
 // lockRequest reads and locks the pending request of tokenHash.
 func lockRequest(ctx context.Context, tx pgx.Tx, tokenHash string, now time.Time) (*PendingRequest, error) {
 	var (
@@ -129,17 +165,24 @@ func lockRequest(ctx context.Context, tx pgx.Tx, tokenHash string, now time.Time
 	return &req, nil
 }
 
-// insertOrganization creates the organization under the first free slug
-// derived from its name (slug, slug-2 … slug-20). The slug is unique across
-// organizations; a taken slug is detected by the unique violation inside a
-// savepoint, since other organizations are invisible here.
-func insertOrganization(ctx context.Context, tx pgx.Tx, name string, setup *Setup) (string, error) {
-	base := Slugify(name)
-	settings := map[string]any{"trial": map[string]any{
-		"plan": string(setup.Plan), "ends_at": setup.TrialEndsAt.Format(time.RFC3339),
-		"fallback_plan": string(setup.FallbackPlan),
-	}}
-	for n := 1; n <= 20; n++ {
+// insertOrganization creates the organization. A given slug is used as is
+// (ErrSlugTaken when taken); otherwise the first free slug derived from the
+// name (slug, slug-2 … slug-20). The slug is unique across organizations; a
+// taken slug is detected by the unique violation inside a savepoint, since
+// other organizations are invisible here.
+func insertOrganization(ctx context.Context, tx pgx.Tx, name, fixedSlug string, setup *Setup) (string, error) {
+	base, attempts := Slugify(name), 20
+	if fixedSlug != "" {
+		base, attempts = fixedSlug, 1
+	}
+	settings := map[string]any{}
+	if !setup.TrialEndsAt.IsZero() {
+		settings["trial"] = map[string]any{
+			"plan": string(setup.Plan), "ends_at": setup.TrialEndsAt.Format(time.RFC3339),
+			"fallback_plan": string(setup.FallbackPlan),
+		}
+	}
+	for n := 1; n <= attempts; n++ {
 		slug := base
 		if n > 1 {
 			slug = base + "-" + strconv.Itoa(n)
@@ -165,6 +208,9 @@ func insertOrganization(ctx context.Context, tx pgx.Tx, name string, setup *Setu
 			return "", fmt.Errorf("release savepoint: %w", err)
 		}
 		return slug, nil
+	}
+	if fixedSlug != "" {
+		return "", ErrSlugTaken
 	}
 	return "", fmt.Errorf("no free organization slug for %q", base)
 }

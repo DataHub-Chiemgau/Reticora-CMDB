@@ -371,6 +371,12 @@ deny access (fail-closed). The tenant API is read-only (`GET
 /api/v1/entitlements`); entitlements are written by the operator only,
 `POST /api/v1/admin/orgs/{id}/entitlements`, and every change is recorded
 in `operator_audit` with the previous and the new state (ENT-04, E-12).
+Operators create organizations with plan and limits through
+`POST /api/v1/admin/orgs` (TLC-02): the same creation chain as the
+self-signup (slug, default VRF, first org_admin, entitlements of the plan
+with the given limits), atomically with an `org.create` entry in
+`operator_audit`; with the Keycloak admin client the first org_admin is
+invited by the IdP's mail to set a password.
 Plan matrix (ENT-06):
 
 | Plan | Features |

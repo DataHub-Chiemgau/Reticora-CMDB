@@ -197,6 +197,45 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createOrganizationAsOperator
+      tags: [Operator]
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      summary: Create an organization with plan and limits (TLC-02)
+      description: >-
+        Runs the creation chain of the self-signup without verification: the
+        organization with its slug (derived from the name unless given), the
+        default VRF and standard roles, the first user as org_admin, and the
+        entitlements of the plan (source manual) with the given limits in
+        the limits of their feature. With an IdP admin client the first
+        org_admin receives an account and the IdP's mail to set a password
+        (`admin_invited`). The creation and its `org.create` entry in
+        operator_audit are atomic. Reseller creation is phase 4.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperatorCreateOrganizationRequest'
+      responses:
+        '201':
+          description: Organization created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorCreatedOrganization'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/admin/orgs/{id}/entitlements:
     parameters:
@@ -8959,6 +8998,41 @@ components:
             $ref: '#/components/schemas/ProblemDetail'
 
   schemas:
+    OperatorCreateOrganizationRequest:
+      type: object
+      required: [name, plan, admin_email]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        slug:
+          type: string
+          maxLength: 48
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          description: Optional; derived from the name (with -2, -3 … on collision) when omitted. A given, taken slug is 409.
+        plan: { type: string, enum: [essential, standard, pro, enterprise] }
+        limits:
+          type: object
+          description: Quotas stored in the limits of their feature's entitlement (max_cis and max_users on cmdb_core, max_collectors on discovery, max_api_keys on api_access).
+          additionalProperties: false
+          properties:
+            max_cis: { type: integer, format: int64, minimum: 0 }
+            max_collectors: { type: integer, format: int64, minimum: 0 }
+            max_users: { type: integer, format: int64, minimum: 0 }
+            max_api_keys: { type: integer, format: int64, minimum: 0 }
+        admin_email: { type: string, maxLength: 254 }
+        admin_display_name: { type: string, maxLength: 200 }
+    OperatorCreatedOrganization:
+      type: object
+      required: [id, name, slug, plan, admin_invited, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        plan: { type: string, enum: [essential, standard, pro, enterprise] }
+        admin_invited:
+          type: boolean
+          description: The first org_admin received an IdP account and an invitation mail; otherwise the account is provisioned in the IdP by hand and linked on first login.
+        created_at: { type: string, format: date-time }
     SignupRequest:
       type: object
       required: [organization_name, email, altcha]

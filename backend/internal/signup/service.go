@@ -16,12 +16,14 @@ import (
 	"fmt"
 	"net/mail"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 )
 
 // Errors of the signup flow.
@@ -35,6 +37,8 @@ var (
 	ErrExpired = errors.New("the verification link has expired")
 	// ErrAccountExists: the IdP already has an account for the address.
 	ErrAccountExists = errors.New("an account with this e-mail address already exists")
+	// ErrSlugTaken: an operator-given slug is used (409).
+	ErrSlugTaken = operator.ErrSlugTaken
 )
 
 // Minimum password length checked before the IdP applies its own policy.
@@ -81,6 +85,12 @@ type Account struct {
 	DisplayName    string
 	Password       string
 	OrganizationID string
+}
+
+// Inviter is implemented by Accounts that can create an account without a
+// password and let the IdP mail the user to set one (operator path).
+type Inviter interface {
+	InviteAccount(ctx context.Context, a Account) (string, error)
 }
 
 // Accounts administers IdP accounts (Keycloak admin API).
@@ -143,6 +153,18 @@ type Repository interface {
 	// everything. The returned request is the one that was completed.
 	Complete(ctx context.Context, tokenHash string, now time.Time, setup *Setup,
 		createAccount func(ctx context.Context, req *PendingRequest) error) (Result, error)
+	// CreateOrganization runs the same creation chain for an operator
+	// (TLC-02); audit is written in the transaction with the slug added.
+	CreateOrganization(ctx context.Context, spec *OrganizationSpec, setup *Setup,
+		createAccount func(ctx context.Context) error, audit *operator.AuditEntry) (Result, error)
+}
+
+// OrganizationSpec is a validated operator creation.
+type OrganizationSpec struct {
+	Name             string
+	Slug             string
+	AdminEmail       string
+	AdminDisplayName string
 }
 
 // Service is the signup flow.
@@ -288,6 +310,136 @@ func TrialEntitlements(cfg Config, endsAt time.Time) ([]entitlement.Entitlement,
 			return nil, err
 		}
 		out = append(out, ent)
+	}
+	return out, nil
+}
+
+// slugPattern is an explicit organization slug: lower-case words of
+// letters and digits joined by single hyphens.
+var slugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// CreateOrganization implements operator.OrgCreator (TLC-02): the creation
+// chain of the signup without verification, with the operator's plan and
+// limits instead of a trial. With an inviting IdP client the first
+// org_admin gets an account and the IdP's mail to set a password.
+func (s *Service) CreateOrganization(ctx context.Context, op operator.Identity, req *operator.NewOrganization) (operator.CreatedOrganization, error) {
+	if s == nil || s.repo == nil {
+		return operator.CreatedOrganization{}, operator.ErrCreationUnavailable
+	}
+	spec, plan, err := validateOrganization(req)
+	if err != nil {
+		return operator.CreatedOrganization{}, err
+	}
+	ents, err := PlanEntitlements(plan, req.Limits)
+	if err != nil {
+		return operator.CreatedOrganization{}, err
+	}
+	setup := &Setup{OrganizationID: s.newOrgID(), Plan: plan, Entitlements: ents}
+	inviter, invites := s.accounts.(Inviter)
+
+	var accountID string
+	createAccount := func(ctx context.Context) error {
+		if !invites {
+			return nil
+		}
+		id, ierr := inviter.InviteAccount(ctx, Account{Email: spec.AdminEmail, DisplayName: spec.AdminDisplayName,
+			OrganizationID: setup.OrganizationID})
+		if ierr != nil {
+			return ierr
+		}
+		accountID = id
+		return nil
+	}
+	limits := map[string]any{}
+	for k, v := range req.Limits {
+		limits[k] = v
+	}
+	audit := &operator.AuditEntry{OperatorID: op.ID, OperatorKind: op.Kind, Action: "org.create", Status: 201,
+		Details: map[string]any{"plan": string(plan), "limits": limits, "admin_invited": invites}}
+
+	res, err := s.repo.CreateOrganization(ctx, spec, setup, createAccount, audit)
+	if err != nil {
+		if accountID != "" {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			if derr := s.accounts.DeleteAccount(cleanup, accountID); derr != nil {
+				err = errors.Join(err, fmt.Errorf("delete account %s after failed creation: %w", accountID, derr))
+			}
+		}
+		if errors.Is(err, ErrAccountExists) {
+			return operator.CreatedOrganization{}, &api.ConflictError{Field: "admin_email", Message: err.Error()}
+		}
+		return operator.CreatedOrganization{}, err
+	}
+	return operator.CreatedOrganization{ID: res.OrganizationID, Name: spec.Name, Slug: res.OrganizationSlug,
+		Plan: string(plan), AdminInvited: invites, CreatedAt: s.now().UTC()}, nil
+}
+
+func validateOrganization(req *operator.NewOrganization) (*OrganizationSpec, entitlement.Plan, error) {
+	name := strings.TrimSpace(req.Name)
+	if name == "" || utf8.RuneCountInString(name) > 200 {
+		return nil, "", &api.FieldError{Field: "name", Message: "name is required (at most 200 characters)"}
+	}
+	slug := strings.TrimSpace(req.Slug)
+	if slug != "" && (len(slug) > 48 || !slugPattern.MatchString(slug)) {
+		return nil, "", &api.FieldError{Field: "slug", Message: "slug consists of lower-case letters, digits and single hyphens (at most 48 characters)"}
+	}
+	plan := entitlement.Plan(strings.TrimSpace(req.Plan))
+	switch plan {
+	case entitlement.PlanEssential, entitlement.PlanStandard, entitlement.PlanPro, entitlement.PlanEnterprise:
+	default:
+		return nil, "", &api.FieldError{Field: "plan", Message: "plan must be one of essential, standard, pro, enterprise"}
+	}
+	email, err := normalizeEmail(req.AdminEmail)
+	if err != nil {
+		return nil, "", &api.FieldError{Field: "admin_email", Message: "admin_email must be a plain e-mail address"}
+	}
+	display := strings.TrimSpace(req.AdminDisplayName)
+	if utf8.RuneCountInString(display) > 200 {
+		return nil, "", &api.FieldError{Field: "admin_display_name", Message: "admin_display_name has at most 200 characters"}
+	}
+	if display == "" {
+		display = email
+	}
+	return &OrganizationSpec{Name: name, Slug: slug, AdminEmail: email, AdminDisplayName: display}, plan, nil
+}
+
+// PlanEntitlements returns the entitlement rows of a plan set by an
+// operator: every feature of the plan, source manual, without expiry; each
+// quota is stored in the limits of its feature (entitlement.QuotaFeature).
+func PlanEntitlements(plan entitlement.Plan, limits map[string]int64) ([]entitlement.Entitlement, error) {
+	byFeature := map[string]map[string]int64{}
+	for quota, value := range limits {
+		feature, known := entitlement.QuotaFeature[quota]
+		if !known {
+			return nil, &api.FieldError{Field: "limits", Message: fmt.Sprintf("unknown limit %q (allowed: %s)",
+				quota, strings.Join(entitlement.Quotas, ", "))}
+		}
+		if value < 0 {
+			return nil, &api.FieldError{Field: "limits", Message: fmt.Sprintf("limit %s must not be negative", quota)}
+		}
+		if byFeature[feature] == nil {
+			byFeature[feature] = map[string]int64{}
+		}
+		byFeature[feature][quota] = value
+	}
+	var out []entitlement.Entitlement
+	covered := map[string]bool{}
+	for _, f := range entitlement.PlanFeatures(plan) {
+		ent := entitlement.Entitlement{FeatureKey: f, Plan: plan, Enabled: true, Limits: map[string]int64{}, Source: "manual"}
+		for k, v := range byFeature[f] {
+			ent.Limits[k] = v
+		}
+		covered[f] = true
+		if err := ent.Validate(); err != nil {
+			return nil, err
+		}
+		out = append(out, ent)
+	}
+	for f := range byFeature {
+		if !covered[f] {
+			return nil, &api.FieldError{Field: "limits", Message: fmt.Sprintf("plan %s does not include %s", plan, f)}
+		}
 	}
 	return out, nil
 }

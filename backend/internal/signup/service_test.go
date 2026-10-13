@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 )
 
 // stubMailer records the verification mails (the notify channel stub until
@@ -53,6 +54,8 @@ type stubRepo struct {
 	completed        map[string]bool
 	failAfterAccount error
 	setup            *Setup
+	spec             *OrganizationSpec
+	audit            *operator.AuditEntry
 }
 
 func newStubRepo() *stubRepo {
@@ -84,6 +87,22 @@ func (r *stubRepo) Complete(ctx context.Context, tokenHash string, now time.Time
 	r.setup = setup
 	return Result{OrganizationID: setup.OrganizationID, OrganizationSlug: Slugify(req.OrganizationName),
 		Plan: setup.Plan, TrialEndsAt: setup.TrialEndsAt}, nil
+}
+
+func (r *stubRepo) CreateOrganization(ctx context.Context, spec *OrganizationSpec, setup *Setup,
+	createAccount func(ctx context.Context) error, audit *operator.AuditEntry) (Result, error) {
+	if err := createAccount(ctx); err != nil {
+		return Result{}, err
+	}
+	if r.failAfterAccount != nil {
+		return Result{}, r.failAfterAccount
+	}
+	r.setup, r.spec, r.audit = setup, spec, audit
+	slug := spec.Slug
+	if slug == "" {
+		slug = Slugify(spec.Name)
+	}
+	return Result{OrganizationID: setup.OrganizationID, OrganizationSlug: slug, Plan: setup.Plan}, nil
 }
 
 func newTestService(repo Repository, mailer Mailer, accounts Accounts) *Service {
@@ -319,5 +338,106 @@ func TestHandlerStatusCodes(t *testing.T) {
 	accounts.err = nil
 	if code := call(h.Verify, `{"token":"`+token+`","password":"correct horse battery"}`); code != http.StatusCreated {
 		t.Errorf("verify = %d, want 201", code)
+	}
+}
+
+// stubInviter is an IdP client that also invites (operator path).
+type stubInviter struct {
+	stubAccounts
+	invited []Account
+}
+
+func (a *stubInviter) InviteAccount(_ context.Context, acc Account) (string, error) {
+	if a.err != nil {
+		return "", a.err
+	}
+	a.invited = append(a.invited, acc)
+	return "kc-invite", nil
+}
+
+func TestOperatorCreationRunsTheSignupChain(t *testing.T) {
+	repo, accounts := newStubRepo(), &stubInviter{}
+	// No mailer: operator creation does not depend on the signup channel.
+	svc := newTestService(repo, nil, accounts)
+	op := operator.Identity{ID: "op-1", Kind: "oidc"}
+	req := &operator.NewOrganization{Name: " Acme ", Plan: "pro", AdminEmail: "admin@acme.example",
+		Limits: map[string]int64{entitlement.LimitMaxCIs: 5000, entitlement.LimitMaxCollectors: 4}}
+	created, err := svc.CreateOrganization(context.Background(), op, req)
+	if err != nil {
+		t.Fatalf("CreateOrganization: %v", err)
+	}
+	if created.Slug != "acme" || created.Plan != "pro" || !created.AdminInvited || created.ID != repo.setup.OrganizationID {
+		t.Errorf("created = %+v", created)
+	}
+	if len(accounts.invited) != 1 || accounts.invited[0].OrganizationID != created.ID || accounts.invited[0].Password != "" {
+		t.Errorf("invited = %+v", accounts.invited)
+	}
+	if repo.spec.AdminDisplayName != "admin@acme.example" || repo.setup.TrialEndsAt != (time.Time{}) {
+		t.Errorf("spec %+v setup %+v", repo.spec, repo.setup)
+	}
+	if repo.audit.OperatorID != "op-1" || repo.audit.Action != "org.create" || repo.audit.Details["plan"] != "pro" {
+		t.Errorf("audit = %+v", repo.audit)
+	}
+	limits := map[string]map[string]int64{}
+	for _, e := range repo.setup.Entitlements {
+		if e.Source != "manual" || e.Plan != entitlement.PlanPro || e.ValidUntil != nil {
+			t.Errorf("%s: %+v", e.FeatureKey, e)
+		}
+		limits[e.FeatureKey] = e.Limits
+	}
+	if limits[entitlement.FeatureCMDBCore][entitlement.LimitMaxCIs] != 5000 || limits[entitlement.FeatureDiscovery][entitlement.LimitMaxCollectors] != 4 {
+		t.Errorf("limits = %v", limits)
+	}
+
+	// Without an inviting IdP client the organization is still created.
+	plain := newTestService(newStubRepo(), nil, &stubAccounts{})
+	if created, err := plain.CreateOrganization(context.Background(), op, req); err != nil || created.AdminInvited {
+		t.Errorf("without inviter: %+v %v", created, err)
+	}
+
+	// A failing transaction deletes the invited account again.
+	repo.failAfterAccount = errors.New("commit failed")
+	if _, err := svc.CreateOrganization(context.Background(), op, req); err == nil {
+		t.Fatal("creation succeeded")
+	}
+	if len(accounts.deleted) != 1 || accounts.deleted[0] != "kc-invite" {
+		t.Errorf("deleted = %v", accounts.deleted)
+	}
+
+	// An existing IdP account is a conflict on admin_email.
+	repo.failAfterAccount, accounts.err = nil, ErrAccountExists
+	var ce *api.ConflictError
+	if _, err := svc.CreateOrganization(context.Background(), op, req); !errors.As(err, &ce) || ce.Field != "admin_email" {
+		t.Errorf("existing account: %v", err)
+	}
+}
+
+func TestOperatorCreationValidates(t *testing.T) {
+	svc := newTestService(newStubRepo(), nil, nil)
+	valid := func() *operator.NewOrganization {
+		return &operator.NewOrganization{Name: "Acme", Plan: "standard", AdminEmail: "a@example.com"}
+	}
+	for field, mutate := range map[string]func(*operator.NewOrganization){
+		"name":        func(r *operator.NewOrganization) { r.Name = " " },
+		"slug":        func(r *operator.NewOrganization) { r.Slug = "Not A Slug" },
+		"plan":        func(r *operator.NewOrganization) { r.Plan = "gold" },
+		"admin_email": func(r *operator.NewOrganization) { r.AdminEmail = "nope" },
+		"limits":      func(r *operator.NewOrganization) { r.Limits = map[string]int64{"max_cpus": 1} },
+	} {
+		req := valid()
+		mutate(req)
+		var fe *api.FieldError
+		if _, err := svc.CreateOrganization(context.Background(), operator.Identity{}, req); !errors.As(err, &fe) || fe.Field != field {
+			t.Errorf("%s: %v", field, err)
+		}
+	}
+	req := valid()
+	req.Limits = map[string]int64{entitlement.LimitMaxUsers: -1}
+	var fe *api.FieldError
+	if _, err := svc.CreateOrganization(context.Background(), operator.Identity{}, req); !errors.As(err, &fe) || fe.Field != "limits" {
+		t.Errorf("negative limit: %v", err)
+	}
+	if _, err := NewService(nil, nil, nil, DefaultConfig()).CreateOrganization(context.Background(), operator.Identity{}, valid()); !errors.Is(err, operator.ErrCreationUnavailable) {
+		t.Errorf("without repository: %v", err)
 	}
 }

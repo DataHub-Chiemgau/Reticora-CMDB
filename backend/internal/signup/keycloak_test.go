@@ -111,3 +111,52 @@ func TestKeycloakCreateAccountErrors(t *testing.T) {
 		t.Error("issuer without /realms/ accepted")
 	}
 }
+
+func TestKeycloakInviteAccount(t *testing.T) {
+	var (
+		user    keycloakUser
+		actions []string
+		deleted string
+	)
+	inviteStatus := http.StatusNoContent
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /realms/reticora/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "admin-token"})
+	})
+	mux.HandleFunc("POST /admin/realms/reticora/users", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&user)
+		w.Header().Set("Location", "http://"+r.Host+"/admin/realms/reticora/users/inv-1")
+		w.WriteHeader(http.StatusCreated)
+	})
+	mux.HandleFunc("PUT /admin/realms/reticora/users/{id}/execute-actions-email", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&actions)
+		w.WriteHeader(inviteStatus)
+	})
+	mux.HandleFunc("DELETE /admin/realms/reticora/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+		deleted = r.PathValue("id")
+		w.WriteHeader(http.StatusNoContent)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	kc, _ := NewKeycloakAccounts(srv.URL+"/realms/reticora", "signup", "s3cret", srv.Client())
+
+	id, err := kc.InviteAccount(context.Background(), Account{Email: "admin@acme.example", OrganizationID: "org-9"})
+	if err != nil || id != "inv-1" {
+		t.Fatalf("InviteAccount = %q, %v", id, err)
+	}
+	if len(user.Credentials) != 0 || user.EmailVerified || user.Attributes["organization_id"][0] != "org-9" {
+		t.Errorf("invited user = %+v", user)
+	}
+	if len(actions) != 2 || actions[0] != "UPDATE_PASSWORD" || actions[1] != "VERIFY_EMAIL" {
+		t.Errorf("actions = %v", actions)
+	}
+
+	// A failing invitation mail removes the account again.
+	inviteStatus = http.StatusInternalServerError
+	if _, err := kc.InviteAccount(context.Background(), Account{Email: "b@acme.example"}); err == nil {
+		t.Fatal("failed invitation accepted")
+	}
+	if deleted != "inv-1" {
+		t.Errorf("deleted = %q", deleted)
+	}
+}

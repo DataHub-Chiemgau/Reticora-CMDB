@@ -54,27 +54,83 @@ type keycloakCredential struct {
 }
 
 type keycloakUser struct {
-	Username      string               `json:"username"`
-	Email         string               `json:"email"`
-	FirstName     string               `json:"firstName,omitempty"`
-	Enabled       bool                 `json:"enabled"`
-	EmailVerified bool                 `json:"emailVerified"`
-	Attributes    map[string][]string  `json:"attributes"`
-	Credentials   []keycloakCredential `json:"credentials"`
+	Username        string               `json:"username"`
+	Email           string               `json:"email"`
+	FirstName       string               `json:"firstName,omitempty"`
+	Enabled         bool                 `json:"enabled"`
+	EmailVerified   bool                 `json:"emailVerified"`
+	Attributes      map[string][]string  `json:"attributes"`
+	Credentials     []keycloakCredential `json:"credentials,omitempty"`
+	RequiredActions []string             `json:"requiredActions,omitempty"`
 }
+
+// inviteActions are the actions the invited first org_admin completes.
+var inviteActions = []string{"UPDATE_PASSWORD", "VERIFY_EMAIL"}
 
 // CreateAccount creates the user with verified address, the organization_id
 // attribute the login reads, and the password as permanent credential.
 func (k *KeycloakAccounts) CreateAccount(ctx context.Context, a Account) (string, error) {
-	token, err := k.token(ctx)
-	if err != nil {
-		return "", err
-	}
-	body, err := json.Marshal(keycloakUser{
+	return k.createUser(ctx, &keycloakUser{
 		Username: a.Email, Email: a.Email, FirstName: a.DisplayName, Enabled: true, EmailVerified: true,
 		Attributes:  map[string][]string{"organization_id": {a.OrganizationID}},
 		Credentials: []keycloakCredential{{Type: "password", Value: a.Password}},
 	})
+}
+
+// InviteAccount creates the user without a password and lets Keycloak mail
+// the link to set one and verify the address (execute-actions-email; the
+// realm's SMTP settings apply). Used by the operator path (TLC-02).
+func (k *KeycloakAccounts) InviteAccount(ctx context.Context, a Account) (string, error) {
+	id, err := k.createUser(ctx, &keycloakUser{
+		Username: a.Email, Email: a.Email, FirstName: a.DisplayName, Enabled: true,
+		Attributes:      map[string][]string{"organization_id": {a.OrganizationID}},
+		RequiredActions: inviteActions,
+	})
+	if err != nil {
+		return "", err
+	}
+	if err = k.executeActionsEmail(ctx, id); err != nil {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		if derr := k.DeleteAccount(cleanup, id); derr != nil {
+			err = errors.Join(err, derr)
+		}
+		return "", err
+	}
+	return id, nil
+}
+
+func (k *KeycloakAccounts) executeActionsEmail(ctx context.Context, id string) error {
+	token, err := k.token(ctx)
+	if err != nil {
+		return err
+	}
+	body, _ := json.Marshal(inviteActions)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut,
+		k.adminRealm+"/users/"+url.PathEscape(id)+"/execute-actions-email", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("keycloak: invite request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := k.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("keycloak: invite: %w", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("keycloak: invite: status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// createUser posts a realm user and returns its id.
+func (k *KeycloakAccounts) createUser(ctx context.Context, user *keycloakUser) (string, error) {
+	token, err := k.token(ctx)
+	if err != nil {
+		return "", err
+	}
+	body, err := json.Marshal(user)
 	if err != nil {
 		return "", fmt.Errorf("keycloak: encode user: %w", err)
 	}
