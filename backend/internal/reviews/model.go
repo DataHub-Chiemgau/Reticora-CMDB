@@ -28,6 +28,9 @@ const (
 	KindResurrectedDevice = "resurrected_device"
 	KindUnlicensedCI      = "unlicensed_ci"
 	KindScopeSuggested    = "scope_suggested"
+	// KindUnknownRelationship is a neighbor reported with a relationship
+	// key the topology does not know (TOP-01).
+	KindUnknownRelationship = "unknown_relationship"
 	// KindSerialMismatch: the observed serial number of a CI differs from
 	// the serial number of its asset (DB-05, AST-04); opened by the
 	// database, at most one open item per CI.
@@ -38,7 +41,7 @@ const (
 // Kinds lists the review types in REC-08 order.
 var Kinds = []string{
 	KindUnclassifiedDevice, KindAmbiguousIdentity, KindConflictingValues, KindProbableDuplicate, KindOverrideConflict,
-	KindResurrectedDevice, KindUnlicensedCI, KindScopeSuggested, KindSerialMismatch, KindDuplicateIP,
+	KindResurrectedDevice, KindUnlicensedCI, KindScopeSuggested, KindSerialMismatch, KindDuplicateIP, KindUnknownRelationship,
 }
 
 // Statuses of a review item.
@@ -65,16 +68,17 @@ const (
 //     suggested scope);
 //   - dismiss closes the item without a change.
 var AllowedActions = map[string][]string{
-	KindUnclassifiedDevice: {ActionNew, ActionDismiss},
-	KindAmbiguousIdentity:  {ActionMerge, ActionNew, ActionDismiss},
-	KindConflictingValues:  {ActionAccept, ActionDismiss},
-	KindProbableDuplicate:  {ActionMerge, ActionDismiss},
-	KindOverrideConflict:   {ActionAccept, ActionDismiss},
-	KindResurrectedDevice:  {ActionMerge, ActionNew, ActionDismiss},
-	KindUnlicensedCI:       {ActionNew, ActionDismiss},
-	KindScopeSuggested:     {ActionAccept, ActionDismiss},
-	KindSerialMismatch:     {ActionDismiss},
-	KindDuplicateIP:        {ActionDismiss},
+	KindUnclassifiedDevice:  {ActionNew, ActionDismiss},
+	KindAmbiguousIdentity:   {ActionMerge, ActionNew, ActionDismiss},
+	KindConflictingValues:   {ActionAccept, ActionDismiss},
+	KindProbableDuplicate:   {ActionMerge, ActionDismiss},
+	KindOverrideConflict:    {ActionAccept, ActionDismiss},
+	KindResurrectedDevice:   {ActionMerge, ActionNew, ActionDismiss},
+	KindUnlicensedCI:        {ActionNew, ActionDismiss},
+	KindScopeSuggested:      {ActionAccept, ActionDismiss},
+	KindSerialMismatch:      {ActionDismiss},
+	KindDuplicateIP:         {ActionDismiss},
+	KindUnknownRelationship: {ActionAccept, ActionDismiss},
 }
 
 // Allowed reports whether action resolves an item of kind.

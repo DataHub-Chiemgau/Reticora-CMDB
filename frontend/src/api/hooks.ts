@@ -3,6 +3,8 @@ import {
   ciApi,
   relationshipApi,
   collectorApi,
+  discoveryScopeApi,
+  scopeSuggestionApi,
   topologyApi,
   rackApi,
   assetApi,
@@ -29,6 +31,7 @@ import {
   credentialApi,
 } from '../api/client';
 import type {
+  DiscoveryScopeInput,
   CICreateRequest,
   CIListParams,
   CIUpdateRequest,
@@ -118,7 +121,11 @@ export function useUpdateRelationship(ciId: string) {
 export function useDeleteRelationship(ciId: string) {
   const invalidate = useRelationshipInvalidation(ciId);
   return useMutation({
-    mutationFn: (id: string) => relationshipApi.delete(id),
+    // A discovery edge is deleted with force and then suppressed (REL-04).
+    mutationFn: (arg: string | { id: string; force?: boolean }) =>
+      typeof arg === 'string'
+        ? relationshipApi.delete(arg)
+        : relationshipApi.delete(arg.id, arg.force ?? false),
     onSuccess: invalidate,
   });
 }
@@ -127,6 +134,54 @@ export function useCollectors(params: ListParams = {}) {
   return useQuery({
     queryKey: ['collectors', params],
     queryFn: () => collectorApi.list(params),
+  });
+}
+
+export function useDiscoveryScopes(collectorId: string) {
+  return useQuery({
+    queryKey: ['discovery-scopes', collectorId],
+    queryFn: () => discoveryScopeApi.list(collectorId),
+  });
+}
+
+export function useDiscoveryScopeMutations(collectorId: string) {
+  const queryClient = useQueryClient();
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: ['discovery-scopes', collectorId] });
+  return {
+    create: useMutation({
+      mutationFn: (input: DiscoveryScopeInput) => discoveryScopeApi.create(input),
+      onSuccess: invalidate,
+    }),
+    update: useMutation({
+      mutationFn: ({ id, patch }: { id: string; patch: Partial<DiscoveryScopeInput> }) =>
+        discoveryScopeApi.update(id, patch),
+      onSuccess: invalidate,
+    }),
+    remove: useMutation({
+      mutationFn: (id: string) => discoveryScopeApi.delete(id),
+      onSuccess: invalidate,
+    }),
+  };
+}
+
+export function useScopeSuggestions() {
+  return useQuery({
+    queryKey: ['scope-suggestions'],
+    queryFn: () => scopeSuggestionApi.list(),
+  });
+}
+
+/** Accepting a suggestion creates the scope; dismissing keeps it away. */
+export function useResolveScopeSuggestion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'accept' | 'dismiss' }) =>
+      scopeSuggestionApi.resolve(id, action),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['scope-suggestions'] });
+      queryClient.invalidateQueries({ queryKey: ['discovery-scopes'] });
+    },
   });
 }
 

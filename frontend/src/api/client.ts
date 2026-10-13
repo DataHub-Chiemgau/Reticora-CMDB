@@ -148,17 +148,72 @@ export interface RelationshipUpdateRequest {
   notes?: string;
 }
 
+/** Collector status (COL-01). */
+export type CollectorStatus = 'pending' | 'active' | 'offline' | 'disabled' | 'paused';
+
 export interface Collector {
   id: string;
   organization_id: string;
   client_id?: string;
+  site_id?: string;
   name: string;
   version?: string;
-  status: string;
-  last_heartbeat?: string;
+  status: CollectorStatus;
+  status_changed_at?: string;
+  last_heartbeat_at?: string;
+  cert_fingerprint?: string;
+  cert_not_after?: string;
   config: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+}
+
+/** Discovery scope (DIS-09). */
+export type DiscoveryScopeKind = 'cidr' | 'host' | 'range';
+
+export interface DiscoveryScope {
+  id: string;
+  organization_id: string;
+  client_id?: string;
+  site_id?: string;
+  collector_id: string;
+  name: string;
+  kind: DiscoveryScopeKind;
+  target: string;
+  vrf_id?: string;
+  schedule: string;
+  credential_ids: string[];
+  plugins: string[];
+  enabled: boolean;
+  last_run_at?: string;
+  next_run_at?: string;
+  last_result?: Record<string, unknown>;
+  health?: DiscoveryScopeHealth;
+  created_at: string;
+  updated_at: string;
+}
+
+/** State of the last scope run with the causes of its errors (DIS-08). */
+export interface DiscoveryScopeHealth {
+  state: 'ok' | 'partial' | 'failed' | 'never_run';
+  errors?: DiscoveryErrorState[];
+}
+
+export interface DiscoveryErrorState {
+  cause: string;
+  message?: string;
+  protocol?: string;
+  target?: string;
+}
+
+export interface DiscoveryScopeInput {
+  collector_id: string;
+  kind: DiscoveryScopeKind;
+  target: string;
+  name?: string;
+  schedule?: string;
+  plugins?: string[];
+  enabled?: boolean;
 }
 
 export interface CIListParams {
@@ -387,14 +442,55 @@ export const relationshipApi = {
     });
   },
 
-  delete(id: string): Promise<void> {
-    return fetchAPI(`/relationships/${id}`, { method: 'DELETE' });
+  delete(id: string, force = false): Promise<void> {
+    return fetchAPI(`/relationships/${id}${force ? '?force=true' : ''}`, { method: 'DELETE' });
   },
 };
 
 export const collectorApi = {
   list(params: ListParams = {}): Promise<PaginatedResponse<Collector>> {
     return fetchAPI(`/collectors${buildQuery(params)}`);
+  },
+};
+
+/** A subnet a collector reported after enrollment (scope_suggested, INS-06). */
+export interface ScopeSuggestion {
+  id: string;
+  kind: 'scope_suggested';
+  status: string;
+  payload: {
+    collector_id?: string;
+    collector_name?: string;
+    cidr?: string;
+    site_id?: string;
+  };
+  created_at: string;
+}
+
+export const scopeSuggestionApi = {
+  list(): Promise<PaginatedResponse<ScopeSuggestion>> {
+    return fetchAPI('/review-items?kind=scope_suggested&status=open&limit=100');
+  },
+  resolve(id: string, action: 'accept' | 'dismiss'): Promise<unknown> {
+    return fetchAPI(`/review-items/${id}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    });
+  },
+};
+
+export const discoveryScopeApi = {
+  list(collectorId: string): Promise<PaginatedResponse<DiscoveryScope>> {
+    return fetchAPI(`/discovery-scopes?collector_id=${encodeURIComponent(collectorId)}&limit=100`);
+  },
+  create(input: DiscoveryScopeInput): Promise<DiscoveryScope> {
+    return fetchAPI('/discovery-scopes', { method: 'POST', body: JSON.stringify(input) });
+  },
+  update(id: string, patch: Partial<DiscoveryScopeInput>): Promise<DiscoveryScope> {
+    return fetchAPI(`/discovery-scopes/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/discovery-scopes/${id}`, { method: 'DELETE' });
   },
 };
 

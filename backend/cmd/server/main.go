@@ -31,6 +31,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
@@ -43,6 +44,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
@@ -260,6 +262,9 @@ func main() {
 	var jobQueue *jobs.Queue
 	// The domain events reach RETICORA_EVENTS over the same connection.
 	var eventStream jetstream.JetStream
+	// coreNATS also carries the collectors' requests from the endpoint
+	// (credential bundles, COL-02).
+	var coreNATS *nats.Conn
 	if cfg.IsSet("RETICORA_NATS_URL") && repos.Jobs != nil {
 		nc, natsErr := nats.Connect(cfg.NATSUrl, nats.Name("reticora-jobs"), nats.MaxReconnects(-1))
 		if natsErr != nil {
@@ -267,6 +272,7 @@ func main() {
 			os.Exit(1)
 		}
 		defer nc.Close()
+		coreNATS = nc
 		js, natsErr := jetstream.New(nc)
 		if natsErr != nil {
 			slog.Error("failed to open JetStream for the job queue", "error", natsErr)
@@ -381,13 +387,17 @@ func main() {
 		}
 	}()
 
+	credentialService := credential.NewService(repos.Credential, encryptor)
+	// The internal CA of the collector certificates (COL-04) and the
+	// collector NATS endpoint (COL-08).
+	collectorPKI := collectorCA(auditPool, encryptor)
 	mux, httpMetrics, err := server.NewRouter(repos, server.Options{
 		Version:            version,
 		MetricsTenantLabel: cfg.MetricsTenantLabel,
 		Entitlements:       entitlementSvc,
 		Dispatcher:         webhookDispatcher,
 		CIService:          ci.NewServiceWithLimits(repos.CI, entitlementSvc).WithFieldResolver(repos.CIType),
-		Credentials:        credential.NewService(repos.Credential, encryptor),
+		Credentials:        credentialService,
 		OIDC:               oidcProvider,
 		Sessions:           sessionIssuer,
 		RefreshSessions:    refreshSessions,
@@ -416,6 +426,7 @@ func main() {
 		SignupProtection: signupProtection(cfg, cacheStore),
 		// Invitations need the database; in --no-db mode they answer 503.
 		InvitationAccounts: invitationAccounts(cfg),
+		CollectorCA:        collectorPKI,
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -440,6 +451,21 @@ func main() {
 			webhook.NewPGRepository(auditPool)).Schedules()...)
 		systemJobs = append(systemJobs, jobs.NewRetention(auditPool, jobs.RetentionFromDays(cfg.RetentionAuditYears,
 			cfg.RetentionHistoryDays, cfg.RetentionSoftDeleteDays, cfg.RetentionReviewItemDays)).Schedules()...)
+		// Collector status: offline after five minutes without heartbeat,
+		// paused while the discovery license is not active (COL-01, COL-05).
+		collectorStatus := discovery.NewStatusMonitor(auditPool)
+		collectorStatus.Licensed = func(ctx context.Context, orgID string) (bool, error) {
+			_, status, serr := entitlementSvc.Status(ctx, orgID, entitlement.FeatureDiscovery)
+			return status == entitlement.StatusActive, serr
+		}
+		systemJobs = append(systemJobs, collectorStatus.Schedule())
+		// CIs not seen for three scope intervals become unknown (REC-09,
+		// LCY-05); RETICORA_OFFLINE_DETECTOR_ENABLED switches it off.
+		if cfg.OfflineDetector {
+			systemJobs = append(systemJobs, lifecycle.NewOfflineDetector(auditPool).Schedule())
+		}
+		// Unconfirmed and suppressed discovery edges are removed (TOP-02).
+		systemJobs = append(systemJobs, relationship.NewCleanup(auditPool).Schedule())
 		// Personal data of existing history entries into the vault (SEC-05).
 		systemJobs = append(systemJobs, jobs.NewPIIBackfill(auditPool).Schedule())
 		// Attribute indexes of searchable/unique attributes (DB-04, MET-15).
@@ -504,6 +530,37 @@ func main() {
 		workers = append(workers, server.Worker{Name: config.WorkerEvents, Run: publisher.Run})
 	}
 	// Deliver queued notifications with retry (NTF-04).
+	if collectorPKI != nil && (cfg.PKIDir != "" || cfg.NATSEdgeURL != "") {
+		edgeSecrets, edgeErr := discovery.DeriveEdgeSecrets(encryptor)
+		if edgeErr != nil {
+			slog.Error("failed to derive the collector NATS endpoint keys", "error", edgeErr)
+			os.Exit(1)
+		}
+		edge := &discovery.EdgeConfig{Pool: auditPool, CA: collectorPKI, Secrets: edgeSecrets, PKIDir: cfg.PKIDir,
+			Hosts: splitList(cfg.NATSEdgeHosts), URL: cfg.NATSEdgeURL}
+		workers = append(workers, server.Worker{Name: config.WorkerNATSEdge, Run: func(ctx context.Context) { discovery.RunEdge(ctx, edge) }})
+	}
+	// Credential bundles for the collectors over their NATS channel,
+	// encrypted for each collector's key (COL-02).
+	if collectorPKI != nil && coreNATS != nil {
+		gate := discovery.NewBundleGate(auditPool, collectorPKI)
+		workers = append(workers, server.Worker{Name: config.WorkerCredentialBundles, Run: func(ctx context.Context) {
+			if serr := credentialService.ServeBundles(ctx, coreNATS, gate, gate); serr != nil {
+				slog.Error("credential bundles", "error", serr)
+			}
+		}})
+	}
+	// Discovery scopes, their run results and the subnets a collector
+	// reports after enrollment (scope_suggested) over the collectors' NATS
+	// channel (DIS-09).
+	if coreNATS != nil {
+		scopeChannel := discovery.NewHandler(repos.Discovery, repos.CI)
+		workers = append(workers, server.Worker{Name: config.WorkerDiscoveryScopes, Run: func(ctx context.Context) {
+			if serr := scopeChannel.ServeCollectorScopes(ctx, coreNATS); serr != nil {
+				slog.Error("discovery scopes", "error", serr)
+			}
+		}})
+	}
 	workers = append(workers, server.Worker{Name: config.WorkerNotifier, Run: func(ctx context.Context) { notifier.Run(ctx, 5*time.Second) }})
 	// Run the jobs announced on the JOBS work queue (TEC-14).
 	if jobQueue != nil {
@@ -904,4 +961,13 @@ func (d dekRotator) RotateOrgDEK(ctx context.Context, orgID string, enc *crypto.
 
 func (d dekRotator) RewrapOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (bool, error) {
 	return d.repo.RewrapOrgDEK(ctx, orgID, enc)
+}
+
+// collectorCA is the internal CA of the collector certificates (COL-04);
+// it lives in the database, so --no-db mode has none.
+func collectorCA(pool *pgxpool.Pool, enc *crypto.EnvelopeEncryptor) *discovery.CA {
+	if pool == nil {
+		return nil
+	}
+	return discovery.NewCA(pool, enc)
 }

@@ -97,7 +97,7 @@ describe('CIRelationshipsCard', () => {
     expect(screen.queryByRole('button', { name: /bestätigen|verify/i })).toBeNull();
   });
 
-  it('deletes a relationship through the relationships endpoint', async () => {
+  it('removes a discovery edge with force so it stays suppressed (REL-04)', async () => {
     const fetchMock = vi
       .fn()
       .mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -108,12 +108,12 @@ describe('CIRelationshipsCard', () => {
 
     renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
 
-    const deleteButton = await screen.findByRole('button', { name: /löschen|delete/i });
+    const deleteButton = await screen.findByRole('button', { name: /unterdrücken|suppress/i });
     fireEvent.click(deleteButton);
 
     await waitFor(() => {
       const del = fetchMock.mock.calls.find((call) => call[1]?.method === 'DELETE');
-      expect(del?.[0]).toBe('/api/v1/relationships/rel-1');
+      expect(del?.[0]).toBe('/api/v1/relationships/rel-1?force=true');
     });
   });
 

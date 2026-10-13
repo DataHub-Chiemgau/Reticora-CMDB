@@ -165,9 +165,21 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
                       <button
                         className="text-xs text-red-600 hover:underline"
                         disabled={deleteRelationship.isPending}
-                        onClick={() => deleteRelationship.mutate(relationship.id)}
+                        title={
+                          relationship.source === 'discovery'
+                            ? t('relationshipCard.suppressHint')
+                            : undefined
+                        }
+                        onClick={() =>
+                          deleteRelationship.mutate({
+                            id: relationship.id,
+                            force: relationship.source === 'discovery',
+                          })
+                        }
                       >
-                        {t('common.delete', 'Löschen')}
+                        {relationship.source === 'discovery'
+                          ? t('relationshipCard.suppress')
+                          : t('common.delete', 'Löschen')}
                       </button>
                     </>
                   )}

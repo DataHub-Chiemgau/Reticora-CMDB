@@ -24,6 +24,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -33,13 +34,16 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/nas"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/power"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/redfish"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/simulate"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/snmp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/ssh"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/sweep"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/wmi"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/profiles"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/transport"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/update"
 )
 
 type collectorConfig struct {
@@ -48,8 +52,20 @@ type collectorConfig struct {
 	CollectorID       string
 	ScanSubnets       []string
 	Protocols         []string
+	// Simulate replaces discovery by the deterministic 30-device fleet of
+	// plugins/simulate (RETICORA_SIMULATE, SIM-02); refused in production.
+	Simulate bool
+	// DiscoveryInterval is the poll interval of the configured subnets
+	// (RETICORA_DISCOVERY_INTERVAL, default 15 min, at least 5 min);
+	// SweepInterval their sweep interval (default 24 h, DIS-10). Scopes
+	// bring their own schedule and the organization's poll intervals.
 	DiscoveryInterval time.Duration
-	HeartbeatInterval time.Duration
+	SweepInterval     time.Duration
+	// ScheduleTick is how often due discovery is checked (default 1 min).
+	ScheduleTick time.Duration
+	// SpoolFlushInterval is how often the spool is delivered (default 30 s).
+	SpoolFlushInterval time.Duration
+	HeartbeatInterval  time.Duration
 	// Credentials are namespaced by protocol ("ssh.username",
 	// "redfish.password", "snmp.community"); plugins receive only their own
 	// namespace through plugins.CredentialsFor (COL-02).
@@ -96,6 +112,14 @@ type collectorConfig struct {
 	AgentRelayAddr     string
 	AgentRelayCertFile string
 	AgentRelayKeyFile  string
+	// SweepConcurrency is the number of parallel sweep probes, capped at
+	// sweep.MaxConcurrency (DIS-01).
+	SweepConcurrency int
+	// UpdateURL enables signed auto-updates (COL-06) from the release
+	// manifests below <UpdateURL>/<UpdateChannel>/; empty disables them.
+	UpdateURL      string
+	UpdateChannel  string
+	UpdateInterval time.Duration
 }
 
 // pluginRegistry maps protocol names to plugin instances.
@@ -114,8 +138,13 @@ var pluginRegistry = map[string]plugins.Plugin{
 // It is the entry point shared by collector/cmd/collector and the backend
 // module's compatibility shim.
 func Main() {
+	if handled, code := runCommand(context.Background(), os.Args[1:], os.Stdout, os.Stderr); handled {
+		os.Exit(code)
+	}
 	collectorCfg := loadCollectorConfig()
 	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
+	pluginRegistry["sweep"] = newSweep(&collectorCfg)
+	loadProfileDir(os.Getenv("RETICORA_PROFILES_DIR"))
 
 	environment := envOrDefault("RETICORA_ENVIRONMENT", "development")
 	logLevel := slog.LevelInfo
@@ -124,7 +153,31 @@ func Main() {
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
 
-	slog.Info("starting collector", "environment", environment)
+	slog.Info("starting collector", "environment", environment, "version", Version)
+	if err := applySimulation(&collectorCfg, environment); err != nil {
+		slog.Error("collector simulation refused", "event", "collector.simulate.refused", "error", err)
+		os.Exit(1)
+	}
+
+	// A pending update is confirmed by the first successful heartbeat;
+	// after repeated failed starts it is rolled back (COL-06).
+	confirmUpdate := func() {}
+	execPath, err := executablePath()
+	if err == nil {
+		confirmUpdate, err = startupUpdate(execPath)
+		if errors.Is(err, update.ErrRolledBack) {
+			os.Exit(1)
+		}
+		if err != nil {
+			slog.Error("pending collector update", "error", err)
+		}
+	}
+	confirmed := make(chan struct{})
+	var confirmedOnce sync.Once
+	onHeartbeat := func() {
+		confirmUpdate()
+		confirmedOnce.Do(func() { close(confirmed) })
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -135,21 +188,31 @@ func Main() {
 		os.Exit(1)
 	}
 
-	natsURL := envOrDefault("RETICORA_NATS_URL", "nats://localhost:4222")
 	slog.Info("collector configured",
-		"nats_url", natsURL,
+		"nats_url", natsEndpoint(collectorCfg.ServerURL),
 		"server_url", collectorCfg.ServerURL,
 		"scan_subnets", collectorCfg.ScanSubnets,
 		"protocols", collectorCfg.Protocols,
-		"discovery_interval", collectorCfg.DiscoveryInterval.String(),
+		"poll_interval", collectorCfg.DiscoveryInterval.String(),
+		"sweep_interval", collectorCfg.SweepInterval.String(),
 		"heartbeat_interval", collectorCfg.HeartbeatInterval.String(),
 		"mtls", uploader.mtls,
 		"spool_dir", collectorCfg.SpoolDir,
+		"sweep_concurrency", collectorCfg.SweepConcurrency,
+		"sweep_icmp", sweepICMPCapability(),
 	)
 
 	go runDiscoveryLoop(ctx, collectorCfg, uploader)
-	go runHeartbeatLoop(ctx, collectorCfg, uploader)
+	// The spool is delivered continuously, not only after discovery (NFR-03).
+	go runSpoolFlusher(ctx, uploader, collectorCfg.SpoolFlushInterval)
+	go runHeartbeatLoop(ctx, collectorCfg, uploader, onHeartbeat)
+	restart := make(chan string, 1)
+	if collectorCfg.UpdateURL != "" {
+		go runUpdateLoop(ctx, collectorCfg.UpdateInterval, newUpdateChecker(&collectorCfg), confirmed, restart)
+	}
 	go runAgentRelay(ctx, collectorCfg, uploader)
+	// The collector's mTLS channel to the NATS endpoint (COL-08).
+	go runNATS(ctx, collectorCfg)
 	if collectorCfg.TrapListenAddr != "" {
 		go runTrapReceiver(ctx, collectorCfg, uploader)
 	}
@@ -159,8 +222,13 @@ func Main() {
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	slog.Info("collector shutting down")
+	select {
+	case <-quit:
+		slog.Info("collector shutting down")
+	case version := <-restart:
+		// The service manager (Restart=always) starts the new binary.
+		slog.Info("collector restarting into the update", "version", version)
+	}
 	cancel()
 }
 
@@ -182,6 +250,9 @@ type uploader struct {
 	// paused is set while the discovery license of the organization is
 	// expired (CH21, ENT-07): the collector neither scans nor spools.
 	paused atomic.Bool
+	// flushMu serializes spool deliveries; flushNow wakes the flusher.
+	flushMu  sync.Mutex
+	flushNow chan struct{}
 }
 
 // LicenseStatusHeader carries the discovery license status on heartbeat
@@ -214,7 +285,7 @@ func (u *uploader) setLicenseStatus(status string) {
 // newUploader builds the upload path: mTLS when certificate material is
 // available, plus the disk spool used for offline buffering.
 func newUploader(ctx context.Context, cfg collectorConfig) (*uploader, error) {
-	u := &uploader{cfg: cfg}
+	u := &uploader{cfg: cfg, flushNow: make(chan struct{}, 1)}
 	if cfg.SpoolDir != "" {
 		u.spool = &buffer.DiskBuffer{
 			Dir: cfg.SpoolDir, MaxBytes: cfg.SpoolMaxBytes, MaxAge: cfg.SpoolMaxAge,
@@ -308,82 +379,32 @@ func loadTLSMaterial(ctx context.Context, cfg collectorConfig) (certPEM, keyPEM,
 	return certPEM, keyPEM, caPEM, nil
 }
 
+// runDiscoveryLoop runs what is due every tick (DIS-10): the sweeps on
+// their schedule, the polls on their interval. A paused collector (expired
+// license) or a saturated spool scans nothing.
 func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
-	ticker := time.NewTicker(cfg.DiscoveryInterval)
+	tick := cfg.ScheduleTick
+	if tick <= 0 {
+		tick = defaultScheduleTick
+		if cfg.DiscoveryInterval > 0 && cfg.DiscoveryInterval < tick {
+			tick = cfg.DiscoveryInterval
+		}
+	}
+	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
+	sched, hosts := newScheduler(), &hostCache{}
 
 	for {
-		cycleStart := time.Now()
-		// Backlog first: spooled batches are delivered before anything new
-		// is collected (COL-05).
-		if up.paused.Load() {
+		switch {
+		case up.paused.Load():
 			// CH21: after the license expired the collector does not scan;
 			// the heartbeat resumes it once the license is renewed.
-			select {
-			case <-ctx.Done():
-				slog.Info("discovery loop stopped")
-				return
-			case <-ticker.C:
-				continue
-			}
-		}
-		up.flushSpool(ctx)
-		if up.backpressure(ctx) {
+		case up.backpressure(ctx):
 			slog.Warn("discovery paused: spool is saturated and the backend is unreachable",
 				"event", "collector.spool.backpressure")
-			select {
-			case <-ctx.Done():
-				slog.Info("discovery loop stopped")
-				return
-			case <-ticker.C:
-				continue
-			}
+		default:
+			runDueDiscovery(ctx, &cfg, up, sched, hosts, time.Now())
 		}
-		slog.Info("discovery cycle started", "scan_subnets", cfg.ScanSubnets, "protocols", cfg.Protocols)
-
-		var records []plugins.DeviceRecord
-
-		// Expand subnets to individual targets for discovery
-		targets := expandSubnets(cfg.ScanSubnets)
-
-		for _, protocol := range cfg.Protocols {
-			if ctx.Err() != nil {
-				break
-			}
-
-			plug, ok := pluginRegistry[protocol]
-			if !ok {
-				slog.Warn("unknown protocol plugin, skipping", "protocol", protocol)
-				continue
-			}
-
-			slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
-			observedAt := time.Now()
-			results, err := plug.Discover(ctx, targets, plugins.CredentialsFor(protocol, cfg.Credentials))
-			if err != nil {
-				slog.Error("discovery plugin error", "protocol", protocol, "error", err)
-				continue
-			}
-			slog.Info("discovery plugin completed", "protocol", protocol, "results", len(results))
-			for i := range results {
-				records = append(records, plugins.RecordFromResult(protocol, &results[i], observedAt))
-			}
-		}
-		records = deliverableRecords(ctx, records)
-
-		// Upload records to the backend in a compressed batch, then flush any
-		// records spooled while the backend was unreachable.
-		if len(records) > 0 {
-			if err := up.uploadRecordsAt(ctx, records, cycleStart); err != nil {
-				slog.Error("failed to upload discovery records", "error", err, "count", len(records))
-			} else {
-				slog.Info("discovery records uploaded", "count", len(records))
-			}
-		}
-		up.flushSpool(ctx)
-
-		slog.Info("discovery cycle completed", "duration_ms", time.Since(cycleStart).Milliseconds(), "total_records", len(records))
-
 		select {
 		case <-ctx.Done():
 			slog.Info("discovery loop stopped")
@@ -391,6 +412,83 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// runDueDiscovery runs the due protocols of every pass, uploads the
+// records and reports the scope runs; it returns the number of records.
+func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sched *scheduler, hosts *hostCache, now time.Time) int {
+	var records []plugins.DeviceRecord
+	type scopeOutcome struct {
+		scope   *collectorScope
+		records int
+		errs    []runError
+		next    time.Time
+	}
+	var outcomes []scopeOutcome
+
+	// One pass per discovery scope (DIS-09), or the configured subnets.
+	for _, pass := range discoveryPasses(cfg) {
+		due := pass.dueProtocols(sched, now)
+		if len(due) == 0 {
+			continue
+		}
+		slog.Info("discovery started", "pass", pass.key, "protocols", due)
+		var passRecords []plugins.DeviceRecord
+		var errs []runError
+		for _, protocol := range due {
+			if ctx.Err() != nil {
+				break
+			}
+			plug, ok := pluginRegistry[protocol]
+			if !ok {
+				slog.Warn("unknown protocol plugin, skipping", "protocol", protocol)
+				continue
+			}
+			targets := pass.targetsFor(protocol, hosts)
+			slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
+			creds := plugins.CredentialsFor(protocol, credentialsFor(cfg))
+			hits, err := plug.Probe(ctx, targets, creds)
+			if err != nil {
+				slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
+				errs = append(errs, runError{Protocol: protocol, Message: err.Error()})
+				continue
+			}
+			if protocol == "sweep" {
+				hosts.set(pass.key, hitTargets(hits))
+			}
+			collected, failed := collectHits(ctx, protocol, plug, hits, creds)
+			errs = append(errs, failed...)
+			slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
+			passRecords = append(passRecords, collected...)
+		}
+		tagRecords(passRecords, pass.scope)
+		records = append(records, passRecords...)
+		outcomes = append(outcomes, scopeOutcome{scope: pass.scope, records: len(passRecords), errs: errs, next: pass.nextRun(sched)})
+	}
+	if len(outcomes) == 0 {
+		return 0
+	}
+	records = deliverableRecords(ctx, records)
+	// Upload the records in a compressed batch; the spool flusher delivers
+	// what could not be sent.
+	var uploadErr *runError
+	if len(records) > 0 {
+		if err := up.uploadRecordsAt(ctx, records, now); err != nil {
+			slog.Error("failed to upload discovery records", "event", "discovery.upload.failed", "error", err, "count", len(records))
+			uploadErr = &runError{Protocol: "upload", Cause: "upload_failed", Message: err.Error()}
+		} else {
+			slog.Info("discovery records uploaded", "count", len(records))
+		}
+	}
+	for _, o := range outcomes {
+		errs := o.errs
+		if uploadErr != nil && o.records > 0 {
+			errs = append(errs, *uploadErr)
+		}
+		reportScopeRun(ctx, o.scope, now, o.records, errs, o.next)
+	}
+	slog.Info("discovery completed", "duration_ms", time.Since(now).Milliseconds(), "total_records", len(records))
+	return len(records)
 }
 
 // expandSubnets converts CIDR notations to individual IP targets.
@@ -435,6 +533,72 @@ func incrementIP(ip net.IP) {
 			break
 		}
 	}
+}
+
+// collectParallelism bounds the parallel Collect calls of one plugin.
+const collectParallelism = 16
+
+// collectHits runs Collect for every target that answered the probe
+// (DIS-03) and returns its DeviceRecords and the targets whose collection
+// failed (DIS-08). When Collect fails, the probe hit is reported instead,
+// so a reachable device is never lost.
+func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits []plugins.Result, creds map[string]string) ([]plugins.DeviceRecord, []runError) {
+	out := make([]plugins.DeviceRecord, len(hits))
+	failures := make([]*runError, len(hits))
+	sem := make(chan struct{}, collectParallelism)
+	var wg sync.WaitGroup
+	for i := range hits {
+		hit := &hits[i]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			probedAt := time.Now()
+			rec, err := plug.Collect(ctx, hit.IP, creds)
+			if err != nil || rec == nil {
+				if err != nil {
+					slog.Warn("discovery target failed; reporting the probe result", "event", "discovery.target.failed",
+						"protocol", protocol, "target", hit.IP, "error", err)
+					failures[i] = &runError{Protocol: protocol, Target: hit.IP, Message: err.Error()}
+				}
+				out[i] = plugins.RecordFromResult(protocol, hit, probedAt)
+				return
+			}
+			if rec.Identity.PrimaryMAC == "" {
+				rec.Identity.PrimaryMAC = hit.MAC
+			}
+			out[i] = *rec
+		}()
+	}
+	wg.Wait()
+	// One classification chain for every record (DIS-02).
+	for i := range out {
+		classifier.ClassifyRecord(&out[i])
+	}
+	var errs []runError
+	for _, f := range failures {
+		if f != nil {
+			errs = append(errs, *f)
+		}
+	}
+	return out, errs
+}
+
+// classifier holds the shipped profiles plus those of RETICORA_PROFILES_DIR.
+var classifier = profiles.Default()
+
+// loadProfileDir adds the operator's profiles (updated OUI prefixes and
+// device profiles) to the classifier.
+func loadProfileDir(dir string) {
+	if dir == "" {
+		return
+	}
+	if err := classifier.LoadDir(dir); err != nil {
+		slog.Error("loading device profiles failed; using the shipped profiles", "dir", dir, "error", err)
+		return
+	}
+	slog.Info("device profiles loaded", "dir", dir, "profiles", len(classifier.List()))
 }
 
 // deliverableRecords resolves the address of targets configured by name and
@@ -637,6 +801,8 @@ func (u *uploader) flushSpool(ctx context.Context) {
 	if u.spool == nil || u.cfg.ServerURL == "" || u.paused.Load() {
 		return
 	}
+	u.flushMu.Lock()
+	defer u.flushMu.Unlock()
 	delivered := 0
 	defer func() {
 		if delivered > 0 {
@@ -717,13 +883,23 @@ func (u *uploader) backpressure(ctx context.Context) bool {
 	return saturated
 }
 
-func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
+// runHeartbeatLoop sends heartbeats; onSuccess runs after every heartbeat
+// the server accepted.
+func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader, onSuccess func()) {
 	ticker := time.NewTicker(cfg.HeartbeatInterval)
 	defer ticker.Stop()
 
 	for {
-		if status := postHeartbeat(ctx, up.client, cfg, up.spoolReport(ctx)); status != "" {
+		status, ok := postHeartbeat(ctx, up.client, cfg, up.spoolReport(ctx))
+		if status != "" {
 			up.setLicenseStatus(status)
+		}
+		if ok {
+			// The backend is reachable: deliver the spool now.
+			up.requestFlush()
+			if onSuccess != nil {
+				onSuccess()
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -768,27 +944,27 @@ func (u *uploader) spoolReport(ctx context.Context) *spoolReport {
 }
 
 // postHeartbeat sends a heartbeat and returns the discovery license status of
-// the response ("" when unknown).
-func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport) string {
+// the response ("" when unknown) and whether the server accepted it.
+func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport) (status string, ok bool) {
 	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
 		slog.Warn("skipping heartbeat due to incomplete configuration",
 			"server_url", cfg.ServerURL,
 			"organization_id", cfg.OrganizationID,
 			"collector_id", cfg.CollectorID,
 		)
-		return ""
+		return "", false
 	}
 
 	endpoint := strings.TrimRight(cfg.ServerURL, "/") + "/api/v1/collectors/" + cfg.CollectorID + "/heartbeat"
 	body, err := json.Marshal(heartbeatBody{Spool: spool})
 	if err != nil {
 		slog.Error("encode heartbeat failed", "error", err)
-		return ""
+		return "", false
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		slog.Error("build heartbeat request failed", "error", err)
-		return ""
+		return "", false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Organization-ID", cfg.OrganizationID)
@@ -797,15 +973,15 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 	resp, err := client.Do(req)
 	if err != nil {
 		slog.Error("heartbeat failed", "error", err, "endpoint", endpoint)
-		return ""
+		return "", false
 	}
 	defer resp.Body.Close()
 
 	slog.Info("heartbeat completed", "status", resp.StatusCode, "duration_ms", time.Since(start).Milliseconds())
 	if resp.StatusCode >= 300 {
-		return ""
+		return "", false
 	}
-	return resp.Header.Get(LicenseStatusHeader)
+	return resp.Header.Get(LicenseStatusHeader), true
 }
 
 // runTrapReceiver receives SNMP traps and forwards them as metric events to
@@ -816,7 +992,7 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 func runTrapReceiver(ctx context.Context, cfg collectorConfig, up *uploader) {
 	rcv := &snmp.TrapReceiver{
 		ListenAddr: cfg.TrapListenAddr,
-		Community:  plugins.CredentialsFor("snmp", cfg.Credentials)["community"],
+		Community:  plugins.CredentialsFor("snmp", credentialsFor(&cfg))["community"],
 		Sink: func(ctx context.Context, ev snmp.TrapEvent) {
 			slog.Info("snmp trap received", "source", ev.SourceIP, "trap_oid", ev.TrapOID)
 			if err := up.uploadTrapEvent(ctx, ev); err != nil {
@@ -843,7 +1019,7 @@ func runMetricsLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 		return
 	}
 
-	creds := plugins.CredentialsFor("snmp", cfg.Credentials)
+	creds := plugins.CredentialsFor("snmp", credentialsFor(&cfg))
 	for {
 		targets := expandSubnets(cfg.ScanSubnets)
 		samples := make([]plugins.MetricSample, 0, len(targets)*len(cfg.PollMetrics))
@@ -1088,14 +1264,22 @@ func loadCollectorConfig() collectorConfig {
 		slog.Error("invalid RETICORA_REDFISH_TLS_SCOPES; using default certificate verification", "error", err)
 		tlsScopes = nil
 	}
+	updateURL := strings.TrimSpace(os.Getenv("RETICORA_UPDATE_URL"))
+	channel, channelOK := updateChannelFromEnv(os.Getenv("RETICORA_UPDATE_CHANNEL"))
+	if !channelOK {
+		updateURL = ""
+	}
 
-	return collectorConfig{
+	cfg := collectorConfig{
 		ServerURL:          envOrDefault("RETICORA_SERVER_URL", "http://localhost:8080"),
 		OrganizationID:     os.Getenv("RETICORA_ORGANIZATION_ID"),
 		CollectorID:        os.Getenv("RETICORA_COLLECTOR_ID"),
 		ScanSubnets:        csvEnvOrDefault("RETICORA_SCAN_SUBNETS", []string{"127.0.0.1/32"}),
 		Protocols:          csvEnvOrDefault("RETICORA_DISCOVERY_PROTOCOLS", []string{"sweep", "snmp", "ssh"}),
-		DiscoveryInterval:  durationEnvOrDefault("RETICORA_DISCOVERY_INTERVAL", 15*time.Minute),
+		Simulate:           boolEnv("RETICORA_SIMULATE"),
+		DiscoveryInterval:  max(durationEnvOrDefault("RETICORA_DISCOVERY_INTERVAL", defaultPollInterval), minPollInterval),
+		SweepInterval:      max(durationEnvOrDefault("RETICORA_SWEEP_INTERVAL", defaultSweepInterval), minPollInterval),
+		SpoolFlushInterval: durationEnvOrDefault("RETICORA_SPOOL_FLUSH_INTERVAL", defaultSpoolFlush),
 		HeartbeatInterval:  durationEnvOrDefault("RETICORA_HEARTBEAT_INTERVAL", time.Minute),
 		Credentials:        creds,
 		RedfishTLSScopes:   tlsScopes,
@@ -1115,8 +1299,80 @@ func loadCollectorConfig() collectorConfig {
 		AgentRelayAddr:     envOrDefault("RETICORA_AGENT_RELAY_ADDR", ":9443"),
 		AgentRelayCertFile: os.Getenv("RETICORA_AGENT_RELAY_TLS_CERT_FILE"),
 		AgentRelayKeyFile:  os.Getenv("RETICORA_AGENT_RELAY_TLS_KEY_FILE"),
-		CredentialsPath:    envOrDefault("RETICORA_CREDENTIALS_PATH", "/var/lib/reticora-collector/credentials.json"),
+		CredentialsPath:    credentialsPath(),
+		SweepConcurrency:   sweepConcurrencyFromEnv(os.Getenv("RETICORA_SWEEP_CONCURRENCY")),
+		UpdateURL:          updateURL,
+		UpdateChannel:      channel,
+		UpdateInterval:     durationEnvOrDefault("RETICORA_UPDATE_INTERVAL", 6*time.Hour),
 	}
+	// After `enroll` the credentials file holds server URL and identity
+	// (INS-06); the environment still wins.
+	if err := applyEnrolledIdentity(context.Background(), &cfg, strings.TrimSpace(os.Getenv("RETICORA_SERVER_URL")) != ""); err != nil && !errors.Is(err, keystore.ErrNotFound) {
+		slog.Warn("enrolled identity not applied", "path", cfg.CredentialsPath, "error", err)
+	}
+	return cfg
+}
+
+// errSimulateInProduction: RETICORA_SIMULATE is refused in production.
+var errSimulateInProduction = errors.New("RETICORA_SIMULATE cannot be enabled in production")
+
+// applySimulation switches the collector to the simulated fleet when
+// RETICORA_SIMULATE is set (SIM-02): the only protocol is "simulate" on the
+// fleet's subnet, and the records take the real upload and ingest path.
+// Production refuses it.
+func applySimulation(cfg *collectorConfig, environment string) error {
+	if !cfg.Simulate {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(environment), "production") {
+		return errSimulateInProduction
+	}
+	pluginRegistry["simulate"] = simulate.New()
+	cfg.Protocols = []string{"simulate"}
+	cfg.ScanSubnets = []string{simulate.Subnet}
+	slog.Warn("collector runs the simulated device fleet", "event", "collector.simulate.enabled",
+		"devices", simulate.DeviceCount, "subnet", simulate.Subnet)
+	return nil
+}
+
+// boolEnv reports whether the variable is set to a true value.
+func boolEnv(key string) bool {
+	v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(key)))
+	return err == nil && v
+}
+
+// newSweep builds the sweep plugin: ICMP, ARP and the DIS-01 ports with the
+// configured parallelism.
+func newSweep(cfg *collectorConfig) *sweep.Plugin {
+	p := sweep.New()
+	p.Concurrency = cfg.SweepConcurrency
+	return p
+}
+
+// sweepICMPCapability names the ICMP socket the sweep can use (logged at
+// start so a missing CAP_NET_RAW / ping_group_range is visible).
+func sweepICMPCapability() string {
+	if c := sweep.ICMPCapability(); c != "" {
+		return c
+	}
+	return "unavailable (TCP and ARP only)"
+}
+
+// sweepConcurrencyFromEnv parses RETICORA_SWEEP_CONCURRENCY; values above
+// sweep.MaxConcurrency are capped, invalid ones use the maximum.
+func sweepConcurrencyFromEnv(value string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n <= 0 {
+		if strings.TrimSpace(value) != "" {
+			slog.Warn("invalid RETICORA_SWEEP_CONCURRENCY; using the maximum", "value", value, "max", sweep.MaxConcurrency)
+		}
+		return sweep.MaxConcurrency
+	}
+	if n > sweep.MaxConcurrency {
+		slog.Warn("RETICORA_SWEEP_CONCURRENCY above the hard limit; capped", "value", n, "max", sweep.MaxConcurrency)
+		return sweep.MaxConcurrency
+	}
+	return n
 }
 
 // credentialEnv maps the credential environment variables to their protocol
@@ -1128,6 +1384,14 @@ var credentialEnv = []struct{ env, key string }{
 	{"RETICORA_SSH_PASSWORD", "ssh.password"},
 	{"RETICORA_REDFISH_USERNAME", "redfish.username"},
 	{"RETICORA_REDFISH_PASSWORD", "redfish.password"},
+	{"RETICORA_SSH_PRIVATE_KEY", "ssh.private_key"},
+	{"RETICORA_SSH_KEY_PASSPHRASE", "ssh.passphrase"},
+	// SNMPv3 authPriv (DIS-04); a configured user switches SNMP to v3.
+	{"RETICORA_SNMP_V3_USERNAME", "snmp.username"},
+	{"RETICORA_SNMP_V3_AUTH_PROTOCOL", "snmp.auth_protocol"},
+	{"RETICORA_SNMP_V3_AUTH_PASSWORD", "snmp.auth_password"},
+	{"RETICORA_SNMP_V3_PRIV_PROTOCOL", "snmp.priv_protocol"},
+	{"RETICORA_SNMP_V3_PRIV_PASSWORD", "snmp.priv_password"},
 }
 
 func credentialsFromEnv(getenv func(string) string) map[string]string {

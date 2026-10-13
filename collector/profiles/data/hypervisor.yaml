@@ -1,0 +1,28 @@
+# Collector profiles (DIS-02): classification and collection data.
+- name: vmware-esxi
+  vendor: VMware
+  model: ESXi
+  protocol: snmp
+  catalog: VMware ESXi
+  ciType: hypervisor
+  plugin: snmp
+  systemTemplate: hypervisor
+  sysObjectIds:
+  - 1.3.6.1.4.1.6876.4.1
+  sysDescrPattern: '(?i)vmware esxi'
+  bannerPattern: '(?i)vmware esxi'
+  ouiPrefixes:
+  - '00:0C:29'
+  - '00:50:56'
+- name: proxmox-ve
+  vendor: Proxmox
+  model: VE
+  protocol: ssh
+  catalog: Proxmox VE
+  ciType: hypervisor
+  plugin: ssh
+  systemTemplate: hypervisor
+  sysObjectIds:
+  - 1.3.6.1.4.1.8072
+  sysDescrPattern: '(?i)-pve\b|proxmox'
+  bannerPattern: '(?i)-pve\b|proxmox'

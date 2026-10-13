@@ -19,6 +19,7 @@ on:
       - 'frontend/Dockerfile'
       - 'tests/install-*.sh'
       - 'tests/backup-*.sh'
+      - 'tests/nats-mtls.test.sh'
       - '.github/workflows/install-smoke.yml'
   pull_request:
     branches: [main]
@@ -30,6 +31,7 @@ on:
       - 'frontend/Dockerfile'
       - 'tests/install-*.sh'
       - 'tests/backup-*.sh'
+      - 'tests/nats-mtls.test.sh'
       - '.github/workflows/install-smoke.yml'
   # Manual runs (e.g. the G1 evidence for GATE-03) are not path filtered.
   workflow_dispatch:
@@ -55,6 +57,9 @@ jobs:
 
       - name: Backup chain configuration (pgBackRest, retention, versioning)
         run: ./tests/backup-config.test.sh
+
+      - name: Collector NATS endpoint accepts only collector certificates (COL-08)
+        run: ./tests/nats-mtls.test.sh
 
   # INS-01/TEC-09/GATE-03 (WP-092): the cloud installer on every platform of
   # CH22. Ubuntu runs natively on the GitHub runners; Debian 12 runs the

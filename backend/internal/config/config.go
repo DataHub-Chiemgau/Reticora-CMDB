@@ -88,6 +88,15 @@ type Config struct {
 	// has moved them to MasterKey (SEC-06).
 	MasterKeyPrevious string
 
+	// Collector NATS endpoint (COL-08, WP-146): the edge NATS server that
+	// collectors reach on 4222 with mutual TLS. PKIDir receives its CA
+	// bundle, server certificate (for the host names in NATSEdgeHosts) and
+	// generated configuration; the authorization callout connects to
+	// NATSEdgeURL. Its keys are derived from the master key.
+	PKIDir        string
+	NATSEdgeHosts string
+	NATSEdgeURL   string
+
 	// Observability
 	OTelEndpoint string
 	// MetricsTenantLabel enables the organization_id label on HTTP request
@@ -158,6 +167,9 @@ type Config struct {
 	LLMEmbeddingModel string
 	// AirGapped disables every external AI call (AI-02, air-gapped profile).
 	AirGapped bool
+	// OfflineDetector switches the CI offline detector on (REC-09, LCY-05;
+	// RETICORA_OFFLINE_DETECTOR_ENABLED, default true).
+	OfflineDetector bool
 
 	// workers holds the operator switch of every registered background
 	// worker (OPS-02, see WorkerNames).
@@ -219,6 +231,10 @@ func Load() *Config {
 		MasterKey:         l.str("RETICORA_MASTER_KEY", ""),
 		MasterKeyPrevious: l.str("RETICORA_MASTER_KEY_PREVIOUS", ""),
 
+		PKIDir:        l.str("RETICORA_PKI_DIR", ""),
+		NATSEdgeHosts: l.str("RETICORA_NATS_EDGE_HOSTS", ""),
+		NATSEdgeURL:   l.str("RETICORA_NATS_EDGE_URL", ""),
+
 		OTelEndpoint: l.str("RETICORA_OTEL_ENDPOINT", ""),
 		// Opt-in: the organization_id label multiplies the HTTP metric series
 		// by the tenant count. Default off; enable for bounded-tenant setups.
@@ -251,6 +267,7 @@ func Load() *Config {
 		LLMChatModel:      l.str("RETICORA_LLM_CHAT_MODEL", ""),
 		LLMEmbeddingModel: l.str("RETICORA_LLM_EMBEDDING_MODEL", ""),
 		AirGapped:         l.boolean("RETICORA_AIR_GAPPED", false),
+		OfflineDetector:   l.boolean("RETICORA_OFFLINE_DETECTOR_ENABLED", true),
 
 		LogLevel: slog.LevelInfo,
 	}
@@ -296,6 +313,9 @@ const (
 	WorkerJobs              = "jobs"
 	WorkerEvents            = "events"
 	WorkerNotifier          = "notifier"
+	WorkerNATSEdge          = "nats_edge"
+	WorkerCredentialBundles = "credential_bundles"
+	WorkerDiscoveryScopes   = "discovery_scopes"
 )
 
 // WorkerNames lists every registered worker.
@@ -308,6 +328,9 @@ var WorkerNames = []string{
 	WorkerJobs,
 	WorkerEvents,
 	WorkerNotifier,
+	WorkerNATSEdge,
+	WorkerCredentialBundles,
+	WorkerDiscoveryScopes,
 }
 
 // WorkerEnvKey returns the switch variable of a worker.

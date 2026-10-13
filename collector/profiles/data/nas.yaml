@@ -1,0 +1,28 @@
+# Collector profiles (DIS-02): classification and collection data.
+- name: qnap-qts
+  vendor: QNAP
+  model: QTS
+  protocol: snmp
+  catalog: QNAP
+  ciType: nas
+  plugin: nas
+  systemTemplate: nas
+  sysObjectIds:
+  - 1.3.6.1.4.1.24681
+  bannerPattern: '(?i)\bqnap\b|\bqts\b'
+  ouiPrefixes:
+  - '00:08:9B'
+  - '24:5E:BE'
+- name: truenas
+  vendor: iXsystems
+  model: TrueNAS
+  protocol: ssh
+  catalog: TrueNAS
+  ciType: nas
+  plugin: nas
+  systemTemplate: nas
+  sysObjectIds:
+  - 1.3.6.1.4.1.8072
+  - 1.3.6.1.4.1.12325
+  sysDescrPattern: '(?i)truenas|freenas'
+  bannerPattern: '(?i)truenas|freenas|ixsystems'

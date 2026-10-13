@@ -220,6 +220,9 @@ type Options struct {
 	Notifications *notify.Center
 	// InvitationAccounts creates the IdP account of an accepted invitation.
 	InvitationAccounts user.InvitationAccounts
+	// CollectorCA signs the collector certificates (COL-04); nil answers
+	// certificate requests with 503.
+	CollectorCA *discovery.CA
 }
 
 // registrar is implemented by every domain handler.
@@ -328,6 +331,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		WithInstanceFields(repos.CIType).
 		WithLimits(opts.Entitlements)
 	opts.Entitlements.WithUnlicensed(discoveryHandler)
+	if opts.CollectorCA != nil {
+		discoveryHandler.WithCA(opts.CollectorCA)
+	}
 	// Discovered values pass the field rules of manual writes (CI-03).
 	if opts.CIService != nil {
 		discoveryHandler.WithObservedValidator(opts.CIService)

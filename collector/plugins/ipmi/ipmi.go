@@ -19,8 +19,8 @@ const (
 	defaultConcurrency = 32
 
 	// RMCP/ASF ping to identify IPMI-capable endpoints
-	rmcpVersion = 0x06
-	rmcpSeqNo   = 0xFF
+	rmcpVersion  = 0x06
+	rmcpSeqNo    = 0xFF
 	rmcpClassASF = 0x06
 )
 
@@ -28,6 +28,8 @@ const (
 type Plugin struct {
 	Timeout     time.Duration
 	Concurrency int
+	// Port is the RMCP port (default 623).
+	Port int
 }
 
 var _ plugins.Plugin = (*Plugin)(nil)
@@ -43,8 +45,8 @@ func New() *Plugin {
 // Name returns the plugin identifier.
 func (p *Plugin) Name() string { return "ipmi" }
 
-// Discover finds IPMI-enabled controllers by sending RMCP ping (ASF Presence Ping) packets.
-func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
+// Probe finds IPMI-enabled controllers by sending RMCP ping (ASF Presence Ping) packets.
+func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
 	_ = creds
 	concurrency := p.Concurrency
 	if concurrency <= 0 {
@@ -95,8 +97,15 @@ func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[strin
 	return results, ctx.Err()
 }
 
-// Collect queries IPMI for device chassis information via RMCP+.
-func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
+// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
+	observedAt := time.Now()
+	res, err := p.collect(ctx, target, creds)
+	return plugins.CollectRecord(p.Name(), res, err, observedAt)
+}
+
+// collect queries IPMI for device chassis information via RMCP+.
+func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
 	timeout := p.Timeout
 	if timeout <= 0 {
 		timeout = defaultTimeout
@@ -108,7 +117,7 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 	}
 
 	// Send Get Channel Auth Capabilities to determine IPMI version support.
-	addr := net.JoinHostPort(target, fmt.Sprintf("%d", defaultPort))
+	addr := net.JoinHostPort(target, fmt.Sprintf("%d", p.port()))
 	conn, err := net.DialTimeout("udp", addr, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("ipmi: dial %s: %w", target, err)
@@ -155,13 +164,13 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 			"ipmiVersion": ipmiVersion,
 			"rmcpPort":    defaultPort,
 			"ipmiCapable": true,
-			"commandSet": map[string]string{
-				"chassis_status": "Get Chassis Status (0x01)",
-				"fru_read":       "Read FRU Data (0x11)",
-				"sdr_list":       "Get SDR Repository Info (0x20)",
-				"sel_info":       "Get SEL Info (0x40)",
-			},
 		},
+	}
+	// The system GUID identifies the server behind the BMC (DIS-04).
+	if guid, gerr := p.systemGUID(target, timeout); gerr == nil && guid != "00000000-0000-0000-0000-000000000000" {
+		result.Attributes["hardwareUUID"] = guid
+	} else if gerr != nil {
+		slog.Debug("ipmi: no system GUID", "target", target, "error", gerr)
 	}
 
 	return result, nil
@@ -169,7 +178,7 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 
 // probeRMCP sends an ASF Presence Ping to check if the host supports RMCP/IPMI.
 func (p *Plugin) probeRMCP(target string, timeout time.Duration) bool {
-	addr := net.JoinHostPort(target, fmt.Sprintf("%d", defaultPort))
+	addr := net.JoinHostPort(target, fmt.Sprintf("%d", p.port()))
 	conn, err := net.DialTimeout("udp", addr, timeout)
 	if err != nil {
 		return false
@@ -199,16 +208,16 @@ func (p *Plugin) probeRMCP(target string, timeout time.Duration) bool {
 func buildASFPing() []byte {
 	msg := make([]byte, 12)
 	// RMCP header
-	msg[0] = rmcpVersion   // Version
-	msg[1] = 0x00          // Reserved
-	msg[2] = rmcpSeqNo     // Sequence number
-	msg[3] = rmcpClassASF  // Class: ASF
+	msg[0] = rmcpVersion  // Version
+	msg[1] = 0x00         // Reserved
+	msg[2] = rmcpSeqNo    // Sequence number
+	msg[3] = rmcpClassASF // Class: ASF
 	// ASF header
 	binary.BigEndian.PutUint32(msg[4:8], 0x000011BE) // IANA Enterprise Number (ASF)
-	msg[8] = 0x80                                     // Message type: Presence Ping
-	msg[9] = 0x00                                     // Message tag
-	msg[10] = 0x00                                    // Reserved
-	msg[11] = 0x00                                    // Data length
+	msg[8] = 0x80                                    // Message type: Presence Ping
+	msg[9] = 0x00                                    // Message tag
+	msg[10] = 0x00                                   // Reserved
+	msg[11] = 0x00                                   // Data length
 	return msg
 }
 
@@ -223,26 +232,26 @@ func buildGetChannelAuthCap() []byte {
 	msg[3] = 0x07 // Class: IPMI
 
 	// IPMI session header (v1.5 format, unauthenticated)
-	msg[4] = 0x00          // Auth type: None
-	msg[5] = 0x00          // Session sequence (4 bytes)
+	msg[4] = 0x00 // Auth type: None
+	msg[5] = 0x00 // Session sequence (4 bytes)
 	msg[6] = 0x00
 	msg[7] = 0x00
 	msg[8] = 0x00
-	msg[9] = 0x00          // Session ID (4 bytes)
+	msg[9] = 0x00 // Session ID (4 bytes)
 	msg[10] = 0x00
 	msg[11] = 0x00
 	msg[12] = 0x00
-	msg[13] = 0x09         // Message length
+	msg[13] = 0x09 // Message length
 
 	// IPMI message
-	msg[14] = 0x20         // Target address (BMC)
-	msg[15] = 0x18         // Target LUN + NetFn (App = 0x06, LUN 0)
-	msg[16] = 0xC8         // Header checksum
-	msg[17] = 0x81         // Source address
-	msg[18] = 0x00         // Source LUN + SeqNo
-	msg[19] = 0x38         // Command: Get Channel Auth Capabilities
-	msg[20] = 0x0E         // Channel 14 (current), request IPMI v2.0
-	msg[21] = 0x04         // Privilege: Administrator
+	msg[14] = 0x20 // Target address (BMC)
+	msg[15] = 0x18 // Target LUN + NetFn (App = 0x06, LUN 0)
+	msg[16] = 0xC8 // Header checksum
+	msg[17] = 0x81 // Source address
+	msg[18] = 0x00 // Source LUN + SeqNo
+	msg[19] = 0x38 // Command: Get Channel Auth Capabilities
+	msg[20] = 0x0E // Channel 14 (current), request IPMI v2.0
+	msg[21] = 0x04 // Privilege: Administrator
 
 	return msg
 }

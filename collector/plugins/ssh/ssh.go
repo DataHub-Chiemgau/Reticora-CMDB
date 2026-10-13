@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
@@ -21,6 +23,14 @@ const (
 // Plugin collects inventory from systems reachable over SSH.
 type Plugin struct {
 	Timeout time.Duration
+	// Port is the SSH port (default 22).
+	Port int
+	// KnownHostsFile pins host keys (default RETICORA_SSH_KNOWN_HOSTS or
+	// /var/lib/reticora-collector/ssh_known_hosts).
+	KnownHostsFile string
+
+	keysOnce sync.Once
+	keys     *hostKeyStore
 }
 
 var _ plugins.Plugin = (*Plugin)(nil)
@@ -33,8 +43,8 @@ func New() *Plugin {
 // Name returns the plugin identifier.
 func (p *Plugin) Name() string { return "ssh" }
 
-// Discover determines which targets accept SSH connections by reading the banner.
-func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
+// Probe determines which targets accept SSH connections by reading the banner.
+func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
 	_ = creds
 	timeout := p.Timeout
 	if timeout <= 0 {
@@ -47,7 +57,7 @@ func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[strin
 			break
 		}
 
-		addr := net.JoinHostPort(target, fmt.Sprintf("%d", defaultPort))
+		addr := net.JoinHostPort(target, fmt.Sprintf("%d", p.port()))
 		conn, err := net.DialTimeout("tcp", addr, timeout)
 		if err != nil {
 			continue
@@ -77,7 +87,7 @@ func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[strin
 			Attributes: map[string]any{
 				"transport": "ssh",
 				"sshBanner": banner,
-				"sshPort":   defaultPort,
+				"sshPort":   p.port(),
 			},
 		}
 
@@ -90,25 +100,30 @@ func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[strin
 	return results, ctx.Err()
 }
 
-// Collect executes common system information commands on a single target.
-// Note: Full SSH authentication requires golang.org/x/crypto/ssh which would
-// be added as a dependency. This implementation performs banner-based fingerprinting
-// and provides the command set that would be executed with proper credentials.
-func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
-	timeout := p.Timeout
-	if timeout <= 0 {
-		timeout = defaultTimeout
+// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
+	observedAt := time.Now()
+	res, err := p.collect(ctx, target, creds)
+	return plugins.CollectRecord(p.Name(), res, err, observedAt)
+}
+
+// collect fingerprints the target by its banner and, with credentials,
+// logs in and runs the allowlisted inventory commands (DIS-04).
+func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
+	timeout := p.timeout()
+	cfg, login, err := p.clientConfig(creds)
+	if err != nil {
+		return nil, err
 	}
 
-	addr := net.JoinHostPort(target, fmt.Sprintf("%d", defaultPort))
+	addr := net.JoinHostPort(target, fmt.Sprintf("%d", p.port()))
 	conn, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("ssh: connect %s: %w", target, err)
 	}
-	defer conn.Close()
-
 	// Read banner for fingerprinting
-	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+	if err = conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		conn.Close()
 		return nil, fmt.Errorf("ssh: set deadline: %w", err)
 	}
 	scanner := bufio.NewScanner(conn)
@@ -116,47 +131,94 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 	if scanner.Scan() {
 		banner = scanner.Text()
 	}
-
-	ciType := classifyFromBanner(banner)
-	osInfo := parseOSFromBanner(banner)
+	conn.Close()
 
 	hostname := target
-	if names, err := net.LookupAddr(target); err != nil {
-		slog.Debug("ssh: reverse DNS lookup failed, falling back to target address", "target", target, "error", err)
+	if names, lerr := net.LookupAddr(target); lerr != nil {
+		slog.Debug("ssh: reverse DNS lookup failed, falling back to target address", "target", target, "error", lerr)
 	} else if len(names) > 0 {
 		hostname = strings.TrimSuffix(names[0], ".")
 	}
 
-	// Define the commands that would be executed with proper authentication.
-	// In production, these would run over an authenticated SSH session.
-	commandSet := map[string]string{
-		"hostname":   "hostname -f",
-		"uname":      "uname -a",
-		"os_release": "cat /etc/os-release",
-		"cpu":        "lscpu",
-		"memory":     "free -b",
-		"disk":       "lsblk -J",
-		"uptime":     "uptime -s",
-		"serial":     "dmidecode -s system-serial-number",
-		"mfg":        "dmidecode -s system-manufacturer",
-		"model":      "dmidecode -s system-product-name",
-	}
-
 	result := &plugins.Result{
-		CIType:   ciType,
-		Name:     hostname,
-		IP:       target,
-		Firmware: banner,
+		CIType: classifyFromBanner(banner),
+		Name:   hostname,
+		IP:     target,
 		Attributes: map[string]any{
-			"transport":  "ssh",
-			"sshBanner":  banner,
-			"osFamily":   osInfo,
-			"commandSet": commandSet,
-			"sshPort":    defaultPort,
+			"transport":     "ssh",
+			"sshBanner":     banner,
+			"osFamily":      parseOSFromBanner(banner),
+			"sshPort":       p.port(),
+			"authenticated": false,
 		},
 	}
-
+	if !login {
+		return result, nil
+	}
+	out, err := p.runAllowed(ctx, target, cfg)
+	if err != nil {
+		return nil, err
+	}
+	applyCommandOutput(result, out)
 	return result, nil
+}
+
+// applyCommandOutput maps the command output onto the result.
+func applyCommandOutput(result *plugins.Result, out map[string]string) {
+	result.Attributes["authenticated"] = true
+	if h := firstLine(out["hostname"]); h != "" {
+		result.Name = h
+		if strings.Contains(h, ".") {
+			result.Attributes["fqdn"] = h
+		}
+		result.Attributes["hostname"] = strings.SplitN(h, ".", 2)[0]
+	}
+	if u := firstLine(out["uname"]); u != "" {
+		result.Attributes["uname"] = u
+	}
+	if rel := osRelease(out["os_release"]); rel["NAME"] != "" {
+		result.Attributes["osName"] = rel["NAME"]
+		result.Attributes["osVersion"] = rel["VERSION_ID"]
+		result.Attributes["os_release"] = rel["PRETTY_NAME"]
+	}
+	if f := strings.Fields(out["uptime"]); len(f) > 0 {
+		if secs, err := strconv.ParseFloat(f[0], 64); err == nil {
+			result.Attributes["uptimeSeconds"] = int64(secs)
+		}
+	}
+	result.Serial = usable(out["serial"])
+	result.Manufacturer = usable(out["mfg"])
+	result.Model = usable(out["model"])
+	result.Firmware = usable(out["bios"])
+	if id := usable(out["machine_id"]); id != "" {
+		result.Attributes["hardwareUUID"] = strings.ToLower(id)
+	}
+	if n, err := strconv.Atoi(firstLine(out["cpu"])); err == nil {
+		result.Attributes["cpuCount"] = n
+	}
+	for _, line := range strings.Split(out["memory"], "\n") {
+		if f := strings.Fields(line); len(f) > 1 && f[0] == "Mem:" {
+			if b, err := strconv.ParseInt(f[1], 10, 64); err == nil {
+				result.Attributes["memoryBytes"] = b
+			}
+		}
+	}
+	result.CIType = "server"
+}
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
+	return strings.TrimSpace(line)
+}
+
+// usable drops placeholder DMI values.
+func usable(s string) string {
+	s = firstLine(s)
+	switch strings.ToLower(s) {
+	case "", "none", "unknown", "not specified", "default string", "to be filled by o.e.m.", "system serial number", "0":
+		return ""
+	}
+	return s
 }
 
 // classifyFromBanner derives a CI type from the SSH identification string.

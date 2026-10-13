@@ -11,6 +11,7 @@ resources:
 components:
   - ../../base/components/opensearch
   - ../../base/components/backup
+  - ../../base/components/nats-edge
 
 namespace: reticora
 

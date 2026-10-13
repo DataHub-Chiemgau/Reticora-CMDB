@@ -285,6 +285,55 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	})
 }
 
+// DeleteWithPolicy implements PolicyDeleter: a discovery edge is deleted
+// only with force and then recorded in relationship_suppression for its
+// CIs and type, so discovery does not recreate it (REL-03, REL-04); other
+// edges are deleted as asked.
+func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, force bool) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var source, relType, src, dst string
+		err := tx.QueryRow(ctx, `SELECT source, rel_type, source_ci_id::text, target_ci_id::text FROM ci_relationship
+			WHERE id = $1 AND organization_id = $2 AND `+visibleEndpoints+` FOR UPDATE`, id, orgID).Scan(&source, &relType, &src, &dst)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
+		}
+		if err != nil {
+			return fmt.Errorf("delete relationship: %w", err)
+		}
+		if source == "discovery" && !force {
+			return ErrForceRequired
+		}
+		if _, err = tx.Exec(ctx, `DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2`, id, orgID); err != nil {
+			return fmt.Errorf("delete relationship: %w", err)
+		}
+		if source != "discovery" {
+			return nil
+		}
+		tag, err := tx.Exec(ctx, `INSERT INTO relationship_suppression (organization_id, source_ci_id, target_ci_id, relationship_type_id)
+			SELECT $1, $2, $3, rt.id FROM relationship_type rt
+			WHERE rt.key = $4 AND (rt.organization_id = $1 OR rt.organization_id IS NULL)
+			ORDER BY rt.organization_id NULLS LAST LIMIT 1
+			ON CONFLICT (organization_id, source_ci_id, target_ci_id, relationship_type_id) DO NOTHING`, orgID, src, dst, relType)
+		if err != nil {
+			return fmt.Errorf("suppress relationship: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			// The type has no relationship_type row, or the edge was
+			// suppressed already; without a row the deletion would not
+			// stick, so it is refused.
+			var exists bool
+			if qerr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM relationship_suppression s JOIN relationship_type rt ON rt.id = s.relationship_type_id
+				WHERE s.organization_id = $1 AND s.source_ci_id = $2 AND s.target_ci_id = $3 AND rt.key = $4)`, orgID, src, dst, relType).Scan(&exists); qerr != nil {
+				return qerr
+			}
+			if !exists {
+				return fmt.Errorf("suppress relationship: unknown relationship type %q", relType)
+			}
+		}
+		return nil
+	})
+}
+
 // TraverseFrom walks the configuration graph from rootCIID with one recursive
 // CTE under the caller's full tenant scope (RLS on ci and ci_relationship).
 // The walk only passes through CIs that are visible and not deleted: an edge
@@ -432,4 +481,19 @@ func nilIfEmptyStr(value string) any {
 		return nil
 	}
 	return value
+}
+
+// Confirm records that discovery saw an edge again (TOP-02): last_seen_at
+// and last_confirmed_at become now, the confidence the reported one. Only
+// discovery edges are confirmed this way (source policy, REL-08).
+func (r *PGRepository) Confirm(ctx context.Context, orgID, id string, confidence *float64) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE ci_relationship
+			SET last_seen_at = now(), last_confirmed_at = now(), confidence = COALESCE($3::numeric, confidence)
+			WHERE id = $1 AND organization_id = $2 AND source = 'discovery'`, id, orgID, confidence)
+		if err == nil && tag.RowsAffected() == 0 {
+			return fmt.Errorf("not found")
+		}
+		return err
+	})
 }

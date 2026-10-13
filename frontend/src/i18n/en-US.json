@@ -254,7 +254,59 @@
       "label": "Label (e.g. site)",
       "generate": "Generate code",
       "once": "This code is shown only once and expires. Run in the customer network:",
-      "expires": "Valid until"
+      "expires": "Valid until",
+      "after": "Then restart the collector and confirm the suggested scopes on this page."
+    },
+    "collectorStatus": {
+      "pending": "Pending",
+      "active": "Active",
+      "offline": "Offline",
+      "disabled": "Disabled",
+      "paused": "Paused (license)"
+    },
+    "scopes": {
+      "title": "Discovery scopes",
+      "none": "No scopes yet. Confirm suggested subnets in the review queue or add a scope.",
+      "kindLabel": "Kind",
+      "kind": {
+        "cidr": "Subnet (CIDR)",
+        "range": "Address range",
+        "host": "Host"
+      },
+      "target": "Target",
+      "targetPlaceholder": "e.g. 10.0.0.0/24",
+      "schedule": "Schedule (interval or cron)",
+      "add": "Add scope",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "enable": "Enable",
+      "disable": "Disable",
+      "delete": "Delete",
+      "invalid": "The scope was refused. Check target and schedule (at least 5 minutes).",
+      "health": {
+        "ok": "Last run ok",
+        "partial": "Partially failed",
+        "failed": "Failed",
+        "never_run": "Not run yet"
+      },
+      "cause": {
+        "unreachable": "Unreachable",
+        "timeout": "Timeout",
+        "refused": "Connection refused",
+        "auth_failed": "Authentication failed",
+        "tls": "Certificate/TLS",
+        "protocol_error": "Protocol error",
+        "config_error": "Configuration error",
+        "upload_failed": "Upload failed (buffered)",
+        "unknown": "Unknown error"
+      }
+    },
+    "suggestions": {
+      "title": "Suggested scopes",
+      "intro": "Your collectors reported these subnets after enrollment. Confirm them to have them discovered.",
+      "from": "reported by {{collector}}",
+      "accept": "Add as scope",
+      "dismiss": "Dismiss"
     }
   },
   "webhook": {
@@ -914,5 +966,9 @@
       "stale": "Stale"
     },
     "projected": "projected (structure)"
+  },
+  "relationshipCard": {
+    "suppress": "Remove and suppress",
+    "suppressHint": "Discovery edge: removed and not recreated by discovery."
   }
 }

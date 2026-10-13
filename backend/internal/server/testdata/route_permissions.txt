@@ -17,6 +17,7 @@ DELETE /api/v1/consumables/{id} consumable:write
 DELETE /api/v1/contacts/{id} contact:write
 DELETE /api/v1/credentials/{id} credential:manage
 DELETE /api/v1/desks/{id} desk:write
+DELETE /api/v1/discovery-scopes/{id} discovery:manage
 DELETE /api/v1/documents/{id} document:write
 DELETE /api/v1/forms/{id} form:write
 DELETE /api/v1/iga/connectors/{id} iga:write
@@ -102,6 +103,7 @@ GET /api/v1/cis/{id}/state ci:read
 GET /api/v1/clients user:read
 GET /api/v1/clients/{id} user:read
 GET /api/v1/collectors discovery:read
+GET /api/v1/collectors/pki discovery:read
 GET /api/v1/compliance/report compliance:read
 GET /api/v1/compliance/results compliance:read
 GET /api/v1/compliance/rules compliance:read
@@ -119,6 +121,8 @@ GET /api/v1/credentials/{id} credential:read
 GET /api/v1/desks desk:read
 GET /api/v1/desks/{id} desk:read
 GET /api/v1/desks/{id}/bookings desk:read
+GET /api/v1/discovery-scopes discovery:read
+GET /api/v1/discovery-scopes/{id} discovery:read
 GET /api/v1/discovery/jobs discovery:read
 GET /api/v1/discovery/jobs/{id} discovery:read
 GET /api/v1/discovery/review-items discovery:read
@@ -262,11 +266,13 @@ PATCH /api/v1/cables/{id} rack:write
 PATCH /api/v1/ci-types/{id} ci_type:manage
 PATCH /api/v1/cis/{id} ci:write
 PATCH /api/v1/clients/{id} user:manage
+PATCH /api/v1/collectors/{id} collector:manage
 PATCH /api/v1/compliance/rules/{id} compliance:write
 PATCH /api/v1/compositions/{id} asset:write
 PATCH /api/v1/consumables/{id} consumable:write
 PATCH /api/v1/contacts/{id} contact:write
 PATCH /api/v1/desks/{id} desk:write
+PATCH /api/v1/discovery-scopes/{id} discovery:manage
 PATCH /api/v1/documents/{id} document:write
 PATCH /api/v1/forms/{id} form:write
 PATCH /api/v1/iga/connectors/{id} iga:write
@@ -341,6 +347,7 @@ POST /api/v1/clients user:manage
 POST /api/v1/collectors collector:manage
 POST /api/v1/collectors/enroll public
 POST /api/v1/collectors/enrollment-codes collector:manage
+POST /api/v1/collectors/{id}/certificate discovery:ingest
 POST /api/v1/collectors/{id}/heartbeat discovery:ingest
 POST /api/v1/compliance/evaluations compliance:write
 POST /api/v1/compliance/rules compliance:write
@@ -353,6 +360,7 @@ POST /api/v1/credentials/rotate-keys credential:manage
 POST /api/v1/desk-bookings/{id}/cancel desk:write
 POST /api/v1/desks desk:write
 POST /api/v1/desks/{id}/bookings desk:write
+POST /api/v1/discovery-scopes discovery:manage
 POST /api/v1/discovery/ingest discovery:ingest
 POST /api/v1/discovery/jobs discovery:manage
 POST /api/v1/discovery/review-items/{id}/resolve review:resolve

@@ -330,3 +330,32 @@ MET-15;B/G1;B;backend/internal/citype/ddl_job_integration_test.go;WP-142
 SEC-05;[B];B;backend/internal/pii/pii_integration_test.go;WP-240
 SEC-05;[B];B;backend/internal/pii/surrogate_integration_test.go;WP-241
 AUD-01;[B];B;backend/internal/contact/pii_integration_test.go;WP-242
+COL-01;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-143
+COL-05;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-143
+COL-04;[B];D;backend/internal/discovery/enroll_handler_test.go;WP-144
+COL-04;[B];D;backend/internal/discovery/ca_test.go;WP-145
+COL-08;[B];D;tests/nats-mtls.test.sh;WP-146
+PRI-07;Grundsatz (ohne Tag);D;tests/nats-mtls.test.sh;WP-146
+COL-02;[B];D;backend/internal/credential/bundle_test.go;WP-147
+COL-06;[B], Air-Gapped [O];D;edgecore/update/update_test.go;WP-148
+DIS-01;[B];D;collector/plugins/sweep/sweep_test.go;WP-149
+DIS-03;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-150
+DIS-04;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-150
+DIS-02;[B], Profilliste (V);D;collector/profiles/profiles_test.go;WP-151
+DIS-04;[B];D;collector/plugins/snmp/snmp_test.go;WP-152
+DIS-09;[B];D;backend/internal/discovery/scope_integration_test.go;WP-153
+API-05;[B];D;backend/internal/discovery/scope_integration_test.go;WP-153
+DIS-10;[B];D;collector/collectorcmd/schedule_test.go;WP-154
+NFR-03;[B], Teilumfang [P5];D;collector/collectorcmd/schedule_test.go;WP-154
+DIS-08;[Q];D;backend/internal/discovery/errors_test.go;WP-155
+INS-06;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-156
+REC-09;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-157
+LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-157
+TOP-01;[B];D;backend/internal/discovery/topology_test.go;WP-158
+TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-159
+REL-08;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-159
+REL-03;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-160
+REL-04;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-160
+REL-05;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-160
+IMP-09;[B];D;backend/internal/discovery/power_test.go;WP-161
+SIM-02;[B];D;collector/plugins/simulate/simulate_test.go;WP-162

@@ -19,7 +19,6 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
@@ -29,18 +28,26 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Collector represents a customer-deployed collector instance.
+// Collector represents a customer-deployed collector instance (COL-01).
 type Collector struct {
-	ID             string         `json:"id"`
-	OrganizationID string         `json:"organization_id"`
-	ClientID       string         `json:"client_id,omitempty"`
-	Name           string         `json:"name"`
-	Version        string         `json:"version,omitempty"`
-	Status         string         `json:"status"`
-	LastHeartbeat  string         `json:"last_heartbeat,omitempty"`
-	Config         map[string]any `json:"config"`
-	CreatedAt      string         `json:"created_at"`
-	UpdatedAt      string         `json:"updated_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	ClientID       string `json:"client_id,omitempty"`
+	// SiteID binds the collector to a site of its client; the site decides
+	// the client.
+	SiteID  string `json:"site_id,omitempty"`
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	// Status is pending, active, offline, disabled or paused
+	// (collector_status.go).
+	Status          string         `json:"status"`
+	StatusChangedAt string         `json:"status_changed_at,omitempty"`
+	LastHeartbeatAt string         `json:"last_heartbeat_at,omitempty"`
+	CertFingerprint string         `json:"cert_fingerprint,omitempty"`
+	CertNotAfter    string         `json:"cert_not_after,omitempty"`
+	Config          map[string]any `json:"config"`
+	CreatedAt       string         `json:"created_at"`
+	UpdatedAt       string         `json:"updated_at"`
 }
 
 // BulkIngestRequest is the deprecated collector_id/items ingest payload; new
@@ -140,14 +147,26 @@ type BulkIngestResponse struct {
 type Repository interface {
 	ListCollectors(ctx context.Context, orgID string, page api.PaginationParams) ([]Collector, int, error)
 	RegisterCollector(ctx context.Context, c *Collector) error
-	Heartbeat(ctx context.Context, orgID, collectorID string) error
+	// Heartbeat records a heartbeat and returns the collector's status: a
+	// pending or offline collector becomes active, a paused one stays
+	// paused, a disabled one is refused (ErrCollectorDisabled).
+	Heartbeat(ctx context.Context, orgID, collectorID string) (status string, err error)
+	// UpdateCollector changes name, site or status (disable, enable).
+	UpdateCollector(ctx context.Context, orgID, collectorID string, patch *CollectorPatch) (*Collector, error)
 
 	// Enrollment codes (zero-config onboarding).
 	CreateEnrollmentCode(ctx context.Context, code *EnrollmentCode) error
-	// RedeemEnrollmentCode validates the raw code, marks it used and returns
-	// the owning organization. It must fail for unknown, expired or already
-	// used codes.
-	RedeemEnrollmentCode(ctx context.Context, rawCode, collectorID string) (orgID string, err error)
+	// EnrollCollector consumes the raw code and registers the collector
+	// (active) in the code's organization, atomically: it fails for
+	// unknown, expired or already used codes, and concurrent enrollments
+	// with one code register exactly one collector (COL-04).
+	// With issue, the collector's first certificate is issued (CN =
+	// collector id) and recorded in the same transaction (COL-04).
+	EnrollCollector(ctx context.Context, rawCode string, c *Collector, issue CertIssuer) (*IssuedCert, error)
+	// RenewCertificate issues a new certificate for the collector once the
+	// current one reached 60 % of its lifetime (ErrRenewalNotDue before);
+	// disabled collectors get none (ErrCollectorDisabled).
+	RenewCertificate(ctx context.Context, orgID, collectorID string, issue CertIssuer) (*IssuedCert, error)
 
 	// Discovery jobs.
 	ListJobs(ctx context.Context, orgID string, filter JobFilter, page api.PaginationParams) ([]Job, int, error)
@@ -171,6 +190,8 @@ type MemoryRepository struct {
 	enrollCodes  map[string]*EnrollmentCode
 	enrollHashes map[string]string
 	records      map[string]time.Time
+	scopes       map[string]*Scope
+	orgSettings  map[string]map[string]any
 	seq          int
 }
 
@@ -235,10 +256,36 @@ func (r *MemoryRepository) RegisterCollector(_ context.Context, c *Collector) er
 	now := time.Now().UTC().Format(time.RFC3339)
 	c.CreatedAt = now
 	c.UpdatedAt = now
-	c.Status = "online"
-	c.LastHeartbeat = now
+	c.StatusChangedAt = now
+	if c.Status != CollectorActive {
+		c.Status = CollectorPending
+	} else {
+		c.LastHeartbeatAt = now
+	}
 	r.collectors[c.ID] = c
 	return nil
+}
+
+// UpdateCollector implements Repository.
+func (r *MemoryRepository) UpdateCollector(_ context.Context, orgID, collectorID string, patch *CollectorPatch) (*Collector, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.collectors[collectorID]
+	if !ok || c.OrganizationID != orgID {
+		return nil, fmt.Errorf("not found")
+	}
+	if patch.Name != nil {
+		c.Name = *patch.Name
+	}
+	if patch.SiteID != nil {
+		c.SiteID = *patch.SiteID
+	}
+	if patch.Status != nil {
+		c.Status = nextAdminStatus(c.Status, *patch.Status)
+	}
+	c.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	cp := *c
+	return &cp, nil
 }
 
 func (r *MemoryRepository) CreateEnrollmentCode(_ context.Context, code *EnrollmentCode) error {
@@ -259,36 +306,67 @@ func (r *MemoryRepository) CreateEnrollmentCode(_ context.Context, code *Enrollm
 	return nil
 }
 
-func (r *MemoryRepository) RedeemEnrollmentCode(_ context.Context, rawCode, collectorID string) (string, error) {
+func (r *MemoryRepository) EnrollCollector(ctx context.Context, rawCode string, c *Collector, issue CertIssuer) (*IssuedCert, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	id, ok := r.enrollHashes[enrollmentCodeHash(rawCode)]
-	if !ok {
-		return "", fmt.Errorf("invalid enrollment code")
-	}
 	code := r.enrollCodes[id]
-	if code == nil || code.UsedAt != nil {
-		return "", fmt.Errorf("enrollment code already used")
-	}
-	if time.Now().UTC().After(code.ExpiresAt) {
-		return "", fmt.Errorf("enrollment code expired")
+	if !ok || code == nil || code.UsedAt != nil || time.Now().UTC().After(code.ExpiresAt) {
+		r.mu.Unlock()
+		return nil, fmt.Errorf("enrollment code invalid, expired or already used")
 	}
 	now := time.Now().UTC()
 	code.UsedAt = &now
-	return code.OrganizationID, nil
+	r.mu.Unlock()
+	c.OrganizationID = code.OrganizationID
+	c.Status = CollectorActive
+	if err := r.RegisterCollector(ctx, c); err != nil {
+		return nil, err
+	}
+	if issue == nil {
+		return nil, nil
+	}
+	return r.RenewCertificate(ctx, c.OrganizationID, c.ID, issue)
 }
 
-func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID string) error {
+// RenewCertificate implements Repository.
+func (r *MemoryRepository) RenewCertificate(ctx context.Context, orgID, collectorID string, issue CertIssuer) (*IssuedCert, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.collectors[collectorID]
+	if !ok || c.OrganizationID != orgID {
+		return nil, fmt.Errorf("not found")
+	}
+	if c.Status == CollectorDisabled {
+		return nil, ErrCollectorDisabled
+	}
+	if c.CertNotAfter != "" {
+		notAfter, _ := time.Parse(time.RFC3339Nano, c.CertNotAfter)
+		if !NeedsRenewal(notAfter.Add(-CertValidity), notAfter, time.Now().UTC()) {
+			return nil, ErrRenewalNotDue
+		}
+	}
+	cert, err := issue(ctx, orgID, collectorID)
+	if err != nil {
+		return nil, err
+	}
+	c.CertFingerprint, c.CertNotAfter = cert.Fingerprint, cert.NotAfter.Format(time.RFC3339Nano)
+	return cert, nil
+}
+
+func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	c, ok := r.collectors[collectorID]
 	if !ok || c.OrganizationID != orgID {
-		return fmt.Errorf("not found")
+		return "", fmt.Errorf("not found")
 	}
-	c.LastHeartbeat = time.Now().UTC().Format(time.RFC3339)
-	c.Status = "online"
-	return nil
+	if c.Status == CollectorDisabled {
+		return c.Status, ErrCollectorDisabled
+	}
+	c.LastHeartbeatAt = time.Now().UTC().Format(time.RFC3339)
+	c.Status = statusAfterHeartbeat(c.Status)
+	return c.Status, nil
 }
 
 // EnrollmentCode is a short-lived, single-use secret a collector presents to
@@ -353,6 +431,8 @@ type Handler struct {
 	observed ObservedValidator
 	// jobs registers discovery jobs in the generic job model (JOB-01).
 	jobs jobs.Tracker
+	// ca signs the collector certificates (COL-04); optional.
+	ca *CA
 	// The review queue (package reviews), built on first use.
 	reviewsOnce    sync.Once
 	reviews        *reviews.Service
@@ -523,6 +603,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/collectors", h.ListCollectors)
 	r.Post("/api/v1/collectors", h.RegisterCollector)
 	r.Post("/api/v1/collectors/{id}/heartbeat", h.Heartbeat)
+	r.Patch("/api/v1/collectors/{id}", h.UpdateCollector)
+	r.Post("/api/v1/collectors/{id}/certificate", h.RenewCertificate)
+	r.Get("/api/v1/collectors/pki", h.PKI)
 	// Zero-config onboarding: an operator mints a short-lived enrollment code;
 	// the collector redeems it (unauthenticated, code = the credential) for its
 	// identity.
@@ -536,6 +619,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/discovery/jobs", h.ListJobs)
 	r.Post("/api/v1/discovery/jobs", h.CreateJob)
 	r.Get("/api/v1/discovery/jobs/{id}", h.GetJob)
+
+	// Discovery scopes (DIS-09, API-05).
+	h.RegisterScopeRoutes(r)
 
 	// Reconciliation review queue.
 	// The review-items resource (API-05) and its deprecated discovery path.
@@ -586,6 +672,8 @@ func (h *Handler) RegisterCollector(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c.OrganizationID = t.OrganizationID
+	// A created collector waits for its first heartbeat.
+	c.Status = CollectorPending
 	if c.Config == nil {
 		c.Config = make(map[string]any)
 	}
@@ -616,9 +704,11 @@ func (h *Handler) CreateEnrollmentCode(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	// Enrollment codes are valid for 24 hours (COL-04); a shorter validity
+	// can be requested.
 	ttl := time.Duration(req.TTLMinutes) * time.Minute
-	if ttl <= 0 || ttl > 24*time.Hour {
-		ttl = 30 * time.Minute
+	if ttl <= 0 || ttl > EnrollmentCodeTTL {
+		ttl = EnrollmentCodeTTL
 	}
 
 	raw, err := generateEnrollmentCode()
@@ -655,6 +745,9 @@ func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
 		Name     string `json:"name"`
 		Version  string `json:"version,omitempty"`
 		ClientID string `json:"client_id,omitempty"`
+		// CSR is the PEM certificate signing request of the collector's
+		// locally generated key.
+		CSR string `json:"csr,omitempty"`
 	}
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -665,34 +758,51 @@ func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Redeem the code first: it yields the owning organization and fails fast
-	// for invalid/expired/used codes. Only then is the collector registered
-	// under that tenant.
-	orgID, err := h.repo.RedeemEnrollmentCode(r.Context(), req.Code, "")
+	// The code is consumed and the collector registered (active) in one
+	// step: the request is unauthenticated, the code authorizes registration
+	// for its organization (E-08); a code works exactly once (COL-04).
+	c := &Collector{
+		Name:     req.Name,
+		Version:  req.Version,
+		ClientID: req.ClientID,
+		Config:   map[string]any{},
+	}
+	// With a CSR the collector gets its client certificate (COL-04); the
+	// key never leaves the collector.
+	var issue CertIssuer
+	if strings.TrimSpace(req.CSR) != "" {
+		if h.ca == nil {
+			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "the collector PKI is not configured")
+			return
+		}
+		issue = h.issuer(req.CSR)
+	}
+	cert, err := h.repo.EnrollCollector(r.Context(), req.Code, c, issue)
 	if err != nil {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
+		var fe *api.FieldError
+		switch {
+		case errors.As(err, &fe):
+			api.WriteRepoError(w, err)
+		case errors.Is(err, ErrInvalidCSR):
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		default:
+			api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "enrollment code invalid, expired or already used")
+		}
 		return
 	}
-
-	c := &Collector{
-		OrganizationID: orgID,
-		Name:           req.Name,
-		Version:        req.Version,
-		ClientID:       req.ClientID,
-		Config:         map[string]any{},
-	}
-	// The request is unauthenticated, so there is no principal scope: the
-	// redeemed code authorizes registration for its organization (E-08). The
-	// client/site binding of codes follows with WP-038.
-	scope := database.OrgWideScope(orgID, "")
-	ctx := database.ContextWithTenantScope(r.Context(), &scope)
-	if err := h.repo.RegisterCollector(ctx, c); err != nil {
-		api.WriteRepoError(w, err)
+	if cert != nil {
+		api.WriteJSON(w, http.StatusCreated, struct {
+			*Collector
+			Certificate *IssuedCert `json:"certificate"`
+		}{c, cert})
 		return
 	}
 
 	api.WriteJSON(w, http.StatusCreated, c)
 }
+
+// EnrollmentCodeTTL is the validity of an enrollment code (COL-04).
+const EnrollmentCodeTTL = 24 * time.Hour
 
 // generateEnrollmentCode returns a URL-safe, high-entropy single-use code.
 func generateEnrollmentCode() (string, error) {
@@ -738,10 +848,18 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.repo.Heartbeat(r.Context(), t.OrganizationID, id); err != nil {
+	status, err := h.repo.Heartbeat(r.Context(), t.OrganizationID, id)
+	if errors.Is(err, ErrCollectorDisabled) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
+		return
+	}
+	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "collector not found")
 		return
 	}
+	// A paused collector stops scanning until the license is active again
+	// (ENT-07).
+	w.Header().Set(CollectorStatusHeader, status)
 	if s := req.Spool; s != nil && (s.DroppedMessages > 0 || s.Backpressure) {
 		slog.WarnContext(r.Context(), "collector reported spool data loss or backpressure",
 			"event", "collector.spool.degraded",
@@ -833,6 +951,38 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			ObjectKey: deviceKey(&item),
 		}
 		opened, openErr := h.openReview(ctx, reviewItem)
+		if openErr != nil {
+			return resp, openErr
+		}
+		if opened {
+			resp.ReviewItems++
+		}
+	}
+	// No collector profile matched (DIS-02): the device becomes a
+	// generic_device CI and a reviewer classifies it.
+	for i := range req.Items {
+		item := &req.Items[i]
+		if typeIDs[i] == "" || !unclassifiedDevice(item) {
+			continue
+		}
+		opened, openErr := h.openReview(ctx, &ReviewItem{
+			OrganizationID: orgID,
+			Kind:           ReviewKindUnclassifiedDevice,
+			Status:         ReviewStatusOpen,
+			Payload: map[string]any{
+				"reason":        ReasonNoProfileMatch,
+				"ci_type_name":  item.CITypeName,
+				"name":          item.Name,
+				"manufacturer":  item.Manufacturer,
+				"model":         item.Model,
+				"serial_number": item.SerialNumber,
+				"management_ip": item.ManagementIP,
+				"sys_object_id": item.SysObjectID,
+				"fingerprint":   item.Fingerprint,
+				"raw_data":      item.RawData,
+			},
+			ObjectKey: deviceKey(item),
+		})
 		if openErr != nil {
 			return resp, openErr
 		}
@@ -1075,6 +1225,8 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 	}
 
 	resp.Relationships = h.deriveTopology(ctx, orgID, req.Items, resolvedCIID, h.neighborCandidates(ctx, orgID, req.Items))
+	// Outlet mappings of PDUs and UPS outlet groups (IMP-09).
+	resp.Relationships += h.derivePowerChain(ctx, orgID, req.Items, resolvedCIID)
 	return resp, h.markProcessed(ctx, orgID, req.Items)
 }
 

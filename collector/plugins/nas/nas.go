@@ -63,8 +63,8 @@ func New() *Plugin {
 // Name returns the plugin identifier.
 func (p *Plugin) Name() string { return "nas" }
 
-// Discover locates NAS appliances by probing vendor-specific API endpoints.
-func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
+// Probe locates NAS appliances by probing vendor-specific API endpoints.
+func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
 	_ = creds
 	concurrency := p.Concurrency
 	if concurrency <= 0 {
@@ -115,8 +115,15 @@ func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[strin
 	return results, ctx.Err()
 }
 
-// Collect gathers chassis, storage, and health information from one NAS appliance.
-func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
+// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
+	observedAt := time.Now()
+	res, err := p.collect(ctx, target, creds)
+	return plugins.CollectRecord(p.Name(), res, err, observedAt)
+}
+
+// collect gathers chassis, storage, and health information from one NAS appliance.
+func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
 	vendor, port := p.detectNASVendor(ctx, target)
 	if vendor == "" {
 		return nil, fmt.Errorf("nas: no NAS vendor detected at %s", target)
@@ -378,4 +385,3 @@ func (p *Plugin) truenasSystemInfo(ctx context.Context, baseURL, username, passw
 	}
 	return info
 }
-

@@ -1002,6 +1002,18 @@ paths:
       operationId: deleteRelationship
       tags: [Relationships]
       summary: Delete a relationship
+      description: >-
+        Manual and other edges are deleted as asked. A discovery edge is
+        deleted only with force=true (409 otherwise) and is then recorded as
+        suppression for its CIs and type, so discovery does not recreate it
+        (REL-03, REL-04). Discovery never changes or removes manual edges
+        (REL-05).
+      parameters:
+        - name: force
+          in: query
+          description: Required to delete a discovery edge; creates its suppression.
+          schema:
+            type: boolean
       responses:
         '204':
           description: Relationship deleted
@@ -1009,6 +1021,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/webhooks:
     get:
@@ -3917,7 +3931,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip]
+            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip, unknown_relationship]
         - name: escalated
           in: query
           schema:
@@ -3973,7 +3987,7 @@ paths:
         number or hardware UUID kept in payload.incoming;
         resurrected_device merge|new|dismiss (merge reactivates the deleted
         CI); unlicensed_ci new|dismiss (new adopts the device within max_cis,
-        403 entitlement-limit otherwise); scope_suggested accept|dismiss;
+        403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope); unknown_relationship accept|dismiss (accept records the neighbor as connected_to);
         serial_mismatch and duplicate_ip dismiss. Another action is 422.
       requestBody:
         required: true
@@ -4024,7 +4038,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip]
+            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip, unknown_relationship]
       responses:
         '200':
           description: Paginated list of review items
@@ -6030,7 +6044,7 @@ paths:
                   type: string
                 ttl_minutes:
                   type: integer
-                  description: Defaults to 30, capped at 1440 (24h).
+                  description: Validity in minutes; defaults to and is capped at 1440 (24 h, COL-04).
       responses:
         '201':
           description: Enrollment code created; plaintext returned once
@@ -6055,8 +6069,11 @@ paths:
       summary: Enroll a collector with an enrollment code
       description: >-
         Unauthenticated by bearer design — the single-use enrollment code is
-        the credential. On success the collector identity is registered under
-        the code's organization and returned with its id.
+        the credential (valid 24 h, consumed exactly once). On success the
+        collector identity is registered under the code's organization and
+        returned with its id. With `csr` (PEM certificate signing request of
+        the collector's locally generated key) the internal CA issues the
+        collector's client certificate (CN = collector id, 90 days, COL-04).
       requestBody:
         required: true
         content:
@@ -6069,17 +6086,92 @@ paths:
                 name: { type: string }
                 version: { type: string }
                 client_id: { type: string }
+                csr: { type: string, description: PEM certificate signing request }
       responses:
         '201':
-          description: Collector enrolled
+          description: Collector enrolled (with `certificate` when a CSR was sent)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Collector'
+                allOf:
+                  - $ref: '#/components/schemas/Collector'
+                  - type: object
+                    properties:
+                      certificate:
+                        $ref: '#/components/schemas/CollectorCertificate'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/collectors/pki:
+    get:
+      operationId: getCollectorPKI
+      tags: [Collectors]
+      summary: Trust bundle and revocation list of the collector certificates
+      description: >-
+        The trust bundle holds the active CA and, during a CA roll-over, the
+        previous one (COL-04); the revocation list names the revoked
+        certificates (disabled collectors) that have not expired.
+      responses:
+        '200':
+          description: Trust bundle and CRL (PEM)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ca_bundle_pem, crl_pem]
+                properties:
+                  ca_bundle_pem: { type: string }
+                  crl_pem: { type: string }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/collectors/{id}/certificate:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: renewCollectorCertificate
+      tags: [Collectors]
+      summary: Renew the collector certificate
+      description: >-
+        The collector sends a CSR of a new local key once its certificate
+        reached 60 % of its lifetime (409 before); a disabled collector gets
+        none (403). Requires discovery:ingest.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [csr]
+              properties:
+                csr: { type: string }
+      responses:
+        '201':
+          description: Certificate issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectorCertificate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/collectors/{id}/heartbeat:
     parameters:
@@ -6110,10 +6202,179 @@ paths:
               schema:
                 type: string
                 enum: [active, expired]
+            Reticora-Collector-Status:
+              description: Status of the collector after the heartbeat (paused stops scanning).
+              schema:
+                type: string
+                enum: [active, paused]
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/collectors/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: updateCollector
+      tags: [Collectors]
+      summary: Rename, bind to a site, disable or enable a collector
+      description: >-
+        Requires collector:manage. The site decides the client (422 for a site
+        of another client). status disabled refuses the collector's heartbeats;
+        active enables a disabled collector again (offline until its next
+        heartbeat).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollectorPatch'
+      responses:
+        '200':
+          description: Collector updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collector'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/discovery-scopes:
+    get:
+      operationId: listDiscoveryScopes
+      tags: [Discovery]
+      summary: List discovery scopes
+      description: Requires discovery:read (DIS-09, API-05).
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: collector_id
+          in: query
+          description: Only the scopes of this collector.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Discovery scopes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryScopeListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createDiscoveryScope
+      tags: [Discovery]
+      summary: Create a discovery scope
+      description: >-
+        Requires discovery:manage. A scope is a CIDR, host or address range
+        (at most 65,536 addresses) that one collector discovers on a
+        schedule (an interval of at least 5m or a five-field cron
+        expression) with the given credentials and plugins. The site decides
+        the client; without a site the collector's client and site apply.
+        The collector receives its enabled scopes over its NATS channel.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoveryScopeInput'
+      responses:
+        '201':
+          description: Scope created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryScope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/discovery-scopes/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getDiscoveryScope
+      tags: [Discovery]
+      summary: Get a discovery scope
+      description: Requires discovery:read.
+      responses:
+        '200':
+          description: Discovery scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryScope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateDiscoveryScope
+      tags: [Discovery]
+      summary: Change a discovery scope
+      description: Requires discovery:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoveryScopePatch'
+      responses:
+        '200':
+          description: Scope updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryScope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      operationId: deleteDiscoveryScope
+      tags: [Discovery]
+      summary: Delete a discovery scope
+      description: Requires discovery:manage.
+      responses:
+        '204':
+          description: Scope deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -10969,7 +11230,12 @@ components:
           additionalProperties: true
         source:
           type: string
-          description: Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow.
+          description: >-
+            Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow
+            ("rule" is accepted as workflow). attributes.provenance records actor, actor type and
+            time of the edge. Discovery edges are re-confirmed when seen again (last_seen_at,
+            last_confirmed_at) and removed with relationship.removed after max(7 days, 5 × the scope
+            interval) without confirmation or when a suppression covers them (TOP-02).
         confidence:
           type: number
           minimum: 0
@@ -14083,6 +14349,8 @@ components:
         result_summary:
           type: object
           additionalProperties: true
+        error:
+          $ref: '#/components/schemas/DiscoveryErrorState'
         started_at:
           type: string
           format: date-time
@@ -14103,7 +14371,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip]
+          enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip, unknown_relationship]
         status:
           type: string
           enum: [open, resolved, dismissed]
@@ -15362,13 +15630,30 @@ components:
           type: string
         client_id:
           type: string
+        site_id:
+          type: string
+          description: Site of the collector; it decides the client.
         name:
           type: string
         version:
           type: string
         status:
           type: string
-        last_heartbeat:
+          enum: [pending, active, offline, disabled, paused]
+          description: >-
+            pending until the first heartbeat, active while heartbeats arrive,
+            offline after five minutes without heartbeat (COL-05), disabled by an
+            administrator (its certificates are revoked), paused while the
+            discovery license is not active (ENT-07).
+        status_changed_at:
+          type: string
+          format: date-time
+        last_heartbeat_at:
+          type: string
+          format: date-time
+        cert_fingerprint:
+          type: string
+        cert_not_after:
           type: string
           format: date-time
         config:
@@ -15380,6 +15665,31 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    CollectorCertificate:
+      type: object
+      required: [certificate_pem, ca_bundle_pem, serial, fingerprint, not_before, not_after]
+      properties:
+        certificate_pem: { type: string }
+        ca_bundle_pem: { type: string, description: Active and, during a roll-over, previous CA }
+        serial: { type: string }
+        fingerprint: { type: string, description: SHA-256 of the certificate (hex) }
+        not_before: { type: string, format: date-time }
+        not_after: { type: string, format: date-time }
+
+    CollectorPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+        site_id:
+          type: string
+          description: Site of the collector; empty removes the binding.
+        status:
+          type: string
+          enum: [disabled, active]
 
     RegisterCollectorRequest:
       type: object
@@ -15407,6 +15717,167 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/Collector'
+
+    DiscoveryScope:
+      type: object
+      description: A discovery scope (DIS-09).
+      required: [id, organization_id, collector_id, name, kind, target, schedule, credential_ids, plugins, enabled, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        client_id:
+          type: string
+        site_id:
+          type: string
+        collector_id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [cidr, host, range]
+        target:
+          type: string
+          description: CIDR, IP address or host name, or "first-last" address range.
+        vrf_id:
+          type: string
+        schedule:
+          type: string
+          description: Interval (e.g. 24h, at least 5m) or five-field cron expression.
+        credential_ids:
+          type: array
+          items:
+            type: string
+        plugins:
+          type: array
+          items:
+            type: string
+            enum: [sweep, snmp, ssh, wmi, ipmi, redfish, power, nas]
+        enabled:
+          type: boolean
+        last_run_at:
+          type: string
+          format: date-time
+        next_run_at:
+          type: string
+          format: date-time
+        last_result:
+          type: object
+          additionalProperties: true
+        health:
+          $ref: '#/components/schemas/DiscoveryScopeHealth'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    DiscoveryScopeHealth:
+      type: object
+      description: State of the last run with the causes of its errors (DIS-08).
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [ok, partial, failed, never_run]
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryErrorState'
+
+    DiscoveryErrorState:
+      type: object
+      required: [cause]
+      properties:
+        cause:
+          type: string
+          enum: [unreachable, timeout, refused, auth_failed, tls, protocol_error, config_error, upload_failed, unknown]
+        message:
+          type: string
+        protocol:
+          type: string
+        target:
+          type: string
+
+    DiscoveryScopeInput:
+      type: object
+      additionalProperties: false
+      required: [collector_id, kind, target]
+      properties:
+        collector_id:
+          type: string
+        name:
+          type: string
+          description: Defaults to the target.
+        kind:
+          type: string
+          enum: [cidr, host, range]
+        target:
+          type: string
+        client_id:
+          type: string
+        site_id:
+          type: string
+        vrf_id:
+          type: string
+        schedule:
+          type: string
+          description: Defaults to 24h.
+        credential_ids:
+          type: array
+          items:
+            type: string
+        plugins:
+          type: array
+          description: Defaults to sweep and snmp.
+          items:
+            type: string
+            enum: [sweep, snmp, ssh, wmi, ipmi, redfish, power, nas]
+        enabled:
+          type: boolean
+
+    DiscoveryScopePatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [cidr, host, range]
+        target:
+          type: string
+        site_id:
+          type: string
+        vrf_id:
+          type: string
+        schedule:
+          type: string
+        credential_ids:
+          type: array
+          items:
+            type: string
+        plugins:
+          type: array
+          items:
+            type: string
+            enum: [sweep, snmp, ssh, wmi, ipmi, redfish, power, nas]
+        enabled:
+          type: boolean
+
+    DiscoveryScopeListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/DiscoveryScope'
 
     Credential:
       type: object

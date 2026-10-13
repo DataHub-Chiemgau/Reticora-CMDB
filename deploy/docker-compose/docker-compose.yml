@@ -105,21 +105,58 @@ services:
       retries: 3
       start_period: 10m
 
+  # Internal NATS (jobs, ingest, events), reachable only on this host; its
+  # leaf node port 7422 serves nats-edge on the internal network (nats.conf).
   nats:
     image: nats:2.10-alpine
     restart: unless-stopped
-    command: ["--jetstream", "--store_dir=/data"]
+    command: ["-c", "/etc/nats/nats.conf"]
     ports:
-      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:${RETICORA_NATS_LOCAL_PORT:-4223}:4222"
       - "127.0.0.1:8222:8222"
     volumes:
       - natsdata:/data
+      - ./nats.conf:/etc/nats/nats.conf:ro
     healthcheck:
       # Probe the client port — always bound, unlike the HTTP monitor.
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8222/healthz 2>/dev/null || nc -z 127.0.0.1 4222 || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # Collector NATS endpoint (COL-08, PRI-07): collectors connect outbound
+  # to 4222 with mutual TLS (docs/betrieb/firewall-matrix.md). The server
+  # writes the collector CA, the server certificate and the generated
+  # pki/edge.conf into the collector-pki volume; the endpoint waits for them.
+  nats-edge:
+    image: nats:2.10-alpine
+    restart: unless-stopped
+    working_dir: /etc/nats
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        until [ -s pki/edge.conf ] && [ -s pki/server.pem ]; do
+        echo "waiting for the collector PKI from the server"; sleep 2; done;
+        exec nats-server -c nats-edge.conf
+    environment:
+      RETICORA_NATS_EDGE_LEAF_URL: "nats://nats:7422"
+    ports:
+      - "${RETICORA_NATS_EDGE_PORT:-4222}:4222"
+    volumes:
+      - ./nats-edge.conf:/etc/nats/nats-edge.conf:ro
+      - collector-pki:/etc/nats/pki:ro
+    depends_on:
+      nats:
+        condition: service_healthy
+      # The server creates the volume first (owned by its unprivileged user,
+      # see backend/Dockerfile) and fills it.
+      server:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4222 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
 
   redis:
     image: redis:7-alpine
@@ -288,8 +325,17 @@ services:
       RETICORA_WORKER_JOBS_ENABLED: "${RETICORA_WORKER_JOBS_ENABLED:-true}"
       RETICORA_WORKER_EVENTS_ENABLED: "${RETICORA_WORKER_EVENTS_ENABLED:-true}"
       RETICORA_WORKER_NOTIFIER_ENABLED: "${RETICORA_WORKER_NOTIFIER_ENABLED:-true}"
+      # Collector NATS endpoint (COL-08): its PKI and the authorization
+      # callout (worker nats_edge); host names of its server certificate.
+      RETICORA_WORKER_NATS_EDGE_ENABLED: "${RETICORA_WORKER_NATS_EDGE_ENABLED:-true}"
+      RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED: "${RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED:-true}"
+      RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED: "${RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED:-true}"
+      RETICORA_PKI_DIR: "/pki"
+      RETICORA_NATS_EDGE_URL: "tls://nats-edge:4222"
+      RETICORA_NATS_EDGE_HOSTS: "${RETICORA_TLS_DOMAIN:-localhost},nats-edge,localhost"
     volumes:
       - ./secrets/session-private.pem:/etc/reticora/session/private.pem:ro
+      - collector-pki:/pki
       # Read-only view of the TLS material so RETICORA_OIDC_CA_CERT_FILE can
       # reference the certificate that this host serves for the issuer domain.
       - ./letsencrypt:/etc/letsencrypt:ro
@@ -384,6 +430,7 @@ volumes:
   pgbackrest:
   pgsocket:
   natsdata:
+  collector-pki:
   redisdata:
   miniodata:
   keycloakdb:

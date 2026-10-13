@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -53,8 +54,8 @@ func New() *Plugin {
 // Name returns the plugin identifier.
 func (p *Plugin) Name() string { return "wmi" }
 
-// Discover identifies Windows hosts by probing WinRM ports (5985/5986).
-func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
+// Probe identifies Windows hosts by probing WinRM ports (5985/5986).
+func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
 	_ = creds
 	concurrency := p.Concurrency
 	if concurrency <= 0 {
@@ -132,8 +133,15 @@ func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[strin
 	return results, ctx.Err()
 }
 
-// Collect retrieves hardware, OS, and service inventory from a Windows target via WinRM.
-func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
+// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
+	observedAt := time.Now()
+	res, err := p.collect(ctx, target, creds)
+	return plugins.CollectRecord(p.Name(), res, err, observedAt)
+}
+
+// collect retrieves hardware, OS, and service inventory from a Windows target via WinRM.
+func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
 	timeout := p.Timeout
 	if timeout <= 0 {
 		timeout = defaultTimeout
@@ -158,6 +166,8 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 	osInfo := p.wsmanEnumerate(ctx, baseURL, username, password, "Win32_OperatingSystem")
 	csInfo := p.wsmanEnumerate(ctx, baseURL, username, password, "Win32_ComputerSystem")
 	biosInfo := p.wsmanEnumerate(ctx, baseURL, username, password, "Win32_BIOS")
+	productInfo := p.wsmanEnumerate(ctx, baseURL, username, password, "Win32_ComputerSystemProduct")
+	nicInfo := p.wsmanEnumerate(ctx, baseURL, username, password, "Win32_NetworkAdapterConfiguration")
 
 	hostname := target
 	if v := extractWMIField(csInfo, "Name"); v != "" {
@@ -182,6 +192,7 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 			"cpuCount":    extractWMIField(csInfo, "NumberOfProcessors"),
 		},
 	}
+	applyIdentity(result, csInfo, productInfo, nicInfo, extractWMIField(osInfo, "LastBootUpTime"), time.Now())
 
 	return result, nil
 }
@@ -266,4 +277,94 @@ func extractWMIField(xmlResponse, fieldName string) string {
 		}
 	}
 	return ""
+}
+
+// applyIdentity fills the DeviceRecord identity (DIS-04): hardware UUID,
+// host name and FQDN, the network adapters with their MAC addresses and the
+// uptime.
+func applyIdentity(result *plugins.Result, csInfo, productInfo, nicInfo, lastBoot string, now time.Time) {
+	if id := strings.ToLower(strings.TrimSpace(extractWMIField(productInfo, "UUID"))); len(id) == 36 && id != "ffffffff-ffff-ffff-ffff-ffffffffffff" && id != "00000000-0000-0000-0000-000000000000" {
+		result.Attributes["hardwareUUID"] = id
+	}
+	host := extractWMIField(csInfo, "DNSHostName")
+	if host == "" {
+		host = extractWMIField(csInfo, "Name")
+	}
+	if host != "" {
+		result.Attributes["hostname"] = strings.ToLower(host)
+		if domain := extractWMIField(csInfo, "Domain"); strings.Contains(domain, ".") {
+			result.Attributes["fqdn"] = strings.ToLower(host + "." + domain)
+		}
+	}
+	for i, item := range extractWMIItems(nicInfo, "Win32_NetworkAdapterConfiguration") {
+		mac := strings.ToLower(strings.TrimSpace(item["MACAddress"]))
+		if mac == "" || !strings.EqualFold(item["IPEnabled"], "true") {
+			continue
+		}
+		name := item["Description"]
+		if name == "" {
+			name = fmt.Sprintf("nic%d", i)
+		}
+		result.Interfaces = append(result.Interfaces, plugins.NetworkInterface{Name: name, MAC: mac, AdminUp: true, OperUp: true})
+		if result.MAC == "" {
+			result.MAC = mac
+		}
+	}
+	if boot, err := parseCIMDateTime(lastBoot); err == nil && now.After(boot) {
+		result.Attributes["uptimeSeconds"] = int64(now.Sub(boot).Seconds())
+	}
+}
+
+// extractWMIItems returns the fields of every instance of class in an
+// enumeration response.
+func extractWMIItems(xmlResponse, class string) []map[string]string {
+	var items []map[string]string
+	var current map[string]string
+	depth := 0
+	decoder := xml.NewDecoder(strings.NewReader(xmlResponse))
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return items
+		}
+		switch el := token.(type) {
+		case xml.StartElement:
+			switch {
+			case el.Name.Local == class && current == nil:
+				current, depth = map[string]string{}, 0
+			case current != nil:
+				depth++
+				if depth == 1 {
+					var value string
+					if decoder.DecodeElement(&value, &el) == nil {
+						current[el.Name.Local] = value
+					}
+					depth--
+				}
+			}
+		case xml.EndElement:
+			if current != nil && el.Name.Local == class {
+				items = append(items, current)
+				current = nil
+			}
+		}
+	}
+}
+
+// parseCIMDateTime parses a CIM datetime ("20261013081500.000000+120",
+// offset in minutes).
+func parseCIMDateTime(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	if len(s) < 25 {
+		return time.Time{}, fmt.Errorf("wmi: bad datetime %q", s)
+	}
+	t, err := time.Parse("20060102150405", s[:14])
+	if err != nil {
+		return time.Time{}, err
+	}
+	offset, err := strconv.Atoi(s[21:])
+	if err != nil {
+		return time.Time{}, err
+	}
+	return t.Add(-time.Duration(offset) * time.Minute).UTC(), nil
 }

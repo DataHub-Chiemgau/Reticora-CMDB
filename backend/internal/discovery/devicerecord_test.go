@@ -230,3 +230,55 @@ func TestIngestAcceptsDeviceRecords(t *testing.T) {
 		t.Errorf("the old collector result array: %d, want 400", w.Code)
 	}
 }
+
+// TestUnclassifiedDeviceBecomesGenericDeviceWithReview covers WP-151
+// (DIS-02): a record no collector profile matched becomes a generic_device
+// CI and opens one unclassified_device review per device; "new" is refused
+// for it because the CI exists.
+func TestUnclassifiedDeviceBecomesGenericDeviceWithReview(t *testing.T) {
+	discoveryRepo := NewMemoryRepository()
+	discoveryRepo.SeedCIType("generic_device", "generic_device")
+	discoveryRepo.SeedCIType("switch", "switch")
+	ciRepo := ci.NewMemoryRepository()
+	h := NewHandler(discoveryRepo, ciRepo)
+	ctx := discoveryTenantCtx(httptest.NewRequest(http.MethodGet, "/", http.NoBody)).Context()
+
+	unknown := plugins.RecordFromResult("sweep", &plugins.Result{CIType: "generic_device", Name: "10.0.0.9", IP: "10.0.0.9",
+		MAC: "aa:bb:cc:00:00:09", Attributes: map[string]any{"classified_by": "fallback"}}, time.Now())
+	known := plugins.RecordFromResult("snmp", &plugins.Result{CIType: "switch", Name: "sw-1", IP: "10.0.0.1",
+		Attributes: map[string]any{"classified_by": "snmp", "profile": "cisco-catalyst-9000-snmp"}}, time.Now())
+	if _, err := h.processItems(ctx, "org-1", []IngestItem{itemFromRecord(&unknown), itemFromRecord(&known)}); err != nil {
+		t.Fatal(err)
+	}
+	items, _, err := ciRepo.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+	if err != nil || len(items) != 2 {
+		t.Fatalf("CIs: %d, %v", len(items), err)
+	}
+	types := map[string]bool{}
+	for i := range items {
+		types[items[i].CITypeID] = true
+	}
+	if !types["generic_device"] || !types["switch"] {
+		t.Errorf("CI types = %v, want generic_device and switch", types)
+	}
+	// A second sighting opens no second review.
+	again := unknown
+	again.RecordID = plugins.NewRecordID()
+	if _, err = h.processItems(ctx, "org-1", []IngestItem{itemFromRecord(&again)}); err != nil {
+		t.Fatal(err)
+	}
+	reviews, _, err := discoveryRepo.ListReviewItems(ctx, "org-1", ReviewFilter{}, api.PaginationParams{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviews) != 1 || reviews[0].Kind != ReviewKindUnclassifiedDevice || reviews[0].Payload["reason"] != ReasonNoProfileMatch ||
+		reviews[0].Payload["management_ip"] != "10.0.0.9" {
+		t.Fatalf("reviews = %+v", reviews)
+	}
+	if _, err = h.ReviewService().Resolve(ctx, "org-1", reviews[0].ID, &Resolution{Action: "new"}); err == nil {
+		t.Error("creating a second CI for the generic_device must be refused")
+	}
+	if _, err = h.ReviewService().Resolve(ctx, "org-1", reviews[0].ID, &Resolution{Action: "dismiss"}); err != nil {
+		t.Errorf("dismiss: %v", err)
+	}
+}

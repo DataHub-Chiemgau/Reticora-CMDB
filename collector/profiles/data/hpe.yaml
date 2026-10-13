@@ -1,0 +1,55 @@
+# Collector profiles (DIS-02): classification and collection data.
+- name: hpe-ilo-redfish
+  vendor: HPE
+  model: 'ProLiant (iLO)'
+  protocol: redfish
+  catalog: 'HPE ProLiant (iLO)'
+  ciType: server
+  plugin: redfish
+  systemTemplate: server-bmc
+  sysObjectIds:
+  - 1.3.6.1.4.1.232.9.4.10
+  redfishPattern: '(?i)\bhpe?\b|hewlett'
+  endpoints:
+    system: /redfish/v1/Systems/1
+    chassis: /redfish/v1/Chassis/1
+    managers: /redfish/v1/Managers/1
+    thermals: /redfish/v1/Chassis/1/Thermal
+    power: /redfish/v1/Chassis/1/Power
+    storage: /redfish/v1/Systems/1/Storage
+    ethernet_interfaces: /redfish/v1/Systems/1/EthernetInterfaces
+  attributes:
+    category: server
+    management_type: out-of-band
+- name: hpe-procurve-snmp
+  vendor: HPE
+  model: ProCurve
+  protocol: snmp
+  catalog: Aruba/HPE ProCurve
+  ciType: switch
+  plugin: snmp
+  systemTemplate: network-switch
+  sysObjectIds:
+  - 1.3.6.1.4.1.11.2.3.7.11
+  - 1.3.6.1.4.1.11.2.3.7.8
+  ouiPrefixes:
+  - '00:1F:29'
+  - '3C:D9:2B'
+  - '94:57:A5'
+  - 'B0:5A:DA'
+  - 'D4:C9:EF'
+  - 'E8:F7:24'
+  - 'FC:15:B4'
+  snmpOids:
+    sysDescr: 1.3.6.1.2.1.1.1.0
+    sysName: 1.3.6.1.2.1.1.5.0
+    sysUpTime: 1.3.6.1.2.1.1.3.0
+    hpSwitchOsVersion: 1.3.6.1.4.1.11.2.14.11.5.1.1.3.0
+    hpSwitchRomVersion: 1.3.6.1.4.1.11.2.14.11.5.1.1.4.0
+    entPhysicalSerialNum: 1.3.6.1.2.1.47.1.1.1.1.11.1
+    ifDescr: 1.3.6.1.2.1.2.2.1.2
+    ifOperStatus: 1.3.6.1.2.1.2.2.1.8
+    ifHighSpeed: 1.3.6.1.2.1.31.1.1.1.15
+  attributes:
+    category: network_device
+    device_type: switch

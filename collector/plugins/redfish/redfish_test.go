@@ -108,7 +108,7 @@ func TestCollectParsesSystemInventory(t *testing.T) {
 	sys.MemorySummary.TotalSystemMemoryGiB = 256
 
 	p := newTestPlugin(t, fakeBMC(t, sys))
-	res, err := p.Collect(context.Background(), "192.0.2.10", nil)
+	res, err := p.collect(context.Background(), "192.0.2.10", nil)
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestCollectFallsBackToHostNameThenTarget(t *testing.T) {
 	// No Name on the system -> HostName should win.
 	srv := fakeBMC(t, computerSystem{HostName: "fallback-host"})
 	p := newTestPlugin(t, srv)
-	res, err := p.Collect(context.Background(), "192.0.2.11", nil)
+	res, err := p.collect(context.Background(), "192.0.2.11", nil)
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestCollectWithoutSystemsKeepsBMCResult(t *testing.T) {
 	})
 	p := newTestPlugin(t, httptest.NewServer(mux))
 
-	res, err := p.Collect(context.Background(), "192.0.2.12", nil)
+	res, err := p.collect(context.Background(), "192.0.2.12", nil)
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestCollectServiceRootError(t *testing.T) {
 	}))
 	p := newTestPlugin(t, srv)
 
-	_, err := p.Collect(context.Background(), "192.0.2.13", nil)
+	_, err := p.collect(context.Background(), "192.0.2.13", nil)
 	if err == nil || !strings.Contains(err.Error(), "HTTP 500") {
 		t.Errorf("expected HTTP 500 error, got %v", err)
 	}
@@ -205,7 +205,7 @@ func TestCollectSendsBasicAuth(t *testing.T) {
 	}))
 	p := newTestPlugin(t, srv)
 
-	if _, err := p.Collect(context.Background(), "192.0.2.14", map[string]string{
+	if _, err := p.collect(context.Background(), "192.0.2.14", map[string]string{
 		"username": "admin", "password": "s3cret",
 	}); err != nil {
 		t.Fatalf("Collect: %v", err)
@@ -242,7 +242,7 @@ func TestDiscoverDetectsOKAndUnauthorized(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			p := newTestPlugin(t, c.srv)
-			results, err := p.Discover(context.Background(), []string{"192.0.2.20"}, map[string]string{
+			results, err := p.Probe(context.Background(), []string{"192.0.2.20"}, map[string]string{
 				"username": "u", "password": "p",
 			})
 			if err != nil {
@@ -273,7 +273,7 @@ func TestDiscoverDetectsOKAndUnauthorized(t *testing.T) {
 
 func TestDiscoverNoTargetsReturnsEmptySlice(t *testing.T) {
 	p := New()
-	results, err := p.Discover(context.Background(), nil, nil)
+	results, err := p.Probe(context.Background(), nil, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestDiscoverCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	p := New()
-	results, err := p.Discover(ctx, []string{"192.0.2.1"}, nil)
+	results, err := p.Probe(ctx, []string{"192.0.2.1"}, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Discover error = %v, want context.Canceled", err)
 	}
@@ -314,7 +314,7 @@ func TestDiscoverRequestTargetsPort443(t *testing.T) {
 			return base.RoundTrip(r)
 		}),
 	}
-	if _, err := p.Discover(context.Background(), []string{"192.0.2.99"}, nil); err != nil {
+	if _, err := p.Probe(context.Background(), []string{"192.0.2.99"}, nil); err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 	_, port, err := net.SplitHostPort(gotHost)
@@ -362,14 +362,14 @@ func TestCollectRejectsUntrustedCertificateByDefault(t *testing.T) {
 	p := New()
 	p.port = port
 
-	_, err := p.Collect(context.Background(), "127.0.0.1", map[string]string{"username": "admin", "password": "secret"})
+	_, err := p.collect(context.Background(), "127.0.0.1", map[string]string{"username": "admin", "password": "secret"})
 	if err == nil || !strings.Contains(err.Error(), "certificate") {
 		t.Fatalf("expected certificate verification error, got %v", err)
 	}
 	if sawAuth {
 		t.Fatal("credentials must not be sent to an unverified endpoint")
 	}
-	results, _ := p.Discover(context.Background(), []string{"127.0.0.1"}, map[string]string{"username": "admin"})
+	results, _ := p.Probe(context.Background(), []string{"127.0.0.1"}, map[string]string{"username": "admin"})
 	if len(results) != 0 || sawAuth {
 		t.Fatalf("discovery must not accept an unverified endpoint: %v (auth sent: %v)", results, sawAuth)
 	}
@@ -399,7 +399,7 @@ func TestCollectAcceptsScopedCAAndPin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p := New(WithTLSScopes(tc.scope))
 			p.port = port
-			res, err := p.Collect(context.Background(), "127.0.0.1", nil)
+			res, err := p.collect(context.Background(), "127.0.0.1", nil)
 			if tc.ok && (err != nil || res.Attributes["bmcUUID"] != "tls-bmc") {
 				t.Fatalf("expected verified connection, got %v, %v", res, err)
 			}
@@ -434,5 +434,41 @@ func TestCredentialsForSeparatesProtocols(t *testing.T) {
 	}
 	if got := plugins.CredentialsFor("ssh", all); got["username"] != "root" || got["community"] != "" {
 		t.Fatalf("ssh credentials = %v", got)
+	}
+}
+
+// TestCollectFillsDeviceRecordFields covers WP-152 (DIS-04): Redfish
+// delivers hardware UUID, host name, FQDN and the Ethernet interfaces.
+func TestCollectFillsDeviceRecordFields(t *testing.T) {
+	sys := computerSystem{ID: "1", Name: "node01", Manufacturer: "Dell Inc.", Model: "PowerEdge R750", SerialNumber: "SN1",
+		UUID: "4C4C4544-0042-3510-8051-B4C04F4A4E33", HostName: "node01.example.com", BiosVersion: "2.7.3"}
+	sys.EthernetInterfaces = link{ID: "/redfish/v1/Systems/1/EthernetInterfaces"}
+	srv := fakeBMC(t, sys)
+	mux := srv.Config.Handler.(*http.ServeMux)
+	mux.HandleFunc("/redfish/v1/Systems/1/EthernetInterfaces", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, systemCollection{Members: []link{{ID: "/redfish/v1/Systems/1/EthernetInterfaces/NIC.1"}, {ID: "/redfish/v1/Systems/1/EthernetInterfaces/NIC.2"}}})
+	})
+	mux.HandleFunc("/redfish/v1/Systems/1/EthernetInterfaces/NIC.1", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"Id":"NIC.1","MACAddress":"B0:26:28:AA:BB:01","SpeedMbps":25000,"LinkStatus":"LinkUp","InterfaceEnabled":true}`))
+	})
+	mux.HandleFunc("/redfish/v1/Systems/1/EthernetInterfaces/NIC.2", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"Id":"NIC.2","MACAddress":"B0:26:28:AA:BB:02","LinkStatus":"LinkDown","InterfaceEnabled":false}`))
+	})
+	p := newTestPlugin(t, srv)
+	rec, err := p.Collect(context.Background(), "192.0.2.10", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Identity.HardwareUUID != "4c4c4544-0042-3510-8051-b4c04f4a4e33" || rec.Identity.Hostname != "node01" ||
+		rec.Identity.FQDN != "node01.example.com" || rec.Identity.PrimaryMAC != "b0:26:28:aa:bb:01" ||
+		rec.Identity.SerialNumber != "SN1" || rec.System.FirmwareVersion != "2.7.3" {
+		t.Errorf("identity/system = %+v / %+v", rec.Identity, rec.System)
+	}
+	if len(rec.Interfaces) != 2 || rec.Interfaces[0].SpeedMbps != 25000 || rec.Interfaces[0].OperStatus != "up" ||
+		rec.Interfaces[1].AdminStatus != "down" || rec.Interfaces[1].MAC != "b0:26:28:aa:bb:02" {
+		t.Errorf("interfaces = %+v", rec.Interfaces)
+	}
+	if v := rec.Validate(); len(v) > 0 {
+		t.Errorf("record breaks the contract: %v", v)
 	}
 }

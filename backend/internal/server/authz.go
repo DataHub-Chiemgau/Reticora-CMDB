@@ -32,6 +32,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"ci-contacts":          identity.PermContactRead,
 	"collectors":           identity.PermDiscoveryRead,
 	"discovery":            identity.PermDiscoveryRead,
+	"discovery-scopes":     identity.PermDiscoveryRead,
 	"review-items":         identity.PermDiscoveryRead,
 	"assets":               identity.PermAssetRead,
 	"asset-locations":      identity.PermAssetWrite,
@@ -140,8 +141,9 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"invitations":      identity.PermUserManage,
 	"teams":            identity.PermTeamManage,
 	// RBA-01: collectors and discovery jobs have their own manage keys.
-	"collectors": identity.PermCollectorManage,
-	"discovery":  identity.PermDiscoveryManage,
+	"collectors":       identity.PermCollectorManage,
+	"discovery":        identity.PermDiscoveryManage,
+	"discovery-scopes": identity.PermDiscoveryManage,
 	// Resolving reconciliation conflicts is resolving review items.
 	"reconciliation": identity.PermReviewResolve,
 	"clients":        identity.PermUserManage,
@@ -233,6 +235,7 @@ var routeRules = []routeRule{
 	// Collectors report with the ingest credential; managing them is
 	// collector:manage (RBA-01).
 	{http.MethodPost, "collectors/*/heartbeat", identity.PermDiscoveryIngest},
+	{http.MethodPost, "collectors/*/certificate", identity.PermDiscoveryIngest},
 	{http.MethodPost, "discovery/ingest", identity.PermDiscoveryIngest},
 	// Resolving a review item is its own right (RBA-01, RBA-02).
 	{http.MethodPost, "discovery/review-items/*/resolve", identity.PermReviewResolve},
@@ -485,7 +488,8 @@ var auditExemptions = map[string]string{
 var collectorRoutes = map[string]bool{
 	"POST /api/v1/agents/telemetry": true, "POST /api/v1/agents/{id}/heartbeat": true,
 	"POST /api/v1/collectors/{id}/heartbeat": true, "POST /api/v1/discovery/ingest": true,
-	"POST /api/v1/ingest/bulk": true,
+	"POST /api/v1/collectors/{id}/certificate": true,
+	"POST /api/v1/ingest/bulk":                 true,
 }
 
 // auditedRoutes records, per write route registered through an

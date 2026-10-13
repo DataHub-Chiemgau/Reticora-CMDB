@@ -83,4 +83,8 @@ type IngestRelationship struct {
 	TargetHostname string  `json:"target_hostname,omitempty"`
 	TypeKey        string  `json:"type_key"` // connected_to, powered_by, etc.
 	Confidence     float64 `json:"confidence,omitempty"`
+	// Protocol is how the neighbor was seen (lldp, cdp, fdb, arp; TOP-01).
+	Protocol string `json:"protocol,omitempty"`
+	// LocalInterface is the port of the reporting device.
+	LocalInterface string `json:"local_interface,omitempty"`
 }

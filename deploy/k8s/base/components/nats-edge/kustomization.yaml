@@ -1,0 +1,46 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Collector NATS endpoint (COL-08, PRI-07, WP-146): collectors connect
+# outbound to port 4222 with mutual TLS. The server writes the collector CA,
+# the endpoint's server certificate and pki/edge.conf into the shared
+# collector-pki volume (ReadWriteMany) and answers the authorization
+# callout (worker nats_edge). The leaf node bridges the collectors' account
+# to the internal NATS (leaf node port 7422 at RETICORA_NATS_URL's host).
+resources:
+  - nats-edge.yaml
+
+patches:
+  - target:
+      kind: Deployment
+      name: reticora-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: RETICORA_PKI_DIR
+          value: "/pki"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: RETICORA_NATS_EDGE_URL
+          value: "tls://reticora-nats-edge:4222"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: RETICORA_NATS_EDGE_HOSTS
+          valueFrom:
+            configMapKeyRef:
+              name: reticora-nats-edge
+              key: hosts
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value:
+          name: collector-pki
+          mountPath: /pki
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: collector-pki
+          persistentVolumeClaim:
+            claimName: reticora-collector-pki

@@ -124,9 +124,53 @@ func (r *Rotation) RewrapMasterKey(ctx context.Context) (int, error) {
 		}
 		rewrapped += n
 	}
+	caKeys, caErr := r.rewrapCollectorCA(ctx)
+	if caErr != nil {
+		return rewrapped, fmt.Errorf("collector CA: %w", caErr)
+	}
+	rewrapped += caKeys
 	slog.Info("master key rewrap", "key_id", r.enc.KeyID(), "rewrapped", rewrapped,
 		"note", "all data keys use the current master key; previous master keys can be retired")
 	return rewrapped, nil
+}
+
+// rewrapCollectorCA wraps the key of the collector CAs (COL-04) with the
+// current master key.
+func (r *Rotation) rewrapCollectorCA(ctx context.Context) (int, error) {
+	n := 0
+	err := database.WithOperator(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text, key_dek FROM collector_ca WHERE state <> 'retired' FOR UPDATE`)
+		if err != nil {
+			return err
+		}
+		type ca struct {
+			id  string
+			dek []byte
+		}
+		cas, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ca, error) {
+			var c ca
+			scanErr := row.Scan(&c.id, &c.dek)
+			return c, scanErr
+		})
+		if err != nil {
+			return err
+		}
+		for _, c := range cas {
+			if r.enc.IsCurrent(c.dek) {
+				continue
+			}
+			rewrapped, rerr := r.enc.Rewrap(c.dek)
+			if rerr != nil {
+				return rerr
+			}
+			if _, err = tx.Exec(ctx, `UPDATE collector_ca SET key_dek = $2 WHERE id = $1`, c.id, rewrapped); err != nil {
+				return err
+			}
+			n++
+		}
+		return nil
+	})
+	return n, err
 }
 
 func (r *Rotation) rewrapChannels(ctx context.Context, orgID string) (int, error) {

@@ -1,0 +1,26 @@
+# Collector profiles (DIS-02): classification and collection data.
+- name: lenovo-xcc-redfish
+  vendor: Lenovo
+  model: 'ThinkSystem (XCC)'
+  protocol: redfish
+  catalog: 'Lenovo ThinkSystem (XCC)'
+  ciType: server
+  plugin: redfish
+  systemTemplate: server-bmc
+  sysObjectIds:
+  - 1.3.6.1.4.1.19046
+  redfishPattern: '(?i)lenovo'
+  ouiPrefixes:
+  - '00:09:2D'
+  - '40:F2:E9'
+  - '6C:AE:8B'
+  - '98:FA:9B'
+  endpoints:
+    system: /redfish/v1/Systems/1
+    chassis: /redfish/v1/Chassis/1
+    managers: /redfish/v1/Managers/1
+    thermals: /redfish/v1/Chassis/1/Thermal
+    power: /redfish/v1/Chassis/1/Power
+  attributes:
+    category: server
+    management_type: out-of-band

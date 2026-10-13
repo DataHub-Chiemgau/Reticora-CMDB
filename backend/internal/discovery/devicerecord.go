@@ -220,6 +220,7 @@ func itemFromRecord(rec *DeviceRecord) IngestItem {
 	for _, n := range rec.Neighbors {
 		item.Relationships = append(item.Relationships, wire.IngestRelationship{
 			TargetIP: n.RemoteIP, TargetMAC: n.RemoteMAC, TargetHostname: n.RemoteHostname, TypeKey: "connected_to",
+			Protocol: n.Protocol, LocalInterface: n.LocalInterface,
 		})
 	}
 	return item

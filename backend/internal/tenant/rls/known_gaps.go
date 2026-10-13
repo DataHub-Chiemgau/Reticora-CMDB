@@ -73,10 +73,11 @@ var GlobalCatalogTables = []string{"permission"}
 // OperatorTables are organization-spanning tables of the operator path
 // (SEC-07, WP-070) without organization_id, signup_request, which exists
 // before its organization (WP-111), and scheduler_run, the state of the
-// organization-spanning system job scheduler (JOB-02, WP-131). This is a
-// documented exception to RuleOrgColumn, not a gap: the catalog test checks
-// RuleOperatorOnly for them instead.
-var OperatorTables = []string{"operator_audit", "signup_request", "scheduler_run"}
+// organization-spanning system job scheduler (JOB-02, WP-131), and
+// collector_ca, the internal CA of the collector certificates (COL-04,
+// WP-145). This is a documented exception to RuleOrgColumn, not a gap: the
+// catalog test checks RuleOperatorOnly for them instead.
+var OperatorTables = []string{"operator_audit", "signup_request", "scheduler_run", "collector_ca"}
 
 // Session variables (GUCs) the policies are expected to reference. Site and
 // team scope do not exist yet; WP-027 and WP-029 introduce them under these

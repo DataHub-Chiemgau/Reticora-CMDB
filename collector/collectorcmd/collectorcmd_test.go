@@ -1,6 +1,7 @@
 package collectorcmd
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/ecdsa"
@@ -15,11 +16,13 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +30,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/update"
 )
 
 func testConfig(serverURL, spoolDir string) collectorConfig {
@@ -378,11 +382,11 @@ func TestHeartbeatReportsSpoolBackpressureAndLoss(t *testing.T) {
 type countingPlugin struct{ runs atomic.Int64 }
 
 func (p *countingPlugin) Name() string { return "counting" }
-func (p *countingPlugin) Discover(context.Context, []string, map[string]string) ([]plugins.Result, error) {
+func (p *countingPlugin) Probe(context.Context, []string, map[string]string) ([]plugins.Result, error) {
 	p.runs.Add(1)
 	return nil, nil
 }
-func (p *countingPlugin) Collect(context.Context, string, map[string]string) (*plugins.Result, error) {
+func (p *countingPlugin) Collect(context.Context, string, map[string]string) (*plugins.DeviceRecord, error) {
 	return nil, nil
 }
 
@@ -445,11 +449,12 @@ func TestLicenseExpiryPausesDiscovery(t *testing.T) {
 	}
 
 	// The heartbeat keeps reporting the status; a renewed license resumes.
-	if status := postHeartbeat(ctx, up.client, cfg, nil); status != "expired" {
-		t.Fatalf("heartbeat license status %q", status)
+	if status, ok := postHeartbeat(ctx, up.client, cfg, nil); status != "expired" || !ok {
+		t.Fatalf("heartbeat license status %q, accepted %v", status, ok)
 	}
 	license.Store("active")
-	up.setLicenseStatus(postHeartbeat(ctx, up.client, cfg, nil))
+	status, _ := postHeartbeat(ctx, up.client, cfg, nil)
+	up.setLicenseStatus(status)
 	if up.paused.Load() {
 		t.Fatal("collector still paused after the license was renewed")
 	}
@@ -467,4 +472,361 @@ func TestLicenseExpiryPausesDiscovery(t *testing.T) {
 // testRecords returns one valid DeviceRecord named name.
 func testRecords(name string) []plugins.DeviceRecord {
 	return []plugins.DeviceRecord{plugins.RecordFromResult("sweep", &plugins.Result{CIType: "server", Name: name, IP: "192.0.2.10"}, time.Now())}
+}
+
+// fakeUpdater offers release once and records what was applied.
+type fakeUpdater struct {
+	release  *update.ReleaseInfo
+	applyErr error
+	checks   atomic.Int32
+	applied  chan string
+}
+
+func (f *fakeUpdater) Check(context.Context, string) (*update.ReleaseInfo, error) {
+	f.checks.Add(1)
+	return f.release, nil
+}
+
+func (f *fakeUpdater) Apply(_ context.Context, rel update.ReleaseInfo) error {
+	if f.applyErr != nil {
+		return f.applyErr
+	}
+	f.applied <- rel.Version
+	return nil
+}
+
+func TestUpdateLoopWaitsForAWorkingStartAndRestartsIntoTheUpdate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	u := &fakeUpdater{release: &update.ReleaseInfo{Version: "v9.0.0", Channel: update.ChannelStable}, applied: make(chan string, 1)}
+	confirmed, restart := make(chan struct{}), make(chan string, 1)
+	go runUpdateLoop(ctx, time.Hour, u, confirmed, restart)
+
+	time.Sleep(30 * time.Millisecond)
+	if u.checks.Load() != 0 {
+		t.Fatal("the updater must not run before the running binary confirmed a successful heartbeat")
+	}
+	close(confirmed)
+	select {
+	case v := <-restart:
+		if v != "v9.0.0" || <-u.applied != "v9.0.0" {
+			t.Fatalf("restart for %q", v)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no restart after the update was installed")
+	}
+}
+
+func TestRefusedUpdateKeepsTheCollectorRunning(t *testing.T) {
+	u := &fakeUpdater{release: &update.ReleaseInfo{Version: "v9.0.0"}, applyErr: update.ErrUnsigned}
+	if v := checkAndApply(context.Background(), u); v != "" {
+		t.Fatalf("a refused update reported %q", v)
+	}
+}
+
+func TestStartupUpdateConfirmsAndRollsBack(t *testing.T) {
+	dir := t.TempDir()
+	execPath := filepath.Join(dir, "reticora-collector")
+	for _, f := range []struct{ name, content string }{
+		{execPath, "new"}, {execPath + ".old", "old"},
+		{filepath.Join(dir, ".update-pending"), `{"version":"v9.0.0","attempts":0}`},
+	} {
+		if err := os.WriteFile(f.name, []byte(f.content), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A start that reaches a heartbeat confirms the update.
+	confirm, err := startupUpdate(execPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirm()
+	if _, serr := os.Stat(filepath.Join(dir, ".update-pending")); !os.IsNotExist(serr) {
+		t.Fatalf("the confirmed update is still pending: %v", serr)
+	}
+
+	// Starts that never reach a heartbeat roll it back.
+	if err = os.WriteFile(filepath.Join(dir, ".update-pending"), []byte(`{"version":"v9.0.1","attempts":0}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for range update.MaxStartAttempts {
+		if _, err = startupUpdate(execPath); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = startupUpdate(execPath); !errors.Is(err, update.ErrRolledBack) {
+		t.Fatalf("err = %v, want ErrRolledBack", err)
+	}
+	if got, _ := os.ReadFile(execPath); string(got) != "old" {
+		t.Fatalf("binary after rollback = %q", got)
+	}
+}
+
+func TestUpdateChannelFromEnv(t *testing.T) {
+	for value, want := range map[string]struct {
+		ch string
+		ok bool
+	}{"": {"stable", true}, "Beta": {"beta", true}, " stable ": {"stable", true}, "nightly": {"nightly", false}} {
+		if ch, ok := updateChannelFromEnv(value); ch != want.ch || ok != want.ok {
+			t.Errorf("updateChannelFromEnv(%q) = %q, %v", value, ch, ok)
+		}
+	}
+	t.Setenv("RETICORA_UPDATE_URL", "https://updates.example.com")
+	t.Setenv("RETICORA_UPDATE_CHANNEL", "nightly")
+	if cfg := loadCollectorConfig(); cfg.UpdateURL != "" {
+		t.Error("an unknown channel must disable auto-updates")
+	}
+	t.Setenv("RETICORA_UPDATE_CHANNEL", "beta")
+	if cfg := loadCollectorConfig(); cfg.UpdateURL == "" || cfg.UpdateChannel != "beta" || cfg.UpdateInterval != 6*time.Hour {
+		t.Errorf("update config = %q %q %s", cfg.UpdateURL, cfg.UpdateChannel, cfg.UpdateInterval)
+	}
+}
+
+func TestSweepConcurrencyIsCappedAt256(t *testing.T) {
+	for value, want := range map[string]int{"": 256, "64": 64, "1000": 256, "-3": 256, "x": 256} {
+		if got := sweepConcurrencyFromEnv(value); got != want {
+			t.Errorf("sweepConcurrencyFromEnv(%q) = %d, want %d", value, got, want)
+		}
+	}
+	cfg := collectorConfig{SweepConcurrency: 32}
+	if p := newSweep(&cfg); p.Concurrency != 32 || p.Pinger == nil || p.Neighbors == nil {
+		t.Errorf("sweep plugin = %+v", p)
+	}
+}
+
+// probeCollectPlugin answers the probe for two targets and collects a full
+// record for one of them.
+type probeCollectPlugin struct {
+	collected sync.Map
+}
+
+func (p *probeCollectPlugin) Name() string { return "snmp" }
+func (p *probeCollectPlugin) Probe(_ context.Context, targets []string, _ map[string]string) ([]plugins.Result, error) {
+	var hits []plugins.Result
+	for _, t := range targets {
+		hits = append(hits, plugins.Result{CIType: "network.device", Name: t, IP: t, MAC: "00:11:22:33:44:01"})
+	}
+	return hits, nil
+}
+func (p *probeCollectPlugin) Collect(_ context.Context, target string, _ map[string]string) (*plugins.DeviceRecord, error) {
+	p.collected.Store(target, true)
+	if target == "192.0.2.2" {
+		return nil, errors.New("authentication failed")
+	}
+	return plugins.CollectRecord("snmp", &plugins.Result{
+		CIType: "network.device", Name: "core-sw-1", IP: target, Serial: "FOC1",
+		Attributes: map[string]any{"sysObjectID": "1.3.6.1.4.1.9.1.2494", "sysDescr": "Cisco IOS XE, C9300-48P"},
+		Interfaces: []plugins.NetworkInterface{{Name: "Gi1/0/1", IfIndex: 1, OperUp: true, AdminUp: true}},
+	}, nil, time.Now())
+}
+
+// TestDiscoveryProbesThenCollects covers WP-150 (DIS-03, DIS-04): the
+// cycle calls Collect for every probed target and uploads its DeviceRecord;
+// a failed Collect falls back to the probe result.
+func TestDiscoveryProbesThenCollects(t *testing.T) {
+	plug := &probeCollectPlugin{}
+	hits, err := plug.Probe(context.Background(), []string{"192.0.2.1", "192.0.2.2"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, failed := collectHits(context.Background(), "snmp", plug, hits, nil)
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want 2", len(records))
+	}
+	// The failed collection is reported with target and protocol (DIS-08).
+	if len(failed) != 1 || failed[0].Target != "192.0.2.2" || failed[0].Protocol != "snmp" || failed[0].Message != "authentication failed" {
+		t.Errorf("failed targets = %+v", failed)
+	}
+	for _, target := range []string{"192.0.2.1", "192.0.2.2"} {
+		if _, ok := plug.collected.Load(target); !ok {
+			t.Errorf("Collect was not called for %s", target)
+		}
+	}
+	full, fallback := records[0], records[1]
+	if full.Classification.CIType != "switch" || full.Classification.Profile != "cisco-catalyst-9000-snmp" ||
+		full.Identity.SerialNumber != "FOC1" || len(full.Interfaces) != 1 {
+		t.Errorf("collected record = %+v", full)
+	}
+	if full.Identity.PrimaryMAC != "00:11:22:33:44:01" {
+		t.Errorf("the probe MAC must complete the record, got %q", full.Identity.PrimaryMAC)
+	}
+	// Without evidence the probe hit is an unclassified generic_device (DIS-02).
+	if fallback.Classification.CIType != "generic_device" || fallback.Attributes["classified_by"] != "fallback" ||
+		fallback.TargetIP != "192.0.2.2" || fallback.Source != "snmp" {
+		t.Errorf("fallback record = %+v", fallback)
+	}
+	for _, rec := range records {
+		if v := rec.Validate(); len(v) > 0 {
+			t.Errorf("record %s breaks the contract: %v", rec.TargetIP, v)
+		}
+	}
+}
+
+// TestEveryPluginImplementsProbeCollect checks the registry: each of the
+// eight protocol plugins is registered under its own name.
+func TestEveryPluginImplementsProbeCollect(t *testing.T) {
+	want := []string{"ipmi", "nas", "power", "redfish", "snmp", "ssh", "sweep", "wmi"}
+	for _, name := range want {
+		plug, ok := pluginRegistry[name]
+		if !ok {
+			t.Errorf("plugin %s missing", name)
+			continue
+		}
+		if plug.Name() != name {
+			t.Errorf("plugin registered as %s is named %s", name, plug.Name())
+		}
+	}
+	if len(pluginRegistry) != len(want) {
+		t.Errorf("registry has %d plugins, want %d", len(pluginRegistry), len(want))
+	}
+}
+
+// TestDiscoveryFollowsTheServerScopes covers WP-153 (DIS-09): with a scope
+// list from the server the cycle discovers each scope with its plugins and
+// tags the records with scope, client, site and VRF; without one the
+// configured subnets apply.
+func TestDiscoveryFollowsTheServerScopes(t *testing.T) {
+	t.Cleanup(func() { collectorScopes = &scopeCache{} })
+	cfg := collectorConfig{ScanSubnets: []string{"192.0.2.0/30"}, Protocols: []string{"sweep"}}
+	if passes := discoveryPasses(&cfg); len(passes) != 1 || passes[0].scope != nil || len(passes[0].targets) != 2 {
+		t.Fatalf("fallback passes = %+v", passes)
+	}
+
+	collectorScopes.set([]collectorScope{
+		{ID: "s-1", Kind: "cidr", Target: "10.1.0.0/29", ClientID: "c-1", SiteID: "site-1", VRFID: "vrf-1", Plugins: []string{"sweep", "snmp"}},
+		{ID: "s-2", Kind: "range", Target: "10.2.0.250-10.2.1.2", Plugins: []string{"ssh"}},
+		{ID: "s-3", Kind: "host", Target: "fw.example.com", Plugins: []string{"snmp"}},
+	}, nil)
+	passes := discoveryPasses(&cfg)
+	if len(passes) != 3 {
+		t.Fatalf("passes = %+v", passes)
+	}
+	if len(passes[0].targets) != 6 || strings.Join(passes[0].protocols, ",") != "sweep,snmp" {
+		t.Errorf("cidr pass = %+v", passes[0])
+	}
+	if strings.Join(passes[1].targets, ",") != "10.2.0.250,10.2.0.251,10.2.0.252,10.2.0.253,10.2.0.254,10.2.0.255,10.2.1.0,10.2.1.1,10.2.1.2" {
+		t.Errorf("range targets = %v", passes[1].targets)
+	}
+	if strings.Join(passes[2].targets, ",") != "fw.example.com" {
+		t.Errorf("host targets = %v", passes[2].targets)
+	}
+
+	recs := []plugins.DeviceRecord{plugins.RecordFromResult("sweep", &plugins.Result{CIType: "generic_device", Name: "x", IP: "10.1.0.1"}, time.Now())}
+	tagRecords(recs, passes[0].scope)
+	if recs[0].ScopeID != "s-1" || recs[0].ClientID != "c-1" || recs[0].SiteID != "site-1" || recs[0].VRFID != "vrf-1" {
+		t.Errorf("tagged record = %+v", recs[0])
+	}
+
+	// An empty list from the server means: nothing to discover.
+	collectorScopes.set([]collectorScope{}, nil)
+	if passes = discoveryPasses(&cfg); len(passes) != 0 {
+		t.Errorf("passes without scopes = %+v", passes)
+	}
+}
+
+type fakeAddr string
+
+func (a fakeAddr) Network() string { return "ip+net" }
+func (a fakeAddr) String() string  { return string(a) }
+
+func TestLocalSubnetsForScopeSuggestions(t *testing.T) {
+	addrs := func() ([]net.Addr, error) {
+		return []net.Addr{fakeAddr("127.0.0.1/8"), fakeAddr("192.168.10.23/24"), fakeAddr("192.168.10.24/24"),
+			fakeAddr("169.254.1.2/16"), fakeAddr("fe80::1/64"), fakeAddr("10.8.0.1/32"), fakeAddr("172.16.4.9/22")}, nil
+	}
+	if got := strings.Join(localSubnets(addrs), ","); got != "192.168.10.0/24,172.16.4.0/22" {
+		t.Errorf("local subnets = %s", got)
+	}
+}
+
+// fakeEnrollServer redeems one code like POST /api/v1/collectors/enroll:
+// it signs the CSR with a test CA (CN = collector id, O = organization).
+func fakeEnrollServer(t *testing.T, code, orgID, collectorID string) *httptest.Server {
+	t.Helper()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test collector CA"}, IsCA: true,
+		BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	caDER, _ := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	caCert, _ := x509.ParseCertificate(caDER)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Code, Name, Version, CSR string }
+		if r.URL.Path != "/api/v1/collectors/enroll" || json.NewDecoder(r.Body).Decode(&req) != nil || req.Code != code {
+			http.Error(w, "invalid or expired enrollment code", http.StatusUnauthorized)
+			return
+		}
+		block, _ := pem.Decode([]byte(req.CSR))
+		csr, perr := x509.ParseCertificateRequest(block.Bytes)
+		if perr != nil {
+			http.Error(w, "bad csr", http.StatusBadRequest)
+			return
+		}
+		tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: collectorID, Organization: []string{orgID}},
+			NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(90 * 24 * time.Hour), ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
+		der, _ := x509.CreateCertificate(rand.Reader, tmpl, caCert, csr.PublicKey, caKey)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": collectorID, "certificate": map[string]any{
+			"certificate_pem": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+			"ca_bundle_pem":   string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})),
+		}})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestEnrollCommand covers WP-156 (INS-06): `enroll --server --code`
+// stores identity and server URL in the one credentials file; the
+// collector then starts without further settings.
+func TestEnrollCommand(t *testing.T) {
+	orgID, colID := "6f0b6f0e-0000-4000-8000-0000000000aa", "6f0b6f0e-0000-4000-8000-0000000000bb"
+	srv := fakeEnrollServer(t, "ABCD-EFGH", orgID, colID)
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("RETICORA_CREDENTIALS_PATH", path)
+	t.Setenv("RETICORA_SERVER_URL", "")
+	t.Setenv("RETICORA_ORGANIZATION_ID", "")
+	t.Setenv("RETICORA_COLLECTOR_ID", "")
+
+	var stdout, stderr bytes.Buffer
+	handled, code := runCommand(context.Background(), []string{"enroll", "--server", srv.URL + "/", "--code", "ABCD-EFGH", "--name", "site-a"}, &stdout, &stderr)
+	if !handled || code != 0 {
+		t.Fatalf("enroll exit %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), colID) || !strings.Contains(stdout.String(), path) {
+		t.Errorf("output = %s", stdout.String())
+	}
+	cfg := loadCollectorConfig()
+	if cfg.ServerURL != srv.URL || cfg.CollectorID != colID || cfg.OrganizationID != orgID || cfg.CredentialsPath != path {
+		t.Errorf("config after enroll: server %q collector %q org %q path %q", cfg.ServerURL, cfg.CollectorID, cfg.OrganizationID, cfg.CredentialsPath)
+	}
+	certPEM, keyPEM, _, err := loadTLSMaterial(context.Background(), cfg)
+	if err != nil || len(certPEM) == 0 || len(keyPEM) == 0 {
+		t.Errorf("TLS material from the credentials file: %v", err)
+	}
+	// The environment still wins.
+	t.Setenv("RETICORA_SERVER_URL", "https://other.example.com")
+	if cfg = loadCollectorConfig(); cfg.ServerURL != "https://other.example.com" {
+		t.Errorf("RETICORA_SERVER_URL ignored: %s", cfg.ServerURL)
+	}
+
+	// Argument and code errors.
+	for _, args := range [][]string{{"enroll", "--code", "X"}, {"enroll", "--server", srv.URL}, {"enroll", "--bogus"}, {"frobnicate"}} {
+		stderr.Reset()
+		if _, code = runCommand(context.Background(), args, &stdout, &stderr); code != 2 {
+			t.Errorf("%v: exit %d", args, code)
+		}
+	}
+	stderr.Reset()
+	if _, code = runCommand(context.Background(), []string{"enroll", "--server", srv.URL, "--code", "WRONG", "--credentials", filepath.Join(t.TempDir(), "c.json")}, &stdout, &stderr); code != 1 ||
+		!strings.Contains(stderr.String(), "invalid or expired") {
+		t.Errorf("wrong code: exit %d, %s", code, stderr.String())
+	}
+	stdout.Reset()
+	if handled, code = runCommand(context.Background(), []string{"version"}, &stdout, &stderr); !handled || code != 0 || !strings.Contains(stdout.String(), "reticora-collector") {
+		t.Errorf("version: %v %d %q", handled, code, stdout.String())
+	}
+	if handled, _ = runCommand(context.Background(), nil, &stdout, &stderr); handled {
+		t.Error("no arguments starts the collector")
+	}
 }

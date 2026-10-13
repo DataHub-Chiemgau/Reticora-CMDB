@@ -1,9 +1,15 @@
 package discovery
 
 import (
+	"context"
+	"errors"
+	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/wire"
 )
 
@@ -56,7 +62,7 @@ func TestDeriveRelationships(t *testing.T) {
 		name       string
 		source     string
 		rels       []wire.IngestRelationship
-		suppressed func(string, string) bool
+		suppressed func(string, string, string) bool
 		want       []DerivedRelationship
 	}{
 		{
@@ -66,10 +72,10 @@ func TestDeriveRelationships(t *testing.T) {
 			want:   []DerivedRelationship{{SourceCIID: "ci-src", TargetCIID: "ci-pdu", RelType: "powered_by", Confidence: 0.9}},
 		},
 		{
-			name:   "connected_to default confidence and type",
+			name:   "LLDP neighbor is connected_to with confidence 1.0",
 			source: "ci-src",
 			rels:   []wire.IngestRelationship{{TargetMAC: "aa:bb:cc:00:00:03", TypeKey: "lldp"}},
-			want:   []DerivedRelationship{{SourceCIID: "ci-src", TargetCIID: "ci-peer", RelType: "connected_to", Confidence: defaultConfidence}},
+			want:   []DerivedRelationship{{SourceCIID: "ci-src", TargetCIID: "ci-peer", RelType: "connected_to", Confidence: lldpConfidence}},
 		},
 		{
 			name:   "unresolved neighbor skipped",
@@ -96,7 +102,7 @@ func TestDeriveRelationships(t *testing.T) {
 			name:       "suppressed pair skipped",
 			source:     "ci-src",
 			rels:       []wire.IngestRelationship{{TargetIP: "10.0.0.2", TypeKey: "powered_by"}},
-			suppressed: func(s, tgt string) bool { return s == "ci-src" && tgt == "ci-pdu" },
+			suppressed: func(s, tgt, typ string) bool { return s == "ci-src" && tgt == "ci-pdu" && typ == "powered_by" },
 			want:       nil,
 		},
 	}
@@ -108,7 +114,7 @@ func TestDeriveRelationships(t *testing.T) {
 				t.Fatalf("got %d edges %+v, want %d %+v", len(got), got, len(tc.want), tc.want)
 			}
 			for i := range got {
-				if got[i] != tc.want[i] {
+				if !reflect.DeepEqual(got[i], tc.want[i]) {
 					t.Errorf("edge %d = %+v, want %+v", i, got[i], tc.want[i])
 				}
 			}
@@ -121,13 +127,111 @@ func TestNormalizeRelType(t *testing.T) {
 		"":             "connected_to",
 		"connected_to": "connected_to",
 		"LLDP":         "connected_to",
+		"fdb":          "connected_to",
 		"powered_by":   "powered_by",
 		"powers":       "powered_by",
-		"unknown_key":  "connected_to",
+		"unknown_key":  "",
 	}
 	for in, want := range cases {
-		if got := normalizeRelType(in); got != want {
-			t.Errorf("normalizeRelType(%q)=%q want %q", in, got, want)
+		if got, known := normalizeRelType(in); got != want || known != (want != "") {
+			t.Errorf("normalizeRelType(%q)=%q,%v want %q", in, got, known, want)
 		}
+	}
+}
+
+// TestDeriveTopologyRules covers WP-158 (TOP-01): LLDP/CDP 1.0, FDB 0.6
+// only on ports without LLDP and with at most four MACs (trunk filter),
+// ARP gives no edge, unknown keys become reviews instead of connected_to.
+func TestDeriveTopologyRules(t *testing.T) {
+	resolve := func(ip, mac, host string) (string, bool) {
+		if mac != "" {
+			return "ci-" + strings.ReplaceAll(mac, ":", ""), true
+		}
+		if ip != "" {
+			return "ci-" + ip, true
+		}
+		return "", false
+	}
+	fdb := func(port, mac string) wire.IngestRelationship {
+		return wire.IngestRelationship{TargetMAC: mac, TypeKey: "connected_to", Protocol: "fdb", LocalInterface: port}
+	}
+	rels := []wire.IngestRelationship{
+		{TargetMAC: "00:00:00:00:00:01", TypeKey: "connected_to", Protocol: "lldp", LocalInterface: "Gi1/0/1"},
+		{TargetMAC: "00:00:00:00:00:02", TypeKey: "connected_to", Protocol: "cdp", LocalInterface: "Gi1/0/2"},
+		// FDB on an LLDP port: no edge.
+		fdb("Gi1/0/1", "00:00:00:00:00:11"),
+		// FDB alone on an access port: 0.6.
+		fdb("Gi1/0/3", "00:00:00:00:00:13"),
+		// Five MACs on one port: trunk, no edge.
+		fdb("Gi1/0/48", "00:00:00:00:00:21"), fdb("Gi1/0/48", "00:00:00:00:00:22"), fdb("Gi1/0/48", "00:00:00:00:00:23"),
+		fdb("Gi1/0/48", "00:00:00:00:00:24"), fdb("Gi1/0/48", "00:00:00:00:00:25"),
+		// Four MACs on a port: still edges.
+		fdb("Gi1/0/47", "00:00:00:00:00:31"), fdb("Gi1/0/47", "00:00:00:00:00:32"), fdb("Gi1/0/47", "00:00:00:00:00:33"),
+		fdb("Gi1/0/47", "00:00:00:00:00:34"),
+		// ARP only enriches.
+		{TargetIP: "10.0.0.50", TargetMAC: "00:00:00:00:00:50", TypeKey: "connected_to", Protocol: "arp"},
+		// Unknown key: review, no edge.
+		{TargetIP: "10.0.0.60", TypeKey: "vxlan_peer"},
+	}
+	derived, unknown := DeriveTopology("ci-sw", rels, resolve, nil)
+	got := map[string]float64{}
+	for _, d := range derived {
+		got[d.TargetCIID] = d.Confidence
+		if d.RelType != "connected_to" {
+			t.Errorf("edge %+v", d)
+		}
+	}
+	want := map[string]float64{
+		"ci-000000000001": 1.0, "ci-000000000002": 1.0, "ci-000000000013": 0.6,
+		"ci-000000000031": 0.6, "ci-000000000032": 0.6, "ci-000000000033": 0.6, "ci-000000000034": 0.6,
+	}
+	if len(got) != len(want) {
+		t.Errorf("edges = %v, want %v", got, want)
+	}
+	for target, c := range want {
+		if got[target] != c {
+			t.Errorf("%s: confidence %v, want %v", target, got[target], c)
+		}
+	}
+	if len(unknown) != 1 || unknown[0].TargetCIID != "ci-10.0.0.60" || unknown[0].TypeKey != "vxlan_peer" {
+		t.Errorf("unknown = %+v", unknown)
+	}
+
+	// Without port information an FDB entry counts only when the device has
+	// no LLDP neighbor at all.
+	noPort := []wire.IngestRelationship{{TargetMAC: "00:00:00:00:00:01", Protocol: "lldp"}, {TargetMAC: "00:00:00:00:00:99", Protocol: "fdb"}}
+	if derived, _ = DeriveTopology("ci-sw", noPort, resolve, nil); len(derived) != 1 {
+		t.Errorf("FDB without port next to LLDP: %+v", derived)
+	}
+	if derived, _ = DeriveTopology("ci-sw", noPort[1:], resolve, nil); len(derived) != 1 || derived[0].Confidence != fdbConfidence {
+		t.Errorf("FDB without LLDP: %+v", derived)
+	}
+}
+
+// brokenSuppressions fails to load the suppressions.
+type brokenSuppressions struct{ *MemoryRepository }
+
+func (brokenSuppressions) SuppressedPairs(context.Context, string) (map[string]bool, error) {
+	return nil, errors.New("database down")
+}
+
+// TestTopologyFailsClosed covers WP-160 (REL-03): when the suppressions
+// cannot be loaded no edge is written, so a suppressed edge never comes
+// back by accident.
+func TestTopologyFailsClosed(t *testing.T) {
+	rels := relationship.NewMemoryRepository()
+	h := NewHandler(brokenSuppressions{NewMemoryRepository()}, nil, rels)
+	items := []IngestItem{{Relationships: []wire.IngestRelationship{{TargetIP: "10.0.0.2", Protocol: "lldp"}}}}
+	existing := []ci.Item{{ID: "ci-peer", ManagementIP: "10.0.0.2"}}
+	if n := h.deriveTopology(context.Background(), "org-1", items, []string{"ci-src"}, existing); n != 0 {
+		t.Fatalf("edges written without suppressions: %d", n)
+	}
+	if list, _, _ := rels.List(context.Background(), "org-1", "", api.PaginationParams{Limit: 10}); len(list) != 0 {
+		t.Errorf("relationships = %+v", list)
+	}
+	// With the suppressions loaded the edge is written.
+	h2 := NewHandler(NewMemoryRepository(), nil, rels)
+	if n := h2.deriveTopology(context.Background(), "org-1", items, []string{"ci-src"}, existing); n != 1 {
+		t.Errorf("edges with suppressions loaded: %d", n)
 	}
 }

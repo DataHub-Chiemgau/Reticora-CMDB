@@ -149,8 +149,8 @@ func (p *Plugin) baseURL(target string) string {
 // Name returns the plugin identifier.
 func (p *Plugin) Name() string { return "redfish" }
 
-// Discover identifies Redfish endpoints from a set of candidate targets.
-func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
+// Probe identifies Redfish endpoints from a set of candidate targets.
+func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
 	concurrency := p.Concurrency
 	if concurrency <= 0 {
 		concurrency = defaultConcurrency
@@ -256,10 +256,66 @@ type computerSystem struct {
 	MemorySummary struct {
 		TotalSystemMemoryGiB float64 `json:"TotalSystemMemoryGiB"`
 	} `json:"MemorySummary"`
+	EthernetInterfaces link `json:"EthernetInterfaces"`
 }
 
-// Collect retrieves system, chassis, and sensor details from a single Redfish endpoint.
-func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
+// ethernetInterface is a Redfish EthernetInterface of a system.
+type ethernetInterface struct {
+	ID            string `json:"Id"`
+	Name          string `json:"Name"`
+	MACAddress    string `json:"MACAddress"`
+	SpeedMbps     int    `json:"SpeedMbps"`
+	MTUSize       int    `json:"MTUSize"`
+	InterfaceOn   *bool  `json:"InterfaceEnabled"`
+	LinkStatus    string `json:"LinkStatus"`
+	IPv4Addresses []struct {
+		Address string `json:"Address"`
+	} `json:"IPv4Addresses"`
+}
+
+// interfaces reads the EthernetInterfaces of a system.
+func (p *Plugin) interfaces(ctx context.Context, client *http.Client, baseURL, collection, username, password string) []plugins.NetworkInterface {
+	if collection == "" {
+		return nil
+	}
+	var members systemCollection
+	if err := p.redfishGet(ctx, client, baseURL+collection, username, password, &members); err != nil {
+		return nil
+	}
+	var out []plugins.NetworkInterface
+	for i, m := range members.Members {
+		var e ethernetInterface
+		if err := p.redfishGet(ctx, client, baseURL+m.ID, username, password, &e); err != nil {
+			continue
+		}
+		name := e.ID
+		if name == "" {
+			name = e.Name
+		}
+		if name == "" {
+			name = fmt.Sprintf("eth%d", i)
+		}
+		out = append(out, plugins.NetworkInterface{
+			Name:    name,
+			MAC:     strings.ToLower(e.MACAddress),
+			Speed:   e.SpeedMbps,
+			MTU:     e.MTUSize,
+			AdminUp: e.InterfaceOn == nil || *e.InterfaceOn,
+			OperUp:  strings.EqualFold(e.LinkStatus, "LinkUp"),
+		})
+	}
+	return out
+}
+
+// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
+	observedAt := time.Now()
+	res, err := p.collect(ctx, target, creds)
+	return plugins.CollectRecord(p.Name(), res, err, observedAt)
+}
+
+// collect retrieves system, chassis, and sensor details from a single Redfish endpoint.
+func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
 	baseURL := p.baseURL(target)
 	client := p.clientFor(target)
 	username := creds["username"]
@@ -305,6 +361,21 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 
 				result.Attributes["powerState"] = sys.PowerState
 				result.Attributes["systemUUID"] = sys.UUID
+				// DeviceRecord identity (DIS-04): hardware UUID and host name.
+				if isUUID(sys.UUID) {
+					result.Attributes["hardwareUUID"] = strings.ToLower(sys.UUID)
+				}
+				if sys.HostName != "" {
+					host, _, _ := strings.Cut(sys.HostName, ".")
+					result.Attributes["hostname"] = host
+					if strings.Contains(sys.HostName, ".") {
+						result.Attributes["fqdn"] = sys.HostName
+					}
+				}
+				result.Interfaces = p.interfaces(ctx, client, baseURL, sys.EthernetInterfaces.ID, username, password)
+				if len(result.Interfaces) > 0 {
+					result.MAC = result.Interfaces[0].MAC
+				}
 				result.Attributes["sku"] = sys.SKU
 				result.Attributes["healthState"] = sys.Status.Health
 				result.Attributes["cpuCount"] = sys.ProcessorSummary.Count
@@ -342,4 +413,24 @@ func (p *Plugin) redfishGet(ctx context.Context, client *http.Client, url, usern
 	}
 
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// isUUID reports whether s has the 8-4-4-4-12 hex form.
+func isUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
+				return false
+			}
+		}
+	}
+	return true
 }

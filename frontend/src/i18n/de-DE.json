@@ -254,7 +254,59 @@
       "label": "Bezeichnung (z. B. Standort)",
       "generate": "Code erzeugen",
       "once": "Dieser Code wird nur einmal angezeigt und läuft ab. Führen Sie im Kundennetz aus:",
-      "expires": "Gültig bis"
+      "expires": "Gültig bis",
+      "after": "Starten Sie danach den Collector neu und bestätigen Sie die vorgeschlagenen Scopes auf dieser Seite."
+    },
+    "collectorStatus": {
+      "pending": "Ausstehend",
+      "active": "Aktiv",
+      "offline": "Offline",
+      "disabled": "Deaktiviert",
+      "paused": "Pausiert (Lizenz)"
+    },
+    "scopes": {
+      "title": "Discovery-Scopes",
+      "none": "Noch keine Scopes. Bestätigen Sie vorgeschlagene Subnetze in der Review-Queue oder legen Sie einen Scope an.",
+      "kindLabel": "Art",
+      "kind": {
+        "cidr": "Subnetz (CIDR)",
+        "range": "Adressbereich",
+        "host": "Host"
+      },
+      "target": "Ziel",
+      "targetPlaceholder": "z. B. 10.0.0.0/24",
+      "schedule": "Zeitplan (Intervall oder Cron)",
+      "add": "Scope hinzufügen",
+      "enabled": "Aktiv",
+      "disabled": "Inaktiv",
+      "enable": "Aktivieren",
+      "disable": "Deaktivieren",
+      "delete": "Löschen",
+      "invalid": "Der Scope wurde abgelehnt. Prüfen Sie Ziel und Zeitplan (mindestens 5 Minuten).",
+      "health": {
+        "ok": "Letzter Lauf ok",
+        "partial": "Teilweise fehlgeschlagen",
+        "failed": "Fehlgeschlagen",
+        "never_run": "Noch nicht gelaufen"
+      },
+      "cause": {
+        "unreachable": "Nicht erreichbar",
+        "timeout": "Zeitüberschreitung",
+        "refused": "Verbindung abgelehnt",
+        "auth_failed": "Anmeldung fehlgeschlagen",
+        "tls": "Zertifikat/TLS",
+        "protocol_error": "Protokollfehler",
+        "config_error": "Konfigurationsfehler",
+        "upload_failed": "Upload fehlgeschlagen (gepuffert)",
+        "unknown": "Unbekannter Fehler"
+      }
+    },
+    "suggestions": {
+      "title": "Vorgeschlagene Scopes",
+      "intro": "Diese Subnetze haben Ihre Collectors nach dem Enrollment gemeldet. Bestätigen Sie sie, damit sie inventarisiert werden.",
+      "from": "gemeldet von {{collector}}",
+      "accept": "Als Scope übernehmen",
+      "dismiss": "Verwerfen"
     }
   },
   "webhook": {
@@ -914,5 +966,9 @@
       "stale": "Veraltet"
     },
     "projected": "projiziert (Struktur)"
+  },
+  "relationshipCard": {
+    "suppress": "Entfernen und unterdrücken",
+    "suppressHint": "Discovery-Kante: wird entfernt und von der Discovery nicht wieder angelegt."
   }
 }

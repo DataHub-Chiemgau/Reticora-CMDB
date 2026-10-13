@@ -524,7 +524,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete a relationship */
+    /**
+     * Delete a relationship
+     * @description Manual and other edges are deleted as asked. A discovery edge is deleted only with force=true (409 otherwise) and is then recorded as suppression for its CIs and type, so discovery does not recreate it (REL-03, REL-04). Discovery never changes or removes manual edges (REL-05).
+     */
     delete: operations['deleteRelationship'];
     options?: never;
     head?: never;
@@ -2210,7 +2213,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge removes the new CI); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss; serial_mismatch and duplicate_ip dismiss. Another action is 422.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge removes the new CI); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422.
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -3205,9 +3208,52 @@ export interface paths {
     put?: never;
     /**
      * Enroll a collector with an enrollment code
-     * @description Unauthenticated by bearer design — the single-use enrollment code is the credential. On success the collector identity is registered under the code's organization and returned with its id.
+     * @description Unauthenticated by bearer design — the single-use enrollment code is the credential (valid 24 h, consumed exactly once). On success the collector identity is registered under the code's organization and returned with its id. With `csr` (PEM certificate signing request of the collector's locally generated key) the internal CA issues the collector's client certificate (CN = collector id, 90 days, COL-04).
      */
     post: operations['enrollCollector'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/collectors/pki': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Trust bundle and revocation list of the collector certificates
+     * @description The trust bundle holds the active CA and, during a CA roll-over, the previous one (COL-04); the revocation list names the revoked certificates (disabled collectors) that have not expired.
+     */
+    get: operations['getCollectorPKI'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/collectors/{id}/certificate': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Renew the collector certificate
+     * @description The collector sends a CSR of a new local key once its certificate reached 60 % of its lifetime (409 before); a disabled collector gets none (403). Requires discovery:ingest.
+     */
+    post: operations['renewCollectorCertificate'];
     delete?: never;
     options?: never;
     head?: never;
@@ -3235,6 +3281,84 @@ export interface paths {
     options?: never;
     head?: never;
     patch?: never;
+    trace?: never;
+  };
+  '/api/v1/collectors/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Rename, bind to a site, disable or enable a collector
+     * @description Requires collector:manage. The site decides the client (422 for a site of another client). status disabled refuses the collector's heartbeats; active enables a disabled collector again (offline until its next heartbeat).
+     */
+    patch: operations['updateCollector'];
+    trace?: never;
+  };
+  '/api/v1/discovery-scopes': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List discovery scopes
+     * @description Requires discovery:read (DIS-09, API-05).
+     */
+    get: operations['listDiscoveryScopes'];
+    put?: never;
+    /**
+     * Create a discovery scope
+     * @description Requires discovery:manage. A scope is a CIDR, host or address range (at most 65,536 addresses) that one collector discovers on a schedule (an interval of at least 5m or a five-field cron expression) with the given credentials and plugins. The site decides the client; without a site the collector's client and site apply. The collector receives its enabled scopes over its NATS channel.
+     */
+    post: operations['createDiscoveryScope'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/discovery-scopes/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get a discovery scope
+     * @description Requires discovery:read.
+     */
+    get: operations['getDiscoveryScope'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a discovery scope
+     * @description Requires discovery:manage.
+     */
+    delete: operations['deleteDiscoveryScope'];
+    options?: never;
+    head?: never;
+    /**
+     * Change a discovery scope
+     * @description Requires discovery:manage.
+     */
+    patch: operations['updateDiscoveryScope'];
     trace?: never;
   };
   '/api/v1/ingest/bulk': {
@@ -6511,7 +6635,7 @@ export interface components {
       attributes: {
         [key: string]: unknown;
       };
-      /** @description Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow. */
+      /** @description Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow ("rule" is accepted as workflow). attributes.provenance records actor, actor type and time of the edge. Discovery edges are re-confirmed when seen again (last_seen_at, last_confirmed_at) and removed with relationship.removed after max(7 days, 5 × the scope interval) without confirmation or when a suppression covers them (TOP-02). */
       source: string;
       confidence?: number;
       /** @description Port of the source CI the edge starts at (REL-02). */
@@ -8475,6 +8599,7 @@ export interface components {
       result_summary?: {
         [key: string]: unknown;
       };
+      error?: components['schemas']['DiscoveryErrorState'];
       /** Format: date-time */
       started_at?: string;
       /** Format: date-time */
@@ -8496,7 +8621,8 @@ export interface components {
         | 'unlicensed_ci'
         | 'scope_suggested'
         | 'serial_mismatch'
-        | 'duplicate_ip';
+        | 'duplicate_ip'
+        | 'unknown_relationship';
       /** @enum {string} */
       status: 'open' | 'resolved' | 'dismissed';
       payload: {
@@ -9154,11 +9280,22 @@ export interface components {
       id: string;
       organization_id: string;
       client_id?: string;
+      /** @description Site of the collector; it decides the client. */
+      site_id?: string;
       name: string;
       version?: string;
-      status: string;
+      /**
+       * @description pending until the first heartbeat, active while heartbeats arrive, offline after five minutes without heartbeat (COL-05), disabled by an administrator (its certificates are revoked), paused while the discovery license is not active (ENT-07).
+       * @enum {string}
+       */
+      status: 'pending' | 'active' | 'offline' | 'disabled' | 'paused';
       /** Format: date-time */
-      last_heartbeat?: string;
+      status_changed_at?: string;
+      /** Format: date-time */
+      last_heartbeat_at?: string;
+      cert_fingerprint?: string;
+      /** Format: date-time */
+      cert_not_after?: string;
       config: {
         [key: string]: unknown;
       };
@@ -9166,6 +9303,25 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    CollectorCertificate: {
+      certificate_pem: string;
+      /** @description Active and */
+      ca_bundle_pem: string;
+      serial: string;
+      /** @description SHA-256 of the certificate (hex) */
+      fingerprint: string;
+      /** Format: date-time */
+      not_before: string;
+      /** Format: date-time */
+      not_after: string;
+    };
+    CollectorPatch: {
+      name?: string;
+      /** @description Site of the collector; empty removes the binding. */
+      site_id?: string;
+      /** @enum {string} */
+      status?: 'disabled' | 'active';
     };
     RegisterCollectorRequest: {
       name: string;
@@ -9178,6 +9334,91 @@ export interface components {
     };
     CollectorListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Collector'][];
+    };
+    /** @description A discovery scope (DIS-09). */
+    DiscoveryScope: {
+      id: string;
+      organization_id: string;
+      client_id?: string;
+      site_id?: string;
+      collector_id: string;
+      name: string;
+      /** @enum {string} */
+      kind: 'cidr' | 'host' | 'range';
+      /** @description CIDR, IP address or host name, or "first-last" address range. */
+      target: string;
+      vrf_id?: string;
+      /** @description Interval (e.g. 24h, at least 5m) or five-field cron expression. */
+      schedule: string;
+      credential_ids: string[];
+      plugins: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
+      enabled: boolean;
+      /** Format: date-time */
+      last_run_at?: string;
+      /** Format: date-time */
+      next_run_at?: string;
+      last_result?: {
+        [key: string]: unknown;
+      };
+      health?: components['schemas']['DiscoveryScopeHealth'];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @description State of the last run with the causes of its errors (DIS-08). */
+    DiscoveryScopeHealth: {
+      /** @enum {string} */
+      state: 'ok' | 'partial' | 'failed' | 'never_run';
+      errors?: components['schemas']['DiscoveryErrorState'][];
+    };
+    DiscoveryErrorState: {
+      /** @enum {string} */
+      cause:
+        | 'unreachable'
+        | 'timeout'
+        | 'refused'
+        | 'auth_failed'
+        | 'tls'
+        | 'protocol_error'
+        | 'config_error'
+        | 'upload_failed'
+        | 'unknown';
+      message?: string;
+      protocol?: string;
+      target?: string;
+    };
+    DiscoveryScopeInput: {
+      collector_id: string;
+      /** @description Defaults to the target. */
+      name?: string;
+      /** @enum {string} */
+      kind: 'cidr' | 'host' | 'range';
+      target: string;
+      client_id?: string;
+      site_id?: string;
+      vrf_id?: string;
+      /** @description Defaults to 24h. */
+      schedule?: string;
+      credential_ids?: string[];
+      /** @description Defaults to sweep and snmp. */
+      plugins?: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
+      enabled?: boolean;
+    };
+    DiscoveryScopePatch: {
+      name?: string;
+      /** @enum {string} */
+      kind?: 'cidr' | 'host' | 'range';
+      target?: string;
+      site_id?: string;
+      vrf_id?: string;
+      schedule?: string;
+      credential_ids?: string[];
+      plugins?: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
+      enabled?: boolean;
+    };
+    DiscoveryScopeListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['DiscoveryScope'][];
     };
     /** @description Credential metadata. The secret material is never included. */
     Credential: {
@@ -10435,7 +10676,10 @@ export interface operations {
   };
   deleteRelationship: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Required to delete a discovery edge; creates its suppression. */
+        force?: boolean;
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -10454,6 +10698,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   updateRelationship: {
@@ -14232,7 +14477,8 @@ export interface operations {
           | 'unlicensed_ci'
           | 'scope_suggested'
           | 'serial_mismatch'
-          | 'duplicate_ip';
+          | 'duplicate_ip'
+          | 'unknown_relationship';
         escalated?: boolean;
       };
       header?: never;
@@ -14343,7 +14589,8 @@ export interface operations {
           | 'unlicensed_ci'
           | 'scope_suggested'
           | 'serial_mismatch'
-          | 'duplicate_ip';
+          | 'duplicate_ip'
+          | 'unknown_relationship';
       };
       header?: never;
       path?: never;
@@ -16920,7 +17167,7 @@ export interface operations {
       content: {
         'application/json': {
           label?: string;
-          /** @description Defaults to 30, capped at 1440 (24h). */
+          /** @description Validity in minutes; defaults to and is capped at 1440 (24 h, COL-04). */
           ttl_minutes?: number;
         };
       };
@@ -16959,21 +17206,87 @@ export interface operations {
           name: string;
           version?: string;
           client_id?: string;
+          /** @description PEM certificate signing request */
+          csr?: string;
         };
       };
     };
     responses: {
-      /** @description Collector enrolled */
+      /** @description Collector enrolled (with `certificate` when a CSR was sent) */
       201: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['Collector'];
+          'application/json': components['schemas']['Collector'] & {
+            certificate?: components['schemas']['CollectorCertificate'];
+          };
         };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getCollectorPKI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Trust bundle and CRL (PEM) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            ca_bundle_pem: string;
+            crl_pem: string;
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  renewCollectorCertificate: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          csr: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Certificate issued */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CollectorCertificate'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   collectorHeartbeat: {
@@ -16997,13 +17310,192 @@ export interface operations {
         headers: {
           /** @description Discovery license status of the organization. */
           'Reticora-License-Status'?: 'active' | 'expired';
+          /** @description Status of the collector after the heartbeat (paused stops scanning). */
+          'Reticora-Collector-Status'?: 'active' | 'paused';
           [name: string]: unknown;
         };
         content?: never;
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+    };
+  };
+  updateCollector: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CollectorPatch'];
+      };
+    };
+    responses: {
+      /** @description Collector updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Collector'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  listDiscoveryScopes: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Only the scopes of this collector. */
+        collector_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Discovery scopes */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DiscoveryScopeListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+    };
+  };
+  createDiscoveryScope: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DiscoveryScopeInput'];
+      };
+    };
+    responses: {
+      /** @description Scope created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DiscoveryScope'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  getDiscoveryScope: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Discovery scope */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DiscoveryScope'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteDiscoveryScope: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Scope deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateDiscoveryScope: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DiscoveryScopePatch'];
+      };
+    };
+    responses: {
+      /** @description Scope updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DiscoveryScope'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   bulkIngest: {

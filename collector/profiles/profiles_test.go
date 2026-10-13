@@ -185,13 +185,17 @@ func TestLoadEmbeddedRegistersShippedProfiles(t *testing.T) {
 	}
 }
 
-// TestEmbeddedProfileData validates every JSON profile shipped in data/ so
+// TestEmbeddedProfileData validates every YAML profile shipped in data/ so
 // broken profile files fail in CI instead of at runtime.
 func TestEmbeddedProfileData(t *testing.T) {
-	entries, err := filepath.Glob(filepath.Join("data", "*.json"))
+	entries, err := filepath.Glob(filepath.Join("data", "*.yaml"))
 	if err != nil || len(entries) == 0 {
 		t.Fatalf("no profile data files found: %v", err)
 	}
+	if jsonFiles, _ := filepath.Glob(filepath.Join("data", "*.json")); len(jsonFiles) > 0 {
+		t.Errorf("profiles are YAML; JSON files left: %v", jsonFiles)
+	}
+	names := map[string]string{}
 	for _, path := range entries {
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			f, err := os.Open(path)
@@ -201,17 +205,62 @@ func TestEmbeddedProfileData(t *testing.T) {
 			defer f.Close()
 
 			r := NewRegistry()
-			if err := r.LoadJSON(f); err != nil {
-				t.Fatalf("LoadJSON(%s): %v", path, err)
+			if err := r.LoadYAML(f); err != nil {
+				t.Fatalf("LoadYAML(%s): %v", path, err)
 			}
 			if len(r.List()) == 0 {
 				t.Errorf("%s registered zero profiles", path)
 			}
 			for _, p := range r.List() {
-				if p.Name == "" {
-					t.Errorf("%s contains a profile without a name", path)
+				if other, dup := names[p.Name]; dup {
+					t.Errorf("profile %s defined in %s and %s", p.Name, other, path)
 				}
+				names[p.Name] = path
 			}
 		})
+	}
+}
+
+func TestLoadYAMLRejectsInvalidProfiles(t *testing.T) {
+	for name, doc := range map[string]string{
+		"unknown field":   "- name: x\n  ciTyp: switch\n",
+		"unknown type":    "- name: x\n  ciType: toaster\n",
+		"bad pattern":     "- name: x\n  ciType: switch\n  sysDescrPattern: '(['\n",
+		"pattern no type": "- name: x\n  bannerPattern: foo\n",
+		"no name":         "- ciType: switch\n",
+	} {
+		if err := NewRegistry().LoadYAML(strings.NewReader(doc)); err == nil {
+			t.Errorf("%s: LoadYAML accepted %q", name, doc)
+		}
+	}
+}
+
+// TestLoadDirUpdatesShippedProfiles: an operator directory adds profiles
+// and replaces shipped ones (OUI table and profiles stay updatable).
+func TestLoadDirUpdatesShippedProfiles(t *testing.T) {
+	dir := t.TempDir()
+	doc := "- name: mikrotik-routeros-snmp\n  vendor: MikroTik\n  ciType: router\n  sysObjectIds: ['1.3.6.1.4.1.14988']\n  ouiPrefixes: ['02:AB:CD']\n" + //nolint:misspell // profile name
+		"- name: acme-widget\n  vendor: Acme\n  ciType: camera\n  bannerPattern: '(?i)acme widget'\n"
+	if err := os.WriteFile(filepath.Join(dir, "local.yaml"), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.txt"), []byte("ignored"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRegistry()
+	if err := r.LoadEmbedded(); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.LoadDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if vendor, ok := r.VendorByMAC("02:ab:cd:00:00:01"); !ok || vendor != "MikroTik" {
+		t.Errorf("updated OUI = %q, %v", vendor, ok)
+	}
+	if res := r.Classify(&Observation{Banners: []string{"ACME Widget 3000"}}); !res.Classified() || res.Profile.CIType != "camera" {
+		t.Errorf("local profile not used: %+v", res)
+	}
+	if err := r.LoadDir(filepath.Join(dir, "missing")); err == nil {
+		t.Error("a missing directory must be reported")
 	}
 }

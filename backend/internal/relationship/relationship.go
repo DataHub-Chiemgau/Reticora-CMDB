@@ -4,6 +4,7 @@ package relationship
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -42,7 +43,7 @@ type Relationship struct {
 	VerifiedBy      string `json:"verified_by,omitempty"`
 	VerifiedAt      string `json:"verified_at,omitempty"`
 	CreatedAt       string `json:"created_at"`
-	UpdatedAt         string   `json:"updated_at"`
+	UpdatedAt       string `json:"updated_at"`
 	// Projected marks a structural relationship that is not stored but
 	// derived (DB-05, CH27): contains from ci.parent_ci_id, mounted_in from
 	// rack_mount, located_in from ci.location_id. It cannot be changed
@@ -134,6 +135,50 @@ var ValidRelTypes = map[string]bool{
 var ValidSources = map[string]bool{
 	"manual": true, "discovery": true, "agent": true, "import": true,
 	"api": true, "integration": true, "workflow": true, "rule": true,
+}
+
+// ErrForceRequired refuses deleting a discovery edge without force=true
+// (REL-04): discovery would find it again, so the deletion also records a
+// suppression.
+var ErrForceRequired = errors.New("a discovery edge is deleted only with force=true; discovery then no longer recreates it")
+
+// PolicyDeleter deletes an edge by the source policy (REL-03, REL-04): a
+// discovery edge only with force, then suppressed for its CIs and type.
+type PolicyDeleter interface {
+	DeleteWithPolicy(ctx context.Context, orgID, id string, force bool) error
+}
+
+// DeleteWithPolicy implements PolicyDeleter (without suppression storage).
+func (r *MemoryRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, force bool) error {
+	r.mu.RLock()
+	rel, ok := r.items[id]
+	r.mu.RUnlock()
+	if ok && rel.OrganizationID == orgID && rel.Source == "discovery" && !force {
+		return ErrForceRequired
+	}
+	return r.Delete(ctx, orgID, id)
+}
+
+// Confirmer re-confirms a discovery edge seen again (TOP-02).
+type Confirmer interface {
+	Confirm(ctx context.Context, orgID, id string, confidence *float64) error
+}
+
+// Confirm implements Confirmer.
+func (r *MemoryRepository) Confirm(_ context.Context, orgID, id string, confidence *float64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rel, ok := r.items[id]
+	if !ok || rel.OrganizationID != orgID || rel.Source != "discovery" {
+		return fmt.Errorf("not found")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	rel.LastSeenAt, rel.LastConfirmedAt = now, now
+	if confidence != nil {
+		c := *confidence
+		rel.Confidence = &c
+	}
+	return nil
 }
 
 // Repository defines persistence operations for relationships.
@@ -428,10 +473,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid rel_type")
 		return
 	}
-	if req.Source != "" && !ValidSources[req.Source] {
+	// The seven sources of REL-08; rule is accepted as workflow (E-01).
+	source, validSource := CanonicalSource(req.Source)
+	if !validSource {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid source")
 		return
 	}
+	req.Source = source
 	if req.Confidence != nil && (*req.Confidence < 0 || *req.Confidence > 1) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "confidence must be between 0 and 1")
 		return
@@ -457,6 +505,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if rel.Source == "" {
 		rel.Source = "manual"
 	}
+	// Actor and time of the edge (REL-08).
+	actor, actorType := t.UserID, "user"
+	if actor == "" {
+		actor, actorType = "api", "api_key"
+	}
+	rel.Attributes["provenance"] = Provenance(actor, actorType, rel.Source, time.Now())
 	if rel.Source == "manual" {
 		// Manual relationships are born verified; they must never be removed
 		// silently because discovery does not detect them (spec §12).
@@ -546,7 +600,19 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
+	var err error
+	if deleter, ok := h.repo.(PolicyDeleter); ok {
+		// A discovery edge goes only with force and is then suppressed
+		// (REL-03, REL-04); manual edges are deleted as asked.
+		err = deleter.DeleteWithPolicy(r.Context(), t.OrganizationID, id, r.URL.Query().Get("force") == "true")
+	} else {
+		err = h.repo.Delete(r.Context(), t.OrganizationID, id)
+	}
+	if errors.Is(err, ErrForceRequired) {
+		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		return
+	}
+	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "relationship not found")
 		return
 	}

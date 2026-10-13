@@ -100,7 +100,7 @@ func TestDiscoverReadsBannerAndClassifies(t *testing.T) {
 	startBannerListener(t, banner, true)
 
 	p := &Plugin{Timeout: 2 * time.Second}
-	results, err := p.Discover(context.Background(), []string{"127.0.0.1"}, nil)
+	results, err := p.Probe(context.Background(), []string{"127.0.0.1"}, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestDiscoverSkipsEmptyBanner(t *testing.T) {
 	startBannerListener(t, "", false)
 
 	p := &Plugin{Timeout: 200 * time.Millisecond}
-	results, err := p.Discover(context.Background(), []string{"127.0.0.1"}, nil)
+	results, err := p.Probe(context.Background(), []string{"127.0.0.1"}, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestDiscoverSkipsEmptyBanner(t *testing.T) {
 
 func TestDiscoverNoTargetsReturnsEmptySlice(t *testing.T) {
 	p := &Plugin{Timeout: time.Second}
-	results, err := p.Discover(context.Background(), nil, nil)
+	results, err := p.Probe(context.Background(), nil, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestDiscoverCancelledContextReturnsError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	p := &Plugin{Timeout: time.Second}
-	results, err := p.Discover(ctx, []string{"192.0.2.1"}, nil)
+	results, err := p.Probe(ctx, []string{"192.0.2.1"}, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Discover error = %v, want context.Canceled", err)
 	}
@@ -164,25 +164,21 @@ func TestCollectUsesBannerForFingerprint(t *testing.T) {
 	startBannerListener(t, banner, true)
 
 	p := &Plugin{Timeout: 2 * time.Second}
-	res, err := p.Collect(context.Background(), "127.0.0.1", nil)
+	res, err := p.collect(context.Background(), "127.0.0.1", nil)
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
 	if res.CIType != "network.device" {
 		t.Errorf("CIType = %q, want network.device", res.CIType)
 	}
-	if res.Firmware != banner {
-		t.Errorf("Firmware = %q, want banner %q", res.Firmware, banner)
+	if res.Attributes["sshBanner"] != banner || res.Firmware != "" {
+		t.Errorf("banner %v / firmware %q: the banner is no firmware version", res.Attributes["sshBanner"], res.Firmware)
 	}
 	if res.Attributes["osFamily"] != "cisco/ios" {
 		t.Errorf("osFamily = %v, want cisco/ios", res.Attributes["osFamily"])
 	}
-	cmds, ok := res.Attributes["commandSet"].(map[string]string)
-	if !ok || len(cmds) == 0 {
-		t.Errorf("expected non-empty commandSet attribute, got %v", res.Attributes["commandSet"])
-	}
-	if _, ok := cmds["serial"]; !ok {
-		t.Errorf("commandSet missing serial command: %v", cmds)
+	if res.Attributes["authenticated"] != false {
+		t.Errorf("without credentials nothing is executed: %v", res.Attributes)
 	}
 }
 
@@ -193,7 +189,7 @@ func TestCollectUnreachableTarget(t *testing.T) {
 		ln.Close()
 	}
 	p := &Plugin{Timeout: 200 * time.Millisecond}
-	_, err = p.Collect(context.Background(), "192.0.2.1", nil)
+	_, err = p.collect(context.Background(), "192.0.2.1", nil)
 	if err == nil || !strings.Contains(err.Error(), "ssh: connect") {
 		t.Errorf("expected connect error, got %v", err)
 	}
@@ -223,7 +219,7 @@ func TestDiscoverReadsOnlyFirstBannerLine(t *testing.T) {
 	}()
 
 	p := &Plugin{Timeout: 2 * time.Second}
-	results, err := p.Discover(context.Background(), []string{"127.0.0.1"}, nil)
+	results, err := p.Probe(context.Background(), []string{"127.0.0.1"}, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}

@@ -15,7 +15,10 @@ import (
 // ErrNotFound is returned when no stored credentials exist yet.
 var ErrNotFound = errors.New("keystore: credentials not found")
 
-// Credentials contains the locally persisted edge identity material.
+// Credentials contains the locally persisted edge identity material. It
+// holds the device's identity only: discovery credentials arrive as an
+// encrypted bundle and stay in memory, they are never written here
+// (COL-02).
 type Credentials struct {
 	DeviceID             string            `json:"deviceId"`
 	ClientCertificatePEM string            `json:"clientCertificatePem"`
