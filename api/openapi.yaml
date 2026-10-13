@@ -4722,6 +4722,14 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The mount collides with another on an overlapping face (front,
+            rear, both), exceeds the rack height, mounts a CI that is
+            mounted already or a child CI of a composition (RCK-01, RCK-02).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/rack-mounts/{id}:
     parameters:
@@ -4768,6 +4776,14 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The mount collides with another on an overlapping face (front,
+            rear, both), exceeds the rack height, mounts a CI that is
+            mounted already or a child CI of a composition (RCK-01, RCK-02).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
     delete:
       operationId: deleteRackMount
       tags: [Racks]

@@ -2,6 +2,7 @@ package rack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -296,7 +298,7 @@ func (r *PGRepository) CreateMount(ctx context.Context, m *RackMount) error {
 			m.OrganizationID, m.RackID, m.CIID, m.PositionU, m.HeightU, m.Face,
 		).Scan(&m.ID, &m.CreatedAt, &m.UpdatedAt)
 		if err != nil {
-			return fmt.Errorf("%w: %v", ErrValidation, err)
+			return mountWriteError(err)
 		}
 		// The mounted CI must be visible under the scope as well.
 		if visErr := requireVisible(ctx, tx, "rack_mount", mountVisible, m.ID); visErr != nil {
@@ -365,7 +367,7 @@ func (r *PGRepository) UpdateMount(ctx context.Context, orgID, id string, req Up
 			 WHERE organization_id = $1 AND id = $2 RETURNING `+mountCols,
 			orgID, id, pos, height, face, rackID))
 		if err != nil {
-			return err
+			return mountWriteError(err)
 		}
 		return recordPlacement(ctx, tx, orgID, m.CIID, "ci.rack_moved", current, m)
 	})
@@ -534,4 +536,18 @@ func nilIfEmptyPtr(v *string) any {
 		return nil
 	}
 	return *v
+}
+
+// mountWriteError maps a failed mount write: a collision the exclusion
+// constraint caught (concurrent writers), a CI that is mounted already and
+// a child CI of a composition are conflicts (409); the rest is invalid.
+func mountWriteError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch {
+		case pgErr.Code == "23P01", pgErr.Code == "23505", pgErr.ConstraintName == "rack_mount_composition_child":
+			return fmt.Errorf("%w: %s", ErrConflict, pgErr.Message)
+		}
+	}
+	return fmt.Errorf("%w: %v", ErrValidation, err)
 }

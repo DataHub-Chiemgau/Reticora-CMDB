@@ -79,8 +79,8 @@ func TestRackRepositoryClientScope(t *testing.T) {
 		t.Fatal("client-1 principal mounted a client-2 CI")
 	}
 	// The occupied units stay occupied although the mount is invisible.
-	if err = repo.CreateMount(ctx, &rack.RackMount{OrganizationID: f.OrgA, RackID: ownRack.ID, CIID: ownCI, PositionU: 2, HeightU: 1, Face: "front"}); !errors.Is(err, rack.ErrValidation) {
-		t.Fatalf("client-1 mount over an invisible mount: got %v, want ErrValidation", err)
+	if err = repo.CreateMount(ctx, &rack.RackMount{OrganizationID: f.OrgA, RackID: ownRack.ID, CIID: ownCI, PositionU: 2, HeightU: 1, Face: "front"}); !errors.Is(err, rack.ErrConflict) {
+		t.Fatalf("client-1 mount over an invisible mount: got %v, want ErrConflict", err)
 	}
 	if err = repo.CreateMount(ctx, &rack.RackMount{OrganizationID: f.OrgA, RackID: ownRack.ID, CIID: ownCI, PositionU: 5, HeightU: 1, Face: "front"}); err != nil {
 		t.Fatalf("client-1 mount of own CI: %v", err)

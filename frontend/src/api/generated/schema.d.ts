@@ -14857,6 +14857,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   getRackMount: {
@@ -14935,6 +14944,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listCables: {

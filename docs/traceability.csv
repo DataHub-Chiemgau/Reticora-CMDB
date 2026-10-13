@@ -300,3 +300,4 @@ NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-123
 NET-03;[B];B;backend/internal/ipam/ip_integration_test.go;WP-124
 NET-05;[B];B;backend/internal/ipam/handler_test.go;WP-125
 API-05;[B];B;backend/internal/ipam/handler_test.go;WP-125
+RCK-01;[B];B;backend/internal/rack/rules_integration_test.go;WP-126
