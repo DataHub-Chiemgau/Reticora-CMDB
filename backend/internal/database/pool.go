@@ -232,7 +232,7 @@ func WithSystem(ctx context.Context, pool *pgxpool.Pool, fn func(ctx context.Con
 }
 
 // OperatorGUC is the flag WithOperator sets. Only the policies of the
-// operator tables (operator_audit, migration 000083) honor it.
+// operator tables (operator_audit, signup_request, scheduler_run) honor it.
 const OperatorGUC = "app.operator"
 
 // WithOperator runs fn in a transaction of the operator path (/admin, SEC-07):

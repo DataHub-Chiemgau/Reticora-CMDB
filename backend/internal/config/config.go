@@ -246,12 +246,12 @@ func Load() *Config {
 // process, so each worker can run on dedicated instances. A new worker adds
 // its name here and registers under it in the server's worker set.
 const (
-	WorkerWebhookDispatcher  = "webhook_dispatcher"
-	WorkerExport             = "export"
-	WorkerIngest             = "ingest"
-	WorkerMonitoring         = "monitoring"
-	WorkerReservationSweeper = "reservation_sweeper"
-	WorkerJobs               = "jobs"
+	WorkerWebhookDispatcher = "webhook_dispatcher"
+	WorkerExport            = "export"
+	WorkerIngest            = "ingest"
+	WorkerMonitoring        = "monitoring"
+	WorkerScheduler         = "scheduler"
+	WorkerJobs              = "jobs"
 )
 
 // WorkerNames lists every registered worker.
@@ -260,7 +260,7 @@ var WorkerNames = []string{
 	WorkerExport,
 	WorkerIngest,
 	WorkerMonitoring,
-	WorkerReservationSweeper,
+	WorkerScheduler,
 	WorkerJobs,
 }
 

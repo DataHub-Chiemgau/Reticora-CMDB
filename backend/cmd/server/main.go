@@ -388,6 +388,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The scheduler of the system jobs (JOB-02, OPS-03): advisory-lock
+	// leader and stored catch-up state on PostgreSQL, process-local with
+	// --no-db.
+	var systemScheduler *jobs.Scheduler
+	if auditPool != nil {
+		systemScheduler = jobs.NewScheduler(jobs.NewPGLocker(auditPool), jobs.NewPGStateStore(auditPool))
+	} else {
+		systemScheduler = jobs.NewScheduler(jobs.NewMemoryLocker(), jobs.NewMemoryStateStore())
+	}
+	// Release expired reservations (spec §10).
+	reservationExpiry := reservation.NewSweeper(repos.Reservation, webhookDispatcher).Schedule()
+	if err = systemScheduler.Register(&reservationExpiry); err != nil {
+		slog.Error("failed to register a system job", "error", err)
+		os.Exit(1)
+	}
+
 	// Background workers, each under its operator switch
 	// RETICORA_WORKER_<NAME>_ENABLED (OPS-02), so they can run on dedicated
 	// instances.
@@ -399,10 +415,10 @@ func main() {
 			return c.CountDue(ctx, time.Now().UTC())
 		}),
 	}, {
-		// Release expired reservations (spec §10). The sweeper is
-		// interval-driven and shares no state with request handling.
-		Name: config.WorkerReservationSweeper,
-		Run:  reservation.NewSweeper(repos.Reservation, webhookDispatcher, time.Minute).Run,
+		// System jobs on the scheduler (JOB-02): one replica leads through
+		// a PostgreSQL advisory lock and runs the due slots.
+		Name: config.WorkerScheduler,
+		Run:  systemScheduler.Run,
 	}}
 	// Process queued asynchronous export jobs. All replicas share the queue
 	// via FOR UPDATE SKIP LOCKED, so jobs are never run twice.

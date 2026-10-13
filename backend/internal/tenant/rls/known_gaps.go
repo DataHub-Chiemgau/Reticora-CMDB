@@ -71,11 +71,12 @@ var ViewProtectedTables = map[string]string{"metric_sample": "metric_sample_v"}
 var GlobalCatalogTables = []string{"permission"}
 
 // OperatorTables are organization-spanning tables of the operator path
-// (SEC-07, WP-070) without organization_id, and signup_request, which exists
-// before its organization (WP-111). This is a documented exception to
-// RuleOrgColumn, not a gap: the catalog test checks RuleOperatorOnly for them
-// instead.
-var OperatorTables = []string{"operator_audit", "signup_request"}
+// (SEC-07, WP-070) without organization_id, signup_request, which exists
+// before its organization (WP-111), and scheduler_run, the state of the
+// organization-spanning system job scheduler (JOB-02, WP-131). This is a
+// documented exception to RuleOrgColumn, not a gap: the catalog test checks
+// RuleOperatorOnly for them instead.
+var OperatorTables = []string{"operator_audit", "signup_request", "scheduler_run"}
 
 // Session variables (GUCs) the policies are expected to reference. Site and
 // team scope do not exist yet; WP-027 and WP-029 introduce them under these

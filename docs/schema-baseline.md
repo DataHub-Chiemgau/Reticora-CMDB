@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000115_job
+Stand: Migration 000116_scheduler_run
 
 ## Prüfung
 
@@ -272,6 +272,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `role_permission` | ja | ja | role_permission_tenant_isolation (ALL) |
 | `room` | ja | ja | room_isolation (ALL) |
 | `saved_view` | ja | ja | saved_view_isolation (ALL) |
+| `scheduler_run` | ja | ja | scheduler_run_operator (ALL) |
 | `search_document` | ja | ja | search_document_scoped_delete (DELETE), search_document_scoped_update (UPDATE), search_document_tenant_isolation (ALL) |
 | `security_finding` | ja | ja | security_finding_isolation (ALL), security_finding_scoped_delete (DELETE), security_finding_scoped_update (UPDATE) |
 | `service_account` | ja | ja | service_account_isolation (ALL) |

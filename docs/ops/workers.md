@@ -26,7 +26,7 @@ stop a single worker during an incident, without touching the API.
 | `export` | `RETICORA_WORKER_EXPORT_ENABLED` | Processes queued asynchronous export jobs. Only active with object storage. A job that has been running for 15 minutes is queued again: its instance died (TEC-14). |
 | `ingest` | `RETICORA_WORKER_INGEST_ENABLED` | Consumes `ingest.>` from NATS (REC-01). The API still publishes to the queue. |
 | `monitoring` | `RETICORA_WORKER_MONITORING_ENABLED` | Evaluates alert rules and the health of the CIs. |
-| `reservation_sweeper` | `RETICORA_WORKER_RESERVATION_SWEEPER_ENABLED` | Releases expired reservations. |
+| `scheduler` | `RETICORA_WORKER_SCHEDULER_ENABLED` | Runs the system jobs on their cron schedules (JOB-02). Every replica runs a scheduler; one leads through a PostgreSQL advisory lock, each job kind also runs under a lock of its own, so scaling (HPA) never runs a job twice. When the leader stops or loses its database session, another replica takes over and catches up on missed slots, at most `MaxCatchUp` per kind (state in `scheduler_run`). Registered: `reservation.expire` (every minute) releases expired reservations. |
 | `jobs` | `RETICORA_WORKER_JOBS_ENABLED` | Consumes the `JOBS` work-queue stream on NATS (`jobs.<kind>`, TEC-14): one durable consumer per job kind, the database claim runs each job once, a job whose instance died is taken over after its timeout. Only active with NATS. |
 
 ## Metrics and alerts (OPS-05)
@@ -56,7 +56,9 @@ Every worker exports these series, labelled `worker`:
 
 ## Planned workers
 
-The OPS-02 workers below do not exist yet as separate runners. Each one
+The OPS-02 workers below do not exist yet as separate runners. The job
+runner of OPS-02 is the `jobs` worker; scheduled system jobs register with
+the `scheduler` instead of getting a worker of their own. Each one
 gets its switch, following the convention above, in the work package that
 introduces it:
 
@@ -64,7 +66,6 @@ introduces it:
 |---|---|
 | `offline_detector` | Offline detection for collectors and agents |
 | `audit_runner` | Audit jobs |
-| `job_runner`, `scheduler` | Shared job framework with a single runner (TEC-14) |
 | `notifier` | Notification delivery (NTF) |
 | `workflow` | Workflows [P3] |
 | `iga` | IGA provisioning tasks [A] |
@@ -78,7 +79,8 @@ RETICORA_WORKER_WEBHOOK_DISPATCHER_ENABLED=false
 RETICORA_WORKER_EXPORT_ENABLED=false
 RETICORA_WORKER_INGEST_ENABLED=false
 RETICORA_WORKER_MONITORING_ENABLED=false
-RETICORA_WORKER_RESERVATION_SWEEPER_ENABLED=false
+RETICORA_WORKER_SCHEDULER_ENABLED=false
+RETICORA_WORKER_JOBS_ENABLED=false
 ```
 
 The worker instance keeps the defaults. At startup the log shows

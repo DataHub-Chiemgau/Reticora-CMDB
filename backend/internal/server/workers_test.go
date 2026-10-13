@@ -93,7 +93,7 @@ func TestWorkerMetricsAreRegisteredAndRecorded(t *testing.T) {
 		Worker{Name: config.WorkerExport, Run: func(ctx context.Context) { <-ctx.Done() }},
 		Worker{Name: config.WorkerIngest, Run: func(ctx context.Context) { <-ctx.Done() },
 			Backlog: func(context.Context) (int, error) { return 42, nil }},
-		Worker{Name: config.WorkerReservationSweeper, Run: func(context.Context) { <-stopEarly }},
+		Worker{Name: config.WorkerScheduler, Run: func(context.Context) { <-stopEarly }},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestWorkerMetricsAreRegisteredAndRecorded(t *testing.T) {
 	observability.ObserveWorkerRun(config.WorkerIngest, 2)
 	close(stopEarly)
 	deadline := time.Now().Add(5 * time.Second)
-	for testutil.ToFloat64(observability.WorkerUp.WithLabelValues(config.WorkerReservationSweeper)) != 0 && time.Now().Before(deadline) {
+	for testutil.ToFloat64(observability.WorkerUp.WithLabelValues(config.WorkerScheduler)) != 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -122,7 +122,7 @@ func TestWorkerMetricsAreRegisteredAndRecorded(t *testing.T) {
 		`reticora_worker_up{worker="export"} 0`,
 		`reticora_worker_enabled{worker="ingest"} 1`,
 		`reticora_worker_up{worker="ingest"} 1`,
-		`reticora_worker_up{worker="reservation_sweeper"} 0`,
+		`reticora_worker_up{worker="scheduler"} 0`,
 		`reticora_worker_backlog{worker="ingest"} 42`,
 		`reticora_worker_runs_total{worker="ingest"}`,
 		`reticora_worker_errors_total{worker="ingest"}`,
