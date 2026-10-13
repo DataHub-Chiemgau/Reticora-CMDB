@@ -66,6 +66,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/cis/{id}/restore", h.Restore)
 	r.Post("/api/v1/cis/{id}/type", h.ChangeType)
 	r.Post("/api/v1/cis/{id}/merge", h.Merge)
+	r.Post("/api/v1/cis/{id}/unmerge", h.Unmerge)
 }
 
 // List handles GET /api/v1/cis
@@ -315,6 +316,39 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("ETag", api.ETag(result.Survivor.Version))
+	api.WriteJSON(w, http.StatusOK, result)
+}
+
+// Unmerge handles POST /api/v1/cis/{id}/unmerge: the merged CI of the path
+// and its survivor return to their state before the merge, within 30 days
+// (CI-12); afterwards 410.
+func (h *Handler) Unmerge(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	result, err := h.svc.Unmerge(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	switch {
+	case errors.Is(err, ErrSnapshotExpired):
+		api.WriteError(w, http.StatusGone, "Gone", err.Error())
+		return
+	case errors.Is(err, ErrMergeConflict):
+		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		return
+	case errors.Is(err, ErrMergeUnsupported):
+		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", err.Error())
+		return
+	case err != nil && err.Error() == "not found":
+		api.WriteError(w, http.StatusNotFound, "Not Found", "no merge of this CI to revert")
+		return
+	case err != nil:
+		if api.WriteFieldError(w, err) {
+			return
+		}
+		api.WriteRepoError(w, err)
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, result)
 }
 

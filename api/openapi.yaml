@@ -925,6 +925,43 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
 
+  /api/v1/cis/{id}/unmerge:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: unmergeCI
+      tags: [CIs]
+      summary: Revert the merge of this (merged) CI within 30 days (CI-12)
+      description: >-
+        Restores the merged CI of the path and its survivor from the merge
+        snapshot: both CI rows, the moved relationships, interfaces,
+        contacts, history, document links, field values and the asset link,
+        and the rows the merge removed. After 30 days the snapshot is gone
+        (410). Requires ci:delete.
+      responses:
+        '200':
+          description: Both CIs after the unmerge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIUnmergeResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: One of the CIs is locked by another write.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '410':
+          description: The merge snapshot is older than 30 days.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
   /api/v1/cis/{id}/changes:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -11422,6 +11459,13 @@ components:
           items: { type: string }
         tombstone_until: { type: string, format: date-time }
         snapshot_until: { type: string, format: date-time }
+    CIUnmergeResult:
+      type: object
+      required: [merge_id, survivor, victim]
+      properties:
+        merge_id: { type: string, format: uuid }
+        survivor: { $ref: '#/components/schemas/CI' }
+        victim: { $ref: '#/components/schemas/CI' }
     CITypeChangeResult:
       type: object
       required: [ci, findings, changed]

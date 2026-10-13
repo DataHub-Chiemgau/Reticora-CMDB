@@ -361,6 +361,7 @@ POST /api/v1/cis/{id}/lifecycle-transitions lifecycle:transition
 POST /api/v1/cis/{id}/merge ci:delete
 POST /api/v1/cis/{id}/restore ci:delete
 POST /api/v1/cis/{id}/type ci:write
+POST /api/v1/cis/{id}/unmerge ci:delete
 POST /api/v1/clients user:manage
 POST /api/v1/collectors collector:manage
 POST /api/v1/collectors/enroll public

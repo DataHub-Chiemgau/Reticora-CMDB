@@ -107,6 +107,21 @@ func (r *indexingRepository) Merge(ctx context.Context, orgID, survivorID, victi
 	return result, nil
 }
 
+// Unmerge forwards the unmerge (CI-12) and indexes both CIs again.
+func (r *indexingRepository) Unmerge(ctx context.Context, orgID, victimID string) (*UnmergeResult, error) {
+	unmerger, ok := r.Repository.(Unmerger)
+	if !ok {
+		return nil, ErrMergeUnsupported
+	}
+	result, err := unmerger.Unmerge(ctx, orgID, victimID)
+	if err != nil {
+		return nil, err
+	}
+	r.index(ctx, result.Survivor)
+	r.index(ctx, result.Victim)
+	return result, nil
+}
+
 // MergedInto forwards the tombstone lookup (CI-12).
 func (r *indexingRepository) MergedInto(ctx context.Context, orgID, victimID string) (survivorID string, found bool, err error) {
 	reader, ok := r.Repository.(TombstoneReader)

@@ -593,3 +593,172 @@ func (r *PGRepository) MergedInto(ctx context.Context, orgID, victimID string) (
 	}
 	return survivorID, true, nil
 }
+
+// ErrSnapshotExpired: the snapshot of the merge is older than 30 days; the
+// unmerge is no longer possible (410).
+var ErrSnapshotExpired = errors.New("the merge snapshot has expired")
+
+// Unmerger reverts a merge from its snapshot (CI-12).
+type Unmerger interface {
+	Unmerge(ctx context.Context, orgID, victimID string) (*UnmergeResult, error)
+}
+
+// UnmergeResult names both CIs after the unmerge.
+type UnmergeResult struct {
+	MergeID  string `json:"merge_id"`
+	Survivor *Item  `json:"survivor"`
+	Victim   *Item  `json:"victim"`
+}
+
+// Unmerge reverts the merge of victimID within the snapshot retention.
+func (s *Service) Unmerge(ctx context.Context, orgID, victimID string) (*UnmergeResult, error) {
+	unmerger, ok := s.repo.(Unmerger)
+	if !ok {
+		return nil, ErrMergeUnsupported
+	}
+	return unmerger.Unmerge(ctx, orgID, victimID)
+}
+
+// snapshotTables are the tables a merge snapshot may name; only these are
+// written by the unmerge.
+var snapshotTables = map[string]bool{
+	"asset": true, "ci_relationship": true, "network_interface": true, "ci_contact": true,
+	"ci_change": true, "document_link": true, "ci_field_value": true, "ci": true,
+}
+
+// tableColumns returns the writable columns of a snapshot table.
+func tableColumns(ctx context.Context, tx pgx.Tx, table string) ([]string, error) {
+	if !snapshotTables[table] {
+		return nil, fmt.Errorf("unexpected snapshot table %q", table)
+	}
+	rows, err := tx.Query(ctx, `SELECT column_name FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = $1 AND is_generated = 'NEVER' ORDER BY ordinal_position`, table)
+	if err != nil {
+		return nil, fmt.Errorf("columns of %s: %w", table, err)
+	}
+	defer rows.Close()
+	var cols []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, err
+		}
+		cols = append(cols, pgx.Identifier{c}.Sanitize())
+	}
+	return cols, rows.Err()
+}
+
+// restoreRow writes a snapshot row back: an existing row (by id) takes the
+// snapshot state, a removed one is inserted again.
+func restoreRow(ctx context.Context, tx pgx.Tx, cols map[string][]string, row *snapshotRow, insert bool) error {
+	c, ok := cols[row.Table]
+	if !ok {
+		var err error
+		if c, err = tableColumns(ctx, tx, row.Table); err != nil {
+			return err
+		}
+		cols[row.Table] = c
+	}
+	list := strings.Join(c, ", ")
+	table := pgx.Identifier{row.Table}.Sanitize()
+	var query string
+	if insert {
+		query = fmt.Sprintf("INSERT INTO %[1]s (%[2]s) SELECT %[2]s FROM jsonb_populate_record(NULL::%[1]s, $1::jsonb)", table, list)
+	} else {
+		query = fmt.Sprintf("UPDATE %[1]s SET (%[2]s) = (SELECT %[2]s FROM jsonb_populate_record(NULL::%[1]s, $1::jsonb)) WHERE id = ($1::jsonb ->> 'id')::uuid",
+			table, list)
+	}
+	if _, err := tx.Exec(ctx, query, []byte(row.Row)); err != nil {
+		return fmt.Errorf("restore %s: %w", row.Table, err)
+	}
+	return nil
+}
+
+// Unmerge implements Unmerger: both CI rows, the moved rows and the removed
+// rows return to their state before the merge.
+func (r *PGRepository) Unmerge(ctx context.Context, orgID, victimID string) (*UnmergeResult, error) {
+	result := &UnmergeResult{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var survivorID string
+		var expired bool
+		var raw []byte
+		err := tx.QueryRow(ctx, `SELECT id::text, survivor_id::text, snapshot_until < now(), snapshot FROM ci_merge
+			WHERE organization_id = $1 AND victim_id = $2 AND unmerged_at IS NULL FOR UPDATE NOWAIT`, orgID, victimID).
+			Scan(&result.MergeID, &survivorID, &expired, &raw)
+		var pgErr *pgconn.PgError
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return fmt.Errorf("not found")
+		case errors.As(err, &pgErr) && pgErr.Code == "55P03":
+			return ErrMergeConflict
+		case err != nil:
+			return fmt.Errorf("read merge: %w", err)
+		case expired:
+			return ErrSnapshotExpired
+		}
+		if _, err = tx.Exec(ctx, "SELECT id FROM ci WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE NOWAIT",
+			[]string{survivorID, victimID}); err != nil {
+			if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+				return ErrMergeConflict
+			}
+			return fmt.Errorf("lock merge pair: %w", err)
+		}
+		var snap mergeSnapshot
+		if err = json.Unmarshal(raw, &snap); err != nil {
+			return fmt.Errorf("decode merge snapshot: %w", err)
+		}
+		cols := map[string][]string{}
+		// The survivor first gives up the unique values of the victim.
+		for _, row := range []snapshotRow{{Table: "ci", Row: snap.Survivor}, {Table: "ci", Row: snap.Victim}} {
+			if err = restoreRow(ctx, tx, cols, &row, false); err != nil {
+				return locationError(err)
+			}
+		}
+		for i := range snap.Changed {
+			if rerr := restoreRow(ctx, tx, cols, &snap.Changed[i], false); rerr != nil {
+				return rerr
+			}
+		}
+		for i := range snap.Removed {
+			if rerr := restoreRow(ctx, tx, cols, &snap.Removed[i], true); rerr != nil {
+				return rerr
+			}
+		}
+		// Both CIs get a new version: the snapshot state is a new write.
+		if _, err = tx.Exec(ctx, `UPDATE ci SET version = version + 2, updated_at = NOW() WHERE id = ANY($1::uuid[])`,
+			[]string{survivorID, victimID}); err != nil {
+			return fmt.Errorf("bump versions: %w", err)
+		}
+		if _, err = tx.Exec(ctx, "UPDATE ci_merge SET unmerged_at = now() WHERE id = $1", result.MergeID); err != nil {
+			return fmt.Errorf("close merge: %w", err)
+		}
+		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1", ciSelectColumns)
+		if result.Survivor, err = scanCI(tx.QueryRow(ctx, query, survivorID)); err != nil {
+			return fmt.Errorf("read survivor: %w", err)
+		}
+		if result.Victim, err = scanCI(tx.QueryRow(ctx, query, victimID)); err != nil {
+			return fmt.Errorf("read victim: %w", err)
+		}
+		for _, item := range []*Item{result.Survivor, result.Victim} {
+			if cerr := r.recordCIChange(ctx, tx, orgID, item.ID, item.Version, "reconciliation_decision", "unmerged_ci",
+				nil, map[string]any{"merge_id": result.MergeID, "survivor_id": survivorID, "victim_id": victimID}); cerr != nil {
+				return cerr
+			}
+		}
+		if aerr := r.recordAudit(ctx, tx, "ci.unmerged", result.Survivor, map[string]interface{}{
+			"victim_id": victimID, "merge_id": result.MergeID,
+		}); aerr != nil {
+			return aerr
+		}
+		// EVT-02 has no unmerge event: the victim is restored, the survivor
+		// changed.
+		if eerr := r.recordEvent(ctx, tx, events.CIRestored, result.Victim, nil); eerr != nil {
+			return eerr
+		}
+		return r.recordEvent(ctx, tx, events.CIChanged, result.Survivor, []string{"merged_ci"})
+	})
+	if err != nil {
+		return nil, r.uniqueField(ctx, orgID, err)
+	}
+	return result, nil
+}

@@ -459,6 +459,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/cis/{id}/unmerge': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Revert the merge of this (merged) CI within 30 days (CI-12)
+     * @description Restores the merged CI of the path and its survivor from the merge snapshot: both CI rows, the moved relationships, interfaces, contacts, history, document links, field values and the asset link, and the rows the merge removed. After 30 days the snapshot is gone (410). Requires ci:delete.
+     */
+    post: operations['unmergeCI'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/cis/{id}/changes': {
     parameters: {
       query?: {
@@ -6616,6 +6639,12 @@ export interface components {
       /** Format: date-time */
       snapshot_until: string;
     };
+    CIUnmergeResult: {
+      /** Format: uuid */
+      merge_id: string;
+      survivor: components['schemas']['CI'];
+      victim: components['schemas']['CI'];
+    };
     CITypeChangeResult: {
       ci: components['schemas']['CI'];
       /** @description False when the CI already had the type. */
@@ -11111,6 +11140,50 @@ export interface operations {
       };
       /** @description Survivor and victim are the same CI. */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  unmergeCI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Both CIs after the unmerge */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CIUnmergeResult'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description One of the CIs is locked by another write. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The merge snapshot is older than 30 days. */
+      410: {
         headers: {
           [name: string]: unknown;
         };
