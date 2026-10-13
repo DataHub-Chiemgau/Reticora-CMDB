@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -312,8 +313,8 @@ type KeyRotator interface {
 	RewrapOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (bool, error)
 }
 
-// RotateOrgDEK implements KeyRotator: a fresh DEK, every credential of the
-// organization re-encrypted under it with the new key version, the old
+// RotateOrgDEK implements KeyRotator: a fresh DEK, every credential and
+// PII vault entry of the organization re-encrypted under it with the new key version, the old
 // DEK replaced — all in one transaction, so the old DEK is retired exactly
 // when nothing depends on it anymore. The DEK's created_at records the
 // rotation.
@@ -370,6 +371,11 @@ func (r *PGRepository) RotateOrgDEK(ctx context.Context, orgID string, enc *cryp
 				return fmt.Errorf("credential %s: %w", c.id, err)
 			}
 		}
+		// The PII vault shares the data key (SEC-05).
+		subjects, err := pii.ReencryptTx(ctx, tx, orgID, oldDEK, newDEK, version)
+		if err != nil {
+			return err
+		}
 		newWrapped, err := enc.WrapDEK(newDEK)
 		if err != nil {
 			return err
@@ -378,7 +384,7 @@ func (r *PGRepository) RotateOrgDEK(ctx context.Context, orgID string, enc *cryp
 			orgID, newWrapped, version); err != nil {
 			return fmt.Errorf("replace org dek: %w", err)
 		}
-		result = &RotationResult{KeyVersion: version, Rotated: len(creds)}
+		result = &RotationResult{KeyVersion: version, Rotated: len(creds), Subjects: subjects}
 		return nil
 	})
 	return result, err

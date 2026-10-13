@@ -221,6 +221,8 @@ type RotationResult struct {
 	KeyVersion int `json:"key_version"`
 	// Rotated is the number of credential ciphertexts re-encrypted.
 	Rotated int `json:"rotated"`
+	// Subjects is the number of PII vault entries re-encrypted (SEC-05).
+	Subjects int `json:"pii_subjects"`
 }
 
 // RotateKeys generates a fresh DEK for the organization, re-encrypts every

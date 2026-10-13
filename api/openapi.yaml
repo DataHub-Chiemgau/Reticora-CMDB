@@ -6287,6 +6287,9 @@ paths:
                   rotated:
                     type: integer
                     description: Number of credential ciphertexts re-encrypted
+                  pii_subjects:
+                    type: integer
+                    description: Number of PII vault entries re-encrypted with the new data key (SEC-05)
                 required: [key_version, rotated]
         '401':
           $ref: '#/components/responses/Unauthorized'

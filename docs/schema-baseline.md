@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000123_webhook_secret_rotation
+Stand: Migration 000124_pii_subject
 
 ## Prüfung
 
@@ -264,6 +264,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `org_dek` | ja | ja | org_dek_isolation (ALL) |
 | `organization` | ja | ja | org_isolation (ALL), organization_system_select (SELECT) |
 | `permission` | nein | nein | – |
+| `pii_subject` | ja | ja | pii_subject_isolation (ALL) |
 | `privacy_retention_policy` | ja | ja | privacy_retention_isolation (ALL) |
 | `quantity_item` | ja | ja | quantity_item_isolation (ALL), quantity_item_scoped_delete (DELETE), quantity_item_scoped_update (UPDATE) |
 | `rack` | ja | ja | rack_isolation (ALL) |

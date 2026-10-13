@@ -17173,6 +17173,8 @@ export interface operations {
             key_version: number;
             /** @description Number of credential ciphertexts re-encrypted */
             rotated: number;
+            /** @description Number of PII vault entries re-encrypted with the new data key (SEC-05) */
+            pii_subjects?: number;
           };
         };
       };
