@@ -24,6 +24,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -40,6 +41,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/transport"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/update"
 )
 
 type collectorConfig struct {
@@ -96,6 +98,11 @@ type collectorConfig struct {
 	AgentRelayAddr     string
 	AgentRelayCertFile string
 	AgentRelayKeyFile  string
+	// UpdateURL enables signed auto-updates (COL-06) from the release
+	// manifests below <UpdateURL>/<UpdateChannel>/; empty disables them.
+	UpdateURL      string
+	UpdateChannel  string
+	UpdateInterval time.Duration
 }
 
 // pluginRegistry maps protocol names to plugin instances.
@@ -114,6 +121,10 @@ var pluginRegistry = map[string]plugins.Plugin{
 // It is the entry point shared by collector/cmd/collector and the backend
 // module's compatibility shim.
 func Main() {
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		fmt.Println(updateArtifact, Version)
+		return
+	}
 	collectorCfg := loadCollectorConfig()
 	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
 
@@ -124,7 +135,27 @@ func Main() {
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
 
-	slog.Info("starting collector", "environment", environment)
+	slog.Info("starting collector", "environment", environment, "version", Version)
+
+	// A pending update is confirmed by the first successful heartbeat;
+	// after repeated failed starts it is rolled back (COL-06).
+	confirmUpdate := func() {}
+	execPath, err := executablePath()
+	if err == nil {
+		confirmUpdate, err = startupUpdate(execPath)
+		if errors.Is(err, update.ErrRolledBack) {
+			os.Exit(1)
+		}
+		if err != nil {
+			slog.Error("pending collector update", "error", err)
+		}
+	}
+	confirmed := make(chan struct{})
+	var confirmedOnce sync.Once
+	onHeartbeat := func() {
+		confirmUpdate()
+		confirmedOnce.Do(func() { close(confirmed) })
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -147,7 +178,11 @@ func Main() {
 	)
 
 	go runDiscoveryLoop(ctx, collectorCfg, uploader)
-	go runHeartbeatLoop(ctx, collectorCfg, uploader)
+	go runHeartbeatLoop(ctx, collectorCfg, uploader, onHeartbeat)
+	restart := make(chan string, 1)
+	if collectorCfg.UpdateURL != "" {
+		go runUpdateLoop(ctx, collectorCfg.UpdateInterval, newUpdateChecker(&collectorCfg), confirmed, restart)
+	}
 	go runAgentRelay(ctx, collectorCfg, uploader)
 	// The collector's mTLS channel to the NATS endpoint (COL-08).
 	go runNATS(ctx, collectorCfg)
@@ -160,8 +195,13 @@ func Main() {
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	slog.Info("collector shutting down")
+	select {
+	case <-quit:
+		slog.Info("collector shutting down")
+	case version := <-restart:
+		// The service manager (Restart=always) starts the new binary.
+		slog.Info("collector restarting into the update", "version", version)
+	}
 	cancel()
 }
 
@@ -718,13 +758,19 @@ func (u *uploader) backpressure(ctx context.Context) bool {
 	return saturated
 }
 
-func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
+// runHeartbeatLoop sends heartbeats; onSuccess runs after every heartbeat
+// the server accepted.
+func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader, onSuccess func()) {
 	ticker := time.NewTicker(cfg.HeartbeatInterval)
 	defer ticker.Stop()
 
 	for {
-		if status := postHeartbeat(ctx, up.client, cfg, up.spoolReport(ctx)); status != "" {
+		status, ok := postHeartbeat(ctx, up.client, cfg, up.spoolReport(ctx))
+		if status != "" {
 			up.setLicenseStatus(status)
+		}
+		if ok && onSuccess != nil {
+			onSuccess()
 		}
 		select {
 		case <-ctx.Done():
@@ -769,27 +815,27 @@ func (u *uploader) spoolReport(ctx context.Context) *spoolReport {
 }
 
 // postHeartbeat sends a heartbeat and returns the discovery license status of
-// the response ("" when unknown).
-func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport) string {
+// the response ("" when unknown) and whether the server accepted it.
+func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport) (status string, ok bool) {
 	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
 		slog.Warn("skipping heartbeat due to incomplete configuration",
 			"server_url", cfg.ServerURL,
 			"organization_id", cfg.OrganizationID,
 			"collector_id", cfg.CollectorID,
 		)
-		return ""
+		return "", false
 	}
 
 	endpoint := strings.TrimRight(cfg.ServerURL, "/") + "/api/v1/collectors/" + cfg.CollectorID + "/heartbeat"
 	body, err := json.Marshal(heartbeatBody{Spool: spool})
 	if err != nil {
 		slog.Error("encode heartbeat failed", "error", err)
-		return ""
+		return "", false
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		slog.Error("build heartbeat request failed", "error", err)
-		return ""
+		return "", false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Organization-ID", cfg.OrganizationID)
@@ -798,15 +844,15 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 	resp, err := client.Do(req)
 	if err != nil {
 		slog.Error("heartbeat failed", "error", err, "endpoint", endpoint)
-		return ""
+		return "", false
 	}
 	defer resp.Body.Close()
 
 	slog.Info("heartbeat completed", "status", resp.StatusCode, "duration_ms", time.Since(start).Milliseconds())
 	if resp.StatusCode >= 300 {
-		return ""
+		return "", false
 	}
-	return resp.Header.Get(LicenseStatusHeader)
+	return resp.Header.Get(LicenseStatusHeader), true
 }
 
 // runTrapReceiver receives SNMP traps and forwards them as metric events to
@@ -1089,6 +1135,11 @@ func loadCollectorConfig() collectorConfig {
 		slog.Error("invalid RETICORA_REDFISH_TLS_SCOPES; using default certificate verification", "error", err)
 		tlsScopes = nil
 	}
+	updateURL := strings.TrimSpace(os.Getenv("RETICORA_UPDATE_URL"))
+	channel, channelOK := updateChannelFromEnv(os.Getenv("RETICORA_UPDATE_CHANNEL"))
+	if !channelOK {
+		updateURL = ""
+	}
 
 	return collectorConfig{
 		ServerURL:          envOrDefault("RETICORA_SERVER_URL", "http://localhost:8080"),
@@ -1117,6 +1168,9 @@ func loadCollectorConfig() collectorConfig {
 		AgentRelayCertFile: os.Getenv("RETICORA_AGENT_RELAY_TLS_CERT_FILE"),
 		AgentRelayKeyFile:  os.Getenv("RETICORA_AGENT_RELAY_TLS_KEY_FILE"),
 		CredentialsPath:    envOrDefault("RETICORA_CREDENTIALS_PATH", "/var/lib/reticora-collector/credentials.json"),
+		UpdateURL:          updateURL,
+		UpdateChannel:      channel,
+		UpdateInterval:     durationEnvOrDefault("RETICORA_UPDATE_INTERVAL", 6*time.Hour),
 	}
 }
 

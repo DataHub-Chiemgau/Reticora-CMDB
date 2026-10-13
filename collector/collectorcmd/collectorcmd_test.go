@@ -27,6 +27,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/update"
 )
 
 func testConfig(serverURL, spoolDir string) collectorConfig {
@@ -445,11 +446,12 @@ func TestLicenseExpiryPausesDiscovery(t *testing.T) {
 	}
 
 	// The heartbeat keeps reporting the status; a renewed license resumes.
-	if status := postHeartbeat(ctx, up.client, cfg, nil); status != "expired" {
-		t.Fatalf("heartbeat license status %q", status)
+	if status, ok := postHeartbeat(ctx, up.client, cfg, nil); status != "expired" || !ok {
+		t.Fatalf("heartbeat license status %q, accepted %v", status, ok)
 	}
 	license.Store("active")
-	up.setLicenseStatus(postHeartbeat(ctx, up.client, cfg, nil))
+	status, _ := postHeartbeat(ctx, up.client, cfg, nil)
+	up.setLicenseStatus(status)
 	if up.paused.Load() {
 		t.Fatal("collector still paused after the license was renewed")
 	}
@@ -467,4 +469,113 @@ func TestLicenseExpiryPausesDiscovery(t *testing.T) {
 // testRecords returns one valid DeviceRecord named name.
 func testRecords(name string) []plugins.DeviceRecord {
 	return []plugins.DeviceRecord{plugins.RecordFromResult("sweep", &plugins.Result{CIType: "server", Name: name, IP: "192.0.2.10"}, time.Now())}
+}
+
+// fakeUpdater offers release once and records what was applied.
+type fakeUpdater struct {
+	release  *update.ReleaseInfo
+	applyErr error
+	checks   atomic.Int32
+	applied  chan string
+}
+
+func (f *fakeUpdater) Check(context.Context, string) (*update.ReleaseInfo, error) {
+	f.checks.Add(1)
+	return f.release, nil
+}
+
+func (f *fakeUpdater) Apply(_ context.Context, rel update.ReleaseInfo) error {
+	if f.applyErr != nil {
+		return f.applyErr
+	}
+	f.applied <- rel.Version
+	return nil
+}
+
+func TestUpdateLoopWaitsForAWorkingStartAndRestartsIntoTheUpdate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	u := &fakeUpdater{release: &update.ReleaseInfo{Version: "v9.0.0", Channel: update.ChannelStable}, applied: make(chan string, 1)}
+	confirmed, restart := make(chan struct{}), make(chan string, 1)
+	go runUpdateLoop(ctx, time.Hour, u, confirmed, restart)
+
+	time.Sleep(30 * time.Millisecond)
+	if u.checks.Load() != 0 {
+		t.Fatal("the updater must not run before the running binary confirmed a successful heartbeat")
+	}
+	close(confirmed)
+	select {
+	case v := <-restart:
+		if v != "v9.0.0" || <-u.applied != "v9.0.0" {
+			t.Fatalf("restart for %q", v)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no restart after the update was installed")
+	}
+}
+
+func TestRefusedUpdateKeepsTheCollectorRunning(t *testing.T) {
+	u := &fakeUpdater{release: &update.ReleaseInfo{Version: "v9.0.0"}, applyErr: update.ErrUnsigned}
+	if v := checkAndApply(context.Background(), u); v != "" {
+		t.Fatalf("a refused update reported %q", v)
+	}
+}
+
+func TestStartupUpdateConfirmsAndRollsBack(t *testing.T) {
+	dir := t.TempDir()
+	execPath := filepath.Join(dir, "reticora-collector")
+	for _, f := range []struct{ name, content string }{
+		{execPath, "new"}, {execPath + ".old", "old"},
+		{filepath.Join(dir, ".update-pending"), `{"version":"v9.0.0","attempts":0}`},
+	} {
+		if err := os.WriteFile(f.name, []byte(f.content), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A start that reaches a heartbeat confirms the update.
+	confirm, err := startupUpdate(execPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirm()
+	if _, serr := os.Stat(filepath.Join(dir, ".update-pending")); !os.IsNotExist(serr) {
+		t.Fatalf("the confirmed update is still pending: %v", serr)
+	}
+
+	// Starts that never reach a heartbeat roll it back.
+	if err = os.WriteFile(filepath.Join(dir, ".update-pending"), []byte(`{"version":"v9.0.1","attempts":0}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for range update.MaxStartAttempts {
+		if _, err = startupUpdate(execPath); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = startupUpdate(execPath); !errors.Is(err, update.ErrRolledBack) {
+		t.Fatalf("err = %v, want ErrRolledBack", err)
+	}
+	if got, _ := os.ReadFile(execPath); string(got) != "old" {
+		t.Fatalf("binary after rollback = %q", got)
+	}
+}
+
+func TestUpdateChannelFromEnv(t *testing.T) {
+	for value, want := range map[string]struct {
+		ch string
+		ok bool
+	}{"": {"stable", true}, "Beta": {"beta", true}, " stable ": {"stable", true}, "nightly": {"nightly", false}} {
+		if ch, ok := updateChannelFromEnv(value); ch != want.ch || ok != want.ok {
+			t.Errorf("updateChannelFromEnv(%q) = %q, %v", value, ch, ok)
+		}
+	}
+	t.Setenv("RETICORA_UPDATE_URL", "https://updates.example.com")
+	t.Setenv("RETICORA_UPDATE_CHANNEL", "nightly")
+	if cfg := loadCollectorConfig(); cfg.UpdateURL != "" {
+		t.Error("an unknown channel must disable auto-updates")
+	}
+	t.Setenv("RETICORA_UPDATE_CHANNEL", "beta")
+	if cfg := loadCollectorConfig(); cfg.UpdateURL == "" || cfg.UpdateChannel != "beta" || cfg.UpdateInterval != 6*time.Hour {
+		t.Errorf("update config = %q %q %s", cfg.UpdateURL, cfg.UpdateChannel, cfg.UpdateInterval)
+	}
 }

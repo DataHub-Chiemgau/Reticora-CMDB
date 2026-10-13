@@ -59,6 +59,16 @@ type Checker struct {
 	// after its signature verified (TEC-15).
 	Verifier Verifier
 
+	// Channel is the subscribed release channel (ChannelStable or
+	// ChannelBeta); a release of another channel is refused. Empty accepts
+	// every release.
+	Channel string
+	// ProbeArgs, when set, start the downloaded binary with these arguments
+	// before it is installed; it must exit successfully and print the
+	// release version, otherwise the update is refused (a binary that does
+	// not start never replaces the running one).
+	ProbeArgs []string
+
 	// executablePath, when set, overrides os.Executable as the binary to
 	// replace during Apply. It is a test seam; production code leaves it nil.
 	executablePath func() (string, error)
@@ -77,7 +87,27 @@ func (c *Checker) Check(ctx context.Context, currentVersion string) (*ReleaseInf
 	if latest == nil || latest.Version == "" || latest.Version == currentVersion {
 		return nil, nil
 	}
+	if c.Channel != "" && !ChannelAccepts(c.Channel, latest.Channel) {
+		return nil, fmt.Errorf("%w: subscribed to %q, release %s is %q", ErrChannelMismatch, c.Channel, latest.Version, latest.Channel)
+	}
+	// Never downgrade: a release that is not newer than the running
+	// version is ignored (unparseable development versions update).
+	if cmp, ok := CompareVersions(latest.Version, currentVersion); ok && cmp <= 0 {
+		return nil, nil
+	}
+	// A version that was rolled back after failed starts is not installed
+	// again; the next newer release is.
+	if execPath, err := c.execPath(); err == nil && RolledBackVersion(execPath) == latest.Version {
+		return nil, nil
+	}
 	return latest, nil
+}
+
+func (c *Checker) execPath() (string, error) {
+	if c.executablePath != nil {
+		return c.executablePath()
+	}
+	return os.Executable()
 }
 
 // Apply downloads, verifies, and stages the new binary for the self-update workflow.
@@ -95,11 +125,7 @@ func (c *Checker) Apply(ctx context.Context, release ReleaseInfo) error {
 		return ErrUnsigned
 	}
 
-	resolveExec := c.executablePath
-	if resolveExec == nil {
-		resolveExec = os.Executable
-	}
-	execPath, err := resolveExec()
+	execPath, err := c.execPath()
 	if err != nil {
 		return fmt.Errorf("update: resolve executable path: %w", err)
 	}
@@ -135,6 +161,13 @@ func (c *Checker) Apply(ctx context.Context, release ReleaseInfo) error {
 		return fmt.Errorf("update: signature verification failed, update refused: %w", err)
 	}
 
+	if len(c.ProbeArgs) > 0 {
+		if err = probe(ctx, stagingPath, release.Version, c.ProbeArgs); err != nil {
+			os.Remove(stagingPath)
+			return fmt.Errorf("update: the new binary does not start, update refused: %w", err)
+		}
+	}
+
 	// Atomic swap: move current binary to .old, then staging to current
 	backupPath := execPath + ".old"
 	if err := os.Remove(backupPath); err != nil && !os.IsNotExist(err) {
@@ -156,6 +189,28 @@ func (c *Checker) Apply(ctx context.Context, release ReleaseInfo) error {
 	markerPath := filepath.Join(filepath.Dir(execPath), ".update-applied")
 	_ = os.WriteFile(markerPath, []byte(release.Version), 0o644)
 
+	// The update counts as installed only once the new binary confirmed a
+	// successful start (Confirm); until then CheckPending rolls it back
+	// after MaxStartAttempts failed starts.
+	if err := writePending(execPath, &pendingUpdate{Version: release.Version}); err != nil {
+		_ = os.Rename(backupPath, execPath)
+		return fmt.Errorf("update: record pending update: %w", err)
+	}
+	return nil
+}
+
+// probe starts the staged binary with args and requires a successful exit
+// whose output names version.
+func probe(ctx context.Context, path, version string, args []string) error {
+	pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(pctx, path, args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	if !strings.Contains(string(out), version) {
+		return fmt.Errorf("it reports %q instead of version %s", strings.TrimSpace(string(out)), version)
+	}
 	return nil
 }
 
