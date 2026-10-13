@@ -188,8 +188,22 @@ export interface DiscoveryScope {
   last_run_at?: string;
   next_run_at?: string;
   last_result?: Record<string, unknown>;
+  health?: DiscoveryScopeHealth;
   created_at: string;
   updated_at: string;
+}
+
+/** State of the last scope run with the causes of its errors (DIS-08). */
+export interface DiscoveryScopeHealth {
+  state: 'ok' | 'partial' | 'failed' | 'never_run';
+  errors?: DiscoveryErrorState[];
+}
+
+export interface DiscoveryErrorState {
+  cause: string;
+  message?: string;
+  protocol?: string;
+  target?: string;
 }
 
 export interface DiscoveryScopeInput {

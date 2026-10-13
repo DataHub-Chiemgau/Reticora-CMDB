@@ -281,7 +281,24 @@
       "enable": "Aktivieren",
       "disable": "Deaktivieren",
       "delete": "Löschen",
-      "invalid": "Der Scope wurde abgelehnt. Prüfen Sie Ziel und Zeitplan (mindestens 5 Minuten)."
+      "invalid": "Der Scope wurde abgelehnt. Prüfen Sie Ziel und Zeitplan (mindestens 5 Minuten).",
+      "health": {
+        "ok": "Letzter Lauf ok",
+        "partial": "Teilweise fehlgeschlagen",
+        "failed": "Fehlgeschlagen",
+        "never_run": "Noch nicht gelaufen"
+      },
+      "cause": {
+        "unreachable": "Nicht erreichbar",
+        "timeout": "Zeitüberschreitung",
+        "refused": "Verbindung abgelehnt",
+        "auth_failed": "Anmeldung fehlgeschlagen",
+        "tls": "Zertifikat/TLS",
+        "protocol_error": "Protokollfehler",
+        "config_error": "Konfigurationsfehler",
+        "upload_failed": "Upload fehlgeschlagen (gepuffert)",
+        "unknown": "Unbekannter Fehler"
+      }
     }
   },
   "webhook": {

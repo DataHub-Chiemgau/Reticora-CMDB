@@ -14330,6 +14330,8 @@ components:
         result_summary:
           type: object
           additionalProperties: true
+        error:
+          $ref: '#/components/schemas/DiscoveryErrorState'
         started_at:
           type: string
           format: date-time
@@ -15745,12 +15747,41 @@ components:
         last_result:
           type: object
           additionalProperties: true
+        health:
+          $ref: '#/components/schemas/DiscoveryScopeHealth'
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+
+    DiscoveryScopeHealth:
+      type: object
+      description: State of the last run with the causes of its errors (DIS-08).
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [ok, partial, failed, never_run]
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryErrorState'
+
+    DiscoveryErrorState:
+      type: object
+      required: [cause]
+      properties:
+        cause:
+          type: string
+          enum: [unreachable, timeout, refused, auth_failed, tls, protocol_error, config_error, upload_failed, unknown]
+        message:
+          type: string
+        protocol:
+          type: string
+        target:
+          type: string
 
     DiscoveryScopeInput:
       type: object

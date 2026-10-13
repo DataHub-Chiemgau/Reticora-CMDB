@@ -55,6 +55,8 @@ func RegisterMetrics(reg prometheus.Registerer) {
 		Name:      "unlicensed_ci_total",
 		Help:      "Discovered devices held as unlicensed_ci review items because max_cis is reached.",
 	}, func() float64 { return float64(UnlicensedQueued()) }))
+	// Discovery error states (DIS-08).
+	reg.MustRegister(scopeRuns, discoveryErrors)
 }
 
 // discoveredAttributes are the attributes a discovered device stores on its

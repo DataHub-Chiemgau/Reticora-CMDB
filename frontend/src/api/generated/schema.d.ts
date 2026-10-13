@@ -8596,6 +8596,7 @@ export interface components {
       result_summary?: {
         [key: string]: unknown;
       };
+      error?: components['schemas']['DiscoveryErrorState'];
       /** Format: date-time */
       started_at?: string;
       /** Format: date-time */
@@ -9355,10 +9356,33 @@ export interface components {
       last_result?: {
         [key: string]: unknown;
       };
+      health?: components['schemas']['DiscoveryScopeHealth'];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    /** @description State of the last run with the causes of its errors (DIS-08). */
+    DiscoveryScopeHealth: {
+      /** @enum {string} */
+      state: 'ok' | 'partial' | 'failed' | 'never_run';
+      errors?: components['schemas']['DiscoveryErrorState'][];
+    };
+    DiscoveryErrorState: {
+      /** @enum {string} */
+      cause:
+        | 'unreachable'
+        | 'timeout'
+        | 'refused'
+        | 'auth_failed'
+        | 'tls'
+        | 'protocol_error'
+        | 'config_error'
+        | 'upload_failed'
+        | 'unknown';
+      message?: string;
+      protocol?: string;
+      target?: string;
     };
     DiscoveryScopeInput: {
       collector_id: string;

@@ -115,8 +115,11 @@ type Scope struct {
 	LastRunAt      string         `json:"last_run_at,omitempty"`
 	NextRunAt      string         `json:"next_run_at,omitempty"`
 	LastResult     map[string]any `json:"last_result,omitempty"`
-	CreatedAt      string         `json:"created_at"`
-	UpdatedAt      string         `json:"updated_at"`
+	// Health is the state of the last run with the causes of its errors
+	// (DIS-08).
+	Health    ScopeHealth `json:"health"`
+	CreatedAt string      `json:"created_at"`
+	UpdatedAt string      `json:"updated_at"`
 }
 
 // ScopeInput is the body of POST /discovery-scopes.
@@ -383,6 +386,7 @@ func scanScope(row pgx.Row) (*Scope, error) {
 	if s.CredentialIDs == nil {
 		s.CredentialIDs = []string{}
 	}
+	s.Health = ScopeHealthOf(&s)
 	return &s, nil
 }
 
@@ -636,7 +640,9 @@ func (r *MemoryRepository) ListScopes(_ context.Context, orgID string, f ScopeFi
 	out := []Scope{}
 	for _, s := range r.scopes {
 		if s.OrganizationID == orgID && (f.CollectorID == "" || s.CollectorID == f.CollectorID) && (!f.EnabledOnly || s.Enabled) {
-			out = append(out, *s)
+			cp := *s
+			cp.Health = ScopeHealthOf(&cp)
+			out = append(out, cp)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name+out[i].ID < out[j].Name+out[j].ID })
@@ -661,6 +667,7 @@ func (r *MemoryRepository) GetScope(_ context.Context, orgID, id string) (*Scope
 		return nil, fmt.Errorf("not found")
 	}
 	cp := *s
+	cp.Health = ScopeHealthOf(&cp)
 	return &cp, nil
 }
 
@@ -703,7 +710,15 @@ func (r *MemoryRepository) RecordScopeRun(_ context.Context, orgID, id string, r
 		return fmt.Errorf("not found")
 	}
 	s.LastRunAt = run.At.UTC().Format(time.RFC3339)
-	s.LastResult = run.Result
+	// Round-trip through JSON like the database, so readers see one form.
+	raw, err := json.Marshal(run.Result)
+	if err != nil {
+		return err
+	}
+	s.LastResult = nil
+	if uerr := json.Unmarshal(raw, &s.LastResult); uerr != nil {
+		return uerr
+	}
 	if !run.NextRun.IsZero() {
 		s.NextRunAt = run.NextRun.UTC().Format(time.RFC3339)
 	}

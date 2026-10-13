@@ -382,7 +382,12 @@ func (h *Handler) RecordCollectorScopeRun(ctx context.Context, orgID, collectorI
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return repo.RecordScopeRun(ctx, orgID, rep.ScopeID, &ScopeRun{At: at, Result: rep.Result, NextRun: rep.NextRun})
+	result := NormalizeRunResult(rep.Result)
+	if state, _ := result["status"].(string); state != ScopeStateOK {
+		slog.Warn("discovery scope run failed", "event", "discovery.scope."+state, "organization_id", orgID,
+			"collector_id", collectorID, "scope_id", rep.ScopeID, "errors", result["errors"])
+	}
+	return repo.RecordScopeRun(ctx, orgID, rep.ScopeID, &ScopeRun{At: at, Result: result, NextRun: rep.NextRun})
 }
 
 // ServeCollectorScopes answers the scope requests, run results and subnet

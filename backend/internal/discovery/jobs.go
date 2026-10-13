@@ -35,9 +35,11 @@ type Job struct {
 	Status         string         `json:"status"`
 	Config         map[string]any `json:"config"`
 	ResultSummary  map[string]any `json:"result_summary,omitempty"`
-	StartedAt      string         `json:"started_at,omitempty"`
-	CompletedAt    string         `json:"completed_at,omitempty"`
-	CreatedAt      string         `json:"created_at"`
+	// Error is the cause of a failed job (DIS-08).
+	Error       *ErrorState `json:"error,omitempty"`
+	StartedAt   string      `json:"started_at,omitempty"`
+	CompletedAt string      `json:"completed_at,omitempty"`
+	CreatedAt   string      `json:"created_at"`
 }
 
 // JobFilter narrows a discovery-job listing.
@@ -142,6 +144,9 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
+	for i := range jobs {
+		jobs[i].Error = JobErrorOf(&jobs[i])
+	}
 
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Job]{
 		Data:    jobs,
@@ -218,5 +223,6 @@ func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "discovery job not found")
 		return
 	}
+	job.Error = JobErrorOf(job)
 	api.WriteJSON(w, http.StatusOK, job)
 }

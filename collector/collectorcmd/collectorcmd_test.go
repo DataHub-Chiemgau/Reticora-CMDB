@@ -629,9 +629,13 @@ func TestDiscoveryProbesThenCollects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	records := collectHits(context.Background(), "snmp", plug, hits, nil)
+	records, failed := collectHits(context.Background(), "snmp", plug, hits, nil)
 	if len(records) != 2 {
 		t.Fatalf("records = %d, want 2", len(records))
+	}
+	// The failed collection is reported with target and protocol (DIS-08).
+	if len(failed) != 1 || failed[0].Target != "192.0.2.2" || failed[0].Protocol != "snmp" || failed[0].Message != "authentication failed" {
+		t.Errorf("failed targets = %+v", failed)
 	}
 	for _, target := range []string{"192.0.2.1", "192.0.2.2"} {
 		if _, ok := plug.collected.Load(target); !ok {

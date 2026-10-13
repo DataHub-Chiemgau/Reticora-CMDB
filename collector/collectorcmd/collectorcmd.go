@@ -414,7 +414,7 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 	type scopeOutcome struct {
 		scope   *collectorScope
 		records int
-		errs    []string
+		errs    []runError
 		next    time.Time
 	}
 	var outcomes []scopeOutcome
@@ -427,7 +427,7 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 		}
 		slog.Info("discovery started", "pass", pass.key, "protocols", due)
 		var passRecords []plugins.DeviceRecord
-		var errs []string
+		var errs []runError
 		for _, protocol := range due {
 			if ctx.Err() != nil {
 				break
@@ -442,14 +442,15 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 			creds := plugins.CredentialsFor(protocol, credentialsFor(cfg))
 			hits, err := plug.Probe(ctx, targets, creds)
 			if err != nil {
-				slog.Error("discovery plugin error", "protocol", protocol, "error", err)
-				errs = append(errs, pluginError(protocol, err))
+				slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
+				errs = append(errs, runError{Protocol: protocol, Message: err.Error()})
 				continue
 			}
 			if protocol == "sweep" {
 				hosts.set(pass.key, hitTargets(hits))
 			}
-			collected := collectHits(ctx, protocol, plug, hits, creds)
+			collected, failed := collectHits(ctx, protocol, plug, hits, creds)
+			errs = append(errs, failed...)
 			slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
 			passRecords = append(passRecords, collected...)
 		}
@@ -461,17 +462,23 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 		return 0
 	}
 	records = deliverableRecords(ctx, records)
-	for _, o := range outcomes {
-		reportScopeRun(ctx, o.scope, now, o.records, o.errs, o.next)
-	}
 	// Upload the records in a compressed batch; the spool flusher delivers
 	// what could not be sent.
+	var uploadErr *runError
 	if len(records) > 0 {
 		if err := up.uploadRecordsAt(ctx, records, now); err != nil {
-			slog.Error("failed to upload discovery records", "error", err, "count", len(records))
+			slog.Error("failed to upload discovery records", "event", "discovery.upload.failed", "error", err, "count", len(records))
+			uploadErr = &runError{Protocol: "upload", Cause: "upload_failed", Message: err.Error()}
 		} else {
 			slog.Info("discovery records uploaded", "count", len(records))
 		}
+	}
+	for _, o := range outcomes {
+		errs := o.errs
+		if uploadErr != nil && o.records > 0 {
+			errs = append(errs, *uploadErr)
+		}
+		reportScopeRun(ctx, o.scope, now, o.records, errs, o.next)
 	}
 	slog.Info("discovery completed", "duration_ms", time.Since(now).Milliseconds(), "total_records", len(records))
 	return len(records)
@@ -525,10 +532,12 @@ func incrementIP(ip net.IP) {
 const collectParallelism = 16
 
 // collectHits runs Collect for every target that answered the probe
-// (DIS-03) and returns its DeviceRecords. When Collect fails, the probe hit
-// is reported instead, so a reachable device is never lost.
-func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits []plugins.Result, creds map[string]string) []plugins.DeviceRecord {
+// (DIS-03) and returns its DeviceRecords and the targets whose collection
+// failed (DIS-08). When Collect fails, the probe hit is reported instead,
+// so a reachable device is never lost.
+func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits []plugins.Result, creds map[string]string) ([]plugins.DeviceRecord, []runError) {
 	out := make([]plugins.DeviceRecord, len(hits))
+	failures := make([]*runError, len(hits))
 	sem := make(chan struct{}, collectParallelism)
 	var wg sync.WaitGroup
 	for i := range hits {
@@ -541,7 +550,11 @@ func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits
 			probedAt := time.Now()
 			rec, err := plug.Collect(ctx, hit.IP, creds)
 			if err != nil || rec == nil {
-				slog.Debug("collect failed; reporting the probe result", "protocol", protocol, "target", hit.IP, "error", err)
+				if err != nil {
+					slog.Warn("discovery target failed; reporting the probe result", "event", "discovery.target.failed",
+						"protocol", protocol, "target", hit.IP, "error", err)
+					failures[i] = &runError{Protocol: protocol, Target: hit.IP, Message: err.Error()}
+				}
 				out[i] = plugins.RecordFromResult(protocol, hit, probedAt)
 				return
 			}
@@ -556,7 +569,13 @@ func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits
 	for i := range out {
 		classifier.ClassifyRecord(&out[i])
 	}
-	return out
+	var errs []runError
+	for _, f := range failures {
+		if f != nil {
+			errs = append(errs, *f)
+		}
+	}
+	return out, errs
 }
 
 // classifier holds the shipped profiles plus those of RETICORA_PROFILES_DIR.

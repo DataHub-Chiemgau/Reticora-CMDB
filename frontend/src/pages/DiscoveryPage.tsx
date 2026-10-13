@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCollectors, useDiscoveryScopeMutations, useDiscoveryScopes } from '../api/hooks';
-import type { Collector, DiscoveryScopeKind } from '../api/client';
+import type { Collector, DiscoveryScopeHealth, DiscoveryScopeKind } from '../api/client';
 import { fetchAPI } from '../api/client';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -158,6 +158,43 @@ function getCollectorVariant(
   }
 }
 
+const healthVariant: Record<
+  DiscoveryScopeHealth['state'],
+  'success' | 'warning' | 'danger' | 'neutral'
+> = {
+  ok: 'success',
+  partial: 'warning',
+  failed: 'danger',
+  never_run: 'neutral',
+};
+
+/** ScopeHealthBadge shows the state of the last run of a scope (DIS-08). */
+function ScopeHealthBadge({ health }: { health?: DiscoveryScopeHealth }) {
+  const { t } = useTranslation();
+  const state = health?.state ?? 'never_run';
+  return <Badge variant={healthVariant[state]}>{t(`discovery.scopes.health.${state}`)}</Badge>;
+}
+
+/** ScopeErrors lists the failures of the last run with their causes. */
+function ScopeErrors({ health }: { health?: DiscoveryScopeHealth }) {
+  const { t } = useTranslation();
+  if (!health?.errors?.length) return null;
+  return (
+    <ul className="w-full space-y-1 text-xs text-red-700 dark:text-red-300">
+      {health.errors.map((err, i) => (
+        <li key={`${err.protocol}-${err.target}-${i}`}>
+          <span className="font-medium">{t(`discovery.scopes.cause.${err.cause}`, err.cause)}</span>
+          {err.protocol ? ` · ${err.protocol}` : ''}
+          {err.target ? ` · ${err.target}` : ''}
+          {err.message ? (
+            <span className="text-gray-500 dark:text-gray-400"> — {err.message}</span>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** ScopeList shows and edits the discovery scopes of a collector (DIS-09). */
 function ScopeList({ collectorId }: { collectorId: string }) {
   const { t } = useTranslation();
@@ -189,7 +226,7 @@ function ScopeList({ collectorId }: { collectorId: string }) {
       {data?.data.length ? (
         <ul className="mt-2 space-y-2 text-sm">
           {data.data.map((scope) => (
-            <li key={scope.id} className="flex items-center justify-between gap-2">
+            <li key={scope.id} className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-gray-900 dark:text-gray-100">
                 <span className="font-mono">{scope.target}</span>{' '}
                 <span className="text-gray-500 dark:text-gray-400">
@@ -198,6 +235,7 @@ function ScopeList({ collectorId }: { collectorId: string }) {
                 </span>
               </span>
               <span className="flex items-center gap-2">
+                <ScopeHealthBadge health={scope.health} />
                 <Badge variant={scope.enabled ? 'success' : 'neutral'}>
                   {scope.enabled ? t('discovery.scopes.enabled') : t('discovery.scopes.disabled')}
                 </Badge>
@@ -214,6 +252,7 @@ function ScopeList({ collectorId }: { collectorId: string }) {
                   {t('discovery.scopes.delete')}
                 </Button>
               </span>
+              <ScopeErrors health={scope.health} />
             </li>
           ))}
         </ul>

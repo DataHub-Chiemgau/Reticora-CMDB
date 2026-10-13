@@ -281,7 +281,24 @@
       "enable": "Enable",
       "disable": "Disable",
       "delete": "Delete",
-      "invalid": "The scope was refused. Check target and schedule (at least 5 minutes)."
+      "invalid": "The scope was refused. Check target and schedule (at least 5 minutes).",
+      "health": {
+        "ok": "Last run ok",
+        "partial": "Partially failed",
+        "failed": "Failed",
+        "never_run": "Not run yet"
+      },
+      "cause": {
+        "unreachable": "Unreachable",
+        "timeout": "Timeout",
+        "refused": "Connection refused",
+        "auth_failed": "Authentication failed",
+        "tls": "Certificate/TLS",
+        "protocol_error": "Protocol error",
+        "config_error": "Configuration error",
+        "upload_failed": "Upload failed (buffered)",
+        "unknown": "Unknown error"
+      }
     }
   },
   "webhook": {

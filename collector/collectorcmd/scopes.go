@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -306,18 +305,30 @@ func tagRecords(records []plugins.DeviceRecord, s *collectorScope) {
 	}
 }
 
+// runError is a failure of a scope run with its target and protocol; the
+// server derives the cause (DIS-08) unless the collector knows it.
+type runError struct {
+	Protocol string `json:"protocol"`
+	Target   string `json:"target,omitempty"`
+	Cause    string `json:"cause,omitempty"`
+	Message  string `json:"message"`
+}
+
+// maxReportedErrors bounds the errors of one run report.
+const maxReportedErrors = 50
+
 // reportScopeRun sends the result of a scope run to the server.
-func reportScopeRun(ctx context.Context, s *collectorScope, started time.Time, records int, errs []string, next time.Time) {
+func reportScopeRun(ctx context.Context, s *collectorScope, started time.Time, records int, errs []runError, next time.Time) {
 	ch := scopeChannel.Load()
 	if ch == nil || s == nil {
 		return
 	}
-	status := "ok"
+	result := map[string]any{"records": records, "duration_ms": time.Since(started).Milliseconds()}
 	if len(errs) > 0 {
-		status = "partial"
-	}
-	result := map[string]any{"status": status, "records": records, "duration_ms": time.Since(started).Milliseconds()}
-	if len(errs) > 0 {
+		result["error_count"] = len(errs)
+		if len(errs) > maxReportedErrors {
+			errs = errs[:maxReportedErrors]
+		}
 		result["errors"] = errs
 	}
 	var resp map[string]any
@@ -327,5 +338,3 @@ func reportScopeRun(ctx context.Context, s *collectorScope, started time.Time, r
 		slog.Warn("scope run not reported", "scope_id", s.ID, "error", err)
 	}
 }
-
-func pluginError(protocol string, err error) string { return fmt.Sprintf("%s: %v", protocol, err) }

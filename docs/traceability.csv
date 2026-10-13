@@ -347,3 +347,4 @@ DIS-09;[B];D;backend/internal/discovery/scope_integration_test.go;WP-153
 API-05;[B];D;backend/internal/discovery/scope_integration_test.go;WP-153
 DIS-10;[B];D;collector/collectorcmd/schedule_test.go;WP-154
 NFR-03;[B], Teilumfang [P5];D;collector/collectorcmd/schedule_test.go;WP-154
+DIS-08;[Q];D;backend/internal/discovery/errors_test.go;WP-155

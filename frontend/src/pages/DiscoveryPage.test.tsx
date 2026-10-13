@@ -70,4 +70,55 @@ describe('DiscoveryPage scopes (DIS-09)', () => {
       });
     });
   });
+
+  it('shows the state and the causes of failed scope runs (DIS-08)', async () => {
+    stubFetchRoutes({
+      '/discovery-scopes?collector_id=c1': paginated([
+        {
+          id: 's1',
+          organization_id: 'org-1',
+          collector_id: 'c1',
+          name: '10.0.0.0/24',
+          kind: 'cidr',
+          target: '10.0.0.0/24',
+          schedule: '24h',
+          credential_ids: [],
+          plugins: ['sweep', 'redfish'],
+          enabled: true,
+          last_run_at: '2026-10-13T08:00:00Z',
+          health: {
+            state: 'partial',
+            errors: [
+              {
+                cause: 'auth_failed',
+                protocol: 'redfish',
+                target: '10.0.0.9',
+                message: 'HTTP 401: Unauthorized',
+              },
+            ],
+          },
+          created_at: '2026-10-01T00:00:00Z',
+          updated_at: '2026-10-01T00:00:00Z',
+        },
+      ]),
+      '/collectors': paginated([
+        {
+          id: 'c1',
+          organization_id: 'org-1',
+          name: 'collector-a',
+          status: 'active',
+          config: {},
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ]),
+    });
+
+    renderWithProviders(<DiscoveryPage />, { route: '/discovery' });
+
+    expect(await screen.findByText('Teilweise fehlgeschlagen')).toBeInTheDocument();
+    expect(screen.getByText('Anmeldung fehlgeschlagen')).toBeInTheDocument();
+    expect(screen.getByText(/10\.0\.0\.9/)).toBeInTheDocument();
+    expect(screen.getByText(/HTTP 401: Unauthorized/)).toBeInTheDocument();
+  });
 });
