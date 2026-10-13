@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reticora.io/schemas/rules.schema.json",
+  "title": "Reticora rule AST",
+  "description": "The JSON rule language of the metamodel (MET-45, CH18). Phase 1 covers required, pattern, range and enum, combined with all. backend/internal/rules evaluates rules bindingly, frontend/src/rules evaluates the same rules for previews; api/rules.conformance.json holds the cases both must pass. Semantics: a value is empty when it is absent, null, a string of only whitespace or an empty array. required fails for an empty value; every other rule passes an empty value. pattern, range and enum apply to each element of an array value. String lengths count Unicode code points. Patterns use the common subset of RE2 and ECMAScript (no lookaround, no backreferences) and match anywhere unless anchored with ^ and $. Violation codes: required, pattern, pattern.type, range.min, range.max, range.type, enum.",
+  "$ref": "#/$defs/rule",
+  "$defs": {
+    "rule": {
+      "oneOf": [
+        { "$ref": "#/$defs/all" },
+        { "$ref": "#/$defs/required" },
+        { "$ref": "#/$defs/pattern" },
+        { "$ref": "#/$defs/range" },
+        { "$ref": "#/$defs/enum" }
+      ]
+    },
+    "all": {
+      "description": "Every rule must hold; violations are reported in order.",
+      "type": "object",
+      "required": ["op", "rules"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "all" },
+        "rules": { "type": "array", "items": { "$ref": "#/$defs/rule" } }
+      }
+    },
+    "required": {
+      "description": "The value must not be empty (code required).",
+      "type": "object",
+      "required": ["op"],
+      "additionalProperties": false,
+      "properties": { "op": { "const": "required" } }
+    },
+    "pattern": {
+      "description": "A string value must match the regular expression (code pattern; a non-string value: pattern.type).",
+      "type": "object",
+      "required": ["op", "pattern"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "pattern" },
+        "pattern": { "type": "string", "minLength": 1 }
+      }
+    },
+    "range": {
+      "description": "The number (of: value) or the length of a string (of: length) lies within min and max, inclusive (codes range.min, range.max; a value of another kind: range.type).",
+      "type": "object",
+      "required": ["op"],
+      "additionalProperties": false,
+      "anyOf": [{ "required": ["min"] }, { "required": ["max"] }],
+      "properties": {
+        "op": { "const": "range" },
+        "of": { "enum": ["value", "length"], "default": "value" },
+        "min": { "type": "number" },
+        "max": { "type": "number" }
+      }
+    },
+    "enum": {
+      "description": "The value is one of the values; strings, numbers and booleans compare by type and value (code enum).",
+      "type": "object",
+      "required": ["op", "values"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "enum" },
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": ["string", "number", "boolean"] }
+        }
+      }
+    }
+  }
+}

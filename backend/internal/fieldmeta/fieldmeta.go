@@ -17,6 +17,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
 // Field types of MET-11. Phase 1: text, multiline, integer, decimal,
@@ -365,6 +367,15 @@ func compareNumeric(op string, actual, expected any) bool {
 	return false
 }
 
+// jsonNumber accepts numbers only: a numeric string is text (MET-11, the
+// rule AST of MET-45 agrees).
+func jsonNumber(v any) (float64, bool) {
+	if _, isString := v.(string); isString {
+		return 0, false
+	}
+	return toFloat(v)
+}
+
 func toFloat(v any) (float64, bool) {
 	switch t := v.(type) {
 	case float64:
@@ -405,38 +416,55 @@ func ValidateValue(def FieldDefinition, value any) error {
 	if err := checkType(def.DataType, value); err != nil {
 		return fmt.Errorf("field %s: %w", def.Name, err)
 	}
-	v := def.Validation
-	if v == nil {
-		if def.DataType == TypeEnum || IsMultiValue(def.DataType) {
-			return checkEnum(def, value)
-		}
-		return nil
-	}
-	if err := checkBounds(def, value, v); err != nil {
-		return err
-	}
-	if v.Pattern != "" {
-		str, ok := value.(string)
-		if ok {
-			matched, err := regexp.MatchString(v.Pattern, str)
-			if err != nil {
-				return fmt.Errorf("field %s: invalid validation pattern", def.Name)
-			}
-			if !matched {
-				return fmt.Errorf("field %s: value does not match pattern %q", def.Name, v.Pattern)
-			}
-		}
-	}
-	if len(v.Options) > 0 {
-		if err := checkOptions(def, value, v.Options); err != nil {
-			return err
-		}
-		return nil
-	}
-	if def.DataType == TypeEnum || IsMultiValue(def.DataType) {
-		return checkEnum(def, value)
+	rule := def.Rule(false)
+	for _, v := range rules.Evaluate(&rule, value, true) {
+		return fmt.Errorf("field %s: %s", def.Name, v.Message)
 	}
 	return nil
+}
+
+// Rule is the rule AST (MET-45, internal/rules) of a definition: required
+// (when withRequired), the allowed values (enum values or validation
+// options), the pattern and the numeric and length ranges. internal/rules
+// evaluates it bindingly; frontend/src/rules builds the same AST.
+func (def *FieldDefinition) Rule(withRequired bool) rules.Rule {
+	var list []rules.Rule
+	if withRequired && def.Required {
+		list = append(list, rules.Rule{Op: rules.OpRequired})
+	}
+	allowed := def.EnumValues
+	v := def.Validation
+	if v != nil && len(v.Options) > 0 {
+		allowed = v.Options
+	}
+	if len(allowed) > 0 {
+		values := make([]any, len(allowed))
+		for i, a := range allowed {
+			values[i] = a
+		}
+		list = append(list, rules.Rule{Op: rules.OpEnum, Values: values})
+	}
+	if v != nil {
+		if v.Pattern != "" {
+			list = append(list, rules.Rule{Op: rules.OpPattern, Pattern: v.Pattern})
+		}
+		if v.Min != nil || v.Max != nil {
+			list = append(list, rules.Rule{Op: rules.OpRange, Min: v.Min, Max: v.Max})
+		}
+		if v.MinLength != nil || v.MaxLength != nil {
+			r := rules.Rule{Op: rules.OpRange, Of: rules.OfLength}
+			if v.MinLength != nil {
+				f := float64(*v.MinLength)
+				r.Min = &f
+			}
+			if v.MaxLength != nil {
+				f := float64(*v.MaxLength)
+				r.Max = &f
+			}
+			list = append(list, r)
+		}
+	}
+	return rules.Rule{Op: rules.OpAll, Rules: list}
 }
 
 // uuidPattern is the textual form of a UUID (any version).
@@ -458,12 +486,12 @@ func checkType(dataType string, value any) error {
 			return fmt.Errorf("expected string")
 		}
 	case TypeInteger:
-		f, ok := toFloat(value)
+		f, ok := jsonNumber(value)
 		if !ok || f != float64(int64(f)) {
 			return fmt.Errorf("expected integer")
 		}
 	case TypeDecimal:
-		if _, ok := toFloat(value); !ok {
+		if _, ok := jsonNumber(value); !ok {
 			return fmt.Errorf("expected number")
 		}
 	case TypeBoolean:
@@ -550,60 +578,6 @@ func checkType(dataType string, value any) error {
 		}
 	default:
 		return fmt.Errorf("unknown field type %q", dataType)
-	}
-	return nil
-}
-
-func checkBounds(def FieldDefinition, value any, v *ValidationRules) error {
-	if v.Min != nil || v.Max != nil {
-		if f, ok := toFloat(value); ok {
-			if v.Min != nil && f < *v.Min {
-				return fmt.Errorf("field %s: value below minimum %v", def.Name, *v.Min)
-			}
-			if v.Max != nil && f > *v.Max {
-				return fmt.Errorf("field %s: value above maximum %v", def.Name, *v.Max)
-			}
-		}
-	}
-	if v.MinLength != nil || v.MaxLength != nil {
-		if str, ok := value.(string); ok {
-			if v.MinLength != nil && len(str) < *v.MinLength {
-				return fmt.Errorf("field %s: value shorter than %d characters", def.Name, *v.MinLength)
-			}
-			if v.MaxLength != nil && len(str) > *v.MaxLength {
-				return fmt.Errorf("field %s: value longer than %d characters", def.Name, *v.MaxLength)
-			}
-		}
-	}
-	return nil
-}
-
-func checkEnum(def FieldDefinition, value any) error {
-	if len(def.EnumValues) == 0 {
-		return nil
-	}
-	return checkOptions(def, value, def.EnumValues)
-}
-
-func checkOptions(def FieldDefinition, value any, options []string) error {
-	allowed := make(map[string]bool, len(options))
-	for _, o := range options {
-		allowed[o] = true
-	}
-	if IsMultiValue(def.DataType) {
-		items, ok := value.([]any)
-		if !ok {
-			return fmt.Errorf("field %s: expected array", def.Name)
-		}
-		for _, item := range items {
-			if !allowed[fmt.Sprintf("%v", item)] {
-				return fmt.Errorf("field %s: value %v not in allowed options", def.Name, item)
-			}
-		}
-		return nil
-	}
-	if !allowed[fmt.Sprintf("%v", value)] {
-		return fmt.Errorf("field %s: value %v not in allowed options", def.Name, value)
 	}
 	return nil
 }

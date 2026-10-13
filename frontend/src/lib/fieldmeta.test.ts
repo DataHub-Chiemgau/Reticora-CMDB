@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { evaluateField, validateValue, matchPredicate, type FieldDefinition } from './fieldmeta';
+import {
+  evaluateField,
+  validateValue,
+  matchPredicate,
+  ruleOf,
+  type FieldDefinition,
+} from './fieldmeta';
 
 describe('evaluateField', () => {
   const physicalServer: FieldDefinition = {
@@ -109,5 +115,41 @@ describe('validateValue', () => {
     };
     expect(validateValue(def, 8)).toBeNull();
     expect(validateValue(def, 128)).toMatch(/at most/);
+  });
+});
+
+// ruleOf builds the same AST as FieldDefinition.Rule in
+// backend/internal/fieldmeta (TestRuleOfDefinition there expects this JSON).
+describe('ruleOf', () => {
+  it('builds the shared rule AST of a definition', () => {
+    const def: FieldDefinition = {
+      name: 'port',
+      data_type: 'integer',
+      required: true,
+      enum_values: ['a'],
+      validation: { min: 1, max: 9, min_length: 2, pattern: '^x' },
+    };
+    expect(ruleOf(def, true)).toEqual({
+      op: 'all',
+      rules: [
+        { op: 'required' },
+        { op: 'enum', values: ['a'] },
+        { op: 'pattern', pattern: '^x' },
+        { op: 'range', min: 1, max: 9 },
+        { op: 'range', of: 'length', min: 2, max: undefined },
+      ],
+    });
+  });
+
+  it('rejects calendar days that do not exist and out-of-range IPv4', () => {
+    expect(validateValue({ name: 'd', data_type: 'date' }, '2026-02-30')).not.toBeNull();
+    expect(validateValue({ name: 'i', data_type: 'ip' }, '10.0.0.256')).not.toBeNull();
+    expect(validateValue({ name: 'i', data_type: 'ip' }, '2001:db8::1')).toBeNull();
+    expect(validateValue({ name: 'n', data_type: 'integer' }, '5')).not.toBeNull();
+  });
+
+  it('counts code points like the server', () => {
+    const def: FieldDefinition = { name: 'x', data_type: 'text', validation: { max_length: 1 } };
+    expect(validateValue(def, '😀')).toBeNull();
   });
 });

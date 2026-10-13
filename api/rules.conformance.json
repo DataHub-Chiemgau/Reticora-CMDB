@@ -1,0 +1,492 @@
+{
+  "description": "Conformance cases of the rule AST (MET-45, api/rules.schema.json). backend/internal/rules/rules_test.go and frontend/src/rules/rules.test.ts both run every case: rule must be valid and evaluate to exactly the listed violation codes; invalid_rules must be rejected. absent: true means the field has no value at all.",
+  "version": 1,
+  "cases": [
+    {
+      "name": "required: absent value",
+      "rule": {
+        "op": "required"
+      },
+      "absent": true,
+      "violations": ["required"]
+    },
+    {
+      "name": "required: null",
+      "rule": {
+        "op": "required"
+      },
+      "value": null,
+      "violations": ["required"]
+    },
+    {
+      "name": "required: whitespace string is empty",
+      "rule": {
+        "op": "required"
+      },
+      "value": "   ",
+      "violations": ["required"]
+    },
+    {
+      "name": "required: empty array",
+      "rule": {
+        "op": "required"
+      },
+      "value": [],
+      "violations": ["required"]
+    },
+    {
+      "name": "required: zero is a value",
+      "rule": {
+        "op": "required"
+      },
+      "value": 0,
+      "violations": []
+    },
+    {
+      "name": "required: false is a value",
+      "rule": {
+        "op": "required"
+      },
+      "value": false,
+      "violations": []
+    },
+    {
+      "name": "required: text",
+      "rule": {
+        "op": "required"
+      },
+      "value": "x",
+      "violations": []
+    },
+    {
+      "name": "pattern: match",
+      "rule": {
+        "op": "pattern",
+        "pattern": "^[a-z0-9-]+$"
+      },
+      "value": "edge-01",
+      "violations": []
+    },
+    {
+      "name": "pattern: no match",
+      "rule": {
+        "op": "pattern",
+        "pattern": "^[a-z0-9-]+$"
+      },
+      "value": "Edge 01",
+      "violations": ["pattern"]
+    },
+    {
+      "name": "pattern: unanchored matches anywhere",
+      "rule": {
+        "op": "pattern",
+        "pattern": "[0-9]"
+      },
+      "value": "sw7",
+      "violations": []
+    },
+    {
+      "name": "pattern: empty value passes",
+      "rule": {
+        "op": "pattern",
+        "pattern": "^x$"
+      },
+      "value": "",
+      "violations": []
+    },
+    {
+      "name": "pattern: absent value passes",
+      "rule": {
+        "op": "pattern",
+        "pattern": "^x$"
+      },
+      "absent": true,
+      "violations": []
+    },
+    {
+      "name": "pattern: number is not a string",
+      "rule": {
+        "op": "pattern",
+        "pattern": "^[0-9]+$"
+      },
+      "value": 42,
+      "violations": ["pattern.type"]
+    },
+    {
+      "name": "pattern: each array element",
+      "rule": {
+        "op": "pattern",
+        "pattern": "^v[0-9]+$"
+      },
+      "value": ["v1", "x2", "v3"],
+      "violations": ["pattern"]
+    },
+    {
+      "name": "pattern: unicode class",
+      "rule": {
+        "op": "pattern",
+        "pattern": "^\\p{L}+$"
+      },
+      "value": "Größe",
+      "violations": []
+    },
+    {
+      "name": "range: inside",
+      "rule": {
+        "op": "range",
+        "min": 1,
+        "max": 48
+      },
+      "value": 24,
+      "violations": []
+    },
+    {
+      "name": "range: bounds are inclusive",
+      "rule": {
+        "op": "range",
+        "min": 1,
+        "max": 48
+      },
+      "value": 48,
+      "violations": []
+    },
+    {
+      "name": "range: below min",
+      "rule": {
+        "op": "range",
+        "min": 1,
+        "max": 48
+      },
+      "value": 0,
+      "violations": ["range.min"]
+    },
+    {
+      "name": "range: above max",
+      "rule": {
+        "op": "range",
+        "min": 1,
+        "max": 48
+      },
+      "value": 48.5,
+      "violations": ["range.max"]
+    },
+    {
+      "name": "range: only max",
+      "rule": {
+        "op": "range",
+        "max": 10
+      },
+      "value": -1000,
+      "violations": []
+    },
+    {
+      "name": "range: numeric string is no number",
+      "rule": {
+        "op": "range",
+        "min": 1
+      },
+      "value": "5",
+      "violations": ["range.type"]
+    },
+    {
+      "name": "range: boolean is no number",
+      "rule": {
+        "op": "range",
+        "min": 0
+      },
+      "value": true,
+      "violations": ["range.type"]
+    },
+    {
+      "name": "range: each array element",
+      "rule": {
+        "op": "range",
+        "min": 0,
+        "max": 9
+      },
+      "value": [1, 12, 3],
+      "violations": ["range.max"]
+    },
+    {
+      "name": "length: code points, not bytes",
+      "rule": {
+        "op": "range",
+        "of": "length",
+        "max": 5
+      },
+      "value": "Größe",
+      "violations": []
+    },
+    {
+      "name": "length: astral character counts once",
+      "rule": {
+        "op": "range",
+        "of": "length",
+        "min": 2
+      },
+      "value": "😀",
+      "violations": ["range.min"]
+    },
+    {
+      "name": "length: too long",
+      "rule": {
+        "op": "range",
+        "of": "length",
+        "max": 3
+      },
+      "value": "abcd",
+      "violations": ["range.max"]
+    },
+    {
+      "name": "length: number has no length",
+      "rule": {
+        "op": "range",
+        "of": "length",
+        "max": 3
+      },
+      "value": 1234,
+      "violations": ["range.type"]
+    },
+    {
+      "name": "enum: member",
+      "rule": {
+        "op": "enum",
+        "values": ["low", "high"]
+      },
+      "value": "high",
+      "violations": []
+    },
+    {
+      "name": "enum: not a member",
+      "rule": {
+        "op": "enum",
+        "values": ["low", "high"]
+      },
+      "value": "medium",
+      "violations": ["enum"]
+    },
+    {
+      "name": "enum: case matters",
+      "rule": {
+        "op": "enum",
+        "values": ["low"]
+      },
+      "value": "Low",
+      "violations": ["enum"]
+    },
+    {
+      "name": "enum: number compares by value",
+      "rule": {
+        "op": "enum",
+        "values": [1, 2]
+      },
+      "value": 2.0,
+      "violations": []
+    },
+    {
+      "name": "enum: string is not a number",
+      "rule": {
+        "op": "enum",
+        "values": [1, 2]
+      },
+      "value": "1",
+      "violations": ["enum"]
+    },
+    {
+      "name": "enum: boolean member",
+      "rule": {
+        "op": "enum",
+        "values": [true]
+      },
+      "value": true,
+      "violations": []
+    },
+    {
+      "name": "enum: array elements",
+      "rule": {
+        "op": "enum",
+        "values": ["a", "b"]
+      },
+      "value": ["a", "c"],
+      "violations": ["enum"]
+    },
+    {
+      "name": "enum: empty value passes",
+      "rule": {
+        "op": "enum",
+        "values": ["a"]
+      },
+      "value": "",
+      "violations": []
+    },
+    {
+      "name": "all: violations in order",
+      "rule": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "range",
+            "of": "length",
+            "max": 3
+          },
+          {
+            "op": "pattern",
+            "pattern": "^[a-z]+$"
+          }
+        ]
+      },
+      "value": "AB12",
+      "violations": ["range.max", "pattern"]
+    },
+    {
+      "name": "all: required first, others skip empty",
+      "rule": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "required"
+          },
+          {
+            "op": "pattern",
+            "pattern": "^x$"
+          },
+          {
+            "op": "enum",
+            "values": ["x"]
+          }
+        ]
+      },
+      "absent": true,
+      "violations": ["required"]
+    },
+    {
+      "name": "all: nested",
+      "rule": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "all",
+            "rules": [
+              {
+                "op": "range",
+                "min": 10
+              }
+            ]
+          },
+          {
+            "op": "enum",
+            "values": [10, 20]
+          }
+        ]
+      },
+      "value": 15,
+      "violations": ["enum"]
+    },
+    {
+      "name": "all: empty list holds",
+      "rule": {
+        "op": "all",
+        "rules": []
+      },
+      "value": "anything",
+      "violations": []
+    }
+  ],
+  "invalid_rules": [
+    {
+      "name": "invalid: unknown op",
+      "rule": {
+        "op": "regex",
+        "pattern": "x"
+      }
+    },
+    {
+      "name": "invalid: pattern missing",
+      "rule": {
+        "op": "pattern"
+      }
+    },
+    {
+      "name": "invalid: pattern does not compile",
+      "rule": {
+        "op": "pattern",
+        "pattern": "[a-"
+      }
+    },
+    {
+      "name": "invalid: lookahead is outside the common subset",
+      "rule": {
+        "op": "pattern",
+        "pattern": "^(?=a)a$"
+      }
+    },
+    {
+      "name": "invalid: backreference is outside the common subset",
+      "rule": {
+        "op": "pattern",
+        "pattern": "^(a)\\1$"
+      }
+    },
+    {
+      "name": "invalid: range without bounds",
+      "rule": {
+        "op": "range"
+      }
+    },
+    {
+      "name": "invalid: range min above max",
+      "rule": {
+        "op": "range",
+        "min": 5,
+        "max": 1
+      }
+    },
+    {
+      "name": "invalid: range of unknown",
+      "rule": {
+        "op": "range",
+        "of": "size",
+        "max": 1
+      }
+    },
+    {
+      "name": "invalid: enum without values",
+      "rule": {
+        "op": "enum",
+        "values": []
+      }
+    },
+    {
+      "name": "invalid: enum with an object",
+      "rule": {
+        "op": "enum",
+        "values": [
+          {
+            "a": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid: nested invalid rule",
+      "rule": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "required"
+          },
+          {
+            "op": "range"
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid: unknown property",
+      "rule": {
+        "op": "required",
+        "message": "x"
+      }
+    }
+  ]
+}

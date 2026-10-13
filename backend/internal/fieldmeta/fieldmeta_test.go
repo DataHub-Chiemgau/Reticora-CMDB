@@ -1,6 +1,7 @@
 package fieldmeta
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -281,3 +282,31 @@ func TestValidateValuePerMET11Type(t *testing.T) {
 		}
 	}
 }
+
+// TestRuleOfDefinition: the rule AST of a definition (MET-45) is the one
+// frontend/src/lib/fieldmeta.ts builds (ruleOf test expects the same JSON).
+func TestRuleOfDefinition(t *testing.T) {
+	minLen := 2
+	def := FieldDefinition{Name: "port", DataType: TypeInteger, Required: true, EnumValues: []string{"a"},
+		Validation: &ValidationRules{Min: f64ptr(1), Max: f64ptr(9), MinLength: &minLen, Pattern: "^x"}}
+	raw, err := json.Marshal(def.Rule(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"op":"all","rules":[{"op":"required"},{"op":"enum","values":["a"]},{"op":"pattern","pattern":"^x"},` +
+		`{"op":"range","min":1,"max":9},{"op":"range","of":"length","min":2}]}`
+	if string(raw) != want {
+		t.Errorf("Rule = %s\nwant   %s", raw, want)
+	}
+	// Without required the empty value passes; lengths count code points.
+	if err := ValidateValue(FieldDefinition{Name: "x", DataType: TypeText,
+		Validation: &ValidationRules{MaxLength: intPtr(1)}}, "😀"); err != nil {
+		t.Errorf("one code point rejected: %v", err)
+	}
+	if err := ValidateValue(FieldDefinition{Name: "n", DataType: TypeInteger}, "5"); err == nil {
+		t.Error("numeric string accepted as integer")
+	}
+}
+
+func f64ptr(v float64) *float64 { return &v }
+func intPtr(v int) *int         { return &v }

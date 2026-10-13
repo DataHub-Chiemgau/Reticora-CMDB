@@ -371,6 +371,11 @@ deny access (fail-closed). The tenant API is read-only (`GET
 /api/v1/entitlements`); entitlements are written by the operator only,
 `POST /api/v1/admin/orgs/{id}/entitlements`, and every change is recorded
 in `operator_audit` with the previous and the new state (ENT-04, E-12).
+Attribute rules use the JSON rule AST of `api/rules.schema.json` (MET-45,
+phase 1: required, pattern, range, enum, combined with all).
+`backend/internal/rules` evaluates them bindingly, `frontend/src/rules` for
+form previews; both run the cases of `api/rules.conformance.json`.
+
 Users join an organization by invitation (`/api/v1/invitations`, TLC-03,
 `user:manage`): an invitation names the address, a role and its scope
 (org, client or site within the issuer's own scope), is valid for seven

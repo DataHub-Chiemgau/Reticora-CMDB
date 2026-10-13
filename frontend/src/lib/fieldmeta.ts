@@ -8,6 +8,8 @@
 // Data types of MET-11 (phase 1: text … uuid; phase 2: file, json,
 // reference); the former names textarea, multi_enum and the specific
 // reference types stay valid.
+import { evaluateRule, type Rule } from '../rules/rules';
+
 export type FieldDataType =
   | 'text'
   | 'multiline'
@@ -203,6 +205,26 @@ export function evaluateField(def: FieldDefinition, values: Record<string, unkno
 }
 
 /**
+ * ruleOf is the rule AST (MET-45, src/rules) of a definition, built exactly
+ * like FieldDefinition.Rule in backend/internal/fieldmeta: required (when
+ * withRequired), the allowed values, the pattern and the value and length
+ * ranges.
+ */
+export function ruleOf(def: FieldDefinition, withRequired: boolean): Rule {
+  const rules: Rule[] = [];
+  if (withRequired && def.required) rules.push({ op: 'required' });
+  const v = def.validation;
+  const allowed = v?.options && v.options.length > 0 ? v.options : def.enum_values;
+  if (allowed && allowed.length > 0) rules.push({ op: 'enum', values: allowed });
+  if (v?.pattern) rules.push({ op: 'pattern', pattern: v.pattern });
+  if (v?.min !== undefined || v?.max !== undefined)
+    rules.push({ op: 'range', min: v?.min, max: v?.max });
+  if (v?.min_length !== undefined || v?.max_length !== undefined)
+    rules.push({ op: 'range', of: 'length', min: v?.min_length, max: v?.max_length });
+  return { op: 'all', rules };
+}
+
+/**
  * validateValue checks a value against its definition. Returns an error
  * message or null. Empty values pass unless the field is required.
  */
@@ -217,31 +239,42 @@ export function validateValue(
   }
   const t = def.data_type;
   switch (t) {
-    case 'integer': {
-      const n = toNumber(value);
-      if (n === undefined || !Number.isInteger(n))
+    case 'integer':
+      if (typeof value !== 'number' || !Number.isInteger(value))
         return `${def.label || def.name} must be an integer`;
       break;
-    }
     case 'decimal':
     case 'number':
-      if (toNumber(value) === undefined) return `${def.label || def.name} must be a number`;
+      if (typeof value !== 'number' || Number.isNaN(value))
+        return `${def.label || def.name} must be a number`;
       break;
     case 'boolean':
       if (typeof value !== 'boolean') return `${def.label || def.name} must be a boolean`;
       break;
-    case 'date':
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value)))
+    case 'date': {
+      // A real calendar day, like Go's time.Parse("2006-01-02").
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
+      const d = m ? new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))) : null;
+      if (!m || !d || d.getUTCMonth() !== Number(m[2]) - 1 || d.getUTCDate() !== Number(m[3]))
         return `${def.label || def.name} must be YYYY-MM-DD`;
       break;
+    }
     case 'datetime':
       if (Number.isNaN(Date.parse(String(value))))
         return `${def.label || def.name} must be a datetime`;
       break;
     case 'ip': {
       const s = String(value);
-      const v4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(s);
-      const v6 = /^[0-9a-fA-F:]+$/.test(s) && s.includes(':');
+      const v4 =
+        /^(\d{1,3}\.){3}\d{1,3}$/.test(s) && s.split('.').every((octet) => Number(octet) <= 255);
+      let v6 = false;
+      if (!v4 && s.includes(':') && /^[0-9a-fA-F:.]+$/.test(s)) {
+        try {
+          v6 = new URL(`http://[${s}]/`).hostname !== '';
+        } catch {
+          v6 = false;
+        }
+      }
       if (!v4 && !v6) return `${def.label || def.name} must be an IP address`;
       break;
     }
@@ -274,37 +307,24 @@ export function validateValue(
         return `${def.label || def.name} must be a UUID`;
       break;
   }
-  const v = def.validation;
-  if (v) {
-    const n = toNumber(value);
-    if (v.min !== undefined && n !== undefined && n < v.min)
-      return `${def.label || def.name} must be at least ${v.min}`;
-    if (v.max !== undefined && n !== undefined && n > v.max)
-      return `${def.label || def.name} must be at most ${v.max}`;
-    if (typeof value === 'string') {
-      if (v.min_length !== undefined && value.length < v.min_length)
-        return `${def.label || def.name} must be at least ${v.min_length} characters`;
-      if (v.max_length !== undefined && value.length > v.max_length)
-        return `${def.label || def.name} must be at most ${v.max_length} characters`;
-      if (v.pattern) {
-        try {
-          if (!new RegExp(v.pattern).test(value))
-            return `${def.label || def.name} has an invalid format`;
-        } catch {
-          /* invalid pattern is a definition error, not a value error */
-        }
-      }
+  // Required, allowed values, pattern and ranges: the shared rule AST.
+  const label = def.label || def.name;
+  const rule = ruleOf(def, false);
+  const [violation] = evaluateRule(rule, value);
+  if (!violation) return null;
+  switch (violation.code) {
+    case 'enum': {
+      const bad = Array.isArray(value)
+        ? value.find((item) => evaluateRule(rule, [item]).length > 0)
+        : value;
+      return `${label}: ${String(bad)} is not an allowed value`;
     }
+    case 'pattern':
+      return `${label} has an invalid format`;
+    case 'range.min':
+    case 'range.max':
+      return `${label} ${violation.message}`;
+    default:
+      return `${label}: ${violation.message}`;
   }
-  const options = v?.options && v.options.length > 0 ? v.options : def.enum_values;
-  const multi = t === 'multi_enum' || t === 'multiselect';
-  if ((t === 'enum' || multi) && options && options.length > 0) {
-    if (multi && Array.isArray(value)) {
-      const bad = value.find((item) => !options.includes(String(item)));
-      if (bad !== undefined) return `${def.label || def.name}: ${String(bad)} is not allowed`;
-    } else if (!options.includes(String(value))) {
-      return `${def.label || def.name}: ${String(value)} is not an allowed value`;
-    }
-  }
-  return null;
 }
