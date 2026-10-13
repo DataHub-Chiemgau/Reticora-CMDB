@@ -4632,6 +4632,55 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/attribute-definitions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List attribute definitions (MET-10)
+     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `scope` (type, global).
+     */
+    get: operations['listAttributeDefinitions'];
+    put?: never;
+    /**
+     * Create an attribute definition (MET-10)
+     * @description Without `ci_type_id` the definition is global (every type of the organization). Creating, changing or deleting a type's definition regenerates the type's `attribute_schema` and raises its `schema_version`. Requires ci_attribute:manage.
+     */
+    post: operations['createAttributeDefinition'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/attribute-definitions/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Read an attribute definition */
+    get: operations['getAttributeDefinition'];
+    put?: never;
+    post?: never;
+    /** Delete an attribute definition */
+    delete: operations['deleteAttributeDefinition'];
+    options?: never;
+    head?: never;
+    /**
+     * Update an attribute definition
+     * @description Key, CI type and scope are immutable; system definitions are read-only (403).
+     */
+    patch: operations['updateAttributeDefinition'];
+    trace?: never;
+  };
   '/api/v1/ci-types': {
     parameters: {
       query?: never;
@@ -5416,6 +5465,105 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    AttributeDefinition: {
+      id: string;
+      /** @description Empty for system definitions. */
+      organization_id?: string;
+      /** @description Empty for global definitions. */
+      ci_type_id?: string;
+      /** @enum {string} */
+      scope: 'type' | 'global';
+      key: string;
+      display_name: components['schemas']['LocalizedText'];
+      description?: string;
+      data_type: string;
+      required: boolean;
+      default?: unknown;
+      enum_values?: string[];
+      multi_value: boolean;
+      searchable: boolean;
+      unique: boolean;
+      /** @enum {string} */
+      unique_scope: 'org' | 'client';
+      inheritable: boolean;
+      validation?: {
+        [key: string]: unknown;
+      };
+      conditional?: {
+        [key: string]: unknown;
+      };
+      reference_target?: string;
+      group?: string;
+      order: number;
+      unit?: string;
+      is_system: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    AttributeDefinitionListResponse: {
+      data: components['schemas']['AttributeDefinition'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    AttributeDefinitionCreate: {
+      /** @description Omitted for a global definition. */
+      ci_type_id?: string;
+      key: string;
+      display_name?: components['schemas']['LocalizedText'] | string;
+      description?: string;
+      /** @description Field type of the fieldmeta registry (text, integer, enum, ip, …). */
+      data_type: string;
+      required?: boolean;
+      /** @description Any JSON value valid for the data type. */
+      default?: unknown;
+      enum_values?: string[];
+      multi_value?: boolean;
+      searchable?: boolean;
+      unique?: boolean;
+      /** @enum {string} */
+      unique_scope?: 'org' | 'client';
+      inheritable?: boolean;
+      validation?: {
+        [key: string]: unknown;
+      };
+      conditional?: {
+        [key: string]: unknown;
+      };
+      reference_target?: string;
+      group?: string;
+      order?: number;
+      unit?: string;
+    };
+    AttributeDefinitionPatch: {
+      display_name?: components['schemas']['LocalizedText'] | string;
+      description?: string;
+      /** @description Field type of the fieldmeta registry (text, integer, enum, ip, …). */
+      data_type?: string;
+      required?: boolean;
+      /** @description Any JSON value valid for the data type. */
+      default?: unknown;
+      enum_values?: string[];
+      multi_value?: boolean;
+      searchable?: boolean;
+      unique?: boolean;
+      /** @enum {string} */
+      unique_scope?: 'org' | 'client';
+      inheritable?: boolean;
+      validation?: {
+        [key: string]: unknown;
+      };
+      conditional?: {
+        [key: string]: unknown;
+      };
+      reference_target?: string;
+      group?: string;
+      order?: number;
+      unit?: string;
+    };
     /** @description A label per language (MET-01). */
     LocalizedText: {
       de?: string;
@@ -5439,6 +5587,11 @@ export interface components {
       is_observable: boolean;
       /** @description Version of the generated attribute schema. */
       schema_version: number;
+      /** @description JSON Schema 2020-12 generated from the type's attribute definitions; read-only (DB-03). */
+      readonly attribute_schema?: {
+        [key: string]: unknown;
+      };
+      readonly required_fields?: string[];
       version: number;
       cloned_from_id?: string;
       template_key?: string;
@@ -20511,6 +20664,144 @@ export interface operations {
         };
         content?: never;
       };
+    };
+  };
+  listAttributeDefinitions: {
+    parameters: {
+      query?: {
+        ci_type_id?: string;
+        scope?: 'type' | 'global';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Attribute definitions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeDefinitionListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  createAttributeDefinition: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AttributeDefinitionCreate'];
+      };
+    };
+    responses: {
+      /** @description Attribute definition created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeDefinition'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getAttributeDefinition: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Attribute definition */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeDefinition'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  deleteAttributeDefinition: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Attribute definition deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  updateAttributeDefinition: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AttributeDefinitionPatch'];
+      };
+    };
+    responses: {
+      /** @description Attribute definition updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeDefinition'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listCiTypes: {

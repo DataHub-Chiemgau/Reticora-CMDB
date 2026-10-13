@@ -57,7 +57,7 @@ func TestGlobalRowsAreReadOnly(t *testing.T) {
 	for _, sql := range []string{
 		`INSERT INTO organization (id, name, slug) VALUES ('` + grOrgA + `', 'WP-024 A', 'wp024-a'), ('` + grOrgB + `', 'WP-024 B', 'wp024-b')`,
 		`INSERT INTO ci_type (id, organization_id, name) VALUES ('` + grGlobalType + `', NULL, 'wp024-global'), ('` + grTypeA + `', '` + grOrgA + `', 'wp024-a'), ('` + grTypeB + `', '` + grOrgB + `', 'wp024-b')`,
-		`INSERT INTO ci_type_attribute (ci_type_id, name, data_type) VALUES ('` + grGlobalType + `', 'global-attr', 'string'), ('` + grTypeB + `', 'b-attr', 'string')`,
+		`INSERT INTO attribute_definition (ci_type_id, key, data_type) VALUES ('` + grGlobalType + `', 'global-attr', 'string'), ('` + grTypeB + `', 'b-attr', 'string')`,
 		`INSERT INTO team (id, organization_id, name) VALUES ('` + grTeamA + `', '` + grOrgA + `', 'Team A'), ('` + grTeamB + `', '` + grOrgB + `', 'Team B')`,
 		`INSERT INTO custom_role (id, organization_id, name) VALUES ('` + grCustomA + `', '` + grOrgA + `', 'Custom A'), ('` + grCustomB + `', '` + grOrgB + `', 'Custom B')`,
 		`INSERT INTO app_user (id, organization_id, email, display_name) VALUES ('` + grUserA + `', '` + grOrgA + `', 'a@wp024.test', 'A'), ('` + grUserB + `', '` + grOrgB + `', 'b@wp024.test', 'B')`,
@@ -71,7 +71,7 @@ func TestGlobalRowsAreReadOnly(t *testing.T) {
 
 	// The trigger derives organization_id from the parent row.
 	var attrOrg *string
-	if err = admin.QueryRow(ctx, `SELECT organization_id::text FROM ci_type_attribute WHERE ci_type_id = $1`, grGlobalType).Scan(&attrOrg); err != nil || attrOrg != nil {
+	if err = admin.QueryRow(ctx, `SELECT organization_id::text FROM attribute_definition WHERE ci_type_id = $1`, grGlobalType).Scan(&attrOrg); err != nil || attrOrg != nil {
 		t.Fatalf("attribute of a global type must have organization_id NULL, got %v (%v)", attrOrg, err)
 	}
 	var memberOrg string
@@ -159,19 +159,19 @@ func TestGlobalRowsAreReadOnly(t *testing.T) {
 		rejected(t, `UPDATE permission SET description = description`)
 		rejected(t, `DELETE FROM permission WHERE key = 'ci:read'`)
 	})
-	t.Run("ci_type_attribute", func(t *testing.T) {
-		if n := count(t, `SELECT count(*) FROM ci_type_attribute WHERE ci_type_id = $1`, grGlobalType); n != 1 {
+	t.Run("attribute_definition", func(t *testing.T) {
+		if n := count(t, `SELECT count(*) FROM attribute_definition WHERE ci_type_id = $1`, grGlobalType); n != 1 {
 			t.Fatalf("attributes of global types must be readable, got %d", n)
 		}
-		if n := count(t, `SELECT count(*) FROM ci_type_attribute WHERE ci_type_id = $1`, grTypeB); n != 0 {
+		if n := count(t, `SELECT count(*) FROM attribute_definition WHERE ci_type_id = $1`, grTypeB); n != 0 {
 			t.Fatalf("attributes of another organization are visible: %d", n)
 		}
-		if n := affected(t, `UPDATE ci_type_attribute SET name = name WHERE ci_type_id = $1`, grGlobalType); n != 0 {
+		if n := affected(t, `UPDATE attribute_definition SET key = key WHERE ci_type_id = $1`, grGlobalType); n != 0 {
 			t.Fatalf("update reached %d attributes of a global type", n)
 		}
-		rejected(t, `INSERT INTO ci_type_attribute (ci_type_id, name, data_type) VALUES ($1, 'new', 'string')`, grGlobalType)
+		rejected(t, `INSERT INTO attribute_definition (ci_type_id, key, data_type) VALUES ($1, 'new', 'string')`, grGlobalType)
 		// organization_id cannot be chosen: the trigger takes it from the type.
-		if n := affected(t, `INSERT INTO ci_type_attribute (ci_type_id, name, data_type, organization_id) VALUES ($1, 'own', 'string', $2)`, grTypeA, grOrgB); n != 1 {
+		if n := affected(t, `INSERT INTO attribute_definition (ci_type_id, key, data_type, organization_id) VALUES ($1, 'own', 'string', $2)`, grTypeA, grOrgB); n != 1 {
 			t.Fatalf("own attribute insert affected %d rows", n)
 		}
 	})

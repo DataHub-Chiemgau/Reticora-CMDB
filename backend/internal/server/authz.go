@@ -84,8 +84,10 @@ var readPermissionFor = map[string]identity.Permission{
 	"ai":      identity.PermAIRead,
 	// Enterprise CMDB + asset/inventory extension (spec §21). Read side;
 	// writes are derived from the read→write suffix or overridden below.
-	"ci-types":              identity.PermCIRead,
-	"ci-fields":             identity.PermCIRead,
+	"ci-types":  identity.PermCIRead,
+	"ci-fields": identity.PermCIRead,
+	// attribute_definition (MET-10, API-05).
+	"attribute-definitions": identity.PermCIRead,
 	"field-definitions":     identity.PermCIRead,
 	"relationship-types":    identity.PermRelationshipRead,
 	"lifecycle-definitions": identity.PermAssetRead,
@@ -154,6 +156,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"ingest":   identity.PermDiscoveryIngest,
 	// Enterprise CMDB + asset/inventory extension write side (spec §21).
 	"ci-fields":             identity.PermCIAttributeManage,
+	"attribute-definitions": identity.PermCIAttributeManage,
 	"field-definitions":     identity.PermCIInstanceAttributeManage,
 	"relationship-types":    identity.PermRelationshipTypeManage,
 	"lifecycle-definitions": identity.PermLifecycleManage,

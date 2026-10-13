@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000104_ci_type_fields_seeds
+Stand: Migration 000105_attribute_definition
 
 ## Prüfung
 
@@ -171,6 +171,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `asset_location` | ja | ja | asset_location_isolation (ALL) |
 | `asset_movement` | ja | ja | asset_movement_isolation (ALL) |
 | `assignment` | ja | ja | assignment_tenant_isolation (ALL) |
+| `attribute_definition` | ja | ja | attribute_definition_isolation_delete (DELETE), attribute_definition_isolation_insert (INSERT), attribute_definition_isolation_select (SELECT), attribute_definition_isolation_update (UPDATE) |
 | `audit_log` | ja | ja | audit_isolation (ALL) |
 | `building` | ja | ja | building_isolation (ALL) |
 | `cable` | ja | ja | org_isolation (ALL) |
@@ -181,7 +182,6 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ci_instance_field_definition` | ja | ja | ci_instance_field_definition_isolation (ALL), ci_instance_field_definition_scoped_delete (DELETE), ci_instance_field_definition_scoped_update (UPDATE) |
 | `ci_relationship` | ja | ja | ci_relationship_isolation (ALL), ci_relationship_scoped_delete (DELETE), ci_relationship_scoped_update (UPDATE) |
 | `ci_type` | ja | ja | ci_type_isolation_delete (DELETE), ci_type_isolation_insert (INSERT), ci_type_isolation_select (SELECT), ci_type_isolation_update (UPDATE) |
-| `ci_type_attribute` | ja | ja | ci_type_attribute_isolation_delete (DELETE), ci_type_attribute_isolation_insert (INSERT), ci_type_attribute_isolation_select (SELECT), ci_type_attribute_isolation_update (UPDATE) |
 | `client` | ja | ja | client_isolation (ALL) |
 | `collector` | ja | ja | collector_isolation (ALL), collector_scoped_delete (DELETE), collector_scoped_update (UPDATE) |
 | `collector_enrollment_code` | ja | ja | collector_enrollment_code_isolation (ALL), collector_enrollment_code_system_select (SELECT) |

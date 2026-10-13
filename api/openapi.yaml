@@ -8238,6 +8238,123 @@ paths:
         '401':
           description: Unauthorized
 
+  /api/v1/attribute-definitions:
+    get:
+      operationId: listAttributeDefinitions
+      summary: List attribute definitions (MET-10)
+      description: >-
+        The single source of attribute validation and indexing (DB-03): the
+        organization's definitions and the read-only system definitions
+        (`is_system`). Filters: `ci_type_id`, `scope` (type, global).
+      parameters:
+        - { name: ci_type_id, in: query, schema: { type: string } }
+        - { name: scope, in: query, schema: { type: string, enum: [type, global] } }
+      responses:
+        '200':
+          description: Attribute definitions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeDefinitionListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createAttributeDefinition
+      summary: Create an attribute definition (MET-10)
+      description: >-
+        Without `ci_type_id` the definition is global (every type of the
+        organization). Creating, changing or deleting a type's definition
+        regenerates the type's `attribute_schema` and raises its
+        `schema_version`. Requires ci_attribute:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttributeDefinitionCreate'
+      responses:
+        '201':
+          description: Attribute definition created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeDefinition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/attribute-definitions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getAttributeDefinition
+      summary: Read an attribute definition
+      responses:
+        '200':
+          description: Attribute definition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeDefinition'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      operationId: updateAttributeDefinition
+      summary: Update an attribute definition
+      description: Key, CI type and scope are immutable; system definitions are read-only (403).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttributeDefinitionPatch'
+      responses:
+        '200':
+          description: Attribute definition updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeDefinition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteAttributeDefinition
+      summary: Delete an attribute definition
+      responses:
+        '204':
+          description: Attribute definition deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/ci-types:
     get:
       operationId: listCiTypes
@@ -9196,6 +9313,105 @@ components:
             $ref: '#/components/schemas/ProblemDetail'
 
   schemas:
+    AttributeDefinition:
+      type: object
+      required: [id, scope, key, display_name, data_type, required, multi_value, searchable, unique, unique_scope, inheritable, order, is_system, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string, description: Empty for system definitions. }
+        ci_type_id: { type: string, description: Empty for global definitions. }
+        scope: { type: string, enum: [type, global] }
+        key: { type: string }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string }
+        data_type: { type: string }
+        required: { type: boolean }
+        default: {}
+        enum_values:
+          type: array
+          items: { type: string }
+        multi_value: { type: boolean }
+        searchable: { type: boolean }
+        unique: { type: boolean }
+        unique_scope: { type: string, enum: [org, client] }
+        inheritable: { type: boolean }
+        validation: { type: object, additionalProperties: true }
+        conditional: { type: object, additionalProperties: true }
+        reference_target: { type: string }
+        group: { type: string }
+        order: { type: integer }
+        unit: { type: string }
+        is_system: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AttributeDefinitionListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttributeDefinition'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    AttributeDefinitionCreate:
+      type: object
+      required: [key, data_type]
+      additionalProperties: false
+      properties:
+        ci_type_id: { type: string, description: Omitted for a global definition. }
+        key: { type: string, minLength: 1, maxLength: 100 }
+        display_name:
+          oneOf:
+            - $ref: '#/components/schemas/LocalizedText'
+            - type: string
+        description: { type: string }
+        data_type: { type: string, description: 'Field type of the fieldmeta registry (text, integer, enum, ip, …).' }
+        required: { type: boolean }
+        default: { description: Any JSON value valid for the data type. }
+        enum_values:
+          type: array
+          items: { type: string }
+        multi_value: { type: boolean }
+        searchable: { type: boolean }
+        unique: { type: boolean }
+        unique_scope: { type: string, enum: [org, client] }
+        inheritable: { type: boolean }
+        validation: { type: object, additionalProperties: true }
+        conditional: { type: object, additionalProperties: true }
+        reference_target: { type: string }
+        group: { type: string }
+        order: { type: integer }
+        unit: { type: string }
+    AttributeDefinitionPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        display_name:
+          oneOf:
+            - $ref: '#/components/schemas/LocalizedText'
+            - type: string
+        description: { type: string }
+        data_type: { type: string, description: 'Field type of the fieldmeta registry (text, integer, enum, ip, …).' }
+        required: { type: boolean }
+        default: { description: Any JSON value valid for the data type. }
+        enum_values:
+          type: array
+          items: { type: string }
+        multi_value: { type: boolean }
+        searchable: { type: boolean }
+        unique: { type: boolean }
+        unique_scope: { type: string, enum: [org, client] }
+        inheritable: { type: boolean }
+        validation: { type: object, additionalProperties: true }
+        conditional: { type: object, additionalProperties: true }
+        reference_target: { type: string }
+        group: { type: string }
+        order: { type: integer }
+        unit: { type: string }
     LocalizedText:
       type: object
       description: A label per language (MET-01).
@@ -9228,6 +9444,15 @@ components:
           type: integer
           minimum: 1
           description: Version of the generated attribute schema.
+        attribute_schema:
+          type: object
+          readOnly: true
+          additionalProperties: true
+          description: JSON Schema 2020-12 generated from the type's attribute definitions; read-only (DB-03).
+        required_fields:
+          type: array
+          readOnly: true
+          items: { type: string }
         version: { type: integer }
         cloned_from_id: { type: string }
         template_key: { type: string }

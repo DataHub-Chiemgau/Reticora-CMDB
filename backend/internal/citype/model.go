@@ -33,6 +33,10 @@ type Type struct {
 	// IsObservable: the offline detector watches CIs of the type (LCY-05);
 	// true for physical, false for logical types unless set (MET-01).
 	IsObservable bool `json:"is_observable"`
+	// AttributeSchema (JSON Schema 2020-12) and RequiredFields are generated
+	// from the type's attribute definitions; they are read-only (DB-03).
+	AttributeSchema map[string]any `json:"attribute_schema,omitempty"`
+	RequiredFields  []string       `json:"required_fields"`
 	// SchemaVersion is the version of the generated attribute schema.
 	SchemaVersion            int            `json:"schema_version"`
 	Version                  int            `json:"version"`

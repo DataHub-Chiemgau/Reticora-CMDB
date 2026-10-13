@@ -45,7 +45,7 @@ const (
 )
 
 // ValidFieldTypes is the registry of supported field types. Legacy type names
-// from the original ci_type_attribute CHECK constraint (migration 000002) are
+// from the original data_type CHECK constraint (migration 000002) are
 // accepted as aliases so existing metadata keeps validating.
 var ValidFieldTypes = map[string]bool{
 	TypeText: true, TypeTextarea: true, TypeInteger: true, TypeDecimal: true,
@@ -66,7 +66,7 @@ var ReferenceTargets = map[string]bool{
 }
 
 // FieldDefinition is the canonical shape of a field definition across all
-// three attribute scopes. Storage rows (ci_type_attribute,
+// three attribute scopes. Storage rows (attribute_definition,
 // ci_instance_field_definition) map onto this structure.
 type FieldDefinition struct {
 	Name            string            `json:"name"`
