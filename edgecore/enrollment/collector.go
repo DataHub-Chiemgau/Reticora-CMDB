@@ -105,7 +105,7 @@ func (c *CollectorClient) Enroll(ctx context.Context, code, name, version string
 		ID          string      `json:"id"`
 		Certificate *issuedCert `json:"certificate"`
 	}
-	if perr := c.post(ctx, "/api/v1/collectors/enroll", "", map[string]string{
+	if perr := c.post(ctx, EnrollPath, "", map[string]string{
 		"code": code, "name": name, "version": version, "csr": csr,
 	}, &out); perr != nil {
 		return nil, perr

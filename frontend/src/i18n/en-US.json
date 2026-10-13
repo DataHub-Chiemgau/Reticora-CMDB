@@ -254,7 +254,8 @@
       "label": "Label (e.g. site)",
       "generate": "Generate code",
       "once": "This code is shown only once and expires. Run in the customer network:",
-      "expires": "Valid until"
+      "expires": "Valid until",
+      "after": "Then restart the collector and confirm the suggested scopes on this page."
     },
     "collectorStatus": {
       "pending": "Pending",
@@ -299,6 +300,13 @@
         "upload_failed": "Upload failed (buffered)",
         "unknown": "Unknown error"
       }
+    },
+    "suggestions": {
+      "title": "Suggested scopes",
+      "intro": "Your collectors reported these subnets after enrollment. Confirm them to have them discovered.",
+      "from": "reported by {{collector}}",
+      "accept": "Add as scope",
+      "dismiss": "Dismiss"
     }
   },
   "webhook": {

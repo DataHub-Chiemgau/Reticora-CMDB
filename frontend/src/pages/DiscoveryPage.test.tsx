@@ -121,4 +121,37 @@ describe('DiscoveryPage scopes (DIS-09)', () => {
     expect(screen.getByText(/10\.0\.0\.9/)).toBeInTheDocument();
     expect(screen.getByText(/HTTP 401: Unauthorized/)).toBeInTheDocument();
   });
+
+  it('confirms a suggested scope (INS-06)', async () => {
+    const fetchMock = stubFetchRoutes({
+      '/review-items?kind=scope_suggested': paginated([
+        {
+          id: 'r1',
+          kind: 'scope_suggested',
+          status: 'open',
+          payload: { collector_id: 'c1', collector_name: 'collector-a', cidr: '192.168.50.0/24' },
+          created_at: '2026-10-13T08:00:00Z',
+        },
+      ]),
+      '/review-items/r1/resolve': { id: 'r1', status: 'resolved' },
+      '/discovery-scopes': paginated([]),
+      '/collectors': paginated([]),
+    });
+
+    renderWithProviders(<DiscoveryPage />, { route: '/discovery' });
+
+    expect(await screen.findByText('192.168.50.0/24')).toBeInTheDocument();
+    expect(screen.getByText('gemeldet von collector-a')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Als Scope übernehmen' }));
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls as unknown as [
+        RequestInfo | URL,
+        RequestInit | undefined,
+      ][];
+      const resolve = calls.find(([url]) => String(url).includes('/review-items/r1/resolve'));
+      expect(resolve?.[1]?.method).toBe('POST');
+      expect(JSON.parse(String(resolve?.[1]?.body))).toEqual({ action: 'accept' });
+    });
+  });
 });

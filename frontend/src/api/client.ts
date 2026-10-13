@@ -453,6 +453,32 @@ export const collectorApi = {
   },
 };
 
+/** A subnet a collector reported after enrollment (scope_suggested, INS-06). */
+export interface ScopeSuggestion {
+  id: string;
+  kind: 'scope_suggested';
+  status: string;
+  payload: {
+    collector_id?: string;
+    collector_name?: string;
+    cidr?: string;
+    site_id?: string;
+  };
+  created_at: string;
+}
+
+export const scopeSuggestionApi = {
+  list(): Promise<PaginatedResponse<ScopeSuggestion>> {
+    return fetchAPI('/review-items?kind=scope_suggested&status=open&limit=100');
+  },
+  resolve(id: string, action: 'accept' | 'dismiss'): Promise<unknown> {
+    return fetchAPI(`/review-items/${id}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    });
+  },
+};
+
 export const discoveryScopeApi = {
   list(collectorId: string): Promise<PaginatedResponse<DiscoveryScope>> {
     return fetchAPI(`/discovery-scopes?collector_id=${encodeURIComponent(collectorId)}&limit=100`);

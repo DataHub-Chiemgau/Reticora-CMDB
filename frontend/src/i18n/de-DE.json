@@ -254,7 +254,8 @@
       "label": "Bezeichnung (z. B. Standort)",
       "generate": "Code erzeugen",
       "once": "Dieser Code wird nur einmal angezeigt und läuft ab. Führen Sie im Kundennetz aus:",
-      "expires": "Gültig bis"
+      "expires": "Gültig bis",
+      "after": "Starten Sie danach den Collector neu und bestätigen Sie die vorgeschlagenen Scopes auf dieser Seite."
     },
     "collectorStatus": {
       "pending": "Ausstehend",
@@ -299,6 +300,13 @@
         "upload_failed": "Upload fehlgeschlagen (gepuffert)",
         "unknown": "Unbekannter Fehler"
       }
+    },
+    "suggestions": {
+      "title": "Vorgeschlagene Scopes",
+      "intro": "Diese Subnetze haben Ihre Collectors nach dem Enrollment gemeldet. Bestätigen Sie sie, damit sie inventarisiert werden.",
+      "from": "gemeldet von {{collector}}",
+      "accept": "Als Scope übernehmen",
+      "dismiss": "Verwerfen"
     }
   },
   "webhook": {

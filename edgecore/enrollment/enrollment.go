@@ -1,93 +1,47 @@
-// Package enrollment implements the shared device enrollment protocol used by edge components.
+// Package enrollment implements the collector enrollment protocol of the
+// edge components (INS-06, COL-04): a one-time enrollment code is redeemed
+// at POST /api/v1/collectors/enroll with a CSR of a locally generated key;
+// the issued identity is stored in one credentials file.
 package enrollment
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
+	"net"
 	"net/http"
-	"strings"
-	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/transport"
 )
 
-// EnrollmentRequest describes the device identity sent to the control plane.
-type EnrollmentRequest struct {
-	DeviceID        string            `json:"deviceId"`
-	EnrollmentToken string            `json:"enrollmentToken,omitempty"`
-	Hostname        string            `json:"hostname,omitempty"`
-	Site            string            `json:"site,omitempty"`
-	Labels          map[string]string `json:"labels,omitempty"`
-	Capabilities    []string          `json:"capabilities,omitempty"`
-	CSRPEM          string            `json:"csrPem,omitempty"`
+// DefaultCredentialsPath is the one place a collector keeps its identity:
+// id, certificate, key, CA bundle and the server URL
+// (RETICORA_CREDENTIALS_PATH overrides it).
+const DefaultCredentialsPath = "/var/lib/reticora-collector/credentials.json"
+
+// EnrollPath is the enrollment endpoint of the collector API.
+const EnrollPath = "/api/v1/collectors/enroll"
+
+// HTTPSTransport is the transport of the enrollment request: plain HTTPS
+// against the server certificate (the collector has no client certificate
+// yet).
+type HTTPSTransport struct{ Client *http.Client }
+
+// Do implements transport.Transport.
+func (h HTTPSTransport) Do(req *http.Request) (*http.Response, error) { return h.client().Do(req) }
+
+// DialContext implements transport.Transport.
+func (h HTTPSTransport) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	var d net.Dialer
+	return d.DialContext(ctx, network, addr)
 }
 
-// EnrollmentResponse carries the issued identity material for an edge device.
-type EnrollmentResponse struct {
-	DeviceID             string            `json:"deviceId"`
-	ClientCertificatePEM string            `json:"clientCertificatePem,omitempty"`
-	ClientPrivateKeyPEM  string            `json:"clientPrivateKeyPem,omitempty"`
-	CertificateAuthority string            `json:"certificateAuthorityPem,omitempty"`
-	AssignedLabels       map[string]string `json:"assignedLabels,omitempty"`
-	ExpiresAt            time.Time         `json:"expiresAt,omitempty"`
+// HTTPClient implements transport.Transport.
+func (h HTTPSTransport) HTTPClient() *http.Client { return h.client() }
+
+func (h HTTPSTransport) client() *http.Client {
+	if h.Client != nil {
+		return h.Client
+	}
+	return http.DefaultClient
 }
 
-// Client enrolls an edge component with the Reticora control plane.
-type Client interface {
-	Enroll(ctx context.Context, req EnrollmentRequest) (*EnrollmentResponse, error)
-}
-
-// HTTPClient implements the enrollment protocol over HTTPS.
-type HTTPClient struct {
-	BaseURL   string
-	Endpoint  string
-	Transport transport.Transport
-}
-
-// Enroll posts an enrollment request to the configured server endpoint.
-func (c *HTTPClient) Enroll(ctx context.Context, req EnrollmentRequest) (*EnrollmentResponse, error) {
-	if c.Transport == nil {
-		return nil, fmt.Errorf("enrollment: transport is required")
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("enrollment: marshal request: %w", err)
-	}
-
-	endpoint := c.Endpoint
-	if endpoint == "" {
-		endpoint = "/api/v1/enrollment"
-	}
-
-	url := strings.TrimRight(c.BaseURL, "/") + endpoint
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("enrollment: build request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.Transport.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("enrollment: send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		payload, rerr := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		if rerr != nil {
-			return nil, fmt.Errorf("enrollment: unexpected status %s (error body unreadable: %v)", resp.Status, rerr)
-		}
-		return nil, fmt.Errorf("enrollment: unexpected status %s: %s", resp.Status, strings.TrimSpace(string(payload)))
-	}
-
-	var out EnrollmentResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("enrollment: decode response: %w", err)
-	}
-
-	return &out, nil
-}
+var _ transport.Transport = HTTPSTransport{}

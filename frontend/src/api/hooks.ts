@@ -4,6 +4,7 @@ import {
   relationshipApi,
   collectorApi,
   discoveryScopeApi,
+  scopeSuggestionApi,
   topologyApi,
   rackApi,
   assetApi,
@@ -158,6 +159,26 @@ export function useDiscoveryScopeMutations(collectorId: string) {
       onSuccess: invalidate,
     }),
   };
+}
+
+export function useScopeSuggestions() {
+  return useQuery({
+    queryKey: ['scope-suggestions'],
+    queryFn: () => scopeSuggestionApi.list(),
+  });
+}
+
+/** Accepting a suggestion creates the scope; dismissing keeps it away. */
+export function useResolveScopeSuggestion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'accept' | 'dismiss' }) =>
+      scopeSuggestionApi.resolve(id, action),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['scope-suggestions'] });
+      queryClient.invalidateQueries({ queryKey: ['discovery-scopes'] });
+    },
+  });
 }
 
 export function useTopology(params: TopologyParams = {}) {

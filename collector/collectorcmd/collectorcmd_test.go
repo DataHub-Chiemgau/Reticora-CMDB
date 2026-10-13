@@ -1,6 +1,7 @@
 package collectorcmd
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/ecdsa"
@@ -736,5 +737,96 @@ func TestLocalSubnetsForScopeSuggestions(t *testing.T) {
 	}
 	if got := strings.Join(localSubnets(addrs), ","); got != "192.168.10.0/24,172.16.4.0/22" {
 		t.Errorf("local subnets = %s", got)
+	}
+}
+
+// fakeEnrollServer redeems one code like POST /api/v1/collectors/enroll:
+// it signs the CSR with a test CA (CN = collector id, O = organization).
+func fakeEnrollServer(t *testing.T, code, orgID, collectorID string) *httptest.Server {
+	t.Helper()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test collector CA"}, IsCA: true,
+		BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	caDER, _ := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	caCert, _ := x509.ParseCertificate(caDER)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Code, Name, Version, CSR string }
+		if r.URL.Path != "/api/v1/collectors/enroll" || json.NewDecoder(r.Body).Decode(&req) != nil || req.Code != code {
+			http.Error(w, "invalid or expired enrollment code", http.StatusUnauthorized)
+			return
+		}
+		block, _ := pem.Decode([]byte(req.CSR))
+		csr, perr := x509.ParseCertificateRequest(block.Bytes)
+		if perr != nil {
+			http.Error(w, "bad csr", http.StatusBadRequest)
+			return
+		}
+		tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: collectorID, Organization: []string{orgID}},
+			NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(90 * 24 * time.Hour), ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
+		der, _ := x509.CreateCertificate(rand.Reader, tmpl, caCert, csr.PublicKey, caKey)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": collectorID, "certificate": map[string]any{
+			"certificate_pem": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+			"ca_bundle_pem":   string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})),
+		}})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestEnrollCommand covers WP-156 (INS-06): `enroll --server --code`
+// stores identity and server URL in the one credentials file; the
+// collector then starts without further settings.
+func TestEnrollCommand(t *testing.T) {
+	orgID, colID := "6f0b6f0e-0000-4000-8000-0000000000aa", "6f0b6f0e-0000-4000-8000-0000000000bb"
+	srv := fakeEnrollServer(t, "ABCD-EFGH", orgID, colID)
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("RETICORA_CREDENTIALS_PATH", path)
+	t.Setenv("RETICORA_SERVER_URL", "")
+	t.Setenv("RETICORA_ORGANIZATION_ID", "")
+	t.Setenv("RETICORA_COLLECTOR_ID", "")
+
+	var stdout, stderr bytes.Buffer
+	handled, code := runCommand(context.Background(), []string{"enroll", "--server", srv.URL + "/", "--code", "ABCD-EFGH", "--name", "site-a"}, &stdout, &stderr)
+	if !handled || code != 0 {
+		t.Fatalf("enroll exit %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), colID) || !strings.Contains(stdout.String(), path) {
+		t.Errorf("output = %s", stdout.String())
+	}
+	cfg := loadCollectorConfig()
+	if cfg.ServerURL != srv.URL || cfg.CollectorID != colID || cfg.OrganizationID != orgID || cfg.CredentialsPath != path {
+		t.Errorf("config after enroll: server %q collector %q org %q path %q", cfg.ServerURL, cfg.CollectorID, cfg.OrganizationID, cfg.CredentialsPath)
+	}
+	certPEM, keyPEM, _, err := loadTLSMaterial(context.Background(), cfg)
+	if err != nil || len(certPEM) == 0 || len(keyPEM) == 0 {
+		t.Errorf("TLS material from the credentials file: %v", err)
+	}
+	// The environment still wins.
+	t.Setenv("RETICORA_SERVER_URL", "https://other.example.com")
+	if cfg = loadCollectorConfig(); cfg.ServerURL != "https://other.example.com" {
+		t.Errorf("RETICORA_SERVER_URL ignored: %s", cfg.ServerURL)
+	}
+
+	// Argument and code errors.
+	for _, args := range [][]string{{"enroll", "--code", "X"}, {"enroll", "--server", srv.URL}, {"enroll", "--bogus"}, {"frobnicate"}} {
+		stderr.Reset()
+		if _, code = runCommand(context.Background(), args, &stdout, &stderr); code != 2 {
+			t.Errorf("%v: exit %d", args, code)
+		}
+	}
+	stderr.Reset()
+	if _, code = runCommand(context.Background(), []string{"enroll", "--server", srv.URL, "--code", "WRONG", "--credentials", filepath.Join(t.TempDir(), "c.json")}, &stdout, &stderr); code != 1 ||
+		!strings.Contains(stderr.String(), "invalid or expired") {
+		t.Errorf("wrong code: exit %d, %s", code, stderr.String())
+	}
+	stdout.Reset()
+	if handled, code = runCommand(context.Background(), []string{"version"}, &stdout, &stderr); !handled || code != 0 || !strings.Contains(stdout.String(), "reticora-collector") {
+		t.Errorf("version: %v %d %q", handled, code, stdout.String())
+	}
+	if handled, _ = runCommand(context.Background(), nil, &stdout, &stderr); handled {
+		t.Error("no arguments starts the collector")
 	}
 }

@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCollectors, useDiscoveryScopeMutations, useDiscoveryScopes } from '../api/hooks';
+import {
+  useCollectors,
+  useDiscoveryScopeMutations,
+  useDiscoveryScopes,
+  useResolveScopeSuggestion,
+  useScopeSuggestions,
+} from '../api/hooks';
 import type { Collector, DiscoveryScopeHealth, DiscoveryScopeKind } from '../api/client';
 import { fetchAPI } from '../api/client';
 import { Badge } from '../components/ui/Badge';
@@ -41,7 +47,7 @@ function EnrollWizard({ open, onClose }: { open: boolean; onClose: () => void })
   });
 
   const enrollCommand = code
-    ? `reticora-collector enroll --server <cloud-url> --code ${code.code}`
+    ? `reticora-collector enroll --server ${window.location.origin} --code ${code.code}`
     : '';
 
   const copy = async () => {
@@ -105,6 +111,7 @@ function EnrollWizard({ open, onClose }: { open: boolean; onClose: () => void })
             {t('discovery.enroll.expires', 'Gültig bis')}:{' '}
             {new Date(code.expires_at).toLocaleString()}
           </p>
+          <p className="text-sm text-gray-600 dark:text-gray-300">{t('discovery.enroll.after')}</p>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={copy}>
               {copied ? t('common.copied', 'Kopiert!') : t('common.copy', 'Kopieren')}
@@ -192,6 +199,56 @@ function ScopeErrors({ health }: { health?: DiscoveryScopeHealth }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * ScopeSuggestions lists the subnets the collectors reported after their
+ * enrollment; confirming one creates the scope (INS-06, DIS-09).
+ */
+function ScopeSuggestions() {
+  const { t } = useTranslation();
+  const { data } = useScopeSuggestions();
+  const resolve = useResolveScopeSuggestion();
+  const items = data?.data ?? [];
+  if (items.length === 0) return null;
+  return (
+    <Card title={t('discovery.suggestions.title')}>
+      <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">
+        {t('discovery.suggestions.intro')}
+      </p>
+      <ul className="space-y-2 text-sm">
+        {items.map((item) => (
+          <li key={item.id} className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-gray-900 dark:text-gray-100">
+              <span className="font-mono">{item.payload.cidr}</span>{' '}
+              <span className="text-gray-500 dark:text-gray-400">
+                {t('discovery.suggestions.from', {
+                  collector: item.payload.collector_name ?? item.payload.collector_id ?? '',
+                })}
+              </span>
+            </span>
+            <span className="flex gap-2">
+              <Button
+                size="sm"
+                disabled={resolve.isPending}
+                onClick={() => resolve.mutate({ id: item.id, action: 'accept' })}
+              >
+                {t('discovery.suggestions.accept')}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={resolve.isPending}
+                onClick={() => resolve.mutate({ id: item.id, action: 'dismiss' })}
+              >
+                {t('discovery.suggestions.dismiss')}
+              </Button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 
@@ -360,6 +417,8 @@ export function DiscoveryPage() {
       </div>
 
       <EnrollWizard open={enrollOpen} onClose={() => setEnrollOpen(false)} />
+
+      <ScopeSuggestions />
 
       {isLoading ? (
         <p className="text-sm text-gray-600 dark:text-gray-300">{t('app.loading')}</p>

@@ -134,9 +134,8 @@ var pluginRegistry = map[string]plugins.Plugin{
 // It is the entry point shared by collector/cmd/collector and the backend
 // module's compatibility shim.
 func Main() {
-	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Println(updateArtifact, Version)
-		return
+	if handled, code := runCommand(context.Background(), os.Args[1:], os.Stdout, os.Stderr); handled {
+		os.Exit(code)
 	}
 	collectorCfg := loadCollectorConfig()
 	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
@@ -1263,7 +1262,7 @@ func loadCollectorConfig() collectorConfig {
 		updateURL = ""
 	}
 
-	return collectorConfig{
+	cfg := collectorConfig{
 		ServerURL:          envOrDefault("RETICORA_SERVER_URL", "http://localhost:8080"),
 		OrganizationID:     os.Getenv("RETICORA_ORGANIZATION_ID"),
 		CollectorID:        os.Getenv("RETICORA_COLLECTOR_ID"),
@@ -1291,12 +1290,18 @@ func loadCollectorConfig() collectorConfig {
 		AgentRelayAddr:     envOrDefault("RETICORA_AGENT_RELAY_ADDR", ":9443"),
 		AgentRelayCertFile: os.Getenv("RETICORA_AGENT_RELAY_TLS_CERT_FILE"),
 		AgentRelayKeyFile:  os.Getenv("RETICORA_AGENT_RELAY_TLS_KEY_FILE"),
-		CredentialsPath:    envOrDefault("RETICORA_CREDENTIALS_PATH", "/var/lib/reticora-collector/credentials.json"),
+		CredentialsPath:    credentialsPath(),
 		SweepConcurrency:   sweepConcurrencyFromEnv(os.Getenv("RETICORA_SWEEP_CONCURRENCY")),
 		UpdateURL:          updateURL,
 		UpdateChannel:      channel,
 		UpdateInterval:     durationEnvOrDefault("RETICORA_UPDATE_INTERVAL", 6*time.Hour),
 	}
+	// After `enroll` the credentials file holds server URL and identity
+	// (INS-06); the environment still wins.
+	if err := applyEnrolledIdentity(context.Background(), &cfg, strings.TrimSpace(os.Getenv("RETICORA_SERVER_URL")) != ""); err != nil && !errors.Is(err, keystore.ErrNotFound) {
+		slog.Warn("enrolled identity not applied", "path", cfg.CredentialsPath, "error", err)
+	}
+	return cfg
 }
 
 // newSweep builds the sweep plugin: ICMP, ARP and the DIS-01 ports with the
