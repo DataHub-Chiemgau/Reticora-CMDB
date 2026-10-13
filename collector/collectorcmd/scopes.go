@@ -204,7 +204,8 @@ type discoveryPass struct {
 // scope list, otherwise the configured subnets.
 func discoveryPasses(cfg *collectorConfig) []discoveryPass {
 	scopes, intervals, known := collectorScopes.get()
-	if !known {
+	// The simulated fleet ignores the server's scopes (SIM-02).
+	if !known || cfg.Simulate {
 		sweep := cfg.SweepInterval
 		if sweep <= 0 {
 			sweep = defaultSweepInterval

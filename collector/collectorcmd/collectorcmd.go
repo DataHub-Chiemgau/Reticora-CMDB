@@ -34,6 +34,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/nas"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/power"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/redfish"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/simulate"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/snmp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/ssh"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/sweep"
@@ -51,6 +52,9 @@ type collectorConfig struct {
 	CollectorID       string
 	ScanSubnets       []string
 	Protocols         []string
+	// Simulate replaces discovery by the deterministic 30-device fleet of
+	// plugins/simulate (RETICORA_SIMULATE, SIM-02); refused in production.
+	Simulate bool
 	// DiscoveryInterval is the poll interval of the configured subnets
 	// (RETICORA_DISCOVERY_INTERVAL, default 15 min, at least 5 min);
 	// SweepInterval their sweep interval (default 24 h, DIS-10). Scopes
@@ -150,6 +154,10 @@ func Main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
 
 	slog.Info("starting collector", "environment", environment, "version", Version)
+	if err := applySimulation(&collectorCfg, environment); err != nil {
+		slog.Error("collector simulation refused", "event", "collector.simulate.refused", "error", err)
+		os.Exit(1)
+	}
 
 	// A pending update is confirmed by the first successful heartbeat;
 	// after repeated failed starts it is rolled back (COL-06).
@@ -1268,6 +1276,7 @@ func loadCollectorConfig() collectorConfig {
 		CollectorID:        os.Getenv("RETICORA_COLLECTOR_ID"),
 		ScanSubnets:        csvEnvOrDefault("RETICORA_SCAN_SUBNETS", []string{"127.0.0.1/32"}),
 		Protocols:          csvEnvOrDefault("RETICORA_DISCOVERY_PROTOCOLS", []string{"sweep", "snmp", "ssh"}),
+		Simulate:           boolEnv("RETICORA_SIMULATE"),
 		DiscoveryInterval:  max(durationEnvOrDefault("RETICORA_DISCOVERY_INTERVAL", defaultPollInterval), minPollInterval),
 		SweepInterval:      max(durationEnvOrDefault("RETICORA_SWEEP_INTERVAL", defaultSweepInterval), minPollInterval),
 		SpoolFlushInterval: durationEnvOrDefault("RETICORA_SPOOL_FLUSH_INTERVAL", defaultSpoolFlush),
@@ -1302,6 +1311,34 @@ func loadCollectorConfig() collectorConfig {
 		slog.Warn("enrolled identity not applied", "path", cfg.CredentialsPath, "error", err)
 	}
 	return cfg
+}
+
+// errSimulateInProduction: RETICORA_SIMULATE is refused in production.
+var errSimulateInProduction = errors.New("RETICORA_SIMULATE cannot be enabled in production")
+
+// applySimulation switches the collector to the simulated fleet when
+// RETICORA_SIMULATE is set (SIM-02): the only protocol is "simulate" on the
+// fleet's subnet, and the records take the real upload and ingest path.
+// Production refuses it.
+func applySimulation(cfg *collectorConfig, environment string) error {
+	if !cfg.Simulate {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(environment), "production") {
+		return errSimulateInProduction
+	}
+	pluginRegistry["simulate"] = simulate.New()
+	cfg.Protocols = []string{"simulate"}
+	cfg.ScanSubnets = []string{simulate.Subnet}
+	slog.Warn("collector runs the simulated device fleet", "event", "collector.simulate.enabled",
+		"devices", simulate.DeviceCount, "subnet", simulate.Subnet)
+	return nil
+}
+
+// boolEnv reports whether the variable is set to a true value.
+func boolEnv(key string) bool {
+	v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(key)))
+	return err == nil && v
 }
 
 // newSweep builds the sweep plugin: ICMP, ARP and the DIS-01 ports with the
