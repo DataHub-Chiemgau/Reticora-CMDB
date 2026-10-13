@@ -122,6 +122,25 @@ func (s *Service) ClaimJob(ctx context.Context, orgID, id string) (*Job, error) 
 	return s.repo.ClaimID(ctx, orgID, id, s.now())
 }
 
+// Due lists the due queued jobs of the given kinds in every organization
+// (workers that serve several organizations claim them with ClaimJob).
+func (s *Service) Due(ctx context.Context, limit int, kinds ...string) ([]Job, error) {
+	all, err := s.repo.QueuedDue(ctx, s.now(), limit)
+	if err != nil {
+		return nil, err
+	}
+	out := all[:0]
+	for i := range all {
+		for _, k := range kinds {
+			if all[i].Kind == k {
+				out = append(out, all[i])
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 // Progress records the progress (0–100) of a running job.
 func (s *Service) Progress(ctx context.Context, orgID, id string, percent int) error {
 	percent = max(0, min(100, percent))

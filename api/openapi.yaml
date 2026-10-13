@@ -637,6 +637,13 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: >-
+            Another active CI holds the value of a unique attribute (MET-15);
+            `violations` names the attributes.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -703,10 +710,16 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Fields of the request changed since the If-Match version
+          description: >-
+            Fields of the request changed since the If-Match version, or
+            another active CI holds the value of a unique attribute (MET-15,
+            `violations` names the attributes)
           content:
             application/problem+json:
-              schema: { $ref: '#/components/schemas/VersionConflictProblem' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/VersionConflictProblem' }
+                  - { $ref: '#/components/schemas/ProblemDetail' }
         '412':
           description: If-Match missing although required, or not a version of the CI
           content:
@@ -8613,7 +8626,12 @@ paths:
     patch:
       operationId: updateAttributeDefinition
       summary: Update an attribute definition
-      description: Key, CI type and scope are immutable; system definitions are read-only (403).
+      description: >-
+        Key, CI type and scope are immutable; system definitions are
+        read-only (403). Changing `searchable`, `unique` or `unique_scope`
+        queues an `attribute.index` job that builds the index concurrently
+        (DB-04); making an attribute unique while active CIs share a value is
+        409.
       requestBody:
         required: true
         content:
@@ -8635,6 +8653,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     delete:
@@ -9698,9 +9718,21 @@ components:
           type: array
           items: { type: string }
         multi_value: { type: boolean }
-        searchable: { type: boolean }
-        unique: { type: boolean }
-        unique_scope: { type: string, enum: [org, client] }
+        searchable:
+          type: boolean
+          description: >-
+            Indexed for search: an `attribute.index` job builds
+            `idx_attr_<id>` concurrently (DB-04).
+        unique:
+          type: boolean
+          description: >-
+            The value is unique among the active CIs (MET-15), enforced by the
+            server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do
+            not count.
+        unique_scope:
+          type: string
+          enum: [org, client]
+          description: Unique per organization or per client (CIs without a client count as one client).
         inheritable: { type: boolean }
         validation: { type: object, additionalProperties: true }
         conditional: { type: object, additionalProperties: true }

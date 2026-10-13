@@ -86,6 +86,41 @@ func ciSummary(item *Item) string {
 	return strings.Join(out, " ")
 }
 
+// UniqueChecker finds the unique attributes (MET-15) whose value in attrs
+// another active CI in the attribute's scope holds. The unique index of the
+// attribute (DB-04) guards concurrent writes the check cannot see.
+type UniqueChecker interface {
+	UniqueConflicts(ctx context.Context, orgID, ciTypeID, clientID, ciID string, attrs map[string]any) ([]string, error)
+}
+
+// UniqueError reports attributes whose value another CI holds (409).
+type UniqueError struct {
+	Fields []string
+	// index is the violated attribute index, when the database reported it.
+	index string
+}
+
+func (e *UniqueError) Error() string {
+	return "another CI holds the value of the unique attribute(s): " + strings.Join(e.Fields, ", ")
+}
+
+// checkUnique enforces the unique attributes server-side (MET-15) when the
+// repository can check them.
+func (s *Service) checkUnique(ctx context.Context, orgID, ciTypeID, clientID, ciID string, attrs map[string]any) error {
+	checker, ok := s.repo.(UniqueChecker)
+	if !ok {
+		return nil
+	}
+	taken, err := checker.UniqueConflicts(ctx, orgID, ciTypeID, clientID, ciID, attrs)
+	if err != nil {
+		return err
+	}
+	if len(taken) > 0 {
+		return &UniqueError{Fields: taken}
+	}
+	return nil
+}
+
 // Service coordinates CI persistence with mutation semantics. Audit-log and
 // ci_change rows are written by the repository inside the same transaction as
 // the mutation, so history can never diverge from the stored data.
@@ -161,6 +196,9 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 	if item.AssetID != "" && item.LocationID != "" {
 		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: locationOwnedByAsset}}}
 	}
+	if err := s.checkUnique(ctx, item.OrganizationID, item.CITypeID, item.ClientID, "", item.Attributes); err != nil {
+		return err
+	}
 	return s.repo.Create(ctx, item)
 }
 
@@ -175,7 +213,9 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 	if err := validateTypedColumns(typed); err != nil {
 		return nil, err
 	}
-	needsBefore := s.fields != nil || (req.Manual != nil && (req.LocationID != nil || req.SerialNumber != nil))
+	_, unique := s.repo.(UniqueChecker)
+	unique = unique && (req.Attributes != nil || req.ClientID != nil)
+	needsBefore := unique || s.fields != nil || (req.Manual != nil && (req.LocationID != nil || req.SerialNumber != nil))
 	if needsBefore {
 		before, err := s.repo.GetByID(ctx, orgID, id)
 		if err != nil {
@@ -187,6 +227,15 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 		}
 		if err := checkAssetOwnedFields(before, &req); err != nil {
 			return nil, err
+		}
+		if unique {
+			clientID := before.ClientID
+			if req.ClientID != nil {
+				clientID = *req.ClientID
+			}
+			if err := s.checkUnique(ctx, orgID, before.CITypeID, clientID, id, MergePatch(before.Attributes, req.Attributes)); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return s.repo.Update(ctx, orgID, id, req)

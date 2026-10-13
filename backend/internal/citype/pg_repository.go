@@ -50,6 +50,15 @@ const typeSelectColumns = `
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
 	pool *pgxpool.Pool
+	// indexes starts the index job of a definition whose searchable or
+	// unique flag changed (DB-04); optional.
+	indexes IndexScheduler
+}
+
+// WithIndexScheduler starts the attribute index jobs through s.
+func (r *PGRepository) WithIndexScheduler(s IndexScheduler) *PGRepository {
+	r.indexes = s
+	return r
 }
 
 // NewPGRepository creates a new PostgreSQL-backed CI type repository.

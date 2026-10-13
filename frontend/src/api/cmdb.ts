@@ -121,6 +121,23 @@ export const ciTypeApi = {
   },
 };
 
+// Index flags of an attribute definition (MET-15, DB-04): a change queues
+// the attribute.index job that builds idx_attr_<id> or idx_attr_<id>_u.
+export interface AttributeIndexFlags {
+  searchable: boolean;
+  unique: boolean;
+  unique_scope: 'org' | 'client';
+}
+
+export const attributeDefinitionApi = {
+  setIndexFlags(id: string, flags: AttributeIndexFlags): Promise<unknown> {
+    return fetchAPI(`/attribute-definitions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(flags),
+    });
+  },
+};
+
 // ─── Global + instance field definitions (§2) ────────────────────────────────
 
 export const ciFieldApi = {

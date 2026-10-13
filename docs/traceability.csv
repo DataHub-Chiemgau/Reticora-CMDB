@@ -325,3 +325,5 @@ API-05;[B];B;backend/internal/notify/notifier_test.go;WP-139
 NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/notify/events_integration_test.go;WP-140
 OPS-05;[B];B;backend/internal/notify/events_integration_test.go;WP-140
 SEC-06;[B];B;backend/internal/platform/crypto/crypto_test.go;WP-141
+DB-04;nicht geliefert;B;backend/internal/citype/ddl_job_integration_test.go;WP-142
+MET-15;B/G1;B;backend/internal/citype/ddl_job_integration_test.go;WP-142

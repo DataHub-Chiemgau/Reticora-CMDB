@@ -4840,7 +4840,7 @@ export interface paths {
     head?: never;
     /**
      * Update an attribute definition
-     * @description Key, CI type and scope are immutable; system definitions are read-only (403).
+     * @description Key, CI type and scope are immutable; system definitions are read-only (403). Changing `searchable`, `unique` or `unique_scope` queues an `attribute.index` job that builds the index concurrently (DB-04); making an attribute unique while active CIs share a value is 409.
      */
     patch: operations['updateAttributeDefinition'];
     trace?: never;
@@ -5667,9 +5667,14 @@ export interface components {
       default?: unknown;
       enum_values?: string[];
       multi_value: boolean;
+      /** @description Indexed for search: an `attribute.index` job builds `idx_attr_<id>` concurrently (DB-04). */
       searchable: boolean;
+      /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. */
       unique: boolean;
-      /** @enum {string} */
+      /**
+       * @description Unique per organization or per client (CIs without a client count as one client).
+       * @enum {string}
+       */
       unique_scope: 'org' | 'client';
       inheritable: boolean;
       validation?: {
@@ -10067,6 +10072,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Another active CI holds the value of a unique attribute (MET-15); `violations` names the attributes. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -10153,13 +10167,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description Fields of the request changed since the If-Match version */
+      /** @description Fields of the request changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15, `violations` names the attributes) */
       409: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/problem+json': components['schemas']['VersionConflictProblem'];
+          'application/problem+json':
+            | components['schemas']['VersionConflictProblem']
+            | components['schemas']['ProblemDetail'];
         };
       };
       /** @description If-Match missing although required, or not a version of the CI */
@@ -21524,6 +21540,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       503: components['responses']['ServiceUnavailable'];
     };
   };

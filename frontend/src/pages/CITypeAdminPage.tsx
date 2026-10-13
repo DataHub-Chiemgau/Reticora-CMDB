@@ -10,7 +10,7 @@ import {
   useUpsertCITypeField,
   useDeleteCITypeField,
 } from '../api/cmdbHooks';
-import { localizedText, type CIType } from '../api/cmdb';
+import { localizedText, type AttributeIndexFlags, type CIType } from '../api/cmdb';
 import type { FieldDefinition } from '../lib/fieldmeta';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -47,6 +47,10 @@ const FIELD_TYPES = [
   'contract_ref',
 ];
 
+// A new field is neither indexed nor unique until the editor says so
+// (MET-15); the flags start the index job (DB-04).
+const NO_INDEX: AttributeIndexFlags = { searchable: false, unique: false, unique_scope: 'org' };
+
 export function CITypeAdminPage() {
   const { t, i18n } = useTranslation();
   const label = (ty: CIType) => localizedText(ty.display_name, i18n.language) || ty.name;
@@ -58,6 +62,7 @@ export function CITypeAdminPage() {
   const [newTypeName, setNewTypeName] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [fieldDraft, setFieldDraft] = useState<FieldDefinition>({ name: '', data_type: 'text' });
+  const [indexDraft, setIndexDraft] = useState<AttributeIndexFlags>(NO_INDEX);
 
   const { data, isLoading, error, refetch } = useCITypes({
     search,
@@ -189,6 +194,7 @@ export function CITypeAdminPage() {
               }
               onAddField={() => {
                 setFieldDraft({ name: '', data_type: 'text', ui_group: 'general' });
+                setIndexDraft(NO_INDEX);
                 setShowFieldEditor(true);
               }}
               onDeleteField={(name) => deleteField.mutate({ typeId: selected.id, name })}
@@ -277,7 +283,11 @@ export function CITypeAdminPage() {
             e.preventDefault();
             if (!selected) return;
             upsertField.mutate(
-              { typeId: selected.id, field: fieldDraft },
+              {
+                typeId: selected.id,
+                field: fieldDraft,
+                index: indexDraft.searchable || indexDraft.unique ? indexDraft : undefined,
+              },
               { onSuccess: () => setShowFieldEditor(false) },
             );
           }}
@@ -332,6 +342,38 @@ export function CITypeAdminPage() {
             />
             {t('citypes.required', 'Pflichtfeld')}
           </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={indexDraft.searchable}
+              onChange={(e) => setIndexDraft({ ...indexDraft, searchable: e.target.checked })}
+            />
+            {t('citypes.searchable', 'Durchsuchbar (indiziert)')}
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={indexDraft.unique}
+              onChange={(e) => setIndexDraft({ ...indexDraft, unique: e.target.checked })}
+            />
+            {t('citypes.unique', 'Eindeutig')}
+          </label>
+          {indexDraft.unique ? (
+            <Select
+              label={t('citypes.uniqueScope', 'Eindeutig je')}
+              options={[
+                { value: 'org', label: t('citypes.uniqueScopeOrg', 'Organisation') },
+                { value: 'client', label: t('citypes.uniqueScopeClient', 'Kunde') },
+              ]}
+              value={indexDraft.unique_scope}
+              onChange={(e) =>
+                setIndexDraft({
+                  ...indexDraft,
+                  unique_scope: e.target.value as AttributeIndexFlags['unique_scope'],
+                })
+              }
+            />
+          ) : null}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setShowFieldEditor(false)}>
               {t('common.cancel', 'Abbrechen')}

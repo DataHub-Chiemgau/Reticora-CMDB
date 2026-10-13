@@ -245,7 +245,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, er
 
 // Create inserts a new CI.
 func (r *PGRepository) Create(ctx context.Context, item *Item) error {
-	return database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if item.Attributes == nil {
 			item.Attributes = make(map[string]any)
 		}
@@ -333,6 +333,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 		}
 		return r.recordEvent(ctx, tx, events.CICreated, item, nil)
 	})
+	return r.uniqueField(ctx, item.OrganizationID, err)
 }
 
 // Update modifies an existing CI.
@@ -480,7 +481,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		return nil
 	})
 
-	return item, err
+	return item, r.uniqueField(ctx, orgID, err)
 }
 
 // instanceFieldNames lists the names of the instance attributes of a CI.
@@ -538,7 +539,9 @@ func (r *PGRepository) Restore(ctx context.Context, orgID, id string) (*Item, er
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "UPDATE ci SET deleted_at = NULL, updated_at = NOW() WHERE id = $1 AND organization_id = $2 AND deleted_at IS NOT NULL", id, orgID)
 		if err != nil {
-			return fmt.Errorf("restore ci: %w", err)
+			// A reactivated CI may hold a value of a unique attribute that
+			// another CI took in the meantime (MET-15).
+			return locationError(fmt.Errorf("restore ci: %w", err))
 		}
 		if tag.RowsAffected() == 0 {
 			return fmt.Errorf("not found")
@@ -555,7 +558,7 @@ func (r *PGRepository) Restore(ctx context.Context, orgID, id string) (*Item, er
 		}
 		return r.recordEvent(ctx, tx, events.CIRestored, restored, nil)
 	})
-	return restored, err
+	return restored, r.uniqueField(ctx, orgID, err)
 }
 
 // ListChanges returns paginated change history for a CI.
@@ -838,6 +841,9 @@ func locationError(err error) error {
 	if !errors.As(err, &pgErr) {
 		return err
 	}
+	if pgErr.Code == "23505" && strings.HasPrefix(pgErr.ConstraintName, "idx_attr_") {
+		return uniqueIndexError(pgErr)
+	}
 	switch pgErr.ConstraintName {
 	case "ci_location_id_fkey":
 		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: "location not found"}}}
@@ -1072,4 +1078,69 @@ func requestedFields(req *UpdateRequest) []string {
 		}
 	}
 	return out
+}
+
+// uniqueIndexError turns a violated unique attribute index (DB-04) into
+// the conflict of the attribute: a concurrent write took the value after
+// the service's check. PostgreSQL leaves out the key of a table with row
+// level security, so uniqueField names the attribute by the index.
+func uniqueIndexError(pgErr *pgconn.PgError) error {
+	return &UniqueError{Fields: []string{"attributes"}, index: pgErr.ConstraintName}
+}
+
+// uniqueField names the attribute of a violated attribute index: the
+// index name carries the definition id (idx_attr_<32 hex>_u, E-04).
+func (r *PGRepository) uniqueField(ctx context.Context, orgID string, err error) error {
+	var ue *UniqueError
+	if !errors.As(err, &ue) || ue.index == "" {
+		return err
+	}
+	hexID := strings.TrimSuffix(strings.TrimPrefix(ue.index, "idx_attr_"), "_u")
+	if len(hexID) != 32 {
+		return err
+	}
+	defID := hexID[0:8] + "-" + hexID[8:12] + "-" + hexID[12:16] + "-" + hexID[16:20] + "-" + hexID[20:]
+	var key string
+	if lerr := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT key FROM attribute_definition WHERE id = $1`, defID).Scan(&key)
+	}); lerr == nil {
+		ue.Fields = []string{key}
+	}
+	return err
+}
+
+// UniqueConflicts implements UniqueChecker: the unique attributes of the
+// CI type and the global ones whose value another active CI of the
+// organization (scope org) or of the same client (scope client) holds.
+// Soft-deleted CIs do not count (MET-15).
+func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, clientID, ciID string, attrs map[string]any) ([]string, error) {
+	if len(attrs) == 0 {
+		return nil, nil
+	}
+	raw, err := json.Marshal(attrs)
+	if err != nil {
+		return nil, fmt.Errorf("encode attributes: %w", err)
+	}
+	var keys []string
+	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, qerr := tx.Query(ctx, `
+			SELECT d.key FROM attribute_definition d
+			WHERE d.is_unique AND (d.ci_type_id = $2::uuid OR d.ci_type_id IS NULL)
+			  AND (d.organization_id = $1::uuid OR d.organization_id IS NULL)
+			  AND $5::jsonb ->> d.key IS NOT NULL
+			  AND EXISTS (
+				SELECT 1 FROM ci c
+				WHERE c.organization_id = $1::uuid AND c.deleted_at IS NULL
+				  AND ($4::uuid IS NULL OR c.id <> $4::uuid)
+				  AND (d.ci_type_id IS NULL OR c.ci_type_id = d.ci_type_id)
+				  AND (d.unique_scope = 'org' OR c.client_id IS NOT DISTINCT FROM $3::uuid)
+				  AND c.attributes ->> d.key = $5::jsonb ->> d.key)
+			ORDER BY d.key`, orgID, ciTypeID, nilIfEmpty(clientID), nilIfEmpty(ciID), raw)
+		if qerr != nil {
+			return fmt.Errorf("check unique attributes: %w", qerr)
+		}
+		keys, qerr = pgx.CollectRows(rows, pgx.RowTo[string])
+		return qerr
+	})
+	return keys, err
 }

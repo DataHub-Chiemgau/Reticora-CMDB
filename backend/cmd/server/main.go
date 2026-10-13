@@ -21,6 +21,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -435,6 +436,12 @@ func main() {
 			webhook.NewPGRepository(auditPool)).Schedules()...)
 		systemJobs = append(systemJobs, jobs.NewRetention(auditPool, jobs.RetentionFromDays(cfg.RetentionAuditYears,
 			cfg.RetentionHistoryDays, cfg.RetentionSoftDeleteDays, cfg.RetentionReviewItemDays)).Schedules()...)
+		// Attribute indexes of searchable/unique attributes (DB-04, MET-15).
+		if typeRepo, ok := repos.CIType.(*citype.PGRepository); ok && repos.Jobs != nil {
+			ddlJob := citype.NewDDLJob(auditPool, jobs.NewService(repos.Jobs))
+			typeRepo.WithIndexScheduler(ddlJob)
+			systemJobs = append(systemJobs, ddlJob.Schedule())
+		}
 	}
 	for i := range systemJobs {
 		if err = systemScheduler.Register(&systemJobs[i]); err != nil {
