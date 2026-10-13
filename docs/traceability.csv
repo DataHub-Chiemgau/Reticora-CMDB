@@ -388,3 +388,5 @@ BLK-01;[B];C;backend/internal/ci/bulk_test.go;WP-181
 API-09;[B];C;backend/internal/jobs/handler_test.go;WP-182
 JOB-03;[B];C;backend/internal/jobs/handler_test.go;WP-182
 JOB-04;[B];C;backend/internal/reviews/merge_job_integration_test.go;WP-183
+GQL-01;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-184
+SEC-10;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-184

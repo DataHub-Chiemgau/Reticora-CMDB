@@ -146,9 +146,9 @@ func replaceAll(s, old, new string) string {
 // (GQL-04): the route needs an authenticated principal but no blanket
 // permission; each resolver checks its own read permission.
 func TestGraphQLRouteRequiresAuthenticationOnly(t *testing.T) {
-	required, access := PermissionForRoute(http.MethodPost, "/api/v1/graphql")
+	required, access := PermissionForRoute(http.MethodPost, "/bff/graphql")
 	if access != routeProtected || required != "" {
-		t.Fatalf("POST /api/v1/graphql: permission %q access %v, want authenticated-only", required, access)
+		t.Fatalf("POST /bff/graphql: permission %q access %v, want authenticated-only", required, access)
 	}
 }
 
@@ -164,7 +164,7 @@ const routePermissionsFile = "testdata/route_permissions.txt"
 func TestEveryOperationRequiresItsExpectedPermission(t *testing.T) {
 	var b strings.Builder
 	for _, op := range routeTable(t, testRouter(t)) {
-		if !strings.HasPrefix(op.Path, "/api/") && !strings.HasPrefix(op.Path, "/scim/") {
+		if !strings.HasPrefix(op.Path, "/api/") && !strings.HasPrefix(op.Path, "/scim/") && !strings.HasPrefix(op.Path, "/bff/") {
 			continue
 		}
 		required, access := PermissionForRoute(op.Method, op.Path)

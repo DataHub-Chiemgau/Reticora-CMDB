@@ -356,8 +356,12 @@ export class ApiError extends Error {
 }
 
 export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
+  return fetchURL<T>(`${API_BASE}${path}`, options);
+}
+
+async function fetchURL<T>(url: string, options?: RequestInit): Promise<T> {
   const request = () =>
-    fetch(`${API_BASE}${path}`, {
+    fetch(url, {
       ...options,
       headers: mergeHeaders(options),
     });
@@ -385,6 +389,29 @@ export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<
     return undefined as T;
   }
   return res.json();
+}
+
+/** BFF_PATH is the GraphQL backend-for-frontend of the UI (GQL-01). */
+export const BFF_PATH = '/bff/graphql';
+
+interface GraphQLResult<T> {
+  data?: T | null;
+  errors?: { message: string; extensions?: { code?: string } }[];
+}
+
+/**
+ * bffQuery runs a read query against the GraphQL BFF with the session of
+ * the UI; mutations go through REST (GQL-02). GraphQL errors are thrown.
+ */
+export async function bffQuery<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+  const result = await fetchURL<GraphQLResult<T>>(BFF_PATH, {
+    method: 'POST',
+    body: JSON.stringify({ query, variables }),
+  });
+  if (result.errors && result.errors.length > 0) {
+    throw new Error(result.errors.map((error) => error.message).join('; '));
+  }
+  return result.data as T;
 }
 
 function buildQuery(params: object) {

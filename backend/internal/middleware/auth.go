@@ -299,6 +299,10 @@ func requiresAuth(r *http.Request) bool {
 	if strings.HasPrefix(r.URL.Path, "/scim/") {
 		return true
 	}
+	// The GraphQL BFF of the web UI requires a session (GQL-01).
+	if strings.HasPrefix(r.URL.Path, "/bff/") {
+		return true
+	}
 	if !strings.HasPrefix(r.URL.Path, "/api/") {
 		return false
 	}

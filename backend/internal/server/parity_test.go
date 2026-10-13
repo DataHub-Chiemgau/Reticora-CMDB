@@ -101,6 +101,10 @@ func TestRoutesAndSpecificationAreInParity(t *testing.T) {
 			if op.Path == "/metrics" {
 				continue
 			}
+			// The GraphQL BFF is not publicly documented (GQL-01).
+			if strings.HasPrefix(op.Path, "/bff/") {
+				continue
+			}
 			filtered = append(filtered, op)
 		}
 

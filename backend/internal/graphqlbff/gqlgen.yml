@@ -1,0 +1,24 @@
+# gqlgen configuration of the GraphQL BFF (GQL-01). Regenerate with
+#   cd backend/internal/graphqlbff && go run github.com/99designs/gqlgen generate
+schema:
+  - schema.graphqls
+exec:
+  filename: generated/generated.go
+  package: generated
+model:
+  filename: generated/models_gen.go
+  package: generated
+skip_mod_tidy: true
+omit_getters: true
+models:
+  ID:
+    model:
+      - github.com/99designs/gqlgen/graphql.ID
+  Int:
+    model:
+      - github.com/99designs/gqlgen/graphql.Int
+      - github.com/99designs/gqlgen/graphql.Int64
+  CI:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci.Item
+  Relationship:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship.Relationship

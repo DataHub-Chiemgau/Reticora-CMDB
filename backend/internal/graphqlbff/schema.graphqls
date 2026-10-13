@@ -1,0 +1,79 @@
+# GraphQL BFF of the web UI (GQL-01): served by gqlgen under /bff/graphql,
+# session JWT only, not part of the public REST contract. Read only:
+# mutations go through REST (GQL-02). Every field checks its read
+# permission and entitlement and reads through the tenant-scoped
+# repositories (GQL-04).
+
+scalar Map
+
+type Query {
+  "CIs of the organization in the caller's scope; at most 100 per page."
+  cis(first: Int, after: String, filter: CIFilter): CIConnection!
+  "One CI; null when it is not visible."
+  ci(id: ID!): CI
+  "Relationships of a CI."
+  relationships(ciId: ID!, first: Int): [Relationship!]!
+  "The signed-in user."
+  currentUser: User!
+}
+
+input CIFilter {
+  status: String
+  typeId: ID
+  clientId: ID
+  siteId: ID
+  search: String
+}
+
+type CIConnection {
+  edges: [CIEdge!]!
+  nodes: [CI!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type CIEdge {
+  cursor: String!
+  node: CI!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+}
+
+type CI {
+  id: ID!
+  name: String!
+  status: String!
+  ciTypeId: ID!
+  clientId: ID
+  siteId: ID
+  locationId: ID
+  hostname: String
+  fqdn: String
+  serialNumber: String
+  manufacturer: String
+  model: String
+  managementIp: String
+  lifecycleState: String
+  health: String
+  version: Int!
+  createdAt: String!
+  updatedAt: String!
+  attributes: Map
+}
+
+type Relationship {
+  id: ID!
+  sourceCiId: ID!
+  targetCiId: ID!
+  relType: String!
+  source: String
+}
+
+type User {
+  id: ID!
+  organizationId: ID!
+  clientId: ID
+}

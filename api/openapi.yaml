@@ -81,8 +81,6 @@ tags:
     description: DSGVO/GDPR data lifecycle (retention policy, erasure workflow)
   - name: Monitoring
     description: Metrics and alert rules
-  - name: GraphQL
-    description: GraphQL backend-for-frontend endpoint
   - name: IGA
     description: Identity governance, active provisioning and access reviews
   - name: SCIM
@@ -4497,29 +4495,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-
-  /api/v1/graphql:
-    post:
-      operationId: executeGraphQL
-      tags: [GraphQL]
-      summary: Execute a GraphQL query
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GraphQLRequest'
-      responses:
-        '200':
-          description: GraphQL response envelope
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GraphQLResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
 
   /api/v1/review-items:
     get:
@@ -15868,36 +15843,6 @@ components:
         enabled:
           type: boolean
           default: true
-
-    GraphQLRequest:
-      type: object
-      required: [query]
-      properties:
-        query:
-          type: string
-        variables:
-          type: object
-          additionalProperties: true
-        operationName:
-          type: string
-
-    GraphQLError:
-      type: object
-      required: [message]
-      properties:
-        message:
-          type: string
-
-    GraphQLResponse:
-      type: object
-      properties:
-        data:
-          type: object
-          additionalProperties: true
-        errors:
-          type: array
-          items:
-            $ref: '#/components/schemas/GraphQLError'
 
     DiscoveryJobCreateRequest:
       type: object

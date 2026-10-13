@@ -2468,23 +2468,6 @@ export interface paths {
     patch: operations['updateAlert'];
     trace?: never;
   };
-  '/api/v1/graphql': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Execute a GraphQL query */
-    post: operations['executeGraphQL'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/v1/review-items': {
     parameters: {
       query?: never;
@@ -9340,22 +9323,6 @@ export interface components {
       /** @default true */
       enabled: boolean;
     };
-    GraphQLRequest: {
-      query: string;
-      variables?: {
-        [key: string]: unknown;
-      };
-      operationName?: string;
-    };
-    GraphQLError: {
-      message: string;
-    };
-    GraphQLResponse: {
-      data?: {
-        [key: string]: unknown;
-      };
-      errors?: components['schemas']['GraphQLError'][];
-    };
     DiscoveryJobCreateRequest: {
       collector_id: string;
       /**
@@ -16066,32 +16033,6 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-    };
-  };
-  executeGraphQL: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['GraphQLRequest'];
-      };
-    };
-    responses: {
-      /** @description GraphQL response envelope */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['GraphQLResponse'];
-        };
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
     };
   };
   listReviewItems: {

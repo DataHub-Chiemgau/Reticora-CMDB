@@ -325,6 +325,12 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 		return identity.PermIGAWrite, routeProtected
 	}
 
+	// The GraphQL BFF only reads; each resolver checks its own read
+	// permission and entitlement (GQL-04), so the route requires an
+	// authenticated principal only; the handler admits sessions only.
+	if strings.HasPrefix(path, "/bff/") {
+		return "", routeProtected
+	}
 	if !strings.HasPrefix(path, "/api/") {
 		return "", routePublic
 	}
@@ -389,11 +395,6 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 	case "notifications":
 		// The notification center serves the signed-in user's own inbox
 		// and preferences (NTF-04).
-		return "", routeProtected
-	case "graphql":
-		// The GraphQL BFF only reads; each resolver checks its own read
-		// permission and entitlement (GQL-04), so the route requires an
-		// authenticated principal only.
 		return "", routeProtected
 	}
 
@@ -481,7 +482,7 @@ var auditExemptions = map[string]string{
 	"POST /api/v1/audit/verify": "reads the chain",
 	"POST /api/v1/search/query": "a search, reads",
 	"POST /api/v1/ai/ask":       "a question to the assistant, reads",
-	"POST /api/v1/graphql":      "the BFF refuses mutations, reads",
+	"POST /bff/graphql":         "the BFF refuses mutations, reads",
 	// Marking one's own notifications read changes no shared state.
 	"POST /api/v1/notifications/{id}/read": "marks the own inbox read",
 	"POST /api/v1/notifications/read-all":  "marks the own inbox read",

@@ -128,3 +128,39 @@ describe('ciApi.update optimistic concurrency', () => {
     expect((fetchMock.mock.calls[2]?.[1]?.headers as Headers).has('If-Match')).toBe(false);
   });
 });
+
+describe('bffQuery', () => {
+  it('posts the query to /bff/graphql with the session and returns data', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ data: { currentUser: { id: 'user-1' } } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await importClientWithSession('bff-token');
+    const { bffQuery } = await import('./client');
+
+    await expect(bffQuery('{ currentUser { id } }')).resolves.toEqual({
+      currentUser: { id: 'user-1' },
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/bff/graphql');
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('POST');
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get('Authorization')).toBe(['Bearer', 'bff-token'].join(' '));
+  });
+
+  it('throws the GraphQL errors', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          data: null,
+          errors: [{ message: 'missing required permission: ci:read' }],
+        }),
+      ),
+    );
+    await importClientWithSession();
+    const { bffQuery } = await import('./client');
+
+    await expect(bffQuery('{ cis { totalCount } }')).rejects.toThrow('ci:read');
+  });
+});
