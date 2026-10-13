@@ -77,6 +77,8 @@ spec:
             # callout; configured by the nats-edge component.
             - name: RETICORA_WORKER_NATS_EDGE_ENABLED
               value: "true"
+            - name: RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED
+              value: "true"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session

@@ -328,6 +328,7 @@ services:
       # Collector NATS endpoint (COL-08): its PKI and the authorization
       # callout (worker nats_edge); host names of its server certificate.
       RETICORA_WORKER_NATS_EDGE_ENABLED: "${RETICORA_WORKER_NATS_EDGE_ENABLED:-true}"
+      RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED: "${RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED:-true}"
       RETICORA_PKI_DIR: "/pki"
       RETICORA_NATS_EDGE_URL: "tls://nats-edge:4222"
       RETICORA_NATS_EDGE_HOSTS: "${RETICORA_TLS_DOMAIN:-localhost},nats-edge,localhost"

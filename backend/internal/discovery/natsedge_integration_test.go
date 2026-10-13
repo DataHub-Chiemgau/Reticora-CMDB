@@ -92,6 +92,25 @@ func TestCollectorNATSEndpointAuthorization(t *testing.T) {
 		t.Fatalf("user claims %+v", uc)
 	}
 
+	// Credential bundles (WP-147, COL-02): only for the collector's own
+	// certificate; the delivery is audited.
+	gate := discovery.NewBundleGate(f.App, e.ca)
+	tctx, target, err := gate.VerifyBundleTarget(bg, f.OrgA, colID, certPEM)
+	if err != nil || target.CollectorID != colID || target.PublicKey == nil {
+		t.Fatalf("bundle target = %+v, %v", target, err)
+	}
+	if _, _, err = gate.VerifyBundleTarget(bg, f.OrgA, "00000000-0000-4000-8000-000000000000", certPEM); err == nil {
+		t.Fatal("a certificate obtained a bundle for another collector")
+	}
+	if err = gate.BundleDelivered(tctx, target, []string{"cred-1"}); err != nil {
+		t.Fatal(err)
+	}
+	var audited int
+	if err = f.Admin.QueryRow(bg, `SELECT count(*) FROM audit_log WHERE organization_id = $1 AND action = 'credential.bundle_delivered'
+		AND resource_id = $2`, f.OrgA, colID).Scan(&audited); err != nil || audited != 1 {
+		t.Fatalf("%d audited deliveries (%v)", audited, err)
+	}
+
 	// Refused: no certificate, a certificate of another CA, a revoked one.
 	if _, err = authz.Authorize(bg, nil); !errors.Is(err, discovery.ErrNoClientCertificate) {
 		t.Fatalf("no certificate: %v", err)

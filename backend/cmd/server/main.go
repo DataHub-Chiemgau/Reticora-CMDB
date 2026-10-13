@@ -260,6 +260,9 @@ func main() {
 	var jobQueue *jobs.Queue
 	// The domain events reach RETICORA_EVENTS over the same connection.
 	var eventStream jetstream.JetStream
+	// coreNATS also carries the collectors' requests from the endpoint
+	// (credential bundles, COL-02).
+	var coreNATS *nats.Conn
 	if cfg.IsSet("RETICORA_NATS_URL") && repos.Jobs != nil {
 		nc, natsErr := nats.Connect(cfg.NATSUrl, nats.Name("reticora-jobs"), nats.MaxReconnects(-1))
 		if natsErr != nil {
@@ -267,6 +270,7 @@ func main() {
 			os.Exit(1)
 		}
 		defer nc.Close()
+		coreNATS = nc
 		js, natsErr := jetstream.New(nc)
 		if natsErr != nil {
 			slog.Error("failed to open JetStream for the job queue", "error", natsErr)
@@ -381,6 +385,7 @@ func main() {
 		}
 	}()
 
+	credentialService := credential.NewService(repos.Credential, encryptor)
 	// The internal CA of the collector certificates (COL-04) and the
 	// collector NATS endpoint (COL-08).
 	collectorPKI := collectorCA(auditPool, encryptor)
@@ -390,7 +395,7 @@ func main() {
 		Entitlements:       entitlementSvc,
 		Dispatcher:         webhookDispatcher,
 		CIService:          ci.NewServiceWithLimits(repos.CI, entitlementSvc).WithFieldResolver(repos.CIType),
-		Credentials:        credential.NewService(repos.Credential, encryptor),
+		Credentials:        credentialService,
 		OIDC:               oidcProvider,
 		Sessions:           sessionIssuer,
 		RefreshSessions:    refreshSessions,
@@ -525,6 +530,16 @@ func main() {
 		edge := &discovery.EdgeConfig{Pool: auditPool, CA: collectorPKI, Secrets: edgeSecrets, PKIDir: cfg.PKIDir,
 			Hosts: splitList(cfg.NATSEdgeHosts), URL: cfg.NATSEdgeURL}
 		workers = append(workers, server.Worker{Name: config.WorkerNATSEdge, Run: func(ctx context.Context) { discovery.RunEdge(ctx, edge) }})
+	}
+	// Credential bundles for the collectors over their NATS channel,
+	// encrypted for each collector's key (COL-02).
+	if collectorPKI != nil && coreNATS != nil {
+		gate := discovery.NewBundleGate(auditPool, collectorPKI)
+		workers = append(workers, server.Worker{Name: config.WorkerCredentialBundles, Run: func(ctx context.Context) {
+			if serr := credentialService.ServeBundles(ctx, coreNATS, gate, gate); serr != nil {
+				slog.Error("credential bundles", "error", serr)
+			}
+		}})
 	}
 	workers = append(workers, server.Worker{Name: config.WorkerNotifier, Run: func(ctx context.Context) { notifier.Run(ctx, 5*time.Second) }})
 	// Run the jobs announced on the JOBS work queue (TEC-14).

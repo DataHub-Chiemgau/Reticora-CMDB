@@ -105,5 +105,7 @@ func runNATS(ctx context.Context, cfg collectorConfig) {
 	}
 	defer nc.Close()
 	slog.Info("collector NATS endpoint connected over mTLS", "url", endpoint)
-	<-ctx.Done()
+	// The credentials of the collector's scopes, encrypted for its key
+	// (COL-02).
+	syncBundle(ctx, nc, creds)
 }

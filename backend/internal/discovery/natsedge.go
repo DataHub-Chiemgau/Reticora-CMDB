@@ -2,6 +2,8 @@ package discovery
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
@@ -20,6 +22,7 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	platformcrypto "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 )
@@ -61,8 +64,13 @@ var (
 type EdgeIdentity struct {
 	OrganizationID string
 	CollectorID    string
+	ClientID       string
 	Status         string
 	NotAfter       time.Time
+	// PublicKey is the collector's key from its certificate.
+	PublicKey any
+	// Fingerprint is the SHA-256 of the certificate (hex).
+	Fingerprint string
 }
 
 // EdgeAuthorizer decides whether a TLS client may connect: its certificate
@@ -106,11 +114,13 @@ func (a *EdgeAuthorizer) Authorize(ctx context.Context, certs []string) (*EdgeId
 	if len(leaf.Subject.Organization) != 1 || !audit.IsUUID(leaf.Subject.CommonName) || !audit.IsUUID(leaf.Subject.Organization[0]) {
 		return nil, errors.New("client certificate names no collector")
 	}
-	id := &EdgeIdentity{OrganizationID: leaf.Subject.Organization[0], CollectorID: leaf.Subject.CommonName, NotAfter: leaf.NotAfter}
+	sum := sha256.Sum256(leaf.Raw)
+	id := &EdgeIdentity{OrganizationID: leaf.Subject.Organization[0], CollectorID: leaf.Subject.CommonName,
+		NotAfter: leaf.NotAfter, PublicKey: leaf.PublicKey, Fingerprint: hex.EncodeToString(sum[:])}
 	scope := database.OrgWideScope(id.OrganizationID, "")
 	err = database.WithTenant(ctx, a.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT status FROM collector WHERE id = $1 AND organization_id = $2`,
-			id.CollectorID, id.OrganizationID).Scan(&id.Status)
+		return tx.QueryRow(ctx, `SELECT status, COALESCE(client_id::text, '') FROM collector WHERE id = $1 AND organization_id = $2`,
+			id.CollectorID, id.OrganizationID).Scan(&id.Status, &id.ClientID)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errors.New("unknown collector")
@@ -403,4 +413,50 @@ func serveEdgeAuth(ctx context.Context, c *EdgeConfig) error {
 	}
 	defer nc.Close()
 	return svc.Run(ctx, nc)
+}
+
+// BundleGate verifies collectors that request their credential bundle and
+// records the delivery (COL-02).
+type BundleGate struct {
+	authorizer *EdgeAuthorizer
+}
+
+// NewBundleGate creates the gate on the collector CA.
+func NewBundleGate(pool *pgxpool.Pool, ca *CA) *BundleGate {
+	return &BundleGate{authorizer: NewEdgeAuthorizer(pool, ca)}
+}
+
+// VerifyBundleTarget implements credential.CollectorVerifier: the
+// certificate must be the collector's own (subject of the request), issued
+// by the collector CA, not revoked, for a collector that is not disabled.
+func (g *BundleGate) VerifyBundleTarget(ctx context.Context, orgID, collectorID, certPEM string) (context.Context, *credential.BundleTarget, error) {
+	id, err := g.authorizer.Authorize(ctx, []string{certPEM})
+	if err != nil {
+		return nil, nil, err
+	}
+	if id.OrganizationID != orgID || id.CollectorID != collectorID {
+		return nil, nil, errors.New("the certificate belongs to another collector")
+	}
+	pub, ok := id.PublicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return nil, nil, errors.New("the collector key is not ECDSA")
+	}
+	scope := database.OrgWideScope(orgID, "")
+	return database.ContextWithTenantScope(ctx, &scope),
+		&credential.BundleTarget{OrganizationID: orgID, CollectorID: collectorID, ClientID: id.ClientID, PublicKey: pub}, nil
+}
+
+// BundleDelivered implements credential.BundleAuditor.
+func (g *BundleGate) BundleDelivered(ctx context.Context, t *credential.BundleTarget, credentialIDs []string) error {
+	scope := database.OrgWideScope(t.OrganizationID, "")
+	return database.WithTenant(ctx, g.authorizer.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		ids := credentialIDs
+		if ids == nil {
+			ids = []string{}
+		}
+		_, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{OrganizationID: t.OrganizationID, ActorID: "",
+			ActorType: "system", Action: "credential.bundle_delivered", ResourceType: "collector", ResourceID: t.CollectorID,
+			Source: "collector", Changes: map[string]interface{}{"credential_ids": ids}})
+		return err
+	})
 }

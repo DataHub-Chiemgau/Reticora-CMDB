@@ -310,6 +310,7 @@ const (
 	WorkerEvents            = "events"
 	WorkerNotifier          = "notifier"
 	WorkerNATSEdge          = "nats_edge"
+	WorkerCredentialBundles = "credential_bundles"
 )
 
 // WorkerNames lists every registered worker.
@@ -323,6 +324,7 @@ var WorkerNames = []string{
 	WorkerEvents,
 	WorkerNotifier,
 	WorkerNATSEdge,
+	WorkerCredentialBundles,
 }
 
 // WorkerEnvKey returns the switch variable of a worker.

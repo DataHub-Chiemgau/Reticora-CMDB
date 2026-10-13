@@ -360,7 +360,7 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 
 			slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
 			observedAt := time.Now()
-			results, err := plug.Discover(ctx, targets, plugins.CredentialsFor(protocol, cfg.Credentials))
+			results, err := plug.Discover(ctx, targets, plugins.CredentialsFor(protocol, credentialsFor(&cfg)))
 			if err != nil {
 				slog.Error("discovery plugin error", "protocol", protocol, "error", err)
 				continue
@@ -817,7 +817,7 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 func runTrapReceiver(ctx context.Context, cfg collectorConfig, up *uploader) {
 	rcv := &snmp.TrapReceiver{
 		ListenAddr: cfg.TrapListenAddr,
-		Community:  plugins.CredentialsFor("snmp", cfg.Credentials)["community"],
+		Community:  plugins.CredentialsFor("snmp", credentialsFor(&cfg))["community"],
 		Sink: func(ctx context.Context, ev snmp.TrapEvent) {
 			slog.Info("snmp trap received", "source", ev.SourceIP, "trap_oid", ev.TrapOID)
 			if err := up.uploadTrapEvent(ctx, ev); err != nil {
@@ -844,7 +844,7 @@ func runMetricsLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 		return
 	}
 
-	creds := plugins.CredentialsFor("snmp", cfg.Credentials)
+	creds := plugins.CredentialsFor("snmp", credentialsFor(&cfg))
 	for {
 		targets := expandSubnets(cfg.ScanSubnets)
 		samples := make([]plugins.MetricSample, 0, len(targets)*len(cfg.PollMetrics))
