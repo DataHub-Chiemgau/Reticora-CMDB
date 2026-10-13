@@ -142,3 +142,62 @@ func (p *WebhookProvider) Send(ctx context.Context, ch *Channel, msg *Message) (
 	}
 	return &Delivery{Recipients: len(msg.To), SentAt: time.Now().UTC()}, nil
 }
+
+// InboxStore is the inbox with the reads of the notification center.
+type InboxStore interface {
+	Inbox
+	List(ctx context.Context, orgID, userID string, unreadOnly bool, limit, offset int) ([]InAppNotification, int, error)
+	MarkRead(ctx context.Context, orgID, userID, id string) error
+	MarkAllRead(ctx context.Context, orgID, userID string) (int, error)
+}
+
+// List implements InboxStore.
+func (b *MemoryInbox) List(_ context.Context, orgID, userID string, unreadOnly bool, limit, offset int) ([]InAppNotification, int, error) {
+	all := b.For(orgID, userID)
+	var out []InAppNotification
+	for i := range all {
+		if !unreadOnly || all[i].ReadAt == nil {
+			out = append(out, all[i])
+		}
+	}
+	total := len(out)
+	start := min(offset, total)
+	end := total
+	if limit > 0 {
+		end = min(start+limit, total)
+	}
+	return out[start:end], total, nil
+}
+
+// MarkRead implements InboxStore.
+func (b *MemoryInbox) MarkRead(_ context.Context, orgID, userID, id string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.items {
+		n := &b.items[i]
+		if n.ID == id && n.OrganizationID == orgID && n.UserID == userID {
+			if n.ReadAt == nil {
+				now := time.Now().UTC()
+				n.ReadAt = &now
+			}
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+// MarkAllRead implements InboxStore.
+func (b *MemoryInbox) MarkAllRead(_ context.Context, orgID, userID string) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now().UTC()
+	n := 0
+	for i := range b.items {
+		item := &b.items[i]
+		if item.OrganizationID == orgID && item.UserID == userID && item.ReadAt == nil {
+			item.ReadAt = &now
+			n++
+		}
+	}
+	return n, nil
+}

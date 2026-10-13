@@ -338,6 +338,25 @@ func main() {
 	// Webhook and connector destinations are user input: every outbound call
 	// goes through the egress client (SEC-08).
 	egressPolicy := egress.Options{AllowPrivate: cfg.EgressAllowPrivate}
+	// Notifications (NTF-01, NTF-04): channels with encrypted provider
+	// settings, the in-app center and the delivery queue of the notifier.
+	smtpSender := centralSMTP(cfg)
+	notifications := notify.NewMemoryCenter()
+	if auditPool != nil {
+		notifications = &notify.Center{
+			Channels:    notify.NewPGRepository(auditPool, notify.NewSealer(encryptor)),
+			Inbox:       notify.NewPGInbox(auditPool),
+			Preferences: notify.NewPGPreferences(auditPool),
+			Deliveries:  notify.NewPGDeliveryStore(auditPool),
+		}
+	}
+	notifier := notify.NewNotifier(notifications.Channels, notifications.Deliveries, notifications.Preferences,
+		notify.NewSender(map[string]notify.Provider{
+			notify.ProviderCentralSMTP: notify.NewEmailProvider(smtpSender),
+			notify.ProviderSMTP:        notify.NewEmailProvider(smtpSender),
+			notify.ProviderInApp:       notify.NewInAppProvider(notifications.Inbox),
+			notify.ProviderWebhook:     notify.NewWebhookProvider(egress.NewClient(egressPolicy)),
+		}))
 	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, egress.NewClient(egressPolicy), webhook.DispatcherOptions{
 		// Subscriptions bound to a service account receive only events whose
 		// object the account may read (RBA-08).
@@ -383,7 +402,8 @@ func main() {
 		},
 		Readiness:        readiness,
 		IngestQueue:      ingestQueue,
-		Signup:           signupService(cfg, auditPool, centralSMTP(cfg)),
+		Signup:           signupService(cfg, auditPool, smtpSender),
+		Notifications:    notifications,
 		SignupProtection: signupProtection(cfg, cacheStore),
 		// Invitations need the database; in --no-db mode they answer 503.
 		InvitationAccounts: invitationAccounts(cfg),
@@ -460,6 +480,8 @@ func main() {
 		}
 		workers = append(workers, server.Worker{Name: config.WorkerEvents, Run: publisher.Run})
 	}
+	// Deliver queued notifications with retry (NTF-04).
+	workers = append(workers, server.Worker{Name: config.WorkerNotifier, Run: func(ctx context.Context) { notifier.Run(ctx, 5*time.Second) }})
 	// Run the jobs announced on the JOBS work queue (TEC-14).
 	if jobQueue != nil {
 		workers = append(workers, server.Worker{Name: config.WorkerJobs, Run: jobQueue.Run})

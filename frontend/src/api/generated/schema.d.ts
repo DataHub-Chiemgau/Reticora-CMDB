@@ -2700,6 +2700,145 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/notifications': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * The signed-in user's in-app notifications
+     * @description Newest first (NTF-04, UI-16); `unread=true` lists the unread ones only.
+     */
+    get: operations['listNotifications'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/notifications/read-all': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Mark all own notifications read */
+    post: operations['markAllNotificationsRead'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/notifications/{id}/read': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Mark an own notification read */
+    post: operations['markNotificationRead'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/notifications/preferences': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The signed-in user's quiet hours and muted categories */
+    get: operations['getNotificationPreferences'];
+    /**
+     * Set quiet hours and muted categories
+     * @description Critical notifications ignore both (NTF-04).
+     */
+    put: operations['setNotificationPreferences'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/notification-channels': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Notification channels of the organization
+     * @description Secrets (password, secret) are returned as `********`.
+     */
+    get: operations['listNotificationChannels'];
+    put?: never;
+    /** Create a notification channel */
+    post: operations['createNotificationChannel'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/notification-channels/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    /** Get a notification channel */
+    get: operations['getNotificationChannel'];
+    put?: never;
+    post?: never;
+    /** Delete a notification channel */
+    delete: operations['deleteNotificationChannel'];
+    options?: never;
+    head?: never;
+    /**
+     * Update name, configuration or enabled flag
+     * @description A configuration replaces the stored one; a secret sent back as `********` keeps its value. Kind and provider cannot change.
+     */
+    patch: operations['updateNotificationChannel'];
+    trace?: never;
+  };
+  '/api/v1/notification-deliveries': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Latest notification deliveries with their status */
+    get: operations['listNotificationDeliveries'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/vrfs': {
     parameters: {
       query?: never;
@@ -5593,6 +5732,92 @@ export interface components {
     LocalizedText: {
       de?: string;
       en?: string;
+    };
+    NotificationRecipient: {
+      user_id?: string;
+      email?: string;
+      name?: string;
+    };
+    InAppNotification: {
+      id: string;
+      organization_id: string;
+      user_id: string;
+      category: string;
+      subject: string;
+      body: string;
+      data?: {
+        [key: string]: unknown;
+      };
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      read_at?: string;
+    };
+    InAppNotificationListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['InAppNotification'][];
+    };
+    NotificationPreference: {
+      /** @description Start of the quiet hours (HH:MM). */
+      quiet_start?: string;
+      /** @description End of the quiet hours; may be on the next day. */
+      quiet_end?: string;
+      /** @example Europe/Berlin */
+      time_zone: string;
+      muted_categories: string[];
+    };
+    NotificationChannel: {
+      id: string;
+      organization_id: string;
+      name: string;
+      /** @enum {string} */
+      kind: 'email' | 'inapp' | 'webhook' | 'sms' | 'pager';
+      /** @enum {string} */
+      provider: 'central_smtp' | 'smtp' | 'inapp' | 'webhook';
+      /** @description central_smtp: sender_name, reply_to; smtp: host, port, tls (starttls|tls|none), username, password, from; webhook: url, secret. Secrets are returned as `********`. */
+      config?: {
+        [key: string]: unknown;
+      };
+      enabled: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    NotificationChannelRequest: {
+      name?: string;
+      /** @enum {string} */
+      kind?: 'email' | 'inapp' | 'webhook';
+      /** @enum {string} */
+      provider?: 'central_smtp' | 'smtp' | 'inapp' | 'webhook';
+      config?: {
+        [key: string]: unknown;
+      };
+      enabled?: boolean;
+    };
+    NotificationDelivery: {
+      id: string;
+      organization_id: string;
+      channel_id: string;
+      recipient: components['schemas']['NotificationRecipient'];
+      recipients?: components['schemas']['NotificationRecipient'][];
+      category: string;
+      critical: boolean;
+      subject: string;
+      body: string;
+      data?: {
+        [key: string]: unknown;
+      };
+      dedup_key?: string;
+      /** @enum {string} */
+      status: 'pending' | 'sending' | 'sent' | 'failed' | 'suppressed';
+      attempts: number;
+      max_attempts: number;
+      /** Format: date-time */
+      next_attempt_at: string;
+      last_error?: string;
+      provider_id?: string;
+      /** Format: date-time */
+      sent_at?: string;
     };
     MetamodelExport: {
       /** @enum {integer} */
@@ -15440,6 +15665,280 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+    };
+  };
+  listNotifications: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        unread?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Notifications */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['InAppNotificationListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  markAllNotificationsRead: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Number of notifications marked */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            marked: number;
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  markNotificationRead: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Marked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  getNotificationPreferences: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Preferences */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NotificationPreference'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  setNotificationPreferences: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NotificationPreference'];
+      };
+    };
+    responses: {
+      /** @description Stored preferences */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NotificationPreference'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  listNotificationChannels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Channels */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            data: components['schemas']['NotificationChannel'][];
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createNotificationChannel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NotificationChannelRequest'];
+      };
+    };
+    responses: {
+      /** @description Created channel */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NotificationChannel'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  getNotificationChannel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Channel */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NotificationChannel'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteNotificationChannel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateNotificationChannel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NotificationChannelRequest'];
+      };
+    };
+    responses: {
+      /** @description Updated channel */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NotificationChannel'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  listNotificationDeliveries: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deliveries, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            data: components['schemas']['NotificationDelivery'][];
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
     };
   };
   listVRFs: {

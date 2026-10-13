@@ -287,6 +287,7 @@ services:
       RETICORA_WORKER_SCHEDULER_ENABLED: "${RETICORA_WORKER_SCHEDULER_ENABLED:-true}"
       RETICORA_WORKER_JOBS_ENABLED: "${RETICORA_WORKER_JOBS_ENABLED:-true}"
       RETICORA_WORKER_EVENTS_ENABLED: "${RETICORA_WORKER_EVENTS_ENABLED:-true}"
+      RETICORA_WORKER_NOTIFIER_ENABLED: "${RETICORA_WORKER_NOTIFIER_ENABLED:-true}"
     volumes:
       - ./secrets/session-private.pem:/etc/reticora/session/private.pem:ro
       # Read-only view of the TLS material so RETICORA_OIDC_CA_CERT_FILE can

@@ -57,27 +57,31 @@ var readPermissionFor = map[string]identity.Permission{
 	"teams":       identity.PermUserRead,
 	"clients":     identity.PermUserRead,
 	// The organization is the root of the location hierarchy (LOC-01).
-	"org":                identity.PermLocationRead,
-	"roles":              identity.PermRoleRead,
-	"permissions":        identity.PermPermissionRead,
-	"entitlements":       identity.PermEntitlementRead,
-	"audit":              identity.PermAuditRead,
-	"webhooks":           identity.PermWebhookRead,
-	"credentials":        identity.PermCredentialRead,
-	"export":             identity.PermCIRead,
-	"ip-addresses":       identity.PermIPAMRead,
-	"subnets":            identity.PermIPAMRead,
-	"vlans":              identity.PermIPAMRead,
-	"vrfs":               identity.PermIPAMRead,
-	"network-interfaces": identity.PermIPAMRead,
-	"cables":             identity.PermRackRead,
-	"forms":              identity.PermFormRead,
-	"form-submissions":   identity.PermFormRead,
-	"workflows":          identity.PermWorkflowRead,
-	"workflow-runs":      identity.PermWorkflowRead,
-	"compliance":         identity.PermComplianceRead,
-	"security":           identity.PermSecurityRead,
-	"monitoring":         identity.PermMonitoringRead,
+	"org":          identity.PermLocationRead,
+	"roles":        identity.PermRoleRead,
+	"permissions":  identity.PermPermissionRead,
+	"entitlements": identity.PermEntitlementRead,
+	"audit":        identity.PermAuditRead,
+	"webhooks":     identity.PermWebhookRead,
+	// Notification channels and their deliveries are administered like
+	// webhooks (NTF-01, NTF-04).
+	"notification-channels":   identity.PermWebhookRead,
+	"notification-deliveries": identity.PermWebhookRead,
+	"credentials":             identity.PermCredentialRead,
+	"export":                  identity.PermCIRead,
+	"ip-addresses":            identity.PermIPAMRead,
+	"subnets":                 identity.PermIPAMRead,
+	"vlans":                   identity.PermIPAMRead,
+	"vrfs":                    identity.PermIPAMRead,
+	"network-interfaces":      identity.PermIPAMRead,
+	"cables":                  identity.PermRackRead,
+	"forms":                   identity.PermFormRead,
+	"form-submissions":        identity.PermFormRead,
+	"workflows":               identity.PermWorkflowRead,
+	"workflow-runs":           identity.PermWorkflowRead,
+	"compliance":              identity.PermComplianceRead,
+	"security":                identity.PermSecurityRead,
+	"monitoring":              identity.PermMonitoringRead,
 	// Privacy/DSGVO acts on other people's personal data; even the read-side
 	// retention policy requires the manage permission.
 	"privacy": identity.PermUserManage,
@@ -118,6 +122,9 @@ var readPermissionFor = map[string]identity.Permission{
 var writePermissionOverrides = map[string]identity.Permission{
 	// VRFs are managed with their own key (TEN-10, RBA-01).
 	"vrfs": identity.PermVRFManage,
+	// Channels hold provider credentials; deliveries are only read.
+	"notification-channels":   identity.PermWebhookManage,
+	"notification-deliveries": identity.PermWebhookManage,
 	// Review items are only written by resolving them (REC-08).
 	"review-items": identity.PermReviewResolve,
 
@@ -351,6 +358,10 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 	case "auth":
 		// /auth/me requires authentication but no specific permission.
 		return "", routeProtected
+	case "notifications":
+		// The notification center serves the signed-in user's own inbox
+		// and preferences (NTF-04).
+		return "", routeProtected
 	case "graphql":
 		// The GraphQL BFF only reads; each resolver checks its own read
 		// permission and entitlement (GQL-04), so the route requires an
@@ -443,6 +454,9 @@ var auditExemptions = map[string]string{
 	"POST /api/v1/search/query": "a search, reads",
 	"POST /api/v1/ai/ask":       "a question to the assistant, reads",
 	"POST /api/v1/graphql":      "the BFF refuses mutations, reads",
+	// Marking one's own notifications read changes no shared state.
+	"POST /api/v1/notifications/{id}/read": "marks the own inbox read",
+	"POST /api/v1/notifications/read-all":  "marks the own inbox read",
 	// No tenant context: sign-in, sign-up and enrollment precede the
 	// organization or the session; the identity provider logs sign-ins.
 	"POST /api/v1/auth/callback":      "sign-in, no tenant context",

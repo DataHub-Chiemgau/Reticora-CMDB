@@ -5073,6 +5073,222 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/notifications:
+    get:
+      operationId: listNotifications
+      tags: [Notifications]
+      summary: The signed-in user's in-app notifications
+      description: Newest first (NTF-04, UI-16); `unread=true` lists the unread ones only.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - {name: unread, in: query, schema: {type: boolean}}
+      responses:
+        '200':
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InAppNotificationListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/notifications/read-all:
+    post:
+      operationId: markAllNotificationsRead
+      tags: [Notifications]
+      summary: Mark all own notifications read
+      responses:
+        '200':
+          description: Number of notifications marked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [marked]
+                properties:
+                  marked: {type: integer}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/notifications/{id}/read:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      operationId: markNotificationRead
+      tags: [Notifications]
+      summary: Mark an own notification read
+      responses:
+        '204':
+          description: Marked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/notifications/preferences:
+    get:
+      operationId: getNotificationPreferences
+      tags: [Notifications]
+      summary: The signed-in user's quiet hours and muted categories
+      responses:
+        '200':
+          description: Preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreference'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      operationId: setNotificationPreferences
+      tags: [Notifications]
+      summary: Set quiet hours and muted categories
+      description: Critical notifications ignore both (NTF-04).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationPreference'
+      responses:
+        '200':
+          description: Stored preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreference'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/notification-channels:
+    get:
+      operationId: listNotificationChannels
+      tags: [Notifications]
+      summary: Notification channels of the organization
+      description: Secrets (password, secret) are returned as `********`.
+      responses:
+        '200':
+          description: Channels
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NotificationChannel'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createNotificationChannel
+      tags: [Notifications]
+      summary: Create a notification channel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationChannelRequest'
+      responses:
+        '201':
+          description: Created channel
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationChannel'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/notification-channels/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      operationId: getNotificationChannel
+      tags: [Notifications]
+      summary: Get a notification channel
+      responses:
+        '200':
+          description: Channel
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationChannel'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateNotificationChannel
+      tags: [Notifications]
+      summary: Update name, configuration or enabled flag
+      description: >-
+        A configuration replaces the stored one; a secret sent back as
+        `********` keeps its value. Kind and provider cannot change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationChannelRequest'
+      responses:
+        '200':
+          description: Updated channel
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationChannel'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      operationId: deleteNotificationChannel
+      tags: [Notifications]
+      summary: Delete a notification channel
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/notification-deliveries:
+    get:
+      operationId: listNotificationDeliveries
+      tags: [Notifications]
+      summary: Latest notification deliveries with their status
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Deliveries, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NotificationDelivery'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /api/v1/vrfs:
     get:
       operationId: listVRFs
@@ -9530,6 +9746,121 @@ components:
       properties:
         de: { type: string, minLength: 1, maxLength: 200 }
         en: { type: string, minLength: 1, maxLength: 200 }
+    NotificationRecipient:
+      type: object
+      properties:
+        user_id: {type: string}
+        email: {type: string}
+        name: {type: string}
+
+    InAppNotification:
+      type: object
+      required: [id, organization_id, user_id, category, subject, body, created_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        user_id: {type: string}
+        category: {type: string}
+        subject: {type: string}
+        body: {type: string}
+        data:
+          type: object
+          additionalProperties: true
+        created_at: {type: string, format: date-time}
+        read_at: {type: string, format: date-time}
+
+    InAppNotificationListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/InAppNotification'
+
+    NotificationPreference:
+      type: object
+      required: [time_zone, muted_categories]
+      properties:
+        quiet_start: {type: string, pattern: '^[0-2][0-9]:[0-5][0-9]$', description: Start of the quiet hours (HH:MM).}
+        quiet_end: {type: string, pattern: '^[0-2][0-9]:[0-5][0-9]$', description: End of the quiet hours; may be on the next day.}
+        time_zone: {type: string, example: Europe/Berlin}
+        muted_categories:
+          type: array
+          items: {type: string}
+
+    NotificationChannel:
+      type: object
+      required: [id, organization_id, name, kind, provider, enabled, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        name: {type: string}
+        kind:
+          type: string
+          enum: [email, inapp, webhook, sms, pager]
+        provider:
+          type: string
+          enum: [central_smtp, smtp, inapp, webhook]
+        config:
+          type: object
+          additionalProperties: true
+          description: >-
+            central_smtp: sender_name, reply_to; smtp: host, port, tls
+            (starttls|tls|none), username, password, from; webhook: url,
+            secret. Secrets are returned as `********`.
+        enabled: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    NotificationChannelRequest:
+      type: object
+      properties:
+        name: {type: string}
+        kind:
+          type: string
+          enum: [email, inapp, webhook]
+        provider:
+          type: string
+          enum: [central_smtp, smtp, inapp, webhook]
+        config:
+          type: object
+          additionalProperties: true
+        enabled: {type: boolean}
+
+    NotificationDelivery:
+      type: object
+      required: [id, organization_id, channel_id, recipient, category, critical, subject, body, status, attempts, max_attempts, next_attempt_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        channel_id: {type: string}
+        recipient:
+          $ref: '#/components/schemas/NotificationRecipient'
+        recipients:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationRecipient'
+        category: {type: string}
+        critical: {type: boolean}
+        subject: {type: string}
+        body: {type: string}
+        data:
+          type: object
+          additionalProperties: true
+        dedup_key: {type: string}
+        status:
+          type: string
+          enum: [pending, sending, sent, failed, suppressed]
+        attempts: {type: integer}
+        max_attempts: {type: integer}
+        next_attempt_at: {type: string, format: date-time}
+        last_error: {type: string}
+        provider_id: {type: string}
+        sent_at: {type: string, format: date-time}
+
     MetamodelExport:
       type: object
       required: [format_version, exported_at, organization_id, ci_types, attribute_definitions]

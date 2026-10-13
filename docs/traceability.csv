@@ -320,3 +320,5 @@ NTF-01;[B];B;backend/internal/notify/channel_test.go;WP-137
 TEC-13;[B];B;backend/internal/notify/channel_test.go;WP-137
 REP-01;[B];B;backend/internal/notify/channel_test.go;WP-137
 NTF-03;[B];B;backend/internal/notify/recipients_integration_test.go;WP-138
+NTF-04;[B];B;backend/internal/notify/notifier_test.go;WP-139
+API-05;[B];B;backend/internal/notify/notifier_test.go;WP-139

@@ -46,6 +46,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/order"
@@ -208,6 +209,9 @@ type Options struct {
 	// SignupProtection is the captcha, blocklist and per-IP limit of the
 	// signup (WP-112); without it signups answer 503.
 	SignupProtection *signup.Protection
+	// Notifications are the notification stores (NTF-04); nil keeps them
+	// in memory.
+	Notifications *notify.Center
 	// InvitationAccounts creates the IdP account of an accepted invitation.
 	InvitationAccounts user.InvitationAccounts
 }
@@ -337,6 +341,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		invitationHandler(&repos, &opts),
 		entitlement.NewHandler(opts.Entitlements),
 		ciHandler(&repos, &opts),
+		notifyHandler(&opts),
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
 		discoveryHandler,
@@ -565,4 +570,12 @@ func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
 		return ci.NewHandler(opts.CIService)
 	}
 	return ci.NewHandler(opts.CIService, opts.Dispatcher)
+}
+
+// notifyHandler serves the notification center and the channels.
+func notifyHandler(opts *Options) *notify.Handler {
+	if opts.Notifications == nil {
+		opts.Notifications = notify.NewMemoryCenter()
+	}
+	return notify.NewHandler(opts.Notifications)
 }

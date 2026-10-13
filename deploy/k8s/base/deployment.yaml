@@ -71,6 +71,8 @@ spec:
               value: "true"
             - name: RETICORA_WORKER_EVENTS_ENABLED
               value: "true"
+            - name: RETICORA_WORKER_NOTIFIER_ENABLED
+              value: "true"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session
