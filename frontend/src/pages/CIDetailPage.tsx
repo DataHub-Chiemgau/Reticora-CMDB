@@ -16,6 +16,7 @@ import {
   ProvenanceSection,
   LifecycleSection,
   ImpactSection,
+  CIHistorySection,
 } from '../components/cmdb/CIDetailSections';
 import { CIRelationshipsCard } from '../components/cmdb/CIRelationshipsCard';
 import { CIParentAssetCard } from '../components/cmdb/CIParentAssetCard';
@@ -141,6 +142,10 @@ export function CIDetailPage() {
             <DetailRow label={t('ci.managementIp')} value={ci.management_ip} />
             <DetailRow label={t('ci.firmware')} value={ci.firmware_version} />
             <DetailRow label={t('ci.source')} value={ci.discovery_source} />
+            <DetailRow label={t('ci.location')} value={ci.location_id} />
+            <DetailRow label={t('ci.site')} value={ci.site_id} />
+            <DetailRow label={t('ci.room')} value={ci.room_id} />
+            <DetailRow label={t('ci.firstSeen')} value={ci.first_seen_at} />
             <DetailRow label={t('ci.lastSeen')} value={ci.last_seen_at} />
             <DetailRow label={t('ci.created')} value={ci.created_at} />
             <DetailRow label={t('ci.updated')} value={ci.updated_at} />
@@ -228,6 +233,7 @@ export function CIDetailPage() {
         <ProvenanceSection ciId={ci.id} />
         <LifecycleSection entityType="cis" entityId={ci.id} currentState={ci.lifecycle_state} />
         <ImpactSection ciId={ci.id} />
+        <CIHistorySection ciId={ci.id} />
       </div>
 
       <CIFormModal open={isEditOpen} onOpenChange={setIsEditOpen} ci={ci} />

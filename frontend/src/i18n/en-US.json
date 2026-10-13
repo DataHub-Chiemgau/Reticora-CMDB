@@ -216,6 +216,18 @@
       "warning": "Health: warning",
       "critical": "Health: critical",
       "unknown": "Health: unknown"
+    },
+    "site": "Site",
+    "room": "Room",
+    "firstSeen": "First seen",
+    "history": "History",
+    "historyEmpty": "No changes yet.",
+    "historyLoadError": "The history could not be loaded.",
+    "historySite": "Site {{site}}",
+    "historySource": {
+      "ci_change": "Change",
+      "entity_change": "History",
+      "audit": "Audit"
     }
   },
   "form": {

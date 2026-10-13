@@ -10012,9 +10012,25 @@ paths:
     get:
       operationId: getHistoryEntitytypeId
       summary: List the unified change history of an entity
+      parameters:
+        - name: entityType
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: List the unified change history of an entity
+          description: >-
+            The change history of an entity, newest first. For a CI it is the
+            unified history of CI-06: its ci_change rows (with the site at the
+            time), entity_change rows and audit entries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryListResponse'
         '401':
           description: Unauthorized
 
@@ -11288,6 +11304,45 @@ components:
         Resources:
           type: array
           items: { $ref: '#/components/schemas/SCIMResource' }
+    HistoryChange:
+      type: object
+      required: [id, entity_type, entity_id, change_type, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string, format: uuid }
+        entity_type: { type: string }
+        entity_id: { type: string, format: uuid }
+        actor_id: { type: string }
+        change_type:
+          type: string
+          description: The change type, or the audit action for source audit.
+        field_name: { type: string }
+        old_value: {}
+        new_value: {}
+        comment: { type: string }
+        created_at: { type: string, format: date-time }
+        source:
+          type: string
+          enum: [ci_change, entity_change, audit]
+          description: The trail of the entry (CI history only).
+        site_id:
+          type: string
+          format: uuid
+          description: The site of the CI when the change was made.
+    HistoryListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/HistoryChange' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
     ProblemDetail:
       type: object
       description: >-

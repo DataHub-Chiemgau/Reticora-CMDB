@@ -216,6 +216,18 @@
       "warning": "Zustand: Warnung",
       "critical": "Zustand: kritisch",
       "unknown": "Zustand: unbekannt"
+    },
+    "site": "Site",
+    "room": "Raum",
+    "firstSeen": "Zuerst gesehen",
+    "history": "Historie",
+    "historyEmpty": "Noch keine Änderungen.",
+    "historyLoadError": "Die Historie konnte nicht geladen werden.",
+    "historySite": "Site {{site}}",
+    "historySource": {
+      "ci_change": "Änderung",
+      "entity_change": "Historie",
+      "audit": "Audit"
     }
   },
   "form": {

@@ -6553,6 +6553,42 @@ export interface components {
       itemsPerPage: number;
       Resources: components['schemas']['SCIMResource'][];
     };
+    HistoryChange: {
+      id: string;
+      /** Format: uuid */
+      organization_id?: string;
+      entity_type: string;
+      /** Format: uuid */
+      entity_id: string;
+      actor_id?: string;
+      /** @description The change type, or the audit action for source audit. */
+      change_type: string;
+      field_name?: string;
+      old_value?: unknown;
+      new_value?: unknown;
+      comment?: string;
+      /** Format: date-time */
+      created_at: string;
+      /**
+       * @description The trail of the entry (CI history only).
+       * @enum {string}
+       */
+      source?: 'ci_change' | 'entity_change' | 'audit';
+      /**
+       * Format: uuid
+       * @description The site of the CI when the change was made.
+       */
+      site_id?: string;
+    };
+    HistoryListResponse: {
+      data: components['schemas']['HistoryChange'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+    };
     /** @description RFC 7807 Problem Details object (API-03). Every error response (4xx/5xx) is `application/problem+json` and carries `trace_id`, the request id also returned in the `X-Request-ID` header. */
     ProblemDetail: {
       /** Format: uri */
@@ -24302,19 +24338,41 @@ export interface operations {
   };
   getHistoryEntitytypeId: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
-      path?: never;
+      path: {
+        entityType: string;
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description List the unified change history of an entity */
+      /** @description The change history of an entity, newest first. For a CI it is the unified history of CI-06: its ci_change rows (with the site at the time), entity_change rows and audit entries. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['HistoryListResponse'];
+        };
       };
       /** @description Unauthorized */
       401: {

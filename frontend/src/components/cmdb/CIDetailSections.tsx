@@ -16,6 +16,7 @@ import {
   useBlastRadius,
   useLifecycleDefinitions,
   useLifecycleTransition,
+  useEntityHistory,
 } from '../../api/cmdbHooks';
 import { DynamicForm, validateAll } from '../form/DynamicForm';
 import { ApiError } from '../../api/client';
@@ -466,6 +467,57 @@ export function ImpactSection({ ciId }: { ciId: string }) {
           </div>
         </div>
       ) : null}
+    </Section>
+  );
+}
+
+// ─── History (CI-06) ─────────────────────────────────────────────────────────
+
+/**
+ * CIHistorySection lists the unified history of a CI (CI-06): changes,
+ * history rows and audit entries, newest first, each with its time and the
+ * site of the CI at that time.
+ */
+export function CIHistorySection({ ciId }: { ciId: string }) {
+  const { t, i18n } = useTranslation();
+  const history = useEntityHistory('ci', ciId);
+  const entries = history.data?.data ?? [];
+  const format = (value: string) =>
+    new Date(value).toLocaleString(i18n.language, { dateStyle: 'medium', timeStyle: 'short' });
+  return (
+    <Section title={t('ci.history')} count={history.data?.total}>
+      {history.isLoading ? (
+        <SkeletonList rows={3} label={t('app.loading')} />
+      ) : history.error ? (
+        <p className="text-sm text-red-600">{t('ci.historyLoadError')}</p>
+      ) : entries.length === 0 ? (
+        <p className="text-sm text-gray-500">{t('ci.historyEmpty')}</p>
+      ) : (
+        <ol className="space-y-2 text-sm" aria-label={t('ci.history')}>
+          {entries.map((entry) => (
+            <li
+              key={`${entry.source ?? 'change'}-${entry.id}`}
+              className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
+            >
+              <time dateTime={entry.created_at} className="text-gray-500 dark:text-gray-400">
+                {format(entry.created_at)}
+              </time>
+              <span className="font-medium">
+                {entry.change_type}
+                {entry.field_name ? ` · ${entry.field_name}` : ''}
+              </span>
+              {entry.source ? (
+                <Badge variant="neutral">{t(`ci.historySource.${entry.source}`)}</Badge>
+              ) : null}
+              {entry.site_id ? (
+                <span className="text-gray-500 dark:text-gray-400">
+                  {t('ci.historySite', { site: entry.site_id })}
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      )}
     </Section>
   );
 }
