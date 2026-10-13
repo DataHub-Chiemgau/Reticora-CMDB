@@ -32,6 +32,8 @@ type Claims struct {
 	PermissionScopes map[identity.Permission]identity.Scope `json:"permission_scopes,omitempty"`
 	ExpiresAt        int64                                  `json:"exp,omitempty"`
 	IssuedAt         int64                                  `json:"iat,omitempty"`
+	// TokenID is the jti of a session token.
+	TokenID string `json:"jti,omitempty"`
 }
 
 // SessionVerifier verifies the signature of session tokens issued by the
@@ -143,6 +145,7 @@ func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIK
 			PermissionScopes: info.PermissionScopes,
 			Permissions:      info.Scopes,
 			Type:             identity.PrincipalTypeAPIKey,
+			Credential:       "apikey:" + info.ID,
 		}
 		return principal, Claims{
 			Subject:        subject,
@@ -163,6 +166,9 @@ func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIK
 		PermissionScopes: claims.PermissionScopes,
 		Permissions:      claims.Permissions,
 		Type:             identity.PrincipalTypeUser,
+	}
+	if claims.TokenID != "" {
+		principal.Credential = "session:" + claims.TokenID
 	}
 	if principal.Scope != nil {
 		principal.ClientScope = principal.Scope.LegacyClientScope()
@@ -211,6 +217,7 @@ func authenticate(r *http.Request, verifier SessionVerifier) (Claims, error) {
 		PermissionScopes: sessionClaims.PermissionScopes,
 		IssuedAt:         sessionClaims.IssuedAt.Unix(),
 		ExpiresAt:        sessionClaims.ExpiresAt.Unix(),
+		TokenID:          sessionClaims.ID,
 	}, nil
 }
 

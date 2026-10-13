@@ -36,7 +36,7 @@ func TestLoadFromEnv(t *testing.T) {
 func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range append(append([]string{
-		"RETICORA_ENVIRONMENT", "RETICORA_RATE_LIMIT_RPM", "RETICORA_METRICS_TENANT_LABEL", "RETICORA_NATS_URL",
+		"RETICORA_ENVIRONMENT", "RETICORA_RATE_LIMIT_RPM", "RETICORA_RATE_LIMIT_ORG_RPM", "RETICORA_METRICS_TENANT_LABEL", "RETICORA_NATS_URL",
 	}, requiredOutsideDevelopment...), s3Keys...) {
 		t.Setenv(key, "")
 	}
@@ -126,6 +126,7 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 		{"unknown environment", map[string]string{"RETICORA_ENVIRONMENT": "prod"}, false, `"prod"`},
 		{"unparsable integer", map[string]string{"RETICORA_RATE_LIMIT_RPM": "many"}, false, "RETICORA_RATE_LIMIT_RPM has an invalid value"},
 		{"non-positive rate limit", map[string]string{"RETICORA_RATE_LIMIT_RPM": "0"}, false, "must be positive"},
+		{"org rate limit below the credential limit", map[string]string{"RETICORA_RATE_LIMIT_ORG_RPM": "100"}, false, "must not be below"},
 		{"smtp without sender", map[string]string{"RETICORA_SMTP_HOST": "mail.example"}, false, "RETICORA_SMTP_FROM is required"},
 		{"smtp with an unknown tls mode", map[string]string{"RETICORA_SMTP_HOST": "mail.example", "RETICORA_SMTP_FROM": "noreply@example.org",
 			"RETICORA_SMTP_TLS": "ssl"}, false, "RETICORA_SMTP_TLS"},

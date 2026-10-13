@@ -5,6 +5,12 @@ info:
   description: |
     Multi-tenant Configuration Management Database API for MSPs and ISPs.
     Endpoints require tenant-scoped authentication unless explicitly marked otherwise.
+
+    Rate limits (API-04): 600 requests per minute per API key or session
+    and 6,000 per minute per organization (configurable). Every response
+    carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and
+    `X-RateLimit-Reset` (seconds until the window ends) for the budget
+    closest to exhaustion; a refused request gets 429 with `Retry-After`.
   contact:
     name: DataHub Chiemgau
   license:
@@ -10004,6 +10010,17 @@ components:
       schema:
         type: string
 
+  headers:
+    X-RateLimit-Limit:
+      description: Requests per minute of the budget closest to exhaustion (API-04).
+      schema: { type: integer }
+    X-RateLimit-Remaining:
+      description: Requests left in the current minute of that budget.
+      schema: { type: integer }
+    X-RateLimit-Reset:
+      description: Seconds until the current window ends.
+      schema: { type: integer }
+
   responses:
     BadRequest:
       description: Bad request
@@ -10048,7 +10065,20 @@ components:
           schema:
             $ref: '#/components/schemas/ProblemDetail'
     TooManyRequests:
-      description: The pre-auth budget of the client IP is spent (AUT-10)
+      description: >-
+        A rate limit is spent: the pre-auth budget of the client IP (AUT-10),
+        the budget of the API key or session, or the organization budget
+        (API-04).
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds until the budget is renewed.
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/X-RateLimit-Limit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/X-RateLimit-Remaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/X-RateLimit-Reset'
       content:
         application/problem+json:
           schema:

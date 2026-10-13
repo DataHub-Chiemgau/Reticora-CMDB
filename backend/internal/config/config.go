@@ -134,7 +134,10 @@ type Config struct {
 	TrustedProxies string
 
 	// Rate Limiting
-	RateLimitRPM int // requests per minute per key/user (default 600)
+	RateLimitRPM int // requests per minute per API key or session (default 600, API-04)
+	// RateLimitOrgRPM is the budget of all requests of an organization per
+	// minute (RETICORA_RATE_LIMIT_ORG_RPM, default 6000, API-04).
+	RateLimitOrgRPM int
 
 	// Central SMTP server of the installation (TEC-13): e-mail of the
 	// central_smtp channels and of the self-signup. Empty host: none.
@@ -240,6 +243,7 @@ func Load() *Config {
 		// by the tenant count. Default off; enable for bounded-tenant setups.
 		MetricsTenantLabel: l.boolean("RETICORA_METRICS_TENANT_LABEL", false),
 		RateLimitRPM:       l.integer("RETICORA_RATE_LIMIT_RPM", 600),
+		RateLimitOrgRPM:    l.integer("RETICORA_RATE_LIMIT_ORG_RPM", 6000),
 
 		SMTPHost:     l.str("RETICORA_SMTP_HOST", ""),
 		SMTPPort:     l.integer("RETICORA_SMTP_PORT", 587),
@@ -436,6 +440,9 @@ func (c *Config) Validate(noDB bool) error {
 		if r.value < r.min {
 			errs = append(errs, fmt.Errorf("%s must be at least %d (NFR-06), got %d", r.key, r.min, r.value))
 		}
+	}
+	if c.RateLimitOrgRPM < c.RateLimitRPM {
+		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_ORG_RPM (%d) must not be below RETICORA_RATE_LIMIT_RPM (%d)", c.RateLimitOrgRPM, c.RateLimitRPM))
 	}
 	if c.RateLimitRPM <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_RPM must be positive, got %d", c.RateLimitRPM))

@@ -9709,9 +9709,14 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
-    /** @description The pre-auth budget of the client IP is spent (AUT-10) */
+    /** @description A rate limit is spent: the pre-auth budget of the client IP (AUT-10), the budget of the API key or session, or the organization budget (API-04). */
     TooManyRequests: {
       headers: {
+        /** @description Seconds until the budget is renewed. */
+        'Retry-After'?: number;
+        'X-RateLimit-Limit': components['headers']['X-RateLimit-Limit'];
+        'X-RateLimit-Remaining': components['headers']['X-RateLimit-Remaining'];
+        'X-RateLimit-Reset': components['headers']['X-RateLimit-Reset'];
         [name: string]: unknown;
       };
       content: {
@@ -9804,7 +9809,14 @@ export interface components {
     RoomID: string;
   };
   requestBodies: never;
-  headers: never;
+  headers: {
+    /** @description Requests per minute of the budget closest to exhaustion (API-04). */
+    'X-RateLimit-Limit': number;
+    /** @description Requests left in the current minute of that budget. */
+    'X-RateLimit-Remaining': number;
+    /** @description Seconds until the current window ends. */
+    'X-RateLimit-Reset': number;
+  };
   pathItems: never;
 }
 export type $defs = Record<string, never>;

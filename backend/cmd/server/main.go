@@ -647,7 +647,7 @@ func main() {
 		middleware.TenantMiddleware,
 		httpMetrics,
 		entitlementSvc.Middleware,
-		middleware.RateLimiterWithStore(cfg.RateLimitRPM, cacheStore),
+		middleware.RateLimiterWithLimits(middleware.RateLimits{PerCredential: cfg.RateLimitRPM, PerOrganization: cfg.RateLimitOrgRPM}, cacheStore),
 	)(mux)
 
 	server := &http.Server{
