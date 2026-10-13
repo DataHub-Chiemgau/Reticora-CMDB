@@ -1287,3 +1287,68 @@ func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, cli
 	})
 	return keys, err
 }
+
+// ChangeType implements TypeChanger (CI-11): the CI keeps its row, so its
+// relationships, mounts, asset link and history stay; required attributes
+// of the target type the CI lacks are reported as findings.
+func (r *PGRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode string) (*TypeChangeResult, error) {
+	result := &TypeChangeResult{Findings: []TypeFinding{}}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
+		before, err := scanCI(tx.QueryRow(ctx, query, ciID, orgID))
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("not found")
+			}
+			return fmt.Errorf("get ci for type change: %w", err)
+		}
+		var toKey string
+		var required []string
+		err = tx.QueryRow(ctx, `SELECT COALESCE(key, name), COALESCE(required_fields, '{}') FROM ci_type
+			WHERE id = $1 AND (organization_id = $2 OR organization_id IS NULL)`, typeID, orgID).Scan(&toKey, &required)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrUnknownType
+			}
+			return fmt.Errorf("get target type: %w", err)
+		}
+		var fromKey string
+		if err = tx.QueryRow(ctx, "SELECT COALESCE(key, name) FROM ci_type WHERE id = $1", before.CITypeID).Scan(&fromKey); err != nil &&
+			!errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("get current type: %w", err)
+		}
+		if mode == TypeChangeDiscovery && !DiscoveryMayReclassify(fromKey, toKey) {
+			return ErrReclassificationRefused
+		}
+		result.Findings = MissingRequired(required, before.Attributes)
+		if before.CITypeID == typeID {
+			result.CI = before
+			return nil
+		}
+		if _, err = tx.Exec(ctx, `UPDATE ci SET ci_type_id = $3, version = version + 1, updated_at = NOW()
+			WHERE id = $1 AND organization_id = $2`, ciID, orgID, typeID); err != nil {
+			return fmt.Errorf("change ci type: %w", err)
+		}
+		after, err := scanCI(tx.QueryRow(ctx, fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2", ciSelectColumns), ciID, orgID))
+		if err != nil {
+			return fmt.Errorf("get changed ci: %w", err)
+		}
+		result.CI, result.Changed = after, true
+		change := map[string]any{"ci_type_id": typeID, "type": toKey, "mode": mode, "findings": result.Findings}
+		if changeErr := r.recordCIChange(ctx, tx, orgID, ciID, after.Version, "type_change", "ci_type_id",
+			map[string]any{"ci_type_id": before.CITypeID, "type": fromKey}, change); changeErr != nil {
+			return changeErr
+		}
+		if auditErr := r.recordAudit(ctx, tx, "ci.type_changed", after, map[string]interface{}{
+			"from": fromKey, "to": toKey, "mode": mode, "findings": result.Findings,
+		}); auditErr != nil {
+			return auditErr
+		}
+		// EVT-02 has no own type event: ci.changed names ci_type_id.
+		return r.recordEvent(ctx, tx, events.CIChanged, after, []string{"ci_type_id"})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}

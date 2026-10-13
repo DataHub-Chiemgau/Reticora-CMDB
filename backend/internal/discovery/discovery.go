@@ -1190,6 +1190,11 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			if conflict {
 				resp.ProtectedOverrides++
 			}
+			// A generic_device classified now becomes the specific type
+			// through the type change service (CI-11).
+			if typeErr := h.raiseGenericType(ctx, orgID, updated, typeIDs[i], identity); typeErr != nil {
+				return resp, typeErr
+			}
 			resolvedCIID[i] = updated.ID
 			resp.Updated++
 			if syncErr := h.syncInterfaces(ctx, orgID, updated.ID, &item); syncErr != nil {
@@ -1284,4 +1289,26 @@ func firstNonEmpty(preferred, fallback string) string {
 		return preferred
 	}
 	return fallback
+}
+
+// raiseGenericType reclassifies a matched generic_device CI to the specific
+// type the device reported (CI-11); discovery never changes other types.
+func (h *Handler) raiseGenericType(ctx context.Context, orgID string, matched *ci.Item, typeID string, ic *IdentityContext) error {
+	if ic == nil || ic.GenericDeviceTypeID == "" || matched.CITypeID != ic.GenericDeviceTypeID ||
+		typeID == "" || typeID == ic.GenericDeviceTypeID {
+		return nil
+	}
+	changer, ok := h.ciRepo.(ci.TypeChanger)
+	if !ok {
+		return nil
+	}
+	result, err := changer.ChangeType(ctx, orgID, matched.ID, typeID, ci.TypeChangeDiscovery)
+	switch {
+	case errors.Is(err, ci.ErrReclassificationRefused), errors.Is(err, ci.ErrUnknownType):
+		return nil
+	case err != nil:
+		return fmt.Errorf("reclassify generic device: %w", err)
+	}
+	*matched = *result.CI
+	return nil
 }

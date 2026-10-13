@@ -371,3 +371,4 @@ CI-05;[B];C;backend/internal/ci/delete_integration_test.go;WP-170
 LCY-01;[B];C;backend/internal/ci/delete_integration_test.go;WP-170
 CI-06;[B];C;backend/internal/history/history_integration_test.go;WP-171
 AUD-03;[B];C;backend/internal/history/history_integration_test.go;WP-171
+CI-11;[B];C;backend/internal/ci/typechange_test.go;WP-172

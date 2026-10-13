@@ -64,6 +64,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Patch("/api/v1/cis/{id}", h.Update)
 	r.Delete("/api/v1/cis/{id}", h.Delete)
 	r.Post("/api/v1/cis/{id}/restore", h.Restore)
+	r.Post("/api/v1/cis/{id}/type", h.ChangeType)
 }
 
 // List handles GET /api/v1/cis
@@ -234,6 +235,37 @@ func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("ETag", api.ETag(item.Version))
 	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// ChangeType handles POST /api/v1/cis/{id}/type: the manual type change
+// (CI-11). Missing required attributes of the target type are findings.
+func (h *Handler) ChangeType(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	var body struct {
+		CITypeID string `json:"ci_type_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.CITypeID) == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "ci_type_id is required")
+		return
+	}
+	result, err := h.svc.ChangeType(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), strings.TrimSpace(body.CITypeID))
+	switch {
+	case errors.Is(err, ErrUnknownType):
+		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		return
+	case err != nil && err.Error() == "not found":
+		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
+		return
+	case err != nil:
+		api.WriteRepoError(w, err)
+		return
+	}
+	w.Header().Set("ETag", api.ETag(result.CI.Version))
+	api.WriteJSON(w, http.StatusOK, result)
 }
 
 // Create handles POST /api/v1/cis

@@ -18,6 +18,13 @@ type MemoryRepository struct {
 	seq   int
 	// deleted keeps what a restore brings back (CI-05).
 	deleted map[string]deletedState
+	// types holds the CI types known for a type change (CI-11).
+	types map[string]memoryType
+}
+
+type memoryType struct {
+	key      string
+	required []string
 }
 
 type deletedState struct{ status, assetID string }
@@ -27,6 +34,7 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
 		items:   make(map[string]*Item),
 		deleted: make(map[string]deletedState),
+		types:   make(map[string]memoryType),
 	}
 }
 
@@ -285,4 +293,38 @@ func matchesFilters(item *Item, filters []api.Filter) bool {
 		}
 	}
 	return true
+}
+
+// SetType registers a CI type for type changes (CI-11).
+func (r *MemoryRepository) SetType(id, key string, required ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.types[id] = memoryType{key: key, required: required}
+}
+
+// ChangeType implements TypeChanger like the PostgreSQL repository.
+func (r *MemoryRepository) ChangeType(_ context.Context, orgID, ciID, typeID, mode string) (*TypeChangeResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.items[ciID]
+	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
+		return nil, fmt.Errorf("not found")
+	}
+	to, ok := r.types[typeID]
+	if !ok {
+		return nil, ErrUnknownType
+	}
+	if mode == TypeChangeDiscovery && !DiscoveryMayReclassify(r.types[item.CITypeID].key, to.key) {
+		return nil, ErrReclassificationRefused
+	}
+	result := &TypeChangeResult{Findings: MissingRequired(to.required, item.Attributes)}
+	if item.CITypeID != typeID {
+		item.CITypeID = typeID
+		item.Version++
+		item.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		result.Changed = true
+	}
+	cp := *item
+	result.CI = &cp
+	return result, nil
 }

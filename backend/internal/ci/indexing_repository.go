@@ -73,6 +73,22 @@ func (r *indexingRepository) RestoreDeleted(ctx context.Context, orgID, id strin
 	return item, nil
 }
 
+// ChangeType forwards the type change (CI-11) and indexes the CI again.
+func (r *indexingRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode string) (*TypeChangeResult, error) {
+	changer, ok := r.Repository.(TypeChanger)
+	if !ok {
+		return nil, errors.New("type change is not supported by this repository")
+	}
+	result, err := changer.ChangeType(ctx, orgID, ciID, typeID, mode)
+	if err != nil {
+		return nil, err
+	}
+	if result.Changed {
+		r.index(ctx, result.CI)
+	}
+	return result, nil
+}
+
 // ListChanges forwards change-history reads when the wrapped repository
 // supports them (used by ci.Service.ListChanges).
 func (r *indexingRepository) ListChanges(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Change, int, error) {

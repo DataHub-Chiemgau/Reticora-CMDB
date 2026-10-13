@@ -824,6 +824,50 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
 
+  /api/v1/cis/{id}/type:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: changeCIType
+      tags: [CIs]
+      summary: Change the type of a CI (CI-11)
+      description: >-
+        Manual reclassification. The CI keeps its id, relationships, mounts,
+        asset link and history; required attributes of the target type the
+        CI does not carry are returned as findings and do not block. The
+        change is recorded as ci_change type_change, audit ci.type_changed
+        and event ci.changed (changed_fields ci_type_id). Discovery uses the
+        same service but may only raise generic_device to a specific type.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ci_type_id]
+              properties:
+                ci_type_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The type change and its findings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CITypeChangeResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: The target type does not exist.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
   /api/v1/cis/{id}/changes:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -11304,6 +11348,23 @@ components:
         Resources:
           type: array
           items: { $ref: '#/components/schemas/SCIMResource' }
+    CITypeChangeResult:
+      type: object
+      required: [ci, findings, changed]
+      properties:
+        ci: { $ref: '#/components/schemas/CI' }
+        changed:
+          type: boolean
+          description: False when the CI already had the type.
+        findings:
+          type: array
+          description: Required attributes of the target type the CI does not carry.
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string }
+              message: { type: string }
     HistoryChange:
       type: object
       required: [id, entity_type, entity_id, change_type, created_at]

@@ -413,6 +413,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/cis/{id}/type': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Change the type of a CI (CI-11)
+     * @description Manual reclassification. The CI keeps its id, relationships, mounts, asset link and history; required attributes of the target type the CI does not carry are returned as findings and do not block. The change is recorded as ci_change type_change, audit ci.type_changed and event ci.changed (changed_fields ci_type_id). Discovery uses the same service but may only raise generic_device to a specific type.
+     */
+    post: operations['changeCIType'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/cis/{id}/changes': {
     parameters: {
       query?: {
@@ -6553,6 +6576,16 @@ export interface components {
       itemsPerPage: number;
       Resources: components['schemas']['SCIMResource'][];
     };
+    CITypeChangeResult: {
+      ci: components['schemas']['CI'];
+      /** @description False when the CI already had the type. */
+      changed: boolean;
+      /** @description Required attributes of the target type the CI does not carry. */
+      findings: {
+        field: string;
+        message: string;
+      }[];
+    };
     HistoryChange: {
       id: string;
       /** Format: uuid */
@@ -10935,6 +10968,49 @@ export interface operations {
       404: components['responses']['NotFound'];
       /** @description The CI was deleted longer ago than the retention. */
       410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  changeCIType: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** Format: uuid */
+          ci_type_id: string;
+        };
+      };
+    };
+    responses: {
+      /** @description The type change and its findings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CITypeChangeResult'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description The target type does not exist. */
+      422: {
         headers: {
           [name: string]: unknown;
         };
