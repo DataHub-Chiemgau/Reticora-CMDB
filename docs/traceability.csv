@@ -351,3 +351,4 @@ DIS-08;[Q];D;backend/internal/discovery/errors_test.go;WP-155
 INS-06;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-156
 REC-09;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-157
 LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-157
+TOP-01;[B];D;backend/internal/discovery/topology_test.go;WP-158

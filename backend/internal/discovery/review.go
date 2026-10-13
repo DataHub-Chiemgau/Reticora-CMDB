@@ -53,6 +53,7 @@ func (h *Handler) ReviewService() *reviews.Service {
 		svc.WithEffect(ReviewKindUnlicensedCI, h.resolveUnlicensed)
 		svc.WithEffect(ReviewKindOverrideConflict, h.resolveOverrideConflict)
 		svc.WithEffect(ReviewKindScopeSuggested, h.resolveScopeSuggested)
+		svc.WithEffect(ReviewKindUnknownRelationship, h.resolveUnknownRelationship)
 		if h.reviewNotifier != nil {
 			svc.WithNotifier(h.reviewNotifier)
 		}

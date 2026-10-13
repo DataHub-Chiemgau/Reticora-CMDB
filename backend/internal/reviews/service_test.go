@@ -26,7 +26,8 @@ func (n *recordingNotifier) ReviewOpened(_ context.Context, item *Item) {
 // the notification when an item is opened, the 14-day escalation and the
 // review-items resource with its deprecated discovery path.
 func TestReviewModel(t *testing.T) {
-	if len(Kinds) != 10 || len(AllowedActions) != 10 {
+	// The ten types of REC-08 plus unknown_relationship (TOP-01, WP-158).
+	if len(Kinds) != 11 || len(AllowedActions) != 11 {
 		t.Fatalf("types: %d, action table: %d", len(Kinds), len(AllowedActions))
 	}
 	for _, kind := range Kinds {

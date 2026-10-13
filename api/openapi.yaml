@@ -3917,7 +3917,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip]
+            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip, unknown_relationship]
         - name: escalated
           in: query
           schema:
@@ -3973,7 +3973,7 @@ paths:
         number or hardware UUID kept in payload.incoming;
         resurrected_device merge|new|dismiss (merge reactivates the deleted
         CI); unlicensed_ci new|dismiss (new adopts the device within max_cis,
-        403 entitlement-limit otherwise); scope_suggested accept|dismiss;
+        403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope); unknown_relationship accept|dismiss (accept records the neighbor as connected_to);
         serial_mismatch and duplicate_ip dismiss. Another action is 422.
       requestBody:
         required: true
@@ -4024,7 +4024,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip]
+            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip, unknown_relationship]
       responses:
         '200':
           description: Paginated list of review items
@@ -14352,7 +14352,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip]
+          enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip, unknown_relationship]
         status:
           type: string
           enum: [open, resolved, dismissed]
