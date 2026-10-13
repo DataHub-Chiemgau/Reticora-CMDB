@@ -400,6 +400,27 @@ function buildQuery(params: object) {
   return value ? `?${value}` : '';
 }
 
+export interface CIBulkItemResult {
+  id: string;
+  result: 'ok' | 'error';
+  code: number;
+  error?: string;
+}
+
+export interface CIBulkResult {
+  action: string;
+  total: number;
+  succeeded: number;
+  failed: number;
+  items: CIBulkItemResult[];
+}
+
+export interface CIBulkJob {
+  job_id: string;
+  status: string;
+  kind: string;
+}
+
 export const ciApi = {
   list(params: CIListParams = {}): Promise<PaginatedResponse<CI>> {
     return fetchAPI(`/cis${buildQuery(params)}`);
@@ -431,6 +452,17 @@ export const ciApi = {
 
   delete(id: string): Promise<void> {
     return fetchAPI(`/cis/${id}`, { method: 'DELETE' });
+  },
+
+  /**
+   * bulk changes the status of up to 500 CIs (API-08): below 100 ids the
+   * answer is the report per id, from 100 ids on the job that produces it.
+   */
+  bulk(ids: string[], status: string): Promise<CIBulkResult | CIBulkJob> {
+    return fetchAPI('/cis/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'set_status', ids, status }),
+    });
   },
 
   relationships(id: string): Promise<PaginatedResponse<Relationship>> {

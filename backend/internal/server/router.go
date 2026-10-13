@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
@@ -322,10 +323,13 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// Export and discovery jobs register in the generic job model (JOB-01).
 	var jobTracker jobs.Tracker
 	if repos.Jobs != nil {
-		jobTracker = jobs.NewService(repos.Jobs)
-		// A CI merge is a job (CI-12, JOB-01).
+		jobService := jobs.NewService(repos.Jobs)
+		jobTracker = jobService
+		// A CI merge is a job (CI-12, JOB-01); bulk operations from 100
+		// ids on as well (API-08, JOB-04).
+		jobService.Register(jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute})
 		if opts.CIService != nil {
-			opts.CIService.WithJobs(jobTracker)
+			opts.CIService.WithJobs(jobTracker).WithBulkJobs(jobService)
 		}
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)

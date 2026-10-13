@@ -66,6 +66,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/cis/{id}/restore", h.Restore)
 	r.Post("/api/v1/cis/{id}/type", h.ChangeType)
 	r.Post("/api/v1/cis/{id}/merge", h.Merge)
+	r.Post("/api/v1/cis/bulk", h.Bulk)
 	r.Post("/api/v1/cis/{id}/unmerge", h.Unmerge)
 }
 
@@ -350,6 +351,34 @@ func (h *Handler) Unmerge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, result)
+}
+
+// Bulk handles POST /api/v1/cis/bulk (API-08, BLK-01): below 100 ids the
+// answer is the report per id (200); from 100 ids on 202 with the job
+// whose result is the report.
+func (h *Handler) Bulk(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	var req BulkRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	result, job, err := h.svc.Bulk(r.Context(), t.OrganizationID, &req)
+	switch {
+	case err != nil:
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
+	case job != nil:
+		w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
+		api.WriteJSON(w, http.StatusAccepted, map[string]any{"job_id": job.ID, "status": job.Status, "kind": job.Kind})
+	default:
+		api.WriteJSON(w, http.StatusOK, result)
+	}
 }
 
 // Create handles POST /api/v1/cis

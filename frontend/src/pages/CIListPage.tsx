@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ciApi } from '../api/client';
-import { useCIList, useUpdateCI } from '../api/hooks';
+import { useQueryClient } from '@tanstack/react-query';
+import { ciApi, type CIBulkItemResult } from '../api/client';
+import { useCIList } from '../api/hooks';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
@@ -29,9 +30,10 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkStatus, setBulkStatus] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkFailures, setBulkFailures] = useState<CIBulkItemResult[]>([]);
   const limit = 25;
   const pushToast = useToastStore((state) => state.push);
-  const updateCI = useUpdateCI();
+  const queryClient = useQueryClient();
 
   const { data, isLoading, error, refetch } = useCIList({
     search,
@@ -73,16 +75,30 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
       return;
     }
     setBulkBusy(true);
+    setBulkFailures([]);
     try {
-      await Promise.all(
-        selectedIds.map((id) => updateCI.mutateAsync({ id, data: { status: bulkStatus } })),
-      );
-      pushToast({
-        message: t('ci.bulk.success', { count: selectedIds.length }),
-        variant: 'success',
-      });
+      // One request for all CIs; the server reports every id (API-08).
+      const result = await ciApi.bulk(selectedIds, bulkStatus);
+      if ('job_id' in result) {
+        pushToast({
+          message: t('ci.bulk.queued', { count: selectedIds.length }),
+          variant: 'success',
+        });
+      } else if (result.failed === 0) {
+        pushToast({
+          message: t('ci.bulk.success', { count: result.succeeded }),
+          variant: 'success',
+        });
+      } else {
+        setBulkFailures(result.items.filter((item) => item.result === 'error'));
+        pushToast({
+          message: t('ci.bulk.partial', { succeeded: result.succeeded, failed: result.failed }),
+          variant: 'error',
+        });
+      }
       setSelectedIds([]);
       setBulkStatus('');
+      void queryClient.invalidateQueries({ queryKey: ['cis'] });
     } catch {
       pushToast({ message: t('ci.bulk.error'), variant: 'error' });
     } finally {
@@ -156,6 +172,25 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
           description={t('ci.emptyHint')}
           action={<Button onClick={onCreateCI}>{t('form.createCI')}</Button>}
         />
+      ) : null}
+
+      {bulkFailures.length > 0 ? (
+        <Card title={t('ci.bulk.failures')}>
+          <ul
+            className="space-y-1 text-sm text-red-700 dark:text-red-300"
+            aria-label={t('ci.bulk.failures')}
+          >
+            {bulkFailures.map((failure) => (
+              <li key={failure.id}>
+                <span className="font-medium">
+                  {data?.data.find((ci) => ci.id === failure.id)?.name ?? failure.id}
+                </span>
+                {': '}
+                {failure.error}
+              </li>
+            ))}
+          </ul>
+        </Card>
       ) : null}
 
       {data && data.data.length > 0 ? (

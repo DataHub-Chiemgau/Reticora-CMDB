@@ -482,6 +482,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/cis/bulk': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Bulk status change of up to 500 CIs (API-08, BLK-01)
+     * @description Sets the status of every CI in ids. Below 100 ids the answer is the partial failure report (200): every id with ok or its error and the HTTP status the single change would have answered. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}). More than 500 ids is 422. Requires ci:write.
+     */
+    post: operations['bulkCIs'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/cis/{id}/changes': {
     parameters: {
       query?: {
@@ -6778,6 +6798,19 @@ export interface components {
       category: string;
       heuristic?: boolean;
     };
+    CIBulkResult: {
+      action: string;
+      total: number;
+      succeeded: number;
+      failed: number;
+      items: {
+        id: string;
+        /** @enum {string} */
+        result: 'ok' | 'error';
+        code: number;
+        error?: string;
+      }[];
+    };
     CITypeChangeResult: {
       ci: components['schemas']['CI'];
       /** @description False when the CI already had the type. */
@@ -11317,6 +11350,65 @@ export interface operations {
       };
       /** @description The merge snapshot is older than 30 days. */
       410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  bulkCIs: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /**
+           * @default set_status
+           * @enum {string}
+           */
+          action?: 'set_status';
+          ids: string[];
+          /** @enum {string} */
+          status: 'active' | 'inactive' | 'maintenance' | 'decommissioned' | 'unknown';
+        };
+      };
+    };
+    responses: {
+      /** @description The report per id */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CIBulkResult'];
+        };
+      };
+      /** @description The bulk change runs as a job */
+      202: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            job_id: string;
+            status: string;
+            kind: string;
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description More than 500 ids, an unknown action or status. */
+      422: {
         headers: {
           [name: string]: unknown;
         };

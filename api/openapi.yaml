@@ -962,6 +962,71 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
 
+  /api/v1/cis/bulk:
+    post:
+      operationId: bulkCIs
+      tags: [CIs]
+      summary: Bulk status change of up to 500 CIs (API-08, BLK-01)
+      description: >-
+        Sets the status of every CI in ids. Below 100 ids the answer is the
+        partial failure report (200): every id with ok or its error and the
+        HTTP status the single change would have answered. From 100 ids on
+        the change runs as a job of kind ci.bulk (JOB-04): 202 with the job,
+        whose result is the report (GET /api/v1/jobs/{id}). More than 500
+        ids is 422. Requires ci:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids, status]
+              additionalProperties: false
+              properties:
+                action:
+                  type: string
+                  enum: [set_status]
+                  default: set_status
+                ids:
+                  type: array
+                  minItems: 1
+                  items: { type: string }
+                status:
+                  type: string
+                  enum: [active, inactive, maintenance, decommissioned, unknown]
+      responses:
+        '200':
+          description: The report per id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIBulkResult'
+        '202':
+          description: The bulk change runs as a job
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, status, kind]
+                properties:
+                  job_id: { type: string }
+                  status: { type: string }
+                  kind: { type: string }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: More than 500 ids, an unknown action or status.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
   /api/v1/cis/{id}/changes:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -11712,6 +11777,24 @@ components:
         rel_type: { type: string }
         category: { type: string }
         heuristic: { type: boolean }
+    CIBulkResult:
+      type: object
+      required: [action, total, succeeded, failed, items]
+      properties:
+        action: { type: string }
+        total: { type: integer }
+        succeeded: { type: integer }
+        failed: { type: integer }
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, result, code]
+            properties:
+              id: { type: string }
+              result: { type: string, enum: [ok, error] }
+              code: { type: integer }
+              error: { type: string }
     CITypeChangeResult:
       type: object
       required: [ci, findings, changed]

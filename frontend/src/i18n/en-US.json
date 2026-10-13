@@ -183,6 +183,9 @@
       "selectAll": "Select all visible CIs",
       "selectRow": "Select {{name}}",
       "toolbarLabel": "Bulk edit",
+      "queued": "Status change for {{count}} CIs runs as a job",
+      "partial": "{{succeeded}} CIs updated, {{failed}} failed",
+      "failures": "Failed CIs",
       "success": "Updated status of {{count}} CIs",
       "error": "The bulk change could not be fully applied"
     },

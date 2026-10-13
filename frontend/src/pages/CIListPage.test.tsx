@@ -50,8 +50,9 @@ describe('CIListPage', () => {
     expect(onCreateCI).toHaveBeenCalledTimes(1);
   });
 
-  it('bulk-updates the status of selected CIs', async () => {
+  it('bulk-updates the status of selected CIs in one request', async () => {
     const fetchMock = stubFetchRoutes({
+      '/cis/bulk': { action: 'set_status', total: 1, succeeded: 1, failed: 0, items: [] },
       '/cis': { data: [ci], total: 1, limit: 25, offset: 0, has_more: false },
     });
 
@@ -74,17 +75,53 @@ describe('CIListPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Anwenden' }));
 
     const calls = fetchMock.mock.calls as unknown as [string, RequestInit | undefined][];
-    const isPatch = (call: [string, RequestInit | undefined]) =>
-      call[0].includes('/cis/ci-1') && call[1]?.method === 'PATCH';
+    const isBulk = (call: [string, RequestInit | undefined]) =>
+      call[0].includes('/cis/bulk') && call[1]?.method === 'POST';
 
     await waitFor(() => {
-      expect(calls.find(isPatch)).toBeTruthy();
+      expect(calls.find(isBulk)).toBeTruthy();
     });
-    const patchCall = calls.find(isPatch);
-    expect(JSON.parse(patchCall?.[1]?.body as string)).toEqual({ status: 'maintenance' });
+    const bulkCall = calls.find(isBulk);
+    expect(JSON.parse(bulkCall?.[1]?.body as string)).toEqual({
+      action: 'set_status',
+      ids: ['ci-1'],
+      status: 'maintenance',
+    });
+    expect(calls.some((call) => call[1]?.method === 'PATCH')).toBe(false);
 
     // Success toast is announced in the live region.
     expect(await screen.findByText('Status von 1 CIs aktualisiert')).toBeInTheDocument();
+  });
+
+  it('shows the error of every CI the bulk change failed for', async () => {
+    stubFetchRoutes({
+      '/cis/bulk': {
+        action: 'set_status',
+        total: 1,
+        succeeded: 0,
+        failed: 1,
+        items: [{ id: 'ci-1', result: 'error', code: 404, error: 'CI not found' }],
+      },
+      '/cis': { data: [ci], total: 1, limit: 25, offset: 0, has_more: false },
+    });
+
+    renderWithProviders(
+      <>
+        <CIListPage onCreateCI={() => {}} />
+        <ToastViewport />
+      </>,
+      { route: '/cmdb' },
+    );
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'core-sw-01 auswählen' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status setzen…' }), {
+      target: { value: 'inactive' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Anwenden' }));
+
+    const failures = await screen.findByRole('list', { name: 'Fehlgeschlagene CIs' });
+    expect(failures).toHaveTextContent('core-sw-01: CI not found');
+    expect(await screen.findByText('0 CIs aktualisiert, 1 fehlgeschlagen')).toBeInTheDocument();
   });
 });
 

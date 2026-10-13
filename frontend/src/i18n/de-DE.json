@@ -183,6 +183,9 @@
       "selectAll": "Alle sichtbaren CIs auswählen",
       "selectRow": "{{name}} auswählen",
       "toolbarLabel": "Massenbearbeitung",
+      "queued": "Statusänderung für {{count}} CIs läuft als Job",
+      "partial": "{{succeeded}} CIs aktualisiert, {{failed}} fehlgeschlagen",
+      "failures": "Fehlgeschlagene CIs",
       "success": "Status von {{count}} CIs aktualisiert",
       "error": "Die Massenänderung konnte nicht vollständig angewendet werden"
     },

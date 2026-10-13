@@ -358,6 +358,7 @@ POST /api/v1/ci-types/{id}/activate ci_type:manage
 POST /api/v1/ci-types/{id}/clone ci_type:manage
 POST /api/v1/ci-types/{id}/deactivate ci_type:manage
 POST /api/v1/cis ci:write
+POST /api/v1/cis/bulk ci:write
 POST /api/v1/cis/{id}/contacts contact:write
 POST /api/v1/cis/{id}/interfaces ipam:write
 POST /api/v1/cis/{id}/lifecycle-transitions lifecycle:transition

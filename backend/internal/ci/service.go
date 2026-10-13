@@ -151,6 +151,8 @@ type Service struct {
 	limit  LimitGuard
 	fields FieldResolver
 	jobs   jobs.Tracker
+	// bulkJobs runs bulk operations from 100 ids on (API-08).
+	bulkJobs BulkJobs
 }
 
 // NewService creates a CI service.
