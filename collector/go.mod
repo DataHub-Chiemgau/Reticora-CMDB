@@ -8,6 +8,7 @@ require (
 	github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore v0.0.0-00010101000000-000000000000
 	github.com/nats-io/nats.go v1.54.0
 	golang.org/x/net v0.60.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

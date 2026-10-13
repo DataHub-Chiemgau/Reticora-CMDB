@@ -1,0 +1,14 @@
+# Collector profiles (DIS-02): classification and collection data.
+- name: opnsense-pfsense
+  vendor: Deciso/Netgate
+  model: OPNsense/pfSense
+  protocol: snmp
+  catalog: OPNsense/pfSense
+  ciType: firewall
+  plugin: snmp
+  systemTemplate: firewall
+  sysObjectIds:
+  - 1.3.6.1.4.1.12325
+  - 1.3.6.1.4.1.8072
+  sysDescrPattern: '(?i)opnsense|pfsense'
+  bannerPattern: '(?i)opnsense|pfsense'

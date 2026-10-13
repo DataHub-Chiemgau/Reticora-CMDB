@@ -1,0 +1,46 @@
+# Collector profiles (DIS-02): classification and collection data.
+- name: ubiquiti-unifi-snmp
+  vendor: Ubiquiti
+  model: UniFi
+  protocol: snmp
+  catalog: Ubiquiti UniFi Switch/AP
+  ciType: access_point
+  plugin: snmp
+  systemTemplate: access-point
+  sysObjectIds:
+  - 1.3.6.1.4.1.41112
+  - 1.3.6.1.4.1.10002.1
+  bannerPattern: '(?i)\buap\b|unifi ?ap|\bu[67]-'
+  ouiPrefixes:
+  - '00:15:6D'
+  - '04:18:D6'
+  - '24:5A:4C'
+  - '68:D7:9A'
+  - '70:A7:41'
+  - '78:45:58'
+  - 'B4:FB:E4'
+  - 'E0:63:DA'
+  - 'F0:9F:C2'
+  snmpOids:
+    sysDescr: 1.3.6.1.2.1.1.1.0
+    sysName: 1.3.6.1.2.1.1.5.0
+    sysUpTime: 1.3.6.1.2.1.1.3.0
+    ifDescr: 1.3.6.1.2.1.2.2.1.2
+    ifOperStatus: 1.3.6.1.2.1.2.2.1.8
+    ifHighSpeed: 1.3.6.1.2.1.31.1.1.1.15
+  attributes:
+    category: network_device
+    device_type: access_point
+- name: ubiquiti-unifi-switch-snmp
+  vendor: Ubiquiti
+  model: UniFi Switch
+  protocol: snmp
+  catalog: Ubiquiti UniFi Switch/AP
+  ciType: switch
+  plugin: snmp
+  systemTemplate: network-switch
+  sysObjectIds:
+  - 1.3.6.1.4.1.41112
+  - 1.3.6.1.4.1.4413
+  sysDescrPattern: '(?i)\bUSW|\bUS-[0-9]|unifi ?switch'
+  bannerPattern: '(?i)\bUSW|unifi ?switch'

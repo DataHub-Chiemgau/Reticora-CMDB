@@ -1,0 +1,16 @@
+# Collector profiles (DIS-02): classification and collection data.
+- name: aruba-cx-snmp
+  vendor: Aruba
+  model: CX 6xxx
+  protocol: snmp
+  catalog: Aruba CX 6xxx
+  ciType: switch
+  plugin: snmp
+  systemTemplate: network-switch
+  sysObjectIds:
+  - 1.3.6.1.4.1.47196.4.1.1
+  sysDescrPattern: '(?i)arubaos-cx|aruba.*\b6[0-9]{3}'
+  ouiPrefixes:
+  - '88:3A:30'
+  - '94:60:D5'
+  - 'B8:D4:E7'

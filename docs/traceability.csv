@@ -341,3 +341,4 @@ COL-06;[B], Air-Gapped [O];D;edgecore/update/update_test.go;WP-148
 DIS-01;[B];D;collector/plugins/sweep/sweep_test.go;WP-149
 DIS-03;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-150
 DIS-04;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-150
+DIS-02;[B], Profilliste (V);D;collector/profiles/profiles_test.go;WP-151

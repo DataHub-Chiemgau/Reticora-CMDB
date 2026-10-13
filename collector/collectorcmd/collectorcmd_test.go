@@ -613,7 +613,8 @@ func (p *probeCollectPlugin) Collect(_ context.Context, target string, _ map[str
 		return nil, errors.New("authentication failed")
 	}
 	return plugins.CollectRecord("snmp", &plugins.Result{
-		CIType: "switch", Name: "core-sw-1", IP: target, Serial: "FOC1",
+		CIType: "network.device", Name: "core-sw-1", IP: target, Serial: "FOC1",
+		Attributes: map[string]any{"sysObjectID": "1.3.6.1.4.1.9.1.2494", "sysDescr": "Cisco IOS XE, C9300-48P"},
 		Interfaces: []plugins.NetworkInterface{{Name: "Gi1/0/1", IfIndex: 1, OperUp: true, AdminUp: true}},
 	}, nil, time.Now())
 }
@@ -637,13 +638,16 @@ func TestDiscoveryProbesThenCollects(t *testing.T) {
 		}
 	}
 	full, fallback := records[0], records[1]
-	if full.Classification.CIType != "switch" || full.Identity.SerialNumber != "FOC1" || len(full.Interfaces) != 1 {
+	if full.Classification.CIType != "switch" || full.Classification.Profile != "cisco-catalyst-9000-snmp" ||
+		full.Identity.SerialNumber != "FOC1" || len(full.Interfaces) != 1 {
 		t.Errorf("collected record = %+v", full)
 	}
 	if full.Identity.PrimaryMAC != "00:11:22:33:44:01" {
 		t.Errorf("the probe MAC must complete the record, got %q", full.Identity.PrimaryMAC)
 	}
-	if fallback.Classification.CIType != "network.device" || fallback.TargetIP != "192.0.2.2" || fallback.Source != "snmp" {
+	// Without evidence the probe hit is an unclassified generic_device (DIS-02).
+	if fallback.Classification.CIType != "generic_device" || fallback.Attributes["classified_by"] != "fallback" ||
+		fallback.TargetIP != "192.0.2.2" || fallback.Source != "snmp" {
 		t.Errorf("fallback record = %+v", fallback)
 	}
 	for _, rec := range records {

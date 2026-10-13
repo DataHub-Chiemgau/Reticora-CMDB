@@ -38,6 +38,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/ssh"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/sweep"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/wmi"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/profiles"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/transport"
@@ -131,6 +132,7 @@ func Main() {
 	collectorCfg := loadCollectorConfig()
 	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
 	pluginRegistry["sweep"] = newSweep(&collectorCfg)
+	loadProfileDir(os.Getenv("RETICORA_PROFILES_DIR"))
 
 	environment := envOrDefault("RETICORA_ENVIRONMENT", "development")
 	logLevel := slog.LevelInfo
@@ -514,7 +516,27 @@ func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits
 		}()
 	}
 	wg.Wait()
+	// One classification chain for every record (DIS-02).
+	for i := range out {
+		classifier.ClassifyRecord(&out[i])
+	}
 	return out
+}
+
+// classifier holds the shipped profiles plus those of RETICORA_PROFILES_DIR.
+var classifier = profiles.Default()
+
+// loadProfileDir adds the operator's profiles (updated OUI prefixes and
+// device profiles) to the classifier.
+func loadProfileDir(dir string) {
+	if dir == "" {
+		return
+	}
+	if err := classifier.LoadDir(dir); err != nil {
+		slog.Error("loading device profiles failed; using the shipped profiles", "dir", dir, "error", err)
+		return
+	}
+	slog.Info("device profiles loaded", "dir", dir, "profiles", len(classifier.List()))
 }
 
 // deliverableRecords resolves the address of targets configured by name and

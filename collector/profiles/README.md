@@ -12,18 +12,29 @@ Typical profile data includes:
 
 Profiles are intended to keep protocol plugins generic while capturing vendor-specific knowledge in declarative data.
 
-## Classification (spec §5.4)
+## Classification (DIS-02)
 
-Every JSON file in `data/` is embedded into the collector binary. The SNMP
-plugin resolves a device's sysObjectID via `Registry.BySysObjectID` (longest
-prefix wins, so a model profile beats a generic vendor profile) and merges the
-profile's vendor/model/attributes into the result. `Registry.VendorByMAC`
-resolves a vendor from a MAC OUI when only a MAC is known.
+Every YAML file in `data/` is embedded into the collector binary;
+`RETICORA_PROFILES_DIR` adds or replaces profiles (and OUI prefixes) without
+a new release. `Registry.ClassifyRecord` runs one chain over every
+DeviceRecord the collector produces:
 
-Adding support for a new device family means dropping a JSON file into
-`data/` — no code change required. `TestEmbeddedProfileData` validates every
-shipped file in CI.
+1. **SNMP** – `sysObjectIds` (longest prefix) and `sysDescrPattern`; a
+   matching sysDescr pattern beats a longer OID prefix, a non-matching one
+   excludes the profile.
+2. **Redfish** – `redfishPattern` against "manufacturer model" of Redfish
+   records.
+3. **Banner** – `bannerPattern` against SSH banner, uname, OS name and the
+   NAS/UPS identification; `priority` decides between matches (generic
+   Linux is -10).
 
-Currently shipped: Cisco, Juniper, Arista, Fortinet, HPE (ProCurve/iLO), Dell
-(OS10/iDRAC), MikroTik, Ubiquiti, Synology, NetApp, APC, Supermicro, Lenovo
-plus generic SNMP/SSH fallbacks.
+A match sets CI type (`ciType`, a system type), vendor, model, `plugin` and
+`systemTemplate` (attributes `plugin`, `system_template`, `classified_by`).
+Without a match the record becomes `generic_device` with
+`classified_by: fallback`; the MAC OUI still names the vendor and the server
+opens an `unclassified_device` review. Profiles without `ciType` carry
+collection data only (OIDs, SSH commands, Redfish endpoints).
+
+`catalog` names the entry of the confirmed CH30 profile list (E-21) a
+profile covers; `TestProfileListCoversCH30` checks the list,
+`TestEmbeddedProfileData` validates every shipped file.

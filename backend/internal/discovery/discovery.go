@@ -953,6 +953,38 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			resp.ReviewItems++
 		}
 	}
+	// No collector profile matched (DIS-02): the device becomes a
+	// generic_device CI and a reviewer classifies it.
+	for i := range req.Items {
+		item := &req.Items[i]
+		if typeIDs[i] == "" || !unclassifiedDevice(item) {
+			continue
+		}
+		opened, openErr := h.openReview(ctx, &ReviewItem{
+			OrganizationID: orgID,
+			Kind:           ReviewKindUnclassifiedDevice,
+			Status:         ReviewStatusOpen,
+			Payload: map[string]any{
+				"reason":        ReasonNoProfileMatch,
+				"ci_type_name":  item.CITypeName,
+				"name":          item.Name,
+				"manufacturer":  item.Manufacturer,
+				"model":         item.Model,
+				"serial_number": item.SerialNumber,
+				"management_ip": item.ManagementIP,
+				"sys_object_id": item.SysObjectID,
+				"fingerprint":   item.Fingerprint,
+				"raw_data":      item.RawData,
+			},
+			ObjectKey: deviceKey(item),
+		})
+		if openErr != nil {
+			return resp, openErr
+		}
+		if opened {
+			resp.ReviewItems++
+		}
+	}
 
 	// The CI count for max_cis; identity candidates are looked up per item
 	// over the whole inventory (REC-02).

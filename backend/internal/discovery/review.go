@@ -69,6 +69,16 @@ func (h *Handler) WithReviewNotifier(n reviews.Notifier) *Handler {
 
 // openReview opens a review item, deduplicated per object and type, and
 // reports whether it is new.
+// ReasonNoProfileMatch marks an unclassified_device item of a device that
+// no collector profile matched (DIS-02); its generic_device CI exists.
+const ReasonNoProfileMatch = "no_profile_match"
+
+// unclassifiedDevice reports whether the collector's classification chain
+// found no profile for the item (generic_device, classified_by fallback).
+func unclassifiedDevice(item *IngestItem) bool {
+	return item.CITypeName == "generic_device" && item.Attributes["classified_by"] == "fallback"
+}
+
 func (h *Handler) openReview(ctx context.Context, item *ReviewItem) (bool, error) {
 	return h.ReviewService().Open(ctx, item)
 }
@@ -125,6 +135,10 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 			res.Note = "merged into " + res.CIID
 		}
 	case reviews.ActionNew:
+		if payloadString(item.Payload, "reason") == ReasonNoProfileMatch {
+			// The device already exists as generic_device CI.
+			return false, refused(http.StatusConflict, "the device is already recorded as generic_device; set its type on the CI and dismiss the item")
+		}
 		nowTime := time.Now().UTC()
 		newItem := ci.Item{
 			OrganizationID:  orgID,
