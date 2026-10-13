@@ -102,6 +102,7 @@ GET /api/v1/cis/{id}/state ci:read
 GET /api/v1/clients user:read
 GET /api/v1/clients/{id} user:read
 GET /api/v1/collectors discovery:read
+GET /api/v1/collectors/pki discovery:read
 GET /api/v1/compliance/report compliance:read
 GET /api/v1/compliance/results compliance:read
 GET /api/v1/compliance/rules compliance:read
@@ -342,6 +343,7 @@ POST /api/v1/clients user:manage
 POST /api/v1/collectors collector:manage
 POST /api/v1/collectors/enroll public
 POST /api/v1/collectors/enrollment-codes collector:manage
+POST /api/v1/collectors/{id}/certificate discovery:ingest
 POST /api/v1/collectors/{id}/heartbeat discovery:ingest
 POST /api/v1/compliance/evaluations compliance:write
 POST /api/v1/compliance/rules compliance:write

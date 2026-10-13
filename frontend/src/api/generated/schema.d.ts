@@ -3205,9 +3205,52 @@ export interface paths {
     put?: never;
     /**
      * Enroll a collector with an enrollment code
-     * @description Unauthenticated by bearer design — the single-use enrollment code is the credential. On success the collector identity is registered under the code's organization and returned with its id.
+     * @description Unauthenticated by bearer design — the single-use enrollment code is the credential (valid 24 h, consumed exactly once). On success the collector identity is registered under the code's organization and returned with its id. With `csr` (PEM certificate signing request of the collector's locally generated key) the internal CA issues the collector's client certificate (CN = collector id, 90 days, COL-04).
      */
     post: operations['enrollCollector'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/collectors/pki': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Trust bundle and revocation list of the collector certificates
+     * @description The trust bundle holds the active CA and, during a CA roll-over, the previous one (COL-04); the revocation list names the revoked certificates (disabled collectors) that have not expired.
+     */
+    get: operations['getCollectorPKI'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/collectors/{id}/certificate': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Renew the collector certificate
+     * @description The collector sends a CSR of a new local key once its certificate reached 60 % of its lifetime (409 before); a disabled collector gets none (403). Requires discovery:ingest.
+     */
+    post: operations['renewCollectorCertificate'];
     delete?: never;
     options?: never;
     head?: never;
@@ -9182,7 +9225,7 @@ export interface components {
       name: string;
       version?: string;
       /**
-       * @description pending until the first heartbeat, active while heartbeats arrive, offline after five minutes without heartbeat (COL-05), disabled by an administrator, paused while the discovery license is not active (ENT-07).
+       * @description pending until the first heartbeat, active while heartbeats arrive, offline after five minutes without heartbeat (COL-05), disabled by an administrator (its certificates are revoked), paused while the discovery license is not active (ENT-07).
        * @enum {string}
        */
       status: 'pending' | 'active' | 'offline' | 'disabled' | 'paused';
@@ -9200,6 +9243,18 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    CollectorCertificate: {
+      certificate_pem: string;
+      /** @description Active and */
+      ca_bundle_pem: string;
+      serial: string;
+      /** @description SHA-256 of the certificate (hex) */
+      fingerprint: string;
+      /** Format: date-time */
+      not_before: string;
+      /** Format: date-time */
+      not_after: string;
     };
     CollectorPatch: {
       name?: string;
@@ -17000,21 +17055,87 @@ export interface operations {
           name: string;
           version?: string;
           client_id?: string;
+          /** @description PEM certificate signing request */
+          csr?: string;
         };
       };
     };
     responses: {
-      /** @description Collector enrolled */
+      /** @description Collector enrolled (with `certificate` when a CSR was sent) */
       201: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['Collector'];
+          'application/json': components['schemas']['Collector'] & {
+            certificate?: components['schemas']['CollectorCertificate'];
+          };
         };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getCollectorPKI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Trust bundle and CRL (PEM) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            ca_bundle_pem: string;
+            crl_pem: string;
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  renewCollectorCertificate: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          csr: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Certificate issued */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CollectorCertificate'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   collectorHeartbeat: {

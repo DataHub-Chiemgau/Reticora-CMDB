@@ -104,17 +104,17 @@ func TestEnrollmentCodeIsConsumedOnce(t *testing.T) {
 	// Expired codes register nothing.
 	seed("scopetest-a4-expired", time.Now().Add(-time.Minute))
 	col := &discovery.Collector{Name: "wp144-expired"}
-	if err := repo.EnrollCollector(bg, "scopetest-a4-expired", col); err == nil || count("wp144-expired") != 0 {
+	if _, err := repo.EnrollCollector(bg, "scopetest-a4-expired", col, nil); err == nil || count("wp144-expired") != 0 {
 		t.Fatalf("expired code: %v", err)
 	}
 
 	// A registration that fails leaves the code usable.
 	seed("scopetest-a4-retry", time.Now().Add(time.Hour))
 	bad := &discovery.Collector{Name: "wp144-retry", SiteID: "00000000-0000-4000-8000-000000000000"}
-	if err := repo.EnrollCollector(bg, "scopetest-a4-retry", bad); err == nil {
+	if _, err := repo.EnrollCollector(bg, "scopetest-a4-retry", bad, nil); err == nil {
 		t.Fatal("enrollment with an unknown site succeeded")
 	}
-	if err := repo.EnrollCollector(bg, "scopetest-a4-retry", &discovery.Collector{Name: "wp144-retry"}); err != nil || count("wp144-retry") != 1 {
+	if _, err := repo.EnrollCollector(bg, "scopetest-a4-retry", &discovery.Collector{Name: "wp144-retry"}, nil); err != nil || count("wp144-retry") != 1 {
 		t.Fatalf("retry after a failed registration: %v", err)
 	}
 }

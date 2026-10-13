@@ -6055,8 +6055,11 @@ paths:
       summary: Enroll a collector with an enrollment code
       description: >-
         Unauthenticated by bearer design — the single-use enrollment code is
-        the credential. On success the collector identity is registered under
-        the code's organization and returned with its id.
+        the credential (valid 24 h, consumed exactly once). On success the
+        collector identity is registered under the code's organization and
+        returned with its id. With `csr` (PEM certificate signing request of
+        the collector's locally generated key) the internal CA issues the
+        collector's client certificate (CN = collector id, 90 days, COL-04).
       requestBody:
         required: true
         content:
@@ -6069,17 +6072,92 @@ paths:
                 name: { type: string }
                 version: { type: string }
                 client_id: { type: string }
+                csr: { type: string, description: PEM certificate signing request }
       responses:
         '201':
-          description: Collector enrolled
+          description: Collector enrolled (with `certificate` when a CSR was sent)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Collector'
+                allOf:
+                  - $ref: '#/components/schemas/Collector'
+                  - type: object
+                    properties:
+                      certificate:
+                        $ref: '#/components/schemas/CollectorCertificate'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/collectors/pki:
+    get:
+      operationId: getCollectorPKI
+      tags: [Collectors]
+      summary: Trust bundle and revocation list of the collector certificates
+      description: >-
+        The trust bundle holds the active CA and, during a CA roll-over, the
+        previous one (COL-04); the revocation list names the revoked
+        certificates (disabled collectors) that have not expired.
+      responses:
+        '200':
+          description: Trust bundle and CRL (PEM)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ca_bundle_pem, crl_pem]
+                properties:
+                  ca_bundle_pem: { type: string }
+                  crl_pem: { type: string }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/collectors/{id}/certificate:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: renewCollectorCertificate
+      tags: [Collectors]
+      summary: Renew the collector certificate
+      description: >-
+        The collector sends a CSR of a new local key once its certificate
+        reached 60 % of its lifetime (409 before); a disabled collector gets
+        none (403). Requires discovery:ingest.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [csr]
+              properties:
+                csr: { type: string }
+      responses:
+        '201':
+          description: Certificate issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectorCertificate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/collectors/{id}/heartbeat:
     parameters:
@@ -15418,8 +15496,8 @@ components:
           description: >-
             pending until the first heartbeat, active while heartbeats arrive,
             offline after five minutes without heartbeat (COL-05), disabled by an
-            administrator, paused while the discovery license is not active
-            (ENT-07).
+            administrator (its certificates are revoked), paused while the
+            discovery license is not active (ENT-07).
         status_changed_at:
           type: string
           format: date-time
@@ -15440,6 +15518,17 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    CollectorCertificate:
+      type: object
+      required: [certificate_pem, ca_bundle_pem, serial, fingerprint, not_before, not_after]
+      properties:
+        certificate_pem: { type: string }
+        ca_bundle_pem: { type: string, description: Active and, during a roll-over, previous CA }
+        serial: { type: string }
+        fingerprint: { type: string, description: SHA-256 of the certificate (hex) }
+        not_before: { type: string, format: date-time }
+        not_after: { type: string, format: date-time }
 
     CollectorPatch:
       type: object

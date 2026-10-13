@@ -202,7 +202,18 @@ func (r *PGRepository) UpdateCollector(ctx context.Context, orgID, collectorID s
 		out, err = scanCollector(tx.QueryRow(ctx, `UPDATE collector SET name = $3, site_id = $4, status = $5
 			WHERE id = $1 AND organization_id = $2 RETURNING `+collectorSelectColumns,
 			collectorID, orgID, name, nilIfEmpty(site), status))
-		return collectorError(err)
+		if err != nil {
+			return collectorError(err)
+		}
+		// Disabling revokes the collector's certificates: they appear on the
+		// revocation list and the NATS endpoint refuses them (COL-04).
+		if status == CollectorDisabled && current.Status != CollectorDisabled {
+			if _, err = tx.Exec(ctx, `UPDATE collector_certificate SET revoked_at = now(), revocation_reason = 'collector disabled'
+				WHERE collector_id = $1 AND revoked_at IS NULL`, collectorID); err != nil {
+				return fmt.Errorf("revoke collector certificates: %w", err)
+			}
+		}
+		return nil
 	})
 	return out, err
 }
@@ -467,7 +478,7 @@ func (r *PGRepository) CreateEnrollmentCode(ctx context.Context, code *Enrollmen
 // UPDATE … WHERE used_at IS NULL … RETURNING lets concurrent enrollments
 // with one code succeed exactly once; a failed registration leaves the
 // code unused.
-func (r *PGRepository) EnrollCollector(ctx context.Context, rawCode string, c *Collector) error {
+func (r *PGRepository) EnrollCollector(ctx context.Context, rawCode string, c *Collector, issue CertIssuer) (*IssuedCert, error) {
 	hash := enrollmentCodeHash(rawCode)
 	var orgID string
 	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
@@ -484,12 +495,13 @@ func (r *PGRepository) EnrollCollector(ctx context.Context, rawCode string, c *C
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	c.OrganizationID = orgID
 	scope := database.OrgWideScope(orgID, "")
-	return database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+	var cert *IssuedCert
+	err = database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		var codeID string
 		consumeErr := tx.QueryRow(ctx, `
 			UPDATE collector_enrollment_code SET used_at = now()
@@ -514,12 +526,71 @@ func (r *PGRepository) EnrollCollector(ctx context.Context, rawCode string, c *C
 			return collectorError(fmt.Errorf("register collector: %w", insErr))
 		}
 		*c = *created
-		if _, err := tx.Exec(ctx, `UPDATE collector_enrollment_code SET used_by_collector_id = $2 WHERE id = $1`,
-			codeID, c.ID); err != nil {
-			return fmt.Errorf("record enrolled collector: %w", err)
+		if _, uerr := tx.Exec(ctx, `UPDATE collector_enrollment_code SET used_by_collector_id = $2 WHERE id = $1`,
+			codeID, c.ID); uerr != nil {
+			return fmt.Errorf("record enrolled collector: %w", uerr)
 		}
-		return nil
+		if issue == nil {
+			return nil
+		}
+		var ierr error
+		if cert, ierr = issue(ctx, orgID, c.ID); ierr != nil {
+			return ierr
+		}
+		return recordCertificateTx(ctx, tx, orgID, c, cert)
 	})
+	return cert, err
+}
+
+// recordCertificateTx stores an issued certificate and shows it on the
+// collector.
+func recordCertificateTx(ctx context.Context, tx pgx.Tx, orgID string, c *Collector, cert *IssuedCert) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO collector_certificate (organization_id, collector_id, serial, fingerprint, not_before, not_after)
+		VALUES ($1, $2, $3, $4, $5, $6)`, orgID, c.ID, cert.Serial, cert.Fingerprint, cert.NotBefore, cert.NotAfter); err != nil {
+		return fmt.Errorf("record collector certificate: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE collector SET cert_fingerprint = $2, cert_not_after = $3 WHERE id = $1`,
+		c.ID, cert.Fingerprint, cert.NotAfter); err != nil {
+		return fmt.Errorf("record collector certificate: %w", err)
+	}
+	c.CertFingerprint, c.CertNotAfter = cert.Fingerprint, cert.NotAfter.UTC().Format(time.RFC3339Nano)
+	return nil
+}
+
+// RenewCertificate implements Repository: the collector is locked, its
+// newest valid certificate decides whether renewal is due; the former
+// certificate stays valid until it expires.
+func (r *PGRepository) RenewCertificate(ctx context.Context, orgID, collectorID string, issue CertIssuer) (*IssuedCert, error) {
+	var cert *IssuedCert
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		c, err := scanCollector(tx.QueryRow(ctx, `SELECT `+collectorSelectColumns+
+			` FROM collector WHERE id = $1 AND organization_id = $2 FOR UPDATE`, collectorID, orgID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
+		}
+		if err != nil {
+			return err
+		}
+		if c.Status == CollectorDisabled {
+			return ErrCollectorDisabled
+		}
+		var notBefore, notAfter time.Time
+		err = tx.QueryRow(ctx, `SELECT not_before, not_after FROM collector_certificate
+			WHERE collector_id = $1 AND revoked_at IS NULL AND not_after > now() ORDER BY not_after DESC LIMIT 1`,
+			collectorID).Scan(&notBefore, &notAfter)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return err
+		case !NeedsRenewal(notBefore, notAfter, time.Now().UTC()):
+			return ErrRenewalNotDue
+		}
+		if cert, err = issue(ctx, orgID, collectorID); err != nil {
+			return err
+		}
+		return recordCertificateTx(ctx, tx, orgID, c, cert)
+	})
+	return cert, err
 }
 
 // errEnrollmentCodeInvalid is returned for unknown, expired and used codes

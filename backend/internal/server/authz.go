@@ -233,6 +233,7 @@ var routeRules = []routeRule{
 	// Collectors report with the ingest credential; managing them is
 	// collector:manage (RBA-01).
 	{http.MethodPost, "collectors/*/heartbeat", identity.PermDiscoveryIngest},
+	{http.MethodPost, "collectors/*/certificate", identity.PermDiscoveryIngest},
 	{http.MethodPost, "discovery/ingest", identity.PermDiscoveryIngest},
 	// Resolving a review item is its own right (RBA-01, RBA-02).
 	{http.MethodPost, "discovery/review-items/*/resolve", identity.PermReviewResolve},
@@ -485,7 +486,8 @@ var auditExemptions = map[string]string{
 var collectorRoutes = map[string]bool{
 	"POST /api/v1/agents/telemetry": true, "POST /api/v1/agents/{id}/heartbeat": true,
 	"POST /api/v1/collectors/{id}/heartbeat": true, "POST /api/v1/discovery/ingest": true,
-	"POST /api/v1/ingest/bulk": true,
+	"POST /api/v1/collectors/{id}/certificate": true,
+	"POST /api/v1/ingest/bulk":                 true,
 }
 
 // auditedRoutes records, per write route registered through an

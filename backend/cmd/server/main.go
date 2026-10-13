@@ -416,6 +416,7 @@ func main() {
 		SignupProtection: signupProtection(cfg, cacheStore),
 		// Invitations need the database; in --no-db mode they answer 503.
 		InvitationAccounts: invitationAccounts(cfg),
+		CollectorCA:        collectorCA(auditPool, encryptor),
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -912,4 +913,13 @@ func (d dekRotator) RotateOrgDEK(ctx context.Context, orgID string, enc *crypto.
 
 func (d dekRotator) RewrapOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (bool, error) {
 	return d.repo.RewrapOrgDEK(ctx, orgID, enc)
+}
+
+// collectorCA is the internal CA of the collector certificates (COL-04);
+// it lives in the database, so --no-db mode has none.
+func collectorCA(pool *pgxpool.Pool, enc *crypto.EnvelopeEncryptor) *discovery.CA {
+	if pool == nil {
+		return nil
+	}
+	return discovery.NewCA(pool, enc)
 }

@@ -98,10 +98,10 @@ func TestSystemWorkersPerOrganization(t *testing.T) {
 			t.Fatalf("seed enrollment code: %v", err)
 		}
 		col := &discovery.Collector{Name: "scopetest-41-col"}
-		if err := codes.EnrollCollector(bg, raw, col); err != nil || col.OrganizationID != org {
+		if _, err := codes.EnrollCollector(bg, raw, col, nil); err != nil || col.OrganizationID != org {
 			t.Fatalf("redeem code of %s: org=%s err=%v", org, col.OrganizationID, err)
 		}
-		if err := codes.EnrollCollector(bg, raw, &discovery.Collector{Name: "again"}); err == nil {
+		if _, err := codes.EnrollCollector(bg, raw, &discovery.Collector{Name: "again"}, nil); err == nil {
 			t.Fatalf("code of %s redeemed twice", org)
 		}
 	}
