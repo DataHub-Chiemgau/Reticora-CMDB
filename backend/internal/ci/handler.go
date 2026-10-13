@@ -2,6 +2,7 @@ package ci
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -60,6 +61,13 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", page.CursorError.Error())
 		return
 	}
+	// filter[field][op], sort, fields and q (API-02); the former single
+	// query parameters stay as shorthands.
+	lq, err := api.ParseListQuery(r, ListFields)
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	filter := FilterParams{
 		Status:   r.URL.Query().Get("status"),
 		TypeID:   r.URL.Query().Get("ci_type_id"),
@@ -67,14 +75,21 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		SiteID:   r.URL.Query().Get("site_id"),
 		RoomID:   r.URL.Query().Get("room_id"),
 		Search:   r.URL.Query().Get("search"),
-		SortBy:   r.URL.Query().Get("sort_by"),
-		SortDir:  r.URL.Query().Get("sort_dir"),
+		SortBy:   lq.SortBy,
+		SortDir:  lq.SortDir,
+		Filters:  lq.Filters,
+	}
+	if lq.Q != "" {
+		filter.Search = lq.Q
 	}
 
 	items, total, err := h.svc.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
 		if errors.Is(err, api.ErrInvalidCursor) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
+		if api.WriteFieldError(w, err) {
 			return
 		}
 		api.WriteRepoError(w, err)
@@ -85,13 +100,24 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if page.Cursor != nil {
 		hasMore = len(items) == page.Limit
 	}
+	next := NextCursor(items, filter, page.Limit)
+	if len(lq.Fields) > 0 {
+		data, perr := api.SelectFields(items, lq.Fields)
+		if perr != nil {
+			api.WriteRepoError(w, perr)
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, api.ListResponse[map[string]json.RawMessage]{Data: data, Total: total, Limit: page.Limit,
+			Offset: page.Offset, HasMore: hasMore, NextCursor: next})
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Item]{
 		Data:       items,
 		Total:      total,
 		Limit:      page.Limit,
 		Offset:     page.Offset,
 		HasMore:    hasMore,
-		NextCursor: NextCursor(items, filter, page.Limit),
+		NextCursor: next,
 	})
 }
 

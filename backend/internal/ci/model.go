@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
 // Item represents a Configuration Item instance.
@@ -172,6 +174,8 @@ type FilterParams struct {
 	Search   string
 	SortBy   string
 	SortDir  string
+	// Filters are the filter[field][op] conditions of API-02.
+	Filters []api.Filter
 }
 
 // Change represents one persisted CI change history row.

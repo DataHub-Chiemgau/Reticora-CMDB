@@ -9766,6 +9766,24 @@ export interface components {
      */
     Offset: number;
     /**
+     * @description Field filters of API-02: `filter[field]=value` (exact),
+     *     `filter[field][op]=value` with op `exact`, `gte`, `lte`, `like`
+     *     (`*` as wildcard, otherwise substring) or `in` (comma-separated).
+     *     `filter[attributes.<key>]` filters a JSONB attribute; only searchable
+     *     attributes may be filtered (otherwise 400 with a hint), and they
+     *     compare by their data type. An unknown field yields 422, an unknown
+     *     operator or a malformed value 400.
+     */
+    ListFilter: {
+      [key: string]: unknown;
+    };
+    /** @description Sort field from the list's whitelist; a leading `-` sorts descending. An unknown field yields 422. */
+    ListSort: string;
+    /** @description Comma-separated response fields; `id` is always returned. An unknown field yields 422. */
+    ListFields: string;
+    /** @description Free-text search. */
+    ListQ: string;
+    /**
      * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
      *     are HMAC-signed by the server (API-02); a forged or altered cursor
      *     yields 400. Keyset cursors are bound to the sort order they were
@@ -10310,6 +10328,22 @@ export interface operations {
         client_id?: components['parameters']['ClientID'];
         site_id?: components['parameters']['SiteID'];
         room_id?: components['parameters']['RoomID'];
+        /**
+         * @description Field filters of API-02: `filter[field]=value` (exact),
+         *     `filter[field][op]=value` with op `exact`, `gte`, `lte`, `like`
+         *     (`*` as wildcard, otherwise substring) or `in` (comma-separated).
+         *     `filter[attributes.<key>]` filters a JSONB attribute; only searchable
+         *     attributes may be filtered (otherwise 400 with a hint), and they
+         *     compare by their data type. An unknown field yields 422, an unknown
+         *     operator or a malformed value 400.
+         */
+        filter?: components['parameters']['ListFilter'];
+        /** @description Sort field from the list's whitelist; a leading `-` sorts descending. An unknown field yields 422. */
+        sort?: components['parameters']['ListSort'];
+        /** @description Comma-separated response fields; `id` is always returned. An unknown field yields 422. */
+        fields?: components['parameters']['ListFields'];
+        /** @description Free-text search. */
+        q?: components['parameters']['ListQ'];
       };
       header?: never;
       path?: never;
@@ -10328,6 +10362,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description An unknown field in filter, sort or fields (API-02). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };

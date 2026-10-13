@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -45,6 +46,9 @@ func (r *MemoryRepository) List(ctx context.Context, orgID string, filter Filter
 		if filter.Search != "" && !containsIgnoreCase(item.Name, filter.Search) &&
 			!containsIgnoreCase(item.SerialNumber, filter.Search) &&
 			!containsIgnoreCase(item.ManagementIP, filter.Search) {
+			continue
+		}
+		if !matchesFilters(item, filter.Filters) {
 			continue
 		}
 		result = append(result, *item)
@@ -228,4 +232,22 @@ func toLower(r rune) rune {
 		return r + 32
 	}
 	return r
+}
+
+// matchesFilters applies the filter[field][op] conditions in memory. The
+// memory repository has no attribute definitions: an attribute compares as
+// a number when the filter value is one, otherwise as text.
+func matchesFilters(item *Item, filters []api.Filter) bool {
+	for _, f := range filters {
+		if f.Kind == "" {
+			f.Kind = api.KindText
+			if _, err := strconv.ParseFloat(f.Values[0], 64); err == nil {
+				f.Kind = api.KindNumber
+			}
+		}
+		if !f.Match(fieldValue(item, f.Field)) {
+			return false
+		}
+	}
+	return true
 }

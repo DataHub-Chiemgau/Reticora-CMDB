@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -109,6 +111,27 @@ func NewPGRepositoryWithAudit(pool *pgxpool.Pool, recorder audit.TxRecorder) *PG
 }
 
 // List returns paginated CIs filtered by the given parameters.
+// attributeFilterKind checks that an attribute may be filtered (API-02):
+// it must be defined (else 422) and searchable (else 400 with a hint), and
+// its data type gives the filter kind.
+func attributeFilterKind(ctx context.Context, tx pgx.Tx, f api.Filter, key string) (string, error) {
+	var dataType string
+	var searchable bool
+	err := tx.QueryRow(ctx, `SELECT data_type, bool_or(searchable) FROM attribute_definition
+		WHERE key = $1 GROUP BY data_type ORDER BY bool_or(searchable) DESC LIMIT 1`, key).Scan(&dataType, &searchable)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", &api.FieldError{Field: "filter[" + f.Field + "]", Status: http.StatusUnprocessableEntity, Message: fmt.Sprintf("unknown attribute %q", key)}
+	}
+	if err != nil {
+		return "", fmt.Errorf("attribute definition %s: %w", key, err)
+	}
+	if !searchable {
+		return "", &api.FieldError{Field: "filter[" + f.Field + "]",
+			Message: fmt.Sprintf("attribute %q is not searchable; mark it searchable in its attribute definition to filter on it", key)}
+	}
+	return fieldmeta.FilterKind(dataType), nil
+}
+
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
 	items := make([]Item, 0)
 	var total int
@@ -147,6 +170,29 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			whereParts = append(whereParts, fmt.Sprintf("name ILIKE $%d", argPos))
 			args = append(args, "%"+filter.Search+"%")
 			argPos++
+		}
+		for _, f := range filter.Filters {
+			expr := filterColumns[f.Field].expr
+			if key, ok := f.Attribute(); ok {
+				kind, err := attributeFilterKind(ctx, tx, f, key)
+				if err != nil {
+					return err
+				}
+				f.Kind = kind
+				if cerr := f.Check(); cerr != nil {
+					return cerr
+				}
+				expr = fmt.Sprintf("attributes->>$%d::text", argPos)
+				args = append(args, key)
+				argPos++
+			}
+			if expr == "" {
+				return &api.FieldError{Field: "filter[" + f.Field + "]", Status: http.StatusUnprocessableEntity, Message: "unknown filter field"}
+			}
+			clause, fargs := f.SQL(expr, argPos)
+			whereParts = append(whereParts, clause)
+			args = append(args, fargs...)
+			argPos += len(fargs)
 		}
 
 		whereClause := strings.Join(whereParts, " AND ")

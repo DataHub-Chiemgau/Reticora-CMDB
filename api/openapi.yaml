@@ -604,6 +604,10 @@ paths:
         - $ref: '#/components/parameters/ClientID'
         - $ref: '#/components/parameters/SiteID'
         - $ref: '#/components/parameters/RoomID'
+        - $ref: '#/components/parameters/ListFilter'
+        - $ref: '#/components/parameters/ListSort'
+        - $ref: '#/components/parameters/ListFields'
+        - $ref: '#/components/parameters/ListQ'
       responses:
         '200':
           description: Paginated list of configuration items
@@ -615,6 +619,11 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: An unknown field in filter, sort or fields (API-02).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
@@ -9905,6 +9914,40 @@ components:
       description: |
         Number of items to skip before returning data. Ignored when `cursor` is
         supplied.
+    ListFilter:
+      name: filter
+      in: query
+      style: deepObject
+      explode: true
+      schema:
+        type: object
+        additionalProperties: true
+      description: |
+        Field filters of API-02: `filter[field]=value` (exact),
+        `filter[field][op]=value` with op `exact`, `gte`, `lte`, `like`
+        (`*` as wildcard, otherwise substring) or `in` (comma-separated).
+        `filter[attributes.<key>]` filters a JSONB attribute; only searchable
+        attributes may be filtered (otherwise 400 with a hint), and they
+        compare by their data type. An unknown field yields 422, an unknown
+        operator or a malformed value 400.
+    ListSort:
+      name: sort
+      in: query
+      schema:
+        type: string
+      description: Sort field from the list's whitelist; a leading `-` sorts descending. An unknown field yields 422.
+    ListFields:
+      name: fields
+      in: query
+      schema:
+        type: string
+      description: Comma-separated response fields; `id` is always returned. An unknown field yields 422.
+    ListQ:
+      name: q
+      in: query
+      schema:
+        type: string
+      description: Free-text search.
     Cursor:
       name: cursor
       in: query
