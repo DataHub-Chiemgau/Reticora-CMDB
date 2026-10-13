@@ -9917,7 +9917,10 @@ components:
 
     CIDiscoverySource:
       type: string
-      enum: [manual, sweep, snmp, ssh, redfish, ipmi, wmi, api, agent, discovery]
+      description: >-
+        Source of the CI (CI-01): a protocol or agent of discovery, api,
+        manual entry or a user's import.
+      enum: [snmp, ssh, redfish, ipmi, wmi, api, agent, sweep, manual, import]
 
     CI:
       type: object
@@ -10046,6 +10049,14 @@ components:
           format: date-time
         is_manual:
           type: boolean
+          readOnly: true
+          description: >-
+            True for a CI a person created — by hand or by import
+            (discovery_source manual or import).
+        merged_into_id:
+          type: string
+          readOnly: true
+          description: The CI this one was merged into; only the merge sets it.
         deleted_at:
           type: string
           format: date-time
@@ -10130,7 +10141,11 @@ components:
           description: >-
             The keys _overrides, _observed, _provenance and _instance are reserved (GLO-13): 400 with the field.
         discovery_source:
-          $ref: '#/components/schemas/CIDiscoverySource'
+          allOf:
+            - $ref: '#/components/schemas/CIDiscoverySource'
+          description: >-
+            Defaults to manual. With manual or import the CI is manual
+            (is_manual); an unknown source is rejected (400 with the field).
 
     UpdateCIRequest:
       description: >-

@@ -29,6 +29,9 @@ type Item struct {
 	// ParentCIID is the CI this one is physically part of (chassis → blade,
 	// AST-05); the relationship contains is projected from it (DB-05).
 	ParentCIID string `json:"parent_ci_id,omitempty"`
+	// MergedIntoID is the CI this one was merged into (CI-01, CI-12);
+	// only the merge sets it.
+	MergedIntoID string `json:"merged_into_id,omitempty"`
 	// LifecycleState is the software lifecycle; only CI types with a
 	// lifecycle model have one, and it changes through lifecycle
 	// transitions (DB-05).

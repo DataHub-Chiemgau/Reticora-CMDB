@@ -5923,18 +5923,12 @@ export interface components {
     };
     /** @enum {string} */
     CIStatus: 'active' | 'inactive' | 'maintenance' | 'decommissioned' | 'unknown';
-    /** @enum {string} */
+    /**
+     * @description Source of the CI (CI-01): a protocol or agent of discovery, api, manual entry or a user's import.
+     * @enum {string}
+     */
     CIDiscoverySource:
-      | 'manual'
-      | 'sweep'
-      | 'snmp'
-      | 'ssh'
-      | 'redfish'
-      | 'ipmi'
-      | 'wmi'
-      | 'api'
-      | 'agent'
-      | 'discovery';
+      'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'agent' | 'sweep' | 'manual' | 'import';
     CI: {
       id: string;
       organization_id: string;
@@ -5995,7 +5989,10 @@ export interface components {
       first_seen_at?: string;
       /** Format: date-time */
       last_seen_at?: string;
-      is_manual: boolean;
+      /** @description True for a CI a person created — by hand or by import (discovery_source manual or import). */
+      readonly is_manual: boolean;
+      /** @description The CI this one was merged into; only the merge sets it. */
+      readonly merged_into_id?: string;
       /** Format: date-time */
       deleted_at?: string;
       /** Format: date-time */
@@ -6049,6 +6046,7 @@ export interface components {
       attributes?: {
         [key: string]: unknown;
       };
+      /** @description Defaults to manual. With manual or import the CI is manual (is_manual); an unknown source is rejected (400 with the field). */
       discovery_source?: components['schemas']['CIDiscoverySource'];
     };
     /** @description A manual change. attributes is an RFC 7396 merge patch (nested objects merge, null removes a member). Every changed field gets a protected override that discovery does not overwrite. */

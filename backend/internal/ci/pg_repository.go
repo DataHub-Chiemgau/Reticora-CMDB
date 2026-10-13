@@ -34,7 +34,7 @@ const ciSelectColumns = `
 	COALESCE(model, ''),
 	COALESCE(serial_number, ''),
 	COALESCE(hardware_uuid::text, ''),
-	COALESCE(management_ip::text, ''),
+	COALESCE(host(management_ip), ''),
 	COALESCE(primary_mac::text, ''),
 	COALESCE(hostname, ''),
 	COALESCE(fqdn, ''),
@@ -56,7 +56,8 @@ const ciSelectColumns = `
 	COALESCE(lifecycle_state, ''),
 	health,
 	health_updated_at,
-	schema_version
+	schema_version,
+	COALESCE(merged_into_id::text, '')
 `
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
@@ -635,6 +636,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		&item.Health,
 		&healthUpdated,
 		&item.SchemaVersion,
+		&item.MergedIntoID,
 	); err != nil {
 		return nil, err
 	}
