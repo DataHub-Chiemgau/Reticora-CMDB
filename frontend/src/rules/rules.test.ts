@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import conformance from '../../../api/rules.conformance.json';
 import { evaluateRule, parseRule } from './rules';
+
+// Loaded at test time: the frontend image is built from frontend/ alone, so
+// the type check must not depend on the file outside it.
+const conformance = Object.values(
+  import.meta.glob<{ cases: unknown[]; invalid_rules: unknown[] }>(
+    '../../../api/rules.conformance.json',
+    { eager: true, import: 'default' },
+  ),
+)[0]!;
 
 interface Case {
   name: string;
