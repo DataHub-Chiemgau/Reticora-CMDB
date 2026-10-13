@@ -3,7 +3,9 @@ package plugins
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"time"
 )
 
 // Result represents a single discovered or collected item.
@@ -40,11 +42,30 @@ type MetricSample struct {
 	Value  float64
 }
 
-// Plugin is the interface every collector plugin must implement.
+// Plugin is the interface every collector plugin implements (DIS-03): Name,
+// Probe and Collect. The discovery cycle probes all targets of a scope and
+// collects the full DeviceRecord of every target that answered.
 type Plugin interface {
+	// Name is the protocol the plugin speaks ("snmp", "redfish" …).
 	Name() string
-	Discover(ctx context.Context, targets []string, creds map[string]string) ([]Result, error)
-	Collect(ctx context.Context, target string, creds map[string]string) (*Result, error)
+	// Probe checks cheaply which targets answer the protocol; each hit
+	// carries what probing learned.
+	Probe(ctx context.Context, targets []string, creds map[string]string) ([]Result, error)
+	// Collect gathers the DeviceRecord of one target (DIS-05).
+	Collect(ctx context.Context, target string, creds map[string]string) (*DeviceRecord, error)
+}
+
+// CollectRecord turns the result of a plugin's collection into the
+// DeviceRecord it returns from Collect.
+func CollectRecord(protocol string, res *Result, err error, observedAt time.Time) (*DeviceRecord, error) {
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		return nil, fmt.Errorf("%s: no data collected", protocol)
+	}
+	rec := RecordFromResult(protocol, res, observedAt)
+	return &rec, nil
 }
 
 // credentialAliases maps protocols that share the credentials of another

@@ -53,8 +53,8 @@ func New() *Plugin {
 // Name returns the plugin identifier.
 func (p *Plugin) Name() string { return "wmi" }
 
-// Discover identifies Windows hosts by probing WinRM ports (5985/5986).
-func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
+// Probe identifies Windows hosts by probing WinRM ports (5985/5986).
+func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
 	_ = creds
 	concurrency := p.Concurrency
 	if concurrency <= 0 {
@@ -132,8 +132,15 @@ func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[strin
 	return results, ctx.Err()
 }
 
-// Collect retrieves hardware, OS, and service inventory from a Windows target via WinRM.
-func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
+// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
+	observedAt := time.Now()
+	res, err := p.collect(ctx, target, creds)
+	return plugins.CollectRecord(p.Name(), res, err, observedAt)
+}
+
+// collect retrieves hardware, OS, and service inventory from a Windows target via WinRM.
+func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
 	timeout := p.Timeout
 	if timeout <= 0 {
 		timeout = defaultTimeout

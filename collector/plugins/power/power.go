@@ -65,8 +65,8 @@ func New() *Plugin {
 // Name returns the plugin identifier.
 func (p *Plugin) Name() string { return "power" }
 
-// Discover identifies power devices by probing SNMP for UPS-MIB presence.
-func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
+// Probe identifies power devices by probing SNMP for UPS-MIB presence.
+func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
 	concurrency := p.Concurrency
 	if concurrency <= 0 {
 		concurrency = defaultConcurrency
@@ -103,8 +103,8 @@ func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[strin
 					Name:   t,
 					IP:     t,
 					Attributes: map[string]any{
-						"category": "power",
-						"protocol": "snmp",
+						"category":   "power",
+						"protocol":   "snmp",
 						"upsCapable": true,
 					},
 				}
@@ -122,8 +122,15 @@ func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[strin
 	return results, ctx.Err()
 }
 
-// Collect gathers UPS identity and runtime metrics from a power device.
-func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
+// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
+	observedAt := time.Now()
+	res, err := p.collect(ctx, target, creds)
+	return plugins.CollectRecord(p.Name(), res, err, observedAt)
+}
+
+// collect gathers UPS identity and runtime metrics from a power device.
+func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
 	timeout := p.Timeout
 	if timeout <= 0 {
 		timeout = defaultTimeout
@@ -185,10 +192,10 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 			{Name: "ups_battery_runtime_seconds", Labels: map[string]string{"target": target}},
 		},
 		Attributes: map[string]any{
-			"category":    "power",
-			"protocol":    "snmp",
-			"deviceType":  classifyPowerDevice(manufacturer, model),
-			"upsCapable":  true,
+			"category":   "power",
+			"protocol":   "snmp",
+			"deviceType": classifyPowerDevice(manufacturer, model),
+			"upsCapable": true,
 		},
 	}
 

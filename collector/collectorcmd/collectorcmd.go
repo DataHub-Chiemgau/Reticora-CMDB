@@ -405,16 +405,15 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 			}
 
 			slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
-			observedAt := time.Now()
-			results, err := plug.Discover(ctx, targets, plugins.CredentialsFor(protocol, credentialsFor(&cfg)))
+			creds := plugins.CredentialsFor(protocol, credentialsFor(&cfg))
+			hits, err := plug.Probe(ctx, targets, creds)
 			if err != nil {
 				slog.Error("discovery plugin error", "protocol", protocol, "error", err)
 				continue
 			}
-			slog.Info("discovery plugin completed", "protocol", protocol, "results", len(results))
-			for i := range results {
-				records = append(records, plugins.RecordFromResult(protocol, &results[i], observedAt))
-			}
+			collected := collectHits(ctx, protocol, plug, hits, creds)
+			slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
+			records = append(records, collected...)
 		}
 		records = deliverableRecords(ctx, records)
 
@@ -482,6 +481,40 @@ func incrementIP(ip net.IP) {
 			break
 		}
 	}
+}
+
+// collectParallelism bounds the parallel Collect calls of one plugin.
+const collectParallelism = 16
+
+// collectHits runs Collect for every target that answered the probe
+// (DIS-03) and returns its DeviceRecords. When Collect fails, the probe hit
+// is reported instead, so a reachable device is never lost.
+func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits []plugins.Result, creds map[string]string) []plugins.DeviceRecord {
+	out := make([]plugins.DeviceRecord, len(hits))
+	sem := make(chan struct{}, collectParallelism)
+	var wg sync.WaitGroup
+	for i := range hits {
+		hit := &hits[i]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			probedAt := time.Now()
+			rec, err := plug.Collect(ctx, hit.IP, creds)
+			if err != nil || rec == nil {
+				slog.Debug("collect failed; reporting the probe result", "protocol", protocol, "target", hit.IP, "error", err)
+				out[i] = plugins.RecordFromResult(protocol, hit, probedAt)
+				return
+			}
+			if rec.Identity.PrimaryMAC == "" {
+				rec.Identity.PrimaryMAC = hit.MAC
+			}
+			out[i] = *rec
+		}()
+	}
+	wg.Wait()
+	return out
 }
 
 // deliverableRecords resolves the address of targets configured by name and

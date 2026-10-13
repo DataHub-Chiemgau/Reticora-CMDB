@@ -73,7 +73,7 @@ func TestCollectorOutputConformsToDeviceRecordSchema(t *testing.T) {
 
 	swap := map[string]plugins.Plugin{
 		"sweep": &sweep.Plugin{Timeout: time.Second, Concurrency: 4, TCPPorts: []int{port}},
-		"snmp": fixturePlugin{plugins.Result{
+		"snmp": fixturePlugin{"snmp", plugins.Result{
 			CIType: "network.device", Name: "core-sw-1", IP: "127.0.0.1",
 			Manufacturer: "Cisco", Model: "C9300", Serial: "FOC1234", Firmware: "17.9.4", MAC: "00:11:22:33:44:55",
 			Attributes: map[string]any{"protocol": "snmp", "sysDescr": "Cisco IOS XE", "sysObjectID": "1.3.6.1.4.1.9.1.2494",
@@ -83,11 +83,11 @@ func TestCollectorOutputConformsToDeviceRecordSchema(t *testing.T) {
 				{Name: "Gi1/0/2", IfIndex: 2},
 			},
 		}},
-		"power": fixturePlugin{plugins.Result{
+		"power": fixturePlugin{"power", plugins.Result{
 			CIType: "power-device", Name: "ups-1", IP: "127.0.0.1", Manufacturer: "APC", Model: "Smart-UPS",
 			Attributes: map[string]any{"category": "power", "protocol": "snmp", "deviceType": "ups", "upsCapable": true},
 		}},
-		"redfish": fixturePlugin{plugins.Result{
+		"redfish": fixturePlugin{"redfish", plugins.Result{
 			CIType: "bmc", Name: "127.0.0.1", IP: "127.0.0.1",
 			Attributes: map[string]any{"api": "redfish", "redfishVersion": "1.15.0", "bmcUUID": "4c4c4544-0042-3510-8051-b4c04f4a4e33"},
 		}},
@@ -230,14 +230,19 @@ func TestDeviceRecordSchemaAndGoValidationAgree(t *testing.T) {
 	}
 }
 
-type fixturePlugin struct{ result plugins.Result }
+type fixturePlugin struct {
+	name   string
+	result plugins.Result
+}
 
-func (p fixturePlugin) Name() string { return "fixture" }
-func (p fixturePlugin) Discover(context.Context, []string, map[string]string) ([]plugins.Result, error) {
+func (p fixturePlugin) Name() string { return p.name }
+func (p fixturePlugin) Probe(context.Context, []string, map[string]string) ([]plugins.Result, error) {
 	return []plugins.Result{p.result}, nil
 }
-func (p fixturePlugin) Collect(context.Context, string, map[string]string) (*plugins.Result, error) {
-	return &p.result, nil
+func (p fixturePlugin) Collect(_ context.Context, target string, _ map[string]string) (*plugins.DeviceRecord, error) {
+	res := p.result
+	res.IP = target
+	return plugins.CollectRecord(p.name, &res, nil, time.Now())
 }
 
 func toJSONDoc(t *testing.T, v any) any {

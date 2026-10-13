@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	defaultPort       = 161
-	defaultTimeout    = 5 * time.Second
-	defaultRetries    = 2
+	defaultPort        = 161
+	defaultTimeout     = 5 * time.Second
+	defaultRetries     = 2
 	defaultConcurrency = 32
 )
 
@@ -39,10 +39,10 @@ const (
 	oidIfMtu      = "1.3.6.1.2.1.2.2.1.4"
 
 	// Entity-MIB for hardware info
-	oidEntPhysDescr      = "1.3.6.1.2.1.47.1.1.1.1.2"
-	oidEntPhysSerialNum  = "1.3.6.1.2.1.47.1.1.1.1.11"
-	oidEntPhysMfgName    = "1.3.6.1.2.1.47.1.1.1.1.12"
-	oidEntPhysModelName  = "1.3.6.1.2.1.47.1.1.1.1.13"
+	oidEntPhysDescr       = "1.3.6.1.2.1.47.1.1.1.1.2"
+	oidEntPhysSerialNum   = "1.3.6.1.2.1.47.1.1.1.1.11"
+	oidEntPhysMfgName     = "1.3.6.1.2.1.47.1.1.1.1.12"
+	oidEntPhysModelName   = "1.3.6.1.2.1.47.1.1.1.1.13"
 	oidEntPhysFirmwareRev = "1.3.6.1.2.1.47.1.1.1.1.9"
 )
 
@@ -110,8 +110,8 @@ func (p *Plugin) applyProfile(result *plugins.Result, sysObjectID string) {
 // Name returns the plugin identifier.
 func (p *Plugin) Name() string { return "snmp" }
 
-// Discover identifies SNMP-capable devices by probing UDP port 161.
-func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
+// Probe identifies SNMP-capable devices by probing UDP port 161.
+func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
 	concurrency := p.Concurrency
 	if concurrency <= 0 {
 		concurrency = defaultConcurrency
@@ -190,8 +190,15 @@ func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[strin
 	return results, ctx.Err()
 }
 
-// Collect retrieves inventory and telemetry from a single SNMP endpoint.
-func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
+// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
+	observedAt := time.Now()
+	res, err := p.collect(ctx, target, creds)
+	return plugins.CollectRecord(p.Name(), res, err, observedAt)
+}
+
+// collect retrieves inventory and telemetry from a single SNMP endpoint.
+func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
 	timeout := p.Timeout
 	if timeout <= 0 {
 		timeout = defaultTimeout
@@ -236,12 +243,12 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 		Serial:       serial,
 		Firmware:     firmware,
 		Attributes: map[string]any{
-			"protocol":     "snmp",
-			"sysDescr":     sysDescr,
-			"sysObjectID":  sysObjectID,
-			"sysLocation":  sysLocation,
-			"sysContact":   sysContact,
-			"snmpVersion":  "v2c",
+			"protocol":    "snmp",
+			"sysDescr":    sysDescr,
+			"sysObjectID": sysObjectID,
+			"sysLocation": sysLocation,
+			"sysContact":  sysContact,
+			"snmpVersion": "v2c",
 		},
 	}
 

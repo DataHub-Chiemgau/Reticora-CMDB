@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -379,11 +380,11 @@ func TestHeartbeatReportsSpoolBackpressureAndLoss(t *testing.T) {
 type countingPlugin struct{ runs atomic.Int64 }
 
 func (p *countingPlugin) Name() string { return "counting" }
-func (p *countingPlugin) Discover(context.Context, []string, map[string]string) ([]plugins.Result, error) {
+func (p *countingPlugin) Probe(context.Context, []string, map[string]string) ([]plugins.Result, error) {
 	p.runs.Add(1)
 	return nil, nil
 }
-func (p *countingPlugin) Collect(context.Context, string, map[string]string) (*plugins.Result, error) {
+func (p *countingPlugin) Collect(context.Context, string, map[string]string) (*plugins.DeviceRecord, error) {
 	return nil, nil
 }
 
@@ -589,5 +590,84 @@ func TestSweepConcurrencyIsCappedAt256(t *testing.T) {
 	cfg := collectorConfig{SweepConcurrency: 32}
 	if p := newSweep(&cfg); p.Concurrency != 32 || p.Pinger == nil || p.Neighbors == nil {
 		t.Errorf("sweep plugin = %+v", p)
+	}
+}
+
+// probeCollectPlugin answers the probe for two targets and collects a full
+// record for one of them.
+type probeCollectPlugin struct {
+	collected sync.Map
+}
+
+func (p *probeCollectPlugin) Name() string { return "snmp" }
+func (p *probeCollectPlugin) Probe(_ context.Context, targets []string, _ map[string]string) ([]plugins.Result, error) {
+	var hits []plugins.Result
+	for _, t := range targets {
+		hits = append(hits, plugins.Result{CIType: "network.device", Name: t, IP: t, MAC: "00:11:22:33:44:01"})
+	}
+	return hits, nil
+}
+func (p *probeCollectPlugin) Collect(_ context.Context, target string, _ map[string]string) (*plugins.DeviceRecord, error) {
+	p.collected.Store(target, true)
+	if target == "192.0.2.2" {
+		return nil, errors.New("authentication failed")
+	}
+	return plugins.CollectRecord("snmp", &plugins.Result{
+		CIType: "switch", Name: "core-sw-1", IP: target, Serial: "FOC1",
+		Interfaces: []plugins.NetworkInterface{{Name: "Gi1/0/1", IfIndex: 1, OperUp: true, AdminUp: true}},
+	}, nil, time.Now())
+}
+
+// TestDiscoveryProbesThenCollects covers WP-150 (DIS-03, DIS-04): the
+// cycle calls Collect for every probed target and uploads its DeviceRecord;
+// a failed Collect falls back to the probe result.
+func TestDiscoveryProbesThenCollects(t *testing.T) {
+	plug := &probeCollectPlugin{}
+	hits, err := plug.Probe(context.Background(), []string{"192.0.2.1", "192.0.2.2"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := collectHits(context.Background(), "snmp", plug, hits, nil)
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want 2", len(records))
+	}
+	for _, target := range []string{"192.0.2.1", "192.0.2.2"} {
+		if _, ok := plug.collected.Load(target); !ok {
+			t.Errorf("Collect was not called for %s", target)
+		}
+	}
+	full, fallback := records[0], records[1]
+	if full.Classification.CIType != "switch" || full.Identity.SerialNumber != "FOC1" || len(full.Interfaces) != 1 {
+		t.Errorf("collected record = %+v", full)
+	}
+	if full.Identity.PrimaryMAC != "00:11:22:33:44:01" {
+		t.Errorf("the probe MAC must complete the record, got %q", full.Identity.PrimaryMAC)
+	}
+	if fallback.Classification.CIType != "network.device" || fallback.TargetIP != "192.0.2.2" || fallback.Source != "snmp" {
+		t.Errorf("fallback record = %+v", fallback)
+	}
+	for _, rec := range records {
+		if v := rec.Validate(); len(v) > 0 {
+			t.Errorf("record %s breaks the contract: %v", rec.TargetIP, v)
+		}
+	}
+}
+
+// TestEveryPluginImplementsProbeCollect checks the registry: each of the
+// eight protocol plugins is registered under its own name.
+func TestEveryPluginImplementsProbeCollect(t *testing.T) {
+	want := []string{"ipmi", "nas", "power", "redfish", "snmp", "ssh", "sweep", "wmi"}
+	for _, name := range want {
+		plug, ok := pluginRegistry[name]
+		if !ok {
+			t.Errorf("plugin %s missing", name)
+			continue
+		}
+		if plug.Name() != name {
+			t.Errorf("plugin registered as %s is named %s", name, plug.Name())
+		}
+	}
+	if len(pluginRegistry) != len(want) {
+		t.Errorf("registry has %d plugins, want %d", len(pluginRegistry), len(want))
 	}
 }

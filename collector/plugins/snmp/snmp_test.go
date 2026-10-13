@@ -196,7 +196,7 @@ func TestDiscoverFindsSNMPDevice(t *testing.T) {
 	startSNMPFake(t, "sysObjectID")
 
 	p := &Plugin{Timeout: time.Second, Concurrency: 4}
-	results, err := p.Discover(context.Background(), []string{"127.0.0.1"}, map[string]string{"community": "public"})
+	results, err := p.Probe(context.Background(), []string{"127.0.0.1"}, map[string]string{"community": "public"})
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestDiscoverFindsSNMPDevice(t *testing.T) {
 
 func TestDiscoverSkipsSilentTarget(t *testing.T) {
 	p := &Plugin{Timeout: 150 * time.Millisecond, Concurrency: 2}
-	results, err := p.Discover(context.Background(), []string{"192.0.2.1"}, nil)
+	results, err := p.Probe(context.Background(), []string{"192.0.2.1"}, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestDiscoverSkipsSilentTarget(t *testing.T) {
 
 func TestDiscoverNoTargetsReturnsEmptySlice(t *testing.T) {
 	p := New()
-	results, err := p.Discover(context.Background(), nil, nil)
+	results, err := p.Probe(context.Background(), nil, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestDiscoverCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	p := &Plugin{Timeout: 100 * time.Millisecond}
-	results, err := p.Discover(ctx, []string{"192.0.2.1"}, nil)
+	results, err := p.Probe(ctx, []string{"192.0.2.1"}, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Discover error = %v, want context.Canceled", err)
 	}
@@ -257,7 +257,7 @@ func TestCollectFromSNMPFake(t *testing.T) {
 	startSNMPFake(t, "test-device")
 
 	p := &Plugin{Timeout: time.Second}
-	res, err := p.Collect(context.Background(), "127.0.0.1", nil)
+	res, err := p.collect(context.Background(), "127.0.0.1", nil)
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestCollectFromSNMPFake(t *testing.T) {
 func TestCollectNameFallsBackToTarget(t *testing.T) {
 	// Fake that never answers => all GETs time out => empty sysName.
 	p := &Plugin{Timeout: 100 * time.Millisecond}
-	res, err := p.Collect(context.Background(), "192.0.2.55", nil)
+	res, err := p.collect(context.Background(), "192.0.2.55", nil)
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}

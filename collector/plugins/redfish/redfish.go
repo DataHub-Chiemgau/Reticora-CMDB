@@ -149,8 +149,8 @@ func (p *Plugin) baseURL(target string) string {
 // Name returns the plugin identifier.
 func (p *Plugin) Name() string { return "redfish" }
 
-// Discover identifies Redfish endpoints from a set of candidate targets.
-func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
+// Probe identifies Redfish endpoints from a set of candidate targets.
+func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
 	concurrency := p.Concurrency
 	if concurrency <= 0 {
 		concurrency = defaultConcurrency
@@ -258,8 +258,15 @@ type computerSystem struct {
 	} `json:"MemorySummary"`
 }
 
-// Collect retrieves system, chassis, and sensor details from a single Redfish endpoint.
-func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
+// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
+	observedAt := time.Now()
+	res, err := p.collect(ctx, target, creds)
+	return plugins.CollectRecord(p.Name(), res, err, observedAt)
+}
+
+// collect retrieves system, chassis, and sensor details from a single Redfish endpoint.
+func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
 	baseURL := p.baseURL(target)
 	client := p.clientFor(target)
 	username := creds["username"]

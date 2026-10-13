@@ -76,7 +76,7 @@ func TestDiscoverFindsReachableTarget(t *testing.T) {
 	port := ln.Addr().(*net.TCPAddr).Port
 
 	p := &Plugin{Timeout: time.Second, Concurrency: 4, TCPPorts: []int{port}}
-	results, err := p.Discover(context.Background(), []string{"127.0.0.1"}, nil)
+	results, err := p.Probe(context.Background(), []string{"127.0.0.1"}, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestDiscoverSkipsUnreachableTarget(t *testing.T) {
 	ln.Close()
 
 	p := &Plugin{Timeout: 300 * time.Millisecond, Concurrency: 2, TCPPorts: []int{port}}
-	results, err := p.Discover(context.Background(), []string{"127.0.0.1"}, nil)
+	results, err := p.Probe(context.Background(), []string{"127.0.0.1"}, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestDiscoverSkipsUnreachableTarget(t *testing.T) {
 
 func TestDiscoverNoTargetsReturnsEmptySlice(t *testing.T) {
 	p := New()
-	results, err := p.Discover(context.Background(), nil, nil)
+	results, err := p.Probe(context.Background(), nil, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestDiscoverCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	p := &Plugin{Timeout: 100 * time.Millisecond, TCPPorts: []int{1}}
-	results, err := p.Discover(ctx, []string{"192.0.2.1"}, nil)
+	results, err := p.Probe(ctx, []string{"192.0.2.1"}, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Discover error = %v, want context.Canceled", err)
 	}
@@ -167,7 +167,7 @@ func TestCollectReportsOpenPorts(t *testing.T) {
 	closedLn.Close()
 
 	p := &Plugin{Timeout: 300 * time.Millisecond, TCPPorts: []int{closedPort, port}}
-	res, err := p.Collect(context.Background(), "127.0.0.1", nil)
+	res, err := p.collect(context.Background(), "127.0.0.1", nil)
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestCollectNoOpenPorts(t *testing.T) {
 	ln.Close()
 
 	p := &Plugin{Timeout: 300 * time.Millisecond, TCPPorts: []int{port}}
-	res, err := p.Collect(context.Background(), "127.0.0.1", nil)
+	res, err := p.collect(context.Background(), "127.0.0.1", nil)
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestDiscoverCapsParallelProbesAt256(t *testing.T) {
 	}
 	pinger := &fakePinger{alive: map[string]bool{}}
 	p := &Plugin{Timeout: 50 * time.Millisecond, Concurrency: 10000, TCPPorts: []int{closedPort(t)}, Pinger: pinger}
-	if _, err := p.Discover(context.Background(), targets, nil); err != nil {
+	if _, err := p.Probe(context.Background(), targets, nil); err != nil {
 		t.Fatal(err)
 	}
 	if peak := pinger.peak.Load(); peak > MaxConcurrency || peak < 2 {
@@ -274,7 +274,7 @@ func TestDiscoverFindsHostsByICMPAndARP(t *testing.T) {
 		return map[string]string{"127.0.0.1": "aa:bb:cc:00:00:01", "127.0.0.2": "aa:bb:cc:00:00:02", "127.0.0.9": "aa:bb:cc:00:00:09"}, nil
 	}
 	p := &Plugin{Timeout: 100 * time.Millisecond, TCPPorts: []int{closedPort(t)}, Pinger: pinger, Neighbors: neighbors}
-	results, err := p.Discover(context.Background(), []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"}, nil)
+	results, err := p.Probe(context.Background(), []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestDiscoverWithoutICMPCapabilityFallsBackToTCP(t *testing.T) {
 		}
 	}()
 	p := &Plugin{Timeout: time.Second, TCPPorts: []int{ln.Addr().(*net.TCPAddr).Port}, Pinger: &fakePinger{err: ErrNoICMP}}
-	results, err := p.Discover(context.Background(), []string{"127.0.0.1"}, nil)
+	results, err := p.Probe(context.Background(), []string{"127.0.0.1"}, nil)
 	if err != nil || len(results) != 1 || results[0].Attributes["discoveryMethod"] != "tcp" {
 		t.Fatalf("results = %+v, %v", results, err)
 	}

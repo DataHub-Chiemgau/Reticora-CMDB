@@ -68,9 +68,9 @@ func (p *Plugin) effectiveConcurrency() int {
 // Name returns the plugin identifier.
 func (p *Plugin) Name() string { return "sweep" }
 
-// Discover probes the targets with ICMP echo and the TCP ports (at most
+// Probe checks the targets with ICMP echo and the TCP ports (at most
 // MaxConcurrency at a time) and adds the targets that only answered ARP.
-func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
+func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
 	_ = creds
 
 	timeout := p.Timeout
@@ -209,8 +209,15 @@ func reverseName(ip string) string {
 	return strings.TrimSuffix(names[0], ".")
 }
 
-// Collect gathers additional service fingerprint data for a single target.
-func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
+// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
+	observedAt := time.Now()
+	res, err := p.collect(ctx, target, creds)
+	return plugins.CollectRecord(p.Name(), res, err, observedAt)
+}
+
+// collect gathers additional service fingerprint data for a single target.
+func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
 	_ = creds
 
 	timeout := p.Timeout
@@ -246,9 +253,9 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 	}
 
 	return &plugins.Result{
-		CIType:   ciType,
-		Name:     hostname,
-		IP:       target,
+		CIType: ciType,
+		Name:   hostname,
+		IP:     target,
 		Attributes: map[string]any{
 			"collectedBy": "sweep",
 			"openPorts":   openPorts,

@@ -109,7 +109,7 @@ func TestDiscoverDetectsWinRMHTTP(t *testing.T) {
 	listenOrSkip(t, defaultHTTPPort)
 
 	p := &Plugin{Timeout: time.Second, Concurrency: 4}
-	results, err := p.Discover(context.Background(), []string{"127.0.0.1"}, nil)
+	results, err := p.Probe(context.Background(), []string{"127.0.0.1"}, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestDiscoverFallsBackToHTTPSPort(t *testing.T) {
 	listenOrSkip(t, defaultHTTPSPort)
 
 	p := &Plugin{Timeout: time.Second, Concurrency: 4}
-	results, err := p.Discover(context.Background(), []string{"127.0.0.1"}, nil)
+	results, err := p.Probe(context.Background(), []string{"127.0.0.1"}, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestDiscoverFallsBackToHTTPSPort(t *testing.T) {
 
 func TestDiscoverSkipsUnreachableTarget(t *testing.T) {
 	p := &Plugin{Timeout: 200 * time.Millisecond, Concurrency: 2}
-	results, err := p.Discover(context.Background(), []string{"192.0.2.1"}, nil)
+	results, err := p.Probe(context.Background(), []string{"192.0.2.1"}, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestDiscoverSkipsUnreachableTarget(t *testing.T) {
 
 func TestDiscoverNoTargetsReturnsEmptySlice(t *testing.T) {
 	p := New()
-	results, err := p.Discover(context.Background(), nil, nil)
+	results, err := p.Probe(context.Background(), nil, nil)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestDiscoverCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	p := &Plugin{Timeout: 100 * time.Millisecond}
-	results, err := p.Discover(ctx, []string{"192.0.2.1"}, nil)
+	results, err := p.Probe(ctx, []string{"192.0.2.1"}, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Discover error = %v, want context.Canceled", err)
 	}
@@ -187,7 +187,7 @@ func TestDiscoverCancelledContext(t *testing.T) {
 
 func TestCollectRequiresCredentials(t *testing.T) {
 	p := &Plugin{Timeout: 100 * time.Millisecond}
-	_, err := p.Collect(context.Background(), "127.0.0.1", nil)
+	_, err := p.collect(context.Background(), "127.0.0.1", nil)
 	if err == nil || !strings.Contains(err.Error(), "credentials required") {
 		t.Errorf("expected credentials error, got %v", err)
 	}
@@ -225,7 +225,7 @@ func TestCollectParsesWSManResponses(t *testing.T) {
 	defer ln.Close()
 	go http.Serve(ln, handler)
 
-	res, err := p.Collect(context.Background(), "127.0.0.1", map[string]string{
+	res, err := p.collect(context.Background(), "127.0.0.1", map[string]string{
 		"username": "admin", "password": "pw",
 	})
 	if err != nil {
@@ -264,7 +264,7 @@ func TestCollectUnreachableWinRMReturnsEmptyFields(t *testing.T) {
 	}
 	ln.Close() // now 127.0.0.1:5985 refuses connections
 
-	res, err := p.Collect(context.Background(), "127.0.0.1", map[string]string{"username": "u", "password": "p"})
+	res, err := p.collect(context.Background(), "127.0.0.1", map[string]string{"username": "u", "password": "p"})
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}

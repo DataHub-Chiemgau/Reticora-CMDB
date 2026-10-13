@@ -33,8 +33,8 @@ func New() *Plugin {
 // Name returns the plugin identifier.
 func (p *Plugin) Name() string { return "ssh" }
 
-// Discover determines which targets accept SSH connections by reading the banner.
-func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
+// Probe determines which targets accept SSH connections by reading the banner.
+func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
 	_ = creds
 	timeout := p.Timeout
 	if timeout <= 0 {
@@ -90,11 +90,18 @@ func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[strin
 	return results, ctx.Err()
 }
 
-// Collect executes common system information commands on a single target.
+// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
+	observedAt := time.Now()
+	res, err := p.collect(ctx, target, creds)
+	return plugins.CollectRecord(p.Name(), res, err, observedAt)
+}
+
+// collect executes common system information commands on a single target.
 // Note: Full SSH authentication requires golang.org/x/crypto/ssh which would
 // be added as a dependency. This implementation performs banner-based fingerprinting
 // and provides the command set that would be executed with proper credentials.
-func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
+func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
 	timeout := p.Timeout
 	if timeout <= 0 {
 		timeout = defaultTimeout
