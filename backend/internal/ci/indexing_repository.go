@@ -2,7 +2,9 @@ package ci
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
@@ -55,6 +57,20 @@ func (r *indexingRepository) Delete(ctx context.Context, orgID, id string) error
 		slog.WarnContext(ctx, "search index delete failed; rebuild via POST /api/v1/search/reindex", "ci_id", id, "error", err)
 	}
 	return nil
+}
+
+// RestoreDeleted forwards the restore (CI-05) and indexes the CI again.
+func (r *indexingRepository) RestoreDeleted(ctx context.Context, orgID, id string, retention time.Duration) (*Item, error) {
+	restorer, ok := r.Repository.(Restorer)
+	if !ok {
+		return nil, errors.New("restore is not supported by this repository")
+	}
+	item, err := restorer.RestoreDeleted(ctx, orgID, id, retention)
+	if err != nil {
+		return nil, err
+	}
+	r.index(ctx, item)
+	return item, nil
 }
 
 // ListChanges forwards change-history reads when the wrapped repository

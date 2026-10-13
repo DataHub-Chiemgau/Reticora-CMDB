@@ -387,6 +387,29 @@ export interface paths {
     patch: operations['updateCI'];
     trace?: never;
   };
+  '/api/v1/cis/{id}/restore': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore a deleted CI within the retention (CI-05, API-05)
+     * @description Clears the deletion of a CI deleted less than 90 days ago; the change history and the audit trail record the restore (ci.restored). Requires ci:delete.
+     */
+    post: operations['restoreCI'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/cis/{id}/changes': {
     parameters: {
       query?: {
@@ -10732,7 +10755,10 @@ export interface operations {
   };
   getCI: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Comma-separated related collections to embed (API-05): `relationships`, `contacts`, `asset`. An unknown name yields 422. */
+        include?: string;
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -10755,6 +10781,15 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description Unknown include name. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   deleteCI: {
@@ -10826,6 +10861,41 @@ export interface operations {
       };
       /** @description If-Match missing although required, or not a version of the CI */
       412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  restoreCI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The restored CI */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CI'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description The CI was deleted longer ago than the retention. */
+      410: {
         headers: {
           [name: string]: unknown;
         };

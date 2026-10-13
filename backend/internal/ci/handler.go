@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -27,6 +30,20 @@ type EventDispatcher interface {
 type Handler struct {
 	svc        *Service
 	dispatcher EventDispatcher
+	includes   map[string]IncludeFunc
+}
+
+// IncludeFunc loads one related collection of a CI for ?include= (API-05).
+type IncludeFunc func(ctx context.Context, orgID, ciID string) (any, error)
+
+// IncludeAsset is always available: the canonical asset facts of the CI.
+const IncludeAsset = "asset"
+
+// WithIncludes adds the related collections GET /cis/{id}?include= can
+// embed (relationships, contacts …) besides the asset.
+func (h *Handler) WithIncludes(includes map[string]IncludeFunc) *Handler {
+	h.includes = includes
+	return h
 }
 
 // NewHandler creates a new CI handler.
@@ -46,6 +63,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/cis/{id}/changes", h.ListChanges)
 	r.Patch("/api/v1/cis/{id}", h.Update)
 	r.Delete("/api/v1/cis/{id}", h.Delete)
+	r.Post("/api/v1/cis/{id}/restore", h.Restore)
 }
 
 // List handles GET /api/v1/cis
@@ -136,6 +154,84 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("ETag", api.ETag(item.Version))
+	if raw := strings.TrimSpace(r.URL.Query().Get("include")); raw != "" {
+		body, ierr := h.withIncludes(r.Context(), t.OrganizationID, item, raw)
+		if ierr != nil {
+			if !api.WriteFieldError(w, ierr) {
+				api.WriteRepoError(w, ierr)
+			}
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, body)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// withIncludes embeds the requested related collections into the CI
+// (API-05): include=relationships,contacts,asset. An unknown name is 422.
+func (h *Handler) withIncludes(ctx context.Context, orgID string, item *Item, raw string) (map[string]json.RawMessage, error) {
+	encoded, err := json.Marshal(item)
+	if err != nil {
+		return nil, err
+	}
+	var body map[string]json.RawMessage
+	if uerr := json.Unmarshal(encoded, &body); uerr != nil {
+		return nil, uerr
+	}
+	for _, name := range strings.Split(raw, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		var value any
+		switch load, ok := h.includes[name]; {
+		case name == IncludeAsset:
+			value = item.Asset
+		case ok:
+			if value, err = load(ctx, orgID, item.ID); err != nil {
+				return nil, err
+			}
+		default:
+			known := []string{IncludeAsset}
+			for k := range h.includes {
+				known = append(known, k)
+			}
+			sort.Strings(known)
+			return nil, &api.FieldError{Field: "include", Status: http.StatusUnprocessableEntity,
+				Message: fmt.Sprintf("unknown include %q; allowed: %s", name, strings.Join(known, ", "))}
+		}
+		if body[name], err = json.Marshal(value); err != nil {
+			return nil, err
+		}
+	}
+	return body, nil
+}
+
+// Restore handles POST /api/v1/cis/{id}/restore: a deleted CI comes back
+// within the retention (CI-05); after it the answer is 410.
+func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	item, err := h.svc.Restore(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	switch {
+	case errors.Is(err, ErrRetentionExpired):
+		api.WriteError(w, http.StatusGone, "Gone", err.Error())
+		return
+	case err != nil && err.Error() == "not found":
+		api.WriteError(w, http.StatusNotFound, "Not Found", "no deleted CI with this id")
+		return
+	case err != nil:
+		if api.WriteFieldError(w, err) {
+			return
+		}
+		api.WriteRepoError(w, err)
+		return
+	}
 	w.Header().Set("ETag", api.ETag(item.Version))
 	api.WriteJSON(w, http.StatusOK, item)
 }

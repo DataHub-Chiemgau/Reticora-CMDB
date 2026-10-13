@@ -592,10 +592,26 @@ func (a pgRouteAuditor) RecordRoute(ctx context.Context, entry *audit.Entry) err
 // ciHandler builds the CI handler; without the event outbox it hands CI
 // events to the webhook dispatcher directly.
 func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
+	var h *ci.Handler
 	if repos.EventOutbox || opts.Dispatcher == nil {
-		return ci.NewHandler(opts.CIService)
+		h = ci.NewHandler(opts.CIService)
+	} else {
+		h = ci.NewHandler(opts.CIService, opts.Dispatcher)
 	}
-	return ci.NewHandler(opts.CIService, opts.Dispatcher)
+	// GET /cis/{id}?include= (API-05) embeds up to includeLimit related
+	// rows of each kind.
+	const includeLimit = 200
+	page := api.PaginationParams{Limit: includeLimit}
+	return h.WithIncludes(map[string]ci.IncludeFunc{
+		"relationships": func(ctx context.Context, orgID, ciID string) (any, error) {
+			rels, _, err := repos.Relationship.List(ctx, orgID, ciID, page)
+			return rels, err
+		},
+		"contacts": func(ctx context.Context, orgID, ciID string) (any, error) {
+			contacts, _, err := repos.Contact.ListForCI(ctx, orgID, ciID, page)
+			return contacts, err
+		},
+	})
 }
 
 // notifyHandler serves the notification center and the channels.

@@ -31,7 +31,7 @@ func (r *MemoryRepository) List(ctx context.Context, orgID string, filter Filter
 
 	var result []Item
 	for _, item := range r.items {
-		if item.OrganizationID != orgID {
+		if item.OrganizationID != orgID || item.DeletedAt != nil {
 			continue
 		}
 		if filter.Status != "" && item.Status != filter.Status {
@@ -104,7 +104,7 @@ func (r *MemoryRepository) GetByID(ctx context.Context, orgID, id string) (*Item
 	defer r.mu.RUnlock()
 
 	item, ok := r.items[id]
-	if !ok || item.OrganizationID != orgID {
+	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
 		return nil, fmt.Errorf("not found")
 	}
 	return item, nil
@@ -132,7 +132,7 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 	defer r.mu.Unlock()
 
 	item, ok := r.items[id]
-	if !ok || item.OrganizationID != orgID {
+	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
 		return nil, fmt.Errorf("not found")
 	}
 
@@ -191,11 +191,30 @@ func (r *MemoryRepository) Delete(ctx context.Context, orgID, id string) error {
 	defer r.mu.Unlock()
 
 	item, ok := r.items[id]
-	if !ok || item.OrganizationID != orgID {
+	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
 		return fmt.Errorf("not found")
 	}
-	delete(r.items, id)
+	// A deleted CI is kept for the retention like in PostgreSQL (CI-05).
+	now := time.Now().UTC()
+	item.DeletedAt = &now
 	return nil
+}
+
+// RestoreDeleted implements Restorer.
+func (r *MemoryRepository) RestoreDeleted(_ context.Context, orgID, id string, retention time.Duration) (*Item, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.items[id]
+	if !ok || item.OrganizationID != orgID || item.DeletedAt == nil {
+		return nil, fmt.Errorf("not found")
+	}
+	if time.Since(*item.DeletedAt) > retention {
+		return nil, ErrRetentionExpired
+	}
+	item.DeletedAt = nil
+	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	item.Version++
+	return item, nil
 }
 
 // ListChanges returns no persisted history for the in-memory repository.

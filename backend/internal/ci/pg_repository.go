@@ -582,9 +582,34 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 // device seen again is the deleted one. It records the decision in the
 // change history and the audit trail.
 func (r *PGRepository) Restore(ctx context.Context, orgID, id string) (*Item, error) {
+	return r.restore(ctx, orgID, id, 0, "reconciliation_decision", "resurrected_device")
+}
+
+// RestoreDeleted implements Restorer: POST /cis/{id}/restore within the
+// retention (CI-05); an older deletion is ErrRetentionExpired.
+func (r *PGRepository) RestoreDeleted(ctx context.Context, orgID, id string, retention time.Duration) (*Item, error) {
+	return r.restore(ctx, orgID, id, retention, "update", "api")
+}
+
+// restore clears deleted_at of a deleted CI (retention 0: no limit) and
+// records the change, the audit entry and the ci.restored event.
+func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention time.Duration, changeType, reason string) (*Item, error) {
 	var restored *Item
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "UPDATE ci SET deleted_at = NULL, updated_at = NOW() WHERE id = $1 AND organization_id = $2 AND deleted_at IS NOT NULL", id, orgID)
+		var deletedAt *time.Time
+		if err := tx.QueryRow(ctx, "SELECT deleted_at FROM ci WHERE id = $1 AND organization_id = $2", id, orgID).Scan(&deletedAt); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("not found")
+			}
+			return fmt.Errorf("get ci for restore: %w", err)
+		}
+		if deletedAt == nil {
+			return fmt.Errorf("not found")
+		}
+		if retention > 0 && time.Since(*deletedAt) > retention {
+			return ErrRetentionExpired
+		}
+		tag, err := tx.Exec(ctx, "UPDATE ci SET deleted_at = NULL, updated_at = NOW(), version = version + 1 WHERE id = $1 AND organization_id = $2 AND deleted_at IS NOT NULL", id, orgID)
 		if err != nil {
 			// A reactivated CI may hold a value of a unique attribute that
 			// another CI took in the meantime (MET-15).
@@ -597,10 +622,10 @@ func (r *PGRepository) Restore(ctx context.Context, orgID, id string) (*Item, er
 		if restored, err = scanCI(tx.QueryRow(ctx, query, id, orgID)); err != nil {
 			return fmt.Errorf("get restored ci: %w", err)
 		}
-		if changeErr := r.recordCIChange(ctx, tx, orgID, id, restored.Version, "reconciliation_decision", "deleted_at", "deleted", nil); changeErr != nil {
+		if changeErr := r.recordCIChange(ctx, tx, orgID, id, restored.Version, changeType, "deleted_at", "deleted", nil); changeErr != nil {
 			return changeErr
 		}
-		if err := r.recordAudit(ctx, tx, "ci.restored", restored, map[string]interface{}{"reason": "resurrected_device"}); err != nil {
+		if err := r.recordAudit(ctx, tx, "ci.restored", restored, map[string]interface{}{"reason": reason}); err != nil {
 			return err
 		}
 		return r.recordEvent(ctx, tx, events.CIRestored, restored, nil)

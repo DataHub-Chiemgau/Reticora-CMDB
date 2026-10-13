@@ -222,8 +222,10 @@ type routeRule struct {
 
 // routeRules are checked in order; the first match wins.
 var routeRules = []routeRule{
-	// Deleting a CI is its own right; ci:write does not delete.
+	// Deleting a CI is its own right; ci:write does not delete. Restoring
+	// undoes a deletion and needs the same right (CI-05).
 	{http.MethodDelete, "cis/*", identity.PermCIDelete},
+	{http.MethodPost, "cis/*/restore", identity.PermCIDelete},
 	// Instance attributes (MET-14, CI-10) and manual overrides (CI-10).
 	{http.MethodPut, "cis/*/field-definitions", identity.PermCIInstanceAttributeManage},
 	{http.MethodDelete, "cis/*/field-definitions/*", identity.PermCIInstanceAttributeManage},

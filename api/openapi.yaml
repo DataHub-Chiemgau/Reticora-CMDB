@@ -693,6 +693,13 @@ paths:
       operationId: getCI
       tags: [CIs]
       summary: Get a configuration item
+      parameters:
+        - name: include
+          in: query
+          schema: { type: string }
+          description: >-
+            Comma-separated related collections to embed (API-05):
+            `relationships`, `contacts`, `asset`. An unknown name yields 422.
       responses:
         '200':
           description: Configuration item details
@@ -708,6 +715,11 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: Unknown include name.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
     patch:
       operationId: updateCI
       tags: [CIs]
@@ -775,6 +787,36 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/cis/{id}/restore:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: restoreCI
+      tags: [CIs]
+      summary: Restore a deleted CI within the retention (CI-05, API-05)
+      description: >-
+        Clears the deletion of a CI deleted less than 90 days ago; the change
+        history and the audit trail record the restore (ci.restored).
+        Requires ci:delete.
+      responses:
+        '200':
+          description: The restored CI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CI'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: The CI was deleted longer ago than the retention.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/cis/{id}/changes:
     parameters:
