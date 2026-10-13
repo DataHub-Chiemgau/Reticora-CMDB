@@ -42,7 +42,7 @@ type Relationship struct {
 	VerifiedBy      string `json:"verified_by,omitempty"`
 	VerifiedAt      string `json:"verified_at,omitempty"`
 	CreatedAt       string `json:"created_at"`
-	UpdatedAt         string   `json:"updated_at"`
+	UpdatedAt       string `json:"updated_at"`
 	// Projected marks a structural relationship that is not stored but
 	// derived (DB-05, CH27): contains from ci.parent_ci_id, mounted_in from
 	// rack_mount, located_in from ci.location_id. It cannot be changed
@@ -134,6 +134,28 @@ var ValidRelTypes = map[string]bool{
 var ValidSources = map[string]bool{
 	"manual": true, "discovery": true, "agent": true, "import": true,
 	"api": true, "integration": true, "workflow": true, "rule": true,
+}
+
+// Confirmer re-confirms a discovery edge seen again (TOP-02).
+type Confirmer interface {
+	Confirm(ctx context.Context, orgID, id string, confidence *float64) error
+}
+
+// Confirm implements Confirmer.
+func (r *MemoryRepository) Confirm(_ context.Context, orgID, id string, confidence *float64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rel, ok := r.items[id]
+	if !ok || rel.OrganizationID != orgID || rel.Source != "discovery" {
+		return fmt.Errorf("not found")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	rel.LastSeenAt, rel.LastConfirmedAt = now, now
+	if confidence != nil {
+		c := *confidence
+		rel.Confidence = &c
+	}
+	return nil
 }
 
 // Repository defines persistence operations for relationships.
@@ -428,10 +450,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid rel_type")
 		return
 	}
-	if req.Source != "" && !ValidSources[req.Source] {
+	// The seven sources of REL-08; rule is accepted as workflow (E-01).
+	source, validSource := CanonicalSource(req.Source)
+	if !validSource {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid source")
 		return
 	}
+	req.Source = source
 	if req.Confidence != nil && (*req.Confidence < 0 || *req.Confidence > 1) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "confidence must be between 0 and 1")
 		return
@@ -457,6 +482,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if rel.Source == "" {
 		rel.Source = "manual"
 	}
+	// Actor and time of the edge (REL-08).
+	actor, actorType := t.UserID, "user"
+	if actor == "" {
+		actor, actorType = "api", "api_key"
+	}
+	rel.Attributes["provenance"] = Provenance(actor, actorType, rel.Source, time.Now())
 	if rel.Source == "manual" {
 		// Manual relationships are born verified; they must never be removed
 		// silently because discovery does not detect them (spec §12).

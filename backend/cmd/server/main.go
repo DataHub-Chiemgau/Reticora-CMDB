@@ -44,6 +44,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
@@ -463,6 +464,8 @@ func main() {
 		if cfg.OfflineDetector {
 			systemJobs = append(systemJobs, lifecycle.NewOfflineDetector(auditPool).Schedule())
 		}
+		// Unconfirmed and suppressed discovery edges are removed (TOP-02).
+		systemJobs = append(systemJobs, relationship.NewCleanup(auditPool).Schedule())
 		// Personal data of existing history entries into the vault (SEC-05).
 		systemJobs = append(systemJobs, jobs.NewPIIBackfill(auditPool).Schedule())
 		// Attribute indexes of searchable/unique attributes (DB-04, MET-15).

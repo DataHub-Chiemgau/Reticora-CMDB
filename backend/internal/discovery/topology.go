@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -276,16 +277,25 @@ type suppressionProvider interface {
 	SuppressedPairs(ctx context.Context, orgID string) (map[string]bool, error)
 }
 
-// upsertRelationship creates a discovery-sourced relationship if an equivalent
-// edge does not already exist. Returns true when a new edge was created.
+// upsertRelationship creates a discovery edge, or re-confirms an existing
+// one (last_seen_at, last_confirmed_at, confidence; TOP-02). An edge of
+// another source between the same CIs stays untouched (source policy,
+// REL-08). It reports whether a new edge was created.
 func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d DerivedRelationship) bool {
 	confidence := d.Confidence
 	existing, _, err := h.relRepo.List(ctx, orgID, d.SourceCIID, api.PaginationParams{Limit: 10000, Offset: 0})
 	if err == nil {
-		for _, rel := range existing {
-			if rel.SourceCIID == d.SourceCIID && rel.TargetCIID == d.TargetCIID && rel.RelType == d.RelType {
-				return false
+		for i := range existing {
+			rel := &existing[i]
+			if rel.SourceCIID != d.SourceCIID || rel.TargetCIID != d.TargetCIID || rel.RelType != d.RelType {
+				continue
 			}
+			if confirmer, ok := h.relRepo.(relationship.Confirmer); ok && relationship.MayChange(RelationshipSource, rel.Source) {
+				if cerr := confirmer.Confirm(ctx, orgID, rel.ID, &confidence); cerr != nil {
+					slog.Warn("re-confirm discovery edge", "relationship_id", rel.ID, "error", cerr)
+				}
+			}
+			return false
 		}
 	}
 	rel := &relationship.Relationship{
@@ -294,7 +304,7 @@ func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d Derive
 		TargetCIID:     d.TargetCIID,
 		RelType:        d.RelType,
 		Source:         RelationshipSource,
-		Attributes:     map[string]any{},
+		Attributes:     map[string]any{"provenance": relationship.Provenance("discovery", "system", RelationshipSource, time.Now())},
 		Confidence:     &confidence,
 	}
 	if err := h.relRepo.Create(ctx, rel); err != nil {

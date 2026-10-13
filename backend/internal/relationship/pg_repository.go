@@ -433,3 +433,18 @@ func nilIfEmptyStr(value string) any {
 	}
 	return value
 }
+
+// Confirm records that discovery saw an edge again (TOP-02): last_seen_at
+// and last_confirmed_at become now, the confidence the reported one. Only
+// discovery edges are confirmed this way (source policy, REL-08).
+func (r *PGRepository) Confirm(ctx context.Context, orgID, id string, confidence *float64) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE ci_relationship
+			SET last_seen_at = now(), last_confirmed_at = now(), confidence = COALESCE($3::numeric, confidence)
+			WHERE id = $1 AND organization_id = $2 AND source = 'discovery'`, id, orgID, confidence)
+		if err == nil && tag.RowsAffected() == 0 {
+			return fmt.Errorf("not found")
+		}
+		return err
+	})
+}
