@@ -163,3 +163,17 @@ func TestEnsureIndexTemplateError(t *testing.T) {
 		t.Fatal("expected error for unreachable backend")
 	}
 }
+
+// TestLocationsAndContactsAreSearchable covers SRC-01 (WP-186): locations
+// and contacts are hits with their read permission and their own
+// visibility check.
+func TestLocationsAndContactsAreSearchable(t *testing.T) {
+	for kind, perm := range map[string]string{"location": "location:read", "contact": "contact:read"} {
+		if ReadPermission[kind] != perm {
+			t.Errorf("%s: read permission %q, want %q", kind, ReadPermission[kind], perm)
+		}
+		if !strings.Contains(hitVisible, "WHEN '"+kind+"' THEN EXISTS") {
+			t.Errorf("%s: no visibility check of its own", kind)
+		}
+	}
+}
