@@ -54,6 +54,24 @@ retention run (migration 000119). A soft-deleted CI that is still referenced
 (TimescaleDB policy, 400 days), logs (30 days) and backups (35 days) expire
 where they are kept.
 
+## Key rotation (SEC-06)
+
+| Run | When | What |
+|---|---|---|
+| `rotation.master_key` | nightly 02:23 | Rewraps every data key (organization DEKs, notification channel keys) that a previous master key wrapped. |
+| `rotation.org_dek` | nightly 02:33 | Replaces an organization's DEK after one year and re-encrypts its credentials in one transaction; audited as `key.org_dek_rotated`. |
+| `rotation.webhook_secrets` | every 15 minutes | Ends the 24-hour overlap of rotated webhook secrets. |
+
+Master key rotation without downtime: set the new key as `RETICORA_MASTER_KEY`
+and the old one in `RETICORA_MASTER_KEY_PREVIOUS` (comma-separated for
+several), restart, and let `rotation.master_key` run (or wait for the night).
+Every wrapped data key names the master key that wrapped it. Once the run
+reports that all data keys use the current key, remove the old key from
+`RETICORA_MASTER_KEY_PREVIOUS`: it is retired. Webhook secrets rotate with
+`POST /api/v1/webhooks/{id}/rotate-secret`, API keys with
+`POST /api/v1/api-keys/{id}/rotate`; session signing keys carry a `kid` and
+rotate in the identity layer.
+
 ## Metrics and alerts (OPS-05)
 
 Every worker exports these series, labelled `worker`:

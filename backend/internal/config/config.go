@@ -83,6 +83,10 @@ type Config struct {
 
 	// Encryption
 	MasterKey string // 32-byte base64-encoded master key for envelope encryption
+	// MasterKeyPrevious lists the master keys being rotated out
+	// (comma-separated): their data keys stay readable until the rewrap job
+	// has moved them to MasterKey (SEC-06).
+	MasterKeyPrevious string
 
 	// Observability
 	OTelEndpoint string
@@ -212,7 +216,8 @@ func Load() *Config {
 		DefaultProvisionRole:      l.str("RETICORA_DEFAULT_PROVISION_ROLE", "viewer"),
 		EntitlementEnforcement:    l.str("RETICORA_ENTITLEMENT_ENFORCEMENT", "true") != "false",
 
-		MasterKey: l.str("RETICORA_MASTER_KEY", ""),
+		MasterKey:         l.str("RETICORA_MASTER_KEY", ""),
+		MasterKeyPrevious: l.str("RETICORA_MASTER_KEY_PREVIOUS", ""),
 
 		OTelEndpoint: l.str("RETICORA_OTEL_ENDPOINT", ""),
 		// Opt-in: the organization_id label multiplies the HTTP metric series

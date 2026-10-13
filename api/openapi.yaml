@@ -1072,6 +1072,46 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/webhooks/{id}/rotate-secret:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      operationId: rotateWebhookSecret
+      tags: [Webhooks]
+      summary: Rotate the signing secret
+      description: >-
+        A new secret (generated, or the one given) replaces the current one;
+        for 24 hours deliveries are signed with both
+        (X-Webhook-Signature, X-Webhook-Signature-Previous), so the receiver
+        can switch without losing deliveries (SEC-06). The new secret is
+        returned only here.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                secret: {type: string, minLength: 16}
+      responses:
+        '200':
+          description: The new secret
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, secret, previous_secret_expires_at]
+                properties:
+                  id: {type: string}
+                  secret: {type: string}
+                  previous_secret_expires_at: {type: string, format: date-time}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/webhooks/{id}/test:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -11016,6 +11056,10 @@ components:
             each header name with the value "***" (SEC-01).
           additionalProperties:
             type: string
+        previous_secret_expires_at:
+          type: string
+          format: date-time
+          description: Until when the previous secret still signs after a rotation (SEC-06).
         service_account_id:
           type: string
           description: >-

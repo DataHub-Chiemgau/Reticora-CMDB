@@ -105,7 +105,7 @@ func main() {
 		}
 		cfg.MasterKey = devKey
 	}
-	encryptor, err = crypto.NewEnvelopeEncryptor(cfg.MasterKey)
+	encryptor, err = crypto.NewEnvelopeEncryptor(cfg.MasterKey, strings.Split(cfg.MasterKeyPrevious, ",")...)
 	if err != nil {
 		slog.Error("failed to init envelope encryptor", "error", err)
 		os.Exit(1)
@@ -428,8 +428,11 @@ func main() {
 	}
 	// Release expired reservations (spec §10).
 	systemJobs := []jobs.Schedule{reservation.NewSweeper(repos.Reservation, webhookDispatcher).Schedule()}
-	// Retention runs per kind of data (NFR-06, AUD-09).
+	// Retention runs per kind of data (NFR-06, AUD-09) and key rotation
+	// (SEC-06).
 	if auditPool != nil {
+		systemJobs = append(systemJobs, jobs.NewRotation(auditPool, encryptor, dekRotator{repo: credential.NewPGRepository(auditPool)},
+			webhook.NewPGRepository(auditPool)).Schedules()...)
 		systemJobs = append(systemJobs, jobs.NewRetention(auditPool, jobs.RetentionFromDays(cfg.RetentionAuditYears,
 			cfg.RetentionHistoryDays, cfg.RetentionSoftDeleteDays, cfg.RetentionReviewItemDays)).Schedules()...)
 	}
@@ -873,4 +876,19 @@ func emitterOf(pool *pgxpool.Pool) events.Emitter {
 		return nil
 	}
 	return events.NewPGEmitter(pool)
+}
+
+// dekRotator adapts the credential store to the rotation runs.
+type dekRotator struct{ repo *credential.PGRepository }
+
+func (d dekRotator) RotateOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (keyVersion, rotated int, err error) {
+	res, err := d.repo.RotateOrgDEK(ctx, orgID, enc)
+	if err != nil {
+		return 0, 0, err
+	}
+	return res.KeyVersion, res.Rotated, nil
+}
+
+func (d dekRotator) RewrapOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (bool, error) {
+	return d.repo.RewrapOrgDEK(ctx, orgID, enc)
 }

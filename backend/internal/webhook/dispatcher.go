@@ -607,6 +607,11 @@ func (d *Dispatcher) send(job deliveryJob) (int, time.Duration, error) {
 	req.Header.Set("X-Webhook-Event", job.event)
 	req.Header.Set("X-Webhook-ID", job.deliveryID)
 	req.Header.Set("X-Webhook-Signature", signPayload(job.sub.Secret, job.payload))
+	// During the overlap after a rotation the old secret signs as well
+	// (SEC-06).
+	if job.sub.PreviousSecret != "" && job.sub.PreviousSecretExpiresAt != nil && d.now().Before(*job.sub.PreviousSecretExpiresAt) {
+		req.Header.Set("X-Webhook-Signature-Previous", signPayload(job.sub.PreviousSecret, job.payload))
+	}
 	for key, value := range job.sub.Headers {
 		req.Header.Set(key, value)
 	}

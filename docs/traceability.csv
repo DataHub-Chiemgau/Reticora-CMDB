@@ -324,3 +324,4 @@ NTF-04;[B];B;backend/internal/notify/notifier_test.go;WP-139
 API-05;[B];B;backend/internal/notify/notifier_test.go;WP-139
 NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/notify/events_integration_test.go;WP-140
 OPS-05;[B];B;backend/internal/notify/events_integration_test.go;WP-140
+SEC-06;[B];B;backend/internal/platform/crypto/crypto_test.go;WP-141

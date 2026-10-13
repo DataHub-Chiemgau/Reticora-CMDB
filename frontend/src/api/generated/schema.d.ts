@@ -574,6 +574,28 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/webhooks/{id}/rotate-secret': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rotate the signing secret
+     * @description A new secret (generated, or the one given) replaces the current one; for 24 hours deliveries are signed with both (X-Webhook-Signature, X-Webhook-Signature-Previous), so the receiver can switch without losing deliveries (SEC-06). The new secret is returned only here.
+     */
+    post: operations['rotateWebhookSecret'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/webhooks/{id}/test': {
     parameters: {
       query?: never;
@@ -6559,6 +6581,11 @@ export interface components {
       headers?: {
         [key: string]: string;
       };
+      /**
+       * Format: date-time
+       * @description Until when the previous secret still signs after a rotation (SEC-06).
+       */
+      previous_secret_expires_at?: string;
       /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose object the account may read. */
       service_account_id?: string;
       /** Format: date-time */
@@ -10540,6 +10567,42 @@ export interface operations {
         };
         content?: never;
       };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  rotateWebhookSecret: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': {
+          secret?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description The new secret */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            id: string;
+            secret: string;
+            /** Format: date-time */
+            previous_secret_expires_at: string;
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
     };

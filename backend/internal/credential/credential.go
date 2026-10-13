@@ -228,6 +228,13 @@ type RotationResult struct {
 // Existing plaintext secrets never leave the platform — re-encryption happens
 // in-process under the envelope-encryption boundary.
 func (s *Service) RotateKeys(ctx context.Context, orgID string) (*RotationResult, error) {
+	// The database store rotates in one transaction (SEC-06).
+	if rotator, ok := s.repo.(KeyRotator); ok {
+		if _, err := s.getOrCreateDEK(ctx, orgID); err != nil {
+			return nil, err
+		}
+		return rotator.RotateOrgDEK(ctx, orgID, s.encryptor)
+	}
 	lister, ok := s.repo.(StoredLister)
 	if !ok {
 		return nil, fmt.Errorf("credential store does not support key rotation")

@@ -14,6 +14,8 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
 )
 
 func TestDispatcherDeliversSignedWebhook(t *testing.T) {
@@ -491,5 +493,83 @@ func TestDeadDeliveryIsReported(t *testing.T) {
 	data := emitter.events[0].Data.(map[string]any)
 	if data["event"] != "ci.created" || data["attempts"] != 1 || data["subscription_id"] != subscriptionID(t, repo) {
 		t.Errorf("data: %v", data)
+	}
+}
+
+// TestRotatedSecretSignsDuringOverlap covers SEC-06 (WP-141): after a
+// rotation a delivery carries the signature of the new secret and, during
+// the overlap, of the previous one; the rotate endpoint returns the new
+// secret once.
+func TestRotatedSecretSignsDuringOverlap(t *testing.T) {
+	repo := NewMemoryRepository()
+	var mu sync.Mutex
+	var headers []http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		headers = append(headers, r.Header.Clone())
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	sub := &Subscription{OrganizationID: "org-1", Name: "hook", URL: server.URL, Secret: "old-secret-123456", Events: []string{"ci.created"}, IsActive: true}
+	if err := repo.Create(context.Background(), sub); err != nil {
+		t.Fatal(err)
+	}
+	d := NewDispatcher(repo, server.Client())
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = d.Shutdown(ctx)
+	}()
+	h := NewHandler(repo, d)
+	mux := chi.NewRouter()
+	h.RegisterRoutes(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/"+sub.ID+"/rotate-secret", nil)
+	req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "u-1"}))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	var out struct {
+		Secret  string     `json:"secret"`
+		Expires *time.Time `json:"previous_secret_expires_at"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || w.Code != http.StatusOK || !strings.HasPrefix(out.Secret, "whsec_") ||
+		out.Expires == nil || time.Until(*out.Expires) < 23*time.Hour {
+		t.Fatalf("rotate: %d %s", w.Code, w.Body.String())
+	}
+
+	payload := map[string]any{"id": "ci-1"}
+	body, _ := json.Marshal(payload)
+	d.Dispatch(context.Background(), "org-1", "ci.created", payload)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		n := len(headers)
+		mu.Unlock()
+		if n > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(headers) != 1 {
+		t.Fatalf("deliveries: %d", len(headers))
+	}
+	if headers[0].Get("X-Webhook-Signature") != signPayload(out.Secret, body) ||
+		headers[0].Get("X-Webhook-Signature-Previous") != signPayload("old-secret-123456", body) {
+		t.Errorf("signatures: %v", headers[0])
+	}
+	stored, _ := repo.GetByID(context.Background(), "org-1", sub.ID)
+	expired := time.Now().Add(-time.Minute)
+	stored.PreviousSecretExpiresAt = &expired
+	d.Dispatch(context.Background(), "org-1", "ci.created", payload)
+	deadline = time.Now().Add(2 * time.Second)
+	for len(headers) < 2 && time.Now().Before(deadline) {
+		mu.Unlock()
+		time.Sleep(5 * time.Millisecond)
+		mu.Lock()
+	}
+	if len(headers) != 2 || headers[1].Get("X-Webhook-Signature-Previous") != "" {
+		t.Errorf("previous signature after the overlap: %v", headers)
 	}
 }

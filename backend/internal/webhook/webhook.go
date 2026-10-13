@@ -3,6 +3,8 @@ package webhook
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -28,8 +30,35 @@ type Subscription struct {
 	// ServiceAccountID binds the subscription to a service account: it then
 	// receives only events whose object the account may read (RBA-08).
 	ServiceAccountID string `json:"service_account_id,omitempty"`
-	CreatedAt        string `json:"created_at"`
-	UpdatedAt        string `json:"updated_at"`
+	// PreviousSecret stays valid until PreviousSecretExpiresAt after a
+	// rotation (SEC-06): deliveries are signed with both.
+	PreviousSecret          string     `json:"-"`
+	PreviousSecretExpiresAt *time.Time `json:"previous_secret_expires_at,omitempty"`
+	CreatedAt               string     `json:"created_at"`
+	UpdatedAt               string     `json:"updated_at"`
+}
+
+// SecretOverlap is how long a rotated secret stays valid (SEC-06).
+const SecretOverlap = 24 * time.Hour
+
+// SecretRotator replaces a subscription's secret and keeps the old one
+// valid until validUntil.
+type SecretRotator interface {
+	RotateSecret(ctx context.Context, orgID, id, secret string, validUntil time.Time) (*Subscription, error)
+}
+
+// RotateSecret implements SecretRotator.
+func (r *MemoryRepository) RotateSecret(_ context.Context, orgID, id, secret string, validUntil time.Time) (*Subscription, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	sub, ok := r.items[id]
+	if !ok || sub.OrganizationID != orgID {
+		return nil, fmt.Errorf("not found")
+	}
+	until := validUntil.UTC()
+	sub.PreviousSecret, sub.PreviousSecretExpiresAt, sub.Secret = sub.Secret, &until, secret
+	cp := *sub
+	return &cp, nil
 }
 
 // MaskedHeaderValue replaces every custom header value in API responses.
@@ -264,7 +293,51 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/webhooks/{id}", h.Get)
 	r.Delete("/api/v1/webhooks/{id}", h.Delete)
 	r.Post("/api/v1/webhooks/{id}/test", h.Test)
+	r.Post("/api/v1/webhooks/{id}/rotate-secret", h.RotateSecret)
 	r.Get("/api/v1/webhooks/{id}/deliveries", h.ListDeliveries)
+}
+
+// RotateSecret handles POST /api/v1/webhooks/{id}/rotate-secret: a new
+// secret (generated, or the one given) replaces the current one, which
+// stays valid for SecretOverlap; the new secret is returned once.
+func (h *Handler) RotateSecret(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	rotator, ok := h.repo.(SecretRotator)
+	if !ok {
+		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", "secret rotation is not available")
+		return
+	}
+	var req struct {
+		Secret string `json:"secret"`
+	}
+	if r.ContentLength > 0 {
+		if err := api.ReadJSON(r, &req); err != nil {
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
+	}
+	if req.Secret == "" {
+		raw := make([]byte, 32)
+		if _, err := rand.Read(raw); err != nil {
+			api.WriteError(w, http.StatusInternalServerError, "Internal Error", "generate secret")
+			return
+		}
+		req.Secret = "whsec_" + hex.EncodeToString(raw)
+	} else if len(req.Secret) < 16 {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "secret must have at least 16 characters")
+		return
+	}
+	sub, err := rotator.RotateSecret(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req.Secret, time.Now().Add(SecretOverlap))
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]any{"id": sub.ID, "secret": req.Secret,
+		"previous_secret_expires_at": sub.PreviousSecretExpiresAt})
 }
 
 // Test handles POST /api/v1/webhooks/{id}/test by sending a single signed
