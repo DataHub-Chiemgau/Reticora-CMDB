@@ -196,7 +196,7 @@ func (h *Handler) GetImpact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	impacted := computeImpact(id, graph.Edges, impactQuery{relType: relType, categories: categories, depth: depth},
+	impacted := computeImpact([]string{id}, graph.Edges, impactQuery{relType: relType, categories: categories, depth: depth},
 		h.impactRules(r.Context(), t.OrganizationID))
 	impactedNodes := make([]ImpactNode, 0, len(impacted))
 	for _, node := range graph.Nodes {

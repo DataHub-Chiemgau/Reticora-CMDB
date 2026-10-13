@@ -39,7 +39,7 @@ func TestComputeImpactFollowsImpactDirection(t *testing.T) {
 		{ID: "e3", SourceCIID: "app", TargetCIID: "vm", RelType: "runs_on"},
 		{ID: "e4", SourceCIID: "server", TargetCIID: "monitor", RelType: "monitored_by"},
 	}
-	all := flags(computeImpact("pdu", edges, impactQuery{}, testRules))
+	all := flags(computeImpact([]string{"pdu"}, edges, impactQuery{}, testRules))
 	for _, id := range []string{"server", "vm", "app"} {
 		if heuristic, ok := all[id]; !ok || heuristic {
 			t.Errorf("%s: impacted %v, heuristic %v", id, ok, heuristic)
@@ -49,18 +49,18 @@ func TestComputeImpactFollowsImpactDirection(t *testing.T) {
 		t.Errorf("impact %v: the monitoring CI does not depend on the server", all)
 	}
 	// The failure of a dependent never reaches what it depends on.
-	if got := flags(computeImpact("vm", edges, impactQuery{}, testRules)); len(got) != 1 {
+	if got := flags(computeImpact([]string{"vm"}, edges, impactQuery{}, testRules)); len(got) != 1 {
 		t.Errorf("failure of the vm: %v, want only the app", got)
 	}
-	if got := flags(computeImpact("server", edges, impactQuery{}, testRules)); len(got) != 2 {
+	if got := flags(computeImpact([]string{"server"}, edges, impactQuery{}, testRules)); len(got) != 2 {
 		t.Errorf("failure of the server: %v, want vm and app", got)
 	}
 	// target_depends_on_source: the contained CI depends on its container.
 	contains := []Edge{{ID: "c", SourceCIID: "chassis", TargetCIID: "blade", RelType: "contains"}}
-	if got := flags(computeImpact("chassis", contains, impactQuery{}, testRules)); len(got) != 1 {
+	if got := flags(computeImpact([]string{"chassis"}, contains, impactQuery{}, testRules)); len(got) != 1 {
 		t.Errorf("contains: %v", got)
 	}
-	if got := flags(computeImpact("blade", contains, impactQuery{}, testRules)); len(got) != 0 {
+	if got := flags(computeImpact([]string{"blade"}, contains, impactQuery{}, testRules)); len(got) != 0 {
 		t.Errorf("contains backwards: %v", got)
 	}
 }
@@ -75,7 +75,7 @@ func TestComputeImpactConnectedToIsHeuristic(t *testing.T) {
 		{ID: "e3", SourceCIID: "router", TargetCIID: "switch", RelType: "connected_to"},
 		{ID: "e4", SourceCIID: "server2", TargetCIID: "switch", RelType: "uplink_to"},
 	}
-	got := flags(computeImpact("switch", edges, impactQuery{}, testRules))
+	got := flags(computeImpact([]string{"switch"}, edges, impactQuery{}, testRules))
 	want := map[string]bool{"server": true, "vm": true, "router": true, "server2": false}
 	if len(got) != len(want) {
 		t.Fatalf("impact %v, want %v", got, want)
@@ -86,11 +86,11 @@ func TestComputeImpactConnectedToIsHeuristic(t *testing.T) {
 		}
 	}
 	// Undirected: the failure of the server reaches the switch as well.
-	if got = flags(computeImpact("server", edges, impactQuery{}, testRules)); !got["switch"] {
+	if got = flags(computeImpact([]string{"server"}, edges, impactQuery{}, testRules)); !got["switch"] {
 		t.Errorf("connected_to backwards: %v", got)
 	}
 	// The rel_type facet keeps one class.
-	if got = flags(computeImpact("switch", edges, impactQuery{relType: "uplink_to"}, testRules)); len(got) != 1 || got["server2"] {
+	if got = flags(computeImpact([]string{"switch"}, edges, impactQuery{relType: "uplink_to"}, testRules)); len(got) != 1 || got["server2"] {
 		t.Errorf("uplink facet: %v", got)
 	}
 }
@@ -112,7 +112,7 @@ func TestImpactRulesUseOrganizationTypes(t *testing.T) {
 		{ID: "e1", SourceCIID: "a", TargetCIID: "b", RelType: "feeds"},
 		{ID: "e2", SourceCIID: "a", TargetCIID: "c", RelType: "documents"},
 	}
-	if got := flags(computeImpact("a", edges, impactQuery{}, rules)); len(got) != 1 || got["b"] {
+	if got := flags(computeImpact([]string{"a"}, edges, impactQuery{}, rules)); len(got) != 1 || got["b"] {
 		t.Errorf("custom types: %v", got)
 	}
 }
@@ -163,7 +163,7 @@ func TestComputeImpactPathsAndCategories(t *testing.T) {
 		{ID: "e4", SourceCIID: "app", TargetCIID: "server", RelType: "depends_on"},
 		{ID: "e5", SourceCIID: "pdu", TargetCIID: "blade", RelType: "contains"},
 	}
-	hits := computeImpact("pdu", edges, impactQuery{depth: maxDepth}, testRules)
+	hits := computeImpact([]string{"pdu"}, edges, impactQuery{depth: maxDepth}, testRules)
 	app := hits["app"]
 	if len(app.path) != 2 || app.path[0].RelType != "powered_by" || app.path[1].RelType != "depends_on" ||
 		app.path[0].FromCIID != "pdu" || app.path[1].ToCIID != "app" {
@@ -172,15 +172,15 @@ func TestComputeImpactPathsAndCategories(t *testing.T) {
 	if blade := hits["blade"]; len(blade.path) != 1 || blade.path[0].Category != "physical" {
 		t.Errorf("projected containment: %+v", blade.path)
 	}
-	power := computeImpact("pdu", edges, impactQuery{categories: map[string]bool{"power": true}, depth: maxDepth}, testRules)
+	power := computeImpact([]string{"pdu"}, edges, impactQuery{categories: map[string]bool{"power": true}, depth: maxDepth}, testRules)
 	if len(power) != 1 || len(power["server"].path) != 1 {
 		t.Errorf("power category: %v", power)
 	}
-	physical := computeImpact("pdu", edges, impactQuery{categories: map[string]bool{"physical": true}, depth: maxDepth}, testRules)
+	physical := computeImpact([]string{"pdu"}, edges, impactQuery{categories: map[string]bool{"physical": true}, depth: maxDepth}, testRules)
 	if _, ok := physical["blade"]; !ok || len(physical) != 1 {
 		t.Errorf("physical category: %v", physical)
 	}
-	if one := computeImpact("pdu", edges, impactQuery{depth: 1}, testRules); len(one) != 2 {
+	if one := computeImpact([]string{"pdu"}, edges, impactQuery{depth: 1}, testRules); len(one) != 2 {
 		t.Errorf("depth 1: %v, want server and blade", one)
 	}
 	if _, err := parseCategories("power, physical"); err != nil {
@@ -197,7 +197,7 @@ func TestComputeImpactTwentyHops(t *testing.T) {
 	for i := 0; i < 21; i++ {
 		edges = append(edges, Edge{ID: fmt.Sprintf("e%02d", i), SourceCIID: fmt.Sprintf("n%02d", i+1), TargetCIID: fmt.Sprintf("n%02d", i), RelType: "hosted_on"})
 	}
-	hits := computeImpact("n00", edges, impactQuery{depth: maxDepth}, testRules)
+	hits := computeImpact([]string{"n00"}, edges, impactQuery{depth: maxDepth}, testRules)
 	if len(hits) != 20 || len(hits["n20"].path) != 20 {
 		t.Errorf("impact over 21 hops: %d CIs, path to n20 %d", len(hits), len(hits["n20"].path))
 	}

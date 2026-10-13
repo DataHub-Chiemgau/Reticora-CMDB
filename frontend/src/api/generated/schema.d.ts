@@ -5598,7 +5598,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Compute the blast radius of a CI failure */
+    /**
+     * Compute the blast radius of a CI failure
+     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed. single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one.
+     */
     get: operations['listCisIdBlastRadius'];
     put?: never;
     post?: never;

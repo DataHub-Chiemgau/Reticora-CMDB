@@ -34,9 +34,12 @@ type BlastRadius struct {
 	AffectedServices []Node   `json:"affected_services,omitempty"`
 	ClientIDs        []string `json:"client_ids,omitempty"`
 	SiteIDs          []string `json:"site_ids,omitempty"`
-	// SinglePointsOfFailure lists CIs in the affected set whose only
-	// redundancy path is the failed node (articulation approximation).
+	// SinglePointsOfFailure lists the affected CIs that depend on the failed
+	// CI directly without an alternative provider (IMP-04).
 	SinglePointsOfFailure []Node `json:"single_points_of_failure,omitempty"`
+	// ProtectedByRedundancy lists the CIs that depend on the failed CI over
+	// a redundant type but keep a working provider (IMP-04).
+	ProtectedByRedundancy []Node `json:"protected_by_redundancy,omitempty"`
 }
 
 // GetDependencies handles GET /api/v1/cis/{id}/dependencies?direction=up|down
@@ -102,7 +105,8 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	impacted := computeImpact(id, graph.Edges, impactQuery{depth: maxDepth}, h.impactRules(r.Context(), t.OrganizationID))
+	rules := h.impactRules(r.Context(), t.OrganizationID)
+	impacted := computeImpact([]string{id}, graph.Edges, impactQuery{depth: maxDepth}, rules)
 	result := BlastRadius{CIID: id}
 	services := map[string]struct{}{}
 	clients := map[string]struct{}{}
@@ -134,7 +138,7 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 			result.AffectedServices = append(result.AffectedServices, node)
 		}
 	}
-	result.SinglePointsOfFailure = findSPOFs(id, graph.Edges, result.AffectedCIs)
+	result.SinglePointsOfFailure, result.ProtectedByRedundancy = redundancyFindings(id, graph, impacted, rules)
 	api.WriteJSON(w, http.StatusOK, result)
 }
 
@@ -167,40 +171,6 @@ func walkDirected(rootID string, edges []Edge, upstream bool) map[string]struct{
 	return reachable
 }
 
-// findSPOFs approximates single points of failure within the affected set: a
-// node is a SPOF when removing the failed CI leaves it with no remaining
-// incoming redundancy edge of the same dependency class.
-func findSPOFs(failedID string, edges []Edge, affected []Node) []Node {
-	incoming := map[string]map[string]int{} // target -> relType -> count from non-failed sources
-	for _, edge := range edges {
-		if edge.SourceCIID == failedID {
-			continue
-		}
-		if _, ok := incoming[edge.TargetCIID]; !ok {
-			incoming[edge.TargetCIID] = map[string]int{}
-		}
-		incoming[edge.TargetCIID][edge.RelType]++
-	}
-	var spofs []Node
-	for _, node := range affected {
-		if node.ID == failedID {
-			continue
-		}
-		// Direct dependents of the failed node with no surviving incoming
-		// edge of the same type have no redundancy.
-		for _, edge := range edges {
-			if edge.SourceCIID != failedID || edge.TargetCIID != node.ID {
-				continue
-			}
-			if incoming[node.ID][edge.RelType] == 0 {
-				spofs = append(spofs, node)
-				break
-			}
-		}
-	}
-	return spofs
-}
-
 // ImpactNode is an impacted CI with its shortest path from the failed CI
 // (IMP-02); Heuristic marks a CI reached only over an undirected network
 // edge (connected_to), a second-class path (IMP-03).
@@ -225,6 +195,9 @@ const maxRelationshipTypes = 500
 type impactRule struct {
 	direction string
 	category  string
+	// redundant: a dependent fails only when all its providers of the type
+	// failed (IMP-04).
+	redundant bool
 }
 
 // impactRules maps each relationship type key onto its impact direction
@@ -234,7 +207,7 @@ func (h *Handler) impactRules(ctx context.Context, orgID string) map[string]impa
 	rules := map[string]impactRule{}
 	catalogue := relationshiptype.Catalogue()
 	for i := range catalogue {
-		rules[catalogue[i].Key] = impactRule{catalogue[i].ImpactDirection, catalogue[i].Category}
+		rules[catalogue[i].Key] = impactRule{catalogue[i].ImpactDirection, catalogue[i].Category, catalogue[i].Redundant}
 	}
 	if h.types == nil {
 		return rules
@@ -245,7 +218,7 @@ func (h *Handler) impactRules(ctx context.Context, orgID string) map[string]impa
 		return rules
 	}
 	for i := range types {
-		rules[types[i].Key] = impactRule{types[i].ImpactDirection, types[i].Category}
+		rules[types[i].Key] = impactRule{types[i].ImpactDirection, types[i].Category, types[i].Redundant}
 	}
 	return rules
 }
@@ -307,15 +280,36 @@ type impactQuery struct {
 	depth      int
 }
 
-// computeImpact returns the CIs a failure of failedID reaches along the
-// impact directions (IMP-01) with the shortest path to each (IMP-02); a CI
-// reached only over an undirected network edge is heuristic (IMP-03) and
-// then carries its shortest path over all edges. Breadth-first over edges
-// in a fixed order, so the paths are deterministic.
-func computeImpact(failedID string, edges []Edge, q impactQuery, rules map[string]impactRule) map[string]impactHit {
+// computeImpact returns the CIs a failure of the failed CIs reaches along
+// the impact directions (IMP-01) with the shortest path to each (IMP-02); a
+// CI reached only over an undirected network edge is heuristic (IMP-03) and
+// then carries its shortest path over all edges. The redundancy postfilter
+// (IMP-04) keeps a CI that still has a working provider of a redundant
+// type. Breadth-first over edges in a fixed order, so the paths are
+// deterministic.
+func computeImpact(failedIDs []string, edges []Edge, q impactQuery, rules map[string]impactRule) map[string]impactHit {
+	failed := map[string]bool{}
+	for _, id := range failedIDs {
+		failed[id] = true
+	}
 	walk := func(withHeuristic bool) map[string][]PathStep {
-		paths := map[string][]PathStep{failedID: {}}
-		queue := []string{failedID}
+		follow := func(e *Edge, rule impactRule) bool {
+			if q.relType != "" && e.RelType != q.relType {
+				return false
+			}
+			return len(q.categories) == 0 || q.categories[rule.category]
+		}
+		down := downSet(failed, edges, rules, func(e *Edge, rule impactRule, heuristic bool) bool {
+			return follow(e, rule) && (withHeuristic || !heuristic)
+		})
+		paths := map[string][]PathStep{}
+		queue := make([]string, 0, len(failedIDs))
+		for _, id := range failedIDs {
+			if _, ok := paths[id]; !ok {
+				paths[id] = []PathStep{}
+				queue = append(queue, id)
+			}
+		}
 		for len(queue) > 0 {
 			current := queue[0]
 			queue = queue[1:]
@@ -323,15 +317,12 @@ func computeImpact(failedID string, edges []Edge, q impactQuery, rules map[strin
 				continue
 			}
 			for i := range edges {
-				if q.relType != "" && edges[i].RelType != q.relType {
-					continue
-				}
 				rule := ruleOf(rules, edges[i].RelType)
-				if len(q.categories) > 0 && !q.categories[rule.category] {
+				if !follow(&edges[i], rule) {
 					continue
 				}
 				to, heuristic, ok := impactStep(&edges[i], current, rule)
-				if !ok || (heuristic && !withHeuristic) {
+				if !ok || (heuristic && !withHeuristic) || !down[to] {
 					continue
 				}
 				if _, seen := paths[to]; seen {
@@ -345,7 +336,9 @@ func computeImpact(failedID string, edges []Edge, q impactQuery, rules map[strin
 				queue = append(queue, to)
 			}
 		}
-		delete(paths, failedID)
+		for id := range failed {
+			delete(paths, id)
+		}
 		return paths
 	}
 	certain := walk(false)
