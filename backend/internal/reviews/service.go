@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 )
 
 // Effect carries out the domain side of a resolution. It may complete
@@ -26,6 +27,18 @@ type Service struct {
 	repo     Repository
 	effects  map[string]Effect
 	notifier Notifier
+	// jobs records every merge resolution as a job (JOB-04).
+	jobs jobs.Tracker
+}
+
+// MergeJobKind is the job kind of a review merge (JOB-04).
+const MergeJobKind = "review.merge"
+
+// WithJobs records the merge resolutions as jobs of kind review.merge with
+// the review item as reference (JOB-04).
+func (s *Service) WithJobs(tracker jobs.Tracker) *Service {
+	s.jobs = tracker
+	return s
 }
 
 // NewService returns the queue over repo.
@@ -130,7 +143,7 @@ func (s *Service) Resolve(ctx context.Context, orgID, id string, res *Resolution
 	}
 	resolved := false
 	if ok {
-		if resolved, err = effect(ctx, item, res); err != nil {
+		if resolved, err = s.runEffect(ctx, effect, item, res); err != nil {
 			return nil, err
 		}
 	}
@@ -147,6 +160,26 @@ func (s *Service) Resolve(ctx context.Context, orgID, id string, res *Resolution
 	slog.InfoContext(ctx, "review item resolved", "event", "review.resolved", "organization_id", orgID,
 		"review_item_id", id, "kind", item.Kind, "action", res.Action)
 	return out, nil
+}
+
+// runEffect runs the effect of a resolution; a merge runs as a job whose
+// status follows the effect (JOB-04).
+func (s *Service) runEffect(ctx context.Context, effect Effect, item *Item, res *Resolution) (bool, error) {
+	if s.jobs == nil || res.Action != ActionMerge {
+		return effect(ctx, item, res)
+	}
+	actor := res.ResolvedBy
+	if err := s.jobs.Track(ctx, item.OrganizationID, MergeJobKind, "review_item", item.ID, actor); err != nil {
+		return false, err
+	}
+	_ = s.jobs.Mirror(ctx, item.OrganizationID, "review_item", item.ID, jobs.StatusRunning, "")
+	resolved, err := effect(ctx, item, res)
+	if err != nil {
+		_ = s.jobs.Mirror(ctx, item.OrganizationID, "review_item", item.ID, jobs.StatusFailed, err.Error())
+		return false, err
+	}
+	_ = s.jobs.Mirror(ctx, item.OrganizationID, "review_item", item.ID, jobs.StatusSucceeded, "")
+	return resolved, nil
 }
 
 func joinActions(actions []string) string {

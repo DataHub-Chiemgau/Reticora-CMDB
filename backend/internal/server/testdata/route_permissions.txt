@@ -399,6 +399,7 @@ POST /api/v1/exports export:run
 POST /api/v1/forms form:write
 POST /api/v1/forms/{id}/submissions form:write
 POST /api/v1/graphql authenticated
+POST /api/v1/history/snapshots audit:read
 POST /api/v1/iga/access-requests iga:write
 POST /api/v1/iga/access-requests/{id}/approve iga:write
 POST /api/v1/iga/access-requests/{id}/reject iga:write

@@ -322,6 +322,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// unlicensed_ci and adopted once the limit is raised (ENT-03, CH21).
 	// Export and discovery jobs register in the generic job model (JOB-01).
 	var jobTracker jobs.Tracker
+	var historyJobs history.SnapshotJobs
 	// The generic job API (API-09) serves in both profiles; without a
 	// database it has an empty in-memory job table.
 	jobAPI := jobs.NewAPIHandler(jobs.NewService(jobs.NewMemoryRepository()))
@@ -343,6 +344,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// A CI merge is a job (CI-12, JOB-01); bulk operations from 100
 		// ids on as well (API-08, JOB-04).
 		jobService.Register(jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute})
+		jobService.Register(jobs.Kind{Name: history.SnapshotJobKind, MaxAttempts: 1, Timeout: 15 * time.Minute})
+		historyJobs = jobService
 		if opts.CIService != nil {
 			opts.CIService.WithJobs(jobTracker).WithBulkJobs(jobService)
 		}
@@ -367,6 +370,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	}
 	if opts.IngestQueue != nil {
 		opts.IngestQueue.Attach(discoveryHandler)
+	}
+	// Review merges run as jobs (JOB-04).
+	if jobTracker != nil {
+		discoveryHandler.WithReviewJobs(jobTracker)
 	}
 	if opts.Events != nil {
 		discoveryHandler.WithReviewNotifier(reviewEvents{emitter: opts.Events})
@@ -431,7 +438,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		composition.NewHandler(repos.Composition, opts.Dispatcher).
 			WithAssets(parentAssetLookup{repo: repos.Asset}),
 		override.NewHandler(repos.Override, opts.Dispatcher),
-		history.NewHandler(repos.History),
+		historyHandler(repos.History, historyJobs),
 		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission),
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
@@ -655,4 +662,14 @@ func (r reviewEvents) ReviewOpened(ctx context.Context, item *reviews.Item) {
 		Data: map[string]any{"id": item.ID, "kind": item.Kind, "object_key": item.ObjectKey}}); err != nil {
 		slog.Error("report opened review item", "item", item.ID, "error", err)
 	}
+}
+
+// historyHandler serves the history; with the job model the state snapshot
+// runs as a job (JOB-04).
+func historyHandler(repo history.Repository, snapshotJobs history.SnapshotJobs) *history.Handler {
+	h := history.NewHandler(repo)
+	if snapshotJobs != nil {
+		h.WithJobs(snapshotJobs)
+	}
+	return h
 }

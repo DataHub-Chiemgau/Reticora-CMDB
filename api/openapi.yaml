@@ -10518,6 +10518,61 @@ paths:
         '401':
           description: Unauthorized
 
+  /api/v1/history/snapshots:
+    post:
+      operationId: createStateSnapshot
+      tags: [History]
+      summary: State snapshot of a CI or asset as a job (JOB-04)
+      description: >-
+        Replays the history of the entity up to at (default now) as a job of
+        kind history.snapshot; 202 with the job, whose result is the state
+        (GET /api/v1/jobs/{id}/result). Without the job model (no database)
+        the state is answered at once (200). GET /cis/{id}/state stays the
+        direct read.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entity_type, entity_id]
+              additionalProperties: false
+              properties:
+                entity_type: { type: string, enum: [ci, asset] }
+                entity_id: { type: string }
+                at: { type: string, format: date-time }
+      responses:
+        '200':
+          description: The state (without the job model)
+          content:
+            application/json:
+              schema: {}
+        '202':
+          description: The snapshot runs as a job
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, status, kind]
+                properties:
+                  job_id: { type: string }
+                  status: { type: string }
+                  kind: { type: string }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: Unknown entity type.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
   /api/v1/history/{entityType}/{id}:
     get:
       operationId: getHistoryEntitytypeId

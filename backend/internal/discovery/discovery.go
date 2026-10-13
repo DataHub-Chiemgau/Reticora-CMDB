@@ -439,7 +439,8 @@ type Handler struct {
 	reviewNotifier reviews.Notifier
 	// serial holds one mutex per organization: the ingests of an
 	// organization run one after another in this process (REC-01).
-	serial sync.Map
+	serial     sync.Map
+	reviewJobs jobs.Tracker
 }
 
 // CITypeLookup resolves a CI type name or UUID to the canonical ci_type id.

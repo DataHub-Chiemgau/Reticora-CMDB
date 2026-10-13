@@ -5928,6 +5928,26 @@ export interface paths {
     patch: operations['updateCompositionsId'];
     trace?: never;
   };
+  '/api/v1/history/snapshots': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * State snapshot of a CI or asset as a job (JOB-04)
+     * @description Replays the history of the entity up to at (default now) as a job of kind history.snapshot; 202 with the job, whose result is the state (GET /api/v1/jobs/{id}/result). Without the job model (no database) the state is answered at once (200). GET /cis/{id}/state stays the direct read.
+     */
+    post: operations['createStateSnapshot'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/history/{entityType}/{id}': {
     parameters: {
       query?: never;
@@ -25268,6 +25288,62 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  createStateSnapshot: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** @enum {string} */
+          entity_type: 'ci' | 'asset';
+          entity_id: string;
+          /** Format: date-time */
+          at?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description The state (without the job model) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': unknown;
+        };
+      };
+      /** @description The snapshot runs as a job */
+      202: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            job_id: string;
+            status: string;
+            kind: string;
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description Unknown entity type. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };

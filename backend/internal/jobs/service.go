@@ -319,3 +319,35 @@ func (s *Service) Mirror(ctx context.Context, orgID, refTable, refID string, sta
 	}
 	return err
 }
+
+// RunDetached enqueues a job of kind and runs it right away in the
+// background of this process with the caller's context values (tenant,
+// scope); run's result becomes the job result, its error fails the job. A
+// process ending meanwhile leaves the job running until its timeout reaps
+// it (JOB-01).
+func (s *Service) RunDetached(ctx context.Context, orgID, kind string, params any, createdBy string,
+	run func(ctx context.Context) (any, error)) (*Job, error) {
+	job, _, err := s.Enqueue(ctx, orgID, kind, params, EnqueueOptions{CreatedBy: createdBy})
+	if err != nil {
+		return nil, err
+	}
+	detached := context.WithoutCancel(ctx)
+	go func() {
+		claimed, cerr := s.ClaimJob(detached, orgID, job.ID)
+		if cerr != nil || claimed == nil {
+			slog.ErrorContext(detached, "claim detached job", "job", job.ID, "kind", kind, "error", cerr)
+			return
+		}
+		result, rerr := run(detached)
+		if rerr != nil {
+			if _, ferr := s.Fail(detached, orgID, job.ID, rerr); ferr != nil {
+				slog.ErrorContext(detached, "record failed detached job", "job", job.ID, "error", ferr)
+			}
+			return
+		}
+		if _, serr := s.Succeed(detached, orgID, job.ID, result); serr != nil {
+			slog.ErrorContext(detached, "record detached job", "job", job.ID, "error", serr)
+		}
+	}()
+	return job, nil
+}
