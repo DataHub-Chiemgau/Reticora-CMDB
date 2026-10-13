@@ -308,3 +308,4 @@ REP-01;[B];B;backend/internal/jobs/service_test.go;WP-129
 TEC-14;[B];B;backend/internal/jobs/queue_test.go;WP-130
 JOB-02;[B], Zusätze [P2], [P3];B;backend/internal/jobs/scheduler_test.go;WP-131
 OPS-03;[B], [P5];B;backend/internal/jobs/scheduler_test.go;WP-131
+AUD-04;[B];B;backend/internal/audit/audit_test.go;WP-132

@@ -773,8 +773,11 @@ paths:
       tags: [Audit]
       summary: Verify the audit hash chain
       description: >-
-        Walks the organization's audit log in chain order and reports whether the
-        `previous_hash`/`hash` linkage is intact.
+        Walks the organization's audit chain in `seq` order and reports the
+        first violation (AUD-04): a gap in the sequence, a broken
+        `previous_hash` link (the first entry links to 32 zero bytes) or a
+        hash that does not match SHA-256(previous_hash || SHA-256(canonical
+        JSON)) of the stored entry.
       responses:
         '200':
           description: Verification result
@@ -10329,12 +10332,16 @@ components:
 
     AuditEntry:
       type: object
-      required: [id, organization_id, timestamp, action, resource_type, hash]
+      required: [id, organization_id, seq, timestamp, action, resource_type, hash]
       properties:
         id:
           type: string
         organization_id:
           type: string
+        seq:
+          type: integer
+          format: int64
+          description: Position in the organization's audit chain, without gaps from 1 (AUD-04).
         timestamp:
           type: string
           format: date-time
@@ -10381,8 +10388,10 @@ components:
           type: string
         broken_at:
           type: integer
+          description: Chain position (seq) where the first violation was found.
         broken_reason:
           type: string
+          description: '`sequence gap`, `previous_hash mismatch` or `hash mismatch`.'
 
     RelationshipTypeCategory:
       type: string

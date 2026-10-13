@@ -434,7 +434,7 @@ export interface paths {
     put?: never;
     /**
      * Verify the audit hash chain
-     * @description Walks the organization's audit log in chain order and reports whether the `previous_hash`/`hash` linkage is intact.
+     * @description Walks the organization's audit chain in `seq` order and reports the first violation (AUD-04): a gap in the sequence, a broken `previous_hash` link (the first entry links to 32 zero bytes) or a hash that does not match SHA-256(previous_hash || SHA-256(canonical JSON)) of the stored entry.
      */
     post: operations['verifyAuditChain'];
     delete?: never;
@@ -6113,6 +6113,11 @@ export interface components {
     AuditEntry: {
       id: string;
       organization_id: string;
+      /**
+       * Format: int64
+       * @description Position in the organization's audit chain, without gaps from 1 (AUD-04).
+       */
+      seq: number;
       /** Format: date-time */
       timestamp: string;
       actor_id?: string;
@@ -6135,7 +6140,9 @@ export interface components {
       /** @description Number of entries verified before the chain broke, or the total when intact. */
       checked: number;
       broken_id?: string;
+      /** @description Chain position (seq) where the first violation was found. */
       broken_at?: number;
+      /** @description `sequence gap`, `previous_hash mismatch` or `hash mismatch`. */
       broken_reason?: string;
     };
     /** @enum {string} */

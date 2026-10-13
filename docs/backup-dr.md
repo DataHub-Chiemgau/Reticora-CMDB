@@ -121,7 +121,7 @@ PITR takes the place of pgBackRest, with the same RPO, RTO and retention.
 5. Run `make migrate-up` (or `migrate ... up`) to apply any migrations newer
    than the backup.
 6. Rebuild the search index per tenant: `POST /api/v1/search/reindex`.
-7. Verify the audit hash chain: `backend/cmd/audit-verify` (see below).
+7. Verify the audit hash chains: `go run ./cmd/audit-verify -all` (in `backend/`) checks the chain of every organization and names the first violation of each (sequence gap, broken link, hash mismatch; AUD-04); `-org <id>` checks one.
 
 ## Restore proof: RPO and RTO (WP-101, NFR-05)
 

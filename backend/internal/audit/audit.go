@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ const AdvisoryLockID int32 = 0x52657469 // "Reti" in hex
 type Entry struct {
 	ID             string                 `json:"id"`
 	OrganizationID string                 `json:"organization_id"`
+	Seq            int64                  `json:"seq"`
 	Timestamp      time.Time              `json:"timestamp"`
 	ActorID        string                 `json:"actor_id,omitempty"`
 	ActorType      string                 `json:"actor_type"`
@@ -59,15 +61,25 @@ func NewPGRecorder() *PGRecorder {
 	return &PGRecorder{}
 }
 
-// ComputeHash computes the SHA-256 hash for an audit entry, chaining from the
-// previous hash. The input is the canonical serialization of the persisted
-// row, identical to the database function audit_entry_hash (migration
-// 000039): microsecond-precision RFC3339 UTC timestamp, plain ids, and the
-// stored JSONB changes payload. Because the BEFORE INSERT trigger recomputes
-// the hash from the stored columns, verification over the stored row always
+// GenesisHash is the previous_hash of the first entry of a chain: 32 zero
+// bytes, hex-encoded (AUD-04).
+var GenesisHash = strings.Repeat("0", 64)
+
+// ComputeHash computes the hash of an audit entry (AUD-04):
+//
+//	hash = SHA-256(previous_hash || SHA-256(canonical JSON))
+//
+// over the binary values, hex-encoded. The canonical JSON is the
+// serialization of the persisted row, identical to the database function
+// audit_entry_hash (migration 000117): organization_id and seq first, a
+// microsecond-precision RFC3339 UTC timestamp, plain ids and the stored
+// JSONB changes payload. Because the BEFORE INSERT trigger computes the
+// hash from the stored columns, verification over the stored row always
 // reproduces the stored hash.
 func ComputeHash(entry *Entry) string {
 	payload := canonicalHashPayload(
+		entry.OrganizationID,
+		entry.Seq,
 		entry.Timestamp.UTC().Truncate(time.Microsecond).Format("2006-01-02T15:04:05.000000Z"),
 		entry.ActorID,
 		entry.ActorType,
@@ -75,16 +87,22 @@ func ComputeHash(entry *Entry) string {
 		entry.ResourceType,
 		entry.ResourceID,
 		entry.Changes,
-		entry.PreviousHash,
 	)
-	h := sha256.Sum256([]byte(payload))
+	inner := sha256.Sum256([]byte(payload))
+	prev, err := hex.DecodeString(entry.PreviousHash)
+	if err != nil {
+		// Not a hash: the chain is broken anyway; hash the text so the
+		// result cannot match a valid entry.
+		prev = []byte(entry.PreviousHash)
+	}
+	h := sha256.Sum256(append(prev, inner[:]...))
 	return hex.EncodeToString(h[:])
 }
 
-// canonicalHashPayload builds the exact byte sequence hashed both here and in
+// canonicalHashPayload builds the canonical JSON hashed both here and in
 // audit_entry_hash: a JSON object with fixed key order where `changes` is the
 // compact JSON serialization of the payload (jsonb-normalized on write).
-func canonicalHashPayload(timestamp, actorID, actorType, action, resourceType, resourceID string, changes map[string]interface{}, previousHash string) string {
+func canonicalHashPayload(orgID string, seq int64, timestamp, actorID, actorType, action, resourceType, resourceID string, changes map[string]interface{}) string {
 	changesJSON := "{}"
 	if changes != nil {
 		if b, err := json.Marshal(changes); err == nil {
@@ -99,7 +117,11 @@ func canonicalHashPayload(timestamp, actorID, actorType, action, resourceType, r
 		return string(b)
 	}
 	var sb strings.Builder
-	sb.WriteString(`{"timestamp":`)
+	sb.WriteString(`{"organization_id":`)
+	sb.WriteString(q(orgID))
+	sb.WriteString(`,"seq":`)
+	sb.WriteString(strconv.FormatInt(seq, 10))
+	sb.WriteString(`,"timestamp":`)
 	sb.WriteString(q(timestamp))
 	sb.WriteString(`,"actor_id":`)
 	sb.WriteString(q(actorID))
@@ -113,14 +135,15 @@ func canonicalHashPayload(timestamp, actorID, actorType, action, resourceType, r
 	sb.WriteString(q(resourceID))
 	sb.WriteString(`,"changes":`)
 	sb.WriteString(changesJSON)
-	sb.WriteString(`,"previous_hash":`)
-	sb.WriteString(q(previousHash))
 	sb.WriteString(`}`)
 	return sb.String()
 }
 
-// AcquireAdvisoryLock acquires a transaction-scoped advisory lock for audit log serialisation.
-// The lock is automatically released when the transaction commits or rolls back.
+// AcquireAdvisoryLock acquires the transaction-scoped advisory lock of the
+// organization's audit chain. The lock is released when the transaction
+// commits or rolls back. The insert trigger of audit_log takes the same lock
+// (audit_org_lock_key, migration 000117), so entries are chained in commit
+// order.
 func AcquireAdvisoryLock(ctx context.Context, tx pgx.Tx, orgID string) error {
 	// Use a hash of the org ID as the second lock key for per-tenant serialisation.
 	orgHash := sha256.Sum256([]byte(orgID))
@@ -153,18 +176,8 @@ func (r *PGRecorder) Record(ctx context.Context, tx pgx.Tx, entry Entry) (*Entry
 		return nil, err
 	}
 
-	entry.PreviousHash = ""
-	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(hash, '')
-		FROM audit_log
-		WHERE organization_id = $1
-		ORDER BY timestamp DESC, id DESC
-		LIMIT 1
-	`, entry.OrganizationID).Scan(&entry.PreviousHash); err != nil && err != pgx.ErrNoRows {
-		return nil, fmt.Errorf("audit: read previous hash: %w", err)
-	}
-
-	entry.Hash = ComputeHash(&entry)
+	// The insert trigger sets seq, previous_hash and hash under the chain
+	// lock (migration 000117).
 	changesJSON, err := json.Marshal(entry.Changes)
 	if err != nil {
 		return nil, fmt.Errorf("audit: marshal changes: %w", err)
@@ -179,13 +192,12 @@ func (r *PGRecorder) Record(ctx context.Context, tx pgx.Tx, entry Entry) (*Entry
 			resource_type,
 			resource_id,
 			changes,
-			previous_hash,
 			hash
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
-		RETURNING id::text, timestamp
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, '')
+		RETURNING id::text, seq, timestamp, previous_hash, hash
 	`, entry.OrganizationID, entry.Timestamp, nilIfEmpty(entry.ActorID), entry.ActorType, entry.Action,
-		entry.ResourceType, nilIfEmpty(entry.ResourceID), string(changesJSON), entry.PreviousHash, entry.Hash).
-		Scan(&entry.ID, &entry.Timestamp); err != nil {
+		entry.ResourceType, nilIfEmpty(entry.ResourceID), string(changesJSON)).
+		Scan(&entry.ID, &entry.Seq, &entry.Timestamp, &entry.PreviousHash, &entry.Hash); err != nil {
 		return nil, fmt.Errorf("audit: insert entry: %w", err)
 	}
 
@@ -220,6 +232,7 @@ func verifyTx(ctx context.Context, tx pgx.Tx, orgID string) (VerifyResult, error
 		SELECT
 			id::text,
 			organization_id::text,
+			seq,
 			timestamp,
 			COALESCE(actor_id::text, ''),
 			actor_type,
@@ -229,10 +242,11 @@ func verifyTx(ctx context.Context, tx pgx.Tx, orgID string) (VerifyResult, error
 			COALESCE(changes, '{}'::jsonb),
 			COALESCE(previous_hash, ''),
 			hash,
-			audit_entry_hash(timestamp, actor_id, actor_type, action, resource_type, resource_id, changes, previous_hash)
+			audit_entry_hash(organization_id, seq, timestamp, actor_id, actor_type, action, resource_type,
+				resource_id, changes, previous_hash)
 		FROM audit_log
 		WHERE organization_id = $1
-		ORDER BY timestamp ASC, id ASC
+		ORDER BY seq ASC
 	`, orgID)
 	if err != nil {
 		return VerifyResult{}, fmt.Errorf("audit: query entries: %w", err)
@@ -258,12 +272,16 @@ func VerifyEntries(entries []Entry) VerifyResult {
 	return verifyEntries(entries, expected)
 }
 
-// verifyEntries checks chain linkage and per-entry hashes. expected[i] is the
-// hash that the entry's stored column values must produce; for database rows
-// it comes from audit_entry_hash so the JSONB serialization cannot diverge.
+// verifyEntries checks the sequence, the chain linkage and the per-entry
+// hashes and reports the first violation. expected[i] is the hash that the
+// entry's stored column values must produce; for database rows it comes from
+// audit_entry_hash so the JSONB serialization cannot diverge.
 func verifyEntries(entries []Entry, expected []string) VerifyResult {
-	prevHash := ""
+	prevHash := GenesisHash
 	for i := range entries {
+		if entries[i].Seq != int64(i+1) {
+			return VerifyResult{Intact: false, Checked: i, BrokenID: entries[i].ID, BrokenAt: i + 1, BrokenReason: "sequence gap"}
+		}
 		if entries[i].PreviousHash != prevHash {
 			return VerifyResult{Intact: false, Checked: i, BrokenID: entries[i].ID, BrokenAt: i + 1, BrokenReason: "previous_hash mismatch"}
 		}
@@ -371,6 +389,7 @@ func listTx(ctx context.Context, tx pgx.Tx, orgID string, page api.PaginationPar
 		SELECT
 			id::text,
 			organization_id::text,
+			seq,
 			timestamp,
 			COALESCE(actor_id::text, ''),
 			actor_type,
@@ -382,7 +401,7 @@ func listTx(ctx context.Context, tx pgx.Tx, orgID string, page api.PaginationPar
 			hash
 		FROM audit_log
 		WHERE `+where+`
-		ORDER BY timestamp DESC, id DESC
+		ORDER BY seq DESC
 		LIMIT $2 OFFSET $3
 	`, orgID, page.Limit, page.Offset)
 	if err != nil {
@@ -408,7 +427,7 @@ func scanEntries(rows pgx.Rows) ([]Entry, error) {
 func scanEntriesWithExpected(rows pgx.Rows) ([]Entry, []string, error) {
 	entries := []Entry{}
 	expected := []string{}
-	hasExpected := len(rows.FieldDescriptions()) == 12
+	hasExpected := len(rows.FieldDescriptions()) == 13
 	for rows.Next() {
 		var entry Entry
 		var changes []byte
@@ -416,6 +435,7 @@ func scanEntriesWithExpected(rows pgx.Rows) ([]Entry, []string, error) {
 		dest := []any{
 			&entry.ID,
 			&entry.OrganizationID,
+			&entry.Seq,
 			&entry.Timestamp,
 			&entry.ActorID,
 			&entry.ActorType,
@@ -450,7 +470,7 @@ func scanEntriesWithExpected(rows pgx.Rows) ([]Entry, []string, error) {
 	return entries, expected, nil
 }
 
-// Log is an in-memory audit log.
+// Log is an in-memory audit log with one chain.
 type Log struct {
 	entries  []Entry
 	lastHash string
@@ -458,7 +478,7 @@ type Log struct {
 
 // NewLog creates a new audit log.
 func NewLog() *Log {
-	return &Log{}
+	return &Log{lastHash: GenesisHash}
 }
 
 // Append adds a new entry to the audit log with hash-chain integrity.
@@ -466,6 +486,7 @@ func (l *Log) Append(entry *Entry) {
 	if entry.ActorType == "" {
 		entry.ActorType = "user"
 	}
+	entry.Seq = int64(len(l.entries) + 1)
 	entry.PreviousHash = l.lastHash
 	entry.Hash = ComputeHash(entry)
 	l.lastHash = entry.Hash

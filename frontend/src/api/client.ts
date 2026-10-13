@@ -1795,6 +1795,7 @@ export interface AuditEntry {
   entity_type?: string;
   entity_id?: string;
   details?: Record<string, unknown>;
+  seq?: number;
   hash?: string;
   previous_hash?: string;
   created_at: string;
