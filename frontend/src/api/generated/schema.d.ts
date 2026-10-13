@@ -16961,7 +16961,7 @@ export interface operations {
       content: {
         'application/json': {
           label?: string;
-          /** @description Defaults to 30, capped at 1440 (24h). */
+          /** @description Validity in minutes; defaults to and is capped at 1440 (24 h, COL-04). */
           ttl_minutes?: number;
         };
       };

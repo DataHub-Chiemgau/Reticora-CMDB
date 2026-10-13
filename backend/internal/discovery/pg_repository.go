@@ -460,13 +460,14 @@ func (r *PGRepository) CreateEnrollmentCode(ctx context.Context, code *Enrollmen
 	})
 }
 
-// RedeemEnrollmentCode validates and consumes a code. The collector is not
+// EnrollCollector consumes a code and registers the collector in one
+// transaction of the code's organization (COL-04): the collector is not
 // enrolled yet and has no tenant, so the code is looked up by its hash with
-// the read-only system flag (the hash is the credential); the code is then
-// consumed in its organization's tenant transaction. The consuming UPDATE
-// re-checks that the code is unused, so concurrent redemptions of one code
-// succeed at most once (WP-022).
-func (r *PGRepository) RedeemEnrollmentCode(ctx context.Context, rawCode, collectorID string) (string, error) {
+// the read-only system flag (the hash is the credential). The consuming
+// UPDATE … WHERE used_at IS NULL … RETURNING lets concurrent enrollments
+// with one code succeed exactly once; a failed registration leaves the
+// code unused.
+func (r *PGRepository) EnrollCollector(ctx context.Context, rawCode string, c *Collector) error {
 	hash := enrollmentCodeHash(rawCode)
 	var orgID string
 	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
@@ -483,28 +484,42 @@ func (r *PGRepository) RedeemEnrollmentCode(ctx context.Context, rawCode, collec
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return err
 	}
 
+	c.OrganizationID = orgID
 	scope := database.OrgWideScope(orgID, "")
-	err = database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
-		tag, execErr := tx.Exec(ctx, `
-			UPDATE collector_enrollment_code
-			SET used_at = now(), used_by_collector_id = NULLIF($2, '')::uuid
+	return database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var codeID string
+		consumeErr := tx.QueryRow(ctx, `
+			UPDATE collector_enrollment_code SET used_at = now()
 			WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
-		`, hash, collectorID)
-		if execErr != nil {
-			return fmt.Errorf("consume enrollment code: %w", execErr)
-		}
-		if tag.RowsAffected() == 0 {
+			RETURNING id::text
+		`, hash).Scan(&codeID)
+		if consumeErr == pgx.ErrNoRows {
 			return errEnrollmentCodeInvalid
+		}
+		if consumeErr != nil {
+			return fmt.Errorf("consume enrollment code: %w", consumeErr)
+		}
+		if c.Config == nil {
+			c.Config = map[string]any{}
+		}
+		created, insErr := scanCollector(tx.QueryRow(ctx, `
+			INSERT INTO collector (organization_id, client_id, site_id, name, version, status, last_heartbeat_at, config)
+			VALUES ($1, $2, $3, $4, $5, 'active', now(), $6)
+			RETURNING `+collectorSelectColumns,
+			orgID, nilIfEmpty(c.ClientID), nilIfEmpty(c.SiteID), c.Name, nilIfEmpty(c.Version), c.Config))
+		if insErr != nil {
+			return collectorError(fmt.Errorf("register collector: %w", insErr))
+		}
+		*c = *created
+		if _, err := tx.Exec(ctx, `UPDATE collector_enrollment_code SET used_by_collector_id = $2 WHERE id = $1`,
+			codeID, c.ID); err != nil {
+			return fmt.Errorf("record enrolled collector: %w", err)
 		}
 		return nil
 	})
-	if err != nil {
-		return "", err
-	}
-	return orgID, nil
 }
 
 // errEnrollmentCodeInvalid is returned for unknown, expired and used codes

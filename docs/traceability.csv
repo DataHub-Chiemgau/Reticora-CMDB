@@ -332,3 +332,4 @@ SEC-05;[B];B;backend/internal/pii/surrogate_integration_test.go;WP-241
 AUD-01;[B];B;backend/internal/contact/pii_integration_test.go;WP-242
 COL-01;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-143
 COL-05;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-143
+COL-04;[B];D;backend/internal/discovery/enroll_handler_test.go;WP-144

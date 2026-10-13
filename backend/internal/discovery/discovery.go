@@ -19,7 +19,6 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
@@ -157,10 +156,11 @@ type Repository interface {
 
 	// Enrollment codes (zero-config onboarding).
 	CreateEnrollmentCode(ctx context.Context, code *EnrollmentCode) error
-	// RedeemEnrollmentCode validates the raw code, marks it used and returns
-	// the owning organization. It must fail for unknown, expired or already
-	// used codes.
-	RedeemEnrollmentCode(ctx context.Context, rawCode, collectorID string) (orgID string, err error)
+	// EnrollCollector consumes the raw code and registers the collector
+	// (active) in the code's organization, atomically: it fails for
+	// unknown, expired or already used codes, and concurrent enrollments
+	// with one code register exactly one collector (COL-04).
+	EnrollCollector(ctx context.Context, rawCode string, c *Collector) error
 
 	// Discovery jobs.
 	ListJobs(ctx context.Context, orgID string, filter JobFilter, page api.PaginationParams) ([]Job, int, error)
@@ -298,23 +298,20 @@ func (r *MemoryRepository) CreateEnrollmentCode(_ context.Context, code *Enrollm
 	return nil
 }
 
-func (r *MemoryRepository) RedeemEnrollmentCode(_ context.Context, rawCode, collectorID string) (string, error) {
+func (r *MemoryRepository) EnrollCollector(ctx context.Context, rawCode string, c *Collector) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	id, ok := r.enrollHashes[enrollmentCodeHash(rawCode)]
-	if !ok {
-		return "", fmt.Errorf("invalid enrollment code")
-	}
 	code := r.enrollCodes[id]
-	if code == nil || code.UsedAt != nil {
-		return "", fmt.Errorf("enrollment code already used")
-	}
-	if time.Now().UTC().After(code.ExpiresAt) {
-		return "", fmt.Errorf("enrollment code expired")
+	if !ok || code == nil || code.UsedAt != nil || time.Now().UTC().After(code.ExpiresAt) {
+		r.mu.Unlock()
+		return fmt.Errorf("enrollment code invalid, expired or already used")
 	}
 	now := time.Now().UTC()
 	code.UsedAt = &now
-	return code.OrganizationID, nil
+	r.mu.Unlock()
+	c.OrganizationID = code.OrganizationID
+	c.Status = CollectorActive
+	return r.RegisterCollector(ctx, c)
 }
 
 func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID string) (string, error) {
@@ -661,9 +658,11 @@ func (h *Handler) CreateEnrollmentCode(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	// Enrollment codes are valid for 24 hours (COL-04); a shorter validity
+	// can be requested.
 	ttl := time.Duration(req.TTLMinutes) * time.Minute
-	if ttl <= 0 || ttl > 24*time.Hour {
-		ttl = 30 * time.Minute
+	if ttl <= 0 || ttl > EnrollmentCodeTTL {
+		ttl = EnrollmentCodeTTL
 	}
 
 	raw, err := generateEnrollmentCode()
@@ -710,36 +709,30 @@ func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Redeem the code first: it yields the owning organization and fails fast
-	// for invalid/expired/used codes. Only then is the collector registered
-	// under that tenant.
-	orgID, err := h.repo.RedeemEnrollmentCode(r.Context(), req.Code, "")
-	if err != nil {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
-		return
-	}
-
-	// An enrolled collector is connected: active.
+	// The code is consumed and the collector registered (active) in one
+	// step: the request is unauthenticated, the code authorizes registration
+	// for its organization (E-08); a code works exactly once (COL-04).
 	c := &Collector{
-		OrganizationID: orgID,
-		Name:           req.Name,
-		Version:        req.Version,
-		ClientID:       req.ClientID,
-		Status:         CollectorActive,
-		Config:         map[string]any{},
+		Name:     req.Name,
+		Version:  req.Version,
+		ClientID: req.ClientID,
+		Config:   map[string]any{},
 	}
-	// The request is unauthenticated, so there is no principal scope: the
-	// redeemed code authorizes registration for its organization (E-08). The
-	// client/site binding of codes follows with WP-038.
-	scope := database.OrgWideScope(orgID, "")
-	ctx := database.ContextWithTenantScope(r.Context(), &scope)
-	if err := h.repo.RegisterCollector(ctx, c); err != nil {
-		api.WriteRepoError(w, err)
+	if err := h.repo.EnrollCollector(r.Context(), req.Code, c); err != nil {
+		var fe *api.FieldError
+		if errors.As(err, &fe) {
+			api.WriteRepoError(w, err)
+			return
+		}
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "enrollment code invalid, expired or already used")
 		return
 	}
 
 	api.WriteJSON(w, http.StatusCreated, c)
 }
+
+// EnrollmentCodeTTL is the validity of an enrollment code (COL-04).
+const EnrollmentCodeTTL = 24 * time.Hour
 
 // generateEnrollmentCode returns a URL-safe, high-entropy single-use code.
 func generateEnrollmentCode() (string, error) {
