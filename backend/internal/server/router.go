@@ -365,7 +365,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
 		discoveryHandler,
-		topology.NewHandler(repos.CI, repos.Relationship),
+		topology.NewHandler(repos.CI, repos.Relationship).WithRelationshipTypes(repos.RelationshipType),
 		export.NewHandler(repos.CI),
 		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs),
 		asset.NewHandler(repos.Asset).

@@ -2540,7 +2540,7 @@ export interface paths {
     /**
      * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
      * @deprecated
-     * @description Follows directed edges (source supports/powers/connects target) from the failed CI and returns the transitively impacted CI set. Powers the Ausfallsimulation in the topology view (spec §4).
+     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Powers the Ausfallsimulation in the topology view.
      */
     get: operations['getCIImpactLegacy'];
     put?: never;
@@ -2568,7 +2568,7 @@ export interface paths {
     };
     /**
      * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
-     * @description Follows directed edges (source supports/powers/connects target) from the failed CI and returns the transitively impacted CI set. Powers the Ausfallsimulation in the topology view (spec §4).
+     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Powers the Ausfallsimulation in the topology view.
      */
     get: operations['getCIImpact'];
     put?: never;
@@ -6714,6 +6714,10 @@ export interface components {
        * @enum {string}
        */
       face: 'front' | 'rear' | 'both';
+    };
+    ImpactNode: components['schemas']['TopologyNode'] & {
+      /** @description Reached only over an undirected network edge (connected_to), a second-class path (IMP-03). */
+      heuristic: boolean;
     };
     CITypeChangeResult: {
       ci: components['schemas']['CI'];
@@ -15903,7 +15907,7 @@ export interface operations {
             failed_ci?: components['schemas']['TopologyNode'];
             rel_type?: string;
             depth?: number;
-            impacted?: components['schemas']['TopologyNode'][];
+            impacted?: components['schemas']['ImpactNode'][];
             count?: number;
           };
         };
@@ -15941,7 +15945,7 @@ export interface operations {
             failed_ci?: components['schemas']['TopologyNode'];
             rel_type?: string;
             depth?: number;
-            impacted?: components['schemas']['TopologyNode'][];
+            impacted?: components['schemas']['ImpactNode'][];
             count?: number;
           };
         };

@@ -4586,9 +4586,12 @@ paths:
       tags: [Topology]
       summary: Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
       description: >-
-        Follows directed edges (source supports/powers/connects target) from the
-        failed CI and returns the transitively impacted CI set. Powers the
-        Ausfallsimulation in the topology view (spec §4).
+        Follows the impact_direction of each relationship type (IMP-01,
+        CH27): over source_depends_on_target the failure of the target
+        reaches the source, over target_depends_on_source the other way,
+        none does not propagate. connected_to is undirected and only a
+        network heuristic: CIs reached only through it carry heuristic true
+        (IMP-03). Powers the Ausfallsimulation in the topology view.
       responses:
         '200':
           description: Impact analysis result
@@ -4603,7 +4606,7 @@ paths:
                   depth: { type: integer }
                   impacted:
                     type: array
-                    items: { $ref: '#/components/schemas/TopologyNode' }
+                    items: { $ref: '#/components/schemas/ImpactNode' }
                   count: { type: integer }
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -4632,9 +4635,12 @@ paths:
       tags: [Topology]
       summary: Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
       description: >-
-        Follows directed edges (source supports/powers/connects target) from the
-        failed CI and returns the transitively impacted CI set. Powers the
-        Ausfallsimulation in the topology view (spec §4).
+        Follows the impact_direction of each relationship type (IMP-01,
+        CH27): over source_depends_on_target the failure of the target
+        reaches the source, over target_depends_on_source the other way,
+        none does not propagate. connected_to is undirected and only a
+        network heuristic: CIs reached only through it carry heuristic true
+        (IMP-03). Powers the Ausfallsimulation in the topology view.
       responses:
         '200':
           description: Impact analysis result
@@ -4649,7 +4655,7 @@ paths:
                   depth: { type: integer }
                   impacted:
                     type: array
-                    items: { $ref: '#/components/schemas/TopologyNode' }
+                    items: { $ref: '#/components/schemas/ImpactNode' }
                   count: { type: integer }
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -11581,6 +11587,15 @@ components:
           type: string
           enum: [front, rear, both]
           default: front
+    ImpactNode:
+      allOf:
+        - $ref: '#/components/schemas/TopologyNode'
+        - type: object
+          required: [heuristic]
+          properties:
+            heuristic:
+              type: boolean
+              description: Reached only over an undirected network edge (connected_to), a second-class path (IMP-03).
     CITypeChangeResult:
       type: object
       required: [ci, findings, changed]

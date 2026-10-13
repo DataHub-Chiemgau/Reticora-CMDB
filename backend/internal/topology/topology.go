@@ -6,11 +6,13 @@ package topology
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strconv"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -52,6 +54,9 @@ type Handler struct {
 	ciRepo    ci.Repository
 	relRepo   relationship.Repository
 	traverser relationship.Traverser
+	// types supplies the impact semantics of the organization's
+	// relationship types; without it the built-in catalogue applies.
+	types relationshiptype.Repository
 }
 
 // NewHandler creates a topology handler backed by the CI and relationship
@@ -151,11 +156,12 @@ func (h *Handler) GetNeighbors(w http.ResponseWriter, r *http.Request) {
 // GetImpact handles GET /api/v1/topology/cis/{id}/impact
 //
 // It answers the failure-simulation question (spec §4): which CIs lose
-// connectivity/power/hosting when this CI fails. The impact set is every CI
-// reachable from the failed node by following edges in their directed
-// (source→target) direction, because a relationship reads "source supports/
-// powers/connects target". The rel_type facet (powered_by, connected_to,
-// hosted_on, …) narrows the simulation to one dependency class.
+// connectivity/power/hosting when this CI fails. The failure travels along
+// the impact_direction of each relationship type (IMP-01); connected_to is
+// undirected and only a network heuristic, so CIs reached only through it
+// are marked heuristic (IMP-03). The rel_type facet (powered_by,
+// connected_to, hosted_on, …) narrows the simulation to one dependency
+// class.
 func (h *Handler) GetImpact(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -185,13 +191,24 @@ func (h *Handler) GetImpact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	impacted := computeImpact(id, graph.Edges, relType)
-	impactedNodes := make([]Node, 0, len(impacted))
+	impacted := computeImpact(id, graph.Edges, relType, h.impactRules(r.Context(), t.OrganizationID))
+	impactedNodes := make([]ImpactNode, 0, len(impacted))
 	for _, node := range graph.Nodes {
-		if _, ok := impacted[node.ID]; ok {
-			impactedNodes = append(impactedNodes, node)
+		if heuristic, ok := impacted[node.ID]; ok {
+			impactedNodes = append(impactedNodes, ImpactNode{Node: node, Heuristic: heuristic})
 		}
 	}
+	// Certain impacts first, then by name: a stable answer.
+	sort.Slice(impactedNodes, func(i, j int) bool {
+		a, b := &impactedNodes[i], &impactedNodes[j]
+		if a.Heuristic != b.Heuristic {
+			return !a.Heuristic
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return a.ID < b.ID
+	})
 	api.WriteJSON(w, http.StatusOK, map[string]any{
 		"failed_ci_id": id,
 		"failed_ci":    nodeFromItem(*root),
@@ -200,37 +217,6 @@ func (h *Handler) GetImpact(w http.ResponseWriter, r *http.Request) {
 		"impacted":     impactedNodes,
 		"count":        len(impactedNodes),
 	})
-}
-
-// computeImpact walks directed edges source→target from the failed CI and
-// returns the set of dependent CI ids. An empty relType follows every edge;
-// otherwise only edges of that relationship type are followed.
-func computeImpact(failedID string, edges []Edge, relType string) map[string]struct{} {
-	impacted := map[string]struct{}{}
-	queue := []string{failedID}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		for _, edge := range edges {
-			if relType != "" && edge.RelType != relType {
-				continue
-			}
-			// Only follow edges that originate from the current node.
-			if edge.SourceCIID != current {
-				continue
-			}
-			// Never follow a back-edge into the failed node itself.
-			if edge.TargetCIID == failedID {
-				continue
-			}
-			if _, seen := impacted[edge.TargetCIID]; seen {
-				continue
-			}
-			impacted[edge.TargetCIID] = struct{}{}
-			queue = append(queue, edge.TargetCIID)
-		}
-	}
-	return impacted
 }
 
 // buildFull lists all CIs matching the filter and every edge whose endpoints are

@@ -1,9 +1,12 @@
 package topology
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -98,7 +101,7 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	impacted := computeImpact(id, graph.Edges, "")
+	impacted := computeImpact(id, graph.Edges, "", h.impactRules(r.Context(), t.OrganizationID))
 	result := BlastRadius{CIID: id}
 	services := map[string]struct{}{}
 	clients := map[string]struct{}{}
@@ -195,4 +198,108 @@ func findSPOFs(failedID string, edges []Edge, affected []Node) []Node {
 		}
 	}
 	return spofs
+}
+
+// ImpactNode is an impacted CI; Heuristic marks a CI reached only over an
+// undirected network edge (connected_to), a second-class path (IMP-03).
+type ImpactNode struct {
+	Node
+	Heuristic bool `json:"heuristic"`
+}
+
+// WithRelationshipTypes makes the impact follow the impact_direction of the
+// organization's relationship types, custom types included (IMP-01).
+func (h *Handler) WithRelationshipTypes(types relationshiptype.Repository) *Handler {
+	h.types = types
+	return h
+}
+
+// maxRelationshipTypes bounds the types read for one impact analysis.
+const maxRelationshipTypes = 500
+
+// impactRules maps each relationship type key onto its impact direction:
+// the built-in catalogue (CH27, E-18), overlaid by the organization's types.
+func (h *Handler) impactRules(ctx context.Context, orgID string) map[string]string {
+	rules := map[string]string{}
+	catalogue := relationshiptype.Catalogue()
+	for i := range catalogue {
+		rules[catalogue[i].Key] = catalogue[i].ImpactDirection
+	}
+	if h.types == nil {
+		return rules
+	}
+	types, _, err := h.types.List(ctx, orgID, api.PaginationParams{Limit: maxRelationshipTypes})
+	if err != nil {
+		slog.WarnContext(ctx, "relationship types unavailable; impact uses the built-in catalogue", "error", err)
+		return rules
+	}
+	for i := range types {
+		rules[types[i].Key] = types[i].ImpactDirection
+	}
+	return rules
+}
+
+// impactStep returns the CI a failure of from reaches over edge, if any.
+// heuristic is true for an undirected edge. A type without a rule counts as
+// source_depends_on_target, the reading of a directed dependency.
+func impactStep(edge *Edge, from string, rules map[string]string) (to string, heuristic, ok bool) {
+	direction, known := rules[edge.RelType]
+	if !known {
+		direction = relationshiptype.ImpactSourceDependsOnTarget
+	}
+	switch direction {
+	case relationshiptype.ImpactSourceDependsOnTarget:
+		if edge.TargetCIID == from {
+			return edge.SourceCIID, false, true
+		}
+	case relationshiptype.ImpactTargetDependsOnSource:
+		if edge.SourceCIID == from {
+			return edge.TargetCIID, false, true
+		}
+	case relationshiptype.ImpactUndirected:
+		switch from {
+		case edge.SourceCIID:
+			return edge.TargetCIID, true, true
+		case edge.TargetCIID:
+			return edge.SourceCIID, true, true
+		}
+	}
+	return "", false, false
+}
+
+// computeImpact returns the CIs a failure of failedID reaches along the
+// impact directions (IMP-01); the value is true for CIs reached only over
+// an undirected network edge (IMP-03). An empty relType follows every
+// type, otherwise only that one.
+func computeImpact(failedID string, edges []Edge, relType string, rules map[string]string) map[string]bool {
+	walk := func(withHeuristic bool) map[string]struct{} {
+		reached := map[string]struct{}{}
+		queue := []string{failedID}
+		for len(queue) > 0 {
+			current := queue[0]
+			queue = queue[1:]
+			for i := range edges {
+				if relType != "" && edges[i].RelType != relType {
+					continue
+				}
+				to, heuristic, ok := impactStep(&edges[i], current, rules)
+				if !ok || to == failedID || (heuristic && !withHeuristic) {
+					continue
+				}
+				if _, seen := reached[to]; seen {
+					continue
+				}
+				reached[to] = struct{}{}
+				queue = append(queue, to)
+			}
+		}
+		return reached
+	}
+	certain := walk(false)
+	impacted := map[string]bool{}
+	for id := range walk(true) {
+		_, sure := certain[id]
+		impacted[id] = !sure
+	}
+	return impacted
 }
