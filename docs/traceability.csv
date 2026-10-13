@@ -345,3 +345,5 @@ DIS-02;[B], Profilliste (V);D;collector/profiles/profiles_test.go;WP-151
 DIS-04;[B];D;collector/plugins/snmp/snmp_test.go;WP-152
 DIS-09;[B];D;backend/internal/discovery/scope_integration_test.go;WP-153
 API-05;[B];D;backend/internal/discovery/scope_integration_test.go;WP-153
+DIS-10;[B];D;collector/collectorcmd/schedule_test.go;WP-154
+NFR-03;[B], Teilumfang [P5];D;collector/collectorcmd/schedule_test.go;WP-154

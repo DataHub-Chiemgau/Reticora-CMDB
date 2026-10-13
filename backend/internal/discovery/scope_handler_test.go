@@ -68,3 +68,26 @@ func TestScopeREST(t *testing.T) {
 		t.Errorf("get deleted: %d", w.Code)
 	}
 }
+
+// TestDiscoveryIntervalsFromSettings covers WP-154 (DIS-10): defaults sweep
+// 24 h and poll 15 min, organization overrides per protocol, polls never
+// below 5 min.
+func TestDiscoveryIntervalsFromSettings(t *testing.T) {
+	def := IntervalsFromSettings(nil)
+	if def.Sweep != "24h0m0s" || def.Poll != "15m0s" || len(def.Protocols) != 0 {
+		t.Errorf("defaults = %+v", def)
+	}
+	got := IntervalsFromSettings(map[string]any{"discovery": map[string]any{
+		"sweep_interval": "12h", "poll_interval": "1m",
+		"poll_intervals": map[string]any{"snmp": "10m", "redfish": "30s", "sweep": "1h", "telnet": "5m", "ssh": "bogus"},
+	}})
+	if got.Sweep != "12h0m0s" || got.Poll != "5m0s" || got.Protocols["snmp"] != "10m0s" || got.Protocols["redfish"] != "5m0s" ||
+		got.Protocols["ssh"] != "15m0s" || got.Protocols["sweep"] != "" || got.Protocols["telnet"] != "" {
+		t.Errorf("org intervals = %+v", got)
+	}
+	repo := NewMemoryRepository()
+	repo.SetOrgSettings("org-1", map[string]any{"discovery": map[string]any{"poll_interval": "20m"}})
+	if iv, _ := repo.DiscoveryIntervals(context.Background(), "org-1"); iv.Poll != "20m0s" {
+		t.Errorf("memory intervals = %+v", iv)
+	}
+}

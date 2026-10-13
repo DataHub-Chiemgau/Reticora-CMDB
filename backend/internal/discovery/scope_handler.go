@@ -301,7 +301,9 @@ type CollectorScope struct {
 // ScopesResponse answers a scopes request.
 type ScopesResponse struct {
 	Scopes []CollectorScope `json:"scopes"`
-	Error  string           `json:"error,omitempty"`
+	// Intervals are the organization's sweep and poll intervals (DIS-10).
+	Intervals *DiscoveryIntervals `json:"intervals,omitempty"`
+	Error     string              `json:"error,omitempty"`
 }
 
 // SubnetsReport is what a collector reports after its enrollment.
@@ -393,7 +395,13 @@ func (h *Handler) ServeCollectorScopes(ctx context.Context, nc *nats.Conn) error
 				slog.Warn("collector scopes refused", "collector_id", collectorID, "error", err)
 				return ScopesResponse{Scopes: []CollectorScope{}, Error: "not available"}
 			}
-			return ScopesResponse{Scopes: scopes}
+			resp := ScopesResponse{Scopes: scopes}
+			if repo, ok := h.repo.(ScopeRepository); ok {
+				if iv, ierr := repo.DiscoveryIntervals(ctx, orgID); ierr == nil {
+					resp.Intervals = &iv
+				}
+			}
+			return resp
 		},
 		ScopesResultSuffix: func(ctx context.Context, orgID, collectorID string, data []byte) any {
 			var rep ScopeResultReport

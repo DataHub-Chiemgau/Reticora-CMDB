@@ -44,6 +44,53 @@ const DefaultScopeSchedule = "24h"
 // MinScopeInterval is the shortest interval a scope may use (DIS-10).
 const MinScopeInterval = 5 * time.Minute
 
+// Default intervals (DIS-10): sweep 24 h, polls 15 min; polls never more
+// often than every 5 min.
+const (
+	DefaultSweepInterval = 24 * time.Hour
+	DefaultPollInterval  = 15 * time.Minute
+	MinPollInterval      = 5 * time.Minute
+)
+
+// DiscoveryIntervals are the organization's intervals (organization
+// settings, key "discovery": sweep_interval, poll_interval and
+// poll_intervals per protocol). A scope's schedule replaces the sweep
+// interval for that scope.
+type DiscoveryIntervals struct {
+	Sweep     string            `json:"sweep"`
+	Poll      string            `json:"poll"`
+	Protocols map[string]string `json:"protocols,omitempty"`
+}
+
+// IntervalsFromSettings reads the discovery intervals of the organization
+// settings; missing or invalid values use the defaults, poll intervals
+// below MinPollInterval are raised to it.
+func IntervalsFromSettings(settings map[string]any) DiscoveryIntervals {
+	out := DiscoveryIntervals{Sweep: DefaultSweepInterval.String(), Poll: DefaultPollInterval.String(), Protocols: map[string]string{}}
+	d, _ := settings["discovery"].(map[string]any)
+	parse := func(v any, fallback, minimum time.Duration) string {
+		str, _ := v.(string)
+		dur, err := time.ParseDuration(strings.TrimSpace(str))
+		if err != nil || dur <= 0 {
+			dur = fallback
+		}
+		if dur < minimum {
+			dur = minimum
+		}
+		return dur.String()
+	}
+	out.Sweep = parse(d["sweep_interval"], DefaultSweepInterval, MinScopeInterval)
+	out.Poll = parse(d["poll_interval"], DefaultPollInterval, MinPollInterval)
+	if per, ok := d["poll_intervals"].(map[string]any); ok {
+		for proto, v := range per {
+			if slices.Contains(ScopePlugins, proto) && proto != "sweep" {
+				out.Protocols[proto] = parse(v, DefaultPollInterval, MinPollInterval)
+			}
+		}
+	}
+	return out
+}
+
 // ScopePlugins are the protocols a scope may name.
 var ScopePlugins = []string{"sweep", "snmp", "ssh", "wmi", "ipmi", "redfish", "power", "nas"}
 
@@ -123,6 +170,8 @@ type ScopeRepository interface {
 	RecordScopeRun(ctx context.Context, orgID, id string, run *ScopeRun) error
 	// ScopeCollector returns a collector of the organization.
 	ScopeCollector(ctx context.Context, orgID, collectorID string) (*Collector, error)
+	// DiscoveryIntervals returns the organization's intervals (DIS-10).
+	DiscoveryIntervals(ctx context.Context, orgID string) (DiscoveryIntervals, error)
 }
 
 func fieldError(field, msg string) error {
@@ -528,6 +577,18 @@ func (r *PGRepository) ScopeCollector(ctx context.Context, orgID, collectorID st
 	return out, err
 }
 
+// DiscoveryIntervals implements ScopeRepository.
+func (r *PGRepository) DiscoveryIntervals(ctx context.Context, orgID string) (DiscoveryIntervals, error) {
+	var settings map[string]any
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT settings FROM organization WHERE id = $1`, orgID).Scan(&settings)
+	})
+	if err != nil {
+		return DiscoveryIntervals{}, err
+	}
+	return IntervalsFromSettings(settings), nil
+}
+
 // --- memory --------------------------------------------------------------
 
 func (r *MemoryRepository) scopeMap() map[string]*Scope {
@@ -659,4 +720,22 @@ func (r *MemoryRepository) ScopeCollector(_ context.Context, orgID, collectorID 
 	}
 	cp := *c
 	return &cp, nil
+}
+
+// SetOrgSettings stores the organization settings the memory repository
+// reads the discovery intervals from (tests, --no-db).
+func (r *MemoryRepository) SetOrgSettings(orgID string, settings map[string]any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.orgSettings == nil {
+		r.orgSettings = map[string]map[string]any{}
+	}
+	r.orgSettings[orgID] = settings
+}
+
+// DiscoveryIntervals implements ScopeRepository.
+func (r *MemoryRepository) DiscoveryIntervals(_ context.Context, orgID string) (DiscoveryIntervals, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return IntervalsFromSettings(r.orgSettings[orgID]), nil
 }

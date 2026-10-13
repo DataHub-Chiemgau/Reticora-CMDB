@@ -692,7 +692,7 @@ func TestDiscoveryFollowsTheServerScopes(t *testing.T) {
 		{ID: "s-1", Kind: "cidr", Target: "10.1.0.0/29", ClientID: "c-1", SiteID: "site-1", VRFID: "vrf-1", Plugins: []string{"sweep", "snmp"}},
 		{ID: "s-2", Kind: "range", Target: "10.2.0.250-10.2.1.2", Plugins: []string{"ssh"}},
 		{ID: "s-3", Kind: "host", Target: "fw.example.com", Plugins: []string{"snmp"}},
-	})
+	}, nil)
 	passes := discoveryPasses(&cfg)
 	if len(passes) != 3 {
 		t.Fatalf("passes = %+v", passes)
@@ -714,7 +714,7 @@ func TestDiscoveryFollowsTheServerScopes(t *testing.T) {
 	}
 
 	// An empty list from the server means: nothing to discover.
-	collectorScopes.set([]collectorScope{})
+	collectorScopes.set([]collectorScope{}, nil)
 	if passes = discoveryPasses(&cfg); len(passes) != 0 {
 		t.Errorf("passes without scopes = %+v", passes)
 	}

@@ -51,8 +51,17 @@ type collectorConfig struct {
 	CollectorID       string
 	ScanSubnets       []string
 	Protocols         []string
+	// DiscoveryInterval is the poll interval of the configured subnets
+	// (RETICORA_DISCOVERY_INTERVAL, default 15 min, at least 5 min);
+	// SweepInterval their sweep interval (default 24 h, DIS-10). Scopes
+	// bring their own schedule and the organization's poll intervals.
 	DiscoveryInterval time.Duration
-	HeartbeatInterval time.Duration
+	SweepInterval     time.Duration
+	// ScheduleTick is how often due discovery is checked (default 1 min).
+	ScheduleTick time.Duration
+	// SpoolFlushInterval is how often the spool is delivered (default 30 s).
+	SpoolFlushInterval time.Duration
+	HeartbeatInterval  time.Duration
 	// Credentials are namespaced by protocol ("ssh.username",
 	// "redfish.password", "snmp.community"); plugins receive only their own
 	// namespace through plugins.CredentialsFor (COL-02).
@@ -177,7 +186,8 @@ func Main() {
 		"server_url", collectorCfg.ServerURL,
 		"scan_subnets", collectorCfg.ScanSubnets,
 		"protocols", collectorCfg.Protocols,
-		"discovery_interval", collectorCfg.DiscoveryInterval.String(),
+		"poll_interval", collectorCfg.DiscoveryInterval.String(),
+		"sweep_interval", collectorCfg.SweepInterval.String(),
 		"heartbeat_interval", collectorCfg.HeartbeatInterval.String(),
 		"mtls", uploader.mtls,
 		"spool_dir", collectorCfg.SpoolDir,
@@ -186,6 +196,8 @@ func Main() {
 	)
 
 	go runDiscoveryLoop(ctx, collectorCfg, uploader)
+	// The spool is delivered continuously, not only after discovery (NFR-03).
+	go runSpoolFlusher(ctx, uploader, collectorCfg.SpoolFlushInterval)
 	go runHeartbeatLoop(ctx, collectorCfg, uploader, onHeartbeat)
 	restart := make(chan string, 1)
 	if collectorCfg.UpdateURL != "" {
@@ -231,6 +243,9 @@ type uploader struct {
 	// paused is set while the discovery license of the organization is
 	// expired (CH21, ENT-07): the collector neither scans nor spools.
 	paused atomic.Bool
+	// flushMu serializes spool deliveries; flushNow wakes the flusher.
+	flushMu  sync.Mutex
+	flushNow chan struct{}
 }
 
 // LicenseStatusHeader carries the discovery license status on heartbeat
@@ -263,7 +278,7 @@ func (u *uploader) setLicenseStatus(status string) {
 // newUploader builds the upload path: mTLS when certificate material is
 // available, plus the disk spool used for offline buffering.
 func newUploader(ctx context.Context, cfg collectorConfig) (*uploader, error) {
-	u := &uploader{cfg: cfg}
+	u := &uploader{cfg: cfg, flushNow: make(chan struct{}, 1)}
 	if cfg.SpoolDir != "" {
 		u.spool = &buffer.DiskBuffer{
 			Dir: cfg.SpoolDir, MaxBytes: cfg.SpoolMaxBytes, MaxAge: cfg.SpoolMaxAge,
@@ -357,96 +372,32 @@ func loadTLSMaterial(ctx context.Context, cfg collectorConfig) (certPEM, keyPEM,
 	return certPEM, keyPEM, caPEM, nil
 }
 
+// runDiscoveryLoop runs what is due every tick (DIS-10): the sweeps on
+// their schedule, the polls on their interval. A paused collector (expired
+// license) or a saturated spool scans nothing.
 func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
-	ticker := time.NewTicker(cfg.DiscoveryInterval)
+	tick := cfg.ScheduleTick
+	if tick <= 0 {
+		tick = defaultScheduleTick
+		if cfg.DiscoveryInterval > 0 && cfg.DiscoveryInterval < tick {
+			tick = cfg.DiscoveryInterval
+		}
+	}
+	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
+	sched, hosts := newScheduler(), &hostCache{}
 
 	for {
-		cycleStart := time.Now()
-		// Backlog first: spooled batches are delivered before anything new
-		// is collected (COL-05).
-		if up.paused.Load() {
+		switch {
+		case up.paused.Load():
 			// CH21: after the license expired the collector does not scan;
 			// the heartbeat resumes it once the license is renewed.
-			select {
-			case <-ctx.Done():
-				slog.Info("discovery loop stopped")
-				return
-			case <-ticker.C:
-				continue
-			}
-		}
-		up.flushSpool(ctx)
-		if up.backpressure(ctx) {
+		case up.backpressure(ctx):
 			slog.Warn("discovery paused: spool is saturated and the backend is unreachable",
 				"event", "collector.spool.backpressure")
-			select {
-			case <-ctx.Done():
-				slog.Info("discovery loop stopped")
-				return
-			case <-ticker.C:
-				continue
-			}
+		default:
+			runDueDiscovery(ctx, &cfg, up, sched, hosts, time.Now())
 		}
-		slog.Info("discovery cycle started", "scan_subnets", cfg.ScanSubnets, "protocols", cfg.Protocols)
-
-		var records []plugins.DeviceRecord
-		type scopeOutcome struct {
-			scope   *collectorScope
-			records int
-			errs    []string
-		}
-		var outcomes []scopeOutcome
-
-		// One pass per discovery scope (DIS-09), or the configured subnets.
-		for _, pass := range discoveryPasses(&cfg) {
-			var passRecords []plugins.DeviceRecord
-			var errs []string
-			for _, protocol := range pass.protocols {
-				if ctx.Err() != nil {
-					break
-				}
-
-				plug, ok := pluginRegistry[protocol]
-				if !ok {
-					slog.Warn("unknown protocol plugin, skipping", "protocol", protocol)
-					continue
-				}
-
-				slog.Info("running discovery plugin", "protocol", protocol, "targets", len(pass.targets))
-				creds := plugins.CredentialsFor(protocol, credentialsFor(&cfg))
-				hits, err := plug.Probe(ctx, pass.targets, creds)
-				if err != nil {
-					slog.Error("discovery plugin error", "protocol", protocol, "error", err)
-					errs = append(errs, pluginError(protocol, err))
-					continue
-				}
-				collected := collectHits(ctx, protocol, plug, hits, creds)
-				slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
-				passRecords = append(passRecords, collected...)
-			}
-			tagRecords(passRecords, pass.scope)
-			records = append(records, passRecords...)
-			outcomes = append(outcomes, scopeOutcome{scope: pass.scope, records: len(passRecords), errs: errs})
-		}
-		records = deliverableRecords(ctx, records)
-		for _, o := range outcomes {
-			reportScopeRun(ctx, o.scope, cycleStart, o.records, o.errs, cycleStart.Add(cfg.DiscoveryInterval))
-		}
-
-		// Upload records to the backend in a compressed batch, then flush any
-		// records spooled while the backend was unreachable.
-		if len(records) > 0 {
-			if err := up.uploadRecordsAt(ctx, records, cycleStart); err != nil {
-				slog.Error("failed to upload discovery records", "error", err, "count", len(records))
-			} else {
-				slog.Info("discovery records uploaded", "count", len(records))
-			}
-		}
-		up.flushSpool(ctx)
-
-		slog.Info("discovery cycle completed", "duration_ms", time.Since(cycleStart).Milliseconds(), "total_records", len(records))
-
 		select {
 		case <-ctx.Done():
 			slog.Info("discovery loop stopped")
@@ -454,6 +405,76 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// runDueDiscovery runs the due protocols of every pass, uploads the
+// records and reports the scope runs; it returns the number of records.
+func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sched *scheduler, hosts *hostCache, now time.Time) int {
+	var records []plugins.DeviceRecord
+	type scopeOutcome struct {
+		scope   *collectorScope
+		records int
+		errs    []string
+		next    time.Time
+	}
+	var outcomes []scopeOutcome
+
+	// One pass per discovery scope (DIS-09), or the configured subnets.
+	for _, pass := range discoveryPasses(cfg) {
+		due := pass.dueProtocols(sched, now)
+		if len(due) == 0 {
+			continue
+		}
+		slog.Info("discovery started", "pass", pass.key, "protocols", due)
+		var passRecords []plugins.DeviceRecord
+		var errs []string
+		for _, protocol := range due {
+			if ctx.Err() != nil {
+				break
+			}
+			plug, ok := pluginRegistry[protocol]
+			if !ok {
+				slog.Warn("unknown protocol plugin, skipping", "protocol", protocol)
+				continue
+			}
+			targets := pass.targetsFor(protocol, hosts)
+			slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
+			creds := plugins.CredentialsFor(protocol, credentialsFor(cfg))
+			hits, err := plug.Probe(ctx, targets, creds)
+			if err != nil {
+				slog.Error("discovery plugin error", "protocol", protocol, "error", err)
+				errs = append(errs, pluginError(protocol, err))
+				continue
+			}
+			if protocol == "sweep" {
+				hosts.set(pass.key, hitTargets(hits))
+			}
+			collected := collectHits(ctx, protocol, plug, hits, creds)
+			slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
+			passRecords = append(passRecords, collected...)
+		}
+		tagRecords(passRecords, pass.scope)
+		records = append(records, passRecords...)
+		outcomes = append(outcomes, scopeOutcome{scope: pass.scope, records: len(passRecords), errs: errs, next: pass.nextRun(sched)})
+	}
+	if len(outcomes) == 0 {
+		return 0
+	}
+	records = deliverableRecords(ctx, records)
+	for _, o := range outcomes {
+		reportScopeRun(ctx, o.scope, now, o.records, o.errs, o.next)
+	}
+	// Upload the records in a compressed batch; the spool flusher delivers
+	// what could not be sent.
+	if len(records) > 0 {
+		if err := up.uploadRecordsAt(ctx, records, now); err != nil {
+			slog.Error("failed to upload discovery records", "error", err, "count", len(records))
+		} else {
+			slog.Info("discovery records uploaded", "count", len(records))
+		}
+	}
+	slog.Info("discovery completed", "duration_ms", time.Since(now).Milliseconds(), "total_records", len(records))
+	return len(records)
 }
 
 // expandSubnets converts CIDR notations to individual IP targets.
@@ -754,6 +775,8 @@ func (u *uploader) flushSpool(ctx context.Context) {
 	if u.spool == nil || u.cfg.ServerURL == "" || u.paused.Load() {
 		return
 	}
+	u.flushMu.Lock()
+	defer u.flushMu.Unlock()
 	delivered := 0
 	defer func() {
 		if delivered > 0 {
@@ -845,8 +868,12 @@ func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader, on
 		if status != "" {
 			up.setLicenseStatus(status)
 		}
-		if ok && onSuccess != nil {
-			onSuccess()
+		if ok {
+			// The backend is reachable: deliver the spool now.
+			up.requestFlush()
+			if onSuccess != nil {
+				onSuccess()
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -1223,7 +1250,9 @@ func loadCollectorConfig() collectorConfig {
 		CollectorID:        os.Getenv("RETICORA_COLLECTOR_ID"),
 		ScanSubnets:        csvEnvOrDefault("RETICORA_SCAN_SUBNETS", []string{"127.0.0.1/32"}),
 		Protocols:          csvEnvOrDefault("RETICORA_DISCOVERY_PROTOCOLS", []string{"sweep", "snmp", "ssh"}),
-		DiscoveryInterval:  durationEnvOrDefault("RETICORA_DISCOVERY_INTERVAL", 15*time.Minute),
+		DiscoveryInterval:  max(durationEnvOrDefault("RETICORA_DISCOVERY_INTERVAL", defaultPollInterval), minPollInterval),
+		SweepInterval:      max(durationEnvOrDefault("RETICORA_SWEEP_INTERVAL", defaultSweepInterval), minPollInterval),
+		SpoolFlushInterval: durationEnvOrDefault("RETICORA_SPOOL_FLUSH_INTERVAL", defaultSpoolFlush),
 		HeartbeatInterval:  durationEnvOrDefault("RETICORA_HEARTBEAT_INTERVAL", time.Minute),
 		Credentials:        creds,
 		RedfishTLSScopes:   tlsScopes,

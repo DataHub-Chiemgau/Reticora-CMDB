@@ -191,6 +191,7 @@ type MemoryRepository struct {
 	enrollHashes map[string]string
 	records      map[string]time.Time
 	scopes       map[string]*Scope
+	orgSettings  map[string]map[string]any
 	seq          int
 }
 

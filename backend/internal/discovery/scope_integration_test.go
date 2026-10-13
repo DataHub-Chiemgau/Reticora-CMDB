@@ -170,6 +170,13 @@ func TestDiscoveryScopes(t *testing.T) {
 		t.Error("a dismissed suggestion came back")
 	}
 
+	// The organization's intervals (DIS-10, WP-154) come from its settings.
+	exec(`UPDATE organization SET settings = '{"discovery": {"poll_interval": "2m", "poll_intervals": {"redfish": "1h"}}}' WHERE id = $1`, f.OrgA)
+	iv, err := repo.DiscoveryIntervals(ctx, f.OrgA)
+	if err != nil || iv.Sweep != "24h0m0s" || iv.Poll != "5m0s" || iv.Protocols["redfish"] != "1h0m0s" {
+		t.Errorf("intervals = %+v, %v", iv, err)
+	}
+
 	// Delete.
 	if err = repo.DeleteScope(ctx, f.OrgA, s.ID); err != nil {
 		t.Fatal(err)
