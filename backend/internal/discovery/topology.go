@@ -34,6 +34,8 @@ type DerivedRelationship struct {
 	TargetCIID string  `json:"target_ci_id"`
 	RelType    string  `json:"rel_type"`
 	Confidence float64 `json:"confidence"`
+	// Attributes describe the edge (outlet, feed, redundancy).
+	Attributes map[string]any `json:"attributes,omitempty"`
 }
 
 // NeighborIndex resolves discovered neighbor identifiers to existing CI ids.
@@ -314,7 +316,7 @@ func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d Derive
 		TargetCIID:     d.TargetCIID,
 		RelType:        d.RelType,
 		Source:         RelationshipSource,
-		Attributes:     map[string]any{"provenance": relationship.Provenance("discovery", "system", RelationshipSource, time.Now())},
+		Attributes:     edgeAttributes(d.Attributes),
 		Confidence:     &confidence,
 	}
 	if err := h.relRepo.Create(ctx, rel); err != nil {
@@ -365,4 +367,13 @@ func (h *Handler) resolveUnknownRelationship(ctx context.Context, item *ReviewIt
 	h.upsertRelationship(ctx, item.OrganizationID, d)
 	res.Note = "recorded as connected_to"
 	return false, nil
+}
+
+// edgeAttributes are the derived attributes plus the provenance.
+func edgeAttributes(derived map[string]any) map[string]any {
+	out := map[string]any{"provenance": relationship.Provenance("discovery", "system", RelationshipSource, time.Now())}
+	for k, v := range derived {
+		out[k] = v
+	}
+	return out
 }

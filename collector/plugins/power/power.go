@@ -50,6 +50,8 @@ const (
 type Plugin struct {
 	Timeout     time.Duration
 	Concurrency int
+	// Port is the SNMP port of the outlet walk (default 161).
+	Port int
 }
 
 var _ plugins.Plugin = (*Plugin)(nil)
@@ -141,7 +143,7 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 		community = "public"
 	}
 
-	addr := net.JoinHostPort(target, fmt.Sprintf("%d", snmpPort))
+	addr := net.JoinHostPort(target, fmt.Sprintf("%d", p.port()))
 	conn, err := net.DialTimeout("udp", addr, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("power: dial %s: %w", target, err)
@@ -197,6 +199,13 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 			"deviceType": classifyPowerDevice(manufacturer, model),
 			"upsCapable": true,
 		},
+	}
+	// The outlet mapping (IMP-09).
+	if outlets, pdu := p.walkOutlets(ctx, target, community, timeout); len(outlets) > 0 {
+		result.Attributes["outlets"] = outlets
+		if pdu {
+			result.Attributes["deviceType"] = "pdu"
+		}
 	}
 
 	return result, nil

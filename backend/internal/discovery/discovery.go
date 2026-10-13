@@ -1225,6 +1225,8 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 	}
 
 	resp.Relationships = h.deriveTopology(ctx, orgID, req.Items, resolvedCIID, h.neighborCandidates(ctx, orgID, req.Items))
+	// Outlet mappings of PDUs and UPS outlet groups (IMP-09).
+	resp.Relationships += h.derivePowerChain(ctx, orgID, req.Items, resolvedCIID)
 	return resp, h.markProcessed(ctx, orgID, req.Items)
 }
 

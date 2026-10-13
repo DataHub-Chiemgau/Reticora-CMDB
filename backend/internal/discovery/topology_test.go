@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -113,7 +114,7 @@ func TestDeriveRelationships(t *testing.T) {
 				t.Fatalf("got %d edges %+v, want %d %+v", len(got), got, len(tc.want), tc.want)
 			}
 			for i := range got {
-				if got[i] != tc.want[i] {
+				if !reflect.DeepEqual(got[i], tc.want[i]) {
 					t.Errorf("edge %d = %+v, want %+v", i, got[i], tc.want[i])
 				}
 			}

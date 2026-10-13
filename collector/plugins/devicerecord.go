@@ -331,6 +331,11 @@ func RecordFromResult(protocol string, res *Result, observedAt time.Time) Device
 	}
 	if attrs["category"] == "power" {
 		rec.Power = &DevicePower{DeviceType: take("deviceType")}
+		// The outlet mapping of PDUs and UPS outlet groups (IMP-09).
+		if outlets, ok := attrs["outlets"].([]DeviceOutlet); ok {
+			rec.Power.Outlets = outlets
+			delete(attrs, "outlets")
+		}
 	}
 	for _, ifc := range res.Interfaces {
 		rec.Interfaces = append(rec.Interfaces, DeviceInterface{

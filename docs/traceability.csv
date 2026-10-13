@@ -357,3 +357,4 @@ REL-08;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-159
 REL-03;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-160
 REL-04;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-160
 REL-05;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-160
+IMP-09;[B];D;backend/internal/discovery/power_test.go;WP-161
