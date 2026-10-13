@@ -84,3 +84,86 @@ func TestImpactDirectionAgainstPostgres(t *testing.T) {
 		t.Errorf("impact of the vm: %v", got)
 	}
 }
+
+// pgCountingCIs counts the CI reads of an impact walk against PostgreSQL.
+type pgCountingCIs struct {
+	*ci.PGRepository
+	single, batch int
+}
+
+func (c *pgCountingCIs) GetByID(ctx context.Context, orgID, id string) (*ci.Item, error) {
+	c.single++
+	return c.PGRepository.GetByID(ctx, orgID, id)
+}
+
+func (c *pgCountingCIs) GetByIDs(ctx context.Context, orgID string, ids []string) ([]ci.Item, error) {
+	c.batch++
+	return c.PGRepository.GetByIDs(ctx, orgID, ids)
+}
+
+// TestImpactPathsAgainstPostgres covers IMP-02 and NFR-02 (WP-177) against
+// PostgreSQL: a chain of 21 hosted_on hops is followed for 20 hops with the
+// shortest path and its type sequence; the containment projected from
+// parent_ci_id is in the category physical; the nodes are read in one
+// batch.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestImpactPathsAgainstPostgres(t *testing.T) {
+	f := scopetest.Seed(t, "b6")
+	bg := context.Background()
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	chain := []string{f.CI(t, f.OrgA, f.Client1, "chain-00")}
+	for i := 1; i <= 21; i++ {
+		chain = append(chain, f.CI(t, f.OrgA, f.Client1, "chain-"+string(rune('a'+i))))
+		if _, err := f.Admin.Exec(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type)
+			VALUES ($1, $2, $3, 'hosted_on')`, f.OrgA, chain[i], chain[i-1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	blade := f.CI(t, f.OrgA, f.Client1, "chain-blade")
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET parent_ci_id = $2 WHERE id = $1`, blade, chain[0]); err != nil {
+		t.Fatal(err)
+	}
+	cis := &pgCountingCIs{PGRepository: ci.NewPGRepository(f.App)}
+	mux := chi.NewRouter()
+	topology.NewHandler(cis, relationship.NewPGRepository(f.App)).
+		WithRelationshipTypes(relationshiptype.NewPGRepository(f.App)).RegisterRoutes(mux)
+	impact := func(query string) []topology.ImpactNode {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/impact/"+chain[0]+query, http.NoBody).WithContext(ctx))
+		var body struct {
+			Impacted []topology.ImpactNode `json:"impacted"`
+		}
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &body) != nil {
+			t.Fatalf("impact%s: %d %s", query, w.Code, w.Body.String())
+		}
+		return body.Impacted
+	}
+	all := impact("")
+	hops := map[string]int{}
+	for i := range all {
+		hops[all[i].ID] = all[i].Hops
+	}
+	if len(all) != 21 || hops[chain[20]] != 20 || hops[blade] != 1 {
+		t.Errorf("impact: %d CIs, hops to chain 20 %d, blade %d", len(all), hops[chain[20]], hops[blade])
+	}
+	if _, ok := hops[chain[21]]; ok {
+		t.Error("the 21st hop was reached")
+	}
+	for i := range all {
+		if all[i].ID != chain[20] {
+			continue
+		}
+		if len(all[i].Path) != 20 || all[i].Path[0].FromCIID != chain[0] || all[i].Path[19].RelType != "hosted_on" {
+			t.Errorf("path to chain 20: %+v", all[i].Path)
+		}
+	}
+	if cis.batch != 1 || cis.single > 2 {
+		t.Errorf("CI reads: %d single, %d batch", cis.single, cis.batch)
+	}
+	physical := impact("?categories=physical")
+	if len(physical) != 1 || physical[0].ID != blade || physical[0].Path[0].RelType != "contains" {
+		t.Errorf("physical: %+v", physical)
+	}
+}

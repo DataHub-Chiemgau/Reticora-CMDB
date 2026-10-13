@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
@@ -101,7 +102,7 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	impacted := computeImpact(id, graph.Edges, "", h.impactRules(r.Context(), t.OrganizationID))
+	impacted := computeImpact(id, graph.Edges, impactQuery{depth: maxDepth}, h.impactRules(r.Context(), t.OrganizationID))
 	result := BlastRadius{CIID: id}
 	services := map[string]struct{}{}
 	clients := map[string]struct{}{}
@@ -200,11 +201,14 @@ func findSPOFs(failedID string, edges []Edge, affected []Node) []Node {
 	return spofs
 }
 
-// ImpactNode is an impacted CI; Heuristic marks a CI reached only over an
-// undirected network edge (connected_to), a second-class path (IMP-03).
+// ImpactNode is an impacted CI with its shortest path from the failed CI
+// (IMP-02); Heuristic marks a CI reached only over an undirected network
+// edge (connected_to), a second-class path (IMP-03).
 type ImpactNode struct {
 	Node
-	Heuristic bool `json:"heuristic"`
+	Heuristic bool       `json:"heuristic"`
+	Hops      int        `json:"hops"`
+	Path      []PathStep `json:"path"`
 }
 
 // WithRelationshipTypes makes the impact follow the impact_direction of the
@@ -217,13 +221,20 @@ func (h *Handler) WithRelationshipTypes(types relationshiptype.Repository) *Hand
 // maxRelationshipTypes bounds the types read for one impact analysis.
 const maxRelationshipTypes = 500
 
-// impactRules maps each relationship type key onto its impact direction:
-// the built-in catalogue (CH27, E-18), overlaid by the organization's types.
-func (h *Handler) impactRules(ctx context.Context, orgID string) map[string]string {
-	rules := map[string]string{}
+// impactRule is the impact semantics of a relationship type.
+type impactRule struct {
+	direction string
+	category  string
+}
+
+// impactRules maps each relationship type key onto its impact direction
+// and category: the built-in catalogue (CH27, E-18), overlaid by the
+// organization's types.
+func (h *Handler) impactRules(ctx context.Context, orgID string) map[string]impactRule {
+	rules := map[string]impactRule{}
 	catalogue := relationshiptype.Catalogue()
 	for i := range catalogue {
-		rules[catalogue[i].Key] = catalogue[i].ImpactDirection
+		rules[catalogue[i].Key] = impactRule{catalogue[i].ImpactDirection, catalogue[i].Category}
 	}
 	if h.types == nil {
 		return rules
@@ -234,20 +245,24 @@ func (h *Handler) impactRules(ctx context.Context, orgID string) map[string]stri
 		return rules
 	}
 	for i := range types {
-		rules[types[i].Key] = types[i].ImpactDirection
+		rules[types[i].Key] = impactRule{types[i].ImpactDirection, types[i].Category}
 	}
 	return rules
 }
 
-// impactStep returns the CI a failure of from reaches over edge, if any.
-// heuristic is true for an undirected edge. A type without a rule counts as
-// source_depends_on_target, the reading of a directed dependency.
-func impactStep(edge *Edge, from string, rules map[string]string) (to string, heuristic, ok bool) {
-	direction, known := rules[edge.RelType]
-	if !known {
-		direction = relationshiptype.ImpactSourceDependsOnTarget
+// ruleOf returns the rule of a type; a type without a rule counts as a
+// logical source_depends_on_target, the reading of a directed dependency.
+func ruleOf(rules map[string]impactRule, relType string) impactRule {
+	if rule, ok := rules[relType]; ok {
+		return rule
 	}
-	switch direction {
+	return impactRule{direction: relationshiptype.ImpactSourceDependsOnTarget, category: "logical"}
+}
+
+// impactStep returns the CI a failure of from reaches over edge, if any.
+// heuristic is true for an undirected edge.
+func impactStep(edge *Edge, from string, rule impactRule) (to string, heuristic, ok bool) {
+	switch rule.direction {
 	case relationshiptype.ImpactSourceDependsOnTarget:
 		if edge.TargetCIID == from {
 			return edge.SourceCIID, false, true
@@ -267,39 +282,101 @@ func impactStep(edge *Edge, from string, rules map[string]string) (to string, he
 	return "", false, false
 }
 
+// PathStep is one hop of an impact path: the failure passes from FromCIID
+// to ToCIID over a relationship of RelType (IMP-02).
+type PathStep struct {
+	FromCIID  string `json:"from_ci_id"`
+	ToCIID    string `json:"to_ci_id"`
+	RelType   string `json:"rel_type"`
+	Category  string `json:"category"`
+	Heuristic bool   `json:"heuristic,omitempty"`
+}
+
+// impactHit is how the failure reaches one CI: the shortest path, and
+// whether only an undirected network edge reaches it.
+type impactHit struct {
+	heuristic bool
+	path      []PathStep
+}
+
+// impactQuery narrows an impact analysis: one relationship type, a set of
+// categories (empty: all) and the maximum number of hops.
+type impactQuery struct {
+	relType    string
+	categories map[string]bool
+	depth      int
+}
+
 // computeImpact returns the CIs a failure of failedID reaches along the
-// impact directions (IMP-01); the value is true for CIs reached only over
-// an undirected network edge (IMP-03). An empty relType follows every
-// type, otherwise only that one.
-func computeImpact(failedID string, edges []Edge, relType string, rules map[string]string) map[string]bool {
-	walk := func(withHeuristic bool) map[string]struct{} {
-		reached := map[string]struct{}{}
+// impact directions (IMP-01) with the shortest path to each (IMP-02); a CI
+// reached only over an undirected network edge is heuristic (IMP-03) and
+// then carries its shortest path over all edges. Breadth-first over edges
+// in a fixed order, so the paths are deterministic.
+func computeImpact(failedID string, edges []Edge, q impactQuery, rules map[string]impactRule) map[string]impactHit {
+	walk := func(withHeuristic bool) map[string][]PathStep {
+		paths := map[string][]PathStep{failedID: {}}
 		queue := []string{failedID}
 		for len(queue) > 0 {
 			current := queue[0]
 			queue = queue[1:]
+			if q.depth > 0 && len(paths[current]) >= q.depth {
+				continue
+			}
 			for i := range edges {
-				if relType != "" && edges[i].RelType != relType {
+				if q.relType != "" && edges[i].RelType != q.relType {
 					continue
 				}
-				to, heuristic, ok := impactStep(&edges[i], current, rules)
-				if !ok || to == failedID || (heuristic && !withHeuristic) {
+				rule := ruleOf(rules, edges[i].RelType)
+				if len(q.categories) > 0 && !q.categories[rule.category] {
 					continue
 				}
-				if _, seen := reached[to]; seen {
+				to, heuristic, ok := impactStep(&edges[i], current, rule)
+				if !ok || (heuristic && !withHeuristic) {
 					continue
 				}
-				reached[to] = struct{}{}
+				if _, seen := paths[to]; seen {
+					continue
+				}
+				prev := paths[current]
+				path := make([]PathStep, len(prev), len(prev)+1)
+				copy(path, prev)
+				paths[to] = append(path, PathStep{FromCIID: current, ToCIID: to, RelType: edges[i].RelType,
+					Category: rule.category, Heuristic: heuristic})
 				queue = append(queue, to)
 			}
 		}
-		return reached
+		delete(paths, failedID)
+		return paths
 	}
 	certain := walk(false)
-	impacted := map[string]bool{}
-	for id := range walk(true) {
-		_, sure := certain[id]
-		impacted[id] = !sure
+	impacted := map[string]impactHit{}
+	for id, path := range walk(true) {
+		if sure, ok := certain[id]; ok {
+			impacted[id] = impactHit{path: sure}
+			continue
+		}
+		impacted[id] = impactHit{heuristic: true, path: path}
 	}
 	return impacted
+}
+
+// parseCategories reads categories=power,network (IMP-02); an unknown
+// category is a field error (422).
+func parseCategories(raw string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, c := range strings.Split(raw, ",") {
+		if c = strings.TrimSpace(c); c == "" {
+			continue
+		}
+		known := false
+		for _, k := range relationshiptype.Categories {
+			known = known || k == c
+		}
+		if !known {
+			return nil, &api.FieldError{Field: "categories", Message: "unknown category " + c + "; known: " +
+				strings.Join(relationshiptype.Categories, ", "), Status: http.StatusUnprocessableEntity}
+		}
+		out[c] = true
+	}
+	return out, nil
 }

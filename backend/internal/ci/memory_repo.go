@@ -123,6 +123,19 @@ func (r *MemoryRepository) GetByID(ctx context.Context, orgID, id string) (*Item
 	return item, nil
 }
 
+// GetByIDs implements BatchReader.
+func (r *MemoryRepository) GetByIDs(_ context.Context, orgID string, ids []string) ([]Item, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := []Item{}
+	for _, id := range ids {
+		if item, ok := r.items[id]; ok && item.OrganizationID == orgID && item.DeletedAt == nil {
+			items = append(items, *item)
+		}
+	}
+	return items, nil
+}
+
 func (r *MemoryRepository) Create(ctx context.Context, item *Item) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

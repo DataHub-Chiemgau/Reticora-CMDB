@@ -290,6 +290,46 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, er
 	return item, nil
 }
 
+// GetByIDs implements BatchReader: the visible, not deleted CIs among ids
+// in one query.
+func (r *PGRepository) GetByIDs(ctx context.Context, orgID string, ids []string) ([]Item, error) {
+	items := []Item{}
+	if len(ids) == 0 {
+		return items, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, fmt.Sprintf("SELECT %s FROM ci WHERE organization_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL",
+			ciSelectColumns), orgID, ids)
+		if err != nil {
+			return fmt.Errorf("get cis by id: %w", err)
+		}
+		var ptrs []*Item
+		for rows.Next() {
+			item, serr := scanCI(rows)
+			if serr != nil {
+				rows.Close()
+				return serr
+			}
+			ptrs = append(ptrs, item)
+		}
+		rows.Close()
+		if rerr := rows.Err(); rerr != nil {
+			return rerr
+		}
+		if oerr := overlayOverrides(ctx, tx, ptrs); oerr != nil {
+			return oerr
+		}
+		if aerr := loadAssetFacts(ctx, tx, ptrs); aerr != nil {
+			return aerr
+		}
+		for _, item := range ptrs {
+			items = append(items, *item)
+		}
+		return nil
+	})
+	return items, err
+}
+
 // Create inserts a new CI.
 func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 	err := database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {

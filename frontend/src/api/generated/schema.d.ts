@@ -2525,10 +2525,12 @@ export interface paths {
   '/api/v1/topology/cis/{id}/impact': {
     parameters: {
       query?: {
-        /** @description Traversal depth; defaults to the maximum for impact analysis. */
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
         depth?: number;
         /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
         rel_type?: string;
+        /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical); physical includes the containment projected from parent_ci_id. An unknown category is 422. */
+        categories?: string;
       };
       header?: never;
       path: {
@@ -2554,10 +2556,12 @@ export interface paths {
   '/api/v1/impact/{ci_id}': {
     parameters: {
       query?: {
-        /** @description Traversal depth; defaults to the maximum for impact analysis. */
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
         depth?: number;
         /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
         rel_type?: string;
+        /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical); physical includes the containment projected from parent_ci_id. An unknown category is 422. */
+        categories?: string;
       };
       header?: never;
       path: {
@@ -6718,6 +6722,17 @@ export interface components {
     ImpactNode: components['schemas']['TopologyNode'] & {
       /** @description Reached only over an undirected network edge (connected_to), a second-class path (IMP-03). */
       heuristic: boolean;
+      /** @description Length of the shortest path from the failed CI. */
+      hops: number;
+      /** @description Shortest path from the failed CI with its relationship types (IMP-02). */
+      path: components['schemas']['ImpactPathStep'][];
+    };
+    ImpactPathStep: {
+      from_ci_id: string;
+      to_ci_id: string;
+      rel_type: string;
+      category: string;
+      heuristic?: boolean;
     };
     CITypeChangeResult: {
       ci: components['schemas']['CI'];
@@ -15831,7 +15846,7 @@ export interface operations {
         ci_type?: string;
         /** @description When set, returns a subgraph reachable from this CI. */
         root_ci_id?: string;
-        /** @description Traversal depth from root_ci_id (default 2, max 10). */
+        /** @description Traversal depth from root_ci_id (default 2, max 20). */
         depth?: number;
       };
       header?: never;
@@ -15882,10 +15897,12 @@ export interface operations {
   getCIImpactLegacy: {
     parameters: {
       query?: {
-        /** @description Traversal depth; defaults to the maximum for impact analysis. */
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
         depth?: number;
         /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
         rel_type?: string;
+        /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical); physical includes the containment projected from parent_ci_id. An unknown category is 422. */
+        categories?: string;
       };
       header?: never;
       path: {
@@ -15906,6 +15923,7 @@ export interface operations {
             failed_ci_id?: string;
             failed_ci?: components['schemas']['TopologyNode'];
             rel_type?: string;
+            categories?: string[];
             depth?: number;
             impacted?: components['schemas']['ImpactNode'][];
             count?: number;
@@ -15914,16 +15932,27 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description Unknown category. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
   getCIImpact: {
     parameters: {
       query?: {
-        /** @description Traversal depth; defaults to the maximum for impact analysis. */
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
         depth?: number;
         /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
         rel_type?: string;
+        /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical); physical includes the containment projected from parent_ci_id. An unknown category is 422. */
+        categories?: string;
       };
       header?: never;
       path: {
@@ -15944,6 +15973,7 @@ export interface operations {
             failed_ci_id?: string;
             failed_ci?: components['schemas']['TopologyNode'];
             rel_type?: string;
+            categories?: string[];
             depth?: number;
             impacted?: components['schemas']['ImpactNode'][];
             count?: number;
@@ -15952,6 +15982,15 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description Unknown category. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };

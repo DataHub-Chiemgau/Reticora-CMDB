@@ -73,6 +73,21 @@ func (r *indexingRepository) RestoreDeleted(ctx context.Context, orgID, id strin
 	return item, nil
 }
 
+// GetByIDs forwards the batch read (NFR-02); without it every CI is read
+// on its own.
+func (r *indexingRepository) GetByIDs(ctx context.Context, orgID string, ids []string) ([]Item, error) {
+	if reader, ok := r.Repository.(BatchReader); ok {
+		return reader.GetByIDs(ctx, orgID, ids)
+	}
+	items := []Item{}
+	for _, id := range ids {
+		if item, err := r.GetByID(ctx, orgID, id); err == nil {
+			items = append(items, *item)
+		}
+	}
+	return items, nil
+}
+
 // ChangeType forwards the type change (CI-11) and indexes the CI again.
 func (r *indexingRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode string) (*TypeChangeResult, error) {
 	changer, ok := r.Repository.(TypeChanger)

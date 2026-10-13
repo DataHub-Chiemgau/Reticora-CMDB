@@ -20,7 +20,7 @@ import (
 const (
 	maxFetch     = 10000
 	defaultDepth = 2
-	maxDepth     = 10
+	maxDepth     = 20
 )
 
 // Node is a CI vertex in the topology graph.
@@ -184,6 +184,11 @@ func (h *Handler) GetImpact(w http.ResponseWriter, r *http.Request) {
 		depth = maxDepth
 	}
 	relType := r.URL.Query().Get("rel_type")
+	categories, err := parseCategories(r.URL.Query().Get("categories"))
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 
 	graph, err := h.buildFromRoot(r.Context(), t.OrganizationID, id, depth, "")
 	if err != nil {
@@ -191,11 +196,12 @@ func (h *Handler) GetImpact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	impacted := computeImpact(id, graph.Edges, relType, h.impactRules(r.Context(), t.OrganizationID))
+	impacted := computeImpact(id, graph.Edges, impactQuery{relType: relType, categories: categories, depth: depth},
+		h.impactRules(r.Context(), t.OrganizationID))
 	impactedNodes := make([]ImpactNode, 0, len(impacted))
 	for _, node := range graph.Nodes {
-		if heuristic, ok := impacted[node.ID]; ok {
-			impactedNodes = append(impactedNodes, ImpactNode{Node: node, Heuristic: heuristic})
+		if hit, ok := impacted[node.ID]; ok {
+			impactedNodes = append(impactedNodes, ImpactNode{Node: node, Heuristic: hit.heuristic, Hops: len(hit.path), Path: hit.path})
 		}
 	}
 	// Certain impacts first, then by name: a stable answer.
@@ -213,6 +219,7 @@ func (h *Handler) GetImpact(w http.ResponseWriter, r *http.Request) {
 		"failed_ci_id": id,
 		"failed_ci":    nodeFromItem(*root),
 		"rel_type":     relType,
+		"categories":   sortedKeys(categories),
 		"depth":        depth,
 		"impacted":     impactedNodes,
 		"count":        len(impactedNodes),
@@ -287,23 +294,19 @@ func (h *Handler) buildFromRootViaTraversal(ctx context.Context, orgID, rootCIID
 
 	nodes := map[string]Node{rootCIID: nodeFromItem(*root)}
 	edgeSet := make(map[string]Edge, len(rels))
+	var ids []string
 	for _, rel := range rels {
 		edgeSet[rel.ID] = edgeFromRel(rel)
 		for _, neighborID := range []string{rel.SourceCIID, rel.TargetCIID} {
-			if neighborID == "" || neighborID == rootCIID {
-				continue
+			if neighborID != "" && neighborID != rootCIID {
+				ids = append(ids, neighborID)
 			}
-			if _, ok := nodes[neighborID]; ok {
-				continue
-			}
-			item, err := h.ciRepo.GetByID(ctx, orgID, neighborID)
-			if err != nil {
-				// The CI is not visible to this tenant or was removed; the
-				// dangling edge is dropped when the graph is assembled.
-				continue
-			}
-			nodes[neighborID] = nodeFromItem(*item)
 		}
+	}
+	// One read for all nodes (NFR-02). A CI that is not visible or was
+	// removed stays out; its dangling edge is dropped by assembleGraph.
+	if err := h.resolveNodes(ctx, orgID, ids, nodes); err != nil {
+		return Graph{}, err
 	}
 
 	return assembleGraph(nodes, edgeSet, rootCIID, ciType), nil
@@ -340,28 +343,58 @@ func (h *Handler) buildFromRootIterative(ctx context.Context, orgID, rootCIID st
 				if neighborID == id {
 					neighborID = rel.SourceCIID
 				}
-				if neighborID == "" || neighborID == id {
-					continue
-				}
-				if _, ok := nodes[neighborID]; !ok {
-					item, err := h.ciRepo.GetByID(ctx, orgID, neighborID)
-					if err != nil {
-						// Invisible or deleted: the walk must not pass
-						// through it (IMP-07); its edge dangles and is
-						// dropped by assembleGraph.
-						continue
-					}
-					nodes[neighborID] = nodeFromItem(*item)
-				}
-				if !visited[neighborID] && len(nodes) <= relationship.MaxTraversalNodes {
+				if neighborID != "" && neighborID != id {
 					next = append(next, neighborID)
 				}
 			}
 		}
-		frontier = next
+		// The neighbors of one hop in one read (NFR-02). Invisible or
+		// deleted CIs stay out: the walk must not pass through them
+		// (IMP-07); their edges dangle and are dropped by assembleGraph.
+		if err := h.resolveNodes(ctx, orgID, next, nodes); err != nil {
+			return Graph{}, err
+		}
+		frontier = frontier[:0]
+		for _, neighborID := range next {
+			if _, ok := nodes[neighborID]; ok && !visited[neighborID] && len(nodes) <= relationship.MaxTraversalNodes {
+				frontier = append(frontier, neighborID)
+			}
+		}
 	}
 
 	return assembleGraph(nodes, edgeSet, rootCIID, ciType), nil
+}
+
+// resolveNodes adds the visible, not deleted CIs among ids to nodes, in one
+// query when the repository reads in batches.
+func (h *Handler) resolveNodes(ctx context.Context, orgID string, ids []string, nodes map[string]Node) error {
+	missing := make([]string, 0, len(ids))
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if _, ok := nodes[id]; !ok && !seen[id] {
+			seen[id] = true
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	if reader, ok := h.ciRepo.(ci.BatchReader); ok {
+		items, err := reader.GetByIDs(ctx, orgID, missing)
+		if err != nil {
+			return err
+		}
+		for i := range items {
+			nodes[items[i].ID] = nodeFromItem(items[i])
+		}
+		return nil
+	}
+	for _, id := range missing {
+		if item, err := h.ciRepo.GetByID(ctx, orgID, id); err == nil {
+			nodes[id] = nodeFromItem(*item)
+		}
+	}
+	return nil
 }
 
 func assembleGraph(nodes map[string]Node, edgeSet map[string]Edge, rootCIID, ciType string) Graph {
@@ -415,4 +448,13 @@ func parseDepth(raw string) int {
 		return maxDepth
 	}
 	return n
+}
+
+func sortedKeys(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

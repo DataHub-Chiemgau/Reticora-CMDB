@@ -10,6 +10,12 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 )
 
+// BatchReader reads several CIs in one query, so graph walks resolve their
+// nodes without one query per node (NFR-02).
+type BatchReader interface {
+	GetByIDs(ctx context.Context, orgID string, ids []string) ([]Item, error)
+}
+
 // Repository defines persistence operations for CIs.
 type Repository interface {
 	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error)

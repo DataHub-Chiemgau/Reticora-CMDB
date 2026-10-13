@@ -4528,11 +4528,11 @@ paths:
             type: string
         - name: depth
           in: query
-          description: Traversal depth from root_ci_id (default 2, max 10).
+          description: Traversal depth from root_ci_id (default 2, max 20).
           schema:
             type: integer
             minimum: 1
-            maximum: 10
+            maximum: 20
       responses:
         '200':
           description: Topology graph
@@ -4571,12 +4571,19 @@ paths:
       - $ref: '#/components/parameters/ResourceID'
       - name: depth
         in: query
-        schema: { type: integer, default: 10, maximum: 10 }
-        description: Traversal depth; defaults to the maximum for impact analysis.
+        schema: { type: integer, default: 20, maximum: 20 }
+        description: Maximum hops of the impact paths (IMP-02); defaults to 20.
       - name: rel_type
         in: query
         schema: { type: string }
         description: Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on).
+      - name: categories
+        in: query
+        schema: { type: string }
+        description: >-
+          Comma-separated relationship categories to follow (network, power,
+          hosting, logical, physical); physical includes the containment
+          projected from parent_ci_id. An unknown category is 422.
     get:
       operationId: getCIImpactLegacy
       deprecated: true
@@ -4603,6 +4610,9 @@ paths:
                   failed_ci_id: { type: string }
                   failed_ci: { $ref: '#/components/schemas/TopologyNode' }
                   rel_type: { type: string }
+                  categories:
+                    type: array
+                    items: { type: string }
                   depth: { type: integer }
                   impacted:
                     type: array
@@ -4610,6 +4620,11 @@ paths:
                   count: { type: integer }
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Unknown category.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -4624,12 +4639,19 @@ paths:
         description: The CI whose outage is simulated.
       - name: depth
         in: query
-        schema: { type: integer, default: 10, maximum: 10 }
-        description: Traversal depth; defaults to the maximum for impact analysis.
+        schema: { type: integer, default: 20, maximum: 20 }
+        description: Maximum hops of the impact paths (IMP-02); defaults to 20.
       - name: rel_type
         in: query
         schema: { type: string }
         description: Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on).
+      - name: categories
+        in: query
+        schema: { type: string }
+        description: >-
+          Comma-separated relationship categories to follow (network, power,
+          hosting, logical, physical); physical includes the containment
+          projected from parent_ci_id. An unknown category is 422.
     get:
       operationId: getCIImpact
       tags: [Topology]
@@ -4652,6 +4674,9 @@ paths:
                   failed_ci_id: { type: string }
                   failed_ci: { $ref: '#/components/schemas/TopologyNode' }
                   rel_type: { type: string }
+                  categories:
+                    type: array
+                    items: { type: string }
                   depth: { type: integer }
                   impacted:
                     type: array
@@ -4659,6 +4684,11 @@ paths:
                   count: { type: integer }
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Unknown category.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -11591,11 +11621,25 @@ components:
       allOf:
         - $ref: '#/components/schemas/TopologyNode'
         - type: object
-          required: [heuristic]
+          required: [heuristic, hops, path]
           properties:
             heuristic:
               type: boolean
               description: Reached only over an undirected network edge (connected_to), a second-class path (IMP-03).
+            hops: { type: integer, description: Length of the shortest path from the failed CI. }
+            path:
+              type: array
+              description: Shortest path from the failed CI with its relationship types (IMP-02).
+              items: { $ref: '#/components/schemas/ImpactPathStep' }
+    ImpactPathStep:
+      type: object
+      required: [from_ci_id, to_ci_id, rel_type, category]
+      properties:
+        from_ci_id: { type: string }
+        to_ci_id: { type: string }
+        rel_type: { type: string }
+        category: { type: string }
+        heuristic: { type: boolean }
     CITypeChangeResult:
       type: object
       required: [ci, findings, changed]
