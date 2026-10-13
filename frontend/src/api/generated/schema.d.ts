@@ -4728,6 +4728,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/ci-types/export': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Export the metamodel
+     * @description The organization's metamodel as one JSON document (MET-54, phase 1): every CI type it sees — system and own, active or not — with its attribute definitions, and the global attribute definitions. Served as a download (Content-Disposition attachment).
+     */
+    get: operations['exportMetamodel'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/ci-types/{id}': {
     parameters: {
       query?: never;
@@ -5573,6 +5593,16 @@ export interface components {
     LocalizedText: {
       de?: string;
       en?: string;
+    };
+    MetamodelExport: {
+      /** @enum {integer} */
+      format_version: 1;
+      /** Format: date-time */
+      exported_at: string;
+      organization_id: string;
+      ci_types: components['schemas']['CIType'][];
+      /** @description Global attribute definitions of the organization and the system. */
+      attribute_definitions: components['schemas']['AttributeDefinition'][];
     };
     CIType: {
       id: string;
@@ -21012,6 +21042,33 @@ export interface operations {
           'application/json': {
             data: components['schemas']['CIType'][];
           };
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  exportMetamodel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Metamodel export */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelExport'];
         };
       };
       /** @description Unauthorized */

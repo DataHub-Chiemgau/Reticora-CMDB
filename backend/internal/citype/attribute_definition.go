@@ -477,7 +477,10 @@ func (r *PGRepository) CreateAttributeDefinition(ctx context.Context, orgID stri
 				return err
 			}
 		}
-		return insertAttributeTx(ctx, tx, orgID, d)
+		if err := insertAttributeTx(ctx, tx, orgID, d); err != nil {
+			return err
+		}
+		return recordAttributeAudit(ctx, tx, orgID, nil, d)
 	})
 }
 
@@ -489,6 +492,7 @@ func (r *PGRepository) UpdateAttributeDefinition(ctx context.Context, orgID, id 
 		if err != nil {
 			return err
 		}
+		before := *d
 		patch.apply(d)
 		if verr := d.Validate(); verr != nil {
 			return verr
@@ -497,7 +501,7 @@ func (r *PGRepository) UpdateAttributeDefinition(ctx context.Context, orgID, id 
 			return uerr
 		}
 		out = d
-		return nil
+		return recordAttributeAudit(ctx, tx, orgID, &before, d)
 	})
 	return out, err
 }
@@ -505,13 +509,14 @@ func (r *PGRepository) UpdateAttributeDefinition(ctx context.Context, orgID, id 
 // DeleteAttributeDefinition implements AttributeDefinitionStore.
 func (r *PGRepository) DeleteAttributeDefinition(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := lockOwnAttributeTx(ctx, tx, id); err != nil {
+		before, err := lockOwnAttributeTx(ctx, tx, id)
+		if err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM attribute_definition WHERE id = $1`, id); err != nil {
 			return fmt.Errorf("delete attribute definition: %w", err)
 		}
-		return nil
+		return recordAttributeAudit(ctx, tx, orgID, before, nil)
 	})
 }
 

@@ -81,6 +81,7 @@ GET /api/v1/cables rack:read
 GET /api/v1/cables/{id} rack:read
 GET /api/v1/ci-fields/global ci:read
 GET /api/v1/ci-types ci:read
+GET /api/v1/ci-types/export ci:read
 GET /api/v1/ci-types/templates ci:read
 GET /api/v1/ci-types/{id} ci:read
 GET /api/v1/ci-types/{id}/fields ci:read

@@ -162,7 +162,7 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 				return err
 			}
 		}
-		return nil
+		return recordMetamodelAudit(ctx, tx, typ.OrganizationID, "ci_type.created", "ci_type", typ.ID, nil, typ)
 	})
 }
 
@@ -219,6 +219,14 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 		if req.DiscoveryMappings != nil {
 			add("discovery_mappings", req.DiscoveryMappings)
 		}
+		before, err := scanType(tx.QueryRow(ctx,
+			fmt.Sprintf("SELECT %s FROM ci_type WHERE id = $1 AND organization_id IS NOT NULL", typeSelectColumns), id))
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return fmt.Errorf("not found")
+			}
+			return err
+		}
 		if len(sets) == 0 {
 			t, err := scanType(tx.QueryRow(ctx,
 				fmt.Sprintf("SELECT %s FROM ci_type WHERE id = $1 AND organization_id IS NOT NULL", typeSelectColumns), id))
@@ -246,7 +254,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 		}
 		t.Fields = flds
 		out = t
-		return nil
+		return recordMetamodelAudit(ctx, tx, orgID, "ci_type.updated", "ci_type", id, before, t)
 	})
 	return out, err
 }
@@ -305,7 +313,8 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 			return fmt.Errorf("clone ci type fields: %w", err)
 		}
 		out = &Type{ID: cloneID, OrganizationID: orgID, Key: key, Name: name}
-		return nil
+		return recordMetamodelAudit(ctx, tx, orgID, "ci_type.cloned", "ci_type", cloneID, nil,
+			map[string]any{"cloned_from_id": src.ID, "key": key, "name": name, "version": src.Version + 1})
 	})
 	if err != nil {
 		return nil, err
@@ -327,7 +336,11 @@ func (r *PGRepository) SetActive(ctx context.Context, orgID, id string, active b
 			return fmt.Errorf("set ci type active: %w", err)
 		}
 		out = t
-		return nil
+		action := "ci_type.deactivated"
+		if active {
+			action = "ci_type.activated"
+		}
+		return recordMetamodelAudit(ctx, tx, orgID, action, "ci_type", id, nil, map[string]any{"is_active": active})
 	})
 	return out, err
 }
@@ -410,12 +423,20 @@ func (r *PGRepository) UpsertField(ctx context.Context, orgID, typeID string, re
 	}
 	var out *Field
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		before, err := findAttributeTx(ctx, tx, typeID, req.Name)
+		if err != nil && !errors.Is(err, ErrAttributeNotFound) {
+			return err
+		}
 		f, err := upsertFieldTx(ctx, tx, orgID, typeID, &req)
 		if err != nil {
 			return err
 		}
 		out = f
-		return nil
+		after, err := findAttributeTx(ctx, tx, typeID, req.Name)
+		if err != nil {
+			return err
+		}
+		return recordAttributeAudit(ctx, tx, orgID, before, after)
 	})
 	return out, err
 }
@@ -485,22 +506,24 @@ func findAttributeTx(ctx context.Context, tx pgx.Tx, typeID, key string) (*Attri
 // the organization's global one.
 func (r *PGRepository) DeleteField(ctx context.Context, orgID, typeID, name string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmd, err := tx.Exec(ctx,
-			"DELETE FROM attribute_definition WHERE ci_type_id::text = $1 AND key = $2", typeID, name)
+		before, err := findAttributeTx(ctx, tx, typeID, name)
+		if errors.Is(err, ErrAttributeNotFound) {
+			before, err = findAttributeTx(ctx, tx, "", name)
+		}
+		if errors.Is(err, ErrAttributeNotFound) {
+			return fmt.Errorf("not found")
+		}
+		if err != nil {
+			return err
+		}
+		cmd, err := tx.Exec(ctx, "DELETE FROM attribute_definition WHERE id = $1", before.ID)
 		if err != nil {
 			return fmt.Errorf("delete field definition: %w", err)
 		}
 		if cmd.RowsAffected() == 0 {
-			cmd, err = tx.Exec(ctx,
-				"DELETE FROM attribute_definition WHERE ci_type_id IS NULL AND organization_id IS NOT NULL AND key = $1", name)
-			if err != nil {
-				return fmt.Errorf("delete global field definition: %w", err)
-			}
-			if cmd.RowsAffected() == 0 {
-				return fmt.Errorf("not found")
-			}
+			return fmt.Errorf("not found")
 		}
-		return nil
+		return recordAttributeAudit(ctx, tx, orgID, before, nil)
 	})
 }
 
@@ -819,4 +842,73 @@ func jsonOrDefault(v any, fallback string) any {
 		return fallback
 	}
 	return v
+}
+
+// recordMetamodelAudit writes the audit entry of a metamodel change in the
+// transaction of the change (AUD-07, MET-54): the definition before and
+// after; the request context adds request and correlation id and source.
+// Metamodel definitions carry no personal data.
+func recordMetamodelAudit(ctx context.Context, tx pgx.Tx, orgID, action, resourceType, resourceID string, before, after any) error {
+	changes := map[string]any{}
+	for key, v := range map[string]any{"before": before, "after": after} {
+		if v == nil || (key == "before" && isNilPointer(v)) {
+			continue
+		}
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("encode audit %s: %w", key, err)
+		}
+		var decoded any
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return fmt.Errorf("decode audit %s: %w", key, err)
+		}
+		changes[key] = decoded
+	}
+	actor := strings.TrimSpace(tenant.FromContext(ctx).UserID)
+	actorType := "system"
+	if actor != "" {
+		actorType = "user"
+	}
+	if !audit.IsUUID(actor) {
+		actor = ""
+	}
+	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+		OrganizationID: orgID, ActorID: actor, ActorType: actorType, Action: action,
+		ResourceType: resourceType, ResourceID: resourceID, Changes: changes,
+	}); err != nil {
+		return fmt.Errorf("record audit: %w", err)
+	}
+	return nil
+}
+
+// recordAttributeAudit audits a created (before nil), changed or deleted
+// (after nil) attribute definition.
+func recordAttributeAudit(ctx context.Context, tx pgx.Tx, orgID string, before, after *AttributeDefinition) error {
+	action, id := "attribute_definition.updated", ""
+	switch {
+	case before == nil && after != nil:
+		action, id = "attribute_definition.created", after.ID
+	case after == nil && before != nil:
+		action, id = "attribute_definition.deleted", before.ID
+	case after != nil:
+		id = after.ID
+	}
+	var b, a any
+	if before != nil {
+		b = before
+	}
+	if after != nil {
+		a = after
+	}
+	return recordMetamodelAudit(ctx, tx, orgID, action, "attribute_definition", id, b, a)
+}
+
+func isNilPointer(v any) bool {
+	switch p := v.(type) {
+	case *Type:
+		return p == nil
+	case *AttributeDefinition:
+		return p == nil
+	}
+	return false
 }

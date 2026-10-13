@@ -8457,6 +8457,25 @@ paths:
         '401':
           description: Unauthorized
 
+  /api/v1/ci-types/export:
+    get:
+      operationId: exportMetamodel
+      summary: Export the metamodel
+      description: >-
+        The organization's metamodel as one JSON document (MET-54, phase 1):
+        every CI type it sees — system and own, active or not — with its
+        attribute definitions, and the global attribute definitions. Served
+        as a download (Content-Disposition attachment).
+      responses:
+        '200':
+          description: Metamodel export
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelExport'
+        '401':
+          description: Unauthorized
+
   /api/v1/ci-types/{id}:
     get:
       operationId: getCiTypesId
@@ -9511,6 +9530,28 @@ components:
       properties:
         de: { type: string, minLength: 1, maxLength: 200 }
         en: { type: string, minLength: 1, maxLength: 200 }
+    MetamodelExport:
+      type: object
+      required: [format_version, exported_at, organization_id, ci_types, attribute_definitions]
+      properties:
+        format_version:
+          type: integer
+          enum: [1]
+        exported_at:
+          type: string
+          format: date-time
+        organization_id:
+          type: string
+        ci_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/CIType'
+        attribute_definitions:
+          type: array
+          description: Global attribute definitions of the organization and the system.
+          items:
+            $ref: '#/components/schemas/AttributeDefinition'
+
     CIType:
       type: object
       required: [id, key, name, display_name, is_builtin, is_system, is_active, is_logical, is_observable, schema_version, version, capabilities, allowed_relationship_types, ui_schema, compliance_rules, discovery_mappings, created_at, updated_at]
