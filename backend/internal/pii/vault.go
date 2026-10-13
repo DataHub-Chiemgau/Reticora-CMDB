@@ -146,8 +146,8 @@ func (v *Vault) createTx(ctx context.Context, tx pgx.Tx, orgID, kind string, dat
 	if err != nil {
 		return "", err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO pii_subject (surrogate_id, organization_id, kind, encrypted_payload, dek_ref, parent_id)
-		VALUES ($1, $2, $3, $4, $5, $6)`, id, orgID, kind, payload, version, nilIfEmpty(parent)); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO pii_subject (surrogate_id, organization_id, kind, encrypted_payload, dek_ref, parent_id, search_tokens)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`, id, orgID, kind, payload, version, nilIfEmpty(parent), searchTokens(dek, kind, data)); err != nil {
 		return "", fmt.Errorf("store pii subject: %w", err)
 	}
 	return id, nil
@@ -216,8 +216,9 @@ func (v *Vault) UpdateTx(ctx context.Context, tx pgx.Tx, orgID, id string, data 
 	if err != nil {
 		return err
 	}
-	tag, err := tx.Exec(ctx, `UPDATE pii_subject SET encrypted_payload = $3, dek_ref = $4
-		WHERE organization_id = $1 AND surrogate_id = $2`, orgID, id, payload, version)
+	tag, err := tx.Exec(ctx, `UPDATE pii_subject SET encrypted_payload = $3, dek_ref = $4,
+			search_tokens = CASE WHEN kind = 'value' THEN '{}' ELSE $5::text[] END
+		WHERE organization_id = $1 AND surrogate_id = $2`, orgID, id, payload, version, searchTokens(dek, "", data))
 	if err != nil {
 		return fmt.Errorf("update pii subject: %w", err)
 	}
@@ -303,18 +304,18 @@ func open(dek []byte, id, orgID string, payload []byte) (Data, error) {
 // oldDEK to newDEK with the new version, inside the rotation's
 // transaction (SEC-06); it returns how many it re-encrypted.
 func ReencryptTx(ctx context.Context, tx pgx.Tx, orgID string, oldDEK, newDEK []byte, version int) (int, error) {
-	rows, err := tx.Query(ctx, `SELECT surrogate_id::text, encrypted_payload FROM pii_subject
+	rows, err := tx.Query(ctx, `SELECT surrogate_id::text, kind, encrypted_payload FROM pii_subject
 		WHERE organization_id = $1 FOR UPDATE`, orgID)
 	if err != nil {
 		return 0, fmt.Errorf("lock pii subjects: %w", err)
 	}
 	type row struct {
-		id      string
-		payload []byte
+		id, kind string
+		payload  []byte
 	}
 	stored, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (row, error) {
 		var s row
-		scanErr := r.Scan(&s.id, &s.payload)
+		scanErr := r.Scan(&s.id, &s.kind, &s.payload)
 		return s, scanErr
 	})
 	if err != nil {
@@ -329,8 +330,13 @@ func ReencryptTx(ctx context.Context, tx pgx.Tx, orgID string, oldDEK, newDEK []
 		if eerr != nil {
 			return 0, fmt.Errorf("pii subject %s: %w", s.id, eerr)
 		}
-		if _, err = tx.Exec(ctx, `UPDATE pii_subject SET encrypted_payload = $2, dek_ref = $3 WHERE surrogate_id = $1`,
-			s.id, payload, version); err != nil {
+		// The blind index follows the data key.
+		var content sealed
+		if uerr := json.Unmarshal(plain, &content); uerr != nil {
+			return 0, fmt.Errorf("pii subject %s: %w", s.id, uerr)
+		}
+		if _, err = tx.Exec(ctx, `UPDATE pii_subject SET encrypted_payload = $2, dek_ref = $3, search_tokens = $4 WHERE surrogate_id = $1`,
+			s.id, payload, version, searchTokens(newDEK, s.kind, content.Data)); err != nil {
 			return 0, fmt.Errorf("pii subject %s: %w", s.id, err)
 		}
 	}

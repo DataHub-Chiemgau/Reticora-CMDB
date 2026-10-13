@@ -8,6 +8,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -51,21 +52,39 @@ const hitVisible = `CASE search_document.entity_type
 	WHEN 'reservation' THEN EXISTS (SELECT 1 FROM reservation WHERE reservation.id = search_document.entity_id)
 	ELSE true END`
 
+// contactTokenMatch finds contacts whose vault entry carries every blind
+// token of the search text (name, e-mail, phone; AUD-01, SEC-05).
+const contactTokenMatch = `(search_document.entity_type = 'contact' AND EXISTS (
+	SELECT 1 FROM contact c JOIN pii_subject s ON s.surrogate_id = c.pii_subject_id
+	WHERE c.id = search_document.entity_id AND s.search_tokens @> $%d::text[]))`
+
 func buildPostgresQuery(q Query) (string, []any, error) {
-	if err := validateQuery(q.Text); err != nil {
-		return "", nil, err
+	return buildPostgresQueryWithTokens(&q, nil)
+}
+
+// buildPostgresQueryWithTokens adds the contacts found by the blind tokens
+// of the text to the full-text hits.
+func buildPostgresQueryWithTokens(q *Query, tokens []string) (query string, args []any, err error) {
+	if verr := validateQuery(q.Text); verr != nil {
+		return "", nil, verr
 	}
 	limit := q.Limit
 	if limit <= 0 || limit > api.MaxPageLimit {
 		limit = api.DefaultPageLimit
 	}
 	where := []string{"organization_id = $1", hitVisible}
-	args := []any{q.OrganizationID}
+	args = []any{q.OrganizationID}
 	pos := 2
 	if strings.TrimSpace(q.Text) != "" {
-		where = append(where, fmt.Sprintf("search_vector @@ websearch_to_tsquery('simple', $%d)", pos))
+		match := fmt.Sprintf("search_vector @@ websearch_to_tsquery('simple', $%d)", pos)
 		args = append(args, q.Text)
 		pos++
+		if len(tokens) > 0 {
+			match = "(" + match + " OR " + fmt.Sprintf(contactTokenMatch, pos) + ")"
+			args = append(args, tokens)
+			pos++
+		}
+		where = append(where, match)
 	}
 	if len(q.EntityTypes) > 0 {
 		where = append(where, fmt.Sprintf("entity_type = ANY($%d)", pos))
@@ -81,7 +100,7 @@ func buildPostgresQuery(q Query) (string, []any, error) {
 		snippet = fmt.Sprintf("ts_headline('simple', title || ' ' || summary, websearch_to_tsquery('simple', $%d), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=2')", 2)
 	}
 	args = append(args, limit, q.Offset)
-	query := fmt.Sprintf(`SELECT id::text, organization_id::text, entity_type, entity_id::text, title, summary, url, metadata, COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), updated_at, %s AS score, %s AS snippet, COUNT(*) OVER() FROM search_document WHERE %s ORDER BY score DESC, updated_at DESC LIMIT $%d OFFSET $%d`, score, snippet, strings.Join(where, " AND "), pos, pos+1)
+	query = fmt.Sprintf(`SELECT id::text, organization_id::text, entity_type, entity_id::text, title, summary, url, metadata, COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), updated_at, %s AS score, %s AS snippet, COUNT(*) OVER() FROM search_document WHERE %s ORDER BY score DESC, updated_at DESC LIMIT $%d OFFSET $%d`, score, snippet, strings.Join(where, " AND "), pos, pos+1)
 	return query, args, nil
 }
 func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
@@ -91,7 +110,14 @@ func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
 	}
 	var res Result
 	err := database.WithRequestTenant(ctx, r.pool, q.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		sql, args, err := buildPostgresQuery(q)
+		var tokens []string
+		if vault := pii.Default(); vault != nil {
+			var err error
+			if tokens, err = vault.QueryTokensTx(ctx, tx, q.OrganizationID, q.Text); err != nil {
+				return err
+			}
+		}
+		sql, args, err := buildPostgresQueryWithTokens(&q, tokens)
 		if err != nil {
 			return err
 		}
@@ -115,7 +141,10 @@ func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
 			}
 			res.Data = append(res.Data, h)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return contactTitles(ctx, tx, q.OrganizationID, res.Data)
 	})
 	res.Limit, res.Offset = limit, q.Offset
 	res.HasMore = q.Offset+len(res.Data) < res.Total
@@ -144,11 +173,56 @@ SELECT organization_id,'ci',id,name,concat_ws(' ',hostname,manufacturer,model,se
 UNION ALL SELECT organization_id,'asset',id,name,concat_ws(' ',asset_tag,category,status,supplier,serial_number,location,notes),'/assets','{}'::jsonb FROM asset WHERE organization_id=$1
 UNION ALL SELECT organization_id,'document',id,title,concat_ws(' ',description,file_name,category,array_to_string(tags,' ')),'/documents','{}'::jsonb FROM document WHERE organization_id=$1
 UNION ALL SELECT organization_id,'ticket',id,title,concat_ws(' ',description,status,priority,category,array_to_string(tags,' ')),'/tickets','{}'::jsonb FROM ticket WHERE organization_id=$1
-UNION ALL SELECT organization_id,'contact',id,display_name,concat_ws(' ',email,phone,role,department,notes),'/contacts','{}'::jsonb FROM contact WHERE organization_id=$1
+UNION ALL SELECT organization_id,'contact',id,COALESCE(display_name,''),concat_ws(' ',email,phone,role,department,notes),'/contacts','{}'::jsonb FROM contact WHERE organization_id=$1
 UNION ALL SELECT organization_id,'location',id,name,kind,'/locations','{}'::jsonb FROM location WHERE organization_id=$1
 UNION ALL SELECT organization_id,'reservation',id,COALESCE(project_ref, reason, 'reservation'),concat_ws(' ',state, reason, project_ref),'/reservations','{}'::jsonb FROM reservation WHERE organization_id=$1`, orgID)
 		count = cmd.RowsAffected()
 		return err
 	})
 	return ReindexResult{Indexed: int(count)}, err
+}
+
+// contactTitles shows the names of contact hits: the index keeps no
+// personal data, the name comes from the PII vault (AUD-01, SEC-05).
+func contactTitles(ctx context.Context, tx pgx.Tx, orgID string, hits []Hit) error {
+	vault := pii.Default()
+	var ids []string
+	for i := range hits {
+		if hits[i].EntityType == "contact" {
+			ids = append(ids, hits[i].EntityID)
+		}
+	}
+	if vault == nil || len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text, pii_subject_id::text FROM contact
+		WHERE organization_id = $1 AND id::text = ANY($2) AND pii_subject_id IS NOT NULL`, orgID, ids)
+	if err != nil {
+		return fmt.Errorf("contact names: %w", err)
+	}
+	subjectOf := map[string]string{}
+	var subjectIDs []string
+	for rows.Next() {
+		var id, subject string
+		if err = rows.Scan(&id, &subject); err != nil {
+			rows.Close()
+			return err
+		}
+		subjectOf[id] = subject
+		subjectIDs = append(subjectIDs, subject)
+	}
+	rows.Close()
+	if rerr := rows.Err(); rerr != nil {
+		return rerr
+	}
+	subjects, err := vault.ResolveTx(ctx, tx, orgID, subjectIDs)
+	if err != nil {
+		return fmt.Errorf("contact names: %w", err)
+	}
+	for i := range hits {
+		if s := subjects[subjectOf[hits[i].EntityID]]; hits[i].EntityType == "contact" && s != nil {
+			hits[i].Title = s.Data["name"]
+		}
+	}
+	return nil
 }

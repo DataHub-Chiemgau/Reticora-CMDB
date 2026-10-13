@@ -14800,7 +14800,11 @@ components:
 
     Contact:
       type: object
-      required: [id, organization_id, display_name, created_at, updated_at]
+      description: >-
+        Contact (AUD-01). Name, phone and e-mail are stored in the PII vault
+        (SEC-05) and resolved when the contact is read; deleting the contact
+        deletes its vault entry.
+      required: [id, organization_id, display_name, is_24_7, created_at, updated_at]
       properties:
         id:
           type: string
@@ -14820,6 +14824,9 @@ components:
           type: string
         notes:
           type: string
+        is_24_7:
+          type: boolean
+          description: Reachable around the clock.
         created_at:
           type: string
           format: date-time
@@ -14851,6 +14858,8 @@ components:
           type: string
         notes:
           type: string
+        is_24_7:
+          type: boolean
 
     UpdateContactRequest:
       type: object
@@ -14869,6 +14878,8 @@ components:
           type: string
         notes:
           type: string
+        is_24_7:
+          type: boolean
 
     ContactListResponse:
       allOf:

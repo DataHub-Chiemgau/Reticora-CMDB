@@ -131,6 +131,9 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 	if req.Notes != nil {
 		c.Notes = *req.Notes
 	}
+	if req.Is247 != nil {
+		c.Is247 = *req.Is247
+	}
 	c.UpdatedAt = time.Now().UTC()
 	cp := *c
 	return &cp, nil

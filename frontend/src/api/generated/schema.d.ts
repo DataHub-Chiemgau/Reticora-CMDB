@@ -8869,6 +8869,7 @@ export interface components {
     CableListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Cable'][];
     };
+    /** @description Contact (AUD-01). Name, phone and e-mail are stored in the PII vault (SEC-05) and resolved when the contact is read; deleting the contact deletes its vault entry. */
     Contact: {
       id: string;
       organization_id: string;
@@ -8879,6 +8880,8 @@ export interface components {
       role?: string;
       department?: string;
       notes?: string;
+      /** @description Reachable around the clock. */
+      is_24_7: boolean;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -8896,6 +8899,7 @@ export interface components {
       role?: string;
       department?: string;
       notes?: string;
+      is_24_7?: boolean;
     };
     UpdateContactRequest: {
       client_id?: string;
@@ -8905,6 +8909,7 @@ export interface components {
       role?: string;
       department?: string;
       notes?: string;
+      is_24_7?: boolean;
     };
     ContactListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Contact'][];

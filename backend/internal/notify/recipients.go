@@ -12,6 +12,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 )
 
 // Audience is who a notification is meant for (NTF-03): users by role,
@@ -121,23 +122,51 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 			}
 		}
 		if a.CIID != "" && len(a.ContactRoles) > 0 {
+			// Name and e-mail of a contact live in the PII vault (AUD-01);
+			// rows not moved there yet keep them in the columns.
 			rows, err := tx.Query(ctx, `
-				SELECT DISTINCT c.email, c.display_name
+				SELECT DISTINCT COALESCE(c.email, ''), COALESCE(c.display_name, ''), COALESCE(c.pii_subject_id::text, '')
 				FROM ci_contact cc JOIN contact c ON c.id = cc.contact_id AND c.organization_id = cc.organization_id
-				WHERE cc.organization_id = $1 AND cc.ci_id::text = $2 AND cc.relationship_type = ANY($3)
-				  AND COALESCE(c.email, '') <> ''
-				ORDER BY c.display_name, c.email`, orgID, a.CIID, a.ContactRoles)
+				WHERE cc.organization_id = $1 AND cc.ci_id::text = $2 AND cc.relationship_type = ANY($3)`,
+				orgID, a.CIID, a.ContactRoles)
 			if err != nil {
 				return fmt.Errorf("resolve contacts: %w", err)
 			}
-			contacts, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (Recipient, error) {
-				var c Recipient
-				scanErr := row.Scan(&c.Email, &c.Name)
+			type linked struct{ email, name, subject string }
+			found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (linked, error) {
+				var c linked
+				scanErr := row.Scan(&c.email, &c.name, &c.subject)
 				return c, scanErr
 			})
 			if err != nil {
 				return fmt.Errorf("resolve contacts: %w", err)
 			}
+			var subjects map[string]*pii.Subject
+			if vault := pii.Default(); vault != nil {
+				ids := make([]string, 0, len(found))
+				for _, c := range found {
+					if c.subject != "" {
+						ids = append(ids, c.subject)
+					}
+				}
+				if subjects, err = vault.ResolveTx(ctx, tx, orgID, ids); err != nil {
+					return fmt.Errorf("resolve contacts: %w", err)
+				}
+			}
+			for _, c := range found {
+				if s := subjects[c.subject]; s != nil {
+					c.email, c.name = s.Data["email"], s.Data["name"]
+				}
+				if c.email != "" {
+					contacts = append(contacts, Recipient{Email: c.email, Name: c.name})
+				}
+			}
+			sort.Slice(contacts, func(i, j int) bool {
+				if contacts[i].Name != contacts[j].Name {
+					return contacts[i].Name < contacts[j].Name
+				}
+				return contacts[i].Email < contacts[j].Email
+			})
 		}
 		return nil
 	})

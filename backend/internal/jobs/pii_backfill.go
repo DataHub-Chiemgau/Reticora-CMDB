@@ -46,11 +46,11 @@ func (b *PIIBackfill) Schedule() Schedule {
 
 // BackfillResult counts the rows a backfill sealed.
 type BackfillResult struct {
-	Audit, CIChanges, Events, Rechained int
+	Audit, CIChanges, Events, Contacts, Rechained int
 }
 
 // Total is the number of rows sealed.
-func (r BackfillResult) Total() int { return r.Audit + r.CIChanges + r.Events }
+func (r BackfillResult) Total() int { return r.Audit + r.CIChanges + r.Events + r.Contacts }
 
 // Run seals every organization and returns how many rows it changed.
 func (b *PIIBackfill) Run(ctx context.Context) (int, error) {
@@ -89,11 +89,15 @@ func (b *PIIBackfill) RunOrg(ctx context.Context, orgID string) (BackfillResult,
 		if res.CIChanges, err = sealCIChanges(ctx, tx, orgID); err != nil {
 			return err
 		}
-		res.Events, err = sealEvents(ctx, tx, orgID)
+		if res.Events, err = sealEvents(ctx, tx, orgID); err != nil {
+			return err
+		}
+		res.Contacts, err = sealContacts(ctx, tx, orgID)
 		if err == nil && res.Total() > 0 {
 			_, err = audit.NewPGRecorder().Record(ctx, tx, audit.Entry{OrganizationID: orgID, ActorType: "system",
 				Action: PIIBackfillKind, ResourceType: "organization", ResourceID: orgID,
-				Changes: map[string]interface{}{"audit_entries": res.Audit, "ci_changes": res.CIChanges, "events": res.Events}})
+				Changes: map[string]interface{}{"audit_entries": res.Audit, "ci_changes": res.CIChanges, "events": res.Events,
+					"contacts": res.Contacts}})
 		}
 		return err
 	})
@@ -224,6 +228,52 @@ func sealEvents(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+// sealContacts moves name, phone and e-mail of contacts into the vault
+// (AUD-01) and drops them from the search index; it needs the vault.
+func sealContacts(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
+	vault := pii.Default()
+	if vault == nil {
+		return 0, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(display_name, ''), COALESCE(email, ''), COALESCE(phone, '')
+		FROM contact WHERE organization_id = $1 AND pii_subject_id IS NULL FOR UPDATE`, orgID)
+	if err != nil {
+		return 0, fmt.Errorf("find contacts: %w", err)
+	}
+	type plain struct{ id, name, email, phone string }
+	found, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (plain, error) {
+		var c plain
+		scanErr := r.Scan(&c.id, &c.name, &c.email, &c.phone)
+		return c, scanErr
+	})
+	if err != nil {
+		return 0, err
+	}
+	for _, c := range found {
+		data := pii.Data{"name": c.name}
+		if c.email != "" {
+			data["email"] = c.email
+		}
+		if c.phone != "" {
+			data["phone"] = c.phone
+		}
+		subject, cerr := vault.CreateTx(ctx, tx, orgID, pii.KindContact, data)
+		if cerr != nil {
+			return 0, fmt.Errorf("contact %s: %w", c.id, cerr)
+		}
+		if _, err = tx.Exec(ctx, `UPDATE contact SET pii_subject_id = $2, display_name = NULL, email = NULL, phone = NULL
+			WHERE id = $1`, c.id, subject); err != nil {
+			return 0, fmt.Errorf("contact %s: %w", c.id, err)
+		}
+		if _, err = tx.Exec(ctx, `UPDATE search_document sd SET title = '', summary = concat_ws(' ', ct.role, ct.department, ct.notes)
+			FROM contact ct WHERE sd.organization_id = $1 AND sd.entity_type = 'contact' AND sd.entity_id = $2 AND ct.id = $2`,
+			orgID, c.id); err != nil {
+			return 0, fmt.Errorf("contact %s: %w", c.id, err)
+		}
+	}
+	return len(found), nil
 }
 
 // sealJSON seals a stored JSON value (of a field, when field is set).
