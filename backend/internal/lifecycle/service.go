@@ -32,7 +32,8 @@ func NewService(repo Repository, states StateStore, changes ChangeRecorder) *Ser
 	return &Service{repo: repo, states: states, changes: changes}
 }
 
-// DefinitionForKey resolves a definition by key within the tenant scope.
+// DefinitionForKey resolves a definition by key within the tenant scope,
+// with its states and transitions (the list holds the definitions only).
 func (s *Service) DefinitionForKey(ctx context.Context, orgID, key string) (*Definition, error) {
 	defs, _, err := s.repo.List(ctx, orgID, api.PaginationParams{Limit: api.MaxPageLimit})
 	if err != nil {
@@ -40,7 +41,7 @@ func (s *Service) DefinitionForKey(ctx context.Context, orgID, key string) (*Def
 	}
 	for _, d := range defs {
 		if d.Key == key {
-			return &d, nil
+			return s.repo.GetByID(ctx, orgID, d.ID)
 		}
 	}
 	return nil, fmt.Errorf("lifecycle definition %q not found", key)
