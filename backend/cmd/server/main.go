@@ -32,6 +32,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
@@ -382,7 +383,7 @@ func main() {
 		},
 		Readiness:        readiness,
 		IngestQueue:      ingestQueue,
-		Signup:           signupService(cfg, auditPool),
+		Signup:           signupService(cfg, auditPool, centralSMTP(cfg)),
 		SignupProtection: signupProtection(cfg, cacheStore),
 		// Invitations need the database; in --no-db mode they answer 503.
 		InvitationAccounts: invitationAccounts(cfg),
@@ -732,11 +733,26 @@ func backlogOf[C any](repo any, count func(context.Context, C) (int, error)) fun
 	return func(ctx context.Context) (int, error) { return count(ctx, c) }
 }
 
+// centralSMTP is the installation's SMTP server (TEC-13); nil without
+// RETICORA_SMTP_HOST.
+func centralSMTP(cfg *config.Config) *notify.SMTPSender {
+	if cfg.SMTPHost == "" {
+		return nil
+	}
+	sender, err := notify.NewSMTPSender(&notify.SMTPConfig{Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername,
+		Password: cfg.SMTPPassword, From: cfg.SMTPFrom, TLS: cfg.SMTPTLS})
+	if err != nil {
+		slog.Error("invalid central SMTP configuration", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("central SMTP configured", "host", cfg.SMTPHost, "port", cfg.SMTPPort, "tls", cfg.SMTPTLS)
+	return sender
+}
+
 // signupService builds the self-signup flow (TLC-01). Signups need the
-// database, the Keycloak admin client and an e-mail channel; the channel
-// arrives with the notification channels (WP-137), so until then every
-// signup answers 503.
-func signupService(cfg *config.Config, pool *pgxpool.Pool) *signup.Service {
+// database, the Keycloak admin client and the central SMTP server for the
+// verification e-mail; without one of them every signup answers 503.
+func signupService(cfg *config.Config, pool *pgxpool.Pool, smtpSender *notify.SMTPSender) *signup.Service {
 	sc := signup.DefaultConfig()
 	sc.TrialPlan = entitlement.Plan(cfg.TrialPlan)
 	sc.TrialDays = cfg.TrialDays
@@ -752,7 +768,11 @@ func signupService(cfg *config.Config, pool *pgxpool.Pool) *signup.Service {
 	if kc := keycloakAccounts(cfg); kc != nil {
 		accounts = kc
 	}
-	svc := signup.NewService(repo, nil, accounts, sc)
+	var mailer signup.Mailer
+	if smtpSender != nil {
+		mailer = notify.SignupMailer{Sender: smtpSender}
+	}
+	svc := signup.NewService(repo, mailer, accounts, sc)
 	slog.Info("self-signup configured", "available", svc.Available())
 	return svc
 }

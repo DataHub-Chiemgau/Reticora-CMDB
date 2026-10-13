@@ -55,16 +55,17 @@ type matrixTable struct {
 // matrixOverrides fixes values the generic rules cannot derive from the
 // catalog (cross-column checks, patterns).
 var matrixOverrides = map[string]map[string]string{
-	"asset_movement":     {"asset_id": "@uuid"},
-	"assignment":         {"asset_id": "@uuid"},
-	"reservation":        {"asset_id": "@uuid"},
-	"composition":        {"child_ci_id": "@uuid"},
-	"desk_booking":       {"starts_at": "2026-01-01T00:00:00Z", "ends_at": "2026-01-01T01:00:00Z"},
-	"maintenance_window": {"starts_at": "2026-01-01T00:00:00Z", "ends_at": "2026-01-01T01:00:00Z"},
-	"iga_connector":      {"type": "scim", "base_url": "https://scim.example"},
-	"document":           {"storage_key": ""},
-	"location":           {"kind": "site"},
-	"event_outbox":       {"type": "ci.created"},
+	"asset_movement":       {"asset_id": "@uuid"},
+	"assignment":           {"asset_id": "@uuid"},
+	"reservation":          {"asset_id": "@uuid"},
+	"composition":          {"child_ci_id": "@uuid"},
+	"desk_booking":         {"starts_at": "2026-01-01T00:00:00Z", "ends_at": "2026-01-01T01:00:00Z"},
+	"maintenance_window":   {"starts_at": "2026-01-01T00:00:00Z", "ends_at": "2026-01-01T01:00:00Z"},
+	"iga_connector":        {"type": "scim", "base_url": "https://scim.example"},
+	"document":             {"storage_key": ""},
+	"location":             {"kind": "site"},
+	"event_outbox":         {"type": "ci.created"},
+	"notification_channel": {"kind": "inapp", "provider": "inapp"},
 	// Global rows (organization_id NULL) must be system rows.
 	"lifecycle_definition":   {"is_system": "true"},
 	"relationship_type":      {"is_system": "true"},

@@ -123,6 +123,15 @@ type Config struct {
 	// Rate Limiting
 	RateLimitRPM int // requests per minute per key/user (default 600)
 
+	// Central SMTP server of the installation (TEC-13): e-mail of the
+	// central_smtp channels and of the self-signup. Empty host: none.
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
+	SMTPTLS      string // starttls (default), tls or none
+
 	// Retention (NFR-06, AUD-09): how long the retention runs keep each
 	// kind of data. The defaults are the minimums; a shorter value is a
 	// start error.
@@ -210,6 +219,13 @@ func Load() *Config {
 		// by the tenant count. Default off; enable for bounded-tenant setups.
 		MetricsTenantLabel: l.boolean("RETICORA_METRICS_TENANT_LABEL", false),
 		RateLimitRPM:       l.integer("RETICORA_RATE_LIMIT_RPM", 600),
+
+		SMTPHost:     l.str("RETICORA_SMTP_HOST", ""),
+		SMTPPort:     l.integer("RETICORA_SMTP_PORT", 587),
+		SMTPUsername: l.str("RETICORA_SMTP_USERNAME", ""),
+		SMTPPassword: l.str("RETICORA_SMTP_PASSWORD", ""),
+		SMTPFrom:     l.str("RETICORA_SMTP_FROM", ""),
+		SMTPTLS:      l.str("RETICORA_SMTP_TLS", "starttls"),
 
 		RetentionAuditYears:     l.integer("RETICORA_RETENTION_AUDIT_YEARS", MinRetentionAuditYears),
 		RetentionHistoryDays:    l.integer("RETICORA_RETENTION_HISTORY_DAYS", MinRetentionHistoryDays),
@@ -367,6 +383,16 @@ func (c *Config) Validate(noDB bool) error {
 	}
 	if c.TrialMaxCIs < 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_TRIAL_MAX_CIS must not be negative, got %d", c.TrialMaxCIs))
+	}
+	if c.SMTPHost != "" {
+		switch {
+		case c.SMTPFrom == "":
+			errs = append(errs, fmt.Errorf("RETICORA_SMTP_FROM is required with RETICORA_SMTP_HOST"))
+		case c.SMTPTLS != "starttls" && c.SMTPTLS != "tls" && c.SMTPTLS != "none":
+			errs = append(errs, fmt.Errorf("RETICORA_SMTP_TLS=%q is not one of starttls, tls, none", c.SMTPTLS))
+		case c.SMTPPort < 1 || c.SMTPPort > 65535:
+			errs = append(errs, fmt.Errorf("RETICORA_SMTP_PORT=%d is out of range", c.SMTPPort))
+		}
 	}
 	for _, r := range []struct {
 		key        string

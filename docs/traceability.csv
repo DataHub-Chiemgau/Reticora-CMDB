@@ -316,3 +316,6 @@ AUD-07;[B];B;backend/internal/citype/export_audit_integration_test.go;WP-134
 NFR-06;[B];B;backend/internal/jobs/retention_integration_test.go;WP-135
 EVT-01;[B];B;backend/internal/events/outbox_integration_test.go;WP-136
 EVT-02;[B];B;backend/internal/events/outbox_integration_test.go;WP-136
+NTF-01;[B];B;backend/internal/notify/channel_test.go;WP-137
+TEC-13;[B];B;backend/internal/notify/channel_test.go;WP-137
+REP-01;[B];B;backend/internal/notify/channel_test.go;WP-137
