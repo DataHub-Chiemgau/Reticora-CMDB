@@ -2,6 +2,9 @@
 Ein PR = ein Arbeitspaket (DOD-01, 0,5–2 PT). Die CI liest die WP-Nummern aus
 dem PR-Titel und aus der Zeile „Arbeitspakete:“ und verlangt alle
 Traceability-Zeilen, die docs/plan/implementierungsplan.md für sie vorsieht.
+Reine Planungs- und Dokumentations-PRs ohne Arbeitspaket schreiben
+„Arbeitspakete: keine“. WP-Nummern aus docs/plan/phase2/ kennt die Prüfung
+erst, wenn WP-243 (p2-trace) gemergt ist.
 -->
 
 **Arbeitspakete:** WP-nnn
@@ -23,4 +26,4 @@ Nicht zutreffende Punkte bitte mit Begründung als „entfällt“ markieren.
 - [ ] **Lint:** `make lint` bzw. CI-Lint ohne Befunde
 - [ ] **Dokumentation:** betroffene Doku aktualisiert (u. a. `docs/schema-baseline.md` bei Schemaänderungen)
 - [ ] **Traceability-Eintrag:** Zeilen des WPs in `docs/traceability.csv` mit tatsächlich angelegter Testdatei
-- [ ] **WP-Nummer:** in Titel und Zeile „Arbeitspakete“ angegeben; Voraussetzungen sind gemergt
+- [ ] **WP-Nummer:** in Titel und Zeile „Arbeitspakete“ angegeben; Voraussetzungen sind gemergt (Planungs-/Dokumentations-PR ohne WP: „Arbeitspakete: keine“)

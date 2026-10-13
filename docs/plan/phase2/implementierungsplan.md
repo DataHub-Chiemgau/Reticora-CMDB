@@ -134,6 +134,7 @@ Die Konventionen 1 bis 10 des Phase-1-Plans ([`../implementierungsplan.md`](../i
 15. **Overrides und Provenienz:** Import, Bulk und Template-Migration schreiben über die zentrale Schreibentscheidung (WP-058) mit ihrer Quelle (import 95, manual 100) und erzeugen bei manuellen Massenänderungen Overrides (OVR-03, WP-306).
 16. **PII:** Akteure, Zuweisungsempfänger, Unterzeichner und Kontakte werden nur als Surrogat-IDs gespeichert (SEC-05, WP-241); Anzeige löst zur Laufzeit auf.
 17. **Verschobene WPs:** PRs verwenden ausschließlich die Nummern dieses Plans; WP-215 bis WP-239 werden nicht mehr als PR-Nummer verwendet (E-46).
+18. **Planungs-PRs:** Dieser Plan und seine Fortschreibungen werden ohne WP-Nummer eingebracht („Arbeitspakete: keine“ in der PR-Vorlage), weil die Traceability-Prüfung die Nummern WP-243 bis WP-331 erst nach WP-243 kennt.
 
 ### Format eines WP-Blocks
 
