@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000108_ci_fields_ci01
+Stand: Migration 000109_ci_indexes
 
 ## Prüfung
 
@@ -51,6 +51,29 @@ sobald ein Eintrag nicht mehr zutrifft, die Liste kann also nur schrumpfen:
   unvollständige Down-Migrationen, die ein WP ausdrücklich nennt.
 - Nach der Änderung wird diese Datei mit dem obigen Befehl aktualisiert und mit
   committet.
+
+## Indizes ohne lange Sperren
+
+golang-migrate (und der psql-Fallback in `install-cloud.sh`) führt jede
+Migrationsdatei in einer Transaktion aus; `CREATE INDEX CONCURRENTLY` ist dort
+nicht möglich, und ein normales `CREATE INDEX` sperrt Schreibzugriffe auf die
+Tabelle, solange der Index gebaut wird. Migrationen, die Indizes auf großen
+Tabellen anlegen, verwenden deshalb `CREATE INDEX IF NOT EXISTS` mit festem
+Namen. Bei großen Datenbeständen baut der Betrieb die Indizes vor dem Update
+ohne lange Sperren vor und lässt die Migration sie dann nur noch erkennen.
+Beispiel Migration 000109 (CI-02):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_org_location ON ci (organization_id, location_id) WHERE location_id IS NOT NULL;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_org_asset ON ci (organization_id, asset_id) WHERE asset_id IS NOT NULL;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_org_parent ON ci (organization_id, parent_ci_id) WHERE parent_ci_id IS NOT NULL;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_attributes_path ON ci USING gin (attributes jsonb_path_ops);
+```
+
+Jede Anweisung einzeln ausführen (nicht in einer Transaktion); ein
+abgebrochener Lauf hinterlässt einen ungültigen Index, der mit `DROP INDEX
+CONCURRENTLY` entfernt und neu gebaut wird. Die Migration entfernt danach nur
+noch die ersetzten Indizes; `DROP INDEX` hält die Sperre nur kurz.
 
 ## Rollenvertrag (TEN-03, CH19)
 
