@@ -816,6 +816,8 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/audit/verify:
     post:
       operationId: verifyAuditChain
@@ -837,6 +839,8 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/privacy/retention:
     get:
       operationId: getRetentionPolicy
@@ -4062,6 +4066,9 @@ paths:
     get:
       operationId: listDiscoveryReviewItems
       deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/review-items'
       tags: [Discovery]
       summary: List reconciliation review items (deprecated, use /api/v1/review-items)
       parameters:
@@ -4096,6 +4103,9 @@ paths:
     post:
       operationId: resolveDiscoveryReviewItem
       deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/review-items/{id}/resolve'
       tags: [Discovery]
       summary: Resolve a reconciliation review item (deprecated, use /api/v1/review-items/{id}/resolve)
       description: >-

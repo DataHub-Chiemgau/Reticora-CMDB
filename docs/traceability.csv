@@ -363,3 +363,4 @@ API-03;[B];C;backend/internal/api/problem_test.go;WP-163
 API-02;[B];C;backend/internal/api/cursor_test.go;WP-164
 API-02;[B];C;backend/internal/api/listquery_test.go;WP-165
 API-04;[B];C;backend/internal/middleware/ratelimit_test.go;WP-166
+API-01;[B];C;backend/internal/middleware/openapi_test.go;WP-167

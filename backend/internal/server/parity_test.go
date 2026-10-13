@@ -22,6 +22,13 @@ const specPath = "../../../api/openapi.yaml"
 
 func testRouter(t *testing.T) *chi.Mux {
 	t.Helper()
+	return testRouterWith(t, &audit.Handler{})
+}
+
+// testRouterWith builds the router; a nil audit handler is the --no-db
+// profile, which has no PostgreSQL audit trail.
+func testRouterWith(t *testing.T, auditHandler *audit.Handler) *chi.Mux {
+	t.Helper()
 
 	key, err := crypto.GenerateMasterKey()
 	if err != nil {
@@ -44,7 +51,7 @@ func testRouter(t *testing.T) *chi.Mux {
 		CIService:    ci.NewServiceWithLimits(repos.CI, entitlements),
 		Credentials:  credential.NewService(repos.Credential, encryptor),
 		OIDC:         identity.NewOIDCProvider(identity.OIDCConfig{}),
-		Audit:        &audit.Handler{},
+		Audit:        auditHandler,
 	})
 	if err != nil {
 		t.Fatalf("build router: %v", err)
@@ -75,31 +82,36 @@ func routerOperations(t *testing.T, mux *chi.Mux) []speccheck.Operation {
 	return operations
 }
 
+// TestRoutesAndSpecificationAreInParity covers API-01 for both profiles:
+// the PostgreSQL profile and --no-db serve exactly the documented
+// operations.
 func TestRoutesAndSpecificationAreInParity(t *testing.T) {
 	documented, err := speccheck.Load(filepath.Clean(specPath))
 	if err != nil {
 		t.Fatalf("load spec: %v", err)
 	}
 
-	registered := routerOperations(t, testRouter(t))
+	for profile, auditHandler := range map[string]*audit.Handler{"postgres": {}, "no-db": nil} {
+		registered := routerOperations(t, testRouterWith(t, auditHandler))
 
-	// /metrics is the Prometheus scrape endpoint, not part of the tenant API
-	// contract, and is therefore excluded from the specification.
-	filtered := registered[:0]
-	for _, op := range registered {
-		if op.Path == "/metrics" {
-			continue
+		// /metrics is the Prometheus scrape endpoint, not part of the tenant
+		// API contract, and is therefore excluded from the specification.
+		filtered := registered[:0]
+		for _, op := range registered {
+			if op.Path == "/metrics" {
+				continue
+			}
+			filtered = append(filtered, op)
 		}
-		filtered = append(filtered, op)
-	}
 
-	undocumented, unimplemented := speccheck.Diff(filtered, documented)
+		undocumented, unimplemented := speccheck.Diff(filtered, documented)
 
-	if len(undocumented) > 0 {
-		t.Errorf("routes registered but missing from api/openapi.yaml:\n%s", format(undocumented))
-	}
-	if len(unimplemented) > 0 {
-		t.Errorf("operations documented in api/openapi.yaml but not registered:\n%s", format(unimplemented))
+		if len(undocumented) > 0 {
+			t.Errorf("%s: routes registered but missing from api/openapi.yaml:\n%s", profile, format(undocumented))
+		}
+		if len(unimplemented) > 0 {
+			t.Errorf("%s: operations documented in api/openapi.yaml but not registered:\n%s", profile, format(unimplemented))
+		}
 	}
 }
 

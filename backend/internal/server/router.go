@@ -419,9 +419,17 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	}
 
 	// The audit trail is hash-chained in PostgreSQL and therefore has no
-	// in-memory counterpart; it is only served when a pool was configured.
+	// in-memory counterpart. Without a pool (--no-db) its operations still
+	// exist and answer 503, so both profiles serve the same contract
+	// (API-01).
 	if opts.Audit != nil {
 		opts.Audit.RegisterRoutes(protected)
+	} else {
+		unavailable := func(w http.ResponseWriter, _ *http.Request) {
+			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "the audit trail needs PostgreSQL; it is not available with --no-db")
+		}
+		protected.Get("/api/v1/audit", unavailable)
+		protected.Post("/api/v1/audit/verify", unavailable)
 	}
 
 	return mux, httpMetrics, nil

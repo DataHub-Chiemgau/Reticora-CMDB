@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -87,5 +88,50 @@ func TestOpenAPIValidationLeavesCompressedBodiesToTheHandler(t *testing.T) {
 
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", w.Code)
+	}
+}
+
+// TestDeprecatedOperationsCarryLifecycleHeaders covers API-01: an operation
+// the specification marks deprecated answers with Deprecation, Sunset and
+// a successor link; other operations carry none.
+func TestDeprecatedOperationsCarryLifecycleHeaders(t *testing.T) {
+	h := OpenAPIValidation(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/discovery/review-items/7b0c6e1a-0000-4000-8000-000000000001/resolve", nil))
+	if got := w.Header().Get("Sunset"); got != "Thu, 14 Oct 2027 00:00:00 GMT" {
+		t.Errorf("Sunset %q", got)
+	}
+	if got := w.Header().Get("Deprecation"); got != "@1791849600" {
+		t.Errorf("Deprecation %q", got)
+	}
+	if got := w.Header().Get("Link"); got != `</api/v1/review-items/{id}/resolve>; rel="successor-version"` {
+		t.Errorf("Link %q", got)
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/review-items", nil))
+	if w.Header().Get("Sunset") != "" || w.Header().Get("Deprecation") != "" {
+		t.Errorf("a current operation is marked deprecated: %v", w.Header())
+	}
+}
+
+// TestDeprecationsNeedTwelveMonthsNotice: the shipped specification is
+// valid, and a deprecation without sunset or with less than 12 months of
+// notice is rejected.
+func TestDeprecationsNeedTwelveMonthsNotice(t *testing.T) {
+	spec, err := os.ReadFile("../../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deps, perr := ParseDeprecations(spec); perr != nil || len(deps) < 2 {
+		t.Fatalf("shipped spec: %d deprecations, %v", len(deps), perr)
+	}
+	for name, doc := range map[string]string{
+		"no sunset":        "paths:\n  /a:\n    get:\n      deprecated: true\n      x-deprecated-at: '2026-01-01'\n",
+		"too short":        "paths:\n  /a:\n    get:\n      deprecated: true\n      x-deprecated-at: '2026-01-01'\n      x-sunset: '2026-06-01'\n",
+		"no deprecated-at": "paths:\n  /a:\n    get:\n      deprecated: true\n      x-sunset: '2028-01-01'\n",
+	} {
+		if _, perr := ParseDeprecations([]byte(doc)); perr == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }
