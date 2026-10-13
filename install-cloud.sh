@@ -1395,6 +1395,14 @@ start_stack() {
         show_service_logs frontend
         die "Frontend did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs frontend"
     }
+    # The collector NATS endpoint (mTLS, port 4222) starts once the server
+    # has written the collector PKI into the shared volume.
+    info "Starting the collector NATS endpoint …"
+    compose_cmd up -d nats-edge
+    wait_for_service nats-edge || {
+        show_service_logs nats-edge
+        die "Collector NATS endpoint did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs nats-edge"
+    }
     # Start the certbot renewal daemon only when TLS is configured; without a
     # domain it has nothing to do.
     if [ -n "$RETICORA_TLS_DOMAIN" ]; then
