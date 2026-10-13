@@ -92,7 +92,11 @@ export interface paths {
     /** List every organization */
     get: operations['listOrganizationsAsOperator'];
     put?: never;
-    post?: never;
+    /**
+     * Create an organization with plan and limits (TLC-02)
+     * @description Runs the creation chain of the self-signup without verification: the organization with its slug (derived from the name unless given), the default VRF and standard roles, the first user as org_admin, and the entitlements of the plan (source manual) with the given limits in the limits of their feature. With an IdP admin client the first org_admin receives an account and the IdP's mail to set a password (`admin_invited`). The creation and its `org.create` entry in operator_audit are atomic. Reseller creation is phase 4.
+     */
+    post: operations['createOrganizationAsOperator'];
     delete?: never;
     options?: never;
     head?: never;
@@ -171,6 +175,66 @@ export interface paths {
     get: operations['getAuthConfig'];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/signup/challenge': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * ALTCHA challenge for the signup form (TLC-01, E-33)
+     * @description A signed proof-of-work challenge of the self-hosted ALTCHA. The solution is sent as `altcha` with the signup request; it is valid for ten minutes and accepted once.
+     */
+    get: operations['getSignupChallenge'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/signup': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Request a self-signup (TLC-01)
+     * @description Stores a signup request and sends a verification link to the address. The answer is 202 whether or not the address already has an account. The request passes the pre-auth limit (AUT-10), at most five signups per client IP and hour (429), the ALTCHA solution (400, `field` = `altcha`) and the disposable-domain blocklist (422, `field` = `email`). 503 while no e-mail channel, IdP administration or protection store is available.
+     */
+    post: operations['submitSignup'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/signup/verify': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Verify a self-signup and create the organization (TLC-01)
+     * @description The token of the verification link is the credential. Creates, in one transaction, the organization with a slug derived from its name, the default VRF, the first user as org_admin and the trial entitlements (ENT-07), sets the password in the IdP (it is never stored by Reticora) and records the signup in operator_audit. 404 for an unknown or used token, 410 for an expired one, 409 when the address already has an IdP account, 422 when the IdP rejects the password.
+     */
+    post: operations['verifySignup'];
     delete?: never;
     options?: never;
     head?: never;
@@ -2239,6 +2303,27 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/org': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get the caller's organization (LOC-01) */
+    get: operations['getOrganization'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update name, settings, time zone, currency and locale of the organization
+     * @description The time zone is an IANA name (Europe/Berlin), the currency an ISO 4217 code (EUR) and the locale a BCP 47 tag, stored in canonical form (de-ch → de-CH). Slug and plan are not changed here. An invalid value answers 400 naming the field.
+     */
+    patch: operations['updateOrganization'];
+    trace?: never;
+  };
   '/api/v1/clients': {
     parameters: {
       query?: never;
@@ -3116,6 +3201,96 @@ export interface paths {
     /** Link a document to another entity */
     post: operations['linkDocument'];
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/invitations': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the organization's invitations (TLC-03)
+     * @description Status is derived from acceptance and expiry (pending, accepted, expired). Requires user:manage.
+     */
+    get: operations['listInvitations'];
+    put?: never;
+    /**
+     * Invite an address with a predefined role and scope (TLC-03)
+     * @description The invitation is valid for seven days. The response carries the token once; only its hash is stored. Role and scope must exist in the organization (422 otherwise); a pending invitation for the same address is a conflict (renew it instead). Requires user:manage.
+     */
+    post: operations['issueInvitation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/invitations/accept': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Accept an invitation (TLC-03)
+     * @description The token is the credential; the request passes the pre-auth limit (AUT-10). The invitation is consumed atomically and once: it creates the user with the invited role and scope. With the IdP admin client the password creates the IdP account (never stored by Reticora); otherwise the user signs in with an existing IdP account of the address, which the first login links. 404 for an unknown, revoked or used token, 410 for an expired one, 409 when the organization already has a user with the address.
+     */
+    post: operations['acceptInvitation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/invitations/{id}/renew': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Renew a pending or expired invitation (TLC-03)
+     * @description A new token and seven more days; the old token stops working. An accepted invitation is 409. Requires user:manage.
+     */
+    post: operations['renewInvitation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/invitations/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Revoke a pending or expired invitation (TLC-03)
+     * @description An accepted invitation stays as a record (409). Requires user:manage.
+     */
+    delete: operations['revokeInvitation'];
     options?: never;
     head?: never;
     patch?: never;
@@ -4457,6 +4632,55 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/attribute-definitions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List attribute definitions (MET-10)
+     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `scope` (type, global).
+     */
+    get: operations['listAttributeDefinitions'];
+    put?: never;
+    /**
+     * Create an attribute definition (MET-10)
+     * @description Without `ci_type_id` the definition is global (every type of the organization). Creating, changing or deleting a type's definition regenerates the type's `attribute_schema` and raises its `schema_version`. Requires ci_attribute:manage.
+     */
+    post: operations['createAttributeDefinition'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/attribute-definitions/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Read an attribute definition */
+    get: operations['getAttributeDefinition'];
+    put?: never;
+    post?: never;
+    /** Delete an attribute definition */
+    delete: operations['deleteAttributeDefinition'];
+    options?: never;
+    head?: never;
+    /**
+     * Update an attribute definition
+     * @description Key, CI type and scope are immutable; system definitions are read-only (403).
+     */
+    patch: operations['updateAttributeDefinition'];
+    trace?: never;
+  };
   '/api/v1/ci-types': {
     parameters: {
       query?: never;
@@ -4464,10 +4688,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List and create CI types */
+    /**
+     * List CI types
+     * @description The organization's types and the system types (MET-01 – MET-03).
+     */
     get: operations['listCiTypes'];
     put?: never;
-    /** List and create CI types */
+    /**
+     * Create a CI type
+     * @description `display_name` is a map of languages (de, en); a missing language takes the other one or the name, a plain string is accepted for both. `is_observable` defaults to true for physical and false for logical types (MET-01).
+     */
     post: operations['createCiTypes'];
     delete?: never;
     options?: never;
@@ -4482,7 +4712,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List built-in CI type templates */
+    /**
+     * List built-in CI type templates
+     * @description Editable starting points; network, vlan and contract are no CI types and never offered (MET-03, DB-05).
+     */
     get: operations['listCiTypesTemplates'];
     put?: never;
     post?: never;
@@ -4499,14 +4732,14 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read and update a CI type */
+    /** Read a CI type */
     get: operations['getCiTypesId'];
     put?: never;
     post?: never;
     delete?: never;
     options?: never;
     head?: never;
-    /** Read and update a CI type */
+    /** Update a CI type */
     patch: operations['updateCiTypesId'];
     trace?: never;
   };
@@ -5232,6 +5465,326 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    AttributeDefinition: {
+      id: string;
+      /** @description Empty for system definitions. */
+      organization_id?: string;
+      /** @description Empty for global definitions. */
+      ci_type_id?: string;
+      /** @enum {string} */
+      scope: 'type' | 'global';
+      key: string;
+      display_name: components['schemas']['LocalizedText'];
+      description?: string;
+      data_type: string;
+      required: boolean;
+      default?: unknown;
+      enum_values?: string[];
+      multi_value: boolean;
+      searchable: boolean;
+      unique: boolean;
+      /** @enum {string} */
+      unique_scope: 'org' | 'client';
+      inheritable: boolean;
+      validation?: {
+        [key: string]: unknown;
+      };
+      conditional?: {
+        [key: string]: unknown;
+      };
+      reference_target?: string;
+      group?: string;
+      order: number;
+      unit?: string;
+      is_system: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    AttributeDefinitionListResponse: {
+      data: components['schemas']['AttributeDefinition'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    AttributeDefinitionCreate: {
+      /** @description Omitted for a global definition. */
+      ci_type_id?: string;
+      key: string;
+      display_name?: components['schemas']['LocalizedText'] | string;
+      description?: string;
+      /** @description Data type of MET-11 — phase 1: text, multiline, integer, decimal, boolean, date, datetime, enum, multiselect, ip, mac, url, email, uuid; phase 2: file, json, reference (former names textarea, multi_enum and the specific reference types stay valid). */
+      data_type: string;
+      required?: boolean;
+      /** @description Any JSON value valid for the data type. */
+      default?: unknown;
+      enum_values?: string[];
+      multi_value?: boolean;
+      searchable?: boolean;
+      unique?: boolean;
+      /** @enum {string} */
+      unique_scope?: 'org' | 'client';
+      inheritable?: boolean;
+      validation?: {
+        [key: string]: unknown;
+      };
+      conditional?: {
+        [key: string]: unknown;
+      };
+      reference_target?: string;
+      group?: string;
+      order?: number;
+      unit?: string;
+    };
+    AttributeDefinitionPatch: {
+      display_name?: components['schemas']['LocalizedText'] | string;
+      description?: string;
+      /** @description Data type of MET-11 — phase 1: text, multiline, integer, decimal, boolean, date, datetime, enum, multiselect, ip, mac, url, email, uuid; phase 2: file, json, reference (former names textarea, multi_enum and the specific reference types stay valid). */
+      data_type?: string;
+      required?: boolean;
+      /** @description Any JSON value valid for the data type. */
+      default?: unknown;
+      enum_values?: string[];
+      multi_value?: boolean;
+      searchable?: boolean;
+      unique?: boolean;
+      /** @enum {string} */
+      unique_scope?: 'org' | 'client';
+      inheritable?: boolean;
+      validation?: {
+        [key: string]: unknown;
+      };
+      conditional?: {
+        [key: string]: unknown;
+      };
+      reference_target?: string;
+      group?: string;
+      order?: number;
+      unit?: string;
+    };
+    /** @description A label per language (MET-01). */
+    LocalizedText: {
+      de?: string;
+      en?: string;
+    };
+    CIType: {
+      id: string;
+      /** @description Empty for system types. */
+      organization_id?: string;
+      key: string;
+      name: string;
+      display_name: components['schemas']['LocalizedText'];
+      icon?: string;
+      description?: string;
+      category?: string;
+      is_builtin: boolean;
+      is_system: boolean;
+      is_active: boolean;
+      is_logical: boolean;
+      /** @description The offline detector watches CIs of the type (LCY-05); true for physical, false for logical types by default. */
+      is_observable: boolean;
+      /** @description Version of the generated attribute schema. */
+      schema_version: number;
+      /** @description JSON Schema 2020-12 generated from the type's attribute definitions; read-only (DB-03). */
+      readonly attribute_schema?: {
+        [key: string]: unknown;
+      };
+      readonly required_fields?: string[];
+      version: number;
+      cloned_from_id?: string;
+      template_key?: string;
+      lifecycle_definition_id?: string;
+      capabilities: {
+        [key: string]: unknown;
+      };
+      allowed_relationship_types: string[];
+      ui_schema: {
+        [key: string]: unknown;
+      };
+      compliance_rules: unknown[];
+      discovery_mappings: unknown[];
+      fields?: {
+        [key: string]: unknown;
+      }[];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CITypeListResponse: {
+      data: components['schemas']['CIType'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    CITypeCreateRequest: {
+      key?: string;
+      name: string;
+      display_name?: components['schemas']['LocalizedText'] | string;
+      icon?: string;
+      description?: string;
+      category?: string;
+      is_logical?: boolean;
+      is_observable?: boolean;
+      template_key?: string;
+      lifecycle_definition_id?: string;
+      capabilities?: {
+        [key: string]: unknown;
+      };
+      allowed_relationship_types?: string[];
+      ui_schema?: {
+        [key: string]: unknown;
+      };
+      compliance_rules?: unknown[];
+      discovery_mappings?: unknown[];
+      fields?: {
+        [key: string]: unknown;
+      }[];
+    };
+    CITypeUpdateRequest: {
+      name?: string;
+      display_name?: components['schemas']['LocalizedText'] | string;
+      icon?: string;
+      description?: string;
+      category?: string;
+      is_logical?: boolean;
+      is_observable?: boolean;
+      lifecycle_definition_id?: string;
+      capabilities?: {
+        [key: string]: unknown;
+      };
+      allowed_relationship_types?: string[];
+      ui_schema?: {
+        [key: string]: unknown;
+      };
+      compliance_rules?: unknown[];
+      discovery_mappings?: unknown[];
+    };
+    InvitationRequest: {
+      email: string;
+      /** Format: uuid */
+      role_id: string;
+      /**
+       * @default org
+       * @enum {string}
+       */
+      scope_type: 'org' | 'client' | 'site';
+      /**
+       * Format: uuid
+       * @description The client or site of a scoped invitation; omitted for org.
+       */
+      scope_id?: string;
+    };
+    Invitation: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      email: string;
+      /** Format: uuid */
+      role_id: string;
+      /** @enum {string} */
+      scope_type: 'org' | 'client' | 'site';
+      /** Format: uuid */
+      scope_id?: string;
+      /** Format: uuid */
+      invited_by: string;
+      /** @enum {string} */
+      status: 'pending' | 'accepted' | 'expired';
+      /** Format: date-time */
+      expires_at: string;
+      /** Format: date-time */
+      accepted_at?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** @description Only in the response of issue and renewal; shown once. */
+      token?: string;
+    };
+    InvitationListResponse: {
+      data: components['schemas']['Invitation'][];
+      total: number;
+      limit: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    InvitationAcceptance: {
+      token: string;
+      /** @description Required (at least 12 characters) when the IdP admin client is configured; set directly in the IdP. */
+      password?: string;
+      display_name?: string;
+    };
+    AcceptedInvitation: {
+      /** Format: uuid */
+      user_id: string;
+      /** Format: uuid */
+      organization_id: string;
+      email: string;
+      account_created: boolean;
+    };
+    OperatorCreateOrganizationRequest: {
+      name: string;
+      /** @description Optional; derived from the name (with -2, -3 … on collision) when omitted. A given, taken slug is 409. */
+      slug?: string;
+      /** @enum {string} */
+      plan: 'essential' | 'standard' | 'pro' | 'enterprise';
+      /** @description Quotas stored in the limits of their feature's entitlement (max_cis and max_users on cmdb_core, max_collectors on discovery, max_api_keys on api_access). */
+      limits?: {
+        /** Format: int64 */
+        max_cis?: number;
+        /** Format: int64 */
+        max_collectors?: number;
+        /** Format: int64 */
+        max_users?: number;
+        /** Format: int64 */
+        max_api_keys?: number;
+      };
+      admin_email: string;
+      admin_display_name?: string;
+    };
+    OperatorCreatedOrganization: {
+      /** Format: uuid */
+      id: string;
+      name: string;
+      slug: string;
+      /** @enum {string} */
+      plan: 'essential' | 'standard' | 'pro' | 'enterprise';
+      /** @description The first org_admin received an IdP account and an invitation mail; otherwise the account is provisioned in the IdP by hand and linked on first login. */
+      admin_invited: boolean;
+      /** Format: date-time */
+      created_at: string;
+    };
+    SignupRequest: {
+      organization_name: string;
+      email: string;
+      display_name?: string;
+      /** @description Base64-encoded JSON solution of a challenge from GET /api/v1/signup/challenge. */
+      altcha: string;
+    };
+    AltchaChallenge: {
+      /** @enum {string} */
+      algorithm: 'SHA-256';
+      challenge: string;
+      maxnumber: number;
+      salt: string;
+      signature: string;
+    };
+    SignupVerification: {
+      token: string;
+      /** @description Set directly in the IdP; at least 12 characters, the IdP's password policy applies. */
+      password: string;
+    };
+    SignupResult: {
+      /** Format: uuid */
+      organization_id: string;
+      organization_slug: string;
+      /** @enum {string} */
+      plan: 'essential' | 'standard' | 'pro' | 'enterprise';
+      /** Format: date-time */
+      trial_ends_at: string;
+    };
     CollectorHeartbeatRequest: {
       spool?: components['schemas']['CollectorSpoolReport'];
     };
@@ -5279,6 +5832,8 @@ export interface components {
       /** Format: uri */
       instance?: string;
       trace_id?: string;
+      /** @description Request field a 400 or 409 refers to (e.g. the unique `name` of a client). */
+      field?: string;
     };
     PaginationEnvelope: {
       total: number;
@@ -7632,11 +8187,54 @@ export interface components {
       nodes: components['schemas']['TopologyNode'][];
       edges: components['schemas']['TopologyEdge'][];
     };
+    /** @description The tenant (LOC-01). */
+    Organization: {
+      id: string;
+      name: string;
+      slug: string;
+      plan: string;
+      settings: {
+        [key: string]: unknown;
+      };
+      /**
+       * @description IANA time zone name.
+       * @example Europe/Berlin
+       */
+      timezone: string;
+      /**
+       * @description ISO 4217 currency code.
+       * @example EUR
+       */
+      currency: string;
+      /**
+       * @description BCP 47 language tag.
+       * @example de-DE
+       */
+      locale: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    UpdateOrganizationRequest: {
+      name?: string;
+      settings?: {
+        [key: string]: unknown;
+      };
+      timezone?: string;
+      currency?: string;
+      locale?: string;
+    };
+    /** @description Customer of the organization (LOC-02); the name is unique per organization. */
     Client: {
       id: string;
       organization_id: string;
       name: string;
       slug: string;
+      /** @description Reference in an external system (CRM, PSA). */
+      external_ref: string | null;
+      /** @description Optional IANA time zone of the client. */
+      timezone: string | null;
       settings: {
         [key: string]: unknown;
       };
@@ -7651,6 +8249,9 @@ export interface components {
       slug?: string;
       /** @description Alias for slug (accepted for integrations sending {name, code}). */
       code?: string;
+      external_ref?: string;
+      /** @description IANA time zone name. */
+      timezone?: string;
       settings?: {
         [key: string]: unknown;
       };
@@ -7658,6 +8259,10 @@ export interface components {
     UpdateClientRequest: {
       name?: string;
       slug?: string;
+      /** @description Empty clears the reference. */
+      external_ref?: string;
+      /** @description IANA time zone name; empty clears it. */
+      timezone?: string;
       settings?: {
         [key: string]: unknown;
       };
@@ -7665,6 +8270,7 @@ export interface components {
     ClientListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Client'][];
     };
+    /** @description Site of a client (LOC-03); the name is unique per (organization, client). */
     Site: {
       id: string;
       organization_id: string;
@@ -7674,6 +8280,8 @@ export interface components {
       geo_lat?: number;
       geo_lon?: number;
       notes?: string;
+      /** @description Optional IANA time zone of the site. */
+      timezone: string | null;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -7686,6 +8294,8 @@ export interface components {
       geo_lat?: number;
       geo_lon?: number;
       notes?: string;
+      /** @description IANA time zone name. */
+      timezone?: string;
     };
     UpdateSiteRequest: {
       name?: string;
@@ -7693,10 +8303,13 @@ export interface components {
       geo_lat?: number;
       geo_lon?: number;
       notes?: string;
+      /** @description IANA time zone name; empty clears it. */
+      timezone?: string;
     };
     SiteListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Site'][];
     };
+    /** @description Building of a site (LOC-04); the name is unique per site. */
     Building: {
       id: string;
       organization_id: string;
@@ -7723,6 +8336,7 @@ export interface components {
     BuildingListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Building'][];
     };
+    /** @description Room of a building (LOC-05); the name is unique per building. */
     Room: {
       id: string;
       organization_id: string;
@@ -7763,12 +8377,13 @@ export interface components {
     RoomListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Room'][];
     };
+    /** @description Rack of a room (LOC-06); the name is unique per room. */
     Rack: {
       id: string;
       organization_id: string;
       room_id: string;
       name: string;
-      height_u: number;
+      height_units: number;
       width_mm: number;
       depth_mm: number;
       notes?: string;
@@ -7780,14 +8395,16 @@ export interface components {
     CreateRackRequest: {
       room_id: string;
       name: string;
-      height_u?: number;
+      /** @description 1–60 height units; absent means 42 on create. Any other value, an explicit 0 included, answers 422. */
+      height_units?: number;
       width_mm?: number;
       depth_mm?: number;
       notes?: string;
     };
     UpdateRackRequest: {
       name?: string;
-      height_u?: number;
+      /** @description 1–60 height units; absent means 42 on create. Any other value, an explicit 0 included, answers 422. */
+      height_units?: number;
       width_mm?: number;
       depth_mm?: number;
       notes?: string;
@@ -8415,8 +9032,26 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
+    /** @description A field value is outside its allowed range; `field` names it. */
+    UnprocessableEntity: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
     /** @description Upstream delivery failed */
     BadGateway: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description The pre-auth budget of the client IP is spent (AUT-10) */
+    TooManyRequests: {
       headers: {
         [name: string]: unknown;
       };
@@ -8615,6 +9250,35 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
+  createOrganizationAsOperator: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['OperatorCreateOrganizationRequest'];
+      };
+    };
+    responses: {
+      /** @description Organization created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OperatorCreatedOrganization'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
   listOrganizationEntitlementsAsOperator: {
     parameters: {
       query?: never;
@@ -8751,6 +9415,101 @@ export interface operations {
           'application/json': components['schemas']['AuthConfigResponse'];
         };
       };
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getSignupChallenge: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Challenge */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AltchaChallenge'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  submitSignup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SignupRequest'];
+      };
+    };
+    responses: {
+      /** @description Verification link sent */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** @enum {string} */
+            status: 'verification_sent';
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
+      422: components['responses']['UnprocessableEntity'];
+      429: components['responses']['TooManyRequests'];
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  verifySignup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SignupVerification'];
+      };
+    };
+    responses: {
+      /** @description Organization created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SignupResult'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description The verification link has expired */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
+      429: components['responses']['TooManyRequests'];
       500: components['responses']['InternalServerError'];
       503: components['responses']['ServiceUnavailable'];
     };
@@ -13282,6 +14041,55 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
+  getOrganization: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The organization */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Organization'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateOrganization: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateOrganizationRequest'];
+      };
+    };
+    responses: {
+      /** @description Organization updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Organization'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
   listClients: {
     parameters: {
       query?: {
@@ -13336,6 +14144,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13415,6 +14224,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listSites: {
@@ -13472,6 +14282,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13552,6 +14363,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listBuildings: {
@@ -13609,6 +14421,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13689,6 +14502,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listRooms: {
@@ -13746,6 +14560,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13826,6 +14641,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listRacks: {
@@ -13883,6 +14699,8 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13963,6 +14781,8 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listRackMounts: {
@@ -15770,6 +16590,152 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  listInvitations: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Invitations, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['InvitationListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  issueInvitation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['InvitationRequest'];
+      };
+    };
+    responses: {
+      /** @description Invitation issued, with its token */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Invitation'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  acceptInvitation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['InvitationAcceptance'];
+      };
+    };
+    responses: {
+      /** @description Invitation accepted, user created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AcceptedInvitation'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description The invitation has expired */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
+      429: components['responses']['TooManyRequests'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  renewInvitation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Invitation renewed, with its new token */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Invitation'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  revokeInvitation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Invitation revoked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listServiceAccounts: {
@@ -19700,6 +20666,144 @@ export interface operations {
       };
     };
   };
+  listAttributeDefinitions: {
+    parameters: {
+      query?: {
+        ci_type_id?: string;
+        scope?: 'type' | 'global';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Attribute definitions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeDefinitionListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  createAttributeDefinition: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AttributeDefinitionCreate'];
+      };
+    };
+    responses: {
+      /** @description Attribute definition created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeDefinition'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getAttributeDefinition: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Attribute definition */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeDefinition'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  deleteAttributeDefinition: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Attribute definition deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  updateAttributeDefinition: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AttributeDefinitionPatch'];
+      };
+    };
+    responses: {
+      /** @description Attribute definition updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeDefinition'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
   listCiTypes: {
     parameters: {
       query?: never;
@@ -19709,12 +20813,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List and create CI types */
+      /** @description CI types */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CITypeListResponse'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -19732,15 +20838,22 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CITypeCreateRequest'];
+      };
+    };
     responses: {
-      /** @description List and create CI types */
+      /** @description CI type created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIType'];
+        };
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -19759,12 +20872,16 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List built-in CI type templates */
+      /** @description Templates */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': {
+            data: components['schemas']['CIType'][];
+          };
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -19784,12 +20901,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Read and update a CI type */
+      /** @description CI type */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIType'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -19807,15 +20926,22 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CITypeUpdateRequest'];
+      };
+    };
     responses: {
-      /** @description Read and update a CI type */
+      /** @description CI type updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIType'];
+        };
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {

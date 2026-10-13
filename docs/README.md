@@ -254,7 +254,10 @@ For a signing key rotation (SEC-06) set the new key in
 Server-side the token signature is always verified by
 `middleware.AuthMiddlewareWithVerifier` — a missing `RETICORA_SESSION_KEY_PATH`
 is a fatal startup error unless the operator explicitly opts into the insecure
-development mode with `RETICORA_ALLOW_INSECURE_DEV_AUTH=true`. Only
+development mode with `RETICORA_ALLOW_INSECURE_DEV_AUTH=true`. That development
+login exists only with `RETICORA_ENVIRONMENT=development` (AUT-03): the start
+check refuses it in staging and production, and without a verifier the
+middleware rejects every session token outside development. Only
 `/api/v1/auth/{config,callback,refresh,logout}` are unauthenticated.
 
 **API keys (AUT-04):** `POST /api/v1/api-keys` (permission `apikey:manage`)
@@ -368,6 +371,26 @@ deny access (fail-closed). The tenant API is read-only (`GET
 /api/v1/entitlements`); entitlements are written by the operator only,
 `POST /api/v1/admin/orgs/{id}/entitlements`, and every change is recorded
 in `operator_audit` with the previous and the new state (ENT-04, E-12).
+Attribute rules use the JSON rule AST of `api/rules.schema.json` (MET-45,
+phase 1: required, pattern, range, enum, combined with all).
+`backend/internal/rules` evaluates them bindingly, `frontend/src/rules` for
+form previews; both run the cases of `api/rules.conformance.json`.
+
+Users join an organization by invitation (`/api/v1/invitations`, TLC-03,
+`user:manage`): an invitation names the address, a role and its scope
+(org, client or site within the issuer's own scope), is valid for seven
+days and stores only the hash of its token, which the response shows once.
+`POST /api/v1/invitations/accept` (public, pre-auth limit) consumes it
+atomically and once and creates the user with that role; with the Keycloak
+admin client the accepting person's password creates the IdP account.
+Expired invitations are renewed with a new token; pending ones can be
+revoked. Every step is audited.
+Operators create organizations with plan and limits through
+`POST /api/v1/admin/orgs` (TLC-02): the same creation chain as the
+self-signup (slug, default VRF, first org_admin, entitlements of the plan
+with the given limits), atomically with an `org.create` entry in
+`operator_audit`; with the Keycloak admin client the first org_admin is
+invited by the IdP's mail to set a password.
 Plan matrix (ENT-06):
 
 | Plan | Features |
@@ -852,6 +875,10 @@ The server is configured via environment variables:
 - `RETICORA_REDIS_URL` — Redis connection string.
 - `RETICORA_ENVIRONMENT` — Environment name (development/staging/production).
 - `RETICORA_DEFAULT_PLAN` — Plan provisioned for the `--no-db` demo organization (default `essential`); organizations in the database are provisioned with their own plan.
+- `RETICORA_SIGNUP_VERIFY_URL` — page the self-signup verification link opens; the token is appended as `?token=` (TLC-01). Self-signup also needs `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` / `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET` (a confidential client of the realm in `RETICORA_OIDC_ISSUER_URL` whose service account holds `realm-management/manage-users`) and an e-mail channel (WP-137); until all exist, `POST /api/v1/signup` answers 503.
+- `RETICORA_SIGNUP_CAPTCHA_KEY` — HMAC key (at least 32 characters, the same on every instance) that signs the self-hosted ALTCHA challenges of `GET /api/v1/signup/challenge` (E-33); without it each instance draws a random key, so challenges verify only where they were issued. Signups additionally pass the pre-auth limit, at most 5 signups per client IP and hour (shared cache) and the disposable-domain blocklist (`backend/internal/signup/disposable/`, updated monthly by the *Disposable domains* workflow).
+- `RETICORA_SIGNUP_BLOCKED_DOMAINS`, `RETICORA_SIGNUP_ALLOWED_DOMAINS` — comma-separated operator entries that extend the disposable-domain blocklist and allowlist; a domain covers its subdomains, the allowlist wins.
+- `RETICORA_TRIAL_PLAN`, `RETICORA_TRIAL_DAYS`, `RETICORA_TRIAL_MAX_CIS` — trial of a self-signed-up organization (ENT-07, defaults `standard`, `30`, `100`); features the `essential` plan lacks expire at the trial's end.
 - `RETICORA_ENTITLEMENT_ENFORCEMENT` — Set to `false` to disable feature/limit enforcement (default `true`).
 - `RETICORA_SEARCH_BACKEND` — `postgres` (default) or `opensearch`.
 - `RETICORA_OPENSEARCH_URL`, `RETICORA_OPENSEARCH_USERNAME`, `RETICORA_OPENSEARCH_PASSWORD`, `RETICORA_OPENSEARCH_INDEX` — OpenSearch connection settings.
@@ -862,7 +889,7 @@ The server is configured via environment variables:
 - `RETICORA_OTEL_ENDPOINT` — OTLP HTTP collector endpoint for traces/metrics; empty (default) keeps no-op telemetry.
 - `RETICORA_METRICS_TENANT_LABEL` — set to `true` to add the `organization_id` label to HTTP request metrics (default `false`; multiplies series by tenant count).
 - `RETICORA_EGRESS_ALLOW_PRIVATE` — set to `true` to let webhooks and IGA connectors reach private, loopback and link-local destinations (on-premises installations; default `false`). Cloud metadata endpoints stay blocked; DNS pinning and the 3-redirect limit always apply (SEC-08).
-- `RETICORA_PREAUTH_RATE_LIMIT_RPM` — authentication attempts per client IP and minute before any credential check (default `20`, AUT-10): requests to `/auth/callback`, `/auth/refresh` and `/collectors/enroll` and every failed authentication count; once spent, the IP gets 429 until the minute is over.
+- `RETICORA_PREAUTH_RATE_LIMIT_RPM` — authentication attempts per client IP and minute before any credential check (default `20`, AUT-10): requests to `/auth/callback`, `/auth/refresh`, `/collectors/enroll`, `/signup`, `/signup/verify` and `/invitations/accept` and every failed authentication count; once spent, the IP gets 429 until the minute is over.
 - `RETICORA_WORKER_<NAME>_ENABLED` — operator switch per background worker (OPS-02, default `true`): `WEBHOOK_DISPATCHER`, `EXPORT`, `INGEST`, `MONITORING`, `RESERVATION_SWEEPER`. A disabled worker is not started in that process; see [`docs/ops/workers.md`](ops/workers.md).
 - `RETICORA_TRUSTED_PROXIES` — comma-separated CIDRs of reverse proxies whose `X-Real-IP` header names the client for IP-based limits (default loopback and private networks; empty trusts none).
 - Endpoint agent channel (AGT-03): the agent sends telemetry only over TLS — to the collector relay (`RETICORA_COLLECTOR_RELAY`, host:port) or directly to an `https://` `RETICORA_SERVER_URL`; there is no plaintext fallback. It authenticates with the `agent_token` returned once by `POST /api/v1/agents/enroll` (`RETICORA_AGENT_TOKEN` or `RETICORA_AGENT_TOKEN_FILE`); `RETICORA_TLS_CA_FILE` adds a private CA. The collector relay listens on `RETICORA_AGENT_RELAY_ADDR` (default `:9443`) only when `RETICORA_AGENT_RELAY_TLS_CERT_FILE` and `RETICORA_AGENT_RELAY_TLS_KEY_FILE` are set, and forwards each message with the agent's token to `/api/v1/agents/telemetry`.

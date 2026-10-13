@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -53,9 +54,10 @@ func TestClientCRUD(t *testing.T) {
 		t.Fatalf("unexpected client: %+v", c)
 	}
 
-	// duplicate slug -> 400
-	if w := do(mux, "POST", "/api/v1/clients", `{"name":"Acme2","slug":"acme"}`, "org-1"); w.Code != http.StatusBadRequest {
-		t.Errorf("dup slug: expected 400, got %d", w.Code)
+	// duplicate slug -> 409 naming the field
+	if w := do(mux, "POST", "/api/v1/clients", `{"name":"Acme2","slug":"acme"}`, "org-1"); w.Code != http.StatusConflict ||
+		!strings.Contains(w.Body.String(), `"field":"slug"`) {
+		t.Errorf("dup slug: expected 409 for slug, got %d: %s", w.Code, w.Body.String())
 	}
 
 	// missing fields -> 400
@@ -164,5 +166,102 @@ func TestSiteBuildingRoomHierarchy(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &rl)
 	if rl.Total != 1 {
 		t.Errorf("room filter: expected 1, got %d", rl.Total)
+	}
+}
+
+// TestOrganizationFields covers WP-107 (LOC-01, API-05): GET/PATCH /org with
+// IANA time zone, ISO 4217 currency and canonical BCP 47 locale; invalid
+// values are rejected with 400 naming the field.
+func TestOrganizationFields(t *testing.T) {
+	_, _, mux := setup()
+
+	w := do(mux, "GET", "/api/v1/org", "", "org-1")
+	var o Organization
+	if err := json.Unmarshal(w.Body.Bytes(), &o); w.Code != http.StatusOK || err != nil ||
+		o.Timezone != "UTC" || o.Currency != "EUR" || o.Locale != "de-DE" {
+		t.Fatalf("get org: %d %s", w.Code, w.Body.String())
+	}
+	w = do(mux, "PATCH", "/api/v1/org", `{"timezone":"Europe/Berlin","currency":"CHF","locale":"de-ch","name":"Acme MSP"}`, "org-1")
+	if err := json.Unmarshal(w.Body.Bytes(), &o); w.Code != http.StatusOK || err != nil ||
+		o.Timezone != "Europe/Berlin" || o.Currency != "CHF" || o.Locale != "de-CH" || o.Name != "Acme MSP" {
+		t.Fatalf("patch org: %d %s", w.Code, w.Body.String())
+	}
+	for _, tc := range []struct{ body, field string }{
+		{`{"timezone":"CET2"}`, "timezone"},
+		{`{"timezone":"Mars/Olympus"}`, "timezone"},
+		{`{"timezone":"Local"}`, "timezone"},
+		{`{"currency":"EURO"}`, "currency"},
+		{`{"currency":"eur"}`, "currency"},
+		{`{"currency":"ABC"}`, "currency"},
+		{`{"locale":"not a locale"}`, "locale"},
+		{`{"locale":""}`, "locale"},
+		{`{"name":""}`, "name"},
+	} {
+		w = do(mux, "PATCH", "/api/v1/org", tc.body, "org-1")
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `"field":"`+tc.field+`"`) {
+			t.Errorf("%s: %d %s", tc.body, w.Code, w.Body.String())
+		}
+	}
+	// Slug and plan are not part of the PATCH.
+	if w = do(mux, "PATCH", "/api/v1/org", `{"plan":"enterprise"}`, "org-1"); w.Code != http.StatusBadRequest {
+		t.Errorf("plan accepted: %d", w.Code)
+	}
+}
+
+// TestClientAndSiteUniqueness covers WP-107 (LOC-02, LOC-03, TEN-01):
+// client names are unique per organization (409 on name), external_ref and
+// the optional time zone are stored and cleared; site names are unique per
+// client, so two clients may each have a site "HQ".
+func TestClientAndSiteUniqueness(t *testing.T) {
+	_, _, mux := setup()
+	create := func(path, body string) map[string]any {
+		t.Helper()
+		w := do(mux, "POST", path, body, "org-1")
+		if w.Code != http.StatusCreated {
+			t.Fatalf("POST %s %s: %d %s", path, body, w.Code, w.Body.String())
+		}
+		var out map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &out)
+		return out
+	}
+	a := create("/api/v1/clients", `{"name":"Alpha","slug":"alpha","external_ref":"CRM-17","timezone":"Europe/Vienna"}`)
+	b := create("/api/v1/clients", `{"name":"Beta","slug":"beta"}`)
+	if a["external_ref"] != "CRM-17" || a["timezone"] != "Europe/Vienna" || b["external_ref"] != nil {
+		t.Errorf("client fields: %v / %v", a, b)
+	}
+	if w := do(mux, "POST", "/api/v1/clients", `{"name":"Alpha","slug":"alpha-2"}`, "org-1"); w.Code != http.StatusConflict ||
+		!strings.Contains(w.Body.String(), `"field":"name"`) {
+		t.Errorf("duplicate client name: %d %s", w.Code, w.Body.String())
+	}
+	if w := do(mux, "PATCH", "/api/v1/clients/"+b["id"].(string), `{"name":"Alpha"}`, "org-1"); w.Code != http.StatusConflict {
+		t.Errorf("rename onto an existing name: %d", w.Code)
+	}
+	if w := do(mux, "POST", "/api/v1/clients", `{"name":"Gamma","slug":"gamma","timezone":"Moon/Base"}`, "org-1"); w.Code != http.StatusBadRequest ||
+		!strings.Contains(w.Body.String(), `"field":"timezone"`) {
+		t.Errorf("invalid client timezone: %d %s", w.Code, w.Body.String())
+	}
+	w := do(mux, "PATCH", "/api/v1/clients/"+a["id"].(string), `{"external_ref":"","timezone":""}`, "org-1")
+	if !strings.Contains(w.Body.String(), `"external_ref":null`) || !strings.Contains(w.Body.String(), `"timezone":null`) {
+		t.Errorf("clearing external_ref/timezone: %s", w.Body.String())
+	}
+	// Other organizations may reuse the name.
+	if w := do(mux, "POST", "/api/v1/clients", `{"name":"Alpha","slug":"alpha"}`, "org-2"); w.Code != http.StatusCreated {
+		t.Errorf("same name in another org: %d", w.Code)
+	}
+
+	// Sites: "HQ" once per client.
+	create("/api/v1/sites", `{"client_id":"`+a["id"].(string)+`","name":"HQ","timezone":"Europe/Berlin"}`)
+	hqB := create("/api/v1/sites", `{"client_id":"`+b["id"].(string)+`","name":"HQ"}`)
+	if w := do(mux, "POST", "/api/v1/sites", `{"client_id":"`+a["id"].(string)+`","name":"HQ"}`, "org-1"); w.Code != http.StatusConflict ||
+		!strings.Contains(w.Body.String(), `"field":"name"`) {
+		t.Errorf("duplicate site name per client: %d %s", w.Code, w.Body.String())
+	}
+	other := create("/api/v1/sites", `{"client_id":"`+b["id"].(string)+`","name":"Branch"}`)
+	if w := do(mux, "PATCH", "/api/v1/sites/"+other["id"].(string), `{"name":"HQ"}`, "org-1"); w.Code != http.StatusConflict {
+		t.Errorf("rename site onto an existing name: %d", w.Code)
+	}
+	if w := do(mux, "PATCH", "/api/v1/sites/"+hqB["id"].(string), `{"timezone":"Asia/Tokyo"}`, "org-1"); w.Code != http.StatusOK ||
+		!strings.Contains(w.Body.String(), `"timezone":"Asia/Tokyo"`) {
+		t.Errorf("site timezone: %d %s", w.Code, w.Body.String())
 	}
 }

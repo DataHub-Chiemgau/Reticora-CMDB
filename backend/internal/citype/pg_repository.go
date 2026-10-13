@@ -22,7 +22,7 @@ const typeSelectColumns = `
 	COALESCE(organization_id::text, ''),
 	COALESCE(key, ''),
 	name,
-	COALESCE(display_name, ''),
+	display_name,
 	COALESCE(icon, ''),
 	COALESCE(description, ''),
 	COALESCE(category, ''),
@@ -30,6 +30,8 @@ const typeSelectColumns = `
 	is_system,
 	is_active,
 	is_logical,
+	is_observable,
+	schema_version,
 	version,
 	COALESCE(cloned_from_id::text, ''),
 	COALESCE(template_key, ''),
@@ -39,6 +41,8 @@ const typeSelectColumns = `
 	ui_schema,
 	compliance_rules,
 	discovery_mappings,
+	attribute_schema,
+	COALESCE(required_fields, '{}'),
 	created_at,
 	updated_at
 `
@@ -71,7 +75,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			pos++
 		}
 		if filter.Search != "" {
-			where = append(where, fmt.Sprintf("(name ILIKE $%d OR display_name ILIKE $%d)", pos, pos))
+			where = append(where, fmt.Sprintf("(name ILIKE $%d OR display_name ->> 'de' ILIKE $%d OR display_name ->> 'en' ILIKE $%d)", pos, pos, pos))
 			args = append(args, "%"+filter.Search+"%")
 			pos++
 		}
@@ -133,22 +137,23 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 				organization_id, key, name, display_name, icon, description, category,
 				is_builtin, is_system, is_active, is_logical, version, template_key,
 				lifecycle_definition_id, capabilities, allowed_relationship_types,
-				ui_schema, compliance_rules, discovery_mappings
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,1,$9,$10,$11,$12,$13,$14,$15)
-			RETURNING id::text, is_active, version, created_at, updated_at`,
-			nilIfEmpty(typ.OrganizationID), typ.Key, typ.Name, nilIfEmpty(typ.DisplayName),
+				ui_schema, compliance_rules, discovery_mappings, is_observable
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,1,$9,$10,$11,$12,$13,$14,$15,$16)
+			RETURNING id::text, is_active, version, schema_version, created_at, updated_at`,
+			nilIfEmpty(typ.OrganizationID), typ.Key, typ.Name, typ.DisplayName.WithFallback(typ.Name),
 			nilIfEmpty(typ.Icon), nilIfEmpty(typ.Description), nilIfEmpty(typ.Category),
 			typ.IsLogical, nilIfEmpty(typ.TemplateKey), nilIfEmpty(typ.LifecycleDefinitionID),
 			jsonOrDefault(typ.Capabilities, emptyObject), jsonOrDefault(typ.AllowedRelationshipTypes, emptyArray),
 			jsonOrDefault(typ.UISchema, emptyObject), jsonOrDefault(typ.ComplianceRules, emptyArray),
-			jsonOrDefault(typ.DiscoveryMappings, emptyArray),
+			jsonOrDefault(typ.DiscoveryMappings, emptyArray), typ.IsObservable,
 		)
-		if err := row.Scan(&typ.ID, &typ.IsActive, &typ.Version, &typ.CreatedAt, &typ.UpdatedAt); err != nil {
+		typ.DisplayName = typ.DisplayName.WithFallback(typ.Name)
+		if err := row.Scan(&typ.ID, &typ.IsActive, &typ.Version, &typ.SchemaVersion, &typ.CreatedAt, &typ.UpdatedAt); err != nil {
 			return fmt.Errorf("create ci type: %w", err)
 		}
 		for _, f := range typ.Fields {
 			f.Scope = "type"
-			if _, err := upsertFieldTx(ctx, tx, typ.ID, UpsertFieldRequest{
+			if _, err := upsertFieldTx(ctx, tx, typ.OrganizationID, typ.ID, &UpsertFieldRequest{
 				Scope: "type", Name: f.Name, Label: f.Label, Description: f.Description,
 				DataType: f.DataType, Required: f.Required, DefaultValue: f.DefaultValue,
 				EnumValues: f.EnumValues, UIGroup: f.UIGroup, SortOrder: f.SortOrder,
@@ -177,7 +182,12 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 			add("name", *req.Name)
 		}
 		if req.DisplayName != nil {
-			add("display_name", nilIfEmpty(*req.DisplayName))
+			// Missing languages fall back to the given one; an empty map
+			// resets the label to the name (trigger ci_type_defaults).
+			add("display_name", req.DisplayName.WithFallback(""))
+		}
+		if req.IsObservable != nil {
+			add("is_observable", *req.IsObservable)
 		}
 		if req.Icon != nil {
 			add("icon", nilIfEmpty(*req.Icon))
@@ -267,30 +277,31 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 				organization_id, key, name, display_name, icon, description, category,
 				is_builtin, is_system, is_active, is_logical, version, cloned_from_id,
 				template_key, lifecycle_definition_id, capabilities,
-				allowed_relationship_types, ui_schema, compliance_rules, discovery_mappings
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,$9,$10,NULL,$11,$12,$13,$14,$15,$16)
+				allowed_relationship_types, ui_schema, compliance_rules, discovery_mappings,
+				is_observable
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,$9,$10,NULL,$11,$12,$13,$14,$15,$16,$17)
 			RETURNING id::text`,
-			orgID, key, name, name, nilIfEmpty(src.Icon), nilIfEmpty(src.Description),
+			orgID, key, name, LocalizedText{}.WithFallback(name), nilIfEmpty(src.Icon), nilIfEmpty(src.Description),
 			nilIfEmpty(src.Category), src.IsLogical, src.Version+1, src.ID,
 			nilIfEmpty(src.LifecycleDefinitionID), src.Capabilities,
 			src.AllowedRelationshipTypes, src.UISchema, src.ComplianceRules,
-			src.DiscoveryMappings,
+			src.DiscoveryMappings, src.IsObservable,
 		).Scan(&cloneID)
 		if err != nil {
 			return fmt.Errorf("clone ci type: %w", err)
 		}
 		// Copy the field definitions of the source type.
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO ci_type_attribute (
-				ci_type_id, name, label, description, scope, data_type, required,
-				default_value, enum_values, ui_group, sort_order, validation,
-				conditional, reference_target
+			INSERT INTO attribute_definition (
+				ci_type_id, scope, key, display_name, description, data_type, required,
+				default_value, enum_values, multi_value, searchable, is_unique, unique_scope,
+				inheritable, validation, conditional, reference_target, group_name, sort_order, unit
 			)
-			SELECT $1, name, label, description, 'type', data_type, required,
-				default_value, enum_values, ui_group, sort_order, validation,
-				conditional, reference_target
-			FROM ci_type_attribute
-			WHERE ci_type_id = $2 AND scope = 'type'`, cloneID, id); err != nil {
+			SELECT $1, 'type', key, display_name, description, data_type, required,
+				default_value, enum_values, multi_value, searchable, is_unique, unique_scope,
+				inheritable, validation, conditional, reference_target, group_name, sort_order, unit
+			FROM attribute_definition
+			WHERE ci_type_id = $2`, cloneID, id); err != nil {
 			return fmt.Errorf("clone ci type fields: %w", err)
 		}
 		out = &Type{ID: cloneID, OrganizationID: orgID, Key: key, Name: name}
@@ -370,16 +381,12 @@ func (r *PGRepository) ListFields(ctx context.Context, orgID, typeID string) ([]
 	return out, err
 }
 
-// ListGlobalFields returns the org-global field definitions (scope 'global').
-// Global definitions are stored on a per-organization synthetic carrier type.
+// ListGlobalFields returns the global field definitions (scope 'global',
+// no CI type): the organization's and the system's.
 func (r *PGRepository) ListGlobalFields(ctx context.Context, orgID string) ([]Field, error) {
 	var out []Field
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		carrier, err := ensureGlobalCarrierTx(ctx, tx, orgID)
-		if err != nil {
-			return err
-		}
-		flds, err := listFieldsScopeTx(ctx, tx, carrier, "global")
+		flds, err := listFieldsScopeTx(ctx, tx, "", "global")
 		if err != nil {
 			return err
 		}
@@ -389,134 +396,103 @@ func (r *PGRepository) ListGlobalFields(ctx context.Context, orgID string) ([]Fi
 	return out, err
 }
 
-// globalCarrierKey is the ci_type key of the per-organization synthetic type
-// that carries the global field definitions. The carrier is hidden from the
-// type list by convention (key prefix) and holds no CIs.
-const globalCarrierKey = "__global_attributes__"
-
-func ensureGlobalCarrierTx(ctx context.Context, tx pgx.Tx, orgID string) (string, error) {
-	var id string
-	err := tx.QueryRow(ctx,
-		"SELECT id::text FROM ci_type WHERE organization_id = $1 AND key = $2",
-		orgID, globalCarrierKey).Scan(&id)
-	if err == nil {
-		return id, nil
-	}
-	if err != pgx.ErrNoRows {
-		return "", fmt.Errorf("lookup global attribute carrier: %w", err)
-	}
-	if err := tx.QueryRow(ctx,
-		"INSERT INTO ci_type (organization_id, key, name, display_name, is_active) VALUES ($1, $2, $2, 'Global Attributes', false) RETURNING id::text",
-		orgID, globalCarrierKey).Scan(&id); err != nil {
-		return "", fmt.Errorf("create global attribute carrier: %w", err)
-	}
-	return id, nil
-}
-
-// UpsertField creates or updates a field definition (type or global scope).
+// UpsertField creates or updates a field definition (type or global scope)
+// in attribute_definition, keyed by type and name (legacy field view).
 func (r *PGRepository) UpsertField(ctx context.Context, orgID, typeID string, req UpsertFieldRequest) (*Field, error) {
 	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(req)); err != nil {
 		return nil, err
 	}
-	scope := req.Scope
-	if scope == "" {
-		scope = "type"
+	if req.Scope == "" {
+		req.Scope = "type"
+	}
+	if req.Scope == "global" {
+		typeID = ""
 	}
 	var out *Field
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		targetType := typeID
-		if scope == "global" {
-			carrier, err := ensureGlobalCarrierTx(ctx, tx, orgID)
-			if err != nil {
-				return err
-			}
-			targetType = carrier
-		}
-		f, err := upsertFieldTx(ctx, tx, targetType, req)
+		f, err := upsertFieldTx(ctx, tx, orgID, typeID, &req)
 		if err != nil {
 			return err
 		}
-		f.Scope = scope
 		out = f
 		return nil
 	})
 	return out, err
 }
 
-func upsertFieldTx(ctx context.Context, tx pgx.Tx, typeID string, req UpsertFieldRequest) (*Field, error) {
-	scope := req.Scope
-	if scope == "" {
-		scope = "type"
-	}
-	enumJSON := "null"
-	if req.EnumValues != nil {
-		raw, err := json.Marshal(req.EnumValues)
-		if err != nil {
-			return nil, fmt.Errorf("marshal enum values: %w", err)
-		}
-		enumJSON = string(raw)
-	}
-	validation := any(emptyObject)
-	if req.Validation != nil {
-		validation = req.Validation
-	}
-	var conditional any
-	if req.Conditional != nil {
-		conditional = req.Conditional
-	}
-	f := &Field{}
-	err := tx.QueryRow(ctx, `
-		INSERT INTO ci_type_attribute (
-			ci_type_id, name, label, description, scope, data_type, required,
-			default_value, enum_values, ui_group, sort_order, validation,
-			conditional, reference_target
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13,$14)
-		ON CONFLICT (ci_type_id, name) DO UPDATE SET
-			label = EXCLUDED.label,
-			description = EXCLUDED.description,
-			scope = EXCLUDED.scope,
-			data_type = EXCLUDED.data_type,
-			required = EXCLUDED.required,
-			default_value = EXCLUDED.default_value,
-			enum_values = EXCLUDED.enum_values,
-			ui_group = EXCLUDED.ui_group,
-			sort_order = EXCLUDED.sort_order,
-			validation = EXCLUDED.validation,
-			conditional = EXCLUDED.conditional,
-			reference_target = EXCLUDED.reference_target
-		RETURNING id::text, ci_type_id::text, name`,
-		typeID, req.Name, nilIfEmpty(req.Label), nilIfEmpty(req.Description), scope,
-		req.DataType, req.Required, nilIfEmpty(req.DefaultValue), enumJSON,
-		nilIfEmpty(req.UIGroup), req.SortOrder, validation, conditional,
-		nilIfEmpty(req.ReferenceTarget),
-	).Scan(&f.ID, &f.CITypeID, &f.Name)
-	if err != nil {
-		return nil, fmt.Errorf("upsert field definition: %w", err)
-	}
-	result, err := getFieldTx(ctx, tx, typeID, req.Name)
-	if err != nil {
+// upsertFieldTx writes a legacy field into attribute_definition: an
+// existing definition of the same key keeps its MET-10 settings that the
+// legacy field cannot express.
+func upsertFieldTx(ctx context.Context, tx pgx.Tx, orgID, typeID string, req *UpsertFieldRequest) (*Field, error) {
+	existing, err := findAttributeTx(ctx, tx, typeID, req.Name)
+	if err != nil && !errors.Is(err, ErrAttributeNotFound) {
 		return nil, err
 	}
-	return result, nil
+	d := existing
+	if d == nil {
+		d = &AttributeDefinition{CITypeID: typeID, Scope: req.Scope, Key: req.Name, UniqueScope: "org", Inheritable: true}
+	}
+	d.DisplayName = nil
+	if strings.TrimSpace(req.Label) != "" {
+		d.DisplayName = LocalizedText{"de": req.Label, "en": req.Label}
+	}
+	d.Description, d.DataType, d.Required = req.Description, req.DataType, req.Required
+	d.Default = nil
+	if req.DefaultValue != "" {
+		raw, err := json.Marshal(req.DefaultValue)
+		if err != nil {
+			return nil, fmt.Errorf("encode default value: %w", err)
+		}
+		d.Default = raw
+	}
+	d.EnumValues, d.Group, d.Order = req.EnumValues, req.UIGroup, req.SortOrder
+	d.Validation, d.Conditional, d.ReferenceTarget = req.Validation, req.Conditional, req.ReferenceTarget
+	if err := d.Validate(); err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		if err := updateAttributeTx(ctx, tx, d); err != nil {
+			return nil, err
+		}
+	} else if err := insertAttributeTx(ctx, tx, orgID, d); err != nil {
+		return nil, err
+	}
+	f := d.Field()
+	return &f, nil
 }
 
-// DeleteField removes a field definition by name (type or global scope).
+// findAttributeTx returns the definition of key on typeID (empty: global
+// of the organization).
+func findAttributeTx(ctx context.Context, tx pgx.Tx, typeID, key string) (*AttributeDefinition, error) {
+	query := `SELECT ` + attributeColumns + ` FROM attribute_definition WHERE ci_type_id::text = $1 AND key = $2`
+	args := []any{typeID, key}
+	if typeID == "" {
+		query = `SELECT ` + attributeColumns + ` FROM attribute_definition
+			WHERE ci_type_id IS NULL AND organization_id IS NOT NULL AND key = $1`
+		args = []any{key}
+	}
+	d, err := scanAttribute(tx.QueryRow(ctx, query, args...))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrAttributeNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read attribute definition: %w", err)
+	}
+	return d, nil
+}
+
+// DeleteField removes a field definition by name: of the type, otherwise
+// the organization's global one.
 func (r *PGRepository) DeleteField(ctx context.Context, orgID, typeID, name string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx,
-			"DELETE FROM ci_type_attribute WHERE ci_type_id = $1 AND name = $2", typeID, name)
+			"DELETE FROM attribute_definition WHERE ci_type_id::text = $1 AND key = $2", typeID, name)
 		if err != nil {
 			return fmt.Errorf("delete field definition: %w", err)
 		}
 		if cmd.RowsAffected() == 0 {
-			// Try the global carrier.
-			carrier, err := ensureGlobalCarrierTx(ctx, tx, orgID)
-			if err != nil {
-				return err
-			}
 			cmd, err = tx.Exec(ctx,
-				"DELETE FROM ci_type_attribute WHERE ci_type_id = $1 AND name = $2 AND scope = 'global'",
-				carrier, name)
+				"DELETE FROM attribute_definition WHERE ci_type_id IS NULL AND organization_id IS NOT NULL AND key = $1", name)
 			if err != nil {
 				return fmt.Errorf("delete global field definition: %w", err)
 			}
@@ -532,78 +508,29 @@ func listFieldsTx(ctx context.Context, tx pgx.Tx, typeID string) ([]Field, error
 	return listFieldsScopeTx(ctx, tx, typeID, "type")
 }
 
+// listFieldsScopeTx lists the fields of a type, or the global fields when
+// scope is "global".
 func listFieldsScopeTx(ctx context.Context, tx pgx.Tx, typeID, scope string) ([]Field, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT id::text, ci_type_id::text, COALESCE(scope, 'type'), name,
-			COALESCE(label, ''), COALESCE(description, ''), data_type, required,
-			COALESCE(default_value, ''), enum_values, COALESCE(ui_group, ''),
-			sort_order, validation, conditional, COALESCE(reference_target, '')
-		FROM ci_type_attribute
-		WHERE ci_type_id = $1 AND COALESCE(scope, 'type') = $2
-		ORDER BY sort_order ASC, name ASC`, typeID, scope)
+	query := `SELECT ` + attributeColumns + ` FROM attribute_definition WHERE ci_type_id::text = $1 ORDER BY sort_order ASC, key ASC`
+	args := []any{typeID}
+	if scope == "global" {
+		query = `SELECT ` + attributeColumns + ` FROM attribute_definition WHERE ci_type_id IS NULL ORDER BY sort_order ASC, key ASC`
+		args = nil
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list field definitions: %w", err)
 	}
 	defer rows.Close()
 	var out []Field
 	for rows.Next() {
-		f, err := scanField(rows)
+		d, err := scanAttribute(rows)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, *f)
+		out = append(out, d.Field())
 	}
 	return out, rows.Err()
-}
-
-func getFieldTx(ctx context.Context, tx pgx.Tx, typeID, name string) (*Field, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT id::text, ci_type_id::text, COALESCE(scope, 'type'), name,
-			COALESCE(label, ''), COALESCE(description, ''), data_type, required,
-			COALESCE(default_value, ''), enum_values, COALESCE(ui_group, ''),
-			sort_order, validation, conditional, COALESCE(reference_target, '')
-		FROM ci_type_attribute
-		WHERE ci_type_id = $1 AND name = $2`, typeID, name)
-	if err != nil {
-		return nil, fmt.Errorf("get field definition: %w", err)
-	}
-	defer rows.Close()
-	if rows.Next() {
-		return scanField(rows)
-	}
-	return nil, fmt.Errorf("not found")
-}
-
-type fieldScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanField(scanner fieldScanner) (*Field, error) {
-	f := &Field{}
-	var enumRaw, validationRaw, conditionalRaw []byte
-	if err := scanner.Scan(
-		&f.ID, &f.CITypeID, &f.Scope, &f.Name, &f.Label, &f.Description,
-		&f.DataType, &f.Required, &f.DefaultValue, &enumRaw, &f.UIGroup,
-		&f.SortOrder, &validationRaw, &conditionalRaw, &f.ReferenceTarget,
-	); err != nil {
-		return nil, err
-	}
-	if len(enumRaw) > 0 {
-		_ = json.Unmarshal(enumRaw, &f.EnumValues)
-	}
-	if len(validationRaw) > 0 && string(validationRaw) != "{}" {
-		var v fieldmeta.ValidationRules
-		if err := json.Unmarshal(validationRaw, &v); err == nil {
-			f.Validation = &v
-		}
-	}
-	if len(conditionalRaw) > 0 {
-		var c fieldmeta.ConditionalRules
-		if err := json.Unmarshal(conditionalRaw, &c); err == nil {
-			f.Conditional = &c
-		}
-	}
-	return f, nil
 }
 
 // ─── CI-instance field definitions ──────────────────────────────────────────
@@ -829,15 +756,21 @@ type typeScanner interface {
 
 func scanType(scanner typeScanner) (*Type, error) {
 	t := &Type{}
-	var capabilities, allowedRels, uiSchema, compliance, discovery []byte
+	var capabilities, allowedRels, uiSchema, compliance, discovery, displayName, attributeSchema []byte
 	if err := scanner.Scan(
-		&t.ID, &t.OrganizationID, &t.Key, &t.Name, &t.DisplayName, &t.Icon,
+		&t.ID, &t.OrganizationID, &t.Key, &t.Name, &displayName, &t.Icon,
 		&t.Description, &t.Category, &t.IsBuiltin, &t.IsSystem, &t.IsActive,
-		&t.IsLogical, &t.Version, &t.ClonedFromID, &t.TemplateKey,
+		&t.IsLogical, &t.IsObservable, &t.SchemaVersion, &t.Version, &t.ClonedFromID, &t.TemplateKey,
 		&t.LifecycleDefinitionID, &capabilities, &allowedRels, &uiSchema,
-		&compliance, &discovery, &t.CreatedAt, &t.UpdatedAt,
+		&compliance, &discovery, &attributeSchema, &t.RequiredFields, &t.CreatedAt, &t.UpdatedAt,
 	); err != nil {
 		return nil, err
+	}
+	if err := json.Unmarshal(displayName, &t.DisplayName); err != nil {
+		return nil, fmt.Errorf("decode display_name: %w", err)
+	}
+	if len(attributeSchema) > 0 {
+		_ = json.Unmarshal(attributeSchema, &t.AttributeSchema)
 	}
 	t.Capabilities = map[string]any{}
 	t.UISchema = map[string]any{}

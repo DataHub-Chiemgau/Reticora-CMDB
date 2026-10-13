@@ -68,6 +68,10 @@ var matrixOverrides = map[string]map[string]string{
 	"lifecycle_definition":   {"is_system": "true"},
 	"relationship_type":      {"is_system": "true"},
 	"source_priority_policy": {"name": "@text"},
+	// The i18n check needs a de/en map; the defaults trigger is skipped
+	// under replica (MET-01, WP-115).
+	"ci_type":              {"display_name": `{"de": "Matrix", "en": "Matrix"}`, "is_observable": "true"},
+	"attribute_definition": {"display_name": `{"de": "Matrix", "en": "Matrix"}`, "scope": "type", "ci_type_id": "@uuid"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)

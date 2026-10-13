@@ -131,3 +131,33 @@ func TestAuthMiddlewareWithVerifierSkipsPublicAuthRoutes(t *testing.T) {
 		t.Fatalf("expected the public OIDC config route to stay reachable, got %d", w.Code)
 	}
 }
+
+// TestDevelopmentLoginOnlyInDevelopment covers WP-110 (AUT-03): without a
+// session verifier the middleware accepts unsigned development tokens only
+// when RETICORA_ENVIRONMENT is development (or unset); in staging and
+// production every session token is refused.
+func TestDevelopmentLoginOnlyInDevelopment(t *testing.T) {
+	for _, tc := range []struct {
+		env  string
+		want int
+	}{
+		{"", http.StatusNoContent},
+		{"development", http.StatusNoContent},
+		{"staging", http.StatusUnauthorized},
+		{"production", http.StatusUnauthorized},
+	} {
+		t.Run("env="+tc.env, func(t *testing.T) {
+			t.Setenv("RETICORA_ENVIRONMENT", tc.env)
+			handler := AuthMiddlewareWithVerifier(nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/cis", http.NoBody)
+			req.Header.Set("Authorization", "Bearer "+testToken(t, Claims{OrganizationID: "org-1", Subject: "dev-user"}))
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			if w.Code != tc.want {
+				t.Errorf("status %d, want %d: %s", w.Code, tc.want, w.Body.String())
+			}
+		})
+	}
+}

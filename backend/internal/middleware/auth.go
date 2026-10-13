@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -74,10 +75,19 @@ func AuthMiddlewareWithVerifier(verifier SessionVerifier) func(http.Handler) htt
 // middleware falls back to unverified claim parsing for local development;
 // API keys are still fully verified against their store.
 func AuthMiddlewareWithAPIKeys(verifier SessionVerifier, apiKeys APIKeyAuthenticator) func(http.Handler) http.Handler {
+	// Unsigned development tokens are accepted only in development
+	// (AUT-03): outside it a missing verifier rejects every session token,
+	// whatever the configuration check let through.
+	devAuthRefused := verifier == nil && !devAuthEnvironment()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !requiresAuth(r) {
 				next.ServeHTTP(w, r)
+				return
+			}
+			if devAuthRefused && r.Header.Get("X-API-Key") == "" {
+				api.WriteError(w, http.StatusUnauthorized, "Unauthorized",
+					"session tokens cannot be verified: the development login is disabled outside development")
 				return
 			}
 
@@ -93,6 +103,13 @@ func AuthMiddlewareWithAPIKeys(verifier SessionVerifier, apiKeys APIKeyAuthentic
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// devAuthEnvironment reports whether RETICORA_ENVIRONMENT allows the
+// development login: development, or unset (its default).
+func devAuthEnvironment() bool {
+	env := strings.TrimSpace(os.Getenv("RETICORA_ENVIRONMENT"))
+	return env == "" || env == "development"
 }
 
 // authenticateRequest resolves the caller's credentials. An X-API-Key header
@@ -284,6 +301,12 @@ func requiresAuth(r *http.Request) bool {
 	case "/api/v1/collectors/enroll":
 		// The enrollment code is the credential; the collector has no session
 		// or API key before it enrolls.
+		return false
+	case "/api/v1/invitations/accept":
+		// The invitation token is the credential (TLC-03).
+		return false
+	case "/api/v1/signup", "/api/v1/signup/verify", "/api/v1/signup/challenge":
+		// Self-signup: no account exists yet (TLC-01).
 		return false
 	}
 	// The operator path authenticates operators itself and has no tenant

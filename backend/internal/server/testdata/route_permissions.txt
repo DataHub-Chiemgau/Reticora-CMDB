@@ -1,6 +1,7 @@
 DELETE /api/v1/api-keys/{id} apikey:manage
 DELETE /api/v1/assets/{id} asset:write
 DELETE /api/v1/assignments/{id} assignment:write
+DELETE /api/v1/attribute-definitions/{id} ci_attribute:manage
 DELETE /api/v1/buildings/{id} location:write
 DELETE /api/v1/cables/{id} rack:write
 DELETE /api/v1/ci-contacts/{id} contact:write
@@ -20,6 +21,7 @@ DELETE /api/v1/documents/{id} document:write
 DELETE /api/v1/forms/{id} form:write
 DELETE /api/v1/iga/connectors/{id} iga:write
 DELETE /api/v1/inventory/items/{id} inventory:manage
+DELETE /api/v1/invitations/{id} user:manage
 DELETE /api/v1/ip-addresses/{id} ipam:write
 DELETE /api/v1/keys/{id} key:write
 DELETE /api/v1/lifecycle-definitions/{id} lifecycle:manage
@@ -68,6 +70,8 @@ GET /api/v1/assets/{id}/movements asset:read
 GET /api/v1/assets/{id}/state asset:read
 GET /api/v1/assignments assignment:read
 GET /api/v1/assignments/{id} assignment:read
+GET /api/v1/attribute-definitions ci:read
+GET /api/v1/attribute-definitions/{id} ci:read
 GET /api/v1/audit audit:read
 GET /api/v1/auth/config public
 GET /api/v1/auth/me authenticated
@@ -145,6 +149,7 @@ GET /api/v1/iga/tasks/{id} iga:read
 GET /api/v1/inventory/availability asset:read
 GET /api/v1/inventory/items asset:read
 GET /api/v1/inventory/items/{id} asset:read
+GET /api/v1/invitations user:manage
 GET /api/v1/ip-addresses ipam:read
 GET /api/v1/ip-addresses/{id} ipam:read
 GET /api/v1/keys key:read
@@ -164,6 +169,7 @@ GET /api/v1/monitoring/metrics monitoring:read
 GET /api/v1/network-interfaces/{id} ipam:read
 GET /api/v1/orders order:read
 GET /api/v1/orders/{id} order:read
+GET /api/v1/org location:read
 GET /api/v1/permissions permission:read
 GET /api/v1/privacy/retention user:manage
 GET /api/v1/rack-mounts/{id} rack:read
@@ -193,6 +199,7 @@ GET /api/v1/security/findings/summary security:read
 GET /api/v1/security/findings/{id} security:read
 GET /api/v1/service-accounts user:read
 GET /api/v1/service-accounts/{id} user:read
+GET /api/v1/signup/challenge public
 GET /api/v1/sites location:read
 GET /api/v1/sites/{id} location:read
 GET /api/v1/slas sla:read
@@ -242,6 +249,7 @@ GET /scim/v2/Users iga:read
 GET /scim/v2/Users/{id} iga:read
 PATCH /api/v1/agents/{id}/policy agent:manage
 PATCH /api/v1/assets/{id} asset:write
+PATCH /api/v1/attribute-definitions/{id} ci_attribute:manage
 PATCH /api/v1/buildings/{id} location:write
 PATCH /api/v1/cables/{id} rack:write
 PATCH /api/v1/ci-types/{id} ci_type:manage
@@ -263,6 +271,7 @@ PATCH /api/v1/maintenance-windows/{id} maintenance:write
 PATCH /api/v1/monitoring/alerts/{id} monitoring:write
 PATCH /api/v1/network-interfaces/{id} ipam:write
 PATCH /api/v1/orders/{id} order:write
+PATCH /api/v1/org user:manage
 PATCH /api/v1/rack-mounts/{id} rack:write
 PATCH /api/v1/racks/{id} rack:write
 PATCH /api/v1/relationship-types/{key} relationship_type:manage
@@ -286,6 +295,7 @@ PATCH /api/v1/workflows/{id} workflow:write
 PATCH /scim/v2/Groups/{id} iga:write
 PATCH /scim/v2/Users/{id} iga:write
 POST /api/v1/admin/auth/callback operator
+POST /api/v1/admin/orgs operator
 POST /api/v1/admin/orgs/{id}/entitlements operator
 POST /api/v1/agents/enroll agent:manage
 POST /api/v1/agents/enrollment-tokens agent:manage
@@ -304,6 +314,7 @@ POST /api/v1/assets/{id}/lifecycle-transitions lifecycle:transition
 POST /api/v1/assignments assignment:write
 POST /api/v1/assignments/{id}/return assignment:write
 POST /api/v1/assignments/{id}/transfer assignment:write
+POST /api/v1/attribute-definitions ci_attribute:manage
 POST /api/v1/audit/verify audit:read
 POST /api/v1/auth/callback public
 POST /api/v1/auth/logout public
@@ -360,6 +371,9 @@ POST /api/v1/iga/tasks/{id}/retry iga:write
 POST /api/v1/ingest/bulk discovery:ingest
 POST /api/v1/inventory/items inventory:manage
 POST /api/v1/inventory/items/{id}/convert inventory:manage
+POST /api/v1/invitations user:manage
+POST /api/v1/invitations/accept public
+POST /api/v1/invitations/{id}/renew user:manage
 POST /api/v1/ip-addresses ipam:write
 POST /api/v1/keys key:write
 POST /api/v1/keys/{id}/issue key:write
@@ -391,6 +405,8 @@ POST /api/v1/search/query search:write
 POST /api/v1/search/reindex search:write
 POST /api/v1/security/findings security:write
 POST /api/v1/service-accounts user:manage
+POST /api/v1/signup public
+POST /api/v1/signup/verify public
 POST /api/v1/sites location:write
 POST /api/v1/slas sla:write
 POST /api/v1/stock-movements asset:move

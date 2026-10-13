@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -39,6 +40,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/signup"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -347,8 +349,12 @@ func main() {
 			middleware.OpenAPIValidation,
 			middleware.IdempotencyWithStore(cacheStore),
 		},
-		Readiness:   readiness,
-		IngestQueue: ingestQueue,
+		Readiness:        readiness,
+		IngestQueue:      ingestQueue,
+		Signup:           signupService(cfg, auditPool),
+		SignupProtection: signupProtection(cfg, cacheStore),
+		// Invitations need the database; in --no-db mode they answer 503.
+		InvitationAccounts: invitationAccounts(cfg),
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -423,7 +429,13 @@ func main() {
 	// current role assignments (AUT-04).
 	apiKeys := identity.NewAPIKeyServiceWithStore(repos.APIKeys).WithOwnerAccess(repos.Permission).
 		WithServiceAccountAccess(user.ServiceAccountAccess{Repo: repos.ServiceAccounts})
-	authMiddleware := middleware.AuthMiddlewareWithAPIKeys(sessionIssuer, apiKeys)
+	// A nil *SessionIssuer must reach the middleware as a nil interface:
+	// only then does the development login (AUT-03, development only) apply.
+	var sessionVerifier middleware.SessionVerifier
+	if sessionIssuer != nil {
+		sessionVerifier = sessionIssuer
+	}
+	authMiddleware := middleware.AuthMiddlewareWithAPIKeys(sessionVerifier, apiKeys)
 	if sessionIssuer == nil {
 		slog.Warn("INSECURE DEVELOPMENT MODE: bearer tokens are accepted without signature verification")
 	}
@@ -644,4 +656,89 @@ func backlogOf[C any](repo any, count func(context.Context, C) (int, error)) fun
 		return nil
 	}
 	return func(ctx context.Context) (int, error) { return count(ctx, c) }
+}
+
+// signupService builds the self-signup flow (TLC-01). Signups need the
+// database, the Keycloak admin client and an e-mail channel; the channel
+// arrives with the notification channels (WP-137), so until then every
+// signup answers 503.
+func signupService(cfg *config.Config, pool *pgxpool.Pool) *signup.Service {
+	sc := signup.DefaultConfig()
+	sc.TrialPlan = entitlement.Plan(cfg.TrialPlan)
+	sc.TrialDays = cfg.TrialDays
+	sc.TrialMaxCIs = int64(cfg.TrialMaxCIs)
+	sc.VerifyURL = cfg.SignupVerifyURL
+	var (
+		repo     signup.Repository
+		accounts signup.Accounts
+	)
+	if pool != nil {
+		repo = signup.NewPGRepository(pool)
+	}
+	if kc := keycloakAccounts(cfg); kc != nil {
+		accounts = kc
+	}
+	svc := signup.NewService(repo, nil, accounts, sc)
+	slog.Info("self-signup configured", "available", svc.Available())
+	return svc
+}
+
+// keycloakAccounts is the Keycloak admin client that creates the accounts
+// of signups, operator-created organizations and accepted invitations; nil
+// without RETICORA_KEYCLOAK_ADMIN_CLIENT_ID.
+func keycloakAccounts(cfg *config.Config) *signup.KeycloakAccounts {
+	if cfg.KeycloakAdminClientID == "" {
+		return nil
+	}
+	kc, err := signup.NewKeycloakAccounts(cfg.OIDCIssuerURL, cfg.KeycloakAdminClientID, cfg.KeycloakAdminClientSecret, nil)
+	if err != nil {
+		slog.Error("Keycloak admin client disabled", "error", err)
+		return nil
+	}
+	return kc
+}
+
+// invitationAccounts lets accepted invitations create their IdP account
+// (TLC-03); nil leaves the account to the IdP.
+func invitationAccounts(cfg *config.Config) user.InvitationAccounts {
+	if kc := keycloakAccounts(cfg); kc != nil {
+		return kc
+	}
+	return nil
+}
+
+// signupProtection builds the captcha, the disposable-domain policy and the
+// per-IP limit of the signup (WP-112, E-33). Without a configured key a
+// random one is drawn: challenges then verify only on this instance.
+func signupProtection(cfg *config.Config, store cache.Store) *signup.Protection {
+	key := []byte(cfg.SignupCaptchaKey)
+	if len(key) == 0 {
+		key = make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			slog.Error("self-signup protection disabled", "error", err)
+			return nil
+		}
+		slog.Warn("RETICORA_SIGNUP_CAPTCHA_KEY not set; signup challenges verify only on this instance")
+	}
+	domains, err := signup.NewDomainPolicy(splitList(cfg.SignupBlockedDomains), splitList(cfg.SignupAllowedDomains))
+	if err != nil {
+		slog.Error("self-signup protection disabled", "error", err)
+		return nil
+	}
+	p, err := signup.NewProtection(key, store, domains)
+	if err != nil {
+		slog.Error("self-signup protection disabled", "error", err)
+		return nil
+	}
+	return p
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

@@ -2,6 +2,7 @@ package citype
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -56,6 +57,146 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/cis/{id}/field-definitions", h.ListInstanceFields)
 	r.Put("/api/v1/cis/{id}/field-definitions", h.UpsertInstanceField)
 	r.Delete("/api/v1/cis/{id}/field-definitions/{name}", h.DeleteInstanceField)
+	// attribute_definition as a resource (API-05, MET-10).
+	r.Get("/api/v1/attribute-definitions", h.ListAttributeDefinitions)
+	r.Post("/api/v1/attribute-definitions", h.CreateAttributeDefinition)
+	r.Get("/api/v1/attribute-definitions/{id}", h.GetAttributeDefinition)
+	r.Patch("/api/v1/attribute-definitions/{id}", h.UpdateAttributeDefinition)
+	r.Delete("/api/v1/attribute-definitions/{id}", h.DeleteAttributeDefinition)
+}
+
+// attributeStore returns the attribute-definitions store or answers 503
+// (in-memory mode has none).
+func (h *Handler) attributeStore(w http.ResponseWriter) (AttributeDefinitionStore, bool) {
+	store, ok := h.repo.(AttributeDefinitionStore)
+	if !ok {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "attribute definitions need the database")
+	}
+	return store, ok
+}
+
+func writeAttributeError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrAttributeNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+	case errors.Is(err, ErrAttributeReadOnly):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
+	case api.WriteFieldError(w, err):
+	default:
+		api.WriteRepoError(w, err)
+	}
+}
+
+// ListAttributeDefinitions handles GET /api/v1/attribute-definitions
+// (?ci_type_id=, ?scope=type|global).
+func (h *Handler) ListAttributeDefinitions(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return
+	}
+	store, ok := h.attributeStore(w)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	items, err := store.ListAttributeDefinitions(r.Context(), t.OrganizationID,
+		AttributeFilter{CITypeID: q.Get("ci_type_id"), Scope: q.Get("scope")})
+	if err != nil {
+		writeAttributeError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[AttributeDefinition]{Data: items, Total: len(items), Limit: len(items)})
+}
+
+// GetAttributeDefinition handles GET /api/v1/attribute-definitions/{id}.
+func (h *Handler) GetAttributeDefinition(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return
+	}
+	store, ok := h.attributeStore(w)
+	if !ok {
+		return
+	}
+	d, err := store.GetAttributeDefinition(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	if err != nil {
+		writeAttributeError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, d)
+}
+
+// CreateAttributeDefinition handles POST /api/v1/attribute-definitions; a
+// definition without ci_type_id is global.
+func (h *Handler) CreateAttributeDefinition(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return
+	}
+	store, ok := h.attributeStore(w)
+	if !ok {
+		return
+	}
+	var req struct {
+		AttributeDefinitionPatch
+		CITypeID string `json:"ci_type_id,omitempty"`
+		Key      string `json:"key"`
+	}
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	d := &AttributeDefinition{CITypeID: req.CITypeID, Key: req.Key, UniqueScope: "org", Inheritable: true}
+	req.apply(d)
+	if err := store.CreateAttributeDefinition(r.Context(), t.OrganizationID, d); err != nil {
+		writeAttributeError(w, err)
+		return
+	}
+	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", d)
+	api.WriteJSON(w, http.StatusCreated, d)
+}
+
+// UpdateAttributeDefinition handles PATCH /api/v1/attribute-definitions/{id}.
+func (h *Handler) UpdateAttributeDefinition(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return
+	}
+	store, ok := h.attributeStore(w)
+	if !ok {
+		return
+	}
+	var patch AttributeDefinitionPatch
+	if err := api.ReadJSON(r, &patch); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	d, err := store.UpdateAttributeDefinition(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), &patch)
+	if err != nil {
+		writeAttributeError(w, err)
+		return
+	}
+	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", d)
+	api.WriteJSON(w, http.StatusOK, d)
+}
+
+// DeleteAttributeDefinition handles DELETE /api/v1/attribute-definitions/{id}.
+func (h *Handler) DeleteAttributeDefinition(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return
+	}
+	store, ok := h.attributeStore(w)
+	if !ok {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if err := store.DeleteAttributeDefinition(r.Context(), t.OrganizationID, id); err != nil {
+		writeAttributeError(w, err)
+		return
+	}
+	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", map[string]string{"id": id})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func tenantOr401(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
@@ -128,6 +269,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name is required")
 		return
 	}
+	if err := req.DisplayName.Validate(); err != nil {
+		api.WriteFieldError(w, &api.FieldError{Field: "display_name", Message: err.Error()})
+		return
+	}
 	for _, f := range req.Fields {
 		if err := validateField(f); err != nil {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -138,11 +283,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		OrganizationID:           t.OrganizationID,
 		Key:                      req.Key,
 		Name:                     req.Name,
-		DisplayName:              req.DisplayName,
+		DisplayName:              req.DisplayName.WithFallback(req.Name),
 		Icon:                     req.Icon,
 		Description:              req.Description,
 		Category:                 req.Category,
 		IsLogical:                req.IsLogical,
+		IsObservable:             observableDefault(req.IsObservable, req.IsLogical),
 		TemplateKey:              req.TemplateKey,
 		LifecycleDefinitionID:    req.LifecycleDefinitionID,
 		Capabilities:             req.Capabilities,
@@ -172,6 +318,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	var req UpdateTypeRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if err := req.DisplayName.Validate(); err != nil {
+		api.WriteFieldError(w, &api.FieldError{Field: "display_name", Message: err.Error()})
 		return
 	}
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)

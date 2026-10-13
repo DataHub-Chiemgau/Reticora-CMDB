@@ -17,7 +17,7 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 | [E-01](#e-01) | Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 | entschieden | Keine Sperre mehr; WPs mit Verweis prüfen ihre Kriterien gegen den Text. | 130 |
 | [E-02](#e-02) | Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) | offen | Teilumfänge von c-ui-*, WP-152 (`d-protocols`), WP-212 (`g1-abnahme`), WP-231 (`m-workflow`), WP-232 (`m-iga`), WP-237 (`m-ui-mods`), WP-219 (`m-relay`). | 9 |
 | [E-03](#e-03) | Umgang mit vorhandenem Code späterer Phasen im G1-Release | entschieden | Steuert den gesamten Meilenstein M-S und den G1-Umfang. | 37 |
-| [E-04](#e-04) | Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells | offen | Keiner für M0; Namensschema für WP-142 (`b-met-ddl`). | 3 |
+| [E-04](#e-04) | Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells | entschieden | Keiner für M0; Namensschema für WP-142 (`b-met-ddl`). | 3 |
 | [E-05](#e-05) | Fehlende oder abweichende Tags | entschieden | Keiner (Annahme konservativ). | 1 |
 | [E-06](#e-06) | Zuordnung der IDs zu Epics A–D | entschieden | Spalte `epic` in `docs/traceability.csv` (WP-005 (`trace`)). | 1 |
 | [E-07](#e-07) | Vorziehen von M0 vor Epic A (Abweichung von SEQ-01) | entschieden | Nachweis SEQ-01 in WP-213 (`g1-gate`). | 0 |
@@ -28,7 +28,7 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 | [E-12](#e-12) | ENT-04: Wer darf Entitlements schreiben? | entschieden | WP-074 (`ent-operator`). | 1 |
 | [E-13](#e-13) | RBA-02-Rollenmatrix und AUT-04-Schlüsselformat | vorläufig entschieden | WP-046 (`role-model`), WP-067 (`apikeys`). | 2 |
 | [E-14](#e-14) | CH26 (V): Keycloak-Org-Attribut, MFA-Pflicht, Brokering | entschieden | WP-043 (`auth-org`), WP-044 (`kc-admin`). | 2 |
-| [E-15](#e-15) | CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation | offen | WP-141 (`b-sec-rotation`), WP-213 (`g1-gate`) (REP-01-Strukturtest). | 2 |
+| [E-15](#e-15) | CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation | entschieden | WP-141 (`b-sec-rotation`), WP-213 (`g1-gate`) (REP-01-Strukturtest). | 2 |
 | [E-16](#e-16) | SEC-10: Zahlenwerte für GraphQL-Limits | vorläufig entschieden | WP-184 (`c-gql-bff`). | 1 |
 | [E-17](#e-17) | CH15: Skalierungsziel bestätigen | offen | WP-093 (`a-preflight`), WP-203 (`lt-seed`), WP-206 (`lt-run`). | 3 |
 | [E-18](#e-18) | CH27 (V): impact_direction | entschieden | WP-127 (`b-rel-types`), WP-176 (`c-imp-direction`). | 2 |
@@ -46,7 +46,7 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 | [E-30](#e-30) | Traceability-Prüfung: ab wann blockierend? | entschieden | WP-005 (`trace`), WP-213 (`g1-gate`). | 2 |
 | [E-31](#e-31) | Werkzeuge für Abhängigkeits-/Container-Scan, Signatur und Lasttest | entschieden | WP-004 (`dep-scan`), WP-102 (`a-release`), WP-204 (`lt-harness`), WP-209 (`sr-review`). | 4 |
 | [E-32](#e-32) | REC-03: Rang der Quelle IPMI | entschieden | WP-058 (`rec-decide`), WP-220 (`m-srcpolicy`). | 2 |
-| [E-33](#e-33) | TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte | offen | WP-111 (`b-signup`), WP-112 (`b-signup-protect`). | 2 |
+| [E-33](#e-33) | TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte | entschieden | WP-111 (`b-signup`), WP-112 (`b-signup-protect`). | 2 |
 | [E-34](#e-34) | ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan | vorläufig entschieden | Folgeänderung zu WP-071 (`ent-model`), WP-203 (`lt-seed`). | 2 |
 | [E-35](#e-35) | NFR-09: Inhalt der Subprozessorenliste | offen | WP-105 (`a-reference`). | 1 |
 | [E-36](#e-36) | DB-05: Zeilen für Vertrag, installierte Software und Health-Findings | entschieden | WP-077 (`db05-asset`), WP-080 (`db05-lcy`), WP-230 (`m-agent`). | 3 |
@@ -137,9 +137,9 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 
 **Thema:** Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells
 
-**Status:** offen (2026-10-01)
+**Status:** entschieden (2026-10-12)
 
-**Festlegung:** Vorläufig gilt Option 2: Die Teil-03-Tabelle bleibt direkte Quelle, gekennzeichnet in `abdeckung.csv`. Die empfohlene Konsolidierung ist eine Audit-Aufgabe und nicht Teil dieses Plans. Die fehlenden Texte werden zusammen mit E-01 angefordert.
+**Festlegung:** Option 2: Die Teil-03-Tabelle bleibt direkte Quelle, gekennzeichnet in `abdeckung.csv`; die Konsolidierung in `befunde.csv` ist eine Audit-Aufgabe ohne Blockadewirkung. Die fehlenden Texte (DB-01, MET-20, MET-30–34, MET-40–44) werden zusammen mit E-01 angefordert. Namensschema (DB-04): `idx_attr_<attribute_definition.id als 32 Hex-Zeichen>`, eindeutige Indizes mit Suffix `_u` (z. B. `idx_attr_3f2a…9c_u`). Begründung: stabil bei Umbenennung des Attributschlüssels, kollisionsfrei über Organisationen und Systemattribute, höchstens 43 Zeichen (PostgreSQL-Grenze 63), verwaiste oder ungültige Indizes über die Definitions-ID auffindbar.
 
 **Aufgabe:** Teil 03 in `docs/audit/befunde.csv` und `docs/audit/99-gesamtbericht.md` konsolidieren; Texte DB-01, MET-20, MET-30–34, MET-40–44 mit E-01 anfordern. Zuständig: Audit. Termin: vor WP-142 (`b-met-ddl`), spätestens vor G1.
 
@@ -414,11 +414,11 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 
 **Thema:** CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation
 
-**Status:** offen (2026-10-01)
+**Status:** entschieden (2026-10-12)
 
-**Festlegung:** Laut Empfehlung ist vor Epic B eine Grundsatzentscheidung zu treffen; der Plan kann sie nicht vorwegnehmen. Bei Bestätigung von CH16 werden Folge-WPs (AUD-01/02, SEC-05) ergänzt.
+**Festlegung:** Option 1, zugeschnitten auf das Phase-1-Minimum: CH16 wird bestätigt, weil SEC-05 und AUD-04 [B] Surrogat-IDs statt Klartext-PII verlangen und ein Gerüst allein das G1-Gate nicht bestünde. Drei Folge-WPs in Epic B: WP-240 (`b-pii-vault`, Vault-Kern `pii_subject` + `internal/pii` mit dem bestehenden Org-DEK), WP-241 (`b-pii-surrogates`, Surrogate in Audit, `ci_change`, Assignments und Events inkl. Bestandsmigration), WP-242 (`b-pii-contacts`, Kontakt- und Nutzerdaten über den Vault, AUD-01). Lösch-, Auskunfts- und Pseudonymisierungsworkflows bleiben [P3] (SEC-05). WP-141 (`b-sec-rotation`) hängt nicht davon ab: Die DEK-Neuverschlüsselung deckt den Vault mit ab.
 
-**Aufgabe:** Option zu CH16/PII-Vault wählen (eigenes WP-Paket oder nur Gerüst und Konzept). Zuständig: Product Owner/Datenschutz. Termin: vor Beginn von Epic B (WP-107).
+**Aufgabe:** erledigt (A-04).
 
 **Frage:** CH16 (Vorschlag) verlangt Surrogat-IDs aus einem PII-Vault bereits in Phase 1 (SEC-05); REP-01 nennt `internal/pii`. Umfang und Bezug zur Schlüsselrotation (SEC-06) sind offen.
 
@@ -879,11 +879,11 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 
 **Thema:** TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte
 
-**Status:** offen (2026-10-01)
+**Status:** entschieden (2026-10-12)
 
-**Festlegung:** Laut Empfehlung geben Produkt und Datenschutz Captcha-Anbieter, Blockliste und Trial-Werte vor.
+**Festlegung:** Option 1. Captcha: selbst gehostetes ALTCHA (Open Source, MIT, Proof-of-Work, serverseitige HMAC-Prüfung; kein Drittanbieter, keine Cookies, NFR-09-konform, auch air-gapped). Alternative bei Wunsch nach einem verwalteten Dienst: Friendly Captcha (EU, AVV). Wegwerf-Domains: Open-Source-Liste `disposable-email-domains` (CC0), als Datei im Repository, monatliche Aktualisierung per PR, ergänzt um Allowlist und Operator-Einträge. Trial nach ENT-07: 30 Tage Standard-Umfang mit `max_cis` 100, danach Essential-Limits; Erinnerungen 14/7/1 Tage vor Ablauf. Zusätzlich höchstens 5 Signups je IP und Stunde neben dem Pre-Auth-Limit (AUT-10); E-Mail-Verifikation über Keycloak.
 
-**Aufgabe:** Captcha-Anbieter, Wegwerf-Domain-Liste und Trial-Werte festlegen. Zuständig: Produkt/Datenschutz. Termin: vor WP-111 (`b-signup`).
+**Aufgabe:** erledigt (A-10).
 
 **Frage:** Anbieter für Captcha (Datenschutz/EU), Quelle der Blocklist und Trial-Dauer/-Limits sind festzulegen.
 
@@ -986,12 +986,12 @@ Diese Aufgaben folgen aus den Empfehlungen. Die betroffenen WPs starten erst, we
 |---|---|---|---|---|
 | A-01 | [E-01](#e-01) | **erledigt 2026-10-01:** Katalogteile 02, 04, 05 und 06 in `docs/spec/katalog-v3/` nachliefern | Auftraggeber/Product Owner | vor Beginn von M0.1 (WP-008) |
 | A-02 | [E-02](#e-02) | v2-Originaltexte (UI-01–UI-10, ABN-01, DIS-04, IGA, WFL-04, AUT-05/06, NET-04, REP-01) nachliefern | Auftraggeber/Product Owner | vor Epic C (UI) bzw. vor WP-212 (ABN-01) |
-| A-03 | [E-04](#e-04) | Teil 03 in `docs/audit/befunde.csv` und `docs/audit/99-gesamtbericht.md` konsolidieren; Texte DB-01, MET-20, MET-30–34, MET-40–44 mit E-01 anfordern | Audit | vor WP-142 (`b-met-ddl`), spätestens vor G1 |
-| A-04 | [E-15](#e-15) | Option zu CH16/PII-Vault wählen (eigenes WP-Paket oder nur Gerüst und Konzept) | Product Owner/Datenschutz | vor Beginn von Epic B (WP-107) |
+| A-03 | [E-04](#e-04) | **entschieden 2026-10-12** (Option 2, Namensschema `idx_attr_<id>`[`_u`]); offen bleibt nur: Teil 03 in `docs/audit/befunde.csv` und `docs/audit/99-gesamtbericht.md` konsolidieren; Texte DB-01, MET-20, MET-30–34, MET-40–44 mit E-01 anfordern | Audit | vor WP-142 (`b-met-ddl`), spätestens vor G1 |
+| A-04 | [E-15](#e-15) | **erledigt 2026-10-12** (Option 1, WP-240–242): Option zu CH16/PII-Vault wählen (eigenes WP-Paket oder nur Gerüst und Konzept) | Product Owner/Datenschutz | vor Beginn von Epic B (WP-107) |
 | A-05 | [E-17](#e-17) | Skalierungsziel CH15 bestätigen (1.000–10.000 Objekte, Headroom 50.000) oder anderen Wert festlegen | Product Owner | vor WP-093 (`a-preflight`), spätestens vor WP-203 (`lt-seed`) |
 | A-06 | [E-23](#e-23) | **erledigt 2026-10-01** (durch CI-10/GLO-13): Abgrenzung GLO-13/CI-10 mit den Texten aus E-01 nachliefern | Auftraggeber/Product Owner | vor WP-091 (`glo13-ns`) |
 | A-07 | [E-28](#e-28) | Pentest-Dienstleister beauftragen, Umfang und Termin festlegen | Auftraggeber | parallel zu Epic C, vor WP-210 |
 | A-08 | [E-29](#e-29) | **erledigt 2026-10-12** (pgBackRest): Werkzeug für WAL-Archivierung und Basisbackups wählen (pgBackRest, WAL-G oder Managed-Postgres) | Betrieb | vor WP-100 (`a-backup`) |
 | A-09 | [E-32](#e-32) | REC-03-Rang für IPMI festlegen (der am 2026-10-01 gelieferte REC-03-Text nennt IPMI nicht) | Auftraggeber/Product Owner | vor WP-058 (`rec-decide`) |
-| A-10 | [E-33](#e-33) | Captcha-Anbieter, Wegwerf-Domain-Liste und Trial-Werte festlegen | Produkt/Datenschutz | vor WP-111 (`b-signup`) |
+| A-10 | [E-33](#e-33) | **erledigt 2026-10-12** (ALTCHA, disposable-email-domains, Trial nach ENT-07): Captcha-Anbieter, Wegwerf-Domain-Liste und Trial-Werte festlegen | Produkt/Datenschutz | vor WP-111 (`b-signup`) |
 | A-11 | [E-35](#e-35) | Subprozessorenliste liefern | Betreiber | vor WP-105 (`a-reference`) |

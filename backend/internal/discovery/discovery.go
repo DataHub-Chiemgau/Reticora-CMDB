@@ -113,6 +113,9 @@ type BulkIngestResponse struct {
 	// ProtectedInstanceFields counts matched CIs where discovered values for
 	// instance attributes were not written (MET-14).
 	ProtectedInstanceFields int `json:"protected_instance_fields,omitempty"`
+	// InvalidValues counts discovered values the field metadata rejected;
+	// they are not stored (CI-03, MET-11).
+	InvalidValues int `json:"invalid_values,omitempty"`
 	// Duplicates counts records whose record_id was processed within the
 	// last 48 hours; they change nothing (REC-01).
 	Duplicates int `json:"duplicates,omitempty"`
@@ -345,6 +348,8 @@ type Handler struct {
 	instance   InstanceFieldSource
 	queue      IngestQueue
 	interfaces InterfaceSyncer
+	// observed validates discovered values against the field metadata.
+	observed ObservedValidator
 	// The review queue (package reviews), built on first use.
 	reviewsOnce    sync.Once
 	reviews        *reviews.Service
@@ -887,6 +892,18 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 		// are visible, searchable and filterable like any other attribute; the
 		// per-field provenance recorded below keeps the reporting source and
 		// timestamp available for reconciliation.
+		// Discovered values pass the same field rules as manual writes.
+		validateType, validateCI := typeIDs[i], ""
+		if result.Action == ReconcileMatched {
+			if m := findCI(candidates, result.MatchedCIID); m != nil {
+				validateType, validateCI = m.CITypeID, m.ID
+			}
+		}
+		dropped, dropErr := h.dropInvalidObserved(ctx, orgID, validateType, validateCI, &item)
+		if dropErr != nil {
+			return resp, dropErr
+		}
+		resp.InvalidValues += dropped
 		attributes := discoveredAttributes(&item)
 
 		switch result.Action {

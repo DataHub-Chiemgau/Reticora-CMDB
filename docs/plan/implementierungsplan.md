@@ -31,7 +31,7 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt alle offenen Punkte der Pha
 | [M0.2c Kanonisches Datenmodell (DB-05), VLAN/VRF](#m02c-kanonisches-datenmodell-db-05-vlanvrf) | Kanonisches Datenmodell nach DB-05 sowie VLAN/VRF. | WP-077 – WP-082 | 6 | 10,0 | DB-05-Zeilen [B] umgesetzt (E-36). |
 | [M0.2d Ingest und Reconciliation](#m02d-ingest-und-reconciliation) | Ingest- und Reconciliation-Fundament: Vertrag, Pipeline, Identität, Reviews, Konflikte. | WP-083 – WP-091 | 9 | 16,0 | DeviceRecord-Ende-zu-Ende über `ingest.>`; Review-Modell nach REC-08. |
 | [Epic A – Installation und Betrieb](#epic-a--installation-und-betrieb) | Epic A – Installation und Betrieb nach SEQ-01 abschließen. | WP-092 – WP-106 | 15 | 19,0 | INS-*, OPS-*, TEC-09/15, NFR-05 ohne offene [B]-Befunde. |
-| [Epic B – Fundament](#epic-b--fundament) | Epic B – Fundament: Organisationen, Metamodell, CI-Modell, Jobs, Audit, Events, Benachrichtigungen. | WP-107 – WP-142 | 36 | 52,0 | [B]-IDs des Fundaments PASS; parallel zu Epic D. |
+| [Epic B – Fundament](#epic-b--fundament) | Epic B – Fundament: Organisationen, Metamodell, CI-Modell, Jobs, Audit, Events, Benachrichtigungen. | WP-107 – WP-142, WP-240 – WP-242 | 39 | 56,5 | [B]-IDs des Fundaments PASS; parallel zu Epic D. |
 | [Epic D – Collector und Discovery](#epic-d--collector-und-discovery) | Epic D – Collector und Discovery (parallel zu Epic B; einzelne WPs benötigen genannte B-WPs). | WP-143 – WP-162 | 20 | 29,0 | COL-*, DIS-*, TOP-*, REC-09 ohne offene [B]-Befunde. |
 | [Epic C – API, Kernfunktionen, UI](#epic-c--api-kernfunktionen-ui) | Epic C – API-Vertrag, Kernfunktionen (CI, Impact, Bulk, Jobs, Suche, Export), UI und E2E. | WP-163 – WP-202 | 40 | 57,0 | API-/UI-[B]-IDs PASS; E2E-Suite grün. |
 | [Lasttest (NFR-10)](#lasttest-nfr-10) | Lasttest nach NFR-10 mit Nachweis NFR-01/02/03 und ABN-02/03. | WP-203 – WP-207 | 5 | 8,0 | Bericht mit p95-Werten; Budgets eingehalten. |
@@ -120,7 +120,7 @@ Der Auftraggeber hat angewiesen, nach den Empfehlungen in `entscheidungen.md` vo
 - **G1-Umfang** ([E-03](entscheidungen.md#e-03), deaktivieren): WP-214 (`m-gates`) ist G1-Pflicht und schaltet Spätphasen-Module standardmäßig ab. WP-215 bis WP-239 sind verschoben. Die M0-WPs in Spätphasen-Modulen bleiben verpflichtend; ihre Kriterien „Alternative nach E-03“ entfallen.
 - **Epics und Traceability** ([E-06](entscheidungen.md#e-06), [E-07](entscheidungen.md#e-07)): Die Epic-Zuordnung ist bestätigt; M0-WPs tragen ihr fachliches Epic.
 - **Festgelegte Umsetzungsregeln:** fail-closed-Scopes und `WithSystem` ([E-08](entscheidungen.md#e-08)), NULL-Scope-Schreiben nur org-weit ([E-09](entscheidungen.md#e-09)), globale Kataloge read-only ([E-10](entscheidungen.md#e-10)), Team-Scope als Schnittmenge (vorläufig, [E-11](entscheidungen.md#e-11)), CH21/CH26–CH30 bestätigt ([E-14](entscheidungen.md#e-14), [E-18](entscheidungen.md#e-18) bis [E-22](entscheidungen.md#e-22)), VLAN-Eindeutigkeit über zwei Teilindizes ([E-24](entscheidungen.md#e-24)), API-05-Pfade wörtlich mit Deprecation/Sunset ([E-25](entscheidungen.md#e-25)), Quarantäne in 000056 ([E-26](entscheidungen.md#e-26)), Install-Matrix nach CH22 ([E-27](entscheidungen.md#e-27)), externer Pentest ([E-28](entscheidungen.md#e-28)), Traceability stufenweise blockierend ([E-30](entscheidungen.md#e-30)), Werkzeuge govulncheck/npm audit/Trivy/cosign keyless/k6 ([E-31](entscheidungen.md#e-31)), DB-05 nur [B]-Zeilen für G1 ([E-36](entscheidungen.md#e-36)).
-- **Offen mit Termin:** E-02, E-04, E-15, E-17, E-32, E-33 und E-35 (E-01 und E-23 sind seit der Lieferung vom 2026-10-01 entschieden, E-29 seit 2026-10-12). Die WP-Blöcke zeigen den Status jeder verwiesenen Entscheidung im Feld „Entscheidungsbedarf“.
+- **Offen mit Termin:** E-02, E-17, E-32 und E-35 (E-01 und E-23 sind seit der Lieferung vom 2026-10-01 entschieden, E-04, E-15, E-29 und E-33 seit 2026-10-12). Die WP-Blöcke zeigen den Status jeder verwiesenen Entscheidung im Feld „Entscheidungsbedarf“.
 
 ## Konventionen für alle WPs
 
@@ -5250,6 +5250,9 @@ SIM-01;[B], Teilumfang [P2];A;.github/workflows/ci.yml;WP-106
 | [WP-140](#wp-140--die-acht-phase-1-benachrichtigungsereignisse-ntf-05) | `b-ntf-events` | Die acht Phase-1-Benachrichtigungsereignisse (NTF-05) | 1,5 | WP-139 |
 | [WP-141](#wp-141--schlüsselrotation-sec-06) | `b-sec-rotation` | Schlüsselrotation (SEC-06) | 1,5 | WP-131, WP-047 |
 | [WP-142](#wp-142--attribut-ddl-job-searchableunique-flags-create-index-concurrently-idx_attr_-serverseitige-eindeutigkeit) | `b-met-ddl` | Attribut-DDL-Job: searchable/unique-Flags, `CREATE INDEX CONCURRENTLY idx_attr_…`, serverseitige Eindeutigkeit | 2,0 | WP-116, WP-130, WP-064 |
+| [WP-240](#wp-240--pii-vault-kern-pii_subject-und-internalpii) | `b-pii-vault` | PII-Vault-Kern: `pii_subject` und `internal/pii` | 1,5 | WP-065 |
+| [WP-241](#wp-241--surrogate-statt-klartext-pii-in-audit-historie-und-events) | `b-pii-surrogates` | Surrogate statt Klartext-PII in Audit, Historie und Events | 2,0 | WP-240, WP-133, WP-136 |
+| [WP-242](#wp-242--kontakt--und-nutzerdaten-über-den-pii-vault) | `b-pii-contacts` | Kontakt- und Nutzerdaten über den PII-Vault | 1,0 | WP-240 |
 
 ### WP-107 – Organisation, Client, Site: Zeitzone/Währung/Locale, Eindeutigkeiten, external_ref
 
@@ -5477,7 +5480,7 @@ TLC-01;[B];B;backend/internal/signup/service_test.go;WP-111
 API-05;[B];B;backend/internal/signup/service_test.go;WP-111
 ```
 
-**Entscheidungsbedarf:** [E-33](entscheidungen.md#e-33) TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte (offen)
+**Entscheidungsbedarf:** [E-33](entscheidungen.md#e-33) TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte (entschieden: ALTCHA, disposable-email-domains, Trial nach ENT-07)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -5517,7 +5520,7 @@ API-05;[B];B;backend/internal/signup/service_test.go;WP-111
 TLC-01;[B];B;backend/internal/signup/protect_test.go;WP-112
 ```
 
-**Entscheidungsbedarf:** [E-33](entscheidungen.md#e-33) TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte (offen)
+**Entscheidungsbedarf:** [E-33](entscheidungen.md#e-33) TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte (entschieden: ALTCHA, disposable-email-domains, Trial nach ENT-07)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6772,7 +6775,7 @@ OPS-05;[B];B;backend/internal/notify/events_integration_test.go;WP-140
 SEC-06;[B];B;backend/internal/platform/crypto/crypto_test.go;WP-141
 ```
 
-**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-15](entscheidungen.md#e-15) CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation (offen)
+**Entscheidungsbedarf:** [E-01](entscheidungen.md#e-01) Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 (entschieden); [E-15](entscheidungen.md#e-15) CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation (entschieden: Option 1, WP-240–242; WP-141 unabhängig)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -6821,7 +6824,130 @@ DB-04;nicht geliefert;B;backend/internal/citype/ddl_job_integration_test.go;WP-1
 MET-15;B/G1;B;backend/internal/citype/ddl_job_integration_test.go;WP-142
 ```
 
-**Entscheidungsbedarf:** [E-04](entscheidungen.md#e-04) Teilbericht 03 nicht konsolidiert (offen); N/P-IDs des Metamodells
+**Entscheidungsbedarf:** [E-04](entscheidungen.md#e-04) Teilbericht 03 nicht konsolidiert (entschieden: Option 2, Namensschema `idx_attr_<id>`/`_u`); N/P-IDs des Metamodells
+
+**Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
+
+
+### WP-240 – PII-Vault-Kern: `pii_subject` und `internal/pii`
+
+**Schlüssel:** `b-pii-vault` · **Meilenstein:** Epic B – Fundament · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-065 (`rls-matrix`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| SEC-05 | [B] | N/P | High | Teil | `docs/audit/befunde.csv` (SEC-05) | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:32` |
+
+Weitere Anforderungstexte: CH16 (`docs/spec/katalog-v3/00-grundlagen.md:31`)
+
+**Problem:** Kein PII-Vault; personenbezogene Daten liegen im Klartext in den Fachtabellen.
+
+**Akzeptanzkriterien:**
+
+- [ ] Tabelle `pii_subject(org, surrogate_id, encrypted_payload, dek_ref)` mit RLS; Verschlüsselung mit dem bestehenden Org-DEK (Envelope Encryption).
+- [ ] Paket `internal/pii`: Anlegen, Auflösen (einzeln und gebündelt) und Ändern eines Surrogats; Auflösung nur innerhalb der eigenen Organisation.
+- [ ] Gelöschter Vault-Eintrag lässt sich nicht mehr auflösen (Grundlage Crypto-Shredding); Workflows dafür bleiben [P3].
+
+**Dateien:**
+
+- `backend/migrations/<nächste Nr.>_pii_subject.up.sql` + .down.sql
+- `backend/internal/pii/` (neu)
+- `backend/internal/pii/pii_integration_test.go` (neu)
+
+**Migration/RLS:** neue Tabelle mit Org-Isolation; up/down.
+
+**Tests:**
+
+- `pii/pii_integration_test.go` (Roundtrip, Org-Isolation, gelöschter Eintrag).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+SEC-05;[B];B;backend/internal/pii/pii_integration_test.go;WP-240
+```
+
+**Entscheidungsbedarf:** [E-15](entscheidungen.md#e-15) (entschieden: Option 1)
+
+**Nicht Bestandteil:** Lösch-, Auskunfts- und Exportworkflows [P3].
+
+### WP-241 – Surrogate statt Klartext-PII in Audit, Historie und Events
+
+**Schlüssel:** `b-pii-surrogates` · **Meilenstein:** Epic B – Fundament · **Epic (Traceability):** B · **Aufwand:** 2,0 PT
+
+**Voraussetzungen (gemergt):** WP-240 (`b-pii-vault`), WP-133 (`b-audit-fields`), WP-136 (`b-events`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| SEC-05 | [B] | N/P | High | schließt | `docs/audit/befunde.csv` (SEC-05) | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:32` |
+| AUD-04 | [B] | ABWEICHEND | High | Teil | `docs/audit/06-audit-sicherheit-events.md:24` | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:10` |
+
+**Problem:** Audit-Log, `ci_change`, Assignments und Events enthalten Klartext-PII (Namen, E-Mail-Adressen).
+
+**Akzeptanzkriterien:**
+
+- [ ] Audit, `ci_change`, `stock_movement`, Assignments und Events speichern für Personen nur Surrogat-IDs; Anzeige und API lösen sie zur Laufzeit auf.
+- [ ] Bestandsdaten werden migriert; die Audit-Hashkette bleibt gültig (`audit-verify`).
+- [ ] Ein gelöschter Vault-Eintrag legt in der Historie keine PII mehr offen.
+
+**Dateien:**
+
+- `backend/migrations/<nächste Nr.>_pii_surrogates.up.sql` + .down.sql
+- `backend/internal/audit/`, `backend/internal/ci/`, `backend/internal/events/` (Schreib- und Lesepfade)
+- `backend/internal/pii/surrogate_integration_test.go` (neu)
+
+**Migration/RLS:** Datenmigration; up/down.
+
+**Tests:**
+
+- `pii/surrogate_integration_test.go` (kein Klartext in den Tabellen, Auflösung, Hashkette).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+SEC-05;[B];B;backend/internal/pii/surrogate_integration_test.go;WP-241
+```
+
+**Entscheidungsbedarf:** [E-15](entscheidungen.md#e-15) (entschieden: Option 1)
+
+**Nicht Bestandteil:** Pseudonymisierungs- und Exportworkflows [P3].
+
+### WP-242 – Kontakt- und Nutzerdaten über den PII-Vault
+
+**Schlüssel:** `b-pii-contacts` · **Meilenstein:** Epic B – Fundament · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-240 (`b-pii-vault`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| AUD-01 | [B] | PARTIAL | Medium | schließt | `docs/audit/befunde.csv` (AUD-01) | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:4` |
+
+**Problem:** Name, Telefon und E-Mail von Kontakten liegen im Klartext in `contact`.
+
+**Akzeptanzkriterien:**
+
+- [ ] Name, Telefon und E-Mail von Kontakten liegen im Vault; `contact` hält das Surrogat; die REST-Ressource `contacts` bleibt unverändert nutzbar (Auflösung beim Lesen).
+- [ ] Bestandsdaten werden migriert; Suche nach Kontaktnamen funktioniert weiter.
+
+**Dateien:**
+
+- `backend/migrations/<nächste Nr.>_contact_pii.up.sql` + .down.sql
+- `backend/internal/contact/`
+- `backend/internal/contact/pii_integration_test.go` (neu)
+
+**Migration/RLS:** Datenmigration; up/down.
+
+**Tests:**
+
+- `contact/pii_integration_test.go`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+AUD-01;[B];B;backend/internal/contact/pii_integration_test.go;WP-242
+```
+
+**Entscheidungsbedarf:** [E-15](entscheidungen.md#e-15) (entschieden: Option 1)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9965,7 +10091,7 @@ GLO-11;[Q];G1;tests/rep01-structure.test.sh;WP-213
 REP-01;[B];G1;tests/rep01-structure.test.sh;WP-213
 ```
 
-**Entscheidungsbedarf:** [E-15](entscheidungen.md#e-15) CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation (offen); [E-27](entscheidungen.md#e-27) GATE-03 „beide Plattformen“ und Umgang mit WARN (GATE-02) (entschieden); [E-30](entscheidungen.md#e-30) Traceability-Prüfung: ab wann blockierend? (entschieden)
+**Entscheidungsbedarf:** [E-15](entscheidungen.md#e-15) CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation (entschieden: Option 1, WP-240–242; WP-141 unabhängig); [E-27](entscheidungen.md#e-27) GATE-03 „beide Plattformen“ und Umgang mit WARN (GATE-02) (entschieden); [E-30](entscheidungen.md#e-30) Traceability-Prüfung: ab wann blockierend? (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -11071,7 +11197,7 @@ UI-14;[P2–P4, A];Phase;frontend/src/pages/IGAPage.test.tsx;WP-237
 LOC-08;P2/G2;Phase;backend/internal/locations/loc08_integration_test.go;WP-238
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden); [E-04](entscheidungen.md#e-04) Teilbericht 03 nicht konsolidiert (offen); N/P-IDs des Metamodells
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden); [E-04](entscheidungen.md#e-04) Teilbericht 03 nicht konsolidiert (entschieden: Option 2, Namensschema `idx_attr_<id>`/`_u`); N/P-IDs des Metamodells
 
 **Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 
@@ -11117,7 +11243,7 @@ MET-12;P2/G2;Phase;backend/internal/fieldmeta/fieldmeta_test.go;WP-239
 MET-51;P2/G2;Phase;backend/internal/fieldmeta/fieldmeta_test.go;WP-239
 ```
 
-**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden); [E-04](entscheidungen.md#e-04) Teilbericht 03 nicht konsolidiert (offen); N/P-IDs des Metamodells
+**Entscheidungsbedarf:** [E-03](entscheidungen.md#e-03) Umgang mit vorhandenem Code späterer Phasen im G1-Release (entschieden); [E-04](entscheidungen.md#e-04) Teilbericht 03 nicht konsolidiert (entschieden: Option 2, Namensschema `idx_attr_<id>`/`_u`); N/P-IDs des Metamodells
 
 **Nicht Bestandteil:** G1-Umfang. Nach E-03 (entschieden: deaktivieren) ist dieses WP in die Folgephase verschoben; im G1-Release ist das Modul über WP-214 (`m-gates`) abgeschaltet.
 

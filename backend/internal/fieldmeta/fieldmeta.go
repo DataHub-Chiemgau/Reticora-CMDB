@@ -17,11 +17,21 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
-// Field types supported by the metadata-driven CI type system (spec §1).
+// Field types of MET-11. Phase 1: text, multiline, integer, decimal,
+// boolean, date, datetime, enum, multiselect, ip, mac, url, email, uuid;
+// phase 2: file, json and the references.
 const (
 	TypeText        = "text"
+	TypeMultiline   = "multiline"
+	TypeMultiselect = "multiselect"
+	TypeUUID        = "uuid"
+	TypeReference   = "reference"
+	// TypeTextarea and TypeMultiEnum are the former names of multiline and
+	// multiselect; stored definitions keep validating.
 	TypeTextarea    = "textarea"
 	TypeInteger     = "integer"
 	TypeDecimal     = "decimal"
@@ -45,9 +55,10 @@ const (
 )
 
 // ValidFieldTypes is the registry of supported field types. Legacy type names
-// from the original ci_type_attribute CHECK constraint (migration 000002) are
+// from the original data_type CHECK constraint (migration 000002) are
 // accepted as aliases so existing metadata keeps validating.
 var ValidFieldTypes = map[string]bool{
+	TypeMultiline: true, TypeMultiselect: true, TypeUUID: true, TypeReference: true,
 	TypeText: true, TypeTextarea: true, TypeInteger: true, TypeDecimal: true,
 	TypeBoolean: true, TypeDate: true, TypeDatetime: true, TypeEnum: true,
 	TypeMultiEnum: true, TypeIP: true, TypeMAC: true, TypeURL: true,
@@ -58,6 +69,35 @@ var ValidFieldTypes = map[string]bool{
 	"string": true, "number": true,
 }
 
+// Phase1Types are the data types of MET-11 phase 1, exactly.
+var Phase1Types = []string{
+	TypeText, TypeMultiline, TypeInteger, TypeDecimal, TypeBoolean, TypeDate, TypeDatetime,
+	TypeEnum, TypeMultiselect, TypeIP, TypeMAC, TypeURL, TypeEmail, TypeUUID,
+}
+
+// Phase2Types are the data types of MET-11 phase 2 (file in the document
+// module, json, references to CI, asset, user, team, location, contract).
+var Phase2Types = []string{TypeFile, TypeJSON, TypeReference}
+
+// aliases map former and specific type names onto the MET-11 type.
+var aliases = map[string]string{
+	TypeTextarea: TypeMultiline, TypeMultiEnum: TypeMultiselect, "string": TypeText, "number": TypeDecimal,
+	TypeUser: TypeReference, TypeTeam: TypeReference, TypeLocation: TypeReference,
+	TypeCIRef: TypeReference, TypeAssetRef: TypeReference, TypeContractRef: TypeReference,
+}
+
+// CanonicalType returns the MET-11 data type of a (possibly former) type
+// name.
+func CanonicalType(dataType string) string {
+	if c, ok := aliases[dataType]; ok {
+		return c
+	}
+	return dataType
+}
+
+// IsMultiValue reports whether a type holds a list of values.
+func IsMultiValue(dataType string) bool { return CanonicalType(dataType) == TypeMultiselect }
+
 // ReferenceTargets lists the valid reference_target values for reference-typed
 // fields.
 var ReferenceTargets = map[string]bool{
@@ -66,7 +106,7 @@ var ReferenceTargets = map[string]bool{
 }
 
 // FieldDefinition is the canonical shape of a field definition across all
-// three attribute scopes. Storage rows (ci_type_attribute,
+// three attribute scopes. Storage rows (attribute_definition,
 // ci_instance_field_definition) map onto this structure.
 type FieldDefinition struct {
 	Name            string            `json:"name"`
@@ -327,6 +367,15 @@ func compareNumeric(op string, actual, expected any) bool {
 	return false
 }
 
+// jsonNumber accepts numbers only: a numeric string is text (MET-11, the
+// rule AST of MET-45 agrees).
+func jsonNumber(v any) (float64, bool) {
+	if _, isString := v.(string); isString {
+		return 0, false
+	}
+	return toFloat(v)
+}
+
 func toFloat(v any) (float64, bool) {
 	switch t := v.(type) {
 	case float64:
@@ -367,53 +416,82 @@ func ValidateValue(def FieldDefinition, value any) error {
 	if err := checkType(def.DataType, value); err != nil {
 		return fmt.Errorf("field %s: %w", def.Name, err)
 	}
-	v := def.Validation
-	if v == nil {
-		if def.DataType == TypeEnum || def.DataType == TypeMultiEnum {
-			return checkEnum(def, value)
-		}
-		return nil
-	}
-	if err := checkBounds(def, value, v); err != nil {
-		return err
-	}
-	if v.Pattern != "" {
-		str, ok := value.(string)
-		if ok {
-			matched, err := regexp.MatchString(v.Pattern, str)
-			if err != nil {
-				return fmt.Errorf("field %s: invalid validation pattern", def.Name)
-			}
-			if !matched {
-				return fmt.Errorf("field %s: value does not match pattern %q", def.Name, v.Pattern)
-			}
-		}
-	}
-	if len(v.Options) > 0 {
-		if err := checkOptions(def, value, v.Options); err != nil {
-			return err
-		}
-		return nil
-	}
-	if def.DataType == TypeEnum || def.DataType == TypeMultiEnum {
-		return checkEnum(def, value)
+	rule := def.Rule(false)
+	for _, v := range rules.Evaluate(&rule, value, true) {
+		return fmt.Errorf("field %s: %s", def.Name, v.Message)
 	}
 	return nil
 }
 
+// Rule is the rule AST (MET-45, internal/rules) of a definition: required
+// (when withRequired), the allowed values (enum values or validation
+// options), the pattern and the numeric and length ranges. internal/rules
+// evaluates it bindingly; frontend/src/rules builds the same AST.
+func (def *FieldDefinition) Rule(withRequired bool) rules.Rule {
+	var list []rules.Rule
+	if withRequired && def.Required {
+		list = append(list, rules.Rule{Op: rules.OpRequired})
+	}
+	allowed := def.EnumValues
+	v := def.Validation
+	if v != nil && len(v.Options) > 0 {
+		allowed = v.Options
+	}
+	if len(allowed) > 0 {
+		values := make([]any, len(allowed))
+		for i, a := range allowed {
+			values[i] = a
+		}
+		list = append(list, rules.Rule{Op: rules.OpEnum, Values: values})
+	}
+	if v != nil {
+		if v.Pattern != "" {
+			list = append(list, rules.Rule{Op: rules.OpPattern, Pattern: v.Pattern})
+		}
+		if v.Min != nil || v.Max != nil {
+			list = append(list, rules.Rule{Op: rules.OpRange, Min: v.Min, Max: v.Max})
+		}
+		if v.MinLength != nil || v.MaxLength != nil {
+			r := rules.Rule{Op: rules.OpRange, Of: rules.OfLength}
+			if v.MinLength != nil {
+				f := float64(*v.MinLength)
+				r.Min = &f
+			}
+			if v.MaxLength != nil {
+				f := float64(*v.MaxLength)
+				r.Max = &f
+			}
+			list = append(list, r)
+		}
+	}
+	return rules.Rule{Op: rules.OpAll, Rules: list}
+}
+
+// uuidPattern is the textual form of a UUID (any version).
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// checkType checks a value against its MET-11 data type.
 func checkType(dataType string, value any) error {
-	switch dataType {
-	case TypeText, TypeTextarea, TypeFile, "string":
+	switch CanonicalType(dataType) {
+	case TypeText:
+		str, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("expected string")
+		}
+		if strings.ContainsAny(str, "\r\n") {
+			return fmt.Errorf("expected a single line (use multiline for line breaks)")
+		}
+	case TypeMultiline:
 		if _, ok := value.(string); !ok {
 			return fmt.Errorf("expected string")
 		}
 	case TypeInteger:
-		f, ok := toFloat(value)
+		f, ok := jsonNumber(value)
 		if !ok || f != float64(int64(f)) {
 			return fmt.Errorf("expected integer")
 		}
-	case TypeDecimal, "number":
-		if _, ok := toFloat(value); !ok {
+	case TypeDecimal:
+		if _, ok := jsonNumber(value); !ok {
 			return fmt.Errorf("expected number")
 		}
 	case TypeBoolean:
@@ -440,9 +518,21 @@ func checkType(dataType string, value any) error {
 		if _, ok := value.(string); !ok {
 			return fmt.Errorf("expected enum string")
 		}
-	case TypeMultiEnum:
-		if _, ok := value.([]any); !ok {
+	case TypeMultiselect:
+		items, ok := value.([]any)
+		if !ok {
 			return fmt.Errorf("expected array of enum values")
+		}
+		seen := map[string]bool{}
+		for _, item := range items {
+			s, ok := item.(string)
+			if !ok {
+				return fmt.Errorf("expected array of enum strings")
+			}
+			if seen[s] {
+				return fmt.Errorf("value %q is selected twice", s)
+			}
+			seen[s] = true
 		}
 	case TypeIP:
 		str, ok := value.(string)
@@ -454,8 +544,8 @@ func checkType(dataType string, value any) error {
 		if !ok {
 			return fmt.Errorf("expected MAC string")
 		}
-		if _, err := net.ParseMAC(str); err != nil {
-			return fmt.Errorf("expected valid MAC address")
+		if hw, err := net.ParseMAC(str); err != nil || (len(hw) != 6 && len(hw) != 8) {
+			return fmt.Errorf("expected valid MAC address (EUI-48 or EUI-64)")
 		}
 	case TypeURL:
 		str, ok := value.(string)
@@ -471,72 +561,23 @@ func checkType(dataType string, value any) error {
 		if !ok {
 			return fmt.Errorf("expected email string")
 		}
-		if _, err := mail.ParseAddress(str); err != nil {
+		if addr, err := mail.ParseAddress(str); err != nil || addr.Address != str {
 			return fmt.Errorf("expected valid email address")
+		}
+	case TypeUUID:
+		str, ok := value.(string)
+		if !ok || !uuidPattern.MatchString(str) {
+			return fmt.Errorf("expected UUID")
 		}
 	case TypeJSON:
 		// Any JSON value is valid.
-	case TypeUser, TypeTeam, TypeLocation, TypeCIRef, TypeAssetRef, TypeContractRef:
-		// Reference fields store the referenced entity's UUID.
+	case TypeFile, TypeReference:
+		// Files and references store the referenced entity's id.
 		if _, ok := value.(string); !ok {
 			return fmt.Errorf("expected reference id string")
 		}
 	default:
 		return fmt.Errorf("unknown field type %q", dataType)
-	}
-	return nil
-}
-
-func checkBounds(def FieldDefinition, value any, v *ValidationRules) error {
-	if v.Min != nil || v.Max != nil {
-		if f, ok := toFloat(value); ok {
-			if v.Min != nil && f < *v.Min {
-				return fmt.Errorf("field %s: value below minimum %v", def.Name, *v.Min)
-			}
-			if v.Max != nil && f > *v.Max {
-				return fmt.Errorf("field %s: value above maximum %v", def.Name, *v.Max)
-			}
-		}
-	}
-	if v.MinLength != nil || v.MaxLength != nil {
-		if str, ok := value.(string); ok {
-			if v.MinLength != nil && len(str) < *v.MinLength {
-				return fmt.Errorf("field %s: value shorter than %d characters", def.Name, *v.MinLength)
-			}
-			if v.MaxLength != nil && len(str) > *v.MaxLength {
-				return fmt.Errorf("field %s: value longer than %d characters", def.Name, *v.MaxLength)
-			}
-		}
-	}
-	return nil
-}
-
-func checkEnum(def FieldDefinition, value any) error {
-	if len(def.EnumValues) == 0 {
-		return nil
-	}
-	return checkOptions(def, value, def.EnumValues)
-}
-
-func checkOptions(def FieldDefinition, value any, options []string) error {
-	allowed := make(map[string]bool, len(options))
-	for _, o := range options {
-		allowed[o] = true
-	}
-	if def.DataType == TypeMultiEnum {
-		items, ok := value.([]any)
-		if !ok {
-			return fmt.Errorf("field %s: expected array", def.Name)
-		}
-		for _, item := range items {
-			if !allowed[fmt.Sprintf("%v", item)] {
-				return fmt.Errorf("field %s: value %v not in allowed options", def.Name, item)
-			}
-		}
-		return nil
-	}
-	if !allowed[fmt.Sprintf("%v", value)] {
-		return fmt.Errorf("field %s: value %v not in allowed options", def.Name, value)
 	}
 	return nil
 }

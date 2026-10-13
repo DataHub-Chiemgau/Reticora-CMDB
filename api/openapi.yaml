@@ -197,6 +197,45 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createOrganizationAsOperator
+      tags: [Operator]
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      summary: Create an organization with plan and limits (TLC-02)
+      description: >-
+        Runs the creation chain of the self-signup without verification: the
+        organization with its slug (derived from the name unless given), the
+        default VRF and standard roles, the first user as org_admin, and the
+        entitlements of the plan (source manual) with the given limits in
+        the limits of their feature. With an IdP admin client the first
+        org_admin receives an account and the IdP's mail to set a password
+        (`admin_invited`). The creation and its `org.create` entry in
+        operator_audit are atomic. Reseller creation is phase 4.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperatorCreateOrganizationRequest'
+      responses:
+        '201':
+          description: Organization created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorCreatedOrganization'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/admin/orgs/{id}/entitlements:
     parameters:
@@ -318,6 +357,121 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthConfigResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/signup/challenge:
+    get:
+      operationId: getSignupChallenge
+      tags: [Auth]
+      security: []
+      summary: ALTCHA challenge for the signup form (TLC-01, E-33)
+      description: >-
+        A signed proof-of-work challenge of the self-hosted ALTCHA. The
+        solution is sent as `altcha` with the signup request; it is valid
+        for ten minutes and accepted once.
+      responses:
+        '200':
+          description: Challenge
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AltchaChallenge'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/signup:
+    post:
+      operationId: submitSignup
+      tags: [Auth]
+      security: []
+      summary: Request a self-signup (TLC-01)
+      description: >-
+        Stores a signup request and sends a verification link to the
+        address. The answer is 202 whether or not the address already has an
+        account. The request passes the pre-auth limit (AUT-10), at most five
+        signups per client IP and hour (429), the ALTCHA solution (400,
+        `field` = `altcha`) and the disposable-domain blocklist (422,
+        `field` = `email`). 503 while no e-mail channel, IdP administration
+        or protection store is available.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+      responses:
+        '202':
+          description: Verification link sent
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [verification_sent] }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/signup/verify:
+    post:
+      operationId: verifySignup
+      tags: [Auth]
+      security: []
+      summary: Verify a self-signup and create the organization (TLC-01)
+      description: >-
+        The token of the verification link is the credential. Creates, in
+        one transaction, the organization with a slug derived from its name,
+        the default VRF, the first user as org_admin and the trial
+        entitlements (ENT-07), sets the password in the IdP (it is never
+        stored by Reticora) and records the signup in operator_audit. 404
+        for an unknown or used token, 410 for an expired one, 409 when the
+        address already has an IdP account, 422 when the IdP rejects the
+        password.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupVerification'
+      responses:
+        '201':
+          description: Organization created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignupResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '410':
+          description: The verification link has expired
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalServerError'
         '503':
@@ -3951,6 +4105,51 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/org:
+    get:
+      operationId: getOrganization
+      tags: [Organization]
+      summary: Get the caller's organization (LOC-01)
+      responses:
+        '200':
+          description: The organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateOrganization
+      tags: [Organization]
+      summary: Update name, settings, time zone, currency and locale of the organization
+      description: >
+        The time zone is an IANA name (Europe/Berlin), the currency an ISO 4217
+        code (EUR) and the locale a BCP 47 tag, stored in canonical form
+        (de-ch → de-CH). Slug and plan are not changed here. An invalid value
+        answers 400 naming the field.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrganizationRequest'
+      responses:
+        '200':
+          description: Organization updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/clients:
     get:
       operationId: listClients
@@ -3989,6 +4188,8 @@ paths:
                 $ref: '#/components/schemas/Client'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -4031,6 +4232,8 @@ paths:
                 $ref: '#/components/schemas/Client'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -4086,6 +4289,8 @@ paths:
                 $ref: '#/components/schemas/Site'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -4128,6 +4333,8 @@ paths:
                 $ref: '#/components/schemas/Site'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -4188,6 +4395,8 @@ paths:
                 $ref: '#/components/schemas/Building'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -4230,6 +4439,8 @@ paths:
                 $ref: '#/components/schemas/Building'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -4290,6 +4501,8 @@ paths:
                 $ref: '#/components/schemas/Room'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -4332,6 +4545,8 @@ paths:
                 $ref: '#/components/schemas/Room'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -4392,6 +4607,10 @@ paths:
                 $ref: '#/components/schemas/Rack'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -4434,6 +4653,10 @@ paths:
                 $ref: '#/components/schemas/Rack'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -5883,6 +6106,155 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/invitations:
+    get:
+      operationId: listInvitations
+      tags: [Users]
+      summary: List the organization's invitations (TLC-03)
+      description: Status is derived from acceptance and expiry (pending, accepted, expired). Requires user:manage.
+      responses:
+        '200':
+          description: Invitations, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: issueInvitation
+      tags: [Users]
+      summary: Invite an address with a predefined role and scope (TLC-03)
+      description: >-
+        The invitation is valid for seven days. The response carries the
+        token once; only its hash is stored. Role and scope must exist in
+        the organization (422 otherwise); a pending invitation for the same
+        address is a conflict (renew it instead). Requires user:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvitationRequest'
+      responses:
+        '201':
+          description: Invitation issued, with its token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/invitations/accept:
+    post:
+      operationId: acceptInvitation
+      tags: [Users]
+      security: []
+      summary: Accept an invitation (TLC-03)
+      description: >-
+        The token is the credential; the request passes the pre-auth limit
+        (AUT-10). The invitation is consumed atomically and once: it creates
+        the user with the invited role and scope. With the IdP admin client
+        the password creates the IdP account (never stored by Reticora);
+        otherwise the user signs in with an existing IdP account of the
+        address, which the first login links. 404 for an unknown, revoked
+        or used token, 410 for an expired one, 409 when the organization
+        already has a user with the address.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvitationAcceptance'
+      responses:
+        '201':
+          description: Invitation accepted, user created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptedInvitation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '410':
+          description: The invitation has expired
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/invitations/{id}/renew:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: renewInvitation
+      tags: [Users]
+      summary: Renew a pending or expired invitation (TLC-03)
+      description: A new token and seven more days; the old token stops working. An accepted invitation is 409. Requires user:manage.
+      responses:
+        '200':
+          description: Invitation renewed, with its new token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/invitations/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    delete:
+      operationId: revokeInvitation
+      tags: [Users]
+      summary: Revoke a pending or expired invitation (TLC-03)
+      description: An accepted invitation stays as a record (409). Requires user:manage.
+      responses:
+        '204':
+          description: Invitation revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/service-accounts:
     get:
@@ -7866,21 +8238,160 @@ paths:
         '401':
           description: Unauthorized
 
+  /api/v1/attribute-definitions:
+    get:
+      operationId: listAttributeDefinitions
+      summary: List attribute definitions (MET-10)
+      description: >-
+        The single source of attribute validation and indexing (DB-03): the
+        organization's definitions and the read-only system definitions
+        (`is_system`). Filters: `ci_type_id`, `scope` (type, global).
+      parameters:
+        - { name: ci_type_id, in: query, schema: { type: string } }
+        - { name: scope, in: query, schema: { type: string, enum: [type, global] } }
+      responses:
+        '200':
+          description: Attribute definitions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeDefinitionListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createAttributeDefinition
+      summary: Create an attribute definition (MET-10)
+      description: >-
+        Without `ci_type_id` the definition is global (every type of the
+        organization). Creating, changing or deleting a type's definition
+        regenerates the type's `attribute_schema` and raises its
+        `schema_version`. Requires ci_attribute:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttributeDefinitionCreate'
+      responses:
+        '201':
+          description: Attribute definition created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeDefinition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/attribute-definitions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getAttributeDefinition
+      summary: Read an attribute definition
+      responses:
+        '200':
+          description: Attribute definition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeDefinition'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      operationId: updateAttributeDefinition
+      summary: Update an attribute definition
+      description: Key, CI type and scope are immutable; system definitions are read-only (403).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttributeDefinitionPatch'
+      responses:
+        '200':
+          description: Attribute definition updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeDefinition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteAttributeDefinition
+      summary: Delete an attribute definition
+      responses:
+        '204':
+          description: Attribute definition deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/ci-types:
     get:
       operationId: listCiTypes
-      summary: List and create CI types
+      summary: List CI types
+      description: The organization's types and the system types (MET-01 – MET-03).
       responses:
         '200':
-          description: List and create CI types
+          description: CI types
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CITypeListResponse'
         '401':
           description: Unauthorized
     post:
       operationId: createCiTypes
-      summary: List and create CI types
+      summary: Create a CI type
+      description: >-
+        `display_name` is a map of languages (de, en); a missing language
+        takes the other one or the name, a plain string is accepted for both.
+        `is_observable` defaults to true for physical and false for logical
+        types (MET-01).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CITypeCreateRequest'
       responses:
         '201':
-          description: List and create CI types
+          description: CI type created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIType'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
 
@@ -7888,27 +8399,54 @@ paths:
     get:
       operationId: listCiTypesTemplates
       summary: List built-in CI type templates
+      description: Editable starting points; network, vlan and contract are no CI types and never offered (MET-03, DB-05).
       responses:
         '200':
-          description: List built-in CI type templates
+          description: Templates
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CIType'
         '401':
           description: Unauthorized
 
   /api/v1/ci-types/{id}:
     get:
       operationId: getCiTypesId
-      summary: Read and update a CI type
+      summary: Read a CI type
       responses:
         '200':
-          description: Read and update a CI type
+          description: CI type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIType'
         '401':
           description: Unauthorized
     patch:
       operationId: updateCiTypesId
-      summary: Read and update a CI type
+      summary: Update a CI type
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CITypeUpdateRequest'
       responses:
         '200':
-          description: Read and update a CI type
+          description: CI type updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIType'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
 
@@ -8731,8 +9269,20 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/ProblemDetail'
+    UnprocessableEntity:
+      description: A field value is outside its allowed range; `field` names it.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
     BadGateway:
       description: Upstream delivery failed
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    TooManyRequests:
+      description: The pre-auth budget of the client IP is spent (AUT-10)
       content:
         application/problem+json:
           schema:
@@ -8763,6 +9313,366 @@ components:
             $ref: '#/components/schemas/ProblemDetail'
 
   schemas:
+    AttributeDefinition:
+      type: object
+      required: [id, scope, key, display_name, data_type, required, multi_value, searchable, unique, unique_scope, inheritable, order, is_system, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string, description: Empty for system definitions. }
+        ci_type_id: { type: string, description: Empty for global definitions. }
+        scope: { type: string, enum: [type, global] }
+        key: { type: string }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string }
+        data_type: { type: string }
+        required: { type: boolean }
+        default: {}
+        enum_values:
+          type: array
+          items: { type: string }
+        multi_value: { type: boolean }
+        searchable: { type: boolean }
+        unique: { type: boolean }
+        unique_scope: { type: string, enum: [org, client] }
+        inheritable: { type: boolean }
+        validation: { type: object, additionalProperties: true }
+        conditional: { type: object, additionalProperties: true }
+        reference_target: { type: string }
+        group: { type: string }
+        order: { type: integer }
+        unit: { type: string }
+        is_system: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AttributeDefinitionListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttributeDefinition'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    AttributeDefinitionCreate:
+      type: object
+      required: [key, data_type]
+      additionalProperties: false
+      properties:
+        ci_type_id: { type: string, description: Omitted for a global definition. }
+        key: { type: string, minLength: 1, maxLength: 100 }
+        display_name:
+          oneOf:
+            - $ref: '#/components/schemas/LocalizedText'
+            - type: string
+        description: { type: string }
+        data_type: { type: string, description: 'Data type of MET-11 — phase 1: text, multiline, integer, decimal, boolean, date, datetime, enum, multiselect, ip, mac, url, email, uuid; phase 2: file, json, reference (former names textarea, multi_enum and the specific reference types stay valid).' }
+        required: { type: boolean }
+        default: { description: Any JSON value valid for the data type. }
+        enum_values:
+          type: array
+          items: { type: string }
+        multi_value: { type: boolean }
+        searchable: { type: boolean }
+        unique: { type: boolean }
+        unique_scope: { type: string, enum: [org, client] }
+        inheritable: { type: boolean }
+        validation: { type: object, additionalProperties: true }
+        conditional: { type: object, additionalProperties: true }
+        reference_target: { type: string }
+        group: { type: string }
+        order: { type: integer }
+        unit: { type: string }
+    AttributeDefinitionPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        display_name:
+          oneOf:
+            - $ref: '#/components/schemas/LocalizedText'
+            - type: string
+        description: { type: string }
+        data_type: { type: string, description: 'Data type of MET-11 — phase 1: text, multiline, integer, decimal, boolean, date, datetime, enum, multiselect, ip, mac, url, email, uuid; phase 2: file, json, reference (former names textarea, multi_enum and the specific reference types stay valid).' }
+        required: { type: boolean }
+        default: { description: Any JSON value valid for the data type. }
+        enum_values:
+          type: array
+          items: { type: string }
+        multi_value: { type: boolean }
+        searchable: { type: boolean }
+        unique: { type: boolean }
+        unique_scope: { type: string, enum: [org, client] }
+        inheritable: { type: boolean }
+        validation: { type: object, additionalProperties: true }
+        conditional: { type: object, additionalProperties: true }
+        reference_target: { type: string }
+        group: { type: string }
+        order: { type: integer }
+        unit: { type: string }
+    LocalizedText:
+      type: object
+      description: A label per language (MET-01).
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        de: { type: string, minLength: 1, maxLength: 200 }
+        en: { type: string, minLength: 1, maxLength: 200 }
+    CIType:
+      type: object
+      required: [id, key, name, display_name, is_builtin, is_system, is_active, is_logical, is_observable, schema_version, version, capabilities, allowed_relationship_types, ui_schema, compliance_rules, discovery_mappings, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string, description: Empty for system types. }
+        key: { type: string }
+        name: { type: string }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        icon: { type: string }
+        description: { type: string }
+        category: { type: string }
+        is_builtin: { type: boolean }
+        is_system: { type: boolean }
+        is_active: { type: boolean }
+        is_logical: { type: boolean }
+        is_observable:
+          type: boolean
+          description: The offline detector watches CIs of the type (LCY-05); true for physical, false for logical types by default.
+        schema_version:
+          type: integer
+          minimum: 1
+          description: Version of the generated attribute schema.
+        attribute_schema:
+          type: object
+          readOnly: true
+          additionalProperties: true
+          description: JSON Schema 2020-12 generated from the type's attribute definitions; read-only (DB-03).
+        required_fields:
+          type: array
+          readOnly: true
+          items: { type: string }
+        version: { type: integer }
+        cloned_from_id: { type: string }
+        template_key: { type: string }
+        lifecycle_definition_id: { type: string }
+        capabilities: { type: object, additionalProperties: true }
+        allowed_relationship_types:
+          type: array
+          items: { type: string }
+        ui_schema: { type: object, additionalProperties: true }
+        compliance_rules:
+          type: array
+          items: {}
+        discovery_mappings:
+          type: array
+          items: {}
+        fields:
+          type: array
+          items: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CITypeListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CIType'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    CITypeCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        key: { type: string }
+        name: { type: string, minLength: 1 }
+        display_name:
+          oneOf:
+            - $ref: '#/components/schemas/LocalizedText'
+            - type: string
+        icon: { type: string }
+        description: { type: string }
+        category: { type: string }
+        is_logical: { type: boolean }
+        is_observable: { type: boolean }
+        template_key: { type: string }
+        lifecycle_definition_id: { type: string }
+        capabilities: { type: object, additionalProperties: true }
+        allowed_relationship_types:
+          type: array
+          items: { type: string }
+        ui_schema: { type: object, additionalProperties: true }
+        compliance_rules:
+          type: array
+          items: {}
+        discovery_mappings:
+          type: array
+          items: {}
+        fields:
+          type: array
+          items: { type: object, additionalProperties: true }
+    CITypeUpdateRequest:
+      type: object
+      properties:
+        name: { type: string }
+        display_name:
+          oneOf:
+            - $ref: '#/components/schemas/LocalizedText'
+            - type: string
+        icon: { type: string }
+        description: { type: string }
+        category: { type: string }
+        is_logical: { type: boolean }
+        is_observable: { type: boolean }
+        lifecycle_definition_id: { type: string }
+        capabilities: { type: object, additionalProperties: true }
+        allowed_relationship_types:
+          type: array
+          items: { type: string }
+        ui_schema: { type: object, additionalProperties: true }
+        compliance_rules:
+          type: array
+          items: {}
+        discovery_mappings:
+          type: array
+          items: {}
+    InvitationRequest:
+      type: object
+      required: [email, role_id]
+      additionalProperties: false
+      properties:
+        email: { type: string, maxLength: 254 }
+        role_id: { type: string, format: uuid }
+        scope_type: { type: string, enum: [org, client, site], default: org }
+        scope_id:
+          type: string
+          format: uuid
+          description: The client or site of a scoped invitation; omitted for org.
+    Invitation:
+      type: object
+      required: [id, organization_id, email, role_id, scope_type, invited_by, status, expires_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        email: { type: string }
+        role_id: { type: string, format: uuid }
+        scope_type: { type: string, enum: [org, client, site] }
+        scope_id: { type: string, format: uuid }
+        invited_by: { type: string, format: uuid }
+        status: { type: string, enum: [pending, accepted, expired] }
+        expires_at: { type: string, format: date-time }
+        accepted_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        token:
+          type: string
+          description: Only in the response of issue and renewal; shown once.
+    InvitationListResponse:
+      type: object
+      required: [data, total, limit]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Invitation'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    InvitationAcceptance:
+      type: object
+      required: [token]
+      additionalProperties: false
+      properties:
+        token: { type: string, minLength: 1 }
+        password:
+          type: string
+          description: Required (at least 12 characters) when the IdP admin client is configured; set directly in the IdP.
+        display_name: { type: string, maxLength: 200 }
+    AcceptedInvitation:
+      type: object
+      required: [user_id, organization_id, email, account_created]
+      properties:
+        user_id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        email: { type: string }
+        account_created: { type: boolean }
+    OperatorCreateOrganizationRequest:
+      type: object
+      required: [name, plan, admin_email]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        slug:
+          type: string
+          maxLength: 48
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          description: Optional; derived from the name (with -2, -3 … on collision) when omitted. A given, taken slug is 409.
+        plan: { type: string, enum: [essential, standard, pro, enterprise] }
+        limits:
+          type: object
+          description: Quotas stored in the limits of their feature's entitlement (max_cis and max_users on cmdb_core, max_collectors on discovery, max_api_keys on api_access).
+          additionalProperties: false
+          properties:
+            max_cis: { type: integer, format: int64, minimum: 0 }
+            max_collectors: { type: integer, format: int64, minimum: 0 }
+            max_users: { type: integer, format: int64, minimum: 0 }
+            max_api_keys: { type: integer, format: int64, minimum: 0 }
+        admin_email: { type: string, maxLength: 254 }
+        admin_display_name: { type: string, maxLength: 200 }
+    OperatorCreatedOrganization:
+      type: object
+      required: [id, name, slug, plan, admin_invited, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        plan: { type: string, enum: [essential, standard, pro, enterprise] }
+        admin_invited:
+          type: boolean
+          description: The first org_admin received an IdP account and an invitation mail; otherwise the account is provisioned in the IdP by hand and linked on first login.
+        created_at: { type: string, format: date-time }
+    SignupRequest:
+      type: object
+      required: [organization_name, email, altcha]
+      additionalProperties: false
+      properties:
+        organization_name: { type: string, minLength: 1, maxLength: 200 }
+        email: { type: string, maxLength: 254 }
+        display_name: { type: string, maxLength: 200 }
+        altcha:
+          type: string
+          description: Base64-encoded JSON solution of a challenge from GET /api/v1/signup/challenge.
+    AltchaChallenge:
+      type: object
+      required: [algorithm, challenge, maxnumber, salt, signature]
+      properties:
+        algorithm: { type: string, enum: [SHA-256] }
+        challenge: { type: string }
+        maxnumber: { type: integer }
+        salt: { type: string }
+        signature: { type: string }
+    SignupVerification:
+      type: object
+      required: [token, password]
+      additionalProperties: false
+      properties:
+        token: { type: string, minLength: 1 }
+        password:
+          type: string
+          description: Set directly in the IdP; at least 12 characters, the IdP's password policy applies.
+    SignupResult:
+      type: object
+      required: [organization_id, organization_slug, plan, trial_ends_at]
+      properties:
+        organization_id: { type: string, format: uuid }
+        organization_slug: { type: string }
+        plan: { type: string, enum: [essential, standard, pro, enterprise] }
+        trial_ends_at: { type: string, format: date-time }
     CollectorHeartbeatRequest:
       type: object
       additionalProperties: false
@@ -8832,6 +9742,9 @@ components:
           format: uri
         trace_id:
           type: string
+        field:
+          type: string
+          description: Request field a 400 or 409 refers to (e.g. the unique `name` of a client).
 
     PaginationEnvelope:
       type: object
@@ -12620,9 +13533,62 @@ components:
           items:
             $ref: '#/components/schemas/TopologyEdge'
 
+    Organization:
+      type: object
+      description: The tenant (LOC-01).
+      required: [id, name, slug, plan, settings, timezone, currency, locale, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        plan:
+          type: string
+        settings:
+          type: object
+          additionalProperties: true
+        timezone:
+          type: string
+          description: IANA time zone name.
+          example: Europe/Berlin
+        currency:
+          type: string
+          description: ISO 4217 currency code.
+          example: EUR
+        locale:
+          type: string
+          description: BCP 47 language tag.
+          example: de-DE
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UpdateOrganizationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+        settings:
+          type: object
+          additionalProperties: true
+        timezone:
+          type: string
+        currency:
+          type: string
+        locale:
+          type: string
+
     Client:
       type: object
-      required: [id, organization_id, name, slug, settings, created_at, updated_at]
+      description: Customer of the organization (LOC-02); the name is unique per organization.
+      required: [id, organization_id, name, slug, external_ref, timezone, settings, created_at, updated_at]
       properties:
         id:
           type: string
@@ -12632,6 +13598,12 @@ components:
           type: string
         slug:
           type: string
+        external_ref:
+          type: [string, 'null']
+          description: Reference in an external system (CRM, PSA).
+        timezone:
+          type: [string, 'null']
+          description: Optional IANA time zone of the client.
         settings:
           type: object
           additionalProperties: true
@@ -12654,6 +13626,11 @@ components:
         code:
           type: string
           description: Alias for slug (accepted for integrations sending {name, code}).
+        external_ref:
+          type: string
+        timezone:
+          type: string
+          description: IANA time zone name.
         settings:
           type: object
           additionalProperties: true
@@ -12665,6 +13642,12 @@ components:
           type: string
         slug:
           type: string
+        external_ref:
+          type: string
+          description: Empty clears the reference.
+        timezone:
+          type: string
+          description: IANA time zone name; empty clears it.
         settings:
           type: object
           additionalProperties: true
@@ -12682,7 +13665,8 @@ components:
 
     Site:
       type: object
-      required: [id, organization_id, client_id, name, created_at, updated_at]
+      description: Site of a client (LOC-03); the name is unique per (organization, client).
+      required: [id, organization_id, client_id, name, timezone, created_at, updated_at]
       properties:
         id:
           type: string
@@ -12700,6 +13684,9 @@ components:
           type: number
         notes:
           type: string
+        timezone:
+          type: [string, 'null']
+          description: Optional IANA time zone of the site.
         created_at:
           type: string
           format: date-time
@@ -12723,6 +13710,9 @@ components:
           type: number
         notes:
           type: string
+        timezone:
+          type: string
+          description: IANA time zone name.
 
     UpdateSiteRequest:
       type: object
@@ -12737,6 +13727,9 @@ components:
           type: number
         notes:
           type: string
+        timezone:
+          type: string
+          description: IANA time zone name; empty clears it.
 
     SiteListResponse:
       allOf:
@@ -12751,6 +13744,7 @@ components:
 
     Building:
       type: object
+      description: Building of a site (LOC-04); the name is unique per site.
       required: [id, organization_id, site_id, name, created_at, updated_at]
       properties:
         id:
@@ -12808,6 +13802,7 @@ components:
 
     Room:
       type: object
+      description: Room of a building (LOC-05); the name is unique per building.
       required: [id, organization_id, building_id, name, created_at, updated_at]
       properties:
         id:
@@ -12884,7 +13879,8 @@ components:
 
     Rack:
       type: object
-      required: [id, organization_id, room_id, name, height_u, width_mm, depth_mm, created_at, updated_at]
+      description: Rack of a room (LOC-06); the name is unique per room.
+      required: [id, organization_id, room_id, name, height_units, width_mm, depth_mm, created_at, updated_at]
       properties:
         id:
           type: string
@@ -12894,7 +13890,7 @@ components:
           type: string
         name:
           type: string
-        height_u:
+        height_units:
           type: integer
           minimum: 1
           maximum: 60
@@ -12919,10 +13915,9 @@ components:
           type: string
         name:
           type: string
-        height_u:
+        height_units:
           type: integer
-          minimum: 1
-          maximum: 60
+          description: 1–60 height units; absent means 42 on create. Any other value, an explicit 0 included, answers 422.
         width_mm:
           type: integer
         depth_mm:
@@ -12935,10 +13930,9 @@ components:
       properties:
         name:
           type: string
-        height_u:
+        height_units:
           type: integer
-          minimum: 1
-          maximum: 60
+          description: 1–60 height units; absent means 42 on create. Any other value, an explicit 0 included, answers 422.
         width_mm:
           type: integer
         depth_mm:

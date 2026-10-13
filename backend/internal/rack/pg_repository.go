@@ -27,11 +27,19 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-const rackCols = `id::text, organization_id::text, room_id::text, name, height_u, width_mm, depth_mm, COALESCE(notes,''), created_at, updated_at`
+const rackCols = `id::text, organization_id::text, room_id::text, name, height_units, width_mm, depth_mm, COALESCE(notes,''), created_at, updated_at`
+
+// rackConstraintFields maps the rack constraints onto their request field
+// (LOC-06).
+var rackConstraintFields = map[string]string{
+	"rack_room_name_key":      "name",
+	"rack_height_units_check": "height_units",
+	"rack_room_id_fkey":       "room_id",
+}
 
 func scanRack(s scanner) (*Rack, error) {
 	rk := &Rack{}
-	if err := s.Scan(&rk.ID, &rk.OrganizationID, &rk.RoomID, &rk.Name, &rk.HeightU, &rk.WidthMM, &rk.DepthMM, &rk.Notes, &rk.CreatedAt, &rk.UpdatedAt); err != nil {
+	if err := s.Scan(&rk.ID, &rk.OrganizationID, &rk.RoomID, &rk.Name, &rk.HeightUnits, &rk.WidthMM, &rk.DepthMM, &rk.Notes, &rk.CreatedAt, &rk.UpdatedAt); err != nil {
 		return nil, err
 	}
 	rk.CreatedAt = rk.CreatedAt.UTC()
@@ -120,11 +128,11 @@ func (r *PGRepository) GetRack(ctx context.Context, orgID, id string) (*Rack, er
 func (r *PGRepository) CreateRack(ctx context.Context, rk *Rack) error {
 	return database.WithRequestTenant(ctx, r.pool, rk.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
-			`INSERT INTO rack (organization_id, room_id, name, height_u, width_mm, depth_mm, notes)
+			`INSERT INTO rack (organization_id, room_id, name, height_units, width_mm, depth_mm, notes)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id::text, created_at, updated_at`,
-			rk.OrganizationID, rk.RoomID, rk.Name, rk.HeightU, rk.WidthMM, rk.DepthMM, nilIfEmpty(rk.Notes),
+			rk.OrganizationID, rk.RoomID, rk.Name, rk.HeightUnits, rk.WidthMM, rk.DepthMM, nilIfEmpty(rk.Notes),
 		).Scan(&rk.ID, &rk.CreatedAt, &rk.UpdatedAt); err != nil {
-			return err
+			return api.FieldDBError(err, rackConstraintFields)
 		}
 		return requireVisible(ctx, tx, "rack", rackVisible, rk.ID)
 	})
@@ -141,9 +149,9 @@ func (r *PGRepository) UpdateRack(ctx context.Context, orgID, id string, req Upd
 			args = append(args, *req.Name)
 			pos++
 		}
-		if req.HeightU != nil {
-			sets = append(sets, fmt.Sprintf("height_u = $%d", pos))
-			args = append(args, *req.HeightU)
+		if req.HeightUnits != nil {
+			sets = append(sets, fmt.Sprintf("height_units = $%d", pos))
+			args = append(args, *req.HeightUnits)
 			pos++
 		}
 		if req.WidthMM != nil {
@@ -173,7 +181,7 @@ func (r *PGRepository) UpdateRack(ctx context.Context, orgID, id string, req Upd
 			return ErrNotFound
 		}
 		if err != nil {
-			return err
+			return api.FieldDBError(err, rackConstraintFields)
 		}
 		// The update may move the row under an object outside the scope.
 		return requireVisible(ctx, tx, "rack", rackVisible, id)
@@ -268,7 +276,7 @@ func (r *PGRepository) ListMounts(ctx context.Context, orgID, rackID string, pag
 func (r *PGRepository) CreateMount(ctx context.Context, m *RackMount) error {
 	return database.WithRequestTenant(ctx, r.pool, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		var height int
-		err := tx.QueryRow(ctx, "SELECT height_u FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, m.OrganizationID, m.RackID).Scan(&height)
+		err := tx.QueryRow(ctx, "SELECT height_units FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, m.OrganizationID, m.RackID).Scan(&height)
 		if err == pgx.ErrNoRows {
 			return ErrRackNotFound
 		}
@@ -338,7 +346,7 @@ func (r *PGRepository) UpdateMount(ctx context.Context, orgID, id string, req Up
 			}
 		}
 		var rackHeight int
-		heightErr := tx.QueryRow(ctx, "SELECT height_u FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, orgID, rackID).Scan(&rackHeight)
+		heightErr := tx.QueryRow(ctx, "SELECT height_units FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, orgID, rackID).Scan(&rackHeight)
 		if heightErr == pgx.ErrNoRows {
 			return ErrRackNotFound
 		}

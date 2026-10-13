@@ -39,8 +39,8 @@ func TestRackRepositoryClientScope(t *testing.T) {
 
 	repo := rack.NewPGRepository(f.App)
 	orgCtx := f.OrgCtx(f.OrgA)
-	ownRack := &rack.Rack{OrganizationID: f.OrgA, RoomID: ownRoom, Name: "rack-c1", HeightU: 42}
-	foreignRack := &rack.Rack{OrganizationID: f.OrgA, RoomID: foreignRoom, Name: "rack-c2", HeightU: 42}
+	ownRack := &rack.Rack{OrganizationID: f.OrgA, RoomID: ownRoom, Name: "rack-c1", HeightUnits: 42}
+	foreignRack := &rack.Rack{OrganizationID: f.OrgA, RoomID: foreignRoom, Name: "rack-c2", HeightUnits: 42}
 	for _, rk := range []*rack.Rack{ownRack, foreignRack} {
 		if err := repo.CreateRack(orgCtx, rk); err != nil {
 			t.Fatalf("org-wide rack %s: %v", rk.Name, err)
@@ -64,7 +64,7 @@ func TestRackRepositoryClientScope(t *testing.T) {
 	if err = repo.DeleteRack(ctx, f.OrgA, foreignRack.ID); err == nil {
 		t.Fatal("client-1 principal deleted a rack on a client-2 site")
 	}
-	if err = repo.CreateRack(ctx, &rack.Rack{OrganizationID: f.OrgA, RoomID: foreignRoom, Name: "intruder", HeightU: 42}); err == nil {
+	if err = repo.CreateRack(ctx, &rack.Rack{OrganizationID: f.OrgA, RoomID: foreignRoom, Name: "intruder", HeightUnits: 42}); err == nil {
 		t.Fatal("client-1 principal created a rack on a client-2 site")
 	}
 

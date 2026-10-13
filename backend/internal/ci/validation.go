@@ -242,3 +242,110 @@ func storedAttributes(attributes map[string]any, instance []string) map[string]a
 	}
 	return out
 }
+
+// typedColumns are the typed CI columns (CI-01) by name with their data
+// type (MET-11). A field definition of the same name applies to the
+// column, so a typed hostname fulfils a required "hostname" definition;
+// the column's own data type is checked on every write.
+var typedColumns = map[string]string{
+	"name": fieldmeta.TypeText, "manufacturer": fieldmeta.TypeText, "model": fieldmeta.TypeText,
+	"serial_number": fieldmeta.TypeText, "hardware_uuid": fieldmeta.TypeUUID,
+	"management_ip": fieldmeta.TypeIP, "primary_mac": fieldmeta.TypeMAC, "hostname": fieldmeta.TypeText,
+	"fqdn": fieldmeta.TypeText, "os_name": fieldmeta.TypeText, "os_version": fieldmeta.TypeText,
+	"firmware_version": fieldmeta.TypeText, "sys_object_id": fieldmeta.TypeText,
+}
+
+// typedValues returns the non-empty typed columns of a CI.
+func typedValues(item *Item) map[string]any {
+	out := map[string]any{}
+	for name, value := range map[string]string{
+		"name": item.Name, "manufacturer": item.Manufacturer, "model": item.Model,
+		"serial_number": item.SerialNumber, "hardware_uuid": item.HardwareUUID,
+		"management_ip": item.ManagementIP, "primary_mac": item.PrimaryMAC, "hostname": item.Hostname,
+		"fqdn": item.FQDN, "os_name": item.OSName, "os_version": item.OSVersion,
+		"firmware_version": item.FirmwareVersion, "sys_object_id": item.SysObjectID,
+	} {
+		if value != "" {
+			out[name] = value
+		}
+	}
+	return out
+}
+
+// typedPatch returns the typed columns an update sets ("" clears).
+func typedPatch(req *UpdateRequest) map[string]any {
+	out := map[string]any{}
+	for name, value := range map[string]*string{
+		"name": req.Name, "manufacturer": req.Manufacturer, "model": req.Model,
+		"serial_number": req.SerialNumber, "hardware_uuid": req.HardwareUUID,
+		"management_ip": req.ManagementIP, "primary_mac": req.PrimaryMAC, "hostname": req.Hostname,
+		"fqdn": req.FQDN, "os_name": req.OSName, "os_version": req.OSVersion,
+		"firmware_version": req.FirmwareVersion, "sys_object_id": req.SysObjectID,
+	} {
+		if value != nil {
+			out[name] = *value
+		}
+	}
+	return out
+}
+
+// withTyped is the value map the field metadata is checked against: the
+// attributes, with the typed columns taking precedence for their names.
+func withTyped(attributes, typed map[string]any) map[string]any {
+	out := make(map[string]any, len(attributes)+len(typed))
+	for k, v := range attributes {
+		out[k] = v
+	}
+	for k, v := range typed {
+		out[k] = v
+	}
+	return out
+}
+
+// validateTypedColumns checks the data type of every typed column a write
+// sets.
+func validateTypedColumns(typed map[string]any) error {
+	var violations []Violation
+	for name, value := range typed {
+		if isBlank(value) {
+			continue
+		}
+		def := fieldmeta.FieldDefinition{Name: name, DataType: typedColumns[name]}
+		if err := fieldmeta.ValidateValue(def, value); err != nil {
+			violations = append(violations, Violation{name, trimFieldPrefix(name, err.Error())})
+		}
+	}
+	if len(violations) == 0 {
+		return nil
+	}
+	sort.Slice(violations, func(i, j int) bool { return violations[i].Field < violations[j].Field })
+	return &ValidationError{Violations: violations}
+}
+
+// InvalidObserved returns the fields whose observed values (typed columns
+// and attributes, by field name) violate the field metadata of the CI
+// type: the same value rules as a manual write (CI-03, MET-11). Required
+// fields do not apply, an observation may lack them. Discovery drops the
+// returned values instead of storing them.
+func (s *Service) InvalidObserved(ctx context.Context, orgID, ciTypeID, ciID string, values map[string]any) ([]string, error) {
+	if s.fields == nil || len(values) == 0 {
+		return nil, nil
+	}
+	defs, err := s.fields.ResolveFields(ctx, orgID, ciTypeID, ciID)
+	if err != nil {
+		return nil, err
+	}
+	var invalid []string
+	for i := range defs {
+		def := &defs[i]
+		value, ok := values[def.Name]
+		if !ok || isBlank(value) {
+			continue
+		}
+		if err := fieldmeta.ValidateValue(*def, value); err != nil {
+			invalid = append(invalid, def.Name)
+		}
+	}
+	sort.Strings(invalid)
+	return invalid, nil
+}

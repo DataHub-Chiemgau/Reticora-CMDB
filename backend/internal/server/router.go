@@ -58,6 +58,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/signup"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
@@ -109,15 +110,17 @@ type Repositories struct {
 	APIKeys identity.APIKeyRepository
 	// ServiceAccounts holds the non-human principals (RBA-08).
 	ServiceAccounts user.ServiceAccountRepository
-	SLA             sla.Repository
-	Form            form.Repository
-	Workflow        workflow.Repository
-	Compliance      compliance.Repository
-	IGA             iga.Repository
-	Search          search.Backend
-	AI              ai.Repository
-	ExportJobs      export.JobRepository
-	Privacy         privacy.Repository
+	// Invitations are the user invitations (TLC-03); nil answers 503.
+	Invitations user.InvitationRepository
+	SLA         sla.Repository
+	Form        form.Repository
+	Workflow    workflow.Repository
+	Compliance  compliance.Repository
+	IGA         iga.Repository
+	Search      search.Backend
+	AI          ai.Repository
+	ExportJobs  export.JobRepository
+	Privacy     privacy.Repository
 	// Enterprise CMDB + asset/inventory extension (additive modules).
 	CIType            citype.Repository
 	RelationshipType  relationshiptype.Repository
@@ -186,6 +189,13 @@ type Options struct {
 	// IngestQueue carries discovery records over ingest.> (REC-01); nil
 	// processes them in the request.
 	IngestQueue *discovery.NATSIngestQueue
+	// Signup is the self-signup flow (TLC-01); nil answers 503.
+	Signup *signup.Service
+	// SignupProtection is the captcha, blocklist and per-IP limit of the
+	// signup (WP-112); without it signups answer 503.
+	SignupProtection *signup.Protection
+	// InvitationAccounts creates the IdP account of an accepted invitation.
+	InvitationAccounts user.InvitationAccounts
 }
 
 // registrar is implemented by every domain handler.
@@ -215,6 +225,27 @@ func agentHandler(repos *Repositories, sessions *identity.SessionIssuer) *agent.
 		WithFieldGuard(override.NewGuard(repos.Override))
 	if sessions != nil {
 		h.WithAgentTokens(sessions)
+	}
+	return h
+}
+
+// operatorHandler builds the operator path; organizations are created with
+// the creation chain of the self-signup (TLC-02).
+func operatorHandler(opts *Options) *operator.Handler {
+	h := operator.NewHandler(opts.Operator, opts.OIDC, opts.Sessions, operator.NewAuditor(opts.OperatorPool), opts.OperatorPool).
+		WithEntitlements(opts.Entitlements)
+	if opts.Signup != nil {
+		h.WithOrgCreator(opts.Signup)
+	}
+	return h
+}
+
+// invitationHandler builds the invitations (TLC-03); with an IdP admin
+// client the acceptance creates the account.
+func invitationHandler(repos *Repositories, opts *Options) *user.InvitationHandler {
+	h := user.NewInvitationHandler(repos.Invitations)
+	if opts.InvitationAccounts != nil {
+		h.WithAccounts(opts.InvitationAccounts)
 	}
 	return h
 }
@@ -266,6 +297,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		WithInstanceFields(repos.CIType).
 		WithLimits(opts.Entitlements)
 	opts.Entitlements.WithUnlicensed(discoveryHandler)
+	// Discovered values pass the field rules of manual writes (CI-03).
+	if opts.CIService != nil {
+		discoveryHandler.WithObservedValidator(opts.CIService)
+	}
 	// Discovered interfaces and addresses are kept in IPAM (REC-07).
 	if syncer, ok := repos.IPAM.(discovery.InterfaceSyncer); ok {
 		discoveryHandler.WithInterfaces(syncer)
@@ -275,10 +310,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	}
 	registrars := []registrar{
 		identityHandler,
-		operator.NewHandler(opts.Operator, opts.OIDC, opts.Sessions, operator.NewAuditor(opts.OperatorPool), opts.OperatorPool).
-			WithEntitlements(opts.Entitlements),
+		operatorHandler(&opts),
 		identity.NewAPIKeyHandler(repos.APIKeys),
 		user.NewServiceAccountHandler(repos.ServiceAccounts),
+		invitationHandler(&repos, &opts),
 		entitlement.NewHandler(opts.Entitlements),
 		ci.NewHandler(opts.CIService, opts.Dispatcher),
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
@@ -335,6 +370,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
 		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),
+		signup.NewHandler(opts.Signup).WithProtection(opts.SignupProtection),
 	}
 	for _, h := range registrars {
 		h.RegisterRoutes(protected)

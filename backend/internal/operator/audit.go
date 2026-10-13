@@ -72,37 +72,65 @@ func (a *Auditor) Record(ctx context.Context, e *AuditEntry) error {
 	if a == nil || a.pool == nil {
 		return fmt.Errorf("operator audit is not configured")
 	}
-	if e.Details == nil {
-		e.Details = map[string]any{}
+	return database.WithOperator(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
+		return RecordTx(ctx, tx, e)
+	})
+}
+
+// RecordTx appends an entry inside tx, which must run in the operator
+// context (database.WithOperator or WithOrganizationSetup). The entry is
+// written atomically with whatever else tx changes.
+func RecordTx(ctx context.Context, tx pgx.Tx, e *AuditEntry) error {
+	// The details are hashed in the form they are read back (a JSON object
+	// decoded into maps): nested structs would otherwise hash in field order
+	// and never verify.
+	details, err := canonicalDetails(e.Details)
+	if err != nil {
+		return err
 	}
+	e.Details = details
 	// Microseconds: the precision PostgreSQL keeps, so the stored entry
 	// hashes like the written one.
 	e.Timestamp = time.Now().UTC().Truncate(time.Microsecond)
-	return database.WithOperator(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('operator_audit'))`); err != nil {
-			return fmt.Errorf("lock operator audit: %w", err)
-		}
-		e.PreviousHash = genesisHash
-		if err := tx.QueryRow(ctx, `SELECT entry_hash FROM operator_audit ORDER BY id DESC LIMIT 1`).Scan(&e.PreviousHash); err != nil && err != pgx.ErrNoRows {
-			return fmt.Errorf("read operator audit head: %w", err)
-		}
-		hash, err := entryHash(e)
-		if err != nil {
-			return err
-		}
-		e.EntryHash = hash
-		var target *string
-		if e.TargetOrg != "" {
-			target = &e.TargetOrg
-		}
-		if err = tx.QueryRow(ctx, `INSERT INTO operator_audit
-			(timestamp, operator_id, operator_kind, action, target_org, status, details, previous_hash, entry_hash)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-			e.Timestamp, e.OperatorID, e.OperatorKind, e.Action, target, e.Status, e.Details, e.PreviousHash, e.EntryHash).Scan(&e.ID); err != nil {
-			return fmt.Errorf("insert operator audit: %w", err)
-		}
-		return nil
-	})
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('operator_audit'))`); err != nil {
+		return fmt.Errorf("lock operator audit: %w", err)
+	}
+	e.PreviousHash = genesisHash
+	if err = tx.QueryRow(ctx, `SELECT entry_hash FROM operator_audit ORDER BY id DESC LIMIT 1`).Scan(&e.PreviousHash); err != nil && err != pgx.ErrNoRows {
+		return fmt.Errorf("read operator audit head: %w", err)
+	}
+	hash, err := entryHash(e)
+	if err != nil {
+		return err
+	}
+	e.EntryHash = hash
+	var target *string
+	if e.TargetOrg != "" {
+		target = &e.TargetOrg
+	}
+	if err = tx.QueryRow(ctx, `INSERT INTO operator_audit
+		(timestamp, operator_id, operator_kind, action, target_org, status, details, previous_hash, entry_hash)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+		e.Timestamp, e.OperatorID, e.OperatorKind, e.Action, target, e.Status, e.Details, e.PreviousHash, e.EntryHash).Scan(&e.ID); err != nil {
+		return fmt.Errorf("insert operator audit: %w", err)
+	}
+	return nil
+}
+
+// canonicalDetails round-trips details through JSON.
+func canonicalDetails(details map[string]any) (map[string]any, error) {
+	out := map[string]any{}
+	if details == nil {
+		return out, nil
+	}
+	raw, err := json.Marshal(details)
+	if err != nil {
+		return nil, fmt.Errorf("operator audit: encode details: %w", err)
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("operator audit: decode details: %w", err)
+	}
+	return out, nil
 }
 
 const auditColumns = `id, timestamp, operator_id, operator_kind, action, COALESCE(target_org::text, ''),

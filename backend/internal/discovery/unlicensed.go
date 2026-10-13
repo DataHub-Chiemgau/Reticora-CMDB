@@ -270,8 +270,12 @@ func (h *Handler) adoptUnlicensed(ctx context.Context, orgID, actorID string, it
 	if err = json.Unmarshal(raw, &device); err != nil {
 		return "", fmt.Errorf("unlicensed_ci %s: device record unreadable: %w", item.ID, err)
 	}
-	created, err := h.createDiscoveredCI(ctx, orgID, &device, payloadString(item.Payload, "ci_type_id"),
-		payloadString(item.Payload, "source"))
+	typeID := payloadString(item.Payload, "ci_type_id")
+	// The held values pass the field rules like a direct ingest.
+	if _, err = h.dropInvalidObserved(ctx, orgID, typeID, "", &device); err != nil {
+		return "", err
+	}
+	created, err := h.createDiscoveredCI(ctx, orgID, &device, typeID, payloadString(item.Payload, "source"))
 	if err != nil {
 		return "", err
 	}

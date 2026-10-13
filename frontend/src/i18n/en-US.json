@@ -799,7 +799,9 @@
     "select": "Select a type to edit its fields.",
     "name": "Name",
     "fields": "Fields",
-    "fromTemplate": "From template"
+    "fromTemplate": "From template",
+    "observable": "observed",
+    "schemaVersion": "Schema"
   },
   "inventory": {
     "assigned": "Assigned",

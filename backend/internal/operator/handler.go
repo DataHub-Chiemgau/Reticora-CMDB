@@ -27,6 +27,8 @@ type Handler struct {
 	pool     *pgxpool.Pool
 	// entitlements is written here only (ENT-04).
 	entitlements *entitlement.Service
+	// orgs creates organizations (TLC-02).
+	orgs OrgCreator
 }
 
 // NewHandler creates the operator handler. pool serves the organization
@@ -41,6 +43,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/admin/auth/callback", h.Callback)
 	r.With(h.Middleware).Get("/api/v1/admin/me", h.Me)
 	r.With(h.Middleware).Get("/api/v1/admin/orgs", h.ListOrgs)
+	r.With(h.Middleware).Post("/api/v1/admin/orgs", h.CreateOrg)
 	r.With(h.Middleware).Get("/api/v1/admin/audit", h.ListAudit)
 	r.With(h.Middleware).Get("/api/v1/admin/audit/verify", h.VerifyAudit)
 	r.With(h.Middleware).Get("/api/v1/admin/orgs/{id}/entitlements", h.ListEntitlements)

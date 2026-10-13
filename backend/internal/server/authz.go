@@ -48,28 +48,33 @@ var readPermissionFor = map[string]identity.Permission{
 	"slas":                 identity.PermSLARead,
 	"users":                identity.PermUserRead,
 	"service-accounts":     identity.PermUserRead,
-	"teams":                identity.PermUserRead,
-	"clients":              identity.PermUserRead,
-	"roles":                identity.PermRoleRead,
-	"permissions":          identity.PermPermissionRead,
-	"entitlements":         identity.PermEntitlementRead,
-	"audit":                identity.PermAuditRead,
-	"webhooks":             identity.PermWebhookRead,
-	"credentials":          identity.PermCredentialRead,
-	"export":               identity.PermCIRead,
-	"ip-addresses":         identity.PermIPAMRead,
-	"subnets":              identity.PermIPAMRead,
-	"vlans":                identity.PermIPAMRead,
-	"vrfs":                 identity.PermIPAMRead,
-	"network-interfaces":   identity.PermIPAMRead,
-	"cables":               identity.PermRackRead,
-	"forms":                identity.PermFormRead,
-	"form-submissions":     identity.PermFormRead,
-	"workflows":            identity.PermWorkflowRead,
-	"workflow-runs":        identity.PermWorkflowRead,
-	"compliance":           identity.PermComplianceRead,
-	"security":             identity.PermSecurityRead,
-	"monitoring":           identity.PermMonitoringRead,
+	// Invitations name addresses and grant roles: read and write need
+	// user:manage (TLC-03).
+	"invitations": identity.PermUserManage,
+	"teams":       identity.PermUserRead,
+	"clients":     identity.PermUserRead,
+	// The organization is the root of the location hierarchy (LOC-01).
+	"org":                identity.PermLocationRead,
+	"roles":              identity.PermRoleRead,
+	"permissions":        identity.PermPermissionRead,
+	"entitlements":       identity.PermEntitlementRead,
+	"audit":              identity.PermAuditRead,
+	"webhooks":           identity.PermWebhookRead,
+	"credentials":        identity.PermCredentialRead,
+	"export":             identity.PermCIRead,
+	"ip-addresses":       identity.PermIPAMRead,
+	"subnets":            identity.PermIPAMRead,
+	"vlans":              identity.PermIPAMRead,
+	"vrfs":               identity.PermIPAMRead,
+	"network-interfaces": identity.PermIPAMRead,
+	"cables":             identity.PermRackRead,
+	"forms":              identity.PermFormRead,
+	"form-submissions":   identity.PermFormRead,
+	"workflows":          identity.PermWorkflowRead,
+	"workflow-runs":      identity.PermWorkflowRead,
+	"compliance":         identity.PermComplianceRead,
+	"security":           identity.PermSecurityRead,
+	"monitoring":         identity.PermMonitoringRead,
 	// Privacy/DSGVO acts on other people's personal data; even the read-side
 	// retention policy requires the manage permission.
 	"privacy": identity.PermUserManage,
@@ -79,8 +84,10 @@ var readPermissionFor = map[string]identity.Permission{
 	"ai":      identity.PermAIRead,
 	// Enterprise CMDB + asset/inventory extension (spec §21). Read side;
 	// writes are derived from the read→write suffix or overridden below.
-	"ci-types":              identity.PermCIRead,
-	"ci-fields":             identity.PermCIRead,
+	"ci-types":  identity.PermCIRead,
+	"ci-fields": identity.PermCIRead,
+	// attribute_definition (MET-10, API-05).
+	"attribute-definitions": identity.PermCIRead,
 	"field-definitions":     identity.PermCIRead,
 	"relationship-types":    identity.PermRelationshipRead,
 	"lifecycle-definitions": identity.PermAssetRead,
@@ -120,6 +127,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"users":       identity.PermUserManage,
 	// Service accounts are principals like users (RBA-08).
 	"service-accounts": identity.PermUserManage,
+	"invitations":      identity.PermUserManage,
 	"teams":            identity.PermTeamManage,
 	// RBA-01: collectors and discovery jobs have their own manage keys.
 	"collectors": identity.PermCollectorManage,
@@ -127,6 +135,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	// Resolving reconciliation conflicts is resolving review items.
 	"reconciliation": identity.PermReviewResolve,
 	"clients":        identity.PermUserManage,
+	"org":            identity.PermUserManage,
 	"roles":          identity.PermRoleManage,
 	"permissions":    identity.PermPermissionManage,
 	"entitlements":   identity.PermEntitlementManage, // no tenant write route: the operator writes (ENT-04)
@@ -147,6 +156,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"ingest":   identity.PermDiscoveryIngest,
 	// Enterprise CMDB + asset/inventory extension write side (spec §21).
 	"ci-fields":             identity.PermCIAttributeManage,
+	"attribute-definitions": identity.PermCIAttributeManage,
 	"field-definitions":     identity.PermCIInstanceAttributeManage,
 	"relationship-types":    identity.PermRelationshipTypeManage,
 	"lifecycle-definitions": identity.PermLifecycleManage,
@@ -294,6 +304,14 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 	case "/api/v1/collectors/enroll":
 		// Zero-config onboarding: the single-use enrollment code is the
 		// credential; the collector has no bearer token before enrolling.
+		return "", routePublic
+	case "/api/v1/invitations/accept":
+		// The invitation token is the credential; the invited person has no
+		// account yet (TLC-03).
+		return "", routePublic
+	case "/api/v1/signup", "/api/v1/signup/verify", "/api/v1/signup/challenge":
+		// Self-signup (TLC-01): no account exists yet; the verification
+		// token is the credential.
 		return "", routePublic
 	}
 

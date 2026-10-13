@@ -143,4 +143,15 @@ func TestOperatorEntitlementAudit(t *testing.T) {
 	if details.Before.Limits[entitlement.LimitMaxCollectors] != 3 || details.After.Limits[entitlement.LimitMaxCollectors] != 7 {
 		t.Errorf("audit details %s", raw)
 	}
+
+	// The entry verifies as stored: details with nested structs hash in
+	// their read-back form (regression, WP-111).
+	entry, err := scanEntry(f.Admin.QueryRow(bg, `SELECT `+auditColumns+` FROM operator_audit
+		WHERE action = 'entitlement.grant' AND target_org = $1 ORDER BY id DESC LIMIT 1`, f.OrgA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, err := entryHash(&entry); err != nil || want != entry.EntryHash {
+		t.Errorf("entitlement.grant entry hash does not verify: %v", err)
+	}
 }

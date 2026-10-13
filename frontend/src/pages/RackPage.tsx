@@ -93,7 +93,7 @@ export function RackPage() {
             className="max-w-sm"
             options={racks.map((rack) => ({
               value: rack.id,
-              label: `${rack.name} (${rack.height_u} HE)`,
+              label: `${rack.name} (${rack.height_units} HE)`,
             }))}
           />
         </Card>
@@ -133,7 +133,7 @@ export function RackPage() {
               />
             ) : (
               <RackSVG
-                units={selectedRack.height_u}
+                units={selectedRack.height_units}
                 items={units}
                 onItemClick={(item) => {
                   const mount = mounts.find((entry) => entry.id === item.id);

@@ -459,7 +459,7 @@ export interface Rack {
   organization_id: string;
   room_id: string;
   name: string;
-  height_u: number;
+  height_units: number;
   width_mm: number;
   depth_mm: number;
   notes?: string;

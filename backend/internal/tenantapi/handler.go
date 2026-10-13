@@ -21,6 +21,9 @@ func NewHandler(repo Repository) *Handler {
 
 // RegisterRoutes registers all location-hierarchy routes.
 func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/api/v1/org", h.GetOrganization)
+	r.Patch("/api/v1/org", h.UpdateOrganization)
+
 	r.Get("/api/v1/clients", h.ListClients)
 	r.Post("/api/v1/clients", h.CreateClient)
 	r.Get("/api/v1/clients/{id}", h.GetClient)
@@ -53,6 +56,98 @@ func orgOrUnauthorized(w http.ResponseWriter, r *http.Request) (string, bool) {
 		return "", false
 	}
 	return t.OrganizationID, true
+}
+
+// writeFieldError answers field errors (400) and conflicts (409) naming the
+// field (LOC-01–LOC-06) and reports whether err was one of them.
+func writeFieldError(w http.ResponseWriter, err error) bool { return api.WriteFieldError(w, err) }
+
+// writeWriteError reports a failed create or update: field errors and
+// conflicts with their field, "not found" as 404, the rest sanitized.
+func writeWriteError(w http.ResponseWriter, err error, notFound string) {
+	switch {
+	case writeFieldError(w, err):
+	case err.Error() == "not found":
+		api.WriteError(w, http.StatusNotFound, "Not Found", notFound)
+	default:
+		api.WriteRepoError(w, err)
+	}
+}
+
+// writeCreateError reports a failed create of a building or room: field
+// errors and conflicts with their field (LOC-04, LOC-05), database errors
+// sanitized, an unknown or invisible parent as 400.
+func writeCreateError(w http.ResponseWriter, err error) {
+	switch {
+	case writeFieldError(w, err):
+	case api.WriteDBError(w, err):
+	default:
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+	}
+}
+
+// --- Organization ---
+
+// GetOrganization handles GET /api/v1/org (API-05, LOC-01).
+func (h *Handler) GetOrganization(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := orgOrUnauthorized(w, r)
+	if !ok {
+		return
+	}
+	o, err := h.repo.GetOrganization(r.Context(), orgID)
+	if err != nil {
+		writeWriteError(w, err, "organization not found")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, o)
+}
+
+// UpdateOrganization handles PATCH /api/v1/org: name, settings, IANA time
+// zone, ISO 4217 currency and BCP 47 locale (canonicalized).
+func (h *Handler) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := orgOrUnauthorized(w, r)
+	if !ok {
+		return
+	}
+	var req UpdateOrganizationRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if err := validateOrganization(&req); err != nil {
+		writeFieldError(w, err)
+		return
+	}
+	o, err := h.repo.UpdateOrganization(r.Context(), orgID, req)
+	if err != nil {
+		writeWriteError(w, err, "organization not found")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, o)
+}
+
+func validateOrganization(req *UpdateOrganizationRequest) error {
+	if req.Name != nil && *req.Name == "" {
+		return &FieldError{Field: "name", Message: "must not be empty"}
+	}
+	if req.Timezone != nil {
+		if err := validTimezone("timezone", *req.Timezone); err != nil {
+			return err
+		}
+	}
+	if req.Currency != nil {
+		if err := validCurrency(*req.Currency); err != nil {
+			return err
+		}
+	}
+	if req.Locale != nil {
+		canonical, err := canonicalLocale(*req.Locale)
+		if err != nil {
+			return err
+		}
+		req.Locale = &canonical
+	}
+	return nil
 }
 
 func writeList[T any](w http.ResponseWriter, items []T, total int, page api.PaginationParams) {
@@ -101,9 +196,14 @@ func (h *Handler) CreateClient(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name and slug are required")
 		return
 	}
-	c := &Client{OrganizationID: orgID, Name: req.Name, Slug: req.Slug, Settings: req.Settings}
+	if err := validOptionalTimezone("timezone", req.Timezone); err != nil {
+		writeFieldError(w, err)
+		return
+	}
+	c := &Client{OrganizationID: orgID, Name: req.Name, Slug: req.Slug, ExternalRef: emptyToNil(req.ExternalRef),
+		Timezone: emptyToNil(req.Timezone), Settings: req.Settings}
 	if err := h.repo.CreateClient(r.Context(), c); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		writeWriteError(w, err, "client not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, c)
@@ -134,9 +234,17 @@ func (h *Handler) UpdateClient(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	if (req.Name != nil && *req.Name == "") || (req.Slug != nil && *req.Slug == "") {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name and slug must not be empty")
+		return
+	}
+	if err := validOptionalTimezone("timezone", req.Timezone); err != nil {
+		writeFieldError(w, err)
+		return
+	}
 	c, err := h.repo.UpdateClient(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "client not found")
+		writeWriteError(w, err, "client not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, c)
@@ -187,7 +295,12 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "client_id and name are required")
 		return
 	}
+	if err := validOptionalTimezone("timezone", req.Timezone); err != nil {
+		writeFieldError(w, err)
+		return
+	}
 	s := &Site{
+		Timezone:       emptyToNil(req.Timezone),
 		OrganizationID: orgID,
 		ClientID:       req.ClientID,
 		Name:           req.Name,
@@ -197,7 +310,7 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 		Notes:          req.Notes,
 	}
 	if err := h.repo.CreateSite(r.Context(), s); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		writeWriteError(w, err, "client not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, s)
@@ -228,9 +341,17 @@ func (h *Handler) UpdateSite(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	if req.Name != nil && *req.Name == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name must not be empty")
+		return
+	}
+	if err := validOptionalTimezone("timezone", req.Timezone); err != nil {
+		writeFieldError(w, err)
+		return
+	}
 	s, err := h.repo.UpdateSite(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "site not found")
+		writeWriteError(w, err, "site not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, s)
@@ -292,7 +413,7 @@ func (h *Handler) CreateBuilding(w http.ResponseWriter, r *http.Request) {
 		FloorplanObjectKey: req.FloorplanObjectKey,
 	}
 	if err := h.repo.CreateBuilding(r.Context(), b); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		writeCreateError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, b)
@@ -325,7 +446,7 @@ func (h *Handler) UpdateBuilding(w http.ResponseWriter, r *http.Request) {
 	}
 	b, err := h.repo.UpdateBuilding(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "building not found")
+		writeWriteError(w, err, "building not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, b)
@@ -387,7 +508,7 @@ func (h *Handler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 		RoomType:       req.RoomType,
 	}
 	if err := h.repo.CreateRoom(r.Context(), rm); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		writeCreateError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, rm)
@@ -420,7 +541,7 @@ func (h *Handler) UpdateRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	rm, err := h.repo.UpdateRoom(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "room not found")
+		writeWriteError(w, err, "room not found")
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, rm)
@@ -440,4 +561,12 @@ func (h *Handler) DeleteRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// emptyToNil drops an empty optional text.
+func emptyToNil(v *string) *string {
+	if v == nil || *v == "" {
+		return nil
+	}
+	return v
 }

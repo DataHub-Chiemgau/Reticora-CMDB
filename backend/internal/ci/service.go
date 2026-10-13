@@ -151,7 +151,11 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 	if err := CheckReservedKeys("attributes", item.Attributes); err != nil {
 		return err
 	}
-	if err := s.validate(ctx, item.OrganizationID, item.CITypeID, "", nil, item.Attributes); err != nil {
+	typed := typedValues(item)
+	if err := validateTypedColumns(typed); err != nil {
+		return err
+	}
+	if err := s.validate(ctx, item.OrganizationID, item.CITypeID, "", nil, withTyped(item.Attributes, typed)); err != nil {
 		return err
 	}
 	if item.AssetID != "" && item.LocationID != "" {
@@ -167,13 +171,18 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 	if err := CheckReservedKeys("attributes", req.Attributes); err != nil {
 		return nil, err
 	}
+	typed := typedPatch(&req)
+	if err := validateTypedColumns(typed); err != nil {
+		return nil, err
+	}
 	needsBefore := s.fields != nil || (req.Manual != nil && (req.LocationID != nil || req.SerialNumber != nil))
 	if needsBefore {
 		before, err := s.repo.GetByID(ctx, orgID, id)
 		if err != nil {
 			return nil, err
 		}
-		if err := s.validate(ctx, orgID, before.CITypeID, id, before.Attributes, req.Attributes); err != nil {
+		if err := s.validate(ctx, orgID, before.CITypeID, id,
+			withTyped(before.Attributes, typedValues(before)), withTyped(req.Attributes, typed)); err != nil {
 			return nil, err
 		}
 		if err := checkAssetOwnedFields(before, &req); err != nil {

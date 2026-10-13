@@ -10,7 +10,7 @@ import {
   useUpsertCITypeField,
   useDeleteCITypeField,
 } from '../api/cmdbHooks';
-import type { CIType } from '../api/cmdb';
+import { localizedText, type CIType } from '../api/cmdb';
 import type { FieldDefinition } from '../lib/fieldmeta';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -21,20 +21,22 @@ import { Modal } from '../components/ui/Modal';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
 
+// Data types of MET-11: phase 1, then phase 2 (file, json, references).
 const FIELD_TYPES = [
   'text',
-  'textarea',
+  'multiline',
   'integer',
   'decimal',
   'boolean',
   'date',
   'datetime',
   'enum',
-  'multi_enum',
+  'multiselect',
   'ip',
   'mac',
   'url',
   'email',
+  'uuid',
   'json',
   'file',
   'user',
@@ -46,7 +48,8 @@ const FIELD_TYPES = [
 ];
 
 export function CITypeAdminPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const label = (ty: CIType) => localizedText(ty.display_name, i18n.language) || ty.name;
   const [search, setSearch] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [selectedId, setSelectedId] = useState<string | undefined>();
@@ -78,6 +81,7 @@ export function CITypeAdminPage() {
         description: tpl.description,
         category: tpl.category,
         is_logical: tpl.is_logical,
+        is_observable: tpl.is_observable,
         capabilities: tpl.capabilities,
         allowed_relationship_types: tpl.allowed_relationship_types,
         fields: tpl.fields,
@@ -152,9 +156,7 @@ export function CITypeAdminPage() {
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className="font-medium text-gray-900 dark:text-gray-100">
-                  {ty.display_name || ty.name}
-                </span>
+                <span className="font-medium text-gray-900 dark:text-gray-100">{label(ty)}</span>
                 <div className="flex gap-1">
                   {ty.is_system ? <Badge variant="info">system</Badge> : null}
                   {!ty.is_active ? (
@@ -163,10 +165,14 @@ export function CITypeAdminPage() {
                   {ty.is_logical ? (
                     <Badge variant="neutral">{t('citypes.logical', 'logisch')}</Badge>
                   ) : null}
+                  {ty.is_observable ? (
+                    <Badge variant="neutral">{t('citypes.observable', 'beobachtet')}</Badge>
+                  ) : null}
                 </div>
               </div>
               <p className="mt-0.5 text-xs text-gray-500">
-                {ty.key} · v{ty.version}
+                {ty.key} · v{ty.version} · {t('citypes.schemaVersion', 'Schema')}{' '}
+                {ty.schema_version}
                 {ty.category ? ` · ${ty.category}` : ''}
               </p>
             </button>
@@ -211,7 +217,7 @@ export function CITypeAdminPage() {
               onClick={() => instantiateTemplate(tpl)}
               className="rounded-lg border border-gray-200 px-3 py-2 text-left hover:border-primary dark:border-gray-700"
             >
-              <p className="font-medium">{tpl.display_name || tpl.name}</p>
+              <p className="font-medium">{label(tpl)}</p>
               <p className="text-xs text-gray-500">
                 {tpl.category}
                 {tpl.is_logical ? ' · logisch' : ''} · {(tpl.fields ?? []).length} Felder
@@ -355,10 +361,11 @@ function CITypeDetail({
   onDeleteField: (name: string) => void;
   t: TFunction;
 }) {
+  const { i18n } = useTranslation();
   const fields = type.fields ?? [];
   return (
     <Card
-      title={type.display_name || type.name}
+      title={localizedText(type.display_name, i18n.language) || type.name}
       actions={
         <div className="flex gap-2">
           <Button size="sm" variant="secondary" onClick={onClone}>
