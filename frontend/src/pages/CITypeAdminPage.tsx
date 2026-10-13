@@ -154,9 +154,7 @@ export function CITypeAdminPage() {
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className="font-medium text-gray-900 dark:text-gray-100">
-                  {label(ty)}
-                </span>
+                <span className="font-medium text-gray-900 dark:text-gray-100">{label(ty)}</span>
                 <div className="flex gap-1">
                   {ty.is_system ? <Badge variant="info">system</Badge> : null}
                   {!ty.is_active ? (
@@ -171,7 +169,8 @@ export function CITypeAdminPage() {
                 </div>
               </div>
               <p className="mt-0.5 text-xs text-gray-500">
-                {ty.key} · v{ty.version} · {t('citypes.schemaVersion', 'Schema')} {ty.schema_version}
+                {ty.key} · v{ty.version} · {t('citypes.schemaVersion', 'Schema')}{' '}
+                {ty.schema_version}
                 {ty.category ? ` · ${ty.category}` : ''}
               </p>
             </button>
