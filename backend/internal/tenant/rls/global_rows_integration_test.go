@@ -130,7 +130,7 @@ func TestGlobalRowsAreReadOnly(t *testing.T) {
 		{"lifecycle_definition", "name"},
 		{"lifecycle_state", "label"},
 		{"lifecycle_transition", "label"},
-		{"relationship_type", "forward_label"},
+		{"relationship_type", "display_name"},
 	}
 	for _, g := range globalTables {
 		t.Run(g.table, func(t *testing.T) {

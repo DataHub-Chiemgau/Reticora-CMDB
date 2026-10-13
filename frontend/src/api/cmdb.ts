@@ -151,17 +151,19 @@ export const ciFieldApi = {
 
 // ─── Relationship types (§11) ────────────────────────────────────────────────
 
+/** Relationship type metadata (REL-01, CH27). */
 export interface RelationshipType {
   id: string;
   key: string;
-  forward_label: string;
-  reverse_label: string;
-  source_ci_types: string[];
-  target_ci_types: string[];
-  direction: string;
+  display_name: string;
+  reverse_name: string;
+  directed: boolean;
+  category: 'network' | 'power' | 'hosting' | 'logical' | 'physical';
+  impact_direction: 'source_depends_on_target' | 'target_depends_on_source' | 'none' | 'undirected';
+  redundant: boolean;
+  allowed_source_types: string[];
+  allowed_target_types: string[];
   cardinality: string;
-  category?: string;
-  impact_participation: boolean;
   is_system: boolean;
   description?: string;
 }
@@ -174,7 +176,7 @@ export const relationshipTypeApi = {
     return fetchAPI(`/relationship-types/${encodeURIComponent(key)}`);
   },
   create(
-    data: Partial<RelationshipType> & { key: string; forward_label: string; reverse_label: string },
+    data: Partial<RelationshipType> & { key: string; display_name: string; reverse_name: string },
   ) {
     return fetchAPI('/relationship-types', { method: 'POST', body: JSON.stringify(data) });
   },

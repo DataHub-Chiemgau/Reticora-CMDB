@@ -3,6 +3,7 @@ package relationshiptype
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -13,9 +14,9 @@ import (
 )
 
 const selectColumns = `
-	id::text, COALESCE(organization_id::text, ''), key, forward_label, reverse_label,
-	source_ci_types, target_ci_types, direction, cardinality,
-	COALESCE(category, ''), impact_participation, is_system,
+	id::text, COALESCE(organization_id::text, ''), key, display_name, reverse_name,
+	allowed_source_types, allowed_target_types, directed, cardinality,
+	category, impact_direction, redundant, is_system,
 	COALESCE(description, ''), created_at, updated_at
 `
 
@@ -84,27 +85,25 @@ func (r *PGRepository) GetByKey(ctx context.Context, orgID, key string) (*Type, 
 
 // Create inserts a tenant-specific relationship type.
 func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
+	if typ.Cardinality == "" {
+		typ.Cardinality = "many_to_many"
+	}
+	if err := typ.Validate(); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
 	return database.WithRequestTenant(ctx, r.pool, typ.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		direction := typ.Direction
-		if direction == "" {
-			direction = "directed"
-		}
-		cardinality := typ.Cardinality
-		if cardinality == "" {
-			cardinality = "many_to_many"
-		}
-		source, _ := json.Marshal(typ.SourceCITypes)
-		target, _ := json.Marshal(typ.TargetCITypes)
+		source, _ := json.Marshal(nonNil(typ.AllowedSourceTypes))
+		target, _ := json.Marshal(nonNil(typ.AllowedTargetTypes))
 		row := tx.QueryRow(ctx, fmt.Sprintf(`
 			INSERT INTO relationship_type (
-				organization_id, key, forward_label, reverse_label,
-				source_ci_types, target_ci_types, direction, cardinality,
-				category, impact_participation, is_system, description
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,false,$11)
+				organization_id, key, display_name, reverse_name,
+				allowed_source_types, allowed_target_types, directed, cardinality,
+				category, impact_direction, redundant, is_system, description
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,$12)
 			RETURNING %s`, selectColumns),
-			typ.OrganizationID, typ.Key, typ.ForwardLabel, typ.ReverseLabel,
-			string(source), string(target), direction, cardinality,
-			nilIfEmpty(typ.Category), typ.ImpactParticipation, nilIfEmpty(typ.Description))
+			typ.OrganizationID, typ.Key, typ.DisplayName, typ.ReverseName,
+			string(source), string(target), typ.Directed, typ.Cardinality,
+			typ.Category, typ.ImpactDirection, typ.Redundant, nilIfEmpty(typ.Description))
 		scanned, err := scan(row)
 		if err != nil {
 			return fmt.Errorf("create relationship type: %w", err)
@@ -114,71 +113,36 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 	})
 }
 
-// Update modifies a tenant-owned relationship type.
+// Update modifies a tenant-owned relationship type; the merged type must
+// satisfy the REL-01 contract.
 func (r *PGRepository) Update(ctx context.Context, orgID, key string, req UpsertRequest) (*Type, error) {
 	var out *Type
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		sets := []string{}
-		args := []any{key}
-		pos := 2
-		add := func(col string, val any) {
-			sets = append(sets, fmt.Sprintf("%s = $%d", col, pos))
-			args = append(args, val)
-			pos++
+		current, err := scan(tx.QueryRow(ctx, fmt.Sprintf(
+			"SELECT %s FROM relationship_type WHERE key = $1 AND organization_id IS NOT NULL FOR UPDATE", selectColumns), key))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
 		}
-		if req.ForwardLabel != "" {
-			add("forward_label", req.ForwardLabel)
+		if err != nil {
+			return fmt.Errorf("read relationship type: %w", err)
 		}
-		if req.ReverseLabel != "" {
-			add("reverse_label", req.ReverseLabel)
+		req.apply(current)
+		if verr := current.Validate(); verr != nil {
+			return fmt.Errorf("%w: %v", ErrInvalid, verr)
 		}
-		if req.SourceCITypes != nil {
-			raw, _ := json.Marshal(req.SourceCITypes)
-			add("source_ci_types", string(raw))
-		}
-		if req.TargetCITypes != nil {
-			raw, _ := json.Marshal(req.TargetCITypes)
-			add("target_ci_types", string(raw))
-		}
-		if req.Direction != "" {
-			add("direction", req.Direction)
-		}
-		if req.Cardinality != "" {
-			add("cardinality", req.Cardinality)
-		}
-		if req.Category != "" {
-			add("category", req.Category)
-		}
-		if req.ImpactParticipation != nil {
-			add("impact_participation", *req.ImpactParticipation)
-		}
-		if req.Description != "" {
-			add("description", req.Description)
-		}
-		if len(sets) == 0 {
-			t, err := r.GetByKey(ctx, orgID, key)
-			if err != nil {
-				return err
-			}
-			out = t
-			return nil
-		}
-		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"UPDATE relationship_type SET %s WHERE key = $1 AND organization_id IS NOT NULL RETURNING %s",
-			strings.Join(sets, ", "), selectColumns), args...)
+		source, _ := json.Marshal(nonNil(current.AllowedSourceTypes))
+		target, _ := json.Marshal(nonNil(current.AllowedTargetTypes))
+		out, err = scan(tx.QueryRow(ctx, fmt.Sprintf(`
+			UPDATE relationship_type SET display_name = $2, reverse_name = $3, allowed_source_types = $4,
+				allowed_target_types = $5, directed = $6, cardinality = $7, category = $8,
+				impact_direction = $9, redundant = $10, description = $11
+			WHERE id = $1 RETURNING %s`, selectColumns),
+			current.ID, current.DisplayName, current.ReverseName, string(source), string(target), current.Directed,
+			current.Cardinality, current.Category, current.ImpactDirection, current.Redundant, nilIfEmpty(current.Description)))
 		if err != nil {
 			return fmt.Errorf("update relationship type: %w", err)
 		}
-		defer rows.Close()
-		if rows.Next() {
-			t, err := scan(rows)
-			if err != nil {
-				return err
-			}
-			out = t
-			return rows.Err()
-		}
-		return fmt.Errorf("not found")
+		return nil
 	})
 	return out, err
 }
@@ -218,21 +182,28 @@ func scan(s scanner) (*Type, error) {
 	t := &Type{}
 	var sourceRaw, targetRaw []byte
 	if err := s.Scan(
-		&t.ID, &t.OrganizationID, &t.Key, &t.ForwardLabel, &t.ReverseLabel,
-		&sourceRaw, &targetRaw, &t.Direction, &t.Cardinality, &t.Category,
-		&t.ImpactParticipation, &t.IsSystem, &t.Description, &t.CreatedAt, &t.UpdatedAt,
+		&t.ID, &t.OrganizationID, &t.Key, &t.DisplayName, &t.ReverseName,
+		&sourceRaw, &targetRaw, &t.Directed, &t.Cardinality, &t.Category,
+		&t.ImpactDirection, &t.Redundant, &t.IsSystem, &t.Description, &t.CreatedAt, &t.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
-	t.SourceCITypes = []string{}
-	t.TargetCITypes = []string{}
+	t.AllowedSourceTypes = []string{}
+	t.AllowedTargetTypes = []string{}
 	if len(sourceRaw) > 0 {
-		_ = json.Unmarshal(sourceRaw, &t.SourceCITypes)
+		_ = json.Unmarshal(sourceRaw, &t.AllowedSourceTypes)
 	}
 	if len(targetRaw) > 0 {
-		_ = json.Unmarshal(targetRaw, &t.TargetCITypes)
+		_ = json.Unmarshal(targetRaw, &t.AllowedTargetTypes)
 	}
 	return t, nil
+}
+
+func nonNil(list []string) []string {
+	if list == nil {
+		return []string{}
+	}
+	return list
 }
 
 func nilIfEmpty(value string) any {

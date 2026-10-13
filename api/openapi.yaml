@@ -8980,46 +8980,96 @@ paths:
   /api/v1/relationship-types:
     get:
       operationId: listRelationshipTypes
-      summary: Manage relationship type metadata
+      summary: List the relationship types (system catalogue and the organization's)
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Manage relationship type metadata
+          description: Paginated relationship types
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationEnvelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/RelationshipTypeDefinition' }
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
     post:
       operationId: createRelationshipTypes
-      summary: Manage relationship type metadata
+      summary: Create a relationship type of the organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RelationshipTypeUpsert' }
       responses:
         '201':
-          description: Manage relationship type metadata
+          description: Relationship type created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RelationshipTypeDefinition' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/relationship-types/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
     get:
       operationId: getRelationshipTypesKey
-      summary: Read, update or delete a relationship type
+      summary: Get a relationship type
       responses:
         '200':
-          description: Read, update or delete a relationship type
+          description: Relationship type
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RelationshipTypeDefinition' }
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     patch:
       operationId: updateRelationshipTypesKey
-      summary: Read, update or delete a relationship type
+      summary: Update a relationship type of the organization (system types are read-only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RelationshipTypeUpsert' }
       responses:
         '200':
-          description: Read, update or delete a relationship type
+          description: Relationship type updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RelationshipTypeDefinition' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       operationId: deleteRelationshipTypesKey
-      summary: Read, update or delete a relationship type
+      summary: Delete a relationship type of the organization (system types stay)
       responses:
         '204':
-          description: Read, update or delete a relationship type
+          description: Relationship type deleted
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/reservations:
     get:
@@ -10333,6 +10383,63 @@ components:
           type: integer
         broken_reason:
           type: string
+
+    RelationshipTypeCategory:
+      type: string
+      enum: [network, power, hosting, logical, physical]
+
+    RelationshipImpactDirection:
+      type: string
+      enum: [source_depends_on_target, target_depends_on_source, none, undirected]
+      description: >-
+        Which end of an edge depends on the other (REL-01, CH27): the
+        source on the target (powered_by, hosted_on, depends_on), the
+        target on the source (powers, contains), none (no impact) or
+        undirected (connected_to, a heuristic both ways).
+
+    RelationshipTypeDefinition:
+      type: object
+      description: Relationship type metadata (REL-01). contains, mounted_in and located_in are projected, not stored (CH27).
+      required: [id, key, display_name, reverse_name, directed, category, impact_direction, redundant,
+        allowed_source_types, allowed_target_types, cardinality, is_system, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string, description: Empty for a system type. }
+        key: { type: string }
+        display_name: { type: string }
+        reverse_name: { type: string }
+        directed: { type: boolean }
+        category: { $ref: '#/components/schemas/RelationshipTypeCategory' }
+        impact_direction: { $ref: '#/components/schemas/RelationshipImpactDirection' }
+        redundant:
+          type: boolean
+          description: Edges of the type are redundant feeds (powered_by, member_of_cluster); impact needs all of them to fail.
+        allowed_source_types: { type: array, items: { type: string } }
+        allowed_target_types: { type: array, items: { type: string } }
+        cardinality: { type: string }
+        is_system: { type: boolean, readOnly: true }
+        description: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    RelationshipTypeUpsert:
+      type: object
+      description: >-
+        Create (key, display_name, reverse_name required; defaults directed,
+        logical, source_depends_on_target) or change a relationship type.
+        impact_direction undirected belongs to undirected types only.
+      properties:
+        key: { type: string }
+        display_name: { type: string }
+        reverse_name: { type: string }
+        directed: { type: boolean }
+        category: { $ref: '#/components/schemas/RelationshipTypeCategory' }
+        impact_direction: { $ref: '#/components/schemas/RelationshipImpactDirection' }
+        redundant: { type: boolean }
+        allowed_source_types: { type: array, items: { type: string } }
+        allowed_target_types: { type: array, items: { type: string } }
+        cardinality: { type: string }
+        description: { type: string }
 
     RelationshipType:
       type: string

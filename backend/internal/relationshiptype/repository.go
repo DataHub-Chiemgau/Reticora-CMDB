@@ -2,12 +2,20 @@ package relationshiptype
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+)
+
+// Errors of the repositories.
+var (
+	ErrNotFound = errors.New("not found")
+	// ErrInvalid: the type violates the REL-01 contract (400).
+	ErrInvalid = errors.New("invalid relationship type")
 )
 
 // Repository defines persistence for relationship types.
@@ -89,6 +97,12 @@ func (r *MemoryRepository) GetByKey(_ context.Context, orgID, key string) (*Type
 }
 
 func (r *MemoryRepository) Create(_ context.Context, typ *Type) error {
+	if typ.Cardinality == "" {
+		typ.Cardinality = "many_to_many"
+	}
+	if err := typ.Validate(); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.types[mapKey(typ.OrganizationID, typ.Key)]; exists {
@@ -109,35 +123,14 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, key string, req Upse
 	defer r.mu.Unlock()
 	t, ok := r.types[mapKey(orgID, key)]
 	if !ok {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
-	if req.ForwardLabel != "" {
-		t.ForwardLabel = req.ForwardLabel
+	next := *t
+	req.apply(&next)
+	if err := next.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
-	if req.ReverseLabel != "" {
-		t.ReverseLabel = req.ReverseLabel
-	}
-	if req.SourceCITypes != nil {
-		t.SourceCITypes = req.SourceCITypes
-	}
-	if req.TargetCITypes != nil {
-		t.TargetCITypes = req.TargetCITypes
-	}
-	if req.Direction != "" {
-		t.Direction = req.Direction
-	}
-	if req.Cardinality != "" {
-		t.Cardinality = req.Cardinality
-	}
-	if req.Category != "" {
-		t.Category = req.Category
-	}
-	if req.ImpactParticipation != nil {
-		t.ImpactParticipation = *req.ImpactParticipation
-	}
-	if req.Description != "" {
-		t.Description = req.Description
-	}
+	*t = next
 	t.UpdatedAt = time.Now().UTC()
 	out := *t
 	return &out, nil

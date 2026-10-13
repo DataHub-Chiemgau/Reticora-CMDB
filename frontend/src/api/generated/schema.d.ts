@@ -5273,10 +5273,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage relationship type metadata */
+    /** List the relationship types (system catalogue and the organization's) */
     get: operations['listRelationshipTypes'];
     put?: never;
-    /** Manage relationship type metadata */
+    /** Create a relationship type of the organization */
     post: operations['createRelationshipTypes'];
     delete?: never;
     options?: never;
@@ -5288,18 +5288,20 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        key: string;
+      };
       cookie?: never;
     };
-    /** Read, update or delete a relationship type */
+    /** Get a relationship type */
     get: operations['getRelationshipTypesKey'];
     put?: never;
     post?: never;
-    /** Read, update or delete a relationship type */
+    /** Delete a relationship type of the organization (system types stay) */
     delete: operations['deleteRelationshipTypesKey'];
     options?: never;
     head?: never;
-    /** Read, update or delete a relationship type */
+    /** Update a relationship type of the organization (system types are read-only) */
     patch: operations['updateRelationshipTypesKey'];
     trace?: never;
   };
@@ -6135,6 +6137,51 @@ export interface components {
       broken_id?: string;
       broken_at?: number;
       broken_reason?: string;
+    };
+    /** @enum {string} */
+    RelationshipTypeCategory: 'network' | 'power' | 'hosting' | 'logical' | 'physical';
+    /**
+     * @description Which end of an edge depends on the other (REL-01, CH27): the source on the target (powered_by, hosted_on, depends_on), the target on the source (powers, contains), none (no impact) or undirected (connected_to, a heuristic both ways).
+     * @enum {string}
+     */
+    RelationshipImpactDirection:
+      'source_depends_on_target' | 'target_depends_on_source' | 'none' | 'undirected';
+    /** @description Relationship type metadata (REL-01). contains, mounted_in and located_in are projected, not stored (CH27). */
+    RelationshipTypeDefinition: {
+      id: string;
+      /** @description Empty for a system type. */
+      organization_id?: string;
+      key: string;
+      display_name: string;
+      reverse_name: string;
+      directed: boolean;
+      category: components['schemas']['RelationshipTypeCategory'];
+      impact_direction: components['schemas']['RelationshipImpactDirection'];
+      /** @description Edges of the type are redundant feeds (powered_by, member_of_cluster); impact needs all of them to fail. */
+      redundant: boolean;
+      allowed_source_types: string[];
+      allowed_target_types: string[];
+      cardinality: string;
+      readonly is_system: boolean;
+      description?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @description Create (key, display_name, reverse_name required; defaults directed, logical, source_depends_on_target) or change a relationship type. impact_direction undirected belongs to undirected types only. */
+    RelationshipTypeUpsert: {
+      key?: string;
+      display_name?: string;
+      reverse_name?: string;
+      directed?: boolean;
+      category?: components['schemas']['RelationshipTypeCategory'];
+      impact_direction?: components['schemas']['RelationshipImpactDirection'];
+      redundant?: boolean;
+      allowed_source_types?: string[];
+      allowed_target_types?: string[];
+      cardinality?: string;
+      description?: string;
     };
     /** @enum {string} */
     RelationshipType:
@@ -22087,27 +22134,33 @@ export interface operations {
   };
   listRelationshipTypes: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Manage relationship type metadata */
+      /** @description Paginated relationship types */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['PaginationEnvelope'] & {
+            data: components['schemas']['RelationshipTypeDefinition'][];
+          };
         };
-        content?: never;
       };
+      401: components['responses']['Unauthorized'];
     };
   };
   createRelationshipTypes: {
@@ -22117,97 +22170,99 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RelationshipTypeUpsert'];
+      };
+    };
     responses: {
-      /** @description Manage relationship type metadata */
+      /** @description Relationship type created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['RelationshipTypeDefinition'];
         };
-        content?: never;
       };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
     };
   };
   getRelationshipTypesKey: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        key: string;
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Read, update or delete a relationship type */
+      /** @description Relationship type */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['RelationshipTypeDefinition'];
         };
-        content?: never;
       };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   deleteRelationshipTypesKey: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        key: string;
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Read, update or delete a relationship type */
+      /** @description Relationship type deleted */
       204: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
       };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   updateRelationshipTypesKey: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        key: string;
+      };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RelationshipTypeUpsert'];
+      };
+    };
     responses: {
-      /** @description Read, update or delete a relationship type */
+      /** @description Relationship type updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['RelationshipTypeDefinition'];
         };
-        content?: never;
       };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listReservations: {

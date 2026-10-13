@@ -1,6 +1,7 @@
 package relationshiptype
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -70,29 +71,22 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if req.Key == "" || req.ForwardLabel == "" || req.ReverseLabel == "" {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "key, forward_label and reverse_label are required")
+	if req.Key == "" || req.DisplayName == "" || req.ReverseName == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "key, display_name and reverse_name are required")
 		return
 	}
-	impact := true
-	if req.ImpactParticipation != nil {
-		impact = *req.ImpactParticipation
-	}
+	// Defaults of a custom type: directed, logical, the source depends on
+	// the target.
 	typ := &Type{
-		OrganizationID:      t.OrganizationID,
-		Key:                 req.Key,
-		ForwardLabel:        req.ForwardLabel,
-		ReverseLabel:        req.ReverseLabel,
-		SourceCITypes:       req.SourceCITypes,
-		TargetCITypes:       req.TargetCITypes,
-		Direction:           req.Direction,
-		Cardinality:         req.Cardinality,
-		Category:            req.Category,
-		ImpactParticipation: impact,
-		Description:         req.Description,
+		OrganizationID: t.OrganizationID, Key: req.Key,
+		Directed: true, Category: "logical", ImpactDirection: ImpactSourceDependsOnTarget,
+	}
+	req.apply(typ)
+	if req.Directed != nil && !*req.Directed && req.ImpactDirection == "" {
+		typ.ImpactDirection = ImpactUndirected
 	}
 	if err := h.repo.Create(r.Context(), typ); err != nil {
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		writeError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, typ)
@@ -111,7 +105,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "key"), req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "relationship type not found or protected")
+		writeError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, item)
@@ -128,4 +122,17 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeError maps repository errors: an invalid type is 400, a missing or
+// system type 404, a taken key 409.
+func writeError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrInvalid):
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "relationship type not found or protected")
+	default:
+		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+	}
 }
