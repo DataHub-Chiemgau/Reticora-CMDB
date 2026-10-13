@@ -1,0 +1,96 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reticora-nats-edge
+data:
+  # Host names of the endpoint's server certificate: the public name the
+  # collectors use first, then the in-cluster service name.
+  hosts: "nats.example.com,reticora-nats-edge"
+  leaf-url: "nats://nats:7422"
+  # As deploy/docker-compose/nats-edge.conf; the file lives in conf/,
+  # the PKI volume in pki/ (working directory /etc/nats).
+  nats-edge.conf: |
+    port: 4222
+    server_name: reticora-nats-edge
+    include ../pki/edge.conf
+    leafnodes {
+      remotes: [
+        { url: $RETICORA_NATS_EDGE_LEAF_URL, account: COLLECTORS }
+      ]
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: reticora-collector-pki
+spec:
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: 10Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reticora-nats-edge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: nats-edge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: nats-edge
+    spec:
+      containers:
+        - name: nats-edge
+          image: nats:2.10-alpine
+          workingDir: /etc/nats
+          command: ["/bin/sh", "-c"]
+          args:
+            - >-
+              until [ -s pki/edge.conf ] && [ -s pki/server.pem ]; do
+              echo "waiting for the collector PKI from the server"; sleep 2; done;
+              exec nats-server -c conf/nats-edge.conf
+          env:
+            - name: RETICORA_NATS_EDGE_LEAF_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: reticora-nats-edge
+                  key: leaf-url
+          ports:
+            - name: nats
+              containerPort: 4222
+          readinessProbe:
+            tcpSocket:
+              port: nats
+            periodSeconds: 10
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nats/conf
+              readOnly: true
+            - name: collector-pki
+              mountPath: /etc/nats/pki
+              readOnly: true
+      volumes:
+        - name: conf
+          configMap:
+            name: reticora-nats-edge
+        - name: collector-pki
+          persistentVolumeClaim:
+            claimName: reticora-collector-pki
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reticora-nats-edge
+spec:
+  # Reachable from customer networks on 4222 (docs/betrieb/firewall-matrix.md).
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/component: nats-edge
+  ports:
+    - name: nats
+      port: 4222
+      targetPort: nats

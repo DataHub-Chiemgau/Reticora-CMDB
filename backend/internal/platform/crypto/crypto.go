@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -100,6 +101,15 @@ func NewEnvelopeEncryptor(masterKeyBase64 string, previousBase64 ...string) (*En
 		}
 	}
 	return e, nil
+}
+
+// Derive returns a 32-byte secret for a purpose (HMAC-SHA256 of the label
+// under the current master key): stable for the installation, different per
+// label, without an extra secret to configure.
+func (e *EnvelopeEncryptor) Derive(label string) []byte {
+	mac := hmac.New(sha256.New, e.masterKey)
+	mac.Write([]byte(label))
+	return mac.Sum(nil)
 }
 
 // KeyID returns the id of the current master key (hex).

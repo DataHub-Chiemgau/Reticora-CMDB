@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -491,4 +492,61 @@ func (h *Handler) PKI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]string{"ca_bundle_pem": bundle, "crl_pem": string(crl)})
+}
+
+// IssueServer issues the TLS server certificate of the collector NATS
+// endpoint (COL-08) for the host names: collectors trust it through the CA
+// bundle they received at enrollment. The key is generated here; it is
+// handed to the NATS server.
+func (ca *CA) IssueServer(ctx context.Context, hosts []string, validity time.Duration) (certPEM, keyPEM string, err error) {
+	return ca.issueWithKey(ctx, "reticora-collector-nats", hosts, validity, x509.ExtKeyUsageServerAuth)
+}
+
+// IssueInternalClient issues a client certificate for a Reticora service
+// (CN = name) that connects to the collector NATS endpoint, e.g. its
+// authorization service.
+func (ca *CA) IssueInternalClient(ctx context.Context, name string, validity time.Duration) (certPEM, keyPEM string, err error) {
+	return ca.issueWithKey(ctx, name, nil, validity, x509.ExtKeyUsageClientAuth)
+}
+
+func (ca *CA) issueWithKey(ctx context.Context, cn string, hosts []string, validity time.Duration, usage x509.ExtKeyUsage) (certPEM, keyPEM string, err error) {
+	if lerr := ca.load(ctx); lerr != nil {
+		return "", "", lerr
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", err
+	}
+	serial, err := randomSerial()
+	if err != nil {
+		return "", "", err
+	}
+	ca.mu.Lock()
+	defer ca.mu.Unlock()
+	now := ca.now()
+	tmpl := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: cn, Organization: []string{"Reticora"}},
+		NotBefore:    now.Add(-5 * time.Minute),
+		NotAfter:     now.Add(validity),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{usage},
+	}
+	for _, h := range hosts {
+		if ip := net.ParseIP(h); ip != nil {
+			tmpl.IPAddresses = append(tmpl.IPAddresses, ip)
+		} else if h != "" {
+			tmpl.DNSNames = append(tmpl.DNSNames, h)
+		}
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.cert, &key.PublicKey, ca.key)
+	if err != nil {
+		return "", "", fmt.Errorf("issue %s certificate: %w", cn, err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return "", "", err
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})), nil
 }

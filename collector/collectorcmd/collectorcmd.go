@@ -135,9 +135,8 @@ func Main() {
 		os.Exit(1)
 	}
 
-	natsURL := envOrDefault("RETICORA_NATS_URL", "nats://localhost:4222")
 	slog.Info("collector configured",
-		"nats_url", natsURL,
+		"nats_url", natsEndpoint(collectorCfg.ServerURL),
 		"server_url", collectorCfg.ServerURL,
 		"scan_subnets", collectorCfg.ScanSubnets,
 		"protocols", collectorCfg.Protocols,
@@ -150,6 +149,8 @@ func Main() {
 	go runDiscoveryLoop(ctx, collectorCfg, uploader)
 	go runHeartbeatLoop(ctx, collectorCfg, uploader)
 	go runAgentRelay(ctx, collectorCfg, uploader)
+	// The collector's mTLS channel to the NATS endpoint (COL-08).
+	go runNATS(ctx, collectorCfg)
 	if collectorCfg.TrapListenAddr != "" {
 		go runTrapReceiver(ctx, collectorCfg, uploader)
 	}

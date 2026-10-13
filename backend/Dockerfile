@@ -24,6 +24,9 @@ RUN apk --no-cache upgrade && apk --no-cache add ca-certificates tzdata
 # Install the binary as root:root 0755. /usr/local/bin is root-owned, so the
 # copy must happen before dropping privileges to the nobody user below.
 COPY --from=builder --chmod=0755 /bin/server /usr/local/bin/server
+# Mount point of the collector PKI volume (COL-08): a fresh named volume
+# takes over this ownership, so the unprivileged server can write it.
+RUN mkdir -p /pki && chown nobody:nobody /pki
 
 EXPOSE 8080
 USER nobody:nobody

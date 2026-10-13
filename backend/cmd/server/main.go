@@ -381,6 +381,9 @@ func main() {
 		}
 	}()
 
+	// The internal CA of the collector certificates (COL-04) and the
+	// collector NATS endpoint (COL-08).
+	collectorPKI := collectorCA(auditPool, encryptor)
 	mux, httpMetrics, err := server.NewRouter(repos, server.Options{
 		Version:            version,
 		MetricsTenantLabel: cfg.MetricsTenantLabel,
@@ -416,7 +419,7 @@ func main() {
 		SignupProtection: signupProtection(cfg, cacheStore),
 		// Invitations need the database; in --no-db mode they answer 503.
 		InvitationAccounts: invitationAccounts(cfg),
-		CollectorCA:        collectorCA(auditPool, encryptor),
+		CollectorCA:        collectorPKI,
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -513,6 +516,16 @@ func main() {
 		workers = append(workers, server.Worker{Name: config.WorkerEvents, Run: publisher.Run})
 	}
 	// Deliver queued notifications with retry (NTF-04).
+	if collectorPKI != nil && (cfg.PKIDir != "" || cfg.NATSEdgeURL != "") {
+		edgeSecrets, edgeErr := discovery.DeriveEdgeSecrets(encryptor)
+		if edgeErr != nil {
+			slog.Error("failed to derive the collector NATS endpoint keys", "error", edgeErr)
+			os.Exit(1)
+		}
+		edge := &discovery.EdgeConfig{Pool: auditPool, CA: collectorPKI, Secrets: edgeSecrets, PKIDir: cfg.PKIDir,
+			Hosts: splitList(cfg.NATSEdgeHosts), URL: cfg.NATSEdgeURL}
+		workers = append(workers, server.Worker{Name: config.WorkerNATSEdge, Run: func(ctx context.Context) { discovery.RunEdge(ctx, edge) }})
+	}
 	workers = append(workers, server.Worker{Name: config.WorkerNotifier, Run: func(ctx context.Context) { notifier.Run(ctx, 5*time.Second) }})
 	// Run the jobs announced on the JOBS work queue (TEC-14).
 	if jobQueue != nil {

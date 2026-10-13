@@ -88,6 +88,15 @@ type Config struct {
 	// has moved them to MasterKey (SEC-06).
 	MasterKeyPrevious string
 
+	// Collector NATS endpoint (COL-08, WP-146): the edge NATS server that
+	// collectors reach on 4222 with mutual TLS. PKIDir receives its CA
+	// bundle, server certificate (for the host names in NATSEdgeHosts) and
+	// generated configuration; the authorization callout connects to
+	// NATSEdgeURL. Its keys are derived from the master key.
+	PKIDir        string
+	NATSEdgeHosts string
+	NATSEdgeURL   string
+
 	// Observability
 	OTelEndpoint string
 	// MetricsTenantLabel enables the organization_id label on HTTP request
@@ -219,6 +228,10 @@ func Load() *Config {
 		MasterKey:         l.str("RETICORA_MASTER_KEY", ""),
 		MasterKeyPrevious: l.str("RETICORA_MASTER_KEY_PREVIOUS", ""),
 
+		PKIDir:        l.str("RETICORA_PKI_DIR", ""),
+		NATSEdgeHosts: l.str("RETICORA_NATS_EDGE_HOSTS", ""),
+		NATSEdgeURL:   l.str("RETICORA_NATS_EDGE_URL", ""),
+
 		OTelEndpoint: l.str("RETICORA_OTEL_ENDPOINT", ""),
 		// Opt-in: the organization_id label multiplies the HTTP metric series
 		// by the tenant count. Default off; enable for bounded-tenant setups.
@@ -296,6 +309,7 @@ const (
 	WorkerJobs              = "jobs"
 	WorkerEvents            = "events"
 	WorkerNotifier          = "notifier"
+	WorkerNATSEdge          = "nats_edge"
 )
 
 // WorkerNames lists every registered worker.
@@ -308,6 +322,7 @@ var WorkerNames = []string{
 	WorkerJobs,
 	WorkerEvents,
 	WorkerNotifier,
+	WorkerNATSEdge,
 }
 
 // WorkerEnvKey returns the switch variable of a worker.
