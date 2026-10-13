@@ -391,33 +391,48 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 		slog.Info("discovery cycle started", "scan_subnets", cfg.ScanSubnets, "protocols", cfg.Protocols)
 
 		var records []plugins.DeviceRecord
+		type scopeOutcome struct {
+			scope   *collectorScope
+			records int
+			errs    []string
+		}
+		var outcomes []scopeOutcome
 
-		// Expand subnets to individual targets for discovery
-		targets := expandSubnets(cfg.ScanSubnets)
+		// One pass per discovery scope (DIS-09), or the configured subnets.
+		for _, pass := range discoveryPasses(&cfg) {
+			var passRecords []plugins.DeviceRecord
+			var errs []string
+			for _, protocol := range pass.protocols {
+				if ctx.Err() != nil {
+					break
+				}
 
-		for _, protocol := range cfg.Protocols {
-			if ctx.Err() != nil {
-				break
+				plug, ok := pluginRegistry[protocol]
+				if !ok {
+					slog.Warn("unknown protocol plugin, skipping", "protocol", protocol)
+					continue
+				}
+
+				slog.Info("running discovery plugin", "protocol", protocol, "targets", len(pass.targets))
+				creds := plugins.CredentialsFor(protocol, credentialsFor(&cfg))
+				hits, err := plug.Probe(ctx, pass.targets, creds)
+				if err != nil {
+					slog.Error("discovery plugin error", "protocol", protocol, "error", err)
+					errs = append(errs, pluginError(protocol, err))
+					continue
+				}
+				collected := collectHits(ctx, protocol, plug, hits, creds)
+				slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
+				passRecords = append(passRecords, collected...)
 			}
-
-			plug, ok := pluginRegistry[protocol]
-			if !ok {
-				slog.Warn("unknown protocol plugin, skipping", "protocol", protocol)
-				continue
-			}
-
-			slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
-			creds := plugins.CredentialsFor(protocol, credentialsFor(&cfg))
-			hits, err := plug.Probe(ctx, targets, creds)
-			if err != nil {
-				slog.Error("discovery plugin error", "protocol", protocol, "error", err)
-				continue
-			}
-			collected := collectHits(ctx, protocol, plug, hits, creds)
-			slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
-			records = append(records, collected...)
+			tagRecords(passRecords, pass.scope)
+			records = append(records, passRecords...)
+			outcomes = append(outcomes, scopeOutcome{scope: pass.scope, records: len(passRecords), errs: errs})
 		}
 		records = deliverableRecords(ctx, records)
+		for _, o := range outcomes {
+			reportScopeRun(ctx, o.scope, cycleStart, o.records, o.errs, cycleStart.Add(cfg.DiscoveryInterval))
+		}
 
 		// Upload records to the backend in a compressed batch, then flush any
 		// records spooled while the backend was unreachable.

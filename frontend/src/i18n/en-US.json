@@ -262,6 +262,26 @@
       "offline": "Offline",
       "disabled": "Disabled",
       "paused": "Paused (license)"
+    },
+    "scopes": {
+      "title": "Discovery scopes",
+      "none": "No scopes yet. Confirm suggested subnets in the review queue or add a scope.",
+      "kindLabel": "Kind",
+      "kind": {
+        "cidr": "Subnet (CIDR)",
+        "range": "Address range",
+        "host": "Host"
+      },
+      "target": "Target",
+      "targetPlaceholder": "e.g. 10.0.0.0/24",
+      "schedule": "Schedule (interval or cron)",
+      "add": "Add scope",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "enable": "Enable",
+      "disable": "Disable",
+      "delete": "Delete",
+      "invalid": "The scope was refused. Check target and schedule (at least 5 minutes)."
     }
   },
   "webhook": {

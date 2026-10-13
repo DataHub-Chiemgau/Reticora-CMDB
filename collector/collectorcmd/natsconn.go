@@ -105,6 +105,14 @@ func runNATS(ctx context.Context, cfg collectorConfig) {
 	}
 	defer nc.Close()
 	slog.Info("collector NATS endpoint connected over mTLS", "url", endpoint)
+	if subject, serr := collectorSubject(creds); serr == nil {
+		scopeChannel.Store(&scopeChannelState{nc: nc, subject: subject})
+		defer scopeChannel.Store(nil)
+		// The collector's discovery scopes and, once, its local subnets as
+		// scope suggestions (DIS-09).
+		go syncScopes(ctx, nc, subject)
+		go reportSubnets(ctx, nc, subject, localSubnets(net.InterfaceAddrs))
+	}
 	// The credentials of the collector's scopes, encrypted for its key
 	// (COL-02).
 	syncBundle(ctx, nc, creds)

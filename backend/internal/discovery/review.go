@@ -52,6 +52,7 @@ func (h *Handler) ReviewService() *reviews.Service {
 		}
 		svc.WithEffect(ReviewKindUnlicensedCI, h.resolveUnlicensed)
 		svc.WithEffect(ReviewKindOverrideConflict, h.resolveOverrideConflict)
+		svc.WithEffect(ReviewKindScopeSuggested, h.resolveScopeSuggested)
 		if h.reviewNotifier != nil {
 			svc.WithNotifier(h.reviewNotifier)
 		}
@@ -67,8 +68,6 @@ func (h *Handler) WithReviewNotifier(n reviews.Notifier) *Handler {
 	return h
 }
 
-// openReview opens a review item, deduplicated per object and type, and
-// reports whether it is new.
 // ReasonNoProfileMatch marks an unclassified_device item of a device that
 // no collector profile matched (DIS-02); its generic_device CI exists.
 const ReasonNoProfileMatch = "no_profile_match"
@@ -79,6 +78,8 @@ func unclassifiedDevice(item *IngestItem) bool {
 	return item.CITypeName == "generic_device" && item.Attributes["classified_by"] == "fallback"
 }
 
+// openReview opens a review item, deduplicated per object and type, and
+// reports whether it is new.
 func (h *Handler) openReview(ctx context.Context, item *ReviewItem) (bool, error) {
 	return h.ReviewService().Open(ctx, item)
 }

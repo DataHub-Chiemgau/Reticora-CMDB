@@ -6238,6 +6238,132 @@ paths:
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
+  /api/v1/discovery-scopes:
+    get:
+      operationId: listDiscoveryScopes
+      tags: [Discovery]
+      summary: List discovery scopes
+      description: Requires discovery:read (DIS-09, API-05).
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: collector_id
+          in: query
+          description: Only the scopes of this collector.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Discovery scopes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryScopeListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createDiscoveryScope
+      tags: [Discovery]
+      summary: Create a discovery scope
+      description: >-
+        Requires discovery:manage. A scope is a CIDR, host or address range
+        (at most 65,536 addresses) that one collector discovers on a
+        schedule (an interval of at least 5m or a five-field cron
+        expression) with the given credentials and plugins. The site decides
+        the client; without a site the collector's client and site apply.
+        The collector receives its enabled scopes over its NATS channel.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoveryScopeInput'
+      responses:
+        '201':
+          description: Scope created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryScope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/discovery-scopes/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getDiscoveryScope
+      tags: [Discovery]
+      summary: Get a discovery scope
+      description: Requires discovery:read.
+      responses:
+        '200':
+          description: Discovery scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryScope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateDiscoveryScope
+      tags: [Discovery]
+      summary: Change a discovery scope
+      description: Requires discovery:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoveryScopePatch'
+      responses:
+        '200':
+          description: Scope updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryScope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      operationId: deleteDiscoveryScope
+      tags: [Discovery]
+      summary: Delete a discovery scope
+      description: Requires discovery:manage.
+      responses:
+        '204':
+          description: Scope deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/ingest/bulk:
     post:
       operationId: bulkIngest
@@ -15570,6 +15696,138 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/Collector'
+
+    DiscoveryScope:
+      type: object
+      description: A discovery scope (DIS-09).
+      required: [id, organization_id, collector_id, name, kind, target, schedule, credential_ids, plugins, enabled, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        client_id:
+          type: string
+        site_id:
+          type: string
+        collector_id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [cidr, host, range]
+        target:
+          type: string
+          description: CIDR, IP address or host name, or "first-last" address range.
+        vrf_id:
+          type: string
+        schedule:
+          type: string
+          description: Interval (e.g. 24h, at least 5m) or five-field cron expression.
+        credential_ids:
+          type: array
+          items:
+            type: string
+        plugins:
+          type: array
+          items:
+            type: string
+            enum: [sweep, snmp, ssh, wmi, ipmi, redfish, power, nas]
+        enabled:
+          type: boolean
+        last_run_at:
+          type: string
+          format: date-time
+        next_run_at:
+          type: string
+          format: date-time
+        last_result:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    DiscoveryScopeInput:
+      type: object
+      additionalProperties: false
+      required: [collector_id, kind, target]
+      properties:
+        collector_id:
+          type: string
+        name:
+          type: string
+          description: Defaults to the target.
+        kind:
+          type: string
+          enum: [cidr, host, range]
+        target:
+          type: string
+        client_id:
+          type: string
+        site_id:
+          type: string
+        vrf_id:
+          type: string
+        schedule:
+          type: string
+          description: Defaults to 24h.
+        credential_ids:
+          type: array
+          items:
+            type: string
+        plugins:
+          type: array
+          description: Defaults to sweep and snmp.
+          items:
+            type: string
+            enum: [sweep, snmp, ssh, wmi, ipmi, redfish, power, nas]
+        enabled:
+          type: boolean
+
+    DiscoveryScopePatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [cidr, host, range]
+        target:
+          type: string
+        site_id:
+          type: string
+        vrf_id:
+          type: string
+        schedule:
+          type: string
+        credential_ids:
+          type: array
+          items:
+            type: string
+        plugins:
+          type: array
+          items:
+            type: string
+            enum: [sweep, snmp, ssh, wmi, ipmi, redfish, power, nas]
+        enabled:
+          type: boolean
+
+    DiscoveryScopeListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/DiscoveryScope'
 
     Credential:
       type: object

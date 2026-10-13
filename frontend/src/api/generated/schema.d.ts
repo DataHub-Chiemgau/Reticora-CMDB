@@ -3303,6 +3303,61 @@ export interface paths {
     patch: operations['updateCollector'];
     trace?: never;
   };
+  '/api/v1/discovery-scopes': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List discovery scopes
+     * @description Requires discovery:read (DIS-09, API-05).
+     */
+    get: operations['listDiscoveryScopes'];
+    put?: never;
+    /**
+     * Create a discovery scope
+     * @description Requires discovery:manage. A scope is a CIDR, host or address range (at most 65,536 addresses) that one collector discovers on a schedule (an interval of at least 5m or a five-field cron expression) with the given credentials and plugins. The site decides the client; without a site the collector's client and site apply. The collector receives its enabled scopes over its NATS channel.
+     */
+    post: operations['createDiscoveryScope'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/discovery-scopes/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get a discovery scope
+     * @description Requires discovery:read.
+     */
+    get: operations['getDiscoveryScope'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a discovery scope
+     * @description Requires discovery:manage.
+     */
+    delete: operations['deleteDiscoveryScope'];
+    options?: never;
+    head?: never;
+    /**
+     * Change a discovery scope
+     * @description Requires discovery:manage.
+     */
+    patch: operations['updateDiscoveryScope'];
+    trace?: never;
+  };
   '/api/v1/ingest/bulk': {
     parameters: {
       query?: never;
@@ -9274,6 +9329,68 @@ export interface components {
     };
     CollectorListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Collector'][];
+    };
+    /** @description A discovery scope (DIS-09). */
+    DiscoveryScope: {
+      id: string;
+      organization_id: string;
+      client_id?: string;
+      site_id?: string;
+      collector_id: string;
+      name: string;
+      /** @enum {string} */
+      kind: 'cidr' | 'host' | 'range';
+      /** @description CIDR, IP address or host name, or "first-last" address range. */
+      target: string;
+      vrf_id?: string;
+      /** @description Interval (e.g. 24h, at least 5m) or five-field cron expression. */
+      schedule: string;
+      credential_ids: string[];
+      plugins: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
+      enabled: boolean;
+      /** Format: date-time */
+      last_run_at?: string;
+      /** Format: date-time */
+      next_run_at?: string;
+      last_result?: {
+        [key: string]: unknown;
+      };
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    DiscoveryScopeInput: {
+      collector_id: string;
+      /** @description Defaults to the target. */
+      name?: string;
+      /** @enum {string} */
+      kind: 'cidr' | 'host' | 'range';
+      target: string;
+      client_id?: string;
+      site_id?: string;
+      vrf_id?: string;
+      /** @description Defaults to 24h. */
+      schedule?: string;
+      credential_ids?: string[];
+      /** @description Defaults to sweep and snmp. */
+      plugins?: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
+      enabled?: boolean;
+    };
+    DiscoveryScopePatch: {
+      name?: string;
+      /** @enum {string} */
+      kind?: 'cidr' | 'host' | 'range';
+      target?: string;
+      site_id?: string;
+      vrf_id?: string;
+      schedule?: string;
+      credential_ids?: string[];
+      plugins?: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
+      enabled?: boolean;
+    };
+    DiscoveryScopeListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['DiscoveryScope'][];
     };
     /** @description Credential metadata. The secret material is never included. */
     Credential: {
@@ -17200,6 +17317,150 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  listDiscoveryScopes: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Only the scopes of this collector. */
+        collector_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Discovery scopes */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DiscoveryScopeListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+    };
+  };
+  createDiscoveryScope: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DiscoveryScopeInput'];
+      };
+    };
+    responses: {
+      /** @description Scope created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DiscoveryScope'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  getDiscoveryScope: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Discovery scope */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DiscoveryScope'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteDiscoveryScope: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Scope deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateDiscoveryScope: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DiscoveryScopePatch'];
+      };
+    };
+    responses: {
+      /** @description Scope updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DiscoveryScope'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };

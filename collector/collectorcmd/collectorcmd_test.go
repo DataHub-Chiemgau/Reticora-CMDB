@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -673,5 +674,63 @@ func TestEveryPluginImplementsProbeCollect(t *testing.T) {
 	}
 	if len(pluginRegistry) != len(want) {
 		t.Errorf("registry has %d plugins, want %d", len(pluginRegistry), len(want))
+	}
+}
+
+// TestDiscoveryFollowsTheServerScopes covers WP-153 (DIS-09): with a scope
+// list from the server the cycle discovers each scope with its plugins and
+// tags the records with scope, client, site and VRF; without one the
+// configured subnets apply.
+func TestDiscoveryFollowsTheServerScopes(t *testing.T) {
+	t.Cleanup(func() { collectorScopes = &scopeCache{} })
+	cfg := collectorConfig{ScanSubnets: []string{"192.0.2.0/30"}, Protocols: []string{"sweep"}}
+	if passes := discoveryPasses(&cfg); len(passes) != 1 || passes[0].scope != nil || len(passes[0].targets) != 2 {
+		t.Fatalf("fallback passes = %+v", passes)
+	}
+
+	collectorScopes.set([]collectorScope{
+		{ID: "s-1", Kind: "cidr", Target: "10.1.0.0/29", ClientID: "c-1", SiteID: "site-1", VRFID: "vrf-1", Plugins: []string{"sweep", "snmp"}},
+		{ID: "s-2", Kind: "range", Target: "10.2.0.250-10.2.1.2", Plugins: []string{"ssh"}},
+		{ID: "s-3", Kind: "host", Target: "fw.example.com", Plugins: []string{"snmp"}},
+	})
+	passes := discoveryPasses(&cfg)
+	if len(passes) != 3 {
+		t.Fatalf("passes = %+v", passes)
+	}
+	if len(passes[0].targets) != 6 || strings.Join(passes[0].protocols, ",") != "sweep,snmp" {
+		t.Errorf("cidr pass = %+v", passes[0])
+	}
+	if strings.Join(passes[1].targets, ",") != "10.2.0.250,10.2.0.251,10.2.0.252,10.2.0.253,10.2.0.254,10.2.0.255,10.2.1.0,10.2.1.1,10.2.1.2" {
+		t.Errorf("range targets = %v", passes[1].targets)
+	}
+	if strings.Join(passes[2].targets, ",") != "fw.example.com" {
+		t.Errorf("host targets = %v", passes[2].targets)
+	}
+
+	recs := []plugins.DeviceRecord{plugins.RecordFromResult("sweep", &plugins.Result{CIType: "generic_device", Name: "x", IP: "10.1.0.1"}, time.Now())}
+	tagRecords(recs, passes[0].scope)
+	if recs[0].ScopeID != "s-1" || recs[0].ClientID != "c-1" || recs[0].SiteID != "site-1" || recs[0].VRFID != "vrf-1" {
+		t.Errorf("tagged record = %+v", recs[0])
+	}
+
+	// An empty list from the server means: nothing to discover.
+	collectorScopes.set([]collectorScope{})
+	if passes = discoveryPasses(&cfg); len(passes) != 0 {
+		t.Errorf("passes without scopes = %+v", passes)
+	}
+}
+
+type fakeAddr string
+
+func (a fakeAddr) Network() string { return "ip+net" }
+func (a fakeAddr) String() string  { return string(a) }
+
+func TestLocalSubnetsForScopeSuggestions(t *testing.T) {
+	addrs := func() ([]net.Addr, error) {
+		return []net.Addr{fakeAddr("127.0.0.1/8"), fakeAddr("192.168.10.23/24"), fakeAddr("192.168.10.24/24"),
+			fakeAddr("169.254.1.2/16"), fakeAddr("fe80::1/64"), fakeAddr("10.8.0.1/32"), fakeAddr("172.16.4.9/22")}, nil
+	}
+	if got := strings.Join(localSubnets(addrs), ","); got != "192.168.10.0/24,172.16.4.0/22" {
+		t.Errorf("local subnets = %s", got)
 	}
 }

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000128_collector_cert
+Stand: Migration 000129_discovery_scope
 
 ## Prüfung
 
@@ -221,6 +221,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `desk_booking` | ja | ja | desk_booking_isolation (ALL), desk_booking_scoped_delete (DELETE), desk_booking_scoped_update (UPDATE) |
 | `discovery_job` | ja | ja | discovery_job_isolation (ALL) |
 | `discovery_result` | ja | ja | discovery_result_isolation (ALL), discovery_result_scoped_delete (DELETE), discovery_result_scoped_update (UPDATE) |
+| `discovery_scope` | ja | ja | discovery_scope_isolation (ALL), discovery_scope_scoped_delete (DELETE), discovery_scope_scoped_update (UPDATE) |
 | `disposal_record` | ja | ja | disposal_record_isolation (ALL) |
 | `document` | ja | ja | document_scoped_delete (DELETE), document_scoped_update (UPDATE), document_tenant_isolation (ALL) |
 | `document_link` | ja | ja | document_link_scoped_delete (DELETE), document_link_scoped_update (UPDATE), document_link_tenant_isolation (ALL) |

@@ -442,8 +442,26 @@ func (g *BundleGate) VerifyBundleTarget(ctx context.Context, orgID, collectorID,
 		return nil, nil, errors.New("the collector key is not ECDSA")
 	}
 	scope := database.OrgWideScope(orgID, "")
-	return database.ContextWithTenantScope(ctx, &scope),
-		&credential.BundleTarget{OrganizationID: orgID, CollectorID: collectorID, ClientID: id.ClientID, PublicKey: pub}, nil
+	target := &credential.BundleTarget{OrganizationID: orgID, CollectorID: collectorID, ClientID: id.ClientID, PublicKey: pub}
+	// With discovery scopes the bundle holds exactly the credentials of the
+	// collector's enabled scopes (DIS-09); without scopes those of its client.
+	err = database.WithTenant(ctx, g.authorizer.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var scopes int
+		var ids []string
+		if qerr := tx.QueryRow(ctx, `SELECT count(*), COALESCE((array_agg(DISTINCT c) FILTER (WHERE c IS NOT NULL))::text[], '{}')
+			FROM discovery_scope LEFT JOIN LATERAL unnest(credential_ids) AS c ON true
+			WHERE organization_id = $1 AND collector_id = $2 AND enabled`, orgID, collectorID).Scan(&scopes, &ids); qerr != nil {
+			return qerr
+		}
+		if scopes > 0 {
+			target.CredentialIDs = ids
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return database.ContextWithTenantScope(ctx, &scope), target, nil
 }
 
 // BundleDelivered implements credential.BundleAuditor.

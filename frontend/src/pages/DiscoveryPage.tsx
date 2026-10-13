@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCollectors } from '../api/hooks';
-import type { Collector } from '../api/client';
+import { useCollectors, useDiscoveryScopeMutations, useDiscoveryScopes } from '../api/hooks';
+import type { Collector, DiscoveryScopeKind } from '../api/client';
 import { fetchAPI } from '../api/client';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -158,6 +158,107 @@ function getCollectorVariant(
   }
 }
 
+/** ScopeList shows and edits the discovery scopes of a collector (DIS-09). */
+function ScopeList({ collectorId }: { collectorId: string }) {
+  const { t } = useTranslation();
+  const { data } = useDiscoveryScopes(collectorId);
+  const { create, update, remove } = useDiscoveryScopeMutations(collectorId);
+  const [kind, setKind] = useState<DiscoveryScopeKind>('cidr');
+  const [target, setTarget] = useState('');
+  const [schedule, setSchedule] = useState('24h');
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!target.trim()) return;
+    create.mutate(
+      {
+        collector_id: collectorId,
+        kind,
+        target: target.trim(),
+        schedule: schedule.trim() || undefined,
+      },
+      { onSuccess: () => setTarget('') },
+    );
+  };
+
+  return (
+    <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
+      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+        {t('discovery.scopes.title')}
+      </h4>
+      {data?.data.length ? (
+        <ul className="mt-2 space-y-2 text-sm">
+          {data.data.map((scope) => (
+            <li key={scope.id} className="flex items-center justify-between gap-2">
+              <span className="text-gray-900 dark:text-gray-100">
+                <span className="font-mono">{scope.target}</span>{' '}
+                <span className="text-gray-500 dark:text-gray-400">
+                  ({t(`discovery.scopes.kind.${scope.kind}`, scope.kind)}, {scope.schedule},{' '}
+                  {scope.plugins.join(', ')})
+                </span>
+              </span>
+              <span className="flex items-center gap-2">
+                <Badge variant={scope.enabled ? 'success' : 'neutral'}>
+                  {scope.enabled ? t('discovery.scopes.enabled') : t('discovery.scopes.disabled')}
+                </Badge>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    update.mutate({ id: scope.id, patch: { enabled: !scope.enabled } })
+                  }
+                >
+                  {scope.enabled ? t('discovery.scopes.disable') : t('discovery.scopes.enable')}
+                </Button>
+                <Button size="sm" variant="danger" onClick={() => remove.mutate(scope.id)}>
+                  {t('discovery.scopes.delete')}
+                </Button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+          {t('discovery.scopes.none')}
+        </p>
+      )}
+      <form className="mt-3 flex flex-wrap items-end gap-2" onSubmit={submit}>
+        <label className="text-sm text-gray-700 dark:text-gray-300">
+          {t('discovery.scopes.kindLabel')}
+          <select
+            className="ml-2 rounded border border-gray-300 bg-white px-2 py-1 dark:border-gray-600 dark:bg-gray-800"
+            value={kind}
+            onChange={(e) => setKind(e.target.value as DiscoveryScopeKind)}
+          >
+            <option value="cidr">{t('discovery.scopes.kind.cidr')}</option>
+            <option value="range">{t('discovery.scopes.kind.range')}</option>
+            <option value="host">{t('discovery.scopes.kind.host')}</option>
+          </select>
+        </label>
+        <Input
+          aria-label={t('discovery.scopes.target')}
+          placeholder={t('discovery.scopes.targetPlaceholder')}
+          value={target}
+          onChange={(e) => setTarget(e.target.value)}
+        />
+        <Input
+          aria-label={t('discovery.scopes.schedule')}
+          value={schedule}
+          onChange={(e) => setSchedule(e.target.value)}
+        />
+        <Button size="sm" type="submit" disabled={create.isPending}>
+          {t('discovery.scopes.add')}
+        </Button>
+      </form>
+      {create.isError ? (
+        <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+          {t('discovery.scopes.invalid')}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function CollectorCard({ collector }: { collector: Collector }) {
   const { t } = useTranslation();
 
@@ -190,6 +291,7 @@ function CollectorCard({ collector }: { collector: Collector }) {
           </dd>
         </div>
       </dl>
+      <ScopeList collectorId={collector.id} />
     </Card>
   );
 }

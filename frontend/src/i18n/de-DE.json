@@ -262,6 +262,26 @@
       "offline": "Offline",
       "disabled": "Deaktiviert",
       "paused": "Pausiert (Lizenz)"
+    },
+    "scopes": {
+      "title": "Discovery-Scopes",
+      "none": "Noch keine Scopes. Bestätigen Sie vorgeschlagene Subnetze in der Review-Queue oder legen Sie einen Scope an.",
+      "kindLabel": "Art",
+      "kind": {
+        "cidr": "Subnetz (CIDR)",
+        "range": "Adressbereich",
+        "host": "Host"
+      },
+      "target": "Ziel",
+      "targetPlaceholder": "z. B. 10.0.0.0/24",
+      "schedule": "Zeitplan (Intervall oder Cron)",
+      "add": "Scope hinzufügen",
+      "enabled": "Aktiv",
+      "disabled": "Inaktiv",
+      "enable": "Aktivieren",
+      "disable": "Deaktivieren",
+      "delete": "Löschen",
+      "invalid": "Der Scope wurde abgelehnt. Prüfen Sie Ziel und Zeitplan (mindestens 5 Minuten)."
     }
   },
   "webhook": {

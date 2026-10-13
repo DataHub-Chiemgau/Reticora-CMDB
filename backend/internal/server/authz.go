@@ -32,6 +32,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"ci-contacts":          identity.PermContactRead,
 	"collectors":           identity.PermDiscoveryRead,
 	"discovery":            identity.PermDiscoveryRead,
+	"discovery-scopes":     identity.PermDiscoveryRead,
 	"review-items":         identity.PermDiscoveryRead,
 	"assets":               identity.PermAssetRead,
 	"asset-locations":      identity.PermAssetWrite,
@@ -140,8 +141,9 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"invitations":      identity.PermUserManage,
 	"teams":            identity.PermTeamManage,
 	// RBA-01: collectors and discovery jobs have their own manage keys.
-	"collectors": identity.PermCollectorManage,
-	"discovery":  identity.PermDiscoveryManage,
+	"collectors":       identity.PermCollectorManage,
+	"discovery":        identity.PermDiscoveryManage,
+	"discovery-scopes": identity.PermDiscoveryManage,
 	// Resolving reconciliation conflicts is resolving review items.
 	"reconciliation": identity.PermReviewResolve,
 	"clients":        identity.PermUserManage,

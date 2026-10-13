@@ -541,6 +541,17 @@ func main() {
 			}
 		}})
 	}
+	// Discovery scopes, their run results and the subnets a collector
+	// reports after enrollment (scope_suggested) over the collectors' NATS
+	// channel (DIS-09).
+	if coreNATS != nil {
+		scopeChannel := discovery.NewHandler(repos.Discovery, repos.CI)
+		workers = append(workers, server.Worker{Name: config.WorkerDiscoveryScopes, Run: func(ctx context.Context) {
+			if serr := scopeChannel.ServeCollectorScopes(ctx, coreNATS); serr != nil {
+				slog.Error("discovery scopes", "error", serr)
+			}
+		}})
+	}
 	workers = append(workers, server.Worker{Name: config.WorkerNotifier, Run: func(ctx context.Context) { notifier.Run(ctx, 5*time.Second) }})
 	// Run the jobs announced on the JOBS work queue (TEC-14).
 	if jobQueue != nil {

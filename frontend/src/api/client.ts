@@ -168,6 +168,40 @@ export interface Collector {
   updated_at: string;
 }
 
+/** Discovery scope (DIS-09). */
+export type DiscoveryScopeKind = 'cidr' | 'host' | 'range';
+
+export interface DiscoveryScope {
+  id: string;
+  organization_id: string;
+  client_id?: string;
+  site_id?: string;
+  collector_id: string;
+  name: string;
+  kind: DiscoveryScopeKind;
+  target: string;
+  vrf_id?: string;
+  schedule: string;
+  credential_ids: string[];
+  plugins: string[];
+  enabled: boolean;
+  last_run_at?: string;
+  next_run_at?: string;
+  last_result?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DiscoveryScopeInput {
+  collector_id: string;
+  kind: DiscoveryScopeKind;
+  target: string;
+  name?: string;
+  schedule?: string;
+  plugins?: string[];
+  enabled?: boolean;
+}
+
 export interface CIListParams {
   limit?: number;
   offset?: number;
@@ -402,6 +436,21 @@ export const relationshipApi = {
 export const collectorApi = {
   list(params: ListParams = {}): Promise<PaginatedResponse<Collector>> {
     return fetchAPI(`/collectors${buildQuery(params)}`);
+  },
+};
+
+export const discoveryScopeApi = {
+  list(collectorId: string): Promise<PaginatedResponse<DiscoveryScope>> {
+    return fetchAPI(`/discovery-scopes?collector_id=${encodeURIComponent(collectorId)}&limit=100`);
+  },
+  create(input: DiscoveryScopeInput): Promise<DiscoveryScope> {
+    return fetchAPI('/discovery-scopes', { method: 'POST', body: JSON.stringify(input) });
+  },
+  update(id: string, patch: Partial<DiscoveryScopeInput>): Promise<DiscoveryScope> {
+    return fetchAPI(`/discovery-scopes/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/discovery-scopes/${id}`, { method: 'DELETE' });
   },
 };
 

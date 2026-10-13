@@ -99,6 +99,21 @@ func TestCollectorNATSEndpointAuthorization(t *testing.T) {
 	if err != nil || target.CollectorID != colID || target.PublicKey == nil {
 		t.Fatalf("bundle target = %+v, %v", target, err)
 	}
+	if target.CredentialIDs != nil {
+		t.Fatalf("without scopes the bundle selects by client, got %v", target.CredentialIDs)
+	}
+	// With discovery scopes the bundle holds exactly their credentials (DIS-09).
+	scopeCred := f.ID()
+	if _, err = f.Admin.Exec(bg, `INSERT INTO credential (id, organization_id, name, kind, ciphertext) VALUES ($1, $2, 'scope-cred', 'snmp_v3', '\x00')`, scopeCred, f.OrgA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.Admin.Exec(bg, `INSERT INTO discovery_scope (organization_id, collector_id, name, kind, target, credential_ids)
+		VALUES ($1, $2, 'net', 'cidr', '10.9.0.0/24', ARRAY[$3::uuid]), ($1, $2, 'host', 'host', '10.9.1.1', '{}')`, f.OrgA, colID, scopeCred); err != nil {
+		t.Fatal(err)
+	}
+	if _, scoped, serr := gate.VerifyBundleTarget(bg, f.OrgA, colID, certPEM); serr != nil || len(scoped.CredentialIDs) != 1 || scoped.CredentialIDs[0] != scopeCred {
+		t.Fatalf("bundle target with scopes = %+v, %v", scoped, serr)
+	}
 	if _, _, err = gate.VerifyBundleTarget(bg, f.OrgA, "00000000-0000-4000-8000-000000000000", certPEM); err == nil {
 		t.Fatal("a certificate obtained a bundle for another collector")
 	}

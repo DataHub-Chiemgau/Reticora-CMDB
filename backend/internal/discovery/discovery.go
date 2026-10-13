@@ -190,6 +190,7 @@ type MemoryRepository struct {
 	enrollCodes  map[string]*EnrollmentCode
 	enrollHashes map[string]string
 	records      map[string]time.Time
+	scopes       map[string]*Scope
 	seq          int
 }
 
@@ -617,6 +618,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/discovery/jobs", h.ListJobs)
 	r.Post("/api/v1/discovery/jobs", h.CreateJob)
 	r.Get("/api/v1/discovery/jobs/{id}", h.GetJob)
+
+	// Discovery scopes (DIS-09, API-05).
+	h.RegisterScopeRoutes(r)
 
 	// Reconciliation review queue.
 	// The review-items resource (API-05) and its deprecated discovery path.

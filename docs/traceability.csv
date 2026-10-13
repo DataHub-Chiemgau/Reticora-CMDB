@@ -343,3 +343,5 @@ DIS-03;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-150
 DIS-04;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-150
 DIS-02;[B], Profilliste (V);D;collector/profiles/profiles_test.go;WP-151
 DIS-04;[B];D;collector/plugins/snmp/snmp_test.go;WP-152
+DIS-09;[B];D;backend/internal/discovery/scope_integration_test.go;WP-153
+API-05;[B];D;backend/internal/discovery/scope_integration_test.go;WP-153

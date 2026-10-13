@@ -3,6 +3,7 @@ import {
   ciApi,
   relationshipApi,
   collectorApi,
+  discoveryScopeApi,
   topologyApi,
   rackApi,
   assetApi,
@@ -29,6 +30,7 @@ import {
   credentialApi,
 } from '../api/client';
 import type {
+  DiscoveryScopeInput,
   CICreateRequest,
   CIListParams,
   CIUpdateRequest,
@@ -128,6 +130,34 @@ export function useCollectors(params: ListParams = {}) {
     queryKey: ['collectors', params],
     queryFn: () => collectorApi.list(params),
   });
+}
+
+export function useDiscoveryScopes(collectorId: string) {
+  return useQuery({
+    queryKey: ['discovery-scopes', collectorId],
+    queryFn: () => discoveryScopeApi.list(collectorId),
+  });
+}
+
+export function useDiscoveryScopeMutations(collectorId: string) {
+  const queryClient = useQueryClient();
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: ['discovery-scopes', collectorId] });
+  return {
+    create: useMutation({
+      mutationFn: (input: DiscoveryScopeInput) => discoveryScopeApi.create(input),
+      onSuccess: invalidate,
+    }),
+    update: useMutation({
+      mutationFn: ({ id, patch }: { id: string; patch: Partial<DiscoveryScopeInput> }) =>
+        discoveryScopeApi.update(id, patch),
+      onSuccess: invalidate,
+    }),
+    remove: useMutation({
+      mutationFn: (id: string) => discoveryScopeApi.delete(id),
+      onSuccess: invalidate,
+    }),
+  };
 }
 
 export function useTopology(params: TopologyParams = {}) {
