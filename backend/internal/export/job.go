@@ -100,6 +100,9 @@ type JobRepository interface {
 	CompleteJob(ctx context.Context, orgID, id string, objectKey string, rowCount int, fileSize int64, completedAt, expiresAt time.Time) error
 	FailJob(ctx context.Context, orgID, id, message string, at time.Time) error
 	ClaimPending(ctx context.Context, limit int) ([]Job, error)
+	// ReclaimStale puts running jobs started before the given time back to
+	// pending: their worker died (TEC-14).
+	ReclaimStale(ctx context.Context, startedBefore time.Time) (int, error)
 }
 
 // Validate checks a create request and returns a human-readable problem.

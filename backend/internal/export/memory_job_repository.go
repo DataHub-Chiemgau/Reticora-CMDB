@@ -99,7 +99,7 @@ func (r *MemoryJobRepository) CompleteJob(_ context.Context, orgID, id string, o
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	job, ok := r.jobs[id]
-	if !ok || job.OrganizationID != orgID {
+	if !ok || job.OrganizationID != orgID || job.Status != JobStatusRunning {
 		return fmt.Errorf("export job not found")
 	}
 	job.Status = JobStatusCompleted
@@ -149,4 +149,20 @@ func (r *MemoryJobRepository) ClaimPending(_ context.Context, limit int) ([]Job,
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
+}
+
+// ReclaimStale implements JobRepository.
+func (r *MemoryJobRepository) ReclaimStale(_ context.Context, startedBefore time.Time) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, job := range r.jobs {
+		if job.Status == JobStatusRunning && job.StartedAt != nil && job.StartedAt.Before(startedBefore) {
+			job.Status = JobStatusPending
+			job.StartedAt = nil
+			job.UpdatedAt = time.Now().UTC()
+			n++
+		}
+	}
+	return n, nil
 }

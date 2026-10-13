@@ -154,8 +154,8 @@ func (r *PGJobRepository) CompleteJob(ctx context.Context, orgID, id string, obj
 		tag, err := tx.Exec(ctx, `
 			UPDATE export_job SET status = $1, object_key = $2, row_count = $3, file_size_bytes = $4,
 				completed_at = $5, expires_at = $6, updated_at = $5
-			WHERE organization_id = current_setting('app.org_id')::uuid AND id = $7`,
-			JobStatusCompleted, objectKey, rowCount, fileSize, completedAt.UTC(), expiresAt.UTC(), id)
+			WHERE organization_id = current_setting('app.org_id')::uuid AND id = $7 AND status = $8`,
+			JobStatusCompleted, objectKey, rowCount, fileSize, completedAt.UTC(), expiresAt.UTC(), id, JobStatusRunning)
 		if err != nil {
 			return fmt.Errorf("complete export job: %w", err)
 		}
@@ -262,4 +262,49 @@ func (r *PGJobRepository) claimPendingForOrg(ctx context.Context, orgID string, 
 		return rows.Err()
 	})
 	return out, err
+}
+
+// ReclaimStale implements JobRepository: the system flag only finds the
+// organizations with stale jobs; each organization's jobs are put back in
+// its own tenant transaction, because the system flag cannot write.
+func (r *PGJobRepository) ReclaimStale(ctx context.Context, startedBefore time.Time) (int, error) {
+	var orgIDs []string
+	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT DISTINCT organization_id::text FROM export_job WHERE status = $1 AND started_at < $2`,
+			JobStatusRunning, startedBefore.UTC())
+		if err != nil {
+			return fmt.Errorf("find stale export jobs: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("scan organization: %w", err)
+			}
+			orgIDs = append(orgIDs, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, orgID := range orgIDs {
+		err := database.WithTenant(ctx, r.pool, workerScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
+			tag, err := tx.Exec(ctx, `
+				UPDATE export_job SET status = $1, started_at = NULL, updated_at = now()
+				WHERE organization_id = current_setting('app.org_id')::uuid AND status = $2 AND started_at < $3`,
+				JobStatusPending, JobStatusRunning, startedBefore.UTC())
+			if err != nil {
+				return fmt.Errorf("reclaim stale export jobs: %w", err)
+			}
+			total += int(tag.RowsAffected())
+			return nil
+		})
+		if err != nil {
+			return total, err
+		}
+	}
+	return total, nil
 }

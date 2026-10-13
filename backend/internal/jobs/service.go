@@ -107,6 +107,12 @@ func (s *Service) Claim(ctx context.Context, orgID string, kinds ...string) (*Jo
 	return s.repo.ClaimNext(ctx, orgID, kinds, s.now())
 }
 
+// ClaimJob starts the given job when it is queued and due; nil when it is
+// not (another worker holds it, it is finished or not yet due).
+func (s *Service) ClaimJob(ctx context.Context, orgID, id string) (*Job, error) {
+	return s.repo.ClaimID(ctx, orgID, id, s.now())
+}
+
 // Progress records the progress (0–100) of a running job.
 func (s *Service) Progress(ctx context.Context, orgID, id string, percent int) error {
 	percent = max(0, min(100, percent))

@@ -39,6 +39,11 @@ type Repository interface {
 	Transition(ctx context.Context, orgID, id string, from []Status, u *Update) (*Job, error)
 	// RunningSince lists running jobs started before t.
 	RunningSince(ctx context.Context, orgID string, t time.Time) ([]Job, error)
+	// ClaimID moves the given job to running when it is queued and due;
+	// nil when it is not (claimed elsewhere, finished or not yet due).
+	ClaimID(ctx context.Context, orgID, id string, now time.Time) (*Job, error)
+	// QueuedDue lists due queued jobs of all organizations, oldest first.
+	QueuedDue(ctx context.Context, now time.Time, limit int) ([]Job, error)
 }
 
 // MemoryRepository keeps jobs in memory (tests and --no-db mode).
@@ -178,6 +183,39 @@ func (r *MemoryRepository) RunningSince(_ context.Context, orgID string, t time.
 		if j.OrganizationID == orgID && j.Status == StatusRunning && j.StartedAt != nil && j.StartedAt.Before(t) {
 			out = append(out, *j)
 		}
+	}
+	return out, nil
+}
+
+// ClaimID implements Repository.
+func (r *MemoryRepository) ClaimID(_ context.Context, orgID, id string, now time.Time) (*Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, err := r.get(orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	if j.Status != StatusQueued || j.RunAfter.After(now) {
+		return nil, nil
+	}
+	j.Status, j.Attempts, j.StartedAt, j.FinishedAt, j.UpdatedAt = StatusRunning, j.Attempts+1, &now, nil, now
+	cp := *j
+	return &cp, nil
+}
+
+// QueuedDue implements Repository.
+func (r *MemoryRepository) QueuedDue(_ context.Context, now time.Time, limit int) ([]Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []Job
+	for _, j := range r.jobs {
+		if j.Status == StatusQueued && !j.RunAfter.After(now) {
+			out = append(out, *j)
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].RunAfter.Before(out[b].RunAfter) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
 	}
 	return out, nil
 }

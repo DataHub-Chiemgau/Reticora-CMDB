@@ -67,6 +67,8 @@ spec:
               value: "true"
             - name: RETICORA_WORKER_RESERVATION_SWEEPER_ENABLED
               value: "true"
+            - name: RETICORA_WORKER_JOBS_ENABLED
+              value: "true"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session

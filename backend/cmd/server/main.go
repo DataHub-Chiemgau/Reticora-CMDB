@@ -45,6 +45,8 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // version is set at build-time via -ldflags.
@@ -245,6 +247,30 @@ func main() {
 		}
 		defer ingestQueue.Close()
 	}
+	// Jobs are distributed over the JOBS work queue on NATS (TEC-14); job
+	// kinds register their handlers with jobQueue.Handle.
+	var jobQueue *jobs.Queue
+	if cfg.IsSet("RETICORA_NATS_URL") && repos.Jobs != nil {
+		nc, natsErr := nats.Connect(cfg.NATSUrl, nats.Name("reticora-jobs"), nats.MaxReconnects(-1))
+		if natsErr != nil {
+			slog.Error("failed to connect to NATS for the job queue", "error", natsErr)
+			os.Exit(1)
+		}
+		defer nc.Close()
+		js, natsErr := jetstream.New(nc)
+		if natsErr != nil {
+			slog.Error("failed to open JetStream for the job queue", "error", natsErr)
+			os.Exit(1)
+		}
+		jobQueue = jobs.NewQueue(jobs.NewService(repos.Jobs), js)
+		queueCtx, cancelQueue := context.WithTimeout(context.Background(), 30*time.Second)
+		natsErr = jobQueue.Setup(queueCtx)
+		cancelQueue()
+		if natsErr != nil {
+			slog.Error("failed to set up the job queue on NATS", "error", natsErr)
+			os.Exit(1)
+		}
+	}
 	if strings.EqualFold(cfg.SearchBackend, "opensearch") {
 		if cfg.OpenSearchURL == "" {
 			slog.Error("RETICORA_OPENSEARCH_URL is required when RETICORA_SEARCH_BACKEND=opensearch")
@@ -392,6 +418,10 @@ func main() {
 				return c.CountPending(ctx)
 			}),
 		})
+	}
+	// Run the jobs announced on the JOBS work queue (TEC-14).
+	if jobQueue != nil {
+		workers = append(workers, server.Worker{Name: config.WorkerJobs, Run: jobQueue.Run})
 	}
 	// Consume ingest.> (REC-01).
 	if ingestQueue != nil {

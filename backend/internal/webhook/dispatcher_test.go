@@ -308,3 +308,78 @@ func TestDispatcherFiltersBoundSubscriptions(t *testing.T) {
 		t.Errorf("event without known object: %v", got)
 	}
 }
+
+// TestDispatcherClaimsTheFirstAttempt covers TEC-14 (WP-130): the first
+// attempt of a delivery is leased to the dispatching process, so a retry
+// worker running meanwhile does not send it a second time; when the
+// process dies before recording the attempt, the retry worker takes the
+// delivery over after the lease.
+func TestDispatcherClaimsTheFirstAttempt(t *testing.T) {
+	repo := NewMemoryRepository()
+	store := NewMemoryDeliveryStore()
+	var attempts int32
+	release := make(chan struct{})
+	inFlight := make(chan struct{}, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		inFlight <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	if err := repo.Create(context.Background(), &Subscription{
+		OrganizationID: "org-1", Name: "hook", URL: server.URL,
+		Secret: "secret", Events: []string{"ci.created"}, IsActive: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher := NewDispatcher(repo, server.Client(), DispatcherOptions{Deliveries: store, PollInterval: -1})
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = dispatcher.Shutdown(ctx)
+	}()
+
+	dispatcher.Dispatch(context.Background(), "org-1", "ci.created", map[string]any{"id": "ci-1"})
+	<-inFlight
+	// The retry worker runs while the first attempt is in flight.
+	dispatcher.ProcessDue(context.Background())
+	close(release)
+	page := api.PaginationParams{Limit: 10}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		records, _, err := store.ListBySubscription(context.Background(), "org-1", subscriptionID(t, repo), page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(records) == 1 && records[0].Status == StatusSuccess {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("delivery not recorded: %+v", records)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if n := atomic.LoadInt32(&attempts); n != 1 {
+		t.Errorf("HTTP attempts: %d, want 1", n)
+	}
+
+	// A process died after storing a delivery: it is due once its lease
+	// has ended.
+	leased := time.Now().UTC().Add(defaultClaimLease)
+	if _, err := store.Enqueue(context.Background(), DeliveryRecord{
+		OrganizationID: "org-1", SubscriptionID: subscriptionID(t, repo), Event: "ci.created",
+		Payload: []byte(`{"id":"ci-2"}`), Status: StatusPending, MaxAttempts: 3, NextRetryAt: &leased,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher.ProcessDue(context.Background())
+	if n := atomic.LoadInt32(&attempts); n != 1 {
+		t.Errorf("a leased delivery was sent before its lease ended (%d attempts)", n)
+	}
+	dispatcher.now = func() time.Time { return leased.Add(time.Second) }
+	dispatcher.ProcessDue(context.Background())
+	if n := atomic.LoadInt32(&attempts); n != 2 {
+		t.Errorf("HTTP attempts after the lease: %d, want 2", n)
+	}
+}

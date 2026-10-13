@@ -253,7 +253,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, orgID, event string, payload 
 		}
 
 		if d.store != nil {
-			now := d.now()
+			// The first attempt is claimed by this process like a retry
+			// claim (TEC-14): the delivery is stored with a lease, so the
+			// retry worker of no replica sends it in parallel, and takes it
+			// over only when this process dies before recording the attempt.
+			leased := d.now().Add(defaultClaimLease)
 			rec, err := d.store.Enqueue(ctx, DeliveryRecord{
 				OrganizationID: orgID,
 				SubscriptionID: sub.ID,
@@ -261,7 +265,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, orgID, event string, payload 
 				Payload:        body,
 				Status:         StatusPending,
 				MaxAttempts:    d.opts.MaxAttempts,
-				NextRetryAt:    &now,
+				NextRetryAt:    &leased,
 			})
 			if err != nil {
 				// The delivery could not be persisted; dropping it is safer
@@ -289,7 +293,8 @@ func (d *Dispatcher) enqueueJob(job deliveryJob) {
 	case <-d.stop:
 	default:
 		// The in-process queue is saturated. Persisted deliveries are picked up
-		// by the retry worker, so only the memory-only mode needs to block.
+		// by the retry worker once their lease ends, so only the memory-only
+		// mode needs to block.
 		if d.store == nil {
 			select {
 			case d.queue <- job:

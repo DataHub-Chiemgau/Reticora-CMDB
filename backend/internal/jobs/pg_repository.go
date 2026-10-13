@@ -194,6 +194,62 @@ func (r *PGRepository) ClaimNext(ctx context.Context, orgID string, kinds []stri
 	return out, err
 }
 
+// ClaimID implements Repository: the status check and the change are one
+// statement, so of two workers holding the same job only one claims it.
+func (r *PGRepository) ClaimID(ctx context.Context, orgID, id string, now time.Time) (*Job, error) {
+	if !isUUID(id) {
+		return nil, ErrNotFound
+	}
+	var out *Job
+	err := r.inOrg(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		j, err := scanJob(tx.QueryRow(ctx, `
+			UPDATE job SET status = 'running', attempts = attempts + 1, started_at = $3, finished_at = NULL
+			WHERE organization_id = $1 AND id = $2 AND status = 'queued' AND run_after <= $3
+			RETURNING `+jobColumns, orgID, id, now))
+		if errors.Is(err, pgx.ErrNoRows) {
+			var exists bool
+			if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM job WHERE organization_id = $1 AND id = $2)`,
+				orgID, id).Scan(&exists); err != nil {
+				return fmt.Errorf("claim job: %w", err)
+			}
+			if !exists {
+				return ErrNotFound
+			}
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("claim job: %w", err)
+		}
+		out = j
+		return nil
+	})
+	return out, err
+}
+
+// QueuedDue implements Repository. It reads across organizations with the
+// system flag, which only widens SELECT; claiming stays in the tenant.
+func (r *PGRepository) QueuedDue(ctx context.Context, now time.Time, limit int) ([]Job, error) {
+	var out []Job
+	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+jobColumns+` FROM job
+			WHERE status = 'queued' AND run_after <= $1 AND organization_id IS NOT NULL
+			ORDER BY run_after, created_at LIMIT $2`, now, limit)
+		if err != nil {
+			return fmt.Errorf("list due jobs: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			j, err := scanJob(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, *j)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // Transition implements Repository; the status check and the change are
 // one statement.
 func (r *PGRepository) Transition(ctx context.Context, orgID, id string, from []Status, u *Update) (*Job, error) {

@@ -17,6 +17,10 @@ import (
 // DefaultJobTTL is how long a completed export remains downloadable.
 const DefaultJobTTL = 24 * time.Hour
 
+// DefaultStaleAfter is how long an export may run before the worker
+// assumes its replica died and queues it again (TEC-14).
+const DefaultStaleAfter = 15 * time.Minute
+
 // ExportBucket is the blob bucket export objects are written to.
 const ExportBucket = "exports"
 
@@ -44,15 +48,20 @@ func ObjectKey(job *Job) string {
 // JobWorker processes pending export jobs: it renders the CI set into blob
 // storage and marks the job completed with the object key and expiry. All
 // replicas share the queue through ClaimPending (FOR UPDATE SKIP LOCKED), so
-// jobs survive restarts and are never processed twice.
+// jobs survive restarts and are never processed twice. A job whose replica
+// died while it ran is queued again after StaleAfter and resumed; only a
+// running job can be completed, so a late original run cannot complete it
+// a second time.
 type JobWorker struct {
-	Jobs    JobRepository
-	CIs     ci.Repository
-	Blobs   blob.Store
-	Bucket  string
-	JobTTL  time.Duration
-	Now     func() time.Time
-	onError func(jobID string, err error)
+	Jobs   JobRepository
+	CIs    ci.Repository
+	Blobs  blob.Store
+	Bucket string
+	JobTTL time.Duration
+	// StaleAfter is how long a job may run before it is queued again.
+	StaleAfter time.Duration
+	Now        func() time.Time
+	onError    func(jobID string, err error)
 	// failures counts the errors of the current cycle (OPS-05).
 	failures int
 	// Tracker mirrors the export job into the generic job model (JOB-01);
@@ -76,12 +85,13 @@ func (w *JobWorker) mirror(ctx context.Context, job *Job, status jobs.Status, er
 // never complete.
 func NewJobWorker(jobs JobRepository, cis ci.Repository, blobs blob.Store) *JobWorker {
 	return &JobWorker{
-		Jobs:   jobs,
-		CIs:    cis,
-		Blobs:  blobs,
-		Bucket: ExportBucket,
-		JobTTL: DefaultJobTTL,
-		Now:    func() time.Time { return time.Now().UTC() },
+		Jobs:       jobs,
+		CIs:        cis,
+		Blobs:      blobs,
+		Bucket:     ExportBucket,
+		JobTTL:     DefaultJobTTL,
+		StaleAfter: DefaultStaleAfter,
+		Now:        func() time.Time { return time.Now().UTC() },
 		onError: func(jobID string, err error) {
 			slog.Error("export job failed", "job", jobID, "error", err)
 		},
@@ -162,6 +172,23 @@ func (w *JobWorker) fail(ctx context.Context, job *Job, err error) {
 	w.mirror(ctx, job, jobs.StatusFailed, err.Error())
 }
 
+// ResumeStale queues the jobs again whose replica died while they ran
+// (status running for longer than StaleAfter); it returns how many.
+func (w *JobWorker) ResumeStale(ctx context.Context) int {
+	if !w.Enabled() || w.StaleAfter <= 0 {
+		return 0
+	}
+	n, err := w.Jobs.ReclaimStale(ctx, w.Now().Add(-w.StaleAfter))
+	if err != nil {
+		w.report("", fmt.Errorf("resume stale export jobs: %w", err))
+		return 0
+	}
+	if n > 0 {
+		slog.Info("resumed stale export jobs", "count", n)
+	}
+	return n
+}
+
 // Run polls for pending jobs until ctx is cancelled. It is the background
 // entry point started by cmd/server.
 func (w *JobWorker) Run(ctx context.Context, pollInterval time.Duration) {
@@ -171,6 +198,7 @@ func (w *JobWorker) Run(ctx context.Context, pollInterval time.Duration) {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
+		w.ResumeStale(ctx)
 		// Drain the queue before sleeping so bursts are processed back to
 		// back.
 		for w.ProcessOne(ctx) {
