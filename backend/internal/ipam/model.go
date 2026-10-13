@@ -90,55 +90,65 @@ type UpdateIPAddressRequest struct {
 	Description *string `json:"description,omitempty"`
 }
 
-// NetworkInterface represents a CI's network interface.
+// NetworkInterface represents a CI's network interface (NET-01): the
+// name is unique per CI.
 type NetworkInterface struct {
 	ID             string `json:"id"`
 	OrganizationID string `json:"organization_id"`
 	CIID           string `json:"ci_id"`
 	Name           string `json:"name"`
-	MACAddress     string `json:"mac_address,omitempty"`
-	InterfaceType  string `json:"interface_type"`
+	IfIndex        *int   `json:"if_index,omitempty"`
+	MAC            string `json:"mac,omitempty"`
+	IfType         string `json:"if_type"`
 	SpeedMbps      *int   `json:"speed_mbps,omitempty"`
+	MTU            *int   `json:"mtu,omitempty"`
 	// VLANID references the VLAN catalog (NET-01).
-	VLANID       string    `json:"vlan_id,omitempty"`
-	IsManagement bool      `json:"is_management"`
-	IsUplink     bool      `json:"is_uplink"`
-	AdminStatus  string    `json:"admin_status"`
-	OperStatus   string    `json:"oper_status"`
-	Description  string    `json:"description,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	VLANID       string `json:"vlan_id,omitempty"`
+	IsManagement bool   `json:"is_management"`
+	IsUplink     bool   `json:"is_uplink"`
+	AdminStatus  string `json:"admin_status"`
+	OperStatus   string `json:"oper_status"`
+	Description  string `json:"description,omitempty"`
+	// MissCount counts the discovery runs that no longer saw the
+	// interface (REC-09); read-only.
+	MissCount int       `json:"miss_count"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // CreateInterfaceRequest is the payload for creating a network interface.
 type CreateInterfaceRequest struct {
-	Name          string `json:"name"`
-	MACAddress    string `json:"mac_address,omitempty"`
-	InterfaceType string `json:"interface_type,omitempty"`
-	SpeedMbps     *int   `json:"speed_mbps,omitempty"`
-	VLANID        string `json:"vlan_id,omitempty"`
-	IsManagement  bool   `json:"is_management,omitempty"`
-	IsUplink      bool   `json:"is_uplink,omitempty"`
-	AdminStatus   string `json:"admin_status,omitempty"`
-	OperStatus    string `json:"oper_status,omitempty"`
-	Description   string `json:"description,omitempty"`
+	Name         string `json:"name"`
+	IfIndex      *int   `json:"if_index,omitempty"`
+	MAC          string `json:"mac,omitempty"`
+	IfType       string `json:"if_type,omitempty"`
+	SpeedMbps    *int   `json:"speed_mbps,omitempty"`
+	MTU          *int   `json:"mtu,omitempty"`
+	VLANID       string `json:"vlan_id,omitempty"`
+	IsManagement bool   `json:"is_management,omitempty"`
+	IsUplink     bool   `json:"is_uplink,omitempty"`
+	AdminStatus  string `json:"admin_status,omitempty"`
+	OperStatus   string `json:"oper_status,omitempty"`
+	Description  string `json:"description,omitempty"`
 }
 
 // UpdateInterfaceRequest is the payload for updating a network interface.
 type UpdateInterfaceRequest struct {
-	Name          *string `json:"name,omitempty"`
-	MACAddress    *string `json:"mac_address,omitempty"`
-	InterfaceType *string `json:"interface_type,omitempty"`
-	SpeedMbps     *int    `json:"speed_mbps,omitempty"`
-	VLANID        *string `json:"vlan_id,omitempty"`
-	IsManagement  *bool   `json:"is_management,omitempty"`
-	IsUplink      *bool   `json:"is_uplink,omitempty"`
-	AdminStatus   *string `json:"admin_status,omitempty"`
-	OperStatus    *string `json:"oper_status,omitempty"`
-	Description   *string `json:"description,omitempty"`
+	Name         *string `json:"name,omitempty"`
+	IfIndex      *int    `json:"if_index,omitempty"`
+	MAC          *string `json:"mac,omitempty"`
+	IfType       *string `json:"if_type,omitempty"`
+	SpeedMbps    *int    `json:"speed_mbps,omitempty"`
+	MTU          *int    `json:"mtu,omitempty"`
+	VLANID       *string `json:"vlan_id,omitempty"`
+	IsManagement *bool   `json:"is_management,omitempty"`
+	IsUplink     *bool   `json:"is_uplink,omitempty"`
+	AdminStatus  *string `json:"admin_status,omitempty"`
+	OperStatus   *string `json:"oper_status,omitempty"`
+	Description  *string `json:"description,omitempty"`
 }
 
-// ValidInterfaceTypes lists allowed network interface types.
+// ValidInterfaceTypes lists allowed network interface types (if_type).
 var ValidInterfaceTypes = map[string]bool{
 	"ethernet": true, "fiber": true, "wifi": true, "virtual": true,
 	"loopback": true, "serial": true, "management": true,

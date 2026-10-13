@@ -364,14 +364,19 @@ func (r *PGRepository) DeleteIPAddress(ctx context.Context, orgID, id string) er
 
 // --- Network Interfaces ---
 
-const nicCols = `id::text, organization_id::text, ci_id::text, name, COALESCE(mac_address::text,''), interface_type,
-	speed_mbps, COALESCE(vlan_id::text,''), is_management, is_uplink, admin_status, oper_status, COALESCE(description,''), created_at, updated_at`
+const nicCols = `id::text, organization_id::text, ci_id::text, name, if_index, COALESCE(mac::text,''), if_type,
+	speed_mbps, mtu, COALESCE(vlan_id::text,''), is_management, is_uplink, admin_status, oper_status, COALESCE(description,''),
+	miss_count, created_at, updated_at`
+
+// interfaceFields maps the constraints of network_interface onto request
+// fields.
+var interfaceFields = map[string]string{"network_interface_ci_name_key": "name"}
 
 func scanNIC(s scanner) (*NetworkInterface, error) {
 	ni := &NetworkInterface{}
-	if err := s.Scan(&ni.ID, &ni.OrganizationID, &ni.CIID, &ni.Name, &ni.MACAddress, &ni.InterfaceType,
-		&ni.SpeedMbps, &ni.VLANID, &ni.IsManagement, &ni.IsUplink, &ni.AdminStatus, &ni.OperStatus, &ni.Description,
-		&ni.CreatedAt, &ni.UpdatedAt); err != nil {
+	if err := s.Scan(&ni.ID, &ni.OrganizationID, &ni.CIID, &ni.Name, &ni.IfIndex, &ni.MAC, &ni.IfType,
+		&ni.SpeedMbps, &ni.MTU, &ni.VLANID, &ni.IsManagement, &ni.IsUplink, &ni.AdminStatus, &ni.OperStatus, &ni.Description,
+		&ni.MissCount, &ni.CreatedAt, &ni.UpdatedAt); err != nil {
 		return nil, err
 	}
 	ni.CreatedAt = ni.CreatedAt.UTC()
@@ -419,12 +424,13 @@ func (r *PGRepository) GetInterface(ctx context.Context, orgID, id string) (*Net
 func (r *PGRepository) CreateInterface(ctx context.Context, ni *NetworkInterface) error {
 	return database.WithRequestTenant(ctx, r.pool, ni.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
-			`INSERT INTO network_interface (organization_id, ci_id, name, mac_address, interface_type, speed_mbps, is_management, is_uplink, admin_status, oper_status, description, vlan_id)
-			 VALUES ($1,$2,$3,$4::macaddr,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id::text, created_at, updated_at`,
-			ni.OrganizationID, ni.CIID, ni.Name, nilIfEmpty(ni.MACAddress), ni.InterfaceType, ni.SpeedMbps,
+			`INSERT INTO network_interface (organization_id, ci_id, name, if_index, mac, if_type, speed_mbps, mtu,
+				is_management, is_uplink, admin_status, oper_status, description, vlan_id)
+			 VALUES ($1,$2,$3,$4,$5::macaddr,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id::text, created_at, updated_at`,
+			ni.OrganizationID, ni.CIID, ni.Name, ni.IfIndex, nilIfEmpty(ni.MAC), ni.IfType, ni.SpeedMbps, ni.MTU,
 			ni.IsManagement, ni.IsUplink, ni.AdminStatus, ni.OperStatus, nilIfEmpty(ni.Description), nilIfEmpty(ni.VLANID),
 		).Scan(&ni.ID, &ni.CreatedAt, &ni.UpdatedAt); err != nil {
-			return err
+			return api.FieldDBError(err, interfaceFields)
 		}
 		return requireVisible(ctx, tx, "network_interface", nicVisible, ni.ID)
 	})
@@ -441,19 +447,29 @@ func (r *PGRepository) UpdateInterface(ctx context.Context, orgID, id string, re
 			args = append(args, *req.Name)
 			pos++
 		}
-		if req.MACAddress != nil {
-			sets = append(sets, fmt.Sprintf("mac_address = $%d::macaddr", pos))
-			args = append(args, nilIfEmpty(*req.MACAddress))
+		if req.IfIndex != nil {
+			sets = append(sets, fmt.Sprintf("if_index = $%d", pos))
+			args = append(args, *req.IfIndex)
 			pos++
 		}
-		if req.InterfaceType != nil {
-			sets = append(sets, fmt.Sprintf("interface_type = $%d", pos))
-			args = append(args, *req.InterfaceType)
+		if req.MAC != nil {
+			sets = append(sets, fmt.Sprintf("mac = $%d::macaddr", pos))
+			args = append(args, nilIfEmpty(*req.MAC))
+			pos++
+		}
+		if req.IfType != nil {
+			sets = append(sets, fmt.Sprintf("if_type = $%d", pos))
+			args = append(args, *req.IfType)
 			pos++
 		}
 		if req.SpeedMbps != nil {
 			sets = append(sets, fmt.Sprintf("speed_mbps = $%d", pos))
 			args = append(args, *req.SpeedMbps)
+			pos++
+		}
+		if req.MTU != nil {
+			sets = append(sets, fmt.Sprintf("mtu = $%d", pos))
+			args = append(args, *req.MTU)
 			pos++
 		}
 		if req.IsManagement != nil {
@@ -498,7 +514,7 @@ func (r *PGRepository) UpdateInterface(ctx context.Context, orgID, id string, re
 			return ErrNotFound
 		}
 		if err != nil {
-			return err
+			return api.FieldDBError(err, interfaceFields)
 		}
 		return requireVisible(ctx, tx, "network_interface", nicVisible, id)
 	})
@@ -565,7 +581,7 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 			ifc := &observed[i]
 			id, ok := existing[ifc.Name]
 			if ok {
-				if _, err = tx.Exec(ctx, `UPDATE network_interface SET if_index = NULLIF($2, 0), mac_address = NULLIF($3, '')::macaddr,
+				if _, err = tx.Exec(ctx, `UPDATE network_interface SET if_index = NULLIF($2, 0), mac = NULLIF($3, '')::macaddr,
 					speed_mbps = NULLIF($4, 0), mtu = NULLIF($5, 0), admin_status = COALESCE(NULLIF($6, ''), admin_status),
 					oper_status = COALESCE(NULLIF($7, ''), oper_status), is_management = $8, miss_count = 0, updated_at = now()
 					WHERE id = $1`, id, ifc.IfIndex, ifc.MAC, ifc.SpeedMbps, ifc.MTU, ifc.AdminStatus, ifc.OperStatus, ifc.IsManagement); err != nil {
@@ -573,7 +589,7 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 				}
 				res.Updated++
 			} else {
-				if err = tx.QueryRow(ctx, `INSERT INTO network_interface (organization_id, ci_id, name, if_index, mac_address, speed_mbps, mtu,
+				if err = tx.QueryRow(ctx, `INSERT INTO network_interface (organization_id, ci_id, name, if_index, mac, speed_mbps, mtu,
 					admin_status, oper_status, is_management)
 					VALUES ($1, $2, $3, NULLIF($4, 0), NULLIF($5, '')::macaddr, NULLIF($6, 0), NULLIF($7, 0),
 						COALESCE(NULLIF($8, ''), 'up'), COALESCE(NULLIF($9, ''), 'unknown'), $10)

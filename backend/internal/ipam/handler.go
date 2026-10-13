@@ -417,12 +417,12 @@ func (h *Handler) CreateInterface(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name is required")
 		return
 	}
-	ifType := req.InterfaceType
+	ifType := req.IfType
 	if ifType == "" {
 		ifType = "ethernet"
 	}
 	if !ValidInterfaceTypes[ifType] {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid interface_type")
+		api.WriteFieldError(w, &api.FieldError{Field: "if_type", Message: "invalid interface type"})
 		return
 	}
 	adminStatus := req.AdminStatus
@@ -437,9 +437,11 @@ func (h *Handler) CreateInterface(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: orgID,
 		CIID:           chi.URLParam(r, "id"),
 		Name:           req.Name,
-		MACAddress:     req.MACAddress,
-		InterfaceType:  ifType,
+		IfIndex:        req.IfIndex,
+		MAC:            req.MAC,
+		IfType:         ifType,
 		SpeedMbps:      req.SpeedMbps,
+		MTU:            req.MTU,
 		VLANID:         req.VLANID,
 		IsManagement:   req.IsManagement,
 		IsUplink:       req.IsUplink,
@@ -448,7 +450,9 @@ func (h *Handler) CreateInterface(w http.ResponseWriter, r *http.Request) {
 		Description:    req.Description,
 	}
 	if err := h.repo.CreateInterface(r.Context(), ni); err != nil {
-		api.WriteRepoError(w, err)
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, ni)
@@ -479,13 +483,15 @@ func (h *Handler) UpdateInterface(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if req.InterfaceType != nil && !ValidInterfaceTypes[*req.InterfaceType] {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid interface_type")
+	if req.IfType != nil && !ValidInterfaceTypes[*req.IfType] {
+		api.WriteFieldError(w, &api.FieldError{Field: "if_type", Message: "invalid interface type"})
 		return
 	}
 	ni, err := h.repo.UpdateInterface(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "network interface not found")
+		if !api.WriteFieldError(w, err) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "network interface not found")
+		}
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, ni)

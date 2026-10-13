@@ -32,7 +32,7 @@ func TestIPAMRepositoryClientScope(t *testing.T) {
 		}
 	}
 	nic := func(ciID, name string) *ipam.NetworkInterface {
-		return &ipam.NetworkInterface{OrganizationID: f.OrgA, CIID: ciID, Name: name, InterfaceType: "ethernet", AdminStatus: "up", OperStatus: "unknown"}
+		return &ipam.NetworkInterface{OrganizationID: f.OrgA, CIID: ciID, Name: name, IfType: "ethernet", AdminStatus: "up", OperStatus: "unknown"}
 	}
 	foreignNIC := nic(foreignCI, "eth0")
 	if err := repo.CreateInterface(orgCtx, foreignNIC); err != nil {

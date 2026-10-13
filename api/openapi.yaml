@@ -5509,6 +5509,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -5553,6 +5555,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
     delete:
       operationId: deleteNetworkInterface
       tags: [IPAM]
@@ -14533,7 +14537,8 @@ components:
 
     NetworkInterface:
       type: object
-      required: [id, organization_id, ci_id, name, interface_type, is_management, is_uplink, admin_status, oper_status, created_at, updated_at]
+      description: Network interface of a CI (NET-01); the name is unique per CI.
+      required: [id, organization_id, ci_id, name, if_type, is_management, is_uplink, admin_status, oper_status, miss_count, created_at, updated_at]
       properties:
         id:
           type: string
@@ -14543,12 +14548,17 @@ components:
           type: string
         name:
           type: string
-        mac_address:
+        if_index:
+          type: integer
+          description: SNMP ifIndex.
+        mac:
           type: string
-        interface_type:
+        if_type:
           type: string
           enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
         speed_mbps:
+          type: integer
+        mtu:
           type: integer
         vlan_id:
           type: string
@@ -14563,6 +14573,10 @@ components:
           type: string
         description:
           type: string
+        miss_count:
+          type: integer
+          readOnly: true
+          description: Discovery runs in a row that no longer saw the interface (REC-09).
         created_at:
           type: string
           format: date-time
@@ -14576,12 +14590,17 @@ components:
       properties:
         name:
           type: string
-        mac_address:
+        if_index:
+          type: integer
+          description: SNMP ifIndex.
+        mac:
           type: string
-        interface_type:
+        if_type:
           type: string
           enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
         speed_mbps:
+          type: integer
+        mtu:
           type: integer
         vlan_id:
           type: string
@@ -14602,12 +14621,17 @@ components:
       properties:
         name:
           type: string
-        mac_address:
+        if_index:
+          type: integer
+          description: SNMP ifIndex.
+        mac:
           type: string
-        interface_type:
+        if_type:
           type: string
           enum: [ethernet, fiber, wifi, virtual, loopback, serial, management]
         speed_mbps:
+          type: integer
+        mtu:
           type: integer
         vlan_id:
           type: string

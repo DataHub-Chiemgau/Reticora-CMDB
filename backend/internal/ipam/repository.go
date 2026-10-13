@@ -317,6 +317,11 @@ func (r *MemoryRepository) GetInterface(_ context.Context, orgID, id string) (*N
 func (r *MemoryRepository) CreateInterface(_ context.Context, ni *NetworkInterface) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	for _, other := range r.interfaces {
+		if other.CIID == ni.CIID && other.Name == ni.Name {
+			return &api.ConflictError{Field: "name", Message: "the value is already taken"}
+		}
+	}
 	r.seq++
 	ni.ID = fmt.Sprintf("nic-%d", r.seq)
 	now := time.Now().UTC()
@@ -336,14 +341,20 @@ func (r *MemoryRepository) UpdateInterface(_ context.Context, orgID, id string, 
 	if req.Name != nil {
 		ni.Name = *req.Name
 	}
-	if req.MACAddress != nil {
-		ni.MACAddress = *req.MACAddress
+	if req.IfIndex != nil {
+		ni.IfIndex = req.IfIndex
 	}
-	if req.InterfaceType != nil {
-		ni.InterfaceType = *req.InterfaceType
+	if req.MAC != nil {
+		ni.MAC = *req.MAC
+	}
+	if req.IfType != nil {
+		ni.IfType = *req.IfType
 	}
 	if req.SpeedMbps != nil {
 		ni.SpeedMbps = req.SpeedMbps
+	}
+	if req.MTU != nil {
+		ni.MTU = req.MTU
 	}
 	if req.VLANID != nil {
 		ni.VLANID = *req.VLANID

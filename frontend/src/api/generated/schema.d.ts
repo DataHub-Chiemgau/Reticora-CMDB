@@ -8691,16 +8691,19 @@ export interface components {
     IPAddressListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['IPAddress'][];
     };
+    /** @description Network interface of a CI (NET-01); the name is unique per CI. */
     NetworkInterface: {
       id: string;
       organization_id: string;
       ci_id: string;
       name: string;
-      mac_address?: string;
+      /** @description SNMP ifIndex. */
+      if_index?: number;
+      mac?: string;
       /** @enum {string} */
-      interface_type:
-        'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
+      if_type: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
+      mtu?: number;
       /** @description VLAN of the VLAN catalog (NET-01). */
       vlan_id?: string;
       is_management: boolean;
@@ -8708,6 +8711,8 @@ export interface components {
       admin_status: string;
       oper_status: string;
       description?: string;
+      /** @description Discovery runs in a row that no longer saw the interface (REC-09). */
+      readonly miss_count: number;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -8715,11 +8720,13 @@ export interface components {
     };
     CreateInterfaceRequest: {
       name: string;
-      mac_address?: string;
+      /** @description SNMP ifIndex. */
+      if_index?: number;
+      mac?: string;
       /** @enum {string} */
-      interface_type?:
-        'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
+      if_type?: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
+      mtu?: number;
       /** @description VLAN of the VLAN catalog (NET-01). */
       vlan_id?: string;
       is_management?: boolean;
@@ -8730,11 +8737,13 @@ export interface components {
     };
     UpdateInterfaceRequest: {
       name?: string;
-      mac_address?: string;
+      /** @description SNMP ifIndex. */
+      if_index?: number;
+      mac?: string;
       /** @enum {string} */
-      interface_type?:
-        'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
+      if_type?: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
+      mtu?: number;
       /** @description VLAN of the VLAN catalog (NET-01). */
       vlan_id?: string;
       is_management?: boolean;
@@ -15932,6 +15941,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -16011,6 +16021,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   returnAssignment: {

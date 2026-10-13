@@ -136,7 +136,7 @@ func TestInterfaceCRUD(t *testing.T) {
 	}
 	var ni NetworkInterface
 	json.Unmarshal(w.Body.Bytes(), &ni)
-	if ni.InterfaceType != "ethernet" || ni.AdminStatus != "up" || ni.OperStatus != "unknown" {
+	if ni.IfType != "ethernet" || ni.AdminStatus != "up" || ni.OperStatus != "unknown" {
 		t.Errorf("unexpected defaults: %+v", ni)
 	}
 
@@ -145,8 +145,8 @@ func TestInterfaceCRUD(t *testing.T) {
 		t.Errorf("missing name: expected 400, got %d", w.Code)
 	}
 	// invalid type
-	if w := do(mux, "POST", "/api/v1/cis/ci-1/interfaces", `{"name":"x","interface_type":"bogus"}`, "org-1"); w.Code != http.StatusBadRequest {
-		t.Errorf("bad type: expected 400, got %d", w.Code)
+	if bad := do(mux, "POST", "/api/v1/cis/ci-1/interfaces", `{"name":"x","if_type":"bogus"}`, "org-1"); bad.Code != http.StatusBadRequest {
+		t.Errorf("bad type: expected 400, got %d", bad.Code)
 	}
 
 	// list for ci
