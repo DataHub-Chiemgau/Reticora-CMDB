@@ -246,12 +246,12 @@ func (h *Handler) GetLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sort.Slice(mounts, func(i, j int) bool { return mounts[i].PositionU < mounts[j].PositionU })
-	api.WriteJSON(w, http.StatusOK, Layout{Rack: rk, Mounts: mounts, Free: freeUnits(rk.HeightUnits, mounts)})
+	api.WriteJSON(w, http.StatusOK, Layout{Rack: rk, Mounts: mounts, Free: FreeUnits(rk.HeightUnits, mounts)})
 }
 
-// freeUnits lists the units of each face no mount occupies; a mount on
+// FreeUnits lists the units of each face no mount occupies; a mount on
 // both faces occupies front and rear.
-func freeUnits(height int, mounts []RackMount) map[string][]int {
+func FreeUnits(height int, mounts []RackMount) map[string][]int {
 	free := map[string][]int{}
 	for _, face := range []string{"front", "rear"} {
 		taken := map[int]bool{}

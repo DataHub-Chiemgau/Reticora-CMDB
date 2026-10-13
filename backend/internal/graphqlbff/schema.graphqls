@@ -5,6 +5,7 @@
 # repositories (GQL-04).
 
 scalar Map
+scalar Time
 
 type Query {
   "CIs of the organization in the caller's scope; at most 100 per page."
@@ -15,6 +16,16 @@ type Query {
   relationships(ciId: ID!, first: Int): [Relationship!]!
   "The signed-in user."
   currentUser: User!
+  "Topology from a root CI (up to depth hops) or, without a root, of at most 2,000 CIs."
+  topology(rootCiId: ID, depth: Int, ciTypeId: ID, siteId: ID): TopologyGraph!
+  "Occupancy of a rack (RCK-02)."
+  rackLayout(rackId: ID!): RackLayout
+  "Full-text search over the entity types the caller may read."
+  searchEverything(q: String!, types: [String!], first: Int): SearchResult!
+  "Review items of the reconciliation queue."
+  reviewInbox(status: String, kind: String, first: Int): [ReviewItem!]!
+  "Jobs of the organization."
+  jobs(kind: String, status: String, first: Int): [Job!]!
 }
 
 input CIFilter {
@@ -70,6 +81,94 @@ type Relationship {
   targetCiId: ID!
   relType: String!
   source: String
+  "The source CI, batched per request (dataloader)."
+  sourceCi: CI
+  "The target CI, batched per request (dataloader)."
+  targetCi: CI
+}
+
+type TopologyGraph {
+  nodes: [TopologyNode!]!
+  edges: [TopologyEdge!]!
+}
+
+type TopologyNode {
+  id: ID!
+  name: String!
+  ciType: String!
+  status: String!
+  clientId: ID
+  siteId: ID
+  "The full CI, batched per request (dataloader)."
+  ci: CI
+}
+
+type TopologyEdge {
+  id: ID!
+  sourceCiId: ID!
+  targetCiId: ID!
+  relType: String!
+  source: String
+}
+
+type RackLayout {
+  rack: Rack!
+  mounts: [RackMount!]!
+  freeFront: [Int!]!
+  freeRear: [Int!]!
+}
+
+type Rack {
+  id: ID!
+  name: String!
+  heightUnits: Int!
+  roomId: ID
+}
+
+type RackMount {
+  id: ID!
+  ciId: ID!
+  positionU: Int!
+  heightU: Int!
+  face: String!
+  "The mounted CI, batched per request (dataloader)."
+  ci: CI
+}
+
+type SearchResult {
+  total: Int!
+  hits: [SearchHit!]!
+}
+
+type SearchHit {
+  id: ID!
+  entityType: String!
+  entityId: ID!
+  title: String!
+  summary: String
+  url: String
+  score: Float!
+}
+
+type ReviewItem {
+  id: ID!
+  kind: String!
+  status: String!
+  payload: Map
+  escalated: Boolean!
+  createdAt: String!
+  "The candidate CIs, batched per request (dataloader)."
+  candidates: [CI!]!
+}
+
+type Job {
+  id: ID!
+  kind: String!
+  status: String!
+  progress: Int!
+  error: String
+  createdAt: Time!
+  finishedAt: Time
 }
 
 type User {

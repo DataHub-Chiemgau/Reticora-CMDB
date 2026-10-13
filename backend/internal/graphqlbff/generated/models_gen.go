@@ -4,6 +4,8 @@ package generated
 
 import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 )
 
 type CIConnection struct {
@@ -32,6 +34,18 @@ type PageInfo struct {
 }
 
 type Query struct {
+}
+
+type RackLayout struct {
+	Rack      *rack.Rack        `json:"rack"`
+	Mounts    []*rack.RackMount `json:"mounts"`
+	FreeFront []int             `json:"freeFront"`
+	FreeRear  []int             `json:"freeRear"`
+}
+
+type SearchResult struct {
+	Total int           `json:"total"`
+	Hits  []*search.Hit `json:"hits"`
 }
 
 type User struct {

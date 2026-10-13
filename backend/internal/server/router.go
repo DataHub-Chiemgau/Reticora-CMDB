@@ -322,6 +322,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// unlicensed_ci and adopted once the limit is raised (ENT-03, CH21).
 	// Export and discovery jobs register in the generic job model (JOB-01).
 	var jobTracker jobs.Tracker
+	var bffJobs graphqlbff.JobSource
 	var historyJobs history.SnapshotJobs
 	// The generic job API (API-09) serves in both profiles; without a
 	// database it has an empty in-memory job table.
@@ -329,6 +330,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService
+		bffJobs = jobService
 		jobs.SetBacklogSource(repos.Jobs)
 		jobAPI = jobs.NewAPIHandler(jobService).
 			WithKind(ci.BulkJobKind, identity.PermCIWrite, nil).
@@ -379,6 +381,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		discoveryHandler.WithReviewNotifier(reviewEvents{emitter: opts.Events})
 		exportWorker.Events = opts.Events
 	}
+	topologyHandler := topology.NewHandler(repos.CI, repos.Relationship).WithRelationshipTypes(repos.RelationshipType)
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -392,7 +395,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
 		discoveryHandler,
-		topology.NewHandler(repos.CI, repos.Relationship).WithRelationshipTypes(repos.RelationshipType),
+		topologyHandler,
 		export.NewHandler(repos.CI),
 		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs),
 		asset.NewHandler(repos.Asset).
@@ -427,7 +430,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		contact.NewHandler(repos.Contact),
 		ipam.NewHandler(repos.IPAM),
 		monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)),
-		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements),
+		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
+			WithSources(bffSources(&repos, topologyHandler, bffJobs)),
 		relationshiptype.NewHandler(repos.RelationshipType),
 		citype.NewHandler(repos.CIType, opts.Dispatcher),
 		lifecycle.NewHandler(repos.Lifecycle,

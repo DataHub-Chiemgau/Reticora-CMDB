@@ -22,3 +22,22 @@ models:
     model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci.Item
   Relationship:
     model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship.Relationship
+  TopologyGraph:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology.Graph
+  TopologyNode:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology.Node
+  TopologyEdge:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology.Edge
+  Rack:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack.Rack
+  RackMount:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack.RackMount
+  SearchHit:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search.Hit
+  ReviewItem:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews.Item
+  Job:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs.Job
+    fields:
+      status:
+        resolver: true

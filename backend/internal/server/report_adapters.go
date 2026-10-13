@@ -11,8 +11,10 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/composition"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -169,4 +171,15 @@ func (l parentAssetLookup) GetByID(ctx context.Context, orgID, id string) (*comp
 		WarrantyEnd:   a.WarrantyEnd,
 		Location:      a.Location,
 	}, nil
+}
+
+// bffSources hands the read models of topology, rack layout, search, the
+// review inbox and jobs to the GraphQL BFF (GQL-02). Without the job model
+// (no database) the jobs query is unavailable.
+func bffSources(repos *Repositories, topo *topology.Handler, jobSource graphqlbff.JobSource) *graphqlbff.Sources {
+	sources := &graphqlbff.Sources{Topology: topo, Racks: repos.Rack, Search: repos.Search, Jobs: jobSource}
+	if reviewSource, ok := repos.Discovery.(graphqlbff.ReviewSource); ok {
+		sources.Reviews = reviewSource
+	}
+	return sources
 }

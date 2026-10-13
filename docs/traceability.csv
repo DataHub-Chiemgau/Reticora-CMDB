@@ -390,3 +390,4 @@ JOB-03;[B];C;backend/internal/jobs/handler_test.go;WP-182
 JOB-04;[B];C;backend/internal/reviews/merge_job_integration_test.go;WP-183
 GQL-01;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-184
 SEC-10;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-184
+GQL-02;[B];C;backend/internal/graphqlbff/resolver_test.go;WP-185

@@ -118,18 +118,11 @@ func (h *Handler) GetTopology(w http.ResponseWriter, r *http.Request) {
 	rootCIID := q.Get("root_ci_id")
 	depth := parseDepth(q.Get("depth"))
 
-	var graph Graph
-	var err error
-	if rootCIID != "" {
-		graph, err = h.buildFromRoot(r.Context(), t.OrganizationID, rootCIID, depth, ciType)
-	} else {
-		filter := ci.FilterParams{
-			ClientID: q.Get("client_id"),
-			SiteID:   q.Get("site_id"),
-			TypeID:   ciType,
-		}
-		graph, err = h.buildFull(r.Context(), t.OrganizationID, filter)
-	}
+	graph, err := h.Graph(r.Context(), t.OrganizationID, rootCIID, depth, &ci.FilterParams{
+		ClientID: q.Get("client_id"),
+		SiteID:   q.Get("site_id"),
+		TypeID:   ciType,
+	})
 	if err != nil {
 		if !api.WriteFieldError(w, err) {
 			api.WriteRepoError(w, err)
@@ -178,6 +171,19 @@ func (h *Handler) GetImpact(w http.ResponseWriter, r *http.Request) {
 	}
 	h.writeImpact(w, r, t.OrganizationID, []string{chi.URLParam(r, "id")}, true)
 }
+
+// Graph returns the topology graph: from rootCIID up to depth hops (the CI
+// type of filter narrows the nodes), or without a root the CIs of filter
+// with their edges, at most MaxTopologyNodes (IMP-06, 422 beyond).
+func (h *Handler) Graph(ctx context.Context, orgID, rootCIID string, depth int, filter *ci.FilterParams) (Graph, error) {
+	if rootCIID != "" {
+		return h.buildFromRoot(ctx, orgID, rootCIID, depth, filter.TypeID)
+	}
+	return h.buildFull(ctx, orgID, *filter)
+}
+
+// ParseDepth reads a depth parameter: 1–20, the default for "".
+func ParseDepth(raw string) int { return parseDepth(raw) }
 
 // buildFull lists all CIs matching the filter and every edge whose endpoints are
 // both in the resulting node set.
