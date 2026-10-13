@@ -98,6 +98,9 @@ type collectorConfig struct {
 	AgentRelayAddr     string
 	AgentRelayCertFile string
 	AgentRelayKeyFile  string
+	// SweepConcurrency is the number of parallel sweep probes, capped at
+	// sweep.MaxConcurrency (DIS-01).
+	SweepConcurrency int
 	// UpdateURL enables signed auto-updates (COL-06) from the release
 	// manifests below <UpdateURL>/<UpdateChannel>/; empty disables them.
 	UpdateURL      string
@@ -127,6 +130,7 @@ func Main() {
 	}
 	collectorCfg := loadCollectorConfig()
 	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
+	pluginRegistry["sweep"] = newSweep(&collectorCfg)
 
 	environment := envOrDefault("RETICORA_ENVIRONMENT", "development")
 	logLevel := slog.LevelInfo
@@ -175,6 +179,8 @@ func Main() {
 		"heartbeat_interval", collectorCfg.HeartbeatInterval.String(),
 		"mtls", uploader.mtls,
 		"spool_dir", collectorCfg.SpoolDir,
+		"sweep_concurrency", collectorCfg.SweepConcurrency,
+		"sweep_icmp", sweepICMPCapability(),
 	)
 
 	go runDiscoveryLoop(ctx, collectorCfg, uploader)
@@ -1168,10 +1174,45 @@ func loadCollectorConfig() collectorConfig {
 		AgentRelayCertFile: os.Getenv("RETICORA_AGENT_RELAY_TLS_CERT_FILE"),
 		AgentRelayKeyFile:  os.Getenv("RETICORA_AGENT_RELAY_TLS_KEY_FILE"),
 		CredentialsPath:    envOrDefault("RETICORA_CREDENTIALS_PATH", "/var/lib/reticora-collector/credentials.json"),
+		SweepConcurrency:   sweepConcurrencyFromEnv(os.Getenv("RETICORA_SWEEP_CONCURRENCY")),
 		UpdateURL:          updateURL,
 		UpdateChannel:      channel,
 		UpdateInterval:     durationEnvOrDefault("RETICORA_UPDATE_INTERVAL", 6*time.Hour),
 	}
+}
+
+// newSweep builds the sweep plugin: ICMP, ARP and the DIS-01 ports with the
+// configured parallelism.
+func newSweep(cfg *collectorConfig) *sweep.Plugin {
+	p := sweep.New()
+	p.Concurrency = cfg.SweepConcurrency
+	return p
+}
+
+// sweepICMPCapability names the ICMP socket the sweep can use (logged at
+// start so a missing CAP_NET_RAW / ping_group_range is visible).
+func sweepICMPCapability() string {
+	if c := sweep.ICMPCapability(); c != "" {
+		return c
+	}
+	return "unavailable (TCP and ARP only)"
+}
+
+// sweepConcurrencyFromEnv parses RETICORA_SWEEP_CONCURRENCY; values above
+// sweep.MaxConcurrency are capped, invalid ones use the maximum.
+func sweepConcurrencyFromEnv(value string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n <= 0 {
+		if strings.TrimSpace(value) != "" {
+			slog.Warn("invalid RETICORA_SWEEP_CONCURRENCY; using the maximum", "value", value, "max", sweep.MaxConcurrency)
+		}
+		return sweep.MaxConcurrency
+	}
+	if n > sweep.MaxConcurrency {
+		slog.Warn("RETICORA_SWEEP_CONCURRENCY above the hard limit; capped", "value", n, "max", sweep.MaxConcurrency)
+		return sweep.MaxConcurrency
+	}
+	return n
 }
 
 // credentialEnv maps the credential environment variables to their protocol

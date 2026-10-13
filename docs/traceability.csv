@@ -338,3 +338,4 @@ COL-08;[B];D;tests/nats-mtls.test.sh;WP-146
 PRI-07;Grundsatz (ohne Tag);D;tests/nats-mtls.test.sh;WP-146
 COL-02;[B];D;backend/internal/credential/bundle_test.go;WP-147
 COL-06;[B], Air-Gapped [O];D;edgecore/update/update_test.go;WP-148
+DIS-01;[B];D;collector/plugins/sweep/sweep_test.go;WP-149

@@ -1,10 +1,15 @@
-// Package sweep provides network host discovery via ICMP echo and TCP connect probes.
+// Package sweep provides network host discovery (DIS-01): ICMP echo, ARP
+// (neighbour table) and TCP connect probes on the optional ports, with
+// reverse DNS. SNMP (UDP 161) is probed by the snmp plugin.
 package sweep
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,63 +17,76 @@ import (
 )
 
 const (
-	defaultTimeout     = 2 * time.Second
-	defaultConcurrency = 64
-	defaultTCPPort     = 443
+	defaultTimeout = 2 * time.Second
+	// MaxConcurrency is the hard upper bound of parallel probes (DIS-01);
+	// a higher configured value is capped.
+	MaxConcurrency     = 256
+	defaultConcurrency = MaxConcurrency
 )
 
-// commonPorts are tried when probing host reachability via TCP.
-var commonPorts = []int{22, 80, 443, 3389, 8080, 8443}
+// DefaultPorts are the optional TCP ports of DIS-01: SSH, HTTP, HTTPS,
+// IPMI/RMCP+ (623), WinRM (5985) and the Proxmox VE API (8006).
+var DefaultPorts = []int{22, 80, 443, 623, 5985, 8006}
 
-// Plugin performs basic host discovery across network ranges using TCP connect probes.
+// Plugin performs host discovery across network ranges.
 type Plugin struct {
-	Timeout     time.Duration
+	Timeout time.Duration
+	// Concurrency is the number of parallel probes, at most
+	// MaxConcurrency.
 	Concurrency int
 	TCPPorts    []int
+	// Pinger sends ICMP echo requests; nil disables ICMP.
+	Pinger Pinger
+	// Neighbors reads the ARP neighbour table; nil disables ARP.
+	Neighbors NeighborTable
 }
 
 var _ plugins.Plugin = (*Plugin)(nil)
 
-// New creates a sweep plugin instance with default settings.
+// New creates a sweep plugin with ICMP, ARP and the default ports.
 func New() *Plugin {
 	return &Plugin{
 		Timeout:     defaultTimeout,
 		Concurrency: defaultConcurrency,
-		TCPPorts:    commonPorts,
+		TCPPorts:    DefaultPorts,
+		Pinger:      &ICMPPinger{},
+		Neighbors:   ProcNeighbors,
 	}
+}
+
+// effectiveConcurrency applies the default and the hard upper bound.
+func (p *Plugin) effectiveConcurrency() int {
+	switch {
+	case p.Concurrency <= 0:
+		return defaultConcurrency
+	case p.Concurrency > MaxConcurrency:
+		return MaxConcurrency
+	}
+	return p.Concurrency
 }
 
 // Name returns the plugin identifier.
 func (p *Plugin) Name() string { return "sweep" }
 
-// Discover probes a list of targets using TCP connect and returns discovered endpoints.
+// Discover probes the targets with ICMP echo and the TCP ports (at most
+// MaxConcurrency at a time) and adds the targets that only answered ARP.
 func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[string]string) ([]plugins.Result, error) {
 	_ = creds
 
-	concurrency := p.Concurrency
-	if concurrency <= 0 {
-		concurrency = defaultConcurrency
-	}
 	timeout := p.Timeout
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
 	ports := p.TCPPorts
 	if len(ports) == 0 {
-		ports = commonPorts
+		ports = DefaultPorts
 	}
 
-	type probeResult struct {
-		target   string
-		reachable bool
-		openPort int
-		rtt      time.Duration
-		hostname string
-	}
-
-	sem := make(chan struct{}, concurrency)
+	sem := make(chan struct{}, p.effectiveConcurrency())
 	var mu sync.Mutex
-	var results []plugins.Result
+	results := []plugins.Result{}
+	found := map[string]bool{}
+	icmpOff := false
 
 	var wg sync.WaitGroup
 	for _, target := range targets {
@@ -78,69 +96,117 @@ func (p *Plugin) Discover(ctx context.Context, targets []string, creds map[strin
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
-
-			sem <- struct{}{}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 			defer func() { <-sem }()
 
-			pr := probeResult{target: t}
-
-			// Try TCP connect on common ports
+			method, openPort := "", 0
+			var rtt time.Duration
+			if p.Pinger != nil {
+				d, err := p.Pinger.Ping(ctx, t, timeout)
+				if err == nil {
+					method, rtt = "icmp", d
+				} else if errors.Is(err, ErrNoICMP) {
+					mu.Lock()
+					icmpOff = true
+					mu.Unlock()
+				}
+			}
 			for _, port := range ports {
 				if ctx.Err() != nil {
 					return
 				}
-				addr := net.JoinHostPort(t, fmt.Sprintf("%d", port))
 				start := time.Now()
-				conn, err := net.DialTimeout("tcp", addr, timeout)
+				var d net.Dialer
+				dctx, cancel := context.WithTimeout(ctx, timeout)
+				conn, err := d.DialContext(dctx, "tcp", net.JoinHostPort(t, fmt.Sprintf("%d", port)))
+				cancel()
 				if err == nil {
-					pr.reachable = true
-					pr.openPort = port
-					pr.rtt = time.Since(start)
 					conn.Close()
+					openPort = port
+					if method == "" {
+						method, rtt = "tcp", time.Since(start)
+					}
 					break
 				}
 			}
-
-			if !pr.reachable {
+			if method == "" {
 				return
 			}
-
-			// Attempt reverse DNS lookup
-			names, err := net.LookupAddr(t)
-			if err == nil && len(names) > 0 {
-				pr.hostname = names[0]
-				// Remove trailing dot from DNS names
-				if len(pr.hostname) > 0 && pr.hostname[len(pr.hostname)-1] == '.' {
-					pr.hostname = pr.hostname[:len(pr.hostname)-1]
-				}
-			}
-
-			result := plugins.Result{
-				CIType: classifyByPort(pr.openPort),
-				Name:   pr.hostname,
-				IP:     t,
-				Attributes: map[string]any{
-					"discoveryMethod": "sweep",
-					"openPort":        pr.openPort,
-					"rttMs":           pr.rtt.Milliseconds(),
-					"reachable":       true,
-				},
-			}
-			if result.Name == "" {
-				result.Name = t
-			}
-
+			result := sweepResult(t, method, openPort, rtt)
 			mu.Lock()
 			results = append(results, result)
+			found[t] = true
 			mu.Unlock()
 		}(target)
 	}
 	wg.Wait()
-
-	if results == nil {
-		results = []plugins.Result{}
+	if icmpOff {
+		slog.Warn("sweep: ICMP unavailable, using TCP and ARP only", "error", ErrNoICMP)
 	}
-	return results, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return results, err
+	}
+	return p.addNeighbors(targets, results, found), nil
+}
+
+// addNeighbors sets the MAC of the found hosts and adds the targets that
+// only answered ARP.
+func (p *Plugin) addNeighbors(targets []string, results []plugins.Result, found map[string]bool) []plugins.Result {
+	if p.Neighbors == nil {
+		return results
+	}
+	table, err := p.Neighbors()
+	if err != nil {
+		slog.Debug("sweep: ARP neighbour table unavailable", "error", err)
+		return results
+	}
+	for i := range results {
+		if mac, ok := table[results[i].IP]; ok {
+			results[i].MAC = mac
+		}
+	}
+	for _, t := range targets {
+		mac, ok := table[t]
+		if !ok || found[t] {
+			continue
+		}
+		r := sweepResult(t, "arp", 0, 0)
+		r.MAC = mac
+		results = append(results, r)
+		found[t] = true
+	}
+	return results
+}
+
+func sweepResult(target, method string, openPort int, rtt time.Duration) plugins.Result {
+	result := plugins.Result{
+		CIType: classifyByPort(openPort),
+		Name:   reverseName(target),
+		IP:     target,
+		Attributes: map[string]any{
+			"discoveryMethod": method,
+			"openPort":        openPort,
+			"rttMs":           rtt.Milliseconds(),
+			"reachable":       true,
+		},
+	}
+	if result.Name == "" {
+		result.Name = target
+	}
+	return result
+}
+
+// reverseName resolves the target's PTR record ("" when none).
+func reverseName(ip string) string {
+	names, err := net.LookupAddr(ip)
+	if err != nil || len(names) == 0 {
+		return ""
+	}
+	return strings.TrimSuffix(names[0], ".")
 }
 
 // Collect gathers additional service fingerprint data for a single target.
@@ -153,7 +219,7 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 	}
 	ports := p.TCPPorts
 	if len(ports) == 0 {
-		ports = commonPorts
+		ports = DefaultPorts
 	}
 
 	var openPorts []int
@@ -169,13 +235,9 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 		}
 	}
 
-	hostname := target
-	names, err := net.LookupAddr(target)
-	if err == nil && len(names) > 0 {
-		hostname = names[0]
-		if len(hostname) > 0 && hostname[len(hostname)-1] == '.' {
-			hostname = hostname[:len(hostname)-1]
-		}
+	hostname := reverseName(target)
+	if hostname == "" {
+		hostname = target
 	}
 
 	ciType := "network.endpoint"
@@ -204,7 +266,7 @@ func classifyByPort(port int) string {
 		return "network.endpoint"
 	case 161:
 		return "network.device"
-	case 3389:
+	case 3389, 5985:
 		return "windows-server"
 	case 623:
 		return "bmc"

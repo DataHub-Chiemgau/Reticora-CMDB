@@ -579,3 +579,15 @@ func TestUpdateChannelFromEnv(t *testing.T) {
 		t.Errorf("update config = %q %q %s", cfg.UpdateURL, cfg.UpdateChannel, cfg.UpdateInterval)
 	}
 }
+
+func TestSweepConcurrencyIsCappedAt256(t *testing.T) {
+	for value, want := range map[string]int{"": 256, "64": 64, "1000": 256, "-3": 256, "x": 256} {
+		if got := sweepConcurrencyFromEnv(value); got != want {
+			t.Errorf("sweepConcurrencyFromEnv(%q) = %d, want %d", value, got, want)
+		}
+	}
+	cfg := collectorConfig{SweepConcurrency: 32}
+	if p := newSweep(&cfg); p.Concurrency != 32 || p.Pinger == nil || p.Neighbors == nil {
+		t.Errorf("sweep plugin = %+v", p)
+	}
+}
