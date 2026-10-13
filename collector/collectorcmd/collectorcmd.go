@@ -1279,6 +1279,14 @@ var credentialEnv = []struct{ env, key string }{
 	{"RETICORA_SSH_PASSWORD", "ssh.password"},
 	{"RETICORA_REDFISH_USERNAME", "redfish.username"},
 	{"RETICORA_REDFISH_PASSWORD", "redfish.password"},
+	{"RETICORA_SSH_PRIVATE_KEY", "ssh.private_key"},
+	{"RETICORA_SSH_KEY_PASSPHRASE", "ssh.passphrase"},
+	// SNMPv3 authPriv (DIS-04); a configured user switches SNMP to v3.
+	{"RETICORA_SNMP_V3_USERNAME", "snmp.username"},
+	{"RETICORA_SNMP_V3_AUTH_PROTOCOL", "snmp.auth_protocol"},
+	{"RETICORA_SNMP_V3_AUTH_PASSWORD", "snmp.auth_password"},
+	{"RETICORA_SNMP_V3_PRIV_PROTOCOL", "snmp.priv_protocol"},
+	{"RETICORA_SNMP_V3_PRIV_PASSWORD", "snmp.priv_password"},
 }
 
 func credentialsFromEnv(getenv func(string) string) map[string]string {

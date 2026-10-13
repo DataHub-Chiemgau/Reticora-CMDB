@@ -28,6 +28,8 @@ const (
 type Plugin struct {
 	Timeout     time.Duration
 	Concurrency int
+	// Port is the RMCP port (default 623).
+	Port int
 }
 
 var _ plugins.Plugin = (*Plugin)(nil)
@@ -115,7 +117,7 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 	}
 
 	// Send Get Channel Auth Capabilities to determine IPMI version support.
-	addr := net.JoinHostPort(target, fmt.Sprintf("%d", defaultPort))
+	addr := net.JoinHostPort(target, fmt.Sprintf("%d", p.port()))
 	conn, err := net.DialTimeout("udp", addr, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("ipmi: dial %s: %w", target, err)
@@ -162,13 +164,13 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 			"ipmiVersion": ipmiVersion,
 			"rmcpPort":    defaultPort,
 			"ipmiCapable": true,
-			"commandSet": map[string]string{
-				"chassis_status": "Get Chassis Status (0x01)",
-				"fru_read":       "Read FRU Data (0x11)",
-				"sdr_list":       "Get SDR Repository Info (0x20)",
-				"sel_info":       "Get SEL Info (0x40)",
-			},
 		},
+	}
+	// The system GUID identifies the server behind the BMC (DIS-04).
+	if guid, gerr := p.systemGUID(target, timeout); gerr == nil && guid != "00000000-0000-0000-0000-000000000000" {
+		result.Attributes["hardwareUUID"] = guid
+	} else if gerr != nil {
+		slog.Debug("ipmi: no system GUID", "target", target, "error", gerr)
 	}
 
 	return result, nil
@@ -176,7 +178,7 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 
 // probeRMCP sends an ASF Presence Ping to check if the host supports RMCP/IPMI.
 func (p *Plugin) probeRMCP(target string, timeout time.Duration) bool {
-	addr := net.JoinHostPort(target, fmt.Sprintf("%d", defaultPort))
+	addr := net.JoinHostPort(target, fmt.Sprintf("%d", p.port()))
 	conn, err := net.DialTimeout("udp", addr, timeout)
 	if err != nil {
 		return false

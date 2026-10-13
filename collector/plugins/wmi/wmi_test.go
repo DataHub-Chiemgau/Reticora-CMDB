@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 )
 
 func TestNewDefaults(t *testing.T) {
@@ -276,5 +278,38 @@ func TestCollectUnreachableWinRMReturnsEmptyFields(t *testing.T) {
 	}
 	if res.Manufacturer != "" || res.Serial != "" {
 		t.Errorf("expected empty hardware fields, got mfg=%q serial=%q", res.Manufacturer, res.Serial)
+	}
+}
+
+// TestApplyIdentityFillsDeviceRecordFields covers WP-152 (DIS-04): WMI
+// delivers hardware UUID, host name/FQDN, adapters with MACs and uptime.
+func TestApplyIdentityFillsDeviceRecordFields(t *testing.T) {
+	cs := `<s:Body><p:Win32_ComputerSystem><p:Name>WIN-SERVER-01</p:Name><p:DNSHostName>win-server-01</p:DNSHostName><p:Domain>corp.example</p:Domain></p:Win32_ComputerSystem></s:Body>`
+	product := `<s:Body><p:Win32_ComputerSystemProduct><p:UUID>4C4C4544-0042-3510-8051-B4C04F4A4E33</p:UUID></p:Win32_ComputerSystemProduct></s:Body>`
+	nics := `<s:Body>
+<p:Win32_NetworkAdapterConfiguration><p:Description>Intel(R) Ethernet 10G</p:Description><p:IPEnabled>true</p:IPEnabled><p:MACAddress>B0:26:28:AA:BB:01</p:MACAddress></p:Win32_NetworkAdapterConfiguration>
+<p:Win32_NetworkAdapterConfiguration><p:Description>WAN Miniport</p:Description><p:IPEnabled>false</p:IPEnabled><p:MACAddress>00:00:00:00:00:01</p:MACAddress></p:Win32_NetworkAdapterConfiguration>
+<p:Win32_NetworkAdapterConfiguration><p:Description>Intel(R) Ethernet 10G #2</p:Description><p:IPEnabled>true</p:IPEnabled><p:MACAddress>B0:26:28:AA:BB:02</p:MACAddress></p:Win32_NetworkAdapterConfiguration>
+</s:Body>`
+	now := time.Date(2026, 10, 13, 10, 0, 0, 0, time.UTC)
+	res := &plugins.Result{CIType: "windows-server", Name: "WIN-SERVER-01", IP: "192.0.2.30", Attributes: map[string]any{"osName": "Microsoft Windows Server 2022", "osVersion": "10.0.20348"}}
+	applyIdentity(res, cs, product, nics, "20261013100000.000000+120", now) // booted 08:00 UTC
+
+	rec := plugins.RecordFromResult("wmi", res, now)
+	if rec.Identity.HardwareUUID != "4c4c4544-0042-3510-8051-b4c04f4a4e33" || rec.Identity.Hostname != "win-server-01" ||
+		rec.Identity.FQDN != "win-server-01.corp.example" || rec.Identity.PrimaryMAC != "b0:26:28:aa:bb:01" {
+		t.Errorf("identity = %+v", rec.Identity)
+	}
+	if rec.System.OSName != "Microsoft Windows Server 2022" || rec.System.OSVersion != "10.0.20348" || rec.System.UptimeSeconds != 7200 {
+		t.Errorf("system = %+v", rec.System)
+	}
+	if len(rec.Interfaces) != 2 || rec.Interfaces[1].Name != "Intel(R) Ethernet 10G #2" {
+		t.Errorf("interfaces = %+v", rec.Interfaces)
+	}
+	if v := rec.Validate(); len(v) > 0 {
+		t.Errorf("record breaks the contract: %v", v)
+	}
+	if _, err := parseCIMDateTime("garbage"); err == nil {
+		t.Error("a malformed datetime must be refused")
 	}
 }

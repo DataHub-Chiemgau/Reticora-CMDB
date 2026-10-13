@@ -279,6 +279,20 @@ func RecordFromResult(protocol string, res *Result, observedAt time.Time) Device
 		return v
 	}
 
+	takeInt := func(key string) int64 {
+		var n int64
+		switch v := attrs[key].(type) {
+		case int64:
+			n = v
+		case int:
+			n = int64(v)
+		default:
+			return 0
+		}
+		delete(attrs, key)
+		return n
+	}
+
 	rec := DeviceRecord{
 		RecordID:   NewRecordID(),
 		ObservedAt: observedAt.UTC(),
@@ -286,6 +300,7 @@ func RecordFromResult(protocol string, res *Result, observedAt time.Time) Device
 		TargetIP:   res.IP,
 		Identity: DeviceIdentity{
 			SerialNumber: res.Serial,
+			HardwareUUID: take("hardwareUUID"),
 			PrimaryMAC:   res.MAC,
 			Hostname:     take("hostname"),
 			FQDN:         take("fqdn"),
@@ -300,7 +315,10 @@ func RecordFromResult(protocol string, res *Result, observedAt time.Time) Device
 		System: DeviceSystem{
 			Name:            res.Name,
 			Description:     take("sysDescr"),
+			OSName:          take("osName"),
+			OSVersion:       take("osVersion"),
 			FirmwareVersion: res.Firmware,
+			UptimeSeconds:   takeInt("uptimeSeconds"),
 		},
 	}
 	if net.ParseIP(res.IP) == nil {

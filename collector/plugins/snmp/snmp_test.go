@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gosnmp/gosnmp"
 )
 
 func TestEncodeOID(t *testing.T) {
@@ -335,5 +338,121 @@ func TestExtractNumericValueParsesNumericString(t *testing.T) {
 func TestExtractNumericValueRejectsGarbage(t *testing.T) {
 	if _, ok := extractNumericValue([]byte{0x30, 0x03, 0x05, 0x00}); ok {
 		t.Error("expected no numeric value in truncated packet")
+	}
+}
+
+// oidLess orders dotted OIDs numerically.
+func oidLess(a, b string) bool {
+	pa, pb := strings.Split(strings.TrimPrefix(a, "."), "."), strings.Split(strings.TrimPrefix(b, "."), ".")
+	for i := 0; i < len(pa) && i < len(pb); i++ {
+		var x, y int
+		fmt.Sscan(pa[i], &x)
+		fmt.Sscan(pb[i], &y)
+		if x != y {
+			return x < y
+		}
+	}
+	return len(pa) < len(pb)
+}
+
+func v3TestMIB() []gosnmp.SnmpPDU {
+	s := func(oid, v string) gosnmp.SnmpPDU {
+		return gosnmp.SnmpPDU{Name: "." + oid, Type: gosnmp.OctetString, Value: []byte(v)}
+	}
+	i := func(oid string, v int) gosnmp.SnmpPDU {
+		return gosnmp.SnmpPDU{Name: "." + oid, Type: gosnmp.Integer, Value: v}
+	}
+	g := func(oid string, v uint) gosnmp.SnmpPDU {
+		return gosnmp.SnmpPDU{Name: "." + oid, Type: gosnmp.Gauge32, Value: v}
+	}
+	mib := []gosnmp.SnmpPDU{
+		s(oidSysDescr, "Cisco IOS XE Software, Catalyst L3 Switch Software (CAT9K_IOSXE), C9300-48P"),
+		{Name: "." + oidSysObjectID, Type: gosnmp.ObjectIdentifier, Value: ".1.3.6.1.4.1.9.1.2494"},
+		{Name: "." + oidSysUpTime, Type: gosnmp.TimeTicks, Value: uint32(360000)},
+		s(oidSysContact, "noc@example.com"),
+		s(oidSysName, "core-sw-1"),
+		s(oidSysLocation, "DC1 R1"),
+		s(oidIfDescr+".1", "GigabitEthernet1/0/1"), s(oidIfDescr+".2", "GigabitEthernet1/0/2"),
+		i(oidIfMtu+".1", 1500), i(oidIfMtu+".2", 9000),
+		g(oidIfSpeed+".1", 1_000_000_000), g(oidIfSpeed+".2", 1_000_000_000),
+		{Name: "." + oidIfPhysAddr + ".1", Type: gosnmp.OctetString, Value: []byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x01}},
+		{Name: "." + oidIfPhysAddr + ".2", Type: gosnmp.OctetString, Value: []byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x02}},
+		i(oidIfAdminSt+".1", 1), i(oidIfAdminSt+".2", 2),
+		i(oidIfOperSt+".1", 1), i(oidIfOperSt+".2", 2),
+		s(oidEntPhysFirmwareRev+".1", "17.9.4"),
+		s(oidEntPhysSerialNum+".1", "FOC1234X0YZ"),
+		s(oidEntPhysMfgName+".1", "Cisco Systems, Inc."),
+		s(oidEntPhysModelName+".1", "C9300-48P"),
+	}
+	sort.Slice(mib, func(a, b int) bool { return oidLess(mib[a].Name, mib[b].Name) })
+	return mib
+}
+
+// TestSNMPv3AuthPrivRoundTrip covers WP-152 (DIS-04): probe and collect a
+// device over SNMPv3 authPriv (SHA-256/AES) including the interface table;
+// wrong credentials find nothing.
+func TestSNMPv3AuthPrivRoundTrip(t *testing.T) {
+	agent := startV3Agent(t, "reticora", "auth-secret-1", "priv-secret-1", v3TestMIB())
+	creds := map[string]string{"username": "reticora", "auth_protocol": "SHA256", "auth_password": "auth-secret-1",
+		"priv_protocol": "AES", "priv_password": "priv-secret-1"}
+	p := &Plugin{Timeout: time.Second, Port: agent.port()}
+
+	hits, err := p.Probe(context.Background(), []string{"127.0.0.1"}, creds)
+	if err != nil || len(hits) != 1 || hits[0].Attributes["snmpVersion"] != "v3" {
+		t.Fatalf("v3 probe = %+v, %v", hits, err)
+	}
+	rec, err := p.Collect(context.Background(), "127.0.0.1", creds)
+	if err != nil {
+		t.Fatalf("v3 collect: %v", err)
+	}
+	if rec.System.Name != "core-sw-1" || rec.Identity.SerialNumber != "FOC1234X0YZ" || rec.Classification.Model != "C9300-48P" ||
+		rec.Classification.SysObjectID != "1.3.6.1.4.1.9.1.2494" || rec.System.FirmwareVersion != "17.9.4" {
+		t.Errorf("record = %+v", rec)
+	}
+	if rec.Attributes["snmpVersion"] != "v3" || rec.System.UptimeSeconds != 3600 {
+		t.Errorf("attributes = %v", rec.Attributes)
+	}
+	if len(rec.Interfaces) != 2 {
+		t.Fatalf("interfaces = %+v", rec.Interfaces)
+	}
+	first := rec.Interfaces[0]
+	if first.Name != "GigabitEthernet1/0/1" || first.MAC != "00:11:22:33:44:01" || first.SpeedMbps != 1000 || first.MTU != 1500 ||
+		first.OperStatus != "up" || rec.Interfaces[1].AdminStatus != "down" {
+		t.Errorf("interfaces = %+v", rec.Interfaces)
+	}
+	if v := rec.Validate(); len(v) > 0 {
+		t.Errorf("record breaks the contract: %v", v)
+	}
+
+	wrong := map[string]string{"username": "reticora", "auth_password": "wrong-auth-pw", "priv_password": "priv-secret-1"}
+	quick := &Plugin{Timeout: 200 * time.Millisecond, Port: agent.port()}
+	if hits, err = quick.Probe(context.Background(), []string{"127.0.0.1"}, wrong); err != nil || len(hits) != 0 {
+		t.Errorf("wrong credentials found %d devices, %v", len(hits), err)
+	}
+}
+
+func TestSNMPv3RequiresAuthPriv(t *testing.T) {
+	for name, creds := range map[string]map[string]string{
+		"no privacy":       {"username": "u", "auth_password": "a-secret"},
+		"no auth":          {"username": "u", "priv_password": "p-secret"},
+		"version only":     {"version": "3"},
+		"md5 refused":      {"username": "u", "auth_protocol": "MD5", "auth_password": "a", "priv_password": "p"},
+		"des refused":      {"username": "u", "auth_password": "a", "priv_protocol": "DES", "priv_password": "p"},
+		"unknown protocol": {"username": "u", "auth_protocol": "sha3", "auth_password": "a", "priv_password": "p"},
+	} {
+		if _, _, err := v3FromCreds(creds); err == nil {
+			t.Errorf("%s: accepted %v", name, creds)
+		}
+		p := &Plugin{Timeout: 50 * time.Millisecond}
+		if _, err := p.Probe(context.Background(), []string{"192.0.2.1"}, creds); err == nil {
+			t.Errorf("%s: probe ran below authPriv", name)
+		}
+	}
+	cfg, ok, err := v3FromCreds(map[string]string{"user": "u", "authKey": "a", "privKey": "p", "auth_protocol": "sha-512", "priv_protocol": "AES256"})
+	if err != nil || !ok || cfg.authProto != gosnmp.SHA512 || cfg.privProto != gosnmp.AES256 {
+		t.Errorf("alternative keys: %+v %v %v", cfg, ok, err)
+	}
+	if _, ok, _ = v3FromCreds(map[string]string{"community": "public"}); ok {
+		t.Error("a community configures SNMPv2c")
 	}
 }

@@ -1,4 +1,4 @@
-// Package snmp provides an SNMP v2c/v3 collection plugin for network device discovery.
+// Package snmp provides an SNMP v2c/v3 (authPriv) collection plugin for network device discovery.
 package snmp
 
 import (
@@ -54,6 +54,8 @@ type Plugin struct {
 	// Profiles resolves sysObjectID/MAC to vendor-specific classification.
 	// nil loads the embedded profile set lazily.
 	Profiles *profiles.Registry
+	// Port is the agent port (default 161).
+	Port int
 
 	loadOnce sync.Once
 }
@@ -125,6 +127,10 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 	if community == "" {
 		community = "public"
 	}
+	v3, useV3, err := v3FromCreds(creds)
+	if err != nil {
+		return []plugins.Result{}, err
+	}
 
 	sem := make(chan struct{}, concurrency)
 	var mu sync.Mutex
@@ -141,8 +147,17 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
+			if useV3 {
+				if result, ok := p.probeV3(ctx, t, v3); ok {
+					mu.Lock()
+					results = append(results, *result)
+					mu.Unlock()
+				}
+				return
+			}
+
 			// Probe SNMP port reachability via UDP
-			addr := net.JoinHostPort(t, fmt.Sprintf("%d", defaultPort))
+			addr := net.JoinHostPort(t, fmt.Sprintf("%d", p.port()))
 			conn, err := net.DialTimeout("udp", addr, timeout)
 			if err != nil {
 				return
@@ -208,8 +223,13 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 	if community == "" {
 		community = "public"
 	}
+	if v3, useV3, err := v3FromCreds(creds); err != nil {
+		return nil, err
+	} else if useV3 {
+		return p.collectV3(ctx, target, v3)
+	}
 
-	addr := net.JoinHostPort(target, fmt.Sprintf("%d", defaultPort))
+	addr := net.JoinHostPort(target, fmt.Sprintf("%d", p.port()))
 	conn, err := net.DialTimeout("udp", addr, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("snmp: dial %s: %w", target, err)
@@ -254,6 +274,14 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 
 	p.applyProfile(result, sysObjectID)
 
+	// The interface table (IF-MIB) of a device that answered.
+	if sysDescr != "" || sysObjectID != "" {
+		g := p.v2cSession(ctx, target, community)
+		if g.Connect() == nil {
+			result.Interfaces = walkInterfaces(g)
+			g.Conn.Close()
+		}
+	}
 	return result, nil
 }
 

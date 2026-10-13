@@ -171,18 +171,14 @@ func TestCollectUsesBannerForFingerprint(t *testing.T) {
 	if res.CIType != "network.device" {
 		t.Errorf("CIType = %q, want network.device", res.CIType)
 	}
-	if res.Firmware != banner {
-		t.Errorf("Firmware = %q, want banner %q", res.Firmware, banner)
+	if res.Attributes["sshBanner"] != banner || res.Firmware != "" {
+		t.Errorf("banner %v / firmware %q: the banner is no firmware version", res.Attributes["sshBanner"], res.Firmware)
 	}
 	if res.Attributes["osFamily"] != "cisco/ios" {
 		t.Errorf("osFamily = %v, want cisco/ios", res.Attributes["osFamily"])
 	}
-	cmds, ok := res.Attributes["commandSet"].(map[string]string)
-	if !ok || len(cmds) == 0 {
-		t.Errorf("expected non-empty commandSet attribute, got %v", res.Attributes["commandSet"])
-	}
-	if _, ok := cmds["serial"]; !ok {
-		t.Errorf("commandSet missing serial command: %v", cmds)
+	if res.Attributes["authenticated"] != false {
+		t.Errorf("without credentials nothing is executed: %v", res.Attributes)
 	}
 }
 

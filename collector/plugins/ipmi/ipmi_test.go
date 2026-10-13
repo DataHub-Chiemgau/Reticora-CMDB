@@ -202,9 +202,81 @@ func TestCollectFromRMCPFake(t *testing.T) {
 	if v := res.Attributes["ipmiVersion"]; v != "1.5" && v != "2.0" {
 		t.Errorf("ipmiVersion = %v, want parsed version", v)
 	}
-	cmds, ok := res.Attributes["commandSet"].(map[string]string)
-	if !ok || len(cmds) == 0 {
-		t.Errorf("expected non-empty commandSet, got %v", res.Attributes["commandSet"])
+	if _, listed := res.Attributes["commandSet"]; listed {
+		t.Error("commands that were never run are not reported")
+	}
+}
+
+// startBMCFake answers the presence ping and Get System GUID.
+func startBMCFake(t *testing.T, guid []byte) int {
+	t.Helper()
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			n, addr, rerr := conn.ReadFromUDP(buf)
+			if rerr != nil {
+				return
+			}
+			if n < 4 || buf[0] != rmcpVersion {
+				continue
+			}
+			if buf[3] == rmcpClassASF {
+				pong := make([]byte, 28)
+				pong[0], pong[3], pong[8] = rmcpVersion, rmcpClassASF, 0x40
+				_, _ = conn.WriteToUDP(pong, addr)
+				continue
+			}
+			req := buf[14:n]
+			if len(req) < 7 || req[5] != cmdGetSystemGUID {
+				// Get Channel Auth Capabilities: IPMI 2.0 support.
+				resp := buildResponse(req[5], []byte{0x0e, 0x80 | 0x04, 0x02, 0x00, 0, 0, 0, 0})
+				_, _ = conn.WriteToUDP(resp, addr)
+				continue
+			}
+			_, _ = conn.WriteToUDP(buildResponse(cmdGetSystemGUID, guid), addr)
+		}
+	}()
+	return conn.LocalAddr().(*net.UDPAddr).Port
+}
+
+// buildResponse frames a BMC response with completion code 0.
+func buildResponse(cmd byte, data []byte) []byte {
+	msg := []byte{remoteAddress, (netFnApp + 1) << 2}
+	msg = append(msg, checksum(msg...))
+	body := append([]byte{bmcAddress, 0x00, cmd, 0x00}, data...)
+	msg = append(msg, body...)
+	msg = append(msg, checksum(body...))
+	out := []byte{rmcpVersion, 0x00, 0xff, 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 0, byte(len(msg))}
+	return append(out, msg...)
+}
+
+// TestCollectReadsSystemGUID covers WP-152 (DIS-04): IPMI delivers the
+// hardware UUID of the server (Get System GUID, SMBIOS byte order).
+func TestCollectReadsSystemGUID(t *testing.T) {
+	guid := []byte{0x44, 0x45, 0x4c, 0x4c, 0x42, 0x00, 0x10, 0x35, 0x80, 0x51, 0xb4, 0xc0, 0x4f, 0x4a, 0x4e, 0x33}
+	p := &Plugin{Timeout: time.Second, Port: startBMCFake(t, guid)}
+	rec, err := p.Collect(context.Background(), "127.0.0.1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Identity.HardwareUUID != "4c4c4544-0042-3510-8051-b4c04f4a4e33" {
+		t.Errorf("hardware UUID = %q", rec.Identity.HardwareUUID)
+	}
+	if v := rec.Validate(); len(v) > 0 {
+		t.Errorf("record breaks the contract: %v", v)
+	}
+	if _, err = parseResponse(buildResponse(cmdGetSystemGUID, guid)[:20], cmdGetSystemGUID); err == nil {
+		t.Error("a truncated response must be refused")
+	}
+	bad := buildResponse(cmdGetSystemGUID, guid)
+	bad[len(bad)-1]++
+	if _, err = parseResponse(bad, cmdGetSystemGUID); err == nil {
+		t.Error("a wrong checksum must be refused")
 	}
 }
 
