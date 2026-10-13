@@ -415,7 +415,7 @@ export interface paths {
     };
     /**
      * List audit log entries
-     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive.
+     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05).
      */
     get: operations['listAuditEntries'];
     put?: never;

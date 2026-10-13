@@ -328,3 +328,4 @@ SEC-06;[B];B;backend/internal/platform/crypto/crypto_test.go;WP-141
 DB-04;nicht geliefert;B;backend/internal/citype/ddl_job_integration_test.go;WP-142
 MET-15;B/G1;B;backend/internal/citype/ddl_job_integration_test.go;WP-142
 SEC-05;[B];B;backend/internal/pii/pii_integration_test.go;WP-240
+SEC-05;[B];B;backend/internal/pii/surrogate_integration_test.go;WP-241

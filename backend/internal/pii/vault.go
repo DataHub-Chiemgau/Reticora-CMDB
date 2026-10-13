@@ -128,6 +128,12 @@ func (v *Vault) Delete(ctx context.Context, orgID, id string) error {
 
 // CreateTx is Create inside the caller's tenant transaction.
 func (v *Vault) CreateTx(ctx context.Context, tx pgx.Tx, orgID, kind string, data Data) (string, error) {
+	return v.createTx(ctx, tx, orgID, kind, data, "")
+}
+
+// createTx stores a subject; a parent (the person a value belongs to)
+// takes the subject with it when it is deleted.
+func (v *Vault) createTx(ctx context.Context, tx pgx.Tx, orgID, kind string, data Data, parent string) (string, error) {
 	dek, version, err := v.orgKey(ctx, tx, orgID)
 	if err != nil {
 		return "", err
@@ -140,8 +146,8 @@ func (v *Vault) CreateTx(ctx context.Context, tx pgx.Tx, orgID, kind string, dat
 	if err != nil {
 		return "", err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO pii_subject (surrogate_id, organization_id, kind, encrypted_payload, dek_ref)
-		VALUES ($1, $2, $3, $4, $5)`, id, orgID, kind, payload, version); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO pii_subject (surrogate_id, organization_id, kind, encrypted_payload, dek_ref, parent_id)
+		VALUES ($1, $2, $3, $4, $5, $6)`, id, orgID, kind, payload, version, nilIfEmpty(parent)); err != nil {
 		return "", fmt.Errorf("store pii subject: %w", err)
 	}
 	return id, nil
@@ -329,4 +335,11 @@ func ReencryptTx(ctx context.Context, tx pgx.Tx, orgID string, oldDEK, newDEK []
 		}
 	}
 	return len(stored), nil
+}
+
+func nilIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }

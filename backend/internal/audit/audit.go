@@ -17,6 +17,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -209,6 +210,15 @@ func (r *PGRecorder) Record(ctx context.Context, tx pgx.Tx, entry Entry) (*Entry
 
 	if err := AcquireAdvisoryLock(ctx, tx, entry.OrganizationID); err != nil {
 		return nil, err
+	}
+
+	// Personal values are stored as vault surrogates (SEC-05, AUD-04).
+	sealed, _, err := pii.SealTx(ctx, tx, entry.OrganizationID, entry.Changes)
+	if err != nil {
+		return nil, fmt.Errorf("audit: seal personal data: %w", err)
+	}
+	if m, ok := sealed.(map[string]interface{}); ok {
+		entry.Changes = m
 	}
 
 	// The insert trigger sets seq, previous_hash and hash under the chain
@@ -540,6 +550,15 @@ func listTx(ctx context.Context, tx pgx.Tx, orgID string, filter *ListFilter, pa
 	entries, err := scanEntries(rows)
 	if err != nil {
 		return nil, 0, err
+	}
+	// The API shows the personal values the surrogates stand for; deleted
+	// ones are null (SEC-05).
+	changes := make([]any, len(entries))
+	for i := range entries {
+		changes[i] = entries[i].Changes
+	}
+	if _, err = pii.RevealTx(ctx, tx, orgID, changes); err != nil {
+		return nil, 0, fmt.Errorf("audit: resolve personal data: %w", err)
 	}
 	return entries, total, nil
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 )
 
 // Event is what a mutation records: its type, the entity it concerns and
@@ -33,7 +34,13 @@ func (o *Outbox) Append(ctx context.Context, tx pgx.Tx, e *Event) (*Envelope, er
 	if !IsType(e.Type) {
 		return nil, fmt.Errorf("events: unknown event type %q", e.Type)
 	}
-	data, err := json.Marshal(e.Data)
+	// Personal values travel as vault surrogates (SEC-05); the in-process
+	// consumers get them resolved (Publisher).
+	sealed, _, err := pii.SealTx(ctx, tx, e.OrgID, e.Data)
+	if err != nil {
+		return nil, fmt.Errorf("events: seal personal data: %w", err)
+	}
+	data, err := json.Marshal(sealed)
 	if err != nil {
 		return nil, fmt.Errorf("events: encode data: %w", err)
 	}

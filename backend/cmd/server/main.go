@@ -37,6 +37,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
@@ -211,6 +212,9 @@ func main() {
 		repos = server.PostgresRepositories(pool, audit.NewPGRecorder())
 		auditHandler = audit.NewHandler(pool)
 		auditPool = pool
+		// Personal data in audit, CI history and events is stored as vault
+		// surrogates (SEC-05).
+		pii.SetDefault(pii.NewVault(pool, encryptor))
 
 		// Asynchronous exports render into object storage and are served via
 		// signed URLs. Without object storage, job creation answers 503 but
@@ -436,6 +440,8 @@ func main() {
 			webhook.NewPGRepository(auditPool)).Schedules()...)
 		systemJobs = append(systemJobs, jobs.NewRetention(auditPool, jobs.RetentionFromDays(cfg.RetentionAuditYears,
 			cfg.RetentionHistoryDays, cfg.RetentionSoftDeleteDays, cfg.RetentionReviewItemDays)).Schedules()...)
+		// Personal data of existing history entries into the vault (SEC-05).
+		systemJobs = append(systemJobs, jobs.NewPIIBackfill(auditPool).Schedule())
 		// Attribute indexes of searchable/unique attributes (DB-04, MET-15).
 		if typeRepo, ok := repos.CIType.(*citype.PGRepository); ok && repos.Jobs != nil {
 			ddlJob := citype.NewDDLJob(auditPool, jobs.NewService(repos.Jobs))

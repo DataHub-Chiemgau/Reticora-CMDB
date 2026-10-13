@@ -12,6 +12,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 )
 
@@ -48,6 +49,9 @@ func TestPhaseOneEventsNotify(t *testing.T) {
 
 	key, _ := crypto.GenerateMasterKey()
 	enc, _ := crypto.NewEnvelopeEncryptor(key)
+	// Personal event data travels as vault surrogates (SEC-05).
+	pii.SetDefault(pii.NewVault(f.App, enc))
+	t.Cleanup(func() { pii.SetDefault(nil) })
 	center := &notify.Center{Channels: notify.NewPGRepository(f.App, notify.NewSealer(enc)), Inbox: notify.NewPGInbox(f.App),
 		Preferences: notify.NewPGPreferences(f.App), Deliveries: notify.NewPGDeliveryStore(f.App)}
 	for _, ch := range []*notify.Channel{

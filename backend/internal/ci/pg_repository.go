@@ -15,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -625,6 +626,23 @@ func (r *PGRepository) ListChanges(ctx context.Context, orgID, ciID string, page
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("iterate ci changes: %w", err)
 		}
+		// The history shows the personal values the surrogates stand for;
+		// deleted ones are null (SEC-05).
+		values := make([]any, 0, 2*len(changes))
+		for i := range changes {
+			values = append(values, changes[i].OldValue, changes[i].NewValue)
+		}
+		revealed, err := pii.RevealTx(ctx, tx, orgID, values)
+		if err != nil {
+			return fmt.Errorf("resolve ci change values: %w", err)
+		}
+		for i, v := range revealed.([]any) {
+			if i%2 == 0 {
+				changes[i/2].OldValue = v
+			} else {
+				changes[i/2].NewValue = v
+			}
+		}
 		return nil
 	})
 	return changes, total, err
@@ -738,6 +756,14 @@ func (r *PGRepository) recordAudit(ctx context.Context, tx pgx.Tx, action string
 }
 
 func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciID string, version int64, changeType, fieldName string, oldValue, newValue any) error {
+	// Personal values are stored as vault surrogates (SEC-05).
+	oldValue, err := sealChangeValue(ctx, tx, orgID, fieldName, oldValue)
+	if err != nil {
+		return err
+	}
+	if newValue, err = sealChangeValue(ctx, tx, orgID, fieldName, newValue); err != nil {
+		return err
+	}
 	oldJSON, err := marshalJSONValue(oldValue)
 	if err != nil {
 		return fmt.Errorf("marshal old ci change value: %w", err)
@@ -763,6 +789,15 @@ func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciI
 		return fmt.Errorf("record ci change: %w", err)
 	}
 	return nil
+}
+
+// sealChangeValue replaces the personal data in a historized value.
+func sealChangeValue(ctx context.Context, tx pgx.Tx, orgID, fieldName string, value any) (any, error) {
+	sealed, _, err := pii.SealFieldTx(ctx, tx, orgID, fieldName, value)
+	if err != nil {
+		return nil, fmt.Errorf("seal ci change value: %w", err)
+	}
+	return sealed, nil
 }
 
 func marshalJSONValue(value any) (string, error) {

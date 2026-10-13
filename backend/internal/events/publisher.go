@@ -1,6 +1,7 @@
 package events
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 )
 
 // Consumer receives every published event, in sequence order per
@@ -154,7 +156,13 @@ func (p *Publisher) publishOrg(ctx context.Context, orgID string) (int, error) {
 			return err
 		}
 		for i := range pending {
-			if deliveryErr = p.deliver(ctx, &pending[i]); deliveryErr != nil {
+			// The stream keeps the surrogates; the in-process consumers
+			// (webhooks, notifications) need the personal values.
+			revealed, rerr := revealData(ctx, tx, &pending[i])
+			if rerr != nil {
+				return rerr
+			}
+			if deliveryErr = p.deliver(ctx, &pending[i], revealed); deliveryErr != nil {
 				_, err = tx.Exec(ctx, `UPDATE event_outbox SET attempts = attempts + 1, last_error = $2 WHERE id = $1`,
 					pending[i].ID, deliveryErr.Error())
 				return err
@@ -175,7 +183,7 @@ func (p *Publisher) publishOrg(ctx context.Context, orgID string) (int, error) {
 
 // deliver sends one event to the stream (the event id is the message id:
 // a repeated delivery is dropped as a duplicate) and to the consumers.
-func (p *Publisher) deliver(ctx context.Context, env *Envelope) error {
+func (p *Publisher) deliver(ctx context.Context, env, revealed *Envelope) error {
 	if p.js != nil {
 		body, err := json.Marshal(env)
 		if err != nil {
@@ -186,7 +194,7 @@ func (p *Publisher) deliver(ctx context.Context, env *Envelope) error {
 		}
 	}
 	for _, c := range p.consumers {
-		if err := c.Consume(ctx, env); err != nil {
+		if err := c.Consume(ctx, revealed); err != nil {
 			return fmt.Errorf("consume %s: %w", env.Type, err)
 		}
 	}
@@ -223,4 +231,27 @@ func (p *Publisher) Cleanup(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// revealData returns the envelope with the personal values resolved; env
+// itself when it holds no surrogates.
+func revealData(ctx context.Context, tx pgx.Tx, env *Envelope) (*Envelope, error) {
+	if !bytes.Contains(env.Data, []byte(pii.RefKey)) {
+		return env, nil
+	}
+	var data any
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		return nil, fmt.Errorf("decode event %s: %w", env.ID, err)
+	}
+	revealed, err := pii.RevealTx(ctx, tx, env.OrgID, data)
+	if err != nil {
+		return nil, fmt.Errorf("resolve event %s: %w", env.ID, err)
+	}
+	raw, err := json.Marshal(revealed)
+	if err != nil {
+		return nil, err
+	}
+	out := *env
+	out.Data = raw
+	return &out, nil
 }
