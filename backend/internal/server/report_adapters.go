@@ -106,6 +106,22 @@ func (a overrideProvenance) RecordDiscovered(ctx context.Context, orgID, ciID, f
 	return &discovery.FieldProvenance{Diverged: fv.Diverged}, nil
 }
 
+// RecordDiscoveredMany records the fields of a new CI in one statement when
+// the repository can (NFR-03).
+func (a overrideProvenance) RecordDiscoveredMany(ctx context.Context, orgID, ciID string, values map[string]any, source string, observedAt time.Time) error {
+	if many, ok := a.repo.(interface {
+		RecordDiscoveredMany(ctx context.Context, orgID, ciID string, values map[string]any, source string, observedAt time.Time) error
+	}); ok {
+		return many.RecordDiscoveredMany(ctx, orgID, ciID, values, source, observedAt)
+	}
+	for field, value := range values {
+		if _, err := a.repo.RecordDiscovered(ctx, orgID, ciID, field, value, source, observedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ClearOverride accepts the observed value of an override_conflict (REC-12).
 func (a overrideProvenance) ClearOverride(ctx context.Context, orgID, ciID, field string) error {
 	_, err := a.repo.ClearOverride(ctx, orgID, ciID, field)

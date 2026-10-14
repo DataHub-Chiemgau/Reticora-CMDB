@@ -143,7 +143,7 @@ func (d *OfflineDetector) RunOrg(ctx context.Context, orgID string) (OfflineChan
 			JOIN ci_type t ON t.id = c.ci_type_id AND t.is_observable
 			LEFT JOIN discovery_scope s ON s.organization_id = c.organization_id AND s.enabled AND (
 				(s.kind = 'cidr' AND c.management_ip <<= s.target::inet)
-				OR (s.kind = 'host' AND (host(c.management_ip) = s.target OR lower(c.hostname) = s.target OR lower(c.fqdn) = s.target))
+				OR (s.kind = 'host' AND (host(c.management_ip) = s.target OR c.hostname_lc = s.target OR c.fqdn_lc = s.target))
 				OR (s.kind = 'range' AND family(c.management_ip) = family(split_part(s.target, '-', 1)::inet)
 					AND host(c.management_ip)::inet BETWEEN split_part(s.target, '-', 1)::inet AND split_part(s.target, '-', 2)::inet))
 			WHERE c.organization_id = $1 AND c.deleted_at IS NULL AND NOT c.is_manual

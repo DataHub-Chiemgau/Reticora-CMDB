@@ -294,6 +294,15 @@ func computeImpact(failedIDs []string, edges []Edge, q impactQuery, rules map[st
 	for _, id := range failedIDs {
 		failed[id] = true
 	}
+	// The edges of each CI in graph order, so a step only looks at the
+	// edges of the CI it leaves (NFR-02); the paths stay those of a scan.
+	incident := make(map[string][]int, len(edges))
+	for i := range edges {
+		incident[edges[i].SourceCIID] = append(incident[edges[i].SourceCIID], i)
+		if edges[i].TargetCIID != edges[i].SourceCIID {
+			incident[edges[i].TargetCIID] = append(incident[edges[i].TargetCIID], i)
+		}
+	}
 	walk := func(withHeuristic bool) map[string][]PathStep {
 		follow := func(e *Edge, rule impactRule) bool {
 			if q.relType != "" && e.RelType != q.relType {
@@ -318,7 +327,7 @@ func computeImpact(failedIDs []string, edges []Edge, q impactQuery, rules map[st
 			if q.depth > 0 && len(paths[current]) >= q.depth {
 				continue
 			}
-			for i := range edges {
+			for _, i := range incident[current] {
 				rule := ruleOf(rules, edges[i].RelType)
 				if !follow(&edges[i], rule) {
 					continue

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -162,6 +163,52 @@ func (r *PGRepository) RecordDiscovered(ctx context.Context, orgID, ciID, fieldN
 		return nil
 	})
 	return out, err
+}
+
+// RecordDiscoveredMany upserts the discovered columns of several fields of
+// one CI in one statement, like RecordDiscovered per field: a new CI records
+// all its fields in one round trip instead of one transaction per field
+// (NFR-03, WP-206). The override columns stay untouched.
+func (r *PGRepository) RecordDiscoveredMany(ctx context.Context, orgID, ciID string, values map[string]any, source string, observedAt time.Time) error {
+	if len(values) == 0 {
+		return nil
+	}
+	if observedAt.IsZero() {
+		observedAt = time.Now()
+	}
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	raw := make([]*string, len(names))
+	for i, name := range names {
+		if v, ok := jsonValue(values[name]).(string); ok {
+			raw[i] = &v
+		}
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireVisibleCI(ctx, tx, ciID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO ci_field_value (
+				organization_id, ci_id, field_name, discovered_value,
+				discovered_source, discovered_at, discovered_rank, observed_at
+			)
+			SELECT $1, $2, f.name, f.value::jsonb, $5, now(), $6, $7
+			FROM unnest($3::text[], $4::text[]) AS f(name, value)
+			ON CONFLICT (ci_id, field_name) DO UPDATE SET
+				discovered_value = EXCLUDED.discovered_value,
+				discovered_source = EXCLUDED.discovered_source,
+				discovered_at = EXCLUDED.discovered_at,
+				discovered_rank = EXCLUDED.discovered_rank,
+				observed_at = EXCLUDED.observed_at`,
+			orgID, ciID, names, raw, nilIfEmpty(source), SourceRank(source), observedAt.UTC()); err != nil {
+			return fmt.Errorf("record discovered values: %w", err)
+		}
+		return nil
+	})
 }
 
 // SetOverride sets or replaces the manual override of a field.

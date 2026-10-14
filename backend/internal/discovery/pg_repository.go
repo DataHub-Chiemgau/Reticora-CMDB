@@ -655,14 +655,17 @@ func (r *PGRepository) IdentityCandidates(ctx context.Context, orgID string, q *
 			afterCreated time.Time
 			afterID      string
 		)
+		predicate, base, ok := identityFilter(orgID, q)
+		if !ok {
+			return nil
+		}
 		for {
-			args := identityArgs(orgID, q)
-			n := len(args)
-			args = append(args, afterID, afterCreated, identityPage)
+			n := len(base)
+			args := append(append([]any{}, base...), afterID, afterCreated, identityPage)
 			rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT id::text, created_at FROM ci
 				WHERE organization_id = $1 AND deleted_at IS NULL AND %s
 				AND ($%d::text = '' OR (created_at, id) > ($%d::timestamptz, NULLIF($%d::text, '')::uuid))
-				ORDER BY created_at, id LIMIT $%d`, identityPredicate, n+1, n+2, n+1, n+3), args...)
+				ORDER BY created_at, id LIMIT $%d`, predicate, n+1, n+2, n+1, n+3), args...)
 			if err != nil {
 				return err
 			}
@@ -711,13 +714,17 @@ func (r *PGRepository) DiscoveryEdge(ctx context.Context, orgID, sourceID, targe
 // may be, with the fields identity resolution compares (CI-13).
 func (r *PGRepository) DeletedIdentityCandidates(ctx context.Context, orgID string, q *IdentityQuery) ([]ci.Item, error) {
 	var out []ci.Item
+	predicate, args, ok := identityFilter(orgID, q)
+	if !ok {
+		return out, nil
+	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT id::text, ci_type_id::text, COALESCE(client_id::text, ''), name,
 				COALESCE(serial_number, ''), COALESCE(hardware_uuid::text, ''), COALESCE(primary_mac::text, ''),
 				COALESCE(host(management_ip), ''), COALESCE(sys_object_id, ''), COALESCE(hostname, ''), COALESCE(fqdn, ''),
 				COALESCE(attributes, '{}'::jsonb), deleted_at
-			FROM ci WHERE organization_id = $1 AND deleted_at IS NOT NULL AND `+identityPredicate+`
-			ORDER BY deleted_at DESC, id LIMIT 1000`, identityArgs(orgID, q)...)
+			FROM ci WHERE organization_id = $1 AND deleted_at IS NOT NULL AND `+predicate+`
+			ORDER BY deleted_at DESC, id LIMIT 1000`, args...)
 		if err != nil {
 			return err
 		}
@@ -737,24 +744,44 @@ func (r *PGRepository) DeletedIdentityCandidates(ctx context.Context, orgID stri
 	return out, err
 }
 
-// identityPredicate matches CIs by the indexed identity columns; its
-// arguments come from identityArgs.
-const identityPredicate = `(
-	($2 <> '' AND serial_number = $2)
-	OR ($3 <> '' AND hardware_uuid = NULLIF($3, '')::uuid)
-	OR primary_mac = ANY($4::macaddr[])
-	OR attributes @> ANY($5::jsonb[])
-	OR ($6 <> '' AND management_ip = NULLIF($6, '')::inet)
-	OR lower(hostname) = ANY($7::text[])
-	OR lower(fqdn) = ANY($7::text[])
-)`
-
-func identityArgs(orgID string, q *IdentityQuery) []any {
-	macDocs := make([]string, 0, len(q.MACs))
-	for _, mac := range q.MACs {
-		macDocs = append(macDocs, `{"fingerprint":{"mac_addresses":["`+mac+`"]}}`)
+// identityFilter matches CIs by the indexed identity columns of q: only
+// the parts q carries become terms, so the planner combines the indexes on
+// serial number, hardware UUID, primary MAC, interface MACs, management IP
+// and hostname/FQDN (BitmapOr) instead of scanning the inventory (NFR-01,
+// NFR-03). Hostnames compare with the stored lower-case columns (migration
+// 000134): lower() is not leakproof and keeps an index unused under RLS. The arguments start at $2 after the organization; ok is false
+// when q carries no identity.
+func identityFilter(orgID string, q *IdentityQuery) (predicate string, args []any, ok bool) {
+	args = []any{orgID}
+	var terms []string
+	add := func(term string, arg any) {
+		args = append(args, arg)
+		terms = append(terms, fmt.Sprintf(term, len(args)))
 	}
-	return []any{orgID, q.SerialNumber, q.HardwareUUID, q.MACs, macDocs, hostOnly(q.ManagementIP), q.Hostnames}
+	if q.SerialNumber != "" {
+		add("serial_number = $%d", q.SerialNumber)
+	}
+	if q.HardwareUUID != "" {
+		add("hardware_uuid = $%d::uuid", q.HardwareUUID)
+	}
+	if len(q.MACs) > 0 {
+		add("primary_mac = ANY($%d::macaddr[])", q.MACs)
+		macDocs := make([]string, 0, len(q.MACs))
+		for _, mac := range q.MACs {
+			macDocs = append(macDocs, `{"fingerprint":{"mac_addresses":["`+mac+`"]}}`)
+		}
+		add("attributes @> ANY($%d::jsonb[])", macDocs)
+	}
+	if ip := hostOnly(q.ManagementIP); ip != "" {
+		add("management_ip = $%d::inet", ip)
+	}
+	if len(q.Hostnames) > 0 {
+		add("(hostname_lc = ANY($%[1]d::text[]) OR fqdn_lc = ANY($%[1]d::text[]))", q.Hostnames)
+	}
+	if len(terms) == 0 {
+		return "", nil, false
+	}
+	return "(" + strings.Join(terms, " OR ") + ")", args, true
 }
 
 // hostOnly drops a prefix length and anything that is no IP address.
