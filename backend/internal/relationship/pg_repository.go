@@ -334,72 +334,83 @@ func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, f
 	})
 }
 
-// TraverseFrom walks the configuration graph from rootCIID with one recursive
-// CTE under the caller's full tenant scope (RLS on ci and ci_relationship).
-// The walk only passes through CIs that are visible and not deleted: an edge
-// is followed only when both endpoints are such CIs, so an invisible or
-// deleted intermediate node never connects visible ones (IMP-07). The CTE
-// collects nodes (not paths) with their hop distance, which bounds the rows
-// by nodes × maxDepth; the result follows SelectTraversal, the semantics the
-// memory repository shares.
+// TraverseFrom walks the configuration graph from rootCIID breadth first,
+// one statement per hop, under the caller's full tenant scope (RLS on ci and
+// ci_relationship). Each node is expanded once, so a walk costs at most
+// maxDepth statements and reads each edge at most twice, whatever cycles the
+// graph has (NFR-02, WP-206; the former recursive CTE re-expanded every node
+// at every depth). The walk only passes through CIs that are visible and not
+// deleted: an edge is followed only when both endpoints are such CIs, so an
+// invisible or deleted intermediate node never connects visible ones
+// (IMP-07). The result follows SelectTraversal, the semantics the memory
+// repository shares.
 func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error) {
-	items := make([]Relationship, 0)
 	if maxDepth < 1 || maxNodes < 1 {
-		return items, nil
+		return make([]Relationship, 0), nil
 	}
-
+	var edges []Relationship
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `
-			WITH RECURSIVE reach (ci_id, depth) AS (
-				SELECT c.id, 0
-				FROM ci c
-				WHERE c.id = $2 AND c.organization_id = $1 AND c.deleted_at IS NULL
-
-				UNION
-
-				SELECT CASE WHEN r.source_ci_id = w.ci_id THEN r.target_ci_id ELSE r.source_ci_id END,
-				       w.depth + 1
-				FROM reach w
-				JOIN `+graphEdges+` r
-				  ON r.organization_id = $1
-				 AND (r.source_ci_id = w.ci_id OR r.target_ci_id = w.ci_id)
-				JOIN ci s ON s.id = r.source_ci_id AND s.deleted_at IS NULL
-				JOIN ci t ON t.id = r.target_ci_id AND t.deleted_at IS NULL
-				WHERE w.depth < $3
-			),
-			nodes AS (
-				SELECT ci_id, min(depth) AS depth FROM reach GROUP BY ci_id
-			),
-			kept AS (
-				SELECT ci_id, depth FROM nodes ORDER BY depth, ci_id::text COLLATE "C" LIMIT $4
-			)
-			SELECT `+traversalSelectColumns+`
-			FROM `+graphEdges+` r
-			JOIN kept a ON a.ci_id = r.source_ci_id
-			JOIN kept b ON b.ci_id = r.target_ci_id
-			WHERE r.organization_id = $1
-			  AND LEAST(a.depth, b.depth) < $3
-			ORDER BY r.id::text COLLATE "C"
-		`, orgID, rootCIID, maxDepth, maxNodes)
-		if err != nil {
+		var visible bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE id = $2 AND organization_id = $1 AND deleted_at IS NULL)`,
+			orgID, rootCIID).Scan(&visible); err != nil {
 			return fmt.Errorf("traverse relationships: %w", err)
 		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var item Relationship
-			if err := rows.Scan(&item.ID, &item.SourceCIID, &item.TargetCIID, &item.RelType, &item.Source); err != nil {
-				return fmt.Errorf("scan traversed relationship: %w", err)
-			}
-			items = append(items, item)
+		if !visible {
+			return nil
 		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterate traversed relationships: %w", err)
+		seenNode := map[string]bool{rootCIID: true}
+		seenEdge := map[string]bool{}
+		frontier := []string{rootCIID}
+		hops := maxDepth
+		for hop := 0; hop < hops && len(frontier) > 0; hop++ {
+			rows, err := tx.Query(ctx, `SELECT `+traversalSelectColumns+`
+				FROM `+graphEdges+` r
+				JOIN ci s ON s.id = r.source_ci_id AND s.deleted_at IS NULL
+				JOIN ci t ON t.id = r.target_ci_id AND t.deleted_at IS NULL
+				WHERE r.organization_id = $1
+				  AND (r.source_ci_id = ANY($2::uuid[]) OR r.target_ci_id = ANY($2::uuid[]))`, orgID, frontier)
+			if err != nil {
+				return fmt.Errorf("traverse relationships: %w", err)
+			}
+			var next []string
+			for rows.Next() {
+				var item Relationship
+				if err := rows.Scan(&item.ID, &item.SourceCIID, &item.TargetCIID, &item.RelType, &item.Source); err != nil {
+					rows.Close()
+					return fmt.Errorf("scan traversed relationship: %w", err)
+				}
+				if seenEdge[item.ID] {
+					continue
+				}
+				seenEdge[item.ID] = true
+				edges = append(edges, item)
+				for _, id := range []string{item.SourceCIID, item.TargetCIID} {
+					if !seenNode[id] {
+						seenNode[id] = true
+						next = append(next, id)
+					}
+				}
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterate traversed relationships: %w", err)
+			}
+			// Beyond the node limit the walk ends after collecting the
+			// edges of the nodes just reached: nodes further away are
+			// dropped by the limit anyway.
+			if len(seenNode) > maxNodes && len(next) > 0 {
+				frontier = next
+				hops = min(hops, hop+2)
+				continue
+			}
+			frontier = next
 		}
 		return nil
 	})
-
-	return items, err
+	if err != nil {
+		return nil, err
+	}
+	return SelectTraversal(rootCIID, edges, maxDepth, maxNodes), nil
 }
 
 const traversalSelectColumns = `

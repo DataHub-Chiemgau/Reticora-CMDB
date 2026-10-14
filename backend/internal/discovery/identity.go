@@ -389,6 +389,26 @@ func (h *Handler) identityCandidates(ctx context.Context, orgID string, item *In
 	if err != nil {
 		return nil, fmt.Errorf("identity candidates: %w", err)
 	}
+	// One read for all candidates (NFR-03), in the order of the index query.
+	if reader, ok := h.ciRepo.(ci.BatchReader); ok && len(ids) > 0 {
+		items, err := reader.GetByIDs(ctx, orgID, ids)
+		if err != nil {
+			return nil, fmt.Errorf("load candidates: %w", err)
+		}
+		byID := make(map[string]ci.Item, len(items))
+		for i := range items {
+			byID[items[i].ID] = items[i]
+		}
+		out := make([]ci.Item, 0, len(ids))
+		for _, id := range ids {
+			item, ok := byID[id]
+			if !ok {
+				return nil, fmt.Errorf("load candidate %s: not found", id)
+			}
+			out = append(out, item)
+		}
+		return out, nil
+	}
 	out := make([]ci.Item, 0, len(ids))
 	for _, id := range ids {
 		item, err := h.ciRepo.GetByID(ctx, orgID, id)

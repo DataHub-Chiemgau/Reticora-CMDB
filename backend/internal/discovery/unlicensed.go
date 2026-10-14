@@ -105,16 +105,15 @@ func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *In
 	}
 	// New CIs carry no overrides; every discovered field is recorded as
 	// provenance so future drift is visible.
-	for field, value := range map[string]any{
+	fields := map[string]any{
 		"name": item.Name, "manufacturer": item.Manufacturer, "model": item.Model,
 		"serial_number": item.SerialNumber, "management_ip": item.ManagementIP,
 		"hostname": item.Hostname, "fqdn": item.FQDN,
-	} {
-		h.recordDiscovered(ctx, orgID, newItem.ID, field, value, source, item.ObservedAt)
 	}
 	for k, v := range item.Attributes {
-		h.recordDiscovered(ctx, orgID, newItem.ID, k, v, source, item.ObservedAt)
+		fields[k] = v
 	}
+	h.recordDiscoveredMany(ctx, orgID, newItem.ID, fields, source, item.ObservedAt)
 	return newItem, nil
 }
 

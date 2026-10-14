@@ -331,16 +331,21 @@ func SelectTraversal(rootCIID string, edges []Relationship, maxDepth, maxNodes i
 	if maxDepth < 1 || maxNodes < 1 || rootCIID == "" {
 		return result
 	}
+	// Adjacency index: each node expands its own edges only (NFR-02).
+	incident := make(map[string][]int, len(edges))
+	for i := range edges {
+		incident[edges[i].SourceCIID] = append(incident[edges[i].SourceCIID], i)
+		if edges[i].TargetCIID != edges[i].SourceCIID {
+			incident[edges[i].TargetCIID] = append(incident[edges[i].TargetCIID], i)
+		}
+	}
 	depth := map[string]int{rootCIID: 0}
 	frontier := []string{rootCIID}
 	for d := 1; d <= maxDepth && len(frontier) > 0; d++ {
 		var next []string
 		for _, id := range frontier {
-			for i := range edges {
+			for _, i := range incident[id] {
 				rel := &edges[i]
-				if rel.SourceCIID != id && rel.TargetCIID != id {
-					continue
-				}
 				neighbor := rel.TargetCIID
 				if neighbor == id {
 					neighbor = rel.SourceCIID

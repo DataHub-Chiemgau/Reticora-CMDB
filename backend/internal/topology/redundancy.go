@@ -31,28 +31,35 @@ func downSet(failed map[string]bool, edges []Edge, rules map[string]impactRule, 
 			}
 		}
 	}
+	incident := make(map[string][]int, len(edges))
+	for i := range edges {
+		incident[edges[i].SourceCIID] = append(incident[edges[i].SourceCIID], i)
+		if edges[i].TargetCIID != edges[i].SourceCIID {
+			incident[edges[i].TargetCIID] = append(incident[edges[i].TargetCIID], i)
+		}
+	}
+	// A worklist reaches the same fixpoint as repeated scans: a CI only
+	// goes down through an edge of a CI that just went down (NFR-02).
 	down := map[string]bool{}
+	queue := make([]string, 0, len(failed))
 	for id := range failed {
 		down[id] = true
+		queue = append(queue, id)
 	}
-	for changed := true; changed; {
-		changed = false
-		for i := range edges {
+	for len(queue) > 0 {
+		from := queue[0]
+		queue = queue[1:]
+		for _, i := range incident[from] {
 			rule := ruleOf(rules, edges[i].RelType)
-			for _, from := range []string{edges[i].SourceCIID, edges[i].TargetCIID} {
-				if !down[from] {
-					continue
-				}
-				to, heuristic, ok := impactStep(&edges[i], from, rule)
-				if !ok || down[to] || !follow(&edges[i], rule, heuristic) {
-					continue
-				}
-				if rule.redundant && !allDown(providers[providerKey{to, edges[i].RelType}], down) {
-					continue
-				}
-				down[to] = true
-				changed = true
+			to, heuristic, ok := impactStep(&edges[i], from, rule)
+			if !ok || down[to] || !follow(&edges[i], rule, heuristic) {
+				continue
 			}
+			if rule.redundant && !allDown(providers[providerKey{to, edges[i].RelType}], down) {
+				continue
+			}
+			down[to] = true
+			queue = append(queue, to)
 		}
 	}
 	return down

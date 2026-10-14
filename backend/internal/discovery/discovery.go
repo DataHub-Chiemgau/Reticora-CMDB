@@ -514,6 +514,28 @@ func (h *Handler) recordDiscovered(ctx context.Context, orgID, ciID, fieldName s
 	_, _ = h.provenance.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source, observedAt)
 }
 
+// manyProvenance records several fields of a CI at once (the PostgreSQL
+// override repository).
+type manyProvenance interface {
+	RecordDiscoveredMany(ctx context.Context, orgID, ciID string, values map[string]any, source string, observedAt time.Time) error
+}
+
+// recordDiscoveredMany records the provenance of the fields of a new CI in
+// one statement where the store can (NFR-03), else field by field; like
+// recordDiscovered it never fails the ingest.
+func (h *Handler) recordDiscoveredMany(ctx context.Context, orgID, ciID string, values map[string]any, source string, observedAt time.Time) {
+	if h.provenance == nil || ciID == "" {
+		return
+	}
+	if many, ok := h.provenance.(manyProvenance); ok {
+		_ = many.RecordDiscoveredMany(ctx, orgID, ciID, values, source, observedAt)
+		return
+	}
+	for field, value := range values {
+		h.recordDiscovered(ctx, orgID, ciID, field, value, source, observedAt)
+	}
+}
+
 // decide applies the central write decision; without a provenance store
 // (--no-db smoke tests) the rank table alone decides.
 func (h *Handler) decide(ctx context.Context, w *override.Write) override.Decision {

@@ -289,14 +289,29 @@ type suppressionProvider interface {
 	SuppressedPairs(ctx context.Context, orgID string) (map[string]bool, error)
 }
 
+// edgeFinder looks an edge up by its endpoints and type (PostgreSQL); other
+// repositories list the edges of the source.
+type edgeFinder interface {
+	DiscoveryEdge(ctx context.Context, orgID, sourceID, targetID, relType string) (id, source string, found bool, err error)
+}
+
 // upsertRelationship creates a discovery edge, or re-confirms an existing
 // one (last_seen_at, last_confirmed_at, confidence; TOP-02). An edge of
 // another source between the same CIs stays untouched (source policy,
 // REL-08). It reports whether a new edge was created.
 func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d DerivedRelationship) bool {
 	confidence := d.Confidence
-	existing, _, err := h.relRepo.List(ctx, orgID, d.SourceCIID, api.PaginationParams{Limit: 10000, Offset: 0})
-	if err == nil {
+	if finder, ok := h.repo.(edgeFinder); ok {
+		id, source, found, err := finder.DiscoveryEdge(ctx, orgID, d.SourceCIID, d.TargetCIID, d.RelType)
+		if err == nil && found {
+			if confirmer, ok := h.relRepo.(relationship.Confirmer); ok && relationship.MayChange(RelationshipSource, source) {
+				if cerr := confirmer.Confirm(ctx, orgID, id, &confidence); cerr != nil {
+					slog.Warn("re-confirm discovery edge", "relationship_id", id, "error", cerr)
+				}
+			}
+			return false
+		}
+	} else if existing, _, err := h.relRepo.List(ctx, orgID, d.SourceCIID, api.PaginationParams{Limit: 10000, Offset: 0}); err == nil {
 		for i := range existing {
 			rel := &existing[i]
 			if rel.SourceCIID != d.SourceCIID || rel.TargetCIID != d.TargetCIID || rel.RelType != d.RelType {

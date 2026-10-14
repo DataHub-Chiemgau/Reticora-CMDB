@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
@@ -132,20 +133,37 @@ func (s *Service) runBulkJob(ctx context.Context, orgID, jobID string, req *Bulk
 	}
 }
 
-// runBulk applies the operation to every id and reports each.
+// bulkWorkers bounds the CIs a bulk changes at once: each change is its own
+// transaction, so a few run side by side (NFR-02: 500 ids < 30 s).
+const bulkWorkers = 8
+
+// runBulk applies the operation to every id and reports each, in the order
+// of the ids.
 func (s *Service) runBulk(ctx context.Context, orgID string, req *BulkRequest) *BulkResult {
-	result := &BulkResult{Action: req.Action, Total: len(req.IDs), Items: make([]BulkItemResult, 0, len(req.IDs))}
+	result := &BulkResult{Action: req.Action, Total: len(req.IDs), Items: make([]BulkItemResult, len(req.IDs))}
 	status := req.Status
-	for _, id := range req.IDs {
-		_, err := s.Update(ctx, orgID, id, UpdateRequest{Status: &status})
-		if err == nil {
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, bulkWorkers)
+	for i, id := range req.IDs {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func(i int, id string) {
+			defer func() { <-slots; wg.Done() }()
+			if _, err := s.Update(ctx, orgID, id, UpdateRequest{Status: &status}); err != nil {
+				code, msg := bulkError(err)
+				result.Items[i] = BulkItemResult{ID: id, Result: bulkResultError, Code: code, Error: msg}
+				return
+			}
+			result.Items[i] = BulkItemResult{ID: id, Result: bulkResultOK, Code: http.StatusOK}
+		}(i, id)
+	}
+	wg.Wait()
+	for i := range result.Items {
+		if result.Items[i].Result == bulkResultOK {
 			result.Succeeded++
-			result.Items = append(result.Items, BulkItemResult{ID: id, Result: bulkResultOK, Code: http.StatusOK})
-			continue
+		} else {
+			result.Failed++
 		}
-		code, msg := bulkError(err)
-		result.Failed++
-		result.Items = append(result.Items, BulkItemResult{ID: id, Result: bulkResultError, Code: code, Error: msg})
 	}
 	return result
 }

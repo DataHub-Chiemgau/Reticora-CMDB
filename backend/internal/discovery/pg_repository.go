@@ -638,43 +638,93 @@ func (r *PGRepository) MarkRecordsProcessed(ctx context.Context, orgID string, r
 	})
 }
 
+// identityPage is the page size of the candidate query; the pages run
+// until the matches are exhausted, so there is no upper bound (NFR-01).
+const identityPage = 1000
+
 // IdentityCandidates returns the ids of the CIs an incoming device may be,
 // using the indexes on serial number, hardware UUID, primary MAC, management
 // IP and hostname/FQDN plus the attribute index for interface MACs, over the
-// whole inventory of the organization (REC-02, NFR-01). Soft-deleted CIs are
-// excluded.
+// whole inventory of the organization (REC-02, NFR-01). The matches are read
+// page by page on (created_at, id) without an upper bound (WP-205).
+// Soft-deleted CIs are excluded.
 func (r *PGRepository) IdentityCandidates(ctx context.Context, orgID string, q *IdentityQuery) ([]string, error) {
 	var ids []string
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT id::text FROM ci WHERE organization_id = $1 AND deleted_at IS NULL AND `+identityPredicate+`
-			ORDER BY created_at, id LIMIT 1000`, identityArgs(orgID, q)...)
-		if err != nil {
-			return err
+		var (
+			afterCreated time.Time
+			afterID      string
+		)
+		predicate, base, ok := identityFilter(orgID, q)
+		if !ok {
+			return nil
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
+		for {
+			n := len(base)
+			args := append(append([]any{}, base...), afterID, afterCreated, identityPage)
+			rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT id::text, created_at FROM ci
+				WHERE organization_id = $1 AND deleted_at IS NULL AND %s
+				AND ($%d::text = '' OR (created_at, id) > ($%d::timestamptz, NULLIF($%d::text, '')::uuid))
+				ORDER BY created_at, id LIMIT $%d`, predicate, n+1, n+2, n+1, n+3), args...)
+			if err != nil {
 				return err
 			}
-			ids = append(ids, id)
+			page := 0
+			for rows.Next() {
+				if err := rows.Scan(&afterID, &afterCreated); err != nil {
+					rows.Close()
+					return err
+				}
+				ids = append(ids, afterID)
+				page++
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			if page < identityPage {
+				return nil
+			}
 		}
-		return rows.Err()
 	})
 	return ids, err
+}
+
+// DiscoveryEdge finds the edge of a type between two CIs with an index
+// lookup instead of listing every edge of the source (WP-205): a core switch
+// with thousands of neighbours is re-confirmed without a scan or a cap.
+func (r *PGRepository) DiscoveryEdge(ctx context.Context, orgID, sourceID, targetID, relType string) (id, source string, found bool, err error) {
+	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		qerr := tx.QueryRow(ctx, `SELECT id::text, source FROM ci_relationship
+			WHERE organization_id = $1 AND source_ci_id = $2 AND target_ci_id = $3 AND rel_type = $4
+			ORDER BY created_at, id LIMIT 1`, orgID, sourceID, targetID, relType).Scan(&id, &source)
+		if errors.Is(qerr, pgx.ErrNoRows) {
+			return nil
+		}
+		if qerr != nil {
+			return qerr
+		}
+		found = true
+		return nil
+	})
+	return id, source, found, err
 }
 
 // DeletedIdentityCandidates returns the soft-deleted CIs an incoming device
 // may be, with the fields identity resolution compares (CI-13).
 func (r *PGRepository) DeletedIdentityCandidates(ctx context.Context, orgID string, q *IdentityQuery) ([]ci.Item, error) {
 	var out []ci.Item
+	predicate, args, ok := identityFilter(orgID, q)
+	if !ok {
+		return out, nil
+	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT id::text, ci_type_id::text, COALESCE(client_id::text, ''), name,
 				COALESCE(serial_number, ''), COALESCE(hardware_uuid::text, ''), COALESCE(primary_mac::text, ''),
 				COALESCE(host(management_ip), ''), COALESCE(sys_object_id, ''), COALESCE(hostname, ''), COALESCE(fqdn, ''),
 				COALESCE(attributes, '{}'::jsonb), deleted_at
-			FROM ci WHERE organization_id = $1 AND deleted_at IS NOT NULL AND `+identityPredicate+`
-			ORDER BY deleted_at DESC, id LIMIT 1000`, identityArgs(orgID, q)...)
+			FROM ci WHERE organization_id = $1 AND deleted_at IS NOT NULL AND `+predicate+`
+			ORDER BY deleted_at DESC, id LIMIT 1000`, args...)
 		if err != nil {
 			return err
 		}
@@ -694,24 +744,44 @@ func (r *PGRepository) DeletedIdentityCandidates(ctx context.Context, orgID stri
 	return out, err
 }
 
-// identityPredicate matches CIs by the indexed identity columns; its
-// arguments come from identityArgs.
-const identityPredicate = `(
-	($2 <> '' AND serial_number = $2)
-	OR ($3 <> '' AND hardware_uuid = NULLIF($3, '')::uuid)
-	OR primary_mac = ANY($4::macaddr[])
-	OR attributes @> ANY($5::jsonb[])
-	OR ($6 <> '' AND management_ip = NULLIF($6, '')::inet)
-	OR lower(hostname) = ANY($7::text[])
-	OR lower(fqdn) = ANY($7::text[])
-)`
-
-func identityArgs(orgID string, q *IdentityQuery) []any {
-	macDocs := make([]string, 0, len(q.MACs))
-	for _, mac := range q.MACs {
-		macDocs = append(macDocs, `{"fingerprint":{"mac_addresses":["`+mac+`"]}}`)
+// identityFilter matches CIs by the indexed identity columns of q: only
+// the parts q carries become terms, so the planner combines the indexes on
+// serial number, hardware UUID, primary MAC, interface MACs, management IP
+// and hostname/FQDN (BitmapOr) instead of scanning the inventory (NFR-01,
+// NFR-03). Hostnames compare with the stored lower-case columns (migration
+// 000134): lower() is not leakproof and keeps an index unused under RLS. The arguments start at $2 after the organization; ok is false
+// when q carries no identity.
+func identityFilter(orgID string, q *IdentityQuery) (predicate string, args []any, ok bool) {
+	args = []any{orgID}
+	var terms []string
+	add := func(term string, arg any) {
+		args = append(args, arg)
+		terms = append(terms, fmt.Sprintf(term, len(args)))
 	}
-	return []any{orgID, q.SerialNumber, q.HardwareUUID, q.MACs, macDocs, hostOnly(q.ManagementIP), q.Hostnames}
+	if q.SerialNumber != "" {
+		add("serial_number = $%d", q.SerialNumber)
+	}
+	if q.HardwareUUID != "" {
+		add("hardware_uuid = $%d::uuid", q.HardwareUUID)
+	}
+	if len(q.MACs) > 0 {
+		add("primary_mac = ANY($%d::macaddr[])", q.MACs)
+		macDocs := make([]string, 0, len(q.MACs))
+		for _, mac := range q.MACs {
+			macDocs = append(macDocs, `{"fingerprint":{"mac_addresses":["`+mac+`"]}}`)
+		}
+		add("attributes @> ANY($%d::jsonb[])", macDocs)
+	}
+	if ip := hostOnly(q.ManagementIP); ip != "" {
+		add("management_ip = $%d::inet", ip)
+	}
+	if len(q.Hostnames) > 0 {
+		add("(hostname_lc = ANY($%[1]d::text[]) OR fqdn_lc = ANY($%[1]d::text[]))", q.Hostnames)
+	}
+	if len(terms) == 0 {
+		return "", nil, false
+	}
+	return "(" + strings.Join(terms, " OR ") + ")", args, true
 }
 
 // hostOnly drops a prefix length and anything that is no IP address.
