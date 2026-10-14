@@ -430,3 +430,5 @@ RBA-05;[P2–P4], [A];Phase;backend/internal/server/modules_test.go;WP-214
 SIM-01;[B], Teilumfang [P2];LT;backend/cmd/seed/seed_integration_test.go;WP-203
 NFR-10;[Q];LT;backend/cmd/seed/seed_integration_test.go;WP-203
 NFR-01;[B], Teilumfang [P5];LT;backend/internal/discovery/scale_integration_test.go;WP-205
+NFR-10;[Q];LT;backend/internal/ci/querybudget_integration_test.go;WP-204
+ABN-02;[Q];LT;backend/internal/ci/querybudget_integration_test.go;WP-204

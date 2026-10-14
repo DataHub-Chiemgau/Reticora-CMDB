@@ -1,0 +1,112 @@
+# NFR-10 (WP-204): load test against the SIM-01 seed scaled to 10,000
+# objects. The k6 thresholds are the budgets of NFR-02 and NFR-03; the
+# summaries are uploaded as artifacts (tests/load/README.md).
+name: Load test
+
+on:
+  workflow_dispatch:
+    inputs:
+      objects:
+        description: CIs of the demo organization (NFR-10: 10000)
+        default: "10000"
+      duration:
+        description: Duration of each read scenario
+        default: "2m"
+  schedule:
+    - cron: "17 2 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: timescale/timescaledb:2.17.2-pg16
+        env:
+          POSTGRES_USER: reticora
+          POSTGRES_PASSWORD: reticora
+          POSTGRES_DB: reticora
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U reticora"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: postgres://reticora:reticora@localhost:5432/reticora?sslmode=disable
+      OBJECTS: ${{ inputs.objects || '10000' }}
+      DURATION: ${{ inputs.duration || '2m' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.9"
+          cache-dependency-path: backend/go.sum
+
+      - name: Start NATS with JetStream
+        run: docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
+
+      - name: Migrate
+        run: |
+          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
+          migrate -path backend/migrations -database "$DATABASE_URL" up
+
+      - name: Build server and seed
+        working-directory: backend
+        run: |
+          go build -o "$RUNNER_TEMP/server" ./cmd/server
+          go build -o "$RUNNER_TEMP/seed" ./cmd/seed
+
+      - name: Seed (SIM-01, NFR-10)
+        run: |
+          "$RUNNER_TEMP/seed" -database-url "$DATABASE_URL" -objects "$OBJECTS" -api-key-file "$RUNNER_TEMP/load.key"
+
+      - name: Start the server
+        run: |
+          openssl genrsa -out "$RUNNER_TEMP/session.pem" 2048
+          RETICORA_DATABASE_URL="$DATABASE_URL" \
+          RETICORA_REDIS_URL=redis://localhost:6379/0 \
+          RETICORA_NATS_URL=nats://localhost:4222 \
+          RETICORA_SESSION_KEY_PATH="$RUNNER_TEMP/session.pem" \
+          RETICORA_MASTER_KEY="$(head -c 32 /dev/urandom | base64)" \
+          RETICORA_RATE_LIMIT_RPM=1000000 RETICORA_RATE_LIMIT_ORG_RPM=1000000 \
+          nohup "$RUNNER_TEMP/server" > "$RUNNER_TEMP/server.log" 2>&1 &
+          for i in $(seq 1 60); do curl -fsS http://localhost:8080/healthz >/dev/null && exit 0; sleep 1; done
+          cat "$RUNNER_TEMP/server.log"; exit 1
+
+      - uses: grafana/setup-k6-action@v1
+        with:
+          k6-version: "0.54.0"
+
+      - name: Latency budgets (NFR-02)
+        run: |
+          set -o pipefail
+          mkdir -p load-results
+          k6 run -e BASE_URL=http://localhost:8080 -e API_KEY="$(cat "$RUNNER_TEMP/load.key")" -e DURATION="$DURATION" \
+            --summary-export load-results/api.json tests/load/api.js | tee load-results/api.txt
+
+      - name: Ingest throughput and delay (NFR-03)
+        if: always()
+        run: |
+          set -o pipefail
+          k6 run -e BASE_URL=http://localhost:8080 -e API_KEY="$(cat "$RUNNER_TEMP/load.key")" \
+            --summary-export load-results/ingest.json tests/load/ingest.js | tee load-results/ingest.txt
+
+      - name: Collect the server log
+        if: always()
+        run: cp "$RUNNER_TEMP/server.log" load-results/ || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: load-results
+          path: load-results/

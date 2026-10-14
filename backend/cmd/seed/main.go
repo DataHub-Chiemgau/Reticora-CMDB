@@ -23,6 +23,7 @@ func main() {
 	metrics := flag.Int("metrics", 2000, "metric samples of the demo organization")
 	at := flag.String("at", "", "anchor time of every timestamp (RFC 3339; default: the current hour)")
 	prefix := flag.String("prefix", "", "prefix of the organization slugs and ids")
+	keyFile := flag.String("api-key-file", "", "issue a load-test API key of the demo administrator and write it to this file")
 	flag.Parse()
 	if *dsn == "" {
 		fmt.Fprintln(os.Stderr, "seed: database URL is required")
@@ -47,10 +48,17 @@ func main() {
 	defer pool.Close()
 
 	start := time.Now()
-	summary, err := Run(ctx, pool, Options{Prefix: *prefix, Objects: *objects, Metrics: *metrics, At: anchor})
+	summary, err := Run(ctx, pool, Options{Prefix: *prefix, Objects: *objects, Metrics: *metrics, At: anchor,
+		APIKey: *keyFile != ""})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "seed: %v\n", err)
 		os.Exit(1)
+	}
+	if *keyFile != "" {
+		if err = os.WriteFile(*keyFile, []byte(summary.Orgs[0].APIKey+"\n"), 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "seed: write API key: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	for _, o := range summary.Orgs {
 		fmt.Printf("%s\t%s\t%s\n", o.Slug, o.ID, o.Admin)

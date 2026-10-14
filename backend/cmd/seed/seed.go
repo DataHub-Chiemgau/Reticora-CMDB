@@ -9,6 +9,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -27,6 +28,10 @@ type Options struct {
 	Metrics int
 	// At anchors every timestamp, so a seed is reproducible.
 	At time.Time
+	// APIKey issues a test API key of the demo administrator for the load
+	// test (NFR-10); an earlier load-test key is revoked. The key is the
+	// only random part of a seed.
+	APIKey bool
 }
 
 // MaxObjects is the headroom of NFR-01.
@@ -40,6 +45,8 @@ type Org struct {
 	ID    string
 	Slug  string
 	Admin string
+	// APIKey is the plaintext of the load-test key (Options.APIKey).
+	APIKey string
 }
 
 // Summary reports what the seed holds.
@@ -97,10 +104,11 @@ func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error)
 			id: ID(opts.Prefix, "org", spec.slug), slug: slug, name: spec.name, admin: "admin@" + spec.domain,
 			prefix: opts.Prefix + spec.slug, octet: 10 + n, objects: spec.objects, metrics: spec.metrics, at: opts.At,
 		}
+		o.issueKey = opts.APIKey && n == 0
 		if err := database.WithOrganizationSetup(ctx, pool, o.id, o.seed); err != nil {
 			return Summary{}, fmt.Errorf("seed %s: %w", slug, err)
 		}
-		summary.Orgs = append(summary.Orgs, Org{ID: o.id, Slug: slug, Admin: o.admin})
+		summary.Orgs = append(summary.Orgs, Org{ID: o.id, Slug: slug, Admin: o.admin, APIKey: o.apiKey})
 	}
 	return summary, nil
 }
@@ -111,6 +119,8 @@ type orgSeed struct {
 	octet            int
 	objects, metrics int
 	at               time.Time
+	issueKey         bool
+	apiKey           string
 }
 
 func (o *orgSeed) uid(parts ...string) string {
@@ -130,6 +140,7 @@ func (o *orgSeed) seed(ctx context.Context, tx pgx.Tx) error {
 		{"metrics", o.metricSamples},
 		{"discovery", o.discovery},
 		{"webhook", o.webhook},
+		{"api key", o.loadTestKey},
 	}
 	for _, s := range steps {
 		if err := s.fn(ctx, tx); err != nil {
@@ -361,4 +372,28 @@ func (o *orgSeed) webhook(ctx context.Context, tx pgx.Tx) error {
 		VALUES ($1, $2, 'Echo', $3, $4, '{ci.created,ci.updated,ci.deleted}', true) ON CONFLICT (id) DO NOTHING`,
 		o.uid("webhook", "echo"), o.id, "https://echo."+o.slug+".example/webhook", "seed-"+o.uid("secret"))
 	return err
+}
+
+// loadTestKey issues the API key of the load test with the permissions of
+// org_admin; the key acts as the administrator (AUT-04).
+func (o *orgSeed) loadTestKey(ctx context.Context, tx pgx.Tx) error {
+	if !o.issueKey {
+		return nil
+	}
+	key, err := identity.GenerateAPIKey(identity.APIKeyEnvironmentTest)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE api_key SET revoked_at = now()
+		WHERE organization_id = $1 AND name = 'load-test' AND revoked_at IS NULL`, o.id); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO api_key (organization_id, name, key_hash, key_prefix, environment, permissions, created_by)
+		SELECT $1, 'load-test', $2, $3, $4, ARRAY(SELECT jsonb_array_elements_text(r.permissions)), $5
+		FROM role r WHERE r.organization_id = $1 AND r.name = 'org_admin'`,
+		o.id, key.KeyHash, key.KeyPrefix, key.Environment, o.uid("user", "admin")); err != nil {
+		return err
+	}
+	o.apiKey = key.Plaintext
+	return nil
 }
