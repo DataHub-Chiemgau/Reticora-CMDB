@@ -1137,5 +1137,21 @@
     "result": "Ergebnis",
     "loadError": "Die Jobs konnten nicht geladen werden",
     "empty": "Keine Jobs"
+  },
+  "provenance": {
+    "show": "Herkunft von {{field}}",
+    "source": "Quelle",
+    "rank": "Rang",
+    "recordedAt": "Erfasst",
+    "observedAt": "Beobachtet",
+    "overrideReason": "Begründung",
+    "overrideAuthor": "Autor",
+    "covers": "Überdeckt",
+    "reasons": {
+      "override": "Manueller Override",
+      "source_rank": "Höchstrangige Quelle",
+      "asset": "Aus dem Asset",
+      "record": "Wert des CI-Datensatzes"
+    }
   }
 }

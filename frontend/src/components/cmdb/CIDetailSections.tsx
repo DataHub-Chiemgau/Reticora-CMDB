@@ -10,7 +10,7 @@ import {
   useInstanceFields,
   useUpsertInstanceField,
   useDeleteInstanceField,
-  useFieldValues,
+  useFieldProvenance,
   useSetOverride,
   useClearOverride,
   useBlastRadius,
@@ -22,6 +22,7 @@ import { DynamicForm, validateAll } from '../form/DynamicForm';
 import { ApiError } from '../../api/client';
 import type { MetricPoint } from '../../api/client';
 import { useCIMetrics } from '../../api/hooks';
+import { ProvenanceTooltip } from './ProvenanceTooltip';
 import type { FieldDefinition } from '../../lib/fieldmeta';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -217,7 +218,8 @@ export function InstanceFieldsSection({
 
 export function ProvenanceSection({ ciId }: { ciId: string }) {
   const { t } = useTranslation();
-  const values = useFieldValues(ciId);
+  // Every typed field with its source, time and selection reason (REC-10).
+  const values = useFieldProvenance(ciId);
   const setOverride = useSetOverride(ciId);
   const clearOverride = useClearOverride(ciId);
   const [overrideField, setOverrideField] = useState<string | undefined>();
@@ -237,11 +239,14 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
       <ul className="space-y-2 text-sm">
         {rows.map((fv) => (
           <li
-            key={fv.field_name}
+            key={fv.field}
             className="rounded-md border border-gray-100 px-3 py-2 dark:border-gray-800"
           >
             <div className="flex items-center justify-between">
-              <span className="font-medium">{fv.field_name}</span>
+              <span className="flex items-center gap-1 font-medium">
+                {fv.field}
+                <ProvenanceTooltip provenance={fv} />
+              </span>
               <div className="flex items-center gap-2">
                 {fv.diverged ? (
                   <Badge variant="warning">{t('ci.diverged', 'abweichend')}</Badge>
@@ -249,10 +254,10 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
                 {fv.protected ? (
                   <Badge variant="info">{t('ci.protected', 'geschützt')}</Badge>
                 ) : null}
-                {fv.override_value !== undefined && fv.override_value !== null ? (
+                {fv.reason === 'override' ? (
                   <button
                     className="text-xs text-red-600 hover:underline"
-                    onClick={() => clearOverride.mutate(fv.field_name)}
+                    onClick={() => clearOverride.mutate(fv.field)}
                   >
                     {t('ci.clearOverride', 'Override aufheben')}
                   </button>
@@ -260,7 +265,7 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
                   <button
                     className="text-xs text-primary hover:underline"
                     onClick={() => {
-                      setOverrideField(fv.field_name);
+                      setOverrideField(fv.field);
                       setDraft({ value: '', reason: '' });
                     }}
                   >
@@ -272,28 +277,24 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
             <dl className="mt-1 grid grid-cols-3 gap-2 text-xs">
               <div>
                 <dt className="text-gray-400">{t('ci.discovered', 'Discovery')}</dt>
-                <dd className="font-mono">{JSON.stringify(fv.discovered_value) ?? '—'}</dd>
+                <dd className="font-mono">
+                  {JSON.stringify(fv.reason === 'override' ? fv.discovered_value : fv.value) ?? '—'}
+                </dd>
               </div>
               <div>
                 <dt className="text-gray-400">{t('ci.override', 'Override')}</dt>
                 <dd className="font-mono">
-                  {fv.override_value !== undefined && fv.override_value !== null
-                    ? JSON.stringify(fv.override_value)
-                    : '—'}
+                  {fv.reason === 'override' ? JSON.stringify(fv.value) : '—'}
                 </dd>
               </div>
               <div>
                 <dt className="text-gray-400">{t('ci.effective', 'Effektiv')}</dt>
-                <dd className="font-mono font-semibold">
-                  {JSON.stringify(fv.effective_value) ?? '—'}
-                </dd>
+                <dd className="font-mono font-semibold">{JSON.stringify(fv.value) ?? '—'}</dd>
               </div>
             </dl>
-            {fv.discovered_source ? (
-              <p className="mt-1 text-xs text-gray-400">
-                {t('ci.source', 'Quelle')}: {fv.discovered_source}
-              </p>
-            ) : null}
+            <p className="mt-1 text-xs text-gray-400">
+              {t('ci.source', 'Quelle')}: {fv.source}
+            </p>
           </li>
         ))}
         {rows.length === 0 && !values.isLoading ? (

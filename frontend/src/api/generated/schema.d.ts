@@ -502,6 +502,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/cis/{id}/provenance': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Provenance of every typed field of a CI (REC-10)
+     * @description One entry per typed field and attribute of the CI with a value: the shown value, its source, the REC-03 rank of the source, when it was recorded and observed, and why it is shown (override, source_rank, asset or record). An override also names its author and reason and the observed value it covers.
+     */
+    get: operations['getCIProvenance'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/cis/{id}/changes': {
     parameters: {
       query?: {
@@ -9378,6 +9398,27 @@ export interface components {
         points: components['schemas']['MetricPoint'][];
       }[];
     };
+    /** @description Provenance of one field of a CI (REC-10). */
+    CIFieldProvenance: {
+      field: string;
+      value: unknown;
+      /** @description The source of the shown value; manual_override for an override, asset for asset-canonical fields. */
+      source: string;
+      /** @description REC-03 rank of the source (100 for manual and overrides). */
+      rank: number;
+      /** @enum {string} */
+      reason: 'override' | 'source_rank' | 'asset' | 'record';
+      /** Format: date-time */
+      recorded_at?: string;
+      /** Format: date-time */
+      observed_at?: string;
+      override_author?: string;
+      override_reason?: string;
+      protected?: boolean;
+      discovered_value?: unknown;
+      discovered_source?: string;
+      diverged: boolean;
+    };
     MetricPoint: {
       /** Format: date-time */
       timestamp: string;
@@ -11636,6 +11677,35 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+    };
+  };
+  getCIProvenance: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Field provenance, sorted by field */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+            next_cursor?: string;
+            data: components['schemas']['CIFieldProvenance'][];
+            total?: number;
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listCIChanges: {

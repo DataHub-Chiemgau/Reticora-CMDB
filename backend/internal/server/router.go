@@ -638,6 +638,9 @@ func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
 	// rows of each kind.
 	const includeLimit = 200
 	page := api.PaginationParams{Limit: includeLimit}
+	if repos.Override != nil {
+		h.WithProvenance(repos.Override)
+	}
 	return h.WithIncludes(map[string]ci.IncludeFunc{
 		"relationships": func(ctx context.Context, orgID, ciID string) (any, error) {
 			rels, _, err := repos.Relationship.List(ctx, orgID, ciID, page)

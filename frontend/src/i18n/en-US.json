@@ -1137,5 +1137,21 @@
     "result": "Result",
     "loadError": "The jobs could not be loaded",
     "empty": "No jobs"
+  },
+  "provenance": {
+    "show": "Provenance of {{field}}",
+    "source": "Source",
+    "rank": "Rank",
+    "recordedAt": "Recorded",
+    "observedAt": "Observed",
+    "overrideReason": "Reason",
+    "overrideAuthor": "Author",
+    "covers": "Covers",
+    "reasons": {
+      "override": "Manual override",
+      "source_rank": "Highest-ranked source",
+      "asset": "From the asset",
+      "record": "Value of the CI record"
+    }
   }
 }

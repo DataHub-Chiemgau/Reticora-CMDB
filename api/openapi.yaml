@@ -1027,6 +1027,45 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
 
+  /api/v1/cis/{id}/provenance:
+    get:
+      operationId: getCIProvenance
+      tags: [CIs]
+      summary: Provenance of every typed field of a CI (REC-10)
+      description: >-
+        One entry per typed field and attribute of the CI with a value: the
+        shown value, its source, the REC-03 rank of the source, when it was
+        recorded and observed, and why it is shown (override, source_rank,
+        asset or record). An override also names its author and reason and
+        the observed value it covers.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Field provenance, sorted by field
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  next_cursor:
+                    type: string
+                    description: Opaque signed cursor for the next page (API-02); absent on the last page.
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CIFieldProvenance'
+                  total: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/cis/{id}/changes:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -16001,6 +16040,31 @@ components:
                 type: array
                 items:
                   $ref: '#/components/schemas/MetricPoint'
+
+    CIFieldProvenance:
+      type: object
+      description: Provenance of one field of a CI (REC-10).
+      required: [field, value, source, rank, reason, diverged]
+      properties:
+        field: { type: string }
+        value: {}
+        source:
+          type: string
+          description: The source of the shown value; manual_override for an override, asset for asset-canonical fields.
+        rank:
+          type: integer
+          description: REC-03 rank of the source (100 for manual and overrides).
+        reason:
+          type: string
+          enum: [override, source_rank, asset, record]
+        recorded_at: { type: string, format: date-time }
+        observed_at: { type: string, format: date-time }
+        override_author: { type: string }
+        override_reason: { type: string }
+        protected: { type: boolean }
+        discovered_value: {}
+        discovered_source: { type: string }
+        diverged: { type: boolean }
 
     MetricPoint:
       type: object

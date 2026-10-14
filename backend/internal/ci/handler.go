@@ -31,6 +31,7 @@ type Handler struct {
 	svc        *Service
 	dispatcher EventDispatcher
 	includes   map[string]IncludeFunc
+	provenance ProvenanceSource
 }
 
 // IncludeFunc loads one related collection of a CI for ?include= (API-05).
@@ -61,6 +62,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/cis", h.Create)
 	r.Get("/api/v1/cis/{id}", h.Get)
 	r.Get("/api/v1/cis/{id}/changes", h.ListChanges)
+	r.Get("/api/v1/cis/{id}/provenance", h.Provenance)
 	r.Patch("/api/v1/cis/{id}", h.Update)
 	r.Delete("/api/v1/cis/{id}", h.Delete)
 	r.Post("/api/v1/cis/{id}/restore", h.Restore)

@@ -410,3 +410,4 @@ UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-194
 UI-06;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-195
 UI-16;[B];C;frontend/src/pages/ReviewInboxPage.test.tsx;WP-196
 UI-16;[B];C;frontend/src/components/NotificationCenter.test.tsx;WP-197
+REC-10;[B];C;backend/internal/ci/provenance_integration_test.go;WP-198

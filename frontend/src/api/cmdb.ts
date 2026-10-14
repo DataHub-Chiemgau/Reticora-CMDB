@@ -558,6 +558,12 @@ export const overrideApi = {
   listForCI(ciId: string): Promise<{ data: FieldValue[] }> {
     return fetchAPI(`/cis/${ciId}/fields`);
   },
+  /** The provenance of every typed field of the CI (REC-10). */
+  provenance(ciId: string) {
+    return fetchAPI<{ data: components['schemas']['CIFieldProvenance'][] }>(
+      `/cis/${ciId}/provenance`,
+    );
+  },
   setOverride(ciId: string, field: string, value: unknown, reason: string, protectedFlag = true) {
     return fetchAPI(`/cis/${ciId}/fields/${encodeURIComponent(field)}/override`, {
       method: 'PUT',
