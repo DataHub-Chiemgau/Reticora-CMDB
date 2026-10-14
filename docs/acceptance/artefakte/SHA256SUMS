@@ -1,0 +1,4 @@
+d3356e2035ce739f961fe653c85acea8fa0c8485dfbfb9e362d811e72bbae57e  frontend/e2e/onboarding.spec.ts
+863bc6f19b852f2a1d66a1a30c053617952a485d8bea845bc600b08a68e92780  frontend/e2e/conflict.spec.ts
+36ce16f8036329cf620191368e2e1a4d138e4c8911c1fec97683cb9eeb885cd5  frontend/e2e/fixtures/setup-onboarding.sh
+b2a7bb40de2062469354f21f36beb653bf522757a64ef944470283f3a44af5d3  docs/acceptance/artefakte/abn-01-e-konflikt.json
