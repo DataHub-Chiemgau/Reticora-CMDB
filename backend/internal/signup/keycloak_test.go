@@ -160,3 +160,33 @@ func TestKeycloakInviteAccount(t *testing.T) {
 		t.Errorf("deleted = %q", deleted)
 	}
 }
+
+func TestKeycloakAccountNames(t *testing.T) {
+	cases := map[string][2]string{
+		"":                    {"", ""},
+		"Ada":                 {"Ada", ""},
+		"Ada Lovelace":        {"Ada", "Lovelace"},
+		" Anna  Maria  Weiß ": {"Anna Maria", "Weiß"},
+	}
+	for display, want := range cases {
+		if first, last := splitName(display); first != want[0] || last != want[1] {
+			t.Errorf("splitName(%q) = %q, %q; want %q, %q", display, first, last, want[0], want[1])
+		}
+	}
+	var user keycloakUser
+	var deleted string
+	srv := fakeKeycloak(t, http.StatusCreated, &user, &deleted)
+	kc, err := NewKeycloakAccounts(srv.URL+"/realms/reticora", "signup", "s3cret", srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The realm's user profile requires first and last name: both are set,
+	// so the first login does not stop at the profile form.
+	if _, err = kc.CreateAccount(context.Background(), Account{Email: "a@example.com", DisplayName: "Ada Lovelace",
+		Password: "correct horse battery", OrganizationID: "org-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if user.FirstName != "Ada" || user.LastName != "Lovelace" {
+		t.Errorf("names = %q %q", user.FirstName, user.LastName)
+	}
+}

@@ -81,6 +81,46 @@ async function verificationLink(request: APIRequestContext): Promise<string> {
   return link;
 }
 
+/**
+ * keycloakLogin signs in on the Keycloak form and completes a required
+ * profile step should the realm ask for one; it fails with the page Keycloak
+ * stopped at instead of a bare timeout.
+ */
+async function keycloakLogin(page: Page, landing: RegExp) {
+  await page.waitForURL(/\/protocol\/openid-connect\/auth/);
+  await page.locator('#username').fill(email);
+  await page.locator('#password').fill(password);
+  await page.locator('#kc-login').click();
+  const lastName = page.locator('#lastName');
+  await Promise.race([
+    page.waitForURL(landing, { timeout: 60_000 }),
+    lastName.waitFor({ state: 'visible', timeout: 60_000 }),
+  ]).catch(() => undefined);
+  if (await lastName.isVisible().catch(() => false)) {
+    if (
+      !(await page
+        .locator('#firstName')
+        .inputValue()
+        .catch(() => ''))
+    ) {
+      await page.locator('#firstName').fill('E2E');
+    }
+    await lastName.fill('Admin');
+    await page.locator('input[type="submit"], button[type="submit"]').first().click();
+  }
+  if (!landing.test(page.url())) {
+    await page.waitForURL(landing, { timeout: 30_000 }).catch(async () => {
+      const text = (
+        await page
+          .locator('body')
+          .innerText()
+          .catch(() => '')
+      ).slice(0, 500);
+      throw new Error(`login stopped at ${page.url()}: ${text}`);
+    });
+  }
+}
+
 test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)', () => {
   test('the API answers through the frontend origin (no "failed to fetch")', async ({ page }) => {
     const response = page.waitForResponse((r) => r.url().endsWith('/api/v1/auth/config'));
@@ -141,11 +181,7 @@ test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)'
 
     await page.getByRole('link', { name: 'Jetzt anmelden und fortfahren' }).click();
     await page.getByRole('button', { name: 'Anmelden' }).click();
-    await page.waitForURL(/\/protocol\/openid-connect\/auth/);
-    await page.locator('#username').fill(email);
-    await page.locator('#password').fill(password);
-    await page.locator('#kc-login').click();
-    await page.waitForURL(/\/onboarding/, { timeout: 60_000 });
+    await keycloakLogin(page, /\/onboarding/);
 
     await page.goto('/dashboard');
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
@@ -162,11 +198,7 @@ test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)'
     // Every test has its own browser context: sign in with the new account.
     await page.goto('/login', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: 'Anmelden' }).click();
-    await page.waitForURL(/\/protocol\/openid-connect\/auth/);
-    await page.locator('#username').fill(email);
-    await page.locator('#password').fill(password);
-    await page.locator('#kc-login').click();
-    await page.waitForURL(/\/dashboard|\/onboarding/, { timeout: 60_000 });
+    await keycloakLogin(page, /\/dashboard|\/onboarding/);
     const token = await sessionToken(page);
 
     // Collector enrollment with the code the onboarding shows.
