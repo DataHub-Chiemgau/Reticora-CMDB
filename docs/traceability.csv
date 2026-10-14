@@ -416,3 +416,12 @@ INS-04;[Q];C;frontend/e2e/onboarding.spec.ts;WP-200
 TST-03;[B], Teilumfang [P2];C;frontend/e2e/onboarding.spec.ts;WP-200
 ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-200
 TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-201
+TST-01;[B], Teilumfang [P2];C;backend/internal/discovery/tst01_integration_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/reviews/tst01_integration_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/events/tst01_integration_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/rack/tst01_integration_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/discovery/topology_integration_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/rules/rules_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/api/cursor_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/platform/crypto/crypto_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/export/export_test.go;WP-202

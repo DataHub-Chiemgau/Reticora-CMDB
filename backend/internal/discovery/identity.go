@@ -298,6 +298,24 @@ func withoutTakenIdentity(item *IngestItem, candidates []ci.Item) {
 	}
 }
 
+// withoutBlocklistedIdentity clears identity values that identify nothing:
+// placeholder serial numbers, clone hardware UUIDs and MACs that are locally
+// administered or belong to a virtual router. Many devices report the same
+// such value, so it must not take the organization-unique identity column
+// of one CI (a second device would be refused); the fingerprint keeps the
+// reported UUID and MACs (TST-01).
+func withoutBlocklistedIdentity(item *IngestItem) {
+	if item.SerialNumber != "" && !usableSerial(item.SerialNumber) {
+		item.SerialNumber = ""
+	}
+	if item.HardwareUUID != "" && !usableUUID(item.HardwareUUID) {
+		item.HardwareUUID = ""
+	}
+	if item.PrimaryMAC != "" && canonicalMAC(item.PrimaryMAC) == "" {
+		item.PrimaryMAC = ""
+	}
+}
+
 // IdentityQuery holds the values candidate CIs are looked up by.
 type IdentityQuery struct {
 	SerialNumber string

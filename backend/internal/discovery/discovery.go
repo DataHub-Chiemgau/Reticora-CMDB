@@ -1058,6 +1058,7 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			return resp, dropErr
 		}
 		resp.InvalidValues += dropped
+		withoutBlocklistedIdentity(&item)
 		attributes := discoveredAttributes(&item)
 
 		switch result.Action {
