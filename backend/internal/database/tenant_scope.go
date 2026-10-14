@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -113,13 +117,18 @@ func OrgWideScope(orgID, userID string) TenantScope {
 }
 
 // Validate checks that the scope is complete: a valid organization id and a
-// decision for every scope dimension. A nil scope is incomplete.
+// decision for every scope dimension. A nil scope is incomplete. The user id
+// is free text, but WithTenant writes it into the statement that opens the
+// transaction, so a NUL byte or invalid UTF-8 is refused.
 func (s *TenantScope) Validate() error {
 	if s == nil || s.OrgID == "" {
 		return fmt.Errorf("%w: organization id is required", ErrIncompleteScope)
 	}
 	if !isUUID(s.OrgID) {
 		return fmt.Errorf("invalid organization id %q: not a UUID", s.OrgID)
+	}
+	if strings.IndexByte(s.UserID, 0) >= 0 || !utf8.ValidString(s.UserID) {
+		return fmt.Errorf("invalid user id %q: NUL byte or invalid UTF-8", s.UserID)
 	}
 	if err := s.Clients.validate("client"); err != nil {
 		return err
@@ -177,7 +186,8 @@ var ErrTenantMismatch = errors.New("organization does not match the tenant scope
 // WithRequestTenant runs fn through WithTenant with the scope attached to ctx
 // (ContextWithTenantScope). Repositories that receive the organization as an
 // argument use it so the transaction carries the principal's complete scope;
-// orgID must be the scope's organization.
+// orgID must be the scope's organization. A transaction in ctx
+// (ContextWithTx) is joined.
 func WithRequestTenant(ctx context.Context, pool *pgxpool.Pool, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	scope, ok := TenantScopeFromContext(ctx)
 	if !ok {
@@ -187,4 +197,195 @@ func WithRequestTenant(ctx context.Context, pool *pgxpool.Pool, orgID string, fn
 		return fmt.Errorf("%w: %q", ErrTenantMismatch, orgID)
 	}
 	return WithTenant(ctx, pool, &scope, fn)
+}
+
+// Joining a transaction (NFR-03): a caller that runs several repository calls
+// as one unit carries its transaction in the context (ContextWithTx,
+// WithRequestTenantTx). WithTenant and WithRequestTenant called with that
+// context run fn in it instead of opening their own transaction, so the
+// repositories stay unchanged. Only the owner commits or rolls back.
+
+var (
+	// ErrTxNotJoinable is returned when the context carries a transaction
+	// that WithTenant did not open, e.g. a WithSystem transaction.
+	ErrTxNotJoinable = errors.New("the context transaction cannot be joined")
+	// ErrTxScopeMismatch is returned when the scope of a call differs from
+	// the scope of the context transaction: the call would run under the
+	// other scope's GUCs, and a second transaction of the same goroutine
+	// could wait forever for the organization's advisory locks the first
+	// one holds.
+	ErrTxScopeMismatch = errors.New("tenant scope differs from the scope of the context transaction")
+	// ErrTxDone is returned when the context outlived its transaction.
+	ErrTxDone = errors.New("the context transaction has ended")
+	// ErrTxAborted is returned instead of a commit when a statement of the
+	// transaction failed and nobody returned its error.
+	ErrTxAborted = errors.New("transaction aborted by a failed statement")
+)
+
+type txKey struct{}
+
+// States of a tenantTx.
+const (
+	txOpen int32 = iota
+	txCommitted
+	txRolledBack
+)
+
+// tenantTx is the transaction WithTenant hands to fn: the pgx transaction,
+// the scope its GUCs were set from and the callbacks waiting for the commit.
+type tenantTx struct {
+	pgx.Tx
+	scope TenantScope
+	state atomic.Int32
+	mu    sync.Mutex
+	after []func(context.Context)
+}
+
+// aborted reports whether a statement failed in the open transaction; it
+// reads the connection's transaction status without a round trip.
+func (t *tenantTx) aborted() bool {
+	return t.state.Load() == txOpen && t.Conn().PgConn().TxStatus() == 'E'
+}
+
+// runAfterCommit runs the callbacks registered with AfterCommit in order,
+// each with ctx; a panicking callback is logged, the others still run.
+func (t *tenantTx) runAfterCommit(ctx context.Context) {
+	t.mu.Lock()
+	callbacks := t.after
+	t.after = nil
+	t.mu.Unlock()
+	for _, fn := range callbacks {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.ErrorContext(ctx, "after-commit callback failed", "panic", r)
+				}
+			}()
+			fn(ctx)
+		}()
+	}
+}
+
+// ContextWithTx returns ctx carrying tx: WithTenant and WithRequestTenant
+// called with it join tx (no BEGIN, no set_config, no COMMIT) when their
+// scope is the scope of tx, and fail with ErrTxScopeMismatch otherwise. The
+// scope of tx becomes the tenant scope of the context. A transaction that
+// WithTenant did not open makes every join fail with ErrTxNotJoinable.
+func ContextWithTx(ctx context.Context, tx pgx.Tx) context.Context {
+	if t, ok := tx.(*tenantTx); ok && t != nil {
+		scope := t.scope
+		ctx = ContextWithTenantScope(ctx, &scope)
+	}
+	return context.WithValue(ctx, txKey{}, tx)
+}
+
+// WithoutTx detaches ctx from its transaction: calls with the returned
+// context open their own transactions. The tenant scope stays.
+func WithoutTx(ctx context.Context) context.Context {
+	if ctx.Value(txKey{}) == nil {
+		return ctx
+	}
+	// An untyped nil: WithTenant sees no transaction at all.
+	return context.WithValue(ctx, txKey{}, nil)
+}
+
+// WithRequestTenantTx runs fn in one transaction of the context's tenant
+// scope (WithRequestTenant): the repository calls fn makes with its context
+// join that transaction, which commits when fn returns nil and rolls back
+// otherwise.
+func WithRequestTenantTx(ctx context.Context, pool *pgxpool.Pool, orgID string, fn func(ctx context.Context) error) error {
+	return WithRequestTenant(ctx, pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ContextWithTx(ctx, tx))
+	})
+}
+
+// InTx reports whether ctx carries an open transaction that WithTenant
+// joins.
+func InTx(ctx context.Context) bool {
+	t, ok := ctx.Value(txKey{}).(*tenantTx)
+	return ok && t != nil && t.state.Load() == txOpen
+}
+
+// TxFailed reports whether a statement failed in the context's transaction:
+// every further statement fails, and the owner rolls back. Callers that
+// tolerate a repository error check it to stop early.
+func TxFailed(ctx context.Context) bool {
+	t, ok := ctx.Value(txKey{}).(*tenantTx)
+	return ok && t != nil && t.aborted()
+}
+
+// Savepoint runs fn under a savepoint of the context's transaction: when fn
+// fails, its writes and its AfterCommit callbacks are undone and the
+// transaction stays usable (two statements). Without a context transaction
+// fn runs as it is.
+func Savepoint(ctx context.Context, fn func(ctx context.Context) error) error {
+	t, ok := ctx.Value(txKey{}).(*tenantTx)
+	if !ok || t == nil || t.state.Load() != txOpen {
+		return fn(ctx)
+	}
+	sp, err := t.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("savepoint: %w", err)
+	}
+	t.mu.Lock()
+	mark := len(t.after)
+	t.mu.Unlock()
+	if err := fn(ctx); err != nil {
+		if rbErr := sp.Rollback(ctx); rbErr != nil {
+			return errors.Join(err, fmt.Errorf("rollback to savepoint: %w", rbErr))
+		}
+		t.mu.Lock()
+		t.after = t.after[:mark]
+		t.mu.Unlock()
+		return err
+	}
+	if err := sp.Commit(ctx); err != nil {
+		return fmt.Errorf("release savepoint: %w", err)
+	}
+	return nil
+}
+
+// AfterCommit runs fn once the context's transaction has committed, with a
+// context detached from it; a rollback drops fn. Without a context
+// transaction fn runs at once. External work (notifications, remote
+// indexes, embeddings) goes here, so a transaction never waits for it while
+// it holds row or advisory locks.
+func AfterCommit(ctx context.Context, fn func(ctx context.Context)) {
+	t, ok := ctx.Value(txKey{}).(*tenantTx)
+	if !ok || t == nil {
+		fn(ctx)
+		return
+	}
+	t.mu.Lock()
+	state := t.state.Load()
+	if state == txOpen {
+		t.after = append(t.after, fn)
+	}
+	t.mu.Unlock()
+	if state == txCommitted {
+		fn(WithoutTx(ctx))
+	}
+}
+
+// sameAs reports whether s and o set the same GUC values, i.e. the same RLS
+// context.
+func (s *TenantScope) sameAs(o *TenantScope) bool {
+	return strings.EqualFold(s.OrgID, o.OrgID) && s.UserID == o.UserID &&
+		s.Clients.gucValue() == o.Clients.gucValue() && s.Sites.gucValue() == o.Sites.gucValue() &&
+		s.Teams.gucValue() == o.Teams.gucValue()
+}
+
+// joinTx runs fn in the context transaction v when scope is its scope. fn's
+// error is returned as it is: only the owner commits or rolls back.
+func joinTx(ctx context.Context, v any, scope *TenantScope, fn func(context.Context, pgx.Tx) error) error {
+	t, ok := v.(*tenantTx)
+	switch {
+	case !ok || t == nil:
+		return ErrTxNotJoinable
+	case t.state.Load() != txOpen:
+		return ErrTxDone
+	case !t.scope.sameAs(scope):
+		return fmt.Errorf("%w: organization %s", ErrTxScopeMismatch, scope.OrgID)
+	}
+	return fn(ctx, t)
 }

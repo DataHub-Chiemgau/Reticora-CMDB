@@ -3,10 +3,13 @@ package database_test
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -204,5 +207,283 @@ func TestWithTenantRejectsIncompleteScope(t *testing.T) {
 	})
 	if !errors.Is(err, database.ErrIncompleteScope) {
 		t.Fatalf("WithTenant() = %v, want ErrIncompleteScope", err)
+	}
+}
+
+// sqlLog records the statements a pool sends.
+type sqlLog struct {
+	mu  sync.Mutex
+	sql []string
+}
+
+func (l *sqlLog) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	l.mu.Lock()
+	l.sql = append(l.sql, strings.ToLower(strings.TrimSpace(data.SQL)))
+	l.mu.Unlock()
+	return ctx
+}
+
+func (l *sqlLog) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+// take returns the statements since the last call and how many of them
+// begin and commit a transaction.
+func (l *sqlLog) take() (statements []string, begins, commits int) {
+	l.mu.Lock()
+	statements, l.sql = l.sql, nil
+	l.mu.Unlock()
+	for _, s := range statements {
+		switch {
+		case strings.HasPrefix(s, "begin"):
+			begins++
+		case s == "commit":
+			commits++
+		}
+	}
+	return statements, begins, commits
+}
+
+// tracedPool is the application pool with a statement log.
+func tracedPool(t *testing.T, app *pgxpool.Pool) (*pgxpool.Pool, *sqlLog) {
+	t.Helper()
+	log := &sqlLog{}
+	cfg := app.Config()
+	cfg.ConnConfig.Tracer = log
+	cfg.MinConns = 0
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err = pool.Ping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return pool, log
+}
+
+// TestContextTxJoin covers the transaction in the context of WP-332 (NFR-03)
+// against PostgreSQL:
+//   - repository calls with the context of WithRequestTenantTx join its
+//     transaction: one BEGIN (with the GUCs in the same round trip), one
+//     COMMIT, one transaction id;
+//   - another organization, another scope, a narrowed context scope, a
+//     WithSystem transaction and a context that outlived its transaction
+//     are refused without opening a transaction;
+//   - a failed statement whose error was swallowed rolls everything back
+//     (ErrTxAborted); a savepoint keeps the transaction usable after a
+//     unique violation;
+//   - AfterCommit runs after the commit only, detached from the transaction.
+func TestContextTxJoin(t *testing.T) {
+	ctx, app := seedScopeFixture(t)
+	pool, log := tracedPool(t, app)
+	scope := database.OrgWideScope(scopeOrgA, scopeUser)
+	reqCtx := database.ContextWithTenantScope(ctx, &scope)
+	noop := func(context.Context, pgx.Tx) error { return nil }
+	clients := func(slug string) int {
+		t.Helper()
+		var n int
+		if err := database.WithTenant(ctx, app, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(*) FROM client WHERE slug = $1`, slug).Scan(&n)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	insertClient := func(ctx context.Context, id, slug string) error {
+		return database.WithRequestTenant(ctx, pool, scopeOrgA, func(ctx context.Context, tx pgx.Tx) error {
+			if id == "" {
+				_, err := tx.Exec(ctx, `INSERT INTO client (organization_id, name, slug) VALUES ($1, $2, $2)`, scopeOrgA, slug)
+				return err
+			}
+			_, err := tx.Exec(ctx, `INSERT INTO client (id, organization_id, name, slug) VALUES ($1, $2, $3, $3)`, id, scopeOrgA, slug)
+			return err
+		})
+	}
+	log.take()
+
+	// Join: two repository calls, one transaction.
+	var outer, inner int64
+	var user string
+	joinErr := database.WithRequestTenantTx(reqCtx, pool, scopeOrgA, func(ctx context.Context) error {
+		if err := database.WithRequestTenant(ctx, pool, scopeOrgA, func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT txid_current()`).Scan(&outer)
+		}); err != nil {
+			return err
+		}
+		return database.WithTenant(ctx, pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT txid_current(), current_setting('app.user_id')`).Scan(&inner, &user)
+		})
+	})
+	if joinErr != nil {
+		t.Fatalf("join: %v", joinErr)
+	}
+	statements, begins, commits := log.take()
+	if outer == 0 || outer != inner || user != scopeUser {
+		t.Errorf("joined calls ran in transactions %d and %d (user %q)", outer, inner, user)
+	}
+	if begins != 1 || commits != 1 || len(statements) != 4 {
+		t.Errorf("join sent %d statements with %d begins and %d commits, want 4 with 1 and 1: %q",
+			len(statements), begins, commits, statements)
+	}
+
+	// Refusals open no transaction and leave the context transaction usable.
+	refusalErr := database.WithRequestTenantTx(reqCtx, pool, scopeOrgA, func(ctx context.Context) error {
+		if err := database.WithRequestTenant(ctx, pool, scopeOrgB, noop); !errors.Is(err, database.ErrTenantMismatch) {
+			t.Errorf("other organization: %v, want ErrTenantMismatch", err)
+		}
+		system := database.OrgWideScope(scopeOrgA, "")
+		if err := database.WithTenant(ctx, pool, &system, noop); !errors.Is(err, database.ErrTxScopeMismatch) {
+			t.Errorf("other scope: %v, want ErrTxScopeMismatch", err)
+		}
+		narrowed := scope
+		narrowed.Clients = database.ScopeIDs(scopeClient1)
+		if err := database.WithRequestTenant(database.ContextWithTenantScope(ctx, &narrowed), pool, scopeOrgA, noop); !errors.Is(err, database.ErrTxScopeMismatch) {
+			t.Errorf("narrowed scope: %v, want ErrTxScopeMismatch", err)
+		}
+		return insertClient(ctx, "", "join-after-refusals")
+	})
+	if refusalErr != nil {
+		t.Fatalf("refusals: %v", refusalErr)
+	}
+	if _, begins, _ = log.take(); begins != 1 {
+		t.Errorf("refused calls opened transactions: %d begins", begins)
+	}
+	if clients("join-after-refusals") != 1 {
+		t.Error("the context transaction did not commit after the refusals")
+	}
+
+	// A WithSystem transaction is not joinable.
+	systemErr := database.WithSystem(ctx, pool, func(_ context.Context, tx pgx.Tx) error {
+		return database.WithRequestTenant(database.ContextWithTx(reqCtx, tx), pool, scopeOrgA, noop)
+	})
+	if !errors.Is(systemErr, database.ErrTxNotJoinable) {
+		t.Errorf("WithSystem transaction: %v, want ErrTxNotJoinable", systemErr)
+	}
+
+	// A context that outlived its transaction is refused; detached, it
+	// opens its own.
+	var leaked context.Context
+	if leakErr := database.WithRequestTenantTx(reqCtx, pool, scopeOrgA, func(ctx context.Context) error {
+		leaked = ctx
+		return nil
+	}); leakErr != nil {
+		t.Fatal(leakErr)
+	}
+	if doneErr := database.WithRequestTenant(leaked, pool, scopeOrgA, noop); !errors.Is(doneErr, database.ErrTxDone) {
+		t.Errorf("ended transaction: %v, want ErrTxDone", doneErr)
+	}
+	if detachedErr := database.WithRequestTenant(database.WithoutTx(leaked), pool, scopeOrgA, noop); detachedErr != nil {
+		t.Errorf("detached context: %v", detachedErr)
+	}
+
+	// A swallowed failed statement rolls back the whole transaction.
+	abortErr := database.WithRequestTenantTx(reqCtx, pool, scopeOrgA, func(ctx context.Context) error {
+		if err := insertClient(ctx, "", "join-aborted"); err != nil {
+			return err
+		}
+		_ = database.WithRequestTenant(ctx, pool, scopeOrgA, func(ctx context.Context, tx pgx.Tx) error {
+			var n int
+			return tx.QueryRow(ctx, `SELECT 1 / 0`).Scan(&n)
+		})
+		if !database.TxFailed(ctx) {
+			t.Error("TxFailed after a division by zero")
+		}
+		return nil
+	})
+	if !errors.Is(abortErr, database.ErrTxAborted) {
+		t.Errorf("swallowed error: %v, want ErrTxAborted", abortErr)
+	}
+	if clients("join-aborted") != 0 {
+		t.Error("the write before the failed statement was committed")
+	}
+
+	// A savepoint undoes a unique violation, its callbacks with it, and the
+	// transaction goes on.
+	var ran []string
+	savepointErr := database.WithRequestTenantTx(reqCtx, pool, scopeOrgA, func(ctx context.Context) error {
+		spErr := database.Savepoint(ctx, func(ctx context.Context) error {
+			database.AfterCommit(ctx, func(context.Context) { ran = append(ran, "undone") })
+			return insertClient(ctx, scopeClient1, "join-duplicate")
+		})
+		var pgErr *pgconn.PgError
+		if !errors.As(spErr, &pgErr) || pgErr.Code != "23505" {
+			t.Errorf("savepoint: %v, want a unique violation", spErr)
+		}
+		if database.TxFailed(ctx) {
+			t.Error("transaction failed after the savepoint rollback")
+		}
+		database.AfterCommit(ctx, func(ctx context.Context) {
+			if database.InTx(ctx) {
+				t.Error("callback context carries the committed transaction")
+			}
+			// Detached: a repository call opens its own transaction.
+			if err := insertClient(ctx, "", "join-after-commit"); err != nil {
+				t.Errorf("write after the commit: %v", err)
+			}
+			ran = append(ran, "committed")
+		})
+		if len(ran) != 0 {
+			t.Error("callbacks ran before the commit")
+		}
+		return insertClient(ctx, "", "join-savepoint")
+	})
+	if savepointErr != nil {
+		t.Fatalf("savepoint transaction: %v", savepointErr)
+	}
+	if strings.Join(ran, ",") != "committed" || clients("join-savepoint") != 1 || clients("join-after-commit") != 1 {
+		t.Errorf("after the savepoint: callbacks %v, clients %d/%d", ran, clients("join-savepoint"), clients("join-after-commit"))
+	}
+
+	// A rollback drops the callbacks.
+	errAbort := errors.New("abort")
+	if rollbackErr := database.WithRequestTenantTx(reqCtx, pool, scopeOrgA, func(ctx context.Context) error {
+		database.AfterCommit(ctx, func(context.Context) { t.Error("callback of a rolled back transaction ran") })
+		return errAbort
+	}); !errors.Is(rollbackErr, errAbort) {
+		t.Errorf("rollback: %v", rollbackErr)
+	}
+}
+
+// TestWithTenantQuotesHostileUserID: the user id travels as a literal in the
+// statement that opens the transaction; whatever it contains, it arrives
+// unchanged in app.user_id, sets nothing else and RLS still restricts the
+// transaction to its organization and client. It holds with
+// standard_conforming_strings and backslash_quote off as well.
+func TestWithTenantQuotesHostileUserID(t *testing.T) {
+	ctx, app := seedScopeFixture(t)
+	cfg := app.Config()
+	cfg.ConnConfig.RuntimeParams["standard_conforming_strings"] = "off"
+	cfg.ConnConfig.RuntimeParams["backslash_quote"] = "off"
+	legacy, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(legacy.Close)
+	var conforming, backslashQuote string
+	if err = legacy.QueryRow(ctx, `SELECT current_setting('standard_conforming_strings'), current_setting('backslash_quote')`).
+		Scan(&conforming, &backslashQuote); err != nil || conforming != "off" || backslashQuote != "off" {
+		t.Fatalf("legacy settings: standard_conforming_strings %q, backslash_quote %q, %v", conforming, backslashQuote, err)
+	}
+
+	hostile := []string{`'`, `\`, `;`, `--`, `\'`, `''`, "line\nbreak", `E'\x41'`, "ünïcödé",
+		`x'); SELECT set_config('app.org_id', '` + scopeOrgB + `', true); --`}
+	for name, pool := range map[string]*pgxpool.Pool{"default": app, "legacy string settings": legacy} {
+		for _, user := range hostile {
+			scope := database.OrgWideScope(scopeOrgA, user)
+			scope.Clients = database.ScopeIDs(scopeClient1)
+			var gotUser, gotOrg string
+			var visible int
+			err := database.WithTenant(ctx, pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+				return tx.QueryRow(ctx, `SELECT current_setting('app.user_id'), current_setting('app.org_id'),
+					(SELECT count(*) FROM client)`).Scan(&gotUser, &gotOrg, &visible)
+			})
+			if err != nil {
+				t.Errorf("%s: %q: %v", name, user, err)
+				continue
+			}
+			if gotUser != user || gotOrg != scopeOrgA || visible != 1 {
+				t.Errorf("%s: %q: app.user_id %q, app.org_id %s, %d clients visible, want the user id unchanged in organization A with 1 client",
+					name, user, gotUser, gotOrg, visible)
+			}
+		}
 	}
 }

@@ -161,37 +161,65 @@ func quoteIdentifier(name string) string {
 // GUCs are set with is_local = true, they end with the transaction and never
 // leak to the next user of the pooled connection. An incomplete scope fails
 // before any connection is used.
+//
+// When ctx carries a transaction (ContextWithTx), fn runs in it if scope is
+// its scope (ErrTxScopeMismatch otherwise); the owner commits. A statement
+// error that fn swallowed rolls the transaction back (ErrTxAborted). After
+// the commit the AfterCommit callbacks run.
 func WithTenant(ctx context.Context, pool *pgxpool.Pool, scope *TenantScope, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	if err := scope.Validate(); err != nil {
 		return err
 	}
+	if v := ctx.Value(txKey{}); v != nil {
+		return joinTx(ctx, v, scope, fn)
+	}
 
-	tx, err := pool.Begin(ctx)
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{BeginQuery: beginTenantSQL(scope)})
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	t := &tenantTx{Tx: tx, scope: *scope}
+	defer func() {
+		if t.state.CompareAndSwap(txOpen, txRolledBack) {
+			_ = tx.Rollback(ctx)
+		}
+	}()
 
-	// All values are set in every transaction, including the empty ones, so a
-	// session-level value set elsewhere on this connection can never widen
-	// the scope.
-	if _, err := tx.Exec(ctx, `SELECT
-		set_config('`+OrgGUC+`', $1, true),
-		set_config('`+UserGUC+`', $2, true),
-		set_config('`+ClientScopeGUC+`', $3, true),
-		set_config('`+SiteScopeGUC+`', $4, true),
-		set_config('`+TeamScopeGUC+`', $5, true)`,
-		scope.OrgID, scope.UserID,
-		scope.Clients.gucValue(), scope.Sites.gucValue(), scope.Teams.gucValue(),
-	); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-
-	if err := fn(ctx, tx); err != nil {
+	if err := fn(ctx, t); err != nil {
 		return err
 	}
+	if t.aborted() {
+		return ErrTxAborted
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	t.state.Store(txCommitted)
+	t.runAfterCommit(WithoutTx(ctx))
+	return nil
+}
 
-	return tx.Commit(ctx)
+// beginTenantSQL opens the transaction and sets every GUC of TEN-04
+// transaction-locally in one round trip (NFR-03): a statement without
+// arguments goes with the simple protocol, which runs both commands of the
+// string. All values are set in every transaction, including the empty
+// ones, so a session-level value set elsewhere on this connection can never
+// widen the scope. The ids are validated UUIDs; the user id is quoted.
+func beginTenantSQL(scope *TenantScope) string {
+	return "BEGIN; SELECT set_config('" + OrgGUC + "', " + quoteLiteral(scope.OrgID) + ", true), " +
+		"set_config('" + UserGUC + "', " + quoteLiteral(scope.UserID) + ", true), " +
+		"set_config('" + ClientScopeGUC + "', " + quoteLiteral(scope.Clients.gucValue()) + ", true), " +
+		"set_config('" + SiteScopeGUC + "', " + quoteLiteral(scope.Sites.gucValue()) + ", true), " +
+		"set_config('" + TeamScopeGUC + "', " + quoteLiteral(scope.Teams.gucValue()) + ", true)"
+}
+
+// quoteLiteral renders s as an escape string constant: backslashes and
+// single quotes are doubled, which means the same under every setting of
+// standard_conforming_strings and backslash_quote. Validate keeps NUL bytes
+// and invalid UTF-8 out of the values.
+func quoteLiteral(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	return "E'" + strings.ReplaceAll(s, `'`, `''`) + "'"
 }
 
 // SystemGUC is the flag WithSystem sets. Only SELECT policies honor it

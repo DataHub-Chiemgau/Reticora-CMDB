@@ -13,6 +13,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -113,7 +114,9 @@ func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *In
 	for k, v := range item.Attributes {
 		fields[k] = v
 	}
-	h.recordDiscoveredMany(ctx, orgID, newItem.ID, fields, source, item.ObservedAt)
+	if err := h.recordDiscoveredMany(ctx, orgID, newItem.ID, fields, source, item.ObservedAt); err != nil {
+		return ci.Item{}, err
+	}
 	return newItem, nil
 }
 
@@ -185,7 +188,14 @@ func (h *Handler) admitNewCI(ctx context.Context, orgID string, current int64, i
 		},
 		ObjectKey: key,
 	}
-	opened, err := h.openReview(ctx, review)
+	// The savepoint keeps the record's transaction usable after a unique
+	// violation of the open unlicensed_ci item of the device.
+	var opened bool
+	err = database.Savepoint(ctx, func(ctx context.Context) error {
+		var openErr error
+		opened, openErr = h.openReview(ctx, review)
+		return openErr
+	})
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -199,10 +209,13 @@ func (h *Handler) admitNewCI(ctx context.Context, orgID string, current int64, i
 	if !opened {
 		return true, nil
 	}
-	unlicensedQueued.Add(1)
-	slog.WarnContext(ctx, "discovered device held as unlicensed_ci: max_cis reached",
-		"event", "entitlement.unlicensed_ci", "organization_id", orgID, "review_item_id", review.ID,
-		"limit", exceeded.Limit, "current", exceeded.Current)
+	// Counted once the item is committed.
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		unlicensedQueued.Add(1)
+		slog.WarnContext(ctx, "discovered device held as unlicensed_ci: max_cis reached",
+			"event", "entitlement.unlicensed_ci", "organization_id", orgID, "review_item_id", review.ID,
+			"limit", exceeded.Limit, "current", exceeded.Current)
+	})
 	return true, nil
 }
 

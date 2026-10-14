@@ -458,6 +458,58 @@ func (r *PGRepository) LookupCITypeID(ctx context.Context, orgID, nameOrID strin
 	return id, nil
 }
 
+// LookupCITypeIDs resolves several type names or keys with one statement
+// (CITypeBatchLookup, NFR-03): per name the same type LookupCITypeID finds,
+// an org-specific type before a global one.
+func (r *PGRepository) LookupCITypeIDs(ctx context.Context, orgID string, namesOrKeys []string) (map[string]string, error) {
+	types := map[string]string{}
+	if len(namesOrKeys) == 0 {
+		return types, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT DISTINCT ON (k.name) k.name, t.id::text
+			FROM unnest($1::text[]) AS k(name)
+			JOIN ci_type t ON (t.key = k.name OR t.name = k.name)
+			  AND (t.organization_id IS NULL OR t.organization_id = $2)
+			ORDER BY k.name, t.organization_id NULLS LAST, t.id
+		`, namesOrKeys, orgID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name, id string
+			if err := rows.Scan(&name, &id); err != nil {
+				return err
+			}
+			types[name] = id
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("lookup ci types: %w", err)
+	}
+	return types, nil
+}
+
+// RunInTx implements TxRunner: fn runs in one transaction of the context's
+// tenant scope, which every repository call with fn's context joins.
+func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	return database.WithRequestTenantTx(ctx, r.pool, orgID, fn)
+}
+
+// LockCI implements CILocker: the CI row stays locked until the context
+// transaction ends.
+func (r *PGRepository) LockCI(ctx context.Context, orgID, ciID string) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM ci WHERE id = $1 AND organization_id = $2 FOR UPDATE`, ciID, orgID); err != nil {
+			return fmt.Errorf("lock ci: %w", err)
+		}
+		return nil
+	})
+}
+
 // CreateEnrollmentCode stores the hash of a new enrollment code.
 func (r *PGRepository) CreateEnrollmentCode(ctx context.Context, code *EnrollmentCode) error {
 	return database.WithRequestTenant(ctx, r.pool, code.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
@@ -621,20 +673,28 @@ func (r *PGRepository) ProcessedRecords(ctx context.Context, orgID string, recor
 }
 
 // MarkRecordsProcessed remembers processed records and forgets those older
-// than the dedupe window (REC-01, RecordLedger).
+// than the dedupe window (REC-01, RecordLedger), in one statement for the
+// whole batch (NFR-03). The record ids must be distinct; an expired entry of
+// a record of the batch is refreshed, not deleted.
 func (r *PGRepository) MarkRecordsProcessed(ctx context.Context, orgID string, records []ProcessedRecord) error {
+	ids := make([]string, len(records))
+	collectors := make([]string, len(records))
+	observed := make([]time.Time, len(records))
+	for i, rec := range records {
+		ids[i], collectors[i], observed[i] = rec.RecordID, rec.CollectorID, rec.ObservedAt
+	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		for _, rec := range records {
-			if _, err := tx.Exec(ctx, `INSERT INTO ingest_record (organization_id, record_id, collector_id, observed_at)
-				VALUES ($1, $2, NULLIF($3, ''), $4)
-				ON CONFLICT (organization_id, record_id) DO UPDATE SET processed_at = now(), observed_at = EXCLUDED.observed_at`,
-				orgID, rec.RecordID, rec.CollectorID, rec.ObservedAt); err != nil {
-				return fmt.Errorf("record processed ingest record: %w", err)
-			}
+		if _, err := tx.Exec(ctx, `WITH expired AS (
+				DELETE FROM ingest_record WHERE organization_id = $1 AND processed_at <= now() - $5::interval
+				  AND record_id <> ALL($2::uuid[]))
+			INSERT INTO ingest_record (organization_id, record_id, collector_id, observed_at)
+			SELECT $1, r.record_id, NULLIF(r.collector_id, ''), r.observed_at
+			FROM unnest($2::uuid[], $3::text[], $4::timestamptz[]) AS r(record_id, collector_id, observed_at)
+			ON CONFLICT (organization_id, record_id) DO UPDATE SET processed_at = now(), observed_at = EXCLUDED.observed_at`,
+			orgID, ids, collectors, observed, RecordDedupeWindow.String()); err != nil {
+			return fmt.Errorf("record processed ingest records: %w", err)
 		}
-		_, err := tx.Exec(ctx, `DELETE FROM ingest_record WHERE organization_id = $1 AND processed_at <= now() - $2::interval`,
-			orgID, RecordDedupeWindow.String())
-		return err
+		return nil
 	})
 }
 

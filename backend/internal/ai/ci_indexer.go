@@ -2,8 +2,10 @@ package ai
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 // CIChunkIndexer adapts the AI chunk store to the ci.Indexer interface so
@@ -88,15 +90,42 @@ func (x *CIChunkIndexer) IndexDocument(ctx context.Context, doc ci.Document) err
 	}
 	// The provider is called only for organizations that opted in and hold
 	// the ai add-on (AI-02).
-	if x.provider != nil && x.provider.EmbeddingsEnabled() && x.consent != nil &&
-		x.consent.AllowsExternalAI(ctx, doc.OrganizationID) {
-		// Embedding failures degrade gracefully to lexical scoring; the chunk
-		// is still upserted without a vector so retrieval keeps working.
-		if emb, err := x.provider.Embed(doc.Title + " " + doc.Summary); err == nil {
-			chunk.Embedding = emb
-		}
+	if x.provider == nil || !x.provider.EmbeddingsEnabled() || x.consent == nil ||
+		!x.consent.AllowsExternalAI(ctx, doc.OrganizationID) {
+		return x.repo.UpsertChunk(ctx, chunk)
 	}
-	return x.repo.UpsertChunk(ctx, chunk)
+	if !database.InTx(ctx) {
+		x.embed(&chunk)
+		return x.repo.UpsertChunk(ctx, chunk)
+	}
+	// Inside a context transaction the chunk is written lexically with the
+	// CI, and the embedding, an external HTTP call, is added after the
+	// commit: the transaction never holds its locks while the provider
+	// answers (NFR-03).
+	if err := x.repo.UpsertChunk(ctx, chunk); err != nil {
+		return err
+	}
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		if !x.embed(&chunk) {
+			return
+		}
+		if err := x.repo.UpsertChunk(ctx, chunk); err != nil {
+			slog.WarnContext(ctx, "AI chunk embedding not stored", "entity_id", chunk.EntityID, "error", err)
+		}
+	})
+	return nil
+}
+
+// embed adds the embedding of the chunk and reports whether it got one.
+// Embedding failures degrade gracefully to lexical scoring; the chunk is
+// still upserted without a vector so retrieval keeps working.
+func (x *CIChunkIndexer) embed(chunk *Chunk) bool {
+	emb, err := x.provider.Embed(chunk.Title + " " + chunk.Content)
+	if err != nil {
+		return false
+	}
+	chunk.Embedding = emb
+	return true
 }
 
 // DeleteDocument removes the retrieval chunk for a CI document.

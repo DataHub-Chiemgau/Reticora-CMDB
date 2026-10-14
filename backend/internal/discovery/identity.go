@@ -352,25 +352,53 @@ func identityQuery(item *IngestItem) IdentityQuery {
 	return q
 }
 
-// identityContext resolves the type ids and the default VRF of an ingest.
-func (h *Handler) identityContext(ctx context.Context, orgID string) *IdentityContext {
-	ic := &IdentityContext{VirtualTypeIDs: map[string]bool{}}
-	if h.typeLookup != nil {
-		if id, err := h.typeLookup.LookupCITypeID(ctx, orgID, "generic_device"); err == nil {
-			ic.GenericDeviceTypeID = id
+// CITypeBatchLookup resolves several CI type names or keys at once. The
+// discovery PG repository implements it with one statement (NFR-03).
+type CITypeBatchLookup interface {
+	// LookupCITypeIDs returns the type id per name; unknown names are
+	// missing from the map.
+	LookupCITypeIDs(ctx context.Context, orgID string, namesOrKeys []string) (map[string]string, error)
+}
+
+// lookupTypes resolves the type names of a batch: with one lookup where the
+// repository can, else name by name, skipping unknown names.
+func (h *Handler) lookupTypes(ctx context.Context, orgID string, names []string) (map[string]string, error) {
+	if batch, ok := h.repo.(CITypeBatchLookup); ok {
+		types, err := batch.LookupCITypeIDs(ctx, orgID, names)
+		if err != nil {
+			return nil, fmt.Errorf("lookup ci types: %w", err)
 		}
-		for _, key := range virtualTypeKeys {
-			if id, err := h.typeLookup.LookupCITypeID(ctx, orgID, key); err == nil && id != "" {
-				ic.VirtualTypeIDs[id] = true
-			}
+		return types, nil
+	}
+	types := map[string]string{}
+	if h.typeLookup == nil {
+		return types, nil
+	}
+	for _, name := range names {
+		if id, err := h.typeLookup.LookupCITypeID(ctx, orgID, name); err == nil && id != "" {
+			types[name] = id
+		}
+	}
+	return types, nil
+}
+
+// identityContext resolves the identity context of an ingest from the types
+// of its batch (lookupTypes) and the default VRF.
+func (h *Handler) identityContext(ctx context.Context, orgID string, types map[string]string) (*IdentityContext, error) {
+	ic := &IdentityContext{GenericDeviceTypeID: types[ci.GenericDeviceType], VirtualTypeIDs: map[string]bool{}}
+	for _, key := range virtualTypeKeys {
+		if id := types[key]; id != "" {
+			ic.VirtualTypeIDs[id] = true
 		}
 	}
 	if finder, ok := h.repo.(IdentityCandidateFinder); ok {
-		if vrf, err := finder.DefaultVRF(ctx, orgID); err == nil {
-			ic.DefaultVRF = vrf
+		vrf, err := finder.DefaultVRF(ctx, orgID)
+		if err != nil {
+			return nil, fmt.Errorf("default VRF: %w", err)
 		}
+		ic.DefaultVRF = vrf
 	}
-	return ic
+	return ic, nil
 }
 
 // identityCandidates returns the CIs an item may be: through the index

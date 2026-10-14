@@ -275,17 +275,27 @@ func (h *Handler) skipProcessed(ctx context.Context, orgID string, items []Inges
 	return kept, duplicates, nil
 }
 
-// markProcessed remembers the record_ids of processed items.
+// markProcessed remembers the record_ids of processed items, each once (the
+// last item of a repeated record_id wins); without record_ids nothing is
+// written.
 func (h *Handler) markProcessed(ctx context.Context, orgID string, items []IngestItem) error {
 	ledger, ok := h.repo.(RecordLedger)
 	if !ok {
 		return nil
 	}
 	var records []ProcessedRecord
+	index := map[string]int{}
 	for i := range items {
-		if items[i].RecordID != "" {
-			records = append(records, ProcessedRecord{RecordID: items[i].RecordID, CollectorID: items[i].CollectorID, ObservedAt: items[i].ObservedAt})
+		if items[i].RecordID == "" {
+			continue
 		}
+		rec := ProcessedRecord{RecordID: items[i].RecordID, CollectorID: items[i].CollectorID, ObservedAt: items[i].ObservedAt}
+		if j, seen := index[rec.RecordID]; seen {
+			records[j] = rec
+			continue
+		}
+		index[rec.RecordID] = len(records)
+		records = append(records, rec)
 	}
 	if len(records) == 0 {
 		return nil

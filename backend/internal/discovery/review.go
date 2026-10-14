@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 )
@@ -56,7 +57,7 @@ func (h *Handler) ReviewService() *reviews.Service {
 		svc.WithEffect(ReviewKindScopeSuggested, h.resolveScopeSuggested)
 		svc.WithEffect(ReviewKindUnknownRelationship, h.resolveUnknownRelationship)
 		if h.reviewNotifier != nil {
-			svc.WithNotifier(h.reviewNotifier)
+			svc.WithNotifier(afterCommitNotifier{next: h.reviewNotifier})
 		}
 		if h.reviewJobs != nil {
 			svc.WithJobs(h.reviewJobs)
@@ -78,6 +79,19 @@ func (h *Handler) WithReviewJobs(tracker jobs.Tracker) *Handler {
 func (h *Handler) WithReviewNotifier(n reviews.Notifier) *Handler {
 	h.reviewNotifier = n
 	return h
+}
+
+// afterCommitNotifier announces an opened item once the transaction that
+// opened it has committed (NFR-03): the notification writes the outbox in a
+// transaction of its own, which would wait forever for the organization's
+// event lock the ingest's record transaction holds, and an item rolled back
+// with its record is never announced. Outside a transaction it notifies at
+// once.
+type afterCommitNotifier struct{ next reviews.Notifier }
+
+func (n afterCommitNotifier) ReviewOpened(ctx context.Context, item *reviews.Item) {
+	opened := *item
+	database.AfterCommit(ctx, func(ctx context.Context) { n.next.ReviewOpened(ctx, &opened) })
 }
 
 // ReasonNoProfileMatch marks an unclassified_device item of a device that

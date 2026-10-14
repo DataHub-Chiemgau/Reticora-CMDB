@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -15,8 +16,23 @@ type HybridBackend struct {
 }
 
 func (b *HybridBackend) Ping(ctx context.Context) error { return b.Remote.Ping(ctx) }
+
+// IndexDocument sends the document to the remote index. Inside a context
+// transaction (database.ContextWithTx) the HTTP call waits for the commit,
+// so the transaction never holds its locks while the remote index answers
+// (NFR-03); a failure is then logged, the index can be rebuilt with
+// POST /api/v1/search/reindex.
 func (b *HybridBackend) IndexDocument(ctx context.Context, doc Document) error {
-	return b.Remote.IndexDocument(ctx, doc)
+	if !database.InTx(ctx) {
+		return b.Remote.IndexDocument(ctx, doc)
+	}
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		if err := b.Remote.IndexDocument(ctx, doc); err != nil {
+			slog.WarnContext(ctx, "remote search index update failed; rebuild via POST /api/v1/search/reindex",
+				"entity_id", doc.EntityID, "error", err)
+		}
+	})
+	return nil
 }
 func (b *HybridBackend) Delete(ctx context.Context, orgID, entityType, entityID string) error {
 	return b.Remote.Delete(ctx, orgID, entityType, entityID)
@@ -24,6 +40,7 @@ func (b *HybridBackend) Delete(ctx context.Context, orgID, entityType, entityID 
 func (b *HybridBackend) Query(ctx context.Context, q Query) (Result, error) {
 	return b.Remote.Query(ctx, q)
 }
+
 // ReindexTenant rebuilds the PostgreSQL index and copies it to the remote
 // index. Like the PostgreSQL rebuild, the copy covers the whole organization
 // even when a restricted administrator triggers it; each document carries its
