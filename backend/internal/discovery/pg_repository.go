@@ -638,30 +638,73 @@ func (r *PGRepository) MarkRecordsProcessed(ctx context.Context, orgID string, r
 	})
 }
 
+// identityPage is the page size of the candidate query; the pages run
+// until the matches are exhausted, so there is no upper bound (NFR-01).
+const identityPage = 1000
+
 // IdentityCandidates returns the ids of the CIs an incoming device may be,
 // using the indexes on serial number, hardware UUID, primary MAC, management
 // IP and hostname/FQDN plus the attribute index for interface MACs, over the
-// whole inventory of the organization (REC-02, NFR-01). Soft-deleted CIs are
-// excluded.
+// whole inventory of the organization (REC-02, NFR-01). The matches are read
+// page by page on (created_at, id) without an upper bound (WP-205).
+// Soft-deleted CIs are excluded.
 func (r *PGRepository) IdentityCandidates(ctx context.Context, orgID string, q *IdentityQuery) ([]string, error) {
 	var ids []string
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT id::text FROM ci WHERE organization_id = $1 AND deleted_at IS NULL AND `+identityPredicate+`
-			ORDER BY created_at, id LIMIT 1000`, identityArgs(orgID, q)...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
+		var (
+			afterCreated time.Time
+			afterID      string
+		)
+		for {
+			args := identityArgs(orgID, q)
+			n := len(args)
+			args = append(args, afterID, afterCreated, identityPage)
+			rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT id::text, created_at FROM ci
+				WHERE organization_id = $1 AND deleted_at IS NULL AND %s
+				AND ($%d::text = '' OR (created_at, id) > ($%d::timestamptz, NULLIF($%d::text, '')::uuid))
+				ORDER BY created_at, id LIMIT $%d`, identityPredicate, n+1, n+2, n+1, n+3), args...)
+			if err != nil {
 				return err
 			}
-			ids = append(ids, id)
+			page := 0
+			for rows.Next() {
+				if err := rows.Scan(&afterID, &afterCreated); err != nil {
+					rows.Close()
+					return err
+				}
+				ids = append(ids, afterID)
+				page++
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			if page < identityPage {
+				return nil
+			}
 		}
-		return rows.Err()
 	})
 	return ids, err
+}
+
+// DiscoveryEdge finds the edge of a type between two CIs with an index
+// lookup instead of listing every edge of the source (WP-205): a core switch
+// with thousands of neighbours is re-confirmed without a scan or a cap.
+func (r *PGRepository) DiscoveryEdge(ctx context.Context, orgID, sourceID, targetID, relType string) (id, source string, found bool, err error) {
+	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		qerr := tx.QueryRow(ctx, `SELECT id::text, source FROM ci_relationship
+			WHERE organization_id = $1 AND source_ci_id = $2 AND target_ci_id = $3 AND rel_type = $4
+			ORDER BY created_at, id LIMIT 1`, orgID, sourceID, targetID, relType).Scan(&id, &source)
+		if errors.Is(qerr, pgx.ErrNoRows) {
+			return nil
+		}
+		if qerr != nil {
+			return qerr
+		}
+		found = true
+		return nil
+	})
+	return id, source, found, err
 }
 
 // DeletedIdentityCandidates returns the soft-deleted CIs an incoming device
