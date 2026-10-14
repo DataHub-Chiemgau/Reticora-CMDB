@@ -217,6 +217,19 @@ jobs:
         working-directory: backend
         run: go test -count=1 -v -run 'TestTraceabilityFile' ./internal/traceability/
 
+  # Gate G1 (WP-213): REP-01 structure, gate checklist, open Critical findings,
+  # frozen acceptance artefacts and workflow syntax.
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PyYAML for the workflow check
+        run: python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+
+      - name: Gate and structure checks (REP-01, GATE-01/02/05, SEQ-01, DOD-01, GLO-11)
+        run: ./tests/rep01-structure.test.sh
+
   lint:
     runs-on: ubuntu-latest
     strategy:

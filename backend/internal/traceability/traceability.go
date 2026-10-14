@@ -4,8 +4,8 @@
 // to its epic, a test file and the work package that delivered it. The checks
 // follow decision E-30: format, known IDs, existing test files and the rows the
 // implementation plan prescribes for the work packages of a pull request are
-// blocking; completeness over all [B]/[Pn]/[A] IDs is reported and only
-// becomes blocking at gate G1.
+// blocking. Since gate G1 (WP-213) every [B] and [Q] ID needs a row as well;
+// completeness over the [Pn]/[A] IDs of later phases is reported.
 package traceability
 
 import (
@@ -234,6 +234,22 @@ func (c Catalog) Required() []string {
 	return ids
 }
 
+var gateTag = regexp.MustCompile(`\[[BQ]\]|\[B–|\bB/G1\b`)
+
+// RequiredForGate returns the sorted IDs whose tag is [B] or [Q], alone or
+// with a later-phase part ("[B], Teilumfang [P2]", "B/G1"). Gate G1 requires a
+// traceability row for each of them (GATE-02, E-30).
+func (c Catalog) RequiredForGate() []string {
+	var ids []string
+	for id, tag := range c {
+		if gateTag.MatchString(tag) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // WorkPackage is the traceability part of one WP block of the plan.
 type WorkPackage struct {
 	ID   string
@@ -376,12 +392,21 @@ func CheckWorkPackages(entries []Entry, plan map[string]*WorkPackage, wps []stri
 
 // Missing returns the required IDs without any traceability row.
 func Missing(entries []Entry, catalog Catalog) []string {
+	return missingOf(entries, catalog.Required())
+}
+
+// MissingForGate returns the [B]/[Q] IDs without any traceability row.
+func MissingForGate(entries []Entry, catalog Catalog) []string {
+	return missingOf(entries, catalog.RequiredForGate())
+}
+
+func missingOf(entries []Entry, required []string) []string {
 	covered := map[string]bool{}
 	for _, e := range entries {
 		covered[e.ID] = true
 	}
 	var missing []string
-	for _, id := range catalog.Required() {
+	for _, id := range required {
 		if !covered[id] {
 			missing = append(missing, id)
 		}
