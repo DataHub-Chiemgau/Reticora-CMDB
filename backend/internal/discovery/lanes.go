@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
@@ -133,11 +134,39 @@ func (h *Handler) laneMutex(orgID string, lane int) *sync.Mutex {
 }
 
 // IdentityLocker takes the transaction-scoped advisory locks of identity
-// keys as one statement of the context transaction. The discovery PG
-// repository implements it.
+// keys as one statement of the context transaction: first Org, shared, or
+// exclusive with Exclusive, then every key of Keys in ascending order. The
+// discovery PG repository implements it.
 type IdentityLocker interface {
-	LockIdentities(ctx context.Context, orgID string, keys []int64) error
+	LockIdentities(ctx context.Context, orgID string, locks IdentityLocks) error
 }
+
+// IdentityLocks are the identity locks of one transaction: the
+// organization's identity lock Org, held shared next to the sorted distinct
+// keys of the transaction's records, or exclusive without keys when the
+// records have more than identityLockLimit keys.
+type IdentityLocks struct {
+	Org       int64
+	Exclusive bool
+	Keys      []int64
+}
+
+// identityLockLimit bounds the identity keys one transaction locks.
+// Advisory locks never take the fast path: each is an entry of PostgreSQL's
+// shared lock table, which every relation lock of every session of the
+// cluster shares and which holds about max_locks_per_transaction ×
+// max_connections entries (64 × 100 by default). A transaction locking
+// thousands of keys (a batch of switches with all their interface MACs, a
+// record with thousands of MACs) makes the transactions of every tenant and
+// service fail with "out of shared memory" (53200). A transaction over the
+// limit therefore takes the organization's identity lock exclusively
+// instead of its keys: every identity-locking transaction of the
+// organization holds that lock shared, so it still runs alone against each
+// of them. A window of the batch path ends before the record that would
+// pass the limit (windowEnd), so only a record over the limit on its own
+// runs exclusively. A process holds at most processingSlots() ×
+// (identityLockLimit+1) identity locks.
+const identityLockLimit = 256
 
 // identityLockNamespace prefixes every hashed identity key: the keys use the
 // one-argument (bigint) form of the advisory locks, a lock space of its own
@@ -145,6 +174,28 @@ type IdentityLocker interface {
 // (migrations 000117, 000120), and the prefix keeps them apart from the
 // other bigint keys (location tree, scheduler leader).
 const identityLockNamespace = "reticora/ingest-identity\x00"
+
+// identityOrgLockKey is the advisory lock key of an organization's identity
+// lock; the hashed text differs from every identity key's.
+func identityOrgLockKey(orgID string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(identityLockNamespace + strings.ToLower(orgID)))
+	return int64(h.Sum64()) //nolint:gosec // a hash, its sign does not matter
+}
+
+// identityLocks returns the identity locks of a transaction that processes
+// items: the organization's lock shared and the keys of items, or the
+// organization's lock exclusive when items have more than
+// identityLockLimit keys. A transaction takes them once, as its first
+// statement, so that it never asks for the exclusive lock while holding the
+// shared one.
+func identityLocks(orgID string, ic *IdentityContext, items ...*IngestItem) IdentityLocks {
+	locks := IdentityLocks{Org: identityOrgLockKey(orgID), Keys: identityLockKeys(orgID, ic, items...)}
+	if len(locks.Keys) > identityLockLimit {
+		locks.Exclusive, locks.Keys = true, nil
+	}
+	return locks
+}
 
 // identityLockKeys returns the advisory lock keys of the identity values of
 // items, sorted and each once: the usable serial number (case folded), the
@@ -184,6 +235,7 @@ func identityLockKeys(orgID string, ic *IdentityContext, items ...*IngestItem) [
 // transaction when more than one lane can process the organization; it must
 // be the transaction's first statement, so that the candidate query after it
 // sees every transaction that held one of the keys before (WP-334, E-56).
+// Records without an identity key match nothing and lock nothing.
 func (h *Handler) lockIdentities(ctx context.Context, orgID string, ic *IdentityContext, items ...*IngestItem) error {
 	if !h.lanesOn() || !database.InTx(ctx) {
 		return nil
@@ -192,11 +244,43 @@ func (h *Handler) lockIdentities(ctx context.Context, orgID string, ic *Identity
 	if !ok {
 		return nil
 	}
-	keys := identityLockKeys(orgID, ic, items...)
-	if len(keys) == 0 {
+	locks := identityLocks(orgID, ic, items...)
+	if !locks.Exclusive && len(locks.Keys) == 0 {
 		return nil
 	}
-	return locker.LockIdentities(ctx, orgID, keys)
+	return locker.LockIdentities(ctx, orgID, locks)
+}
+
+// windowEnd returns the end of the batch window of the frame's records that
+// starts at start: at most ingestBatch records and, with more than one
+// lane, only as many as keep the identity keys of the records the batch
+// locks within identityLockLimit; a record over the limit on its own is a
+// window of its own. With one lane nothing is locked and windows keep
+// ingestBatch records.
+func (h *Handler) windowEnd(orgID string, frame *batchFrame, start int) int {
+	end := min(start+ingestBatch, len(frame.items))
+	if !h.lanesOn() {
+		return end
+	}
+	keys := map[int64]struct{}{}
+	locked := false
+	for i := start; i < end; i++ {
+		if frame.typeIDs[i] == "" {
+			// Queued for review in the frame; the batch does not lock it.
+			continue
+		}
+		for _, k := range identityLockKeys(orgID, frame.identity, &frame.items[i]) {
+			keys[k] = struct{}{}
+		}
+		if len(keys) > identityLockLimit {
+			if !locked {
+				return i + 1
+			}
+			return i
+		}
+		locked = true
+	}
+	return end
 }
 
 // CICountLocker takes the organization's max_cis lock until the end of the
@@ -259,12 +343,18 @@ func (h *Handler) admissionCount(ctx context.Context, orgID string, frame *batch
 // transaction lost against another lane.
 const maxRecordRetries = 3
 
-// retryReason names why a failed record transaction is started again at
-// once with more than one lane, or returns "": a deadlock (40P01) or
-// serialization failure (40001) with another lane, a unique identity index
-// another lane or instance won (23505 on serial number, hardware UUID or
-// primary MAC; the new attempt matches that CI), or a max_cis admission that
-// must run exclusively.
+// outOfMemoryPause is the pause before the first new attempt of a
+// transaction that failed because PostgreSQL ran out of shared memory; the
+// next attempts wait one more pause each.
+const outOfMemoryPause = 100 * time.Millisecond
+
+// retryReason names why a failed record transaction is started again with
+// more than one lane, or returns "": a deadlock (40P01) or serialization
+// failure (40001) with another lane, a unique identity index another lane
+// or instance won (23505 on serial number, hardware UUID or primary MAC; the
+// new attempt matches that CI), a max_cis admission that must run
+// exclusively, or PostgreSQL out of shared memory (53200, mostly a full
+// lock table) for a moment.
 func retryReason(err error) string {
 	if errors.Is(err, errNearLimit) {
 		return "near_limit"
@@ -278,6 +368,8 @@ func retryReason(err error) string {
 		return "deadlock"
 	case "40001":
 		return "serialization"
+	case "53200":
+		return "out_of_memory"
 	case "23505":
 		switch pgErr.ConstraintName {
 		case "uq_ci_org_serial", "uq_ci_org_hardware_uuid", "uq_ci_org_primary_mac":
@@ -287,11 +379,31 @@ func retryReason(err error) string {
 	return ""
 }
 
+// retryPause waits before the new attempt of a transaction that failed for
+// reason, attempt being the number of the failed one (0 first): not at all
+// after losing against another lane; after running out of shared memory
+// (attempt+1)·outOfMemoryPause, so that other sessions can release their
+// locks first. It reports false when ctx ended first.
+func retryPause(ctx context.Context, reason string, attempt int) bool {
+	if reason != "out_of_memory" {
+		return true
+	}
+	t := time.NewTimer(time.Duration(attempt+1) * outOfMemoryPause)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
 // runRecord processes record i of the frame in its own transaction. With
-// more than one lane a transaction that lost against another lane (see
-// retryReason) runs again at once, at most maxRecordRetries times, in a
-// fresh transaction and from the record as reported; the queue does not
-// see these attempts. With one lane the record runs once, as before.
+// more than one lane a transaction that lost against another lane or ran
+// out of shared memory (see retryReason) runs again, at most
+// maxRecordRetries times, in a fresh transaction and from the record as
+// reported (retryPause); the queue does not see these attempts. With one
+// lane the record runs once, as before.
 func (h *Handler) runRecord(ctx context.Context, orgID string, frame *batchFrame, i int) (recordOutcome, error) {
 	var reported IngestItem
 	if h.lanesOn() {
@@ -309,7 +421,7 @@ func (h *Handler) runRecord(ctx context.Context, orgID string, frame *batchFrame
 		// Devices the failed transaction queued as unlicensed are not.
 		frame.unlicensed.rollback(mark)
 		reason := retryReason(err)
-		if !h.lanesOn() || reason == "" || attempt >= maxRecordRetries {
+		if !h.lanesOn() || reason == "" || attempt >= maxRecordRetries || !retryPause(ctx, reason, attempt) {
 			return out, err
 		}
 		if reason == "near_limit" {

@@ -539,7 +539,7 @@ func TestIngestStatementBudget(t *testing.T) {
 	// the identity locks of its records: one statement more, right after
 	// BEGIN. With one lane there is none (the subtests above).
 	t.Run("lanes", func(t *testing.T) {
-		lock := regexp.MustCompile(`^select pg_advisory_xact_lock\(k\) from \(select distinct unnest`)
+		lock := regexp.MustCompile(`^select case when s\.o = 0 and not \$3 then pg_advisory_xact_lock_shared\(s\.k\)`)
 		locks := func(tx []string) int {
 			n := 0
 			for _, sql := range tx {

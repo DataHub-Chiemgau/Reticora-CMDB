@@ -511,14 +511,26 @@ func (r *PGRepository) LockCI(ctx context.Context, orgID, ciID string) error {
 	})
 }
 
-// LockIdentities implements IdentityLocker: one statement takes the
-// transaction-scoped advisory locks of keys in ascending order (the lock
-// function runs after the sort), so transactions that share keys never wait
-// for each other in a cycle (WP-334).
-func (r *PGRepository) LockIdentities(ctx context.Context, orgID string, keys []int64) error {
+// The identity locks of the ingest lanes (WP-334); the record and batch
+// transactions find them by type assertion.
+var _ IdentityLocker = (*PGRepository)(nil)
+
+// identityLockSQL takes the identity locks of a transaction in one
+// statement: the organization's lock ($1) first, shared, or exclusive with
+// $3, then the keys ($2) exclusively in ascending order. The lock functions
+// run after the sort (EXPLAIN: Result above Sort), so transactions that
+// share keys never wait for each other in a cycle.
+const identityLockSQL = `SELECT CASE WHEN s.o = 0 AND NOT $3 THEN pg_advisory_xact_lock_shared(s.k) ELSE pg_advisory_xact_lock(s.k) END
+FROM (SELECT 0 AS o, $1::bigint AS k UNION ALL SELECT DISTINCT 1, unnest($2::bigint[])) s ORDER BY s.o, s.k`
+
+// LockIdentities implements IdentityLocker with identityLockSQL (WP-334).
+func (r *PGRepository) LockIdentities(ctx context.Context, orgID string, locks IdentityLocks) error {
+	keys := locks.Keys
+	if keys == nil || locks.Exclusive {
+		keys = []int64{}
+	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(k) FROM (SELECT DISTINCT unnest($1::bigint[]) AS k) s ORDER BY k`,
-			keys); err != nil {
+		if _, err := tx.Exec(ctx, identityLockSQL, locks.Org, keys, locks.Exclusive); err != nil {
 			return fmt.Errorf("lock identity keys: %w", err)
 		}
 		return nil

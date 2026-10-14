@@ -8,19 +8,24 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // withoutIdentityLocks is the discovery repository without the identity
 // locks: the control of TestIngestLanesIdentityLock.
 type withoutIdentityLocks struct{ *discovery.PGRepository }
 
-func (withoutIdentityLocks) LockIdentities(context.Context, string, []int64) error { return nil }
+func (withoutIdentityLocks) LockIdentities(context.Context, string, discovery.IdentityLocks) error {
+	return nil
+}
 
 // lanesCtx is the context of an org-wide ingest of orgID.
 func lanesCtx(f *scopetest.Fixture, orgID string) context.Context {
@@ -172,6 +177,120 @@ func TestIngestLanesIdentityLock(t *testing.T) {
 			t.Errorf("order round %d (newer first: %v): model %q, want the newer observation", round, newerFirst, m)
 		}
 	}
+
+	t.Run("bounded per transaction", func(t *testing.T) { identityLocksBounded(t, f) })
+}
+
+// lockProbe is the discovery repository that reads, in every
+// identity-locking transaction right after the identity locks, how many
+// advisory locks the transaction holds (pg_locks).
+type lockProbe struct {
+	*discovery.PGRepository
+	pool *pgxpool.Pool
+
+	mu sync.Mutex
+	// most is the most advisory locks one transaction held, exclusive the
+	// transactions that held one exclusive lock alone (the organization's).
+	most, exclusive int
+	failed          []string
+}
+
+func (p *lockProbe) LockIdentities(ctx context.Context, orgID string, locks discovery.IdentityLocks) error {
+	if err := p.PGRepository.LockIdentities(ctx, orgID, locks); err != nil {
+		return err
+	}
+	var held, exclusive int
+	if err := database.WithRequestTenant(ctx, p.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE mode = 'ExclusiveLock')
+			FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND granted`).Scan(&held, &exclusive)
+	}); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.most = max(p.most, held)
+	switch {
+	case locks.Exclusive && held == 1 && exclusive == 1:
+		p.exclusive++
+	case locks.Exclusive || held != len(locks.Keys)+1 || exclusive != len(locks.Keys):
+		p.failed = append(p.failed, fmt.Sprintf("%d keys (exclusive %v): %d advisory locks held, %d exclusive",
+			len(locks.Keys), locks.Exclusive, held, exclusive))
+	}
+	return nil
+}
+
+// identityLocksBounded: the identity locks of a transaction stay within
+// PostgreSQL's shared lock table (53200, WP-334) also for a switch fleet
+// with an interface MAC per port and for a record with 20,000 MACs, while
+// four lanes ingest at once: every transaction holds at most
+// IdentityLockLimit+1 advisory locks, windows of switches still batch
+// several records, and the record over the limit holds the organization's
+// lock exclusively, alone. Every device becomes one CI.
+func identityLocksBounded(t *testing.T, f *scopetest.Fixture) {
+	bg := context.Background()
+	ctx := lanesCtx(f, f.OrgB)
+	probe := &lockProbe{PGRepository: discovery.NewPGRepository(f.App), pool: f.App}
+	h := discovery.NewHandler(probe, ci.NewPGRepository(f.App)).WithIngestLanes(4)
+	seen := time.Now().Add(-time.Minute)
+	switchRec := func(lane, n int) plugins.DeviceRecord {
+		res := &plugins.Result{CIType: "switch", Name: fmt.Sprintf("locktbl-%d-%02d", lane, n), Serial: fmt.Sprintf("LOCKTBL-%d-%02d", lane, n),
+			IP: fmt.Sprintf("198.18.%d.%d", 20+lane, n), MAC: fmt.Sprintf("00:1b:21:%02x:%02x:00", lane, n)}
+		for p := range 48 {
+			res.Interfaces = append(res.Interfaces, plugins.NetworkInterface{Name: fmt.Sprintf("ge-0/0/%d", p), IfIndex: p + 1,
+				MAC: fmt.Sprintf("00:1b:22:%02x:%02x:%02x", lane, n, p)})
+		}
+		return plugins.RecordFromResult("snmp", res, seen)
+	}
+	big := plugins.RecordFromResult("snmp", &plugins.Result{CIType: "switch", Name: "locktbl-macs", Serial: "LOCKTBL-MACS", IP: "198.18.30.1"}, seen)
+	bigItem := discovery.ItemFromRecord(&big)
+	macs := make([]any, 20000)
+	for i := range macs {
+		macs[i] = fmt.Sprintf("00:1b:23:%02x:%02x:%02x", i>>16, (i>>8)&0xff, i&0xff)
+	}
+	bigItem.Fingerprint["mac_addresses"] = macs
+
+	var wg sync.WaitGroup
+	for lane := range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			recs := make([]plugins.DeviceRecord, 25)
+			for n := range recs {
+				recs[n] = switchRec(lane, n)
+			}
+			if _, err := discovery.ProcessInLane(ctx, h, f.OrgB, lane, recs...); err != nil {
+				t.Errorf("lane %d: %v", lane, err)
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if _, err := discovery.ProcessItemsInLane(ctx, h, f.OrgB, 1, bigItem); err != nil {
+			t.Errorf("record with 20,000 MACs: %v", err)
+		}
+	}()
+	wg.Wait()
+
+	var cis int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci WHERE organization_id = $1 AND serial_number LIKE 'LOCKTBL-%' AND deleted_at IS NULL`,
+		f.OrgB).Scan(&cis); err != nil {
+		t.Fatal(err)
+	}
+	if cis != 101 {
+		t.Errorf("%d CIs of 100 switches and the record with 20,000 MACs, want 101", cis)
+	}
+	if probe.most > discovery.IdentityLockLimit+1 || probe.most <= 52 {
+		t.Errorf("a transaction held up to %d advisory locks; want at most %d and windows of several switches (51 keys each)",
+			probe.most, discovery.IdentityLockLimit+1)
+	}
+	if probe.exclusive == 0 {
+		t.Error("the record with 20,000 MACs did not hold the organization's identity lock exclusively")
+	}
+	for _, msg := range probe.failed {
+		t.Error("identity locks: " + msg)
+	}
+	t.Logf("at most %d advisory locks per transaction, %d transactions with the organization's lock exclusively", probe.most, probe.exclusive)
 }
 
 // fixedLimit is a max_cis limit for the organization of the test.

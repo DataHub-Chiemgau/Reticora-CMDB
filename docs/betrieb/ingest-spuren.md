@@ -60,10 +60,20 @@ nebeneinander arbeiten.
   Interface-MACs, Management-IP je VRF), werden nie gleichzeitig verarbeitet,
   auch nicht über Spuren oder Instanzen hinweg. Jede Record- und
   Batch-Transaktion nimmt dazu als erste Anweisung transaktionsgebundene
-  Advisory-Locks auf diese Schlüssel, sortiert. Die Identitätsauflösung sieht
-  damit, was eine serielle Verarbeitung gesehen hätte: ein Gerät wird nicht
-  zu zwei CIs (PRI-10), auch wenn sich seine Records nur über
-  nicht eindeutige Merkmale (IP und sysObjectID, Interface-MACs) erkennen.
+  Advisory-Locks: die Identitätssperre der Organisation geteilt, dann die
+  Schlüssel, sortiert. Die Identitätsauflösung sieht damit, was eine
+  serielle Verarbeitung gesehen hätte: ein Gerät wird nicht zu zwei CIs
+  (PRI-10), auch wenn sich seine Records nur über nicht eindeutige Merkmale
+  (IP und sysObjectID, Interface-MACs) erkennen.
+- **Obergrenze der Sperren:** Eine Transaktion sperrt höchstens 256
+  Schlüssel. Ein Batch endet vor dem Record, der die Grenze überschreiten
+  würde (z. B. 5 Switches mit 48 Ports, je 51 Schlüssel); ein Record mit mehr
+  als 256 Schlüsseln (Stack oder Chassis mit vielen Port-MACs, Record mit
+  Tausenden MACs) nimmt stattdessen die Identitätssperre der Organisation
+  **exklusiv** und läuft damit allein gegen alle anderen sperrenden
+  Transaktionen der Organisation, über alle Spuren und Instanzen. Grund:
+  Advisory-Locks belegen je einen Eintrag der gemeinsamen Lock-Tabelle des
+  PostgreSQL-Clusters (siehe „Kosten je Transaktion“).
 - **Feldwerte:** REC-03/REC-05 entscheiden unabhängig von der
   Verarbeitungsreihenfolge; eine ältere Beobachtung überschreibt keine neuere.
   Rest: `raw_data` und der Fingerprint-Merge folgen der Verarbeitungsreihenfolge,
@@ -79,8 +89,10 @@ nebeneinander arbeiten.
   Serialisierungsfehler (40001) oder ein Unique-Index auf Seriennummer,
   Hardware-UUID oder Primär-MAC, den eine andere Spur zuerst belegt hat,
   wiederholt den Record sofort in einer neuen Transaktion (höchstens dreimal,
-  Metrik `reticora_ingest_record_retries_total`). Die Queue sieht diese
-  Wiederholungen nicht; sie zählen nicht gegen `MaxDeliver`.
+  Metrik `reticora_ingest_record_retries_total`). „out of shared memory“
+  (53200, meist eine volle Lock-Tabelle) wiederholt ihn ebenso, aber nach
+  100, 200 und 300 ms. Die Queue sieht diese Wiederholungen nicht; sie
+  zählen nicht gegen `MaxDeliver`.
 
 ## Upgrade und Altconsumer
 
@@ -143,7 +155,7 @@ und werden über diesen Consumer verarbeitet (`/readyz`: Spur `legacy`).
   | `reticora_ingest_lanes` | Spurzahl dieser Instanz |
   | `reticora_ingest_lane_backlog{lane}` | Rückstand je Spur (`legacy` = Altconsumer) |
   | `reticora_ingest_lane_records_total{lane}` | bestätigte Nachrichten je Spur |
-  | `reticora_ingest_record_retries_total{reason}` | sofortige Wiederholungen (`deadlock`, `serialization`, `identity`, `near_limit`) |
+  | `reticora_ingest_record_retries_total{reason}` | Wiederholungen im Prozess (`deadlock`, `serialization`, `identity`, `near_limit`, `out_of_memory`) |
   | `reticora_worker_backlog{worker="ingest"}` | Summe aller Spuren (bestehende Alerts) |
 
 - Eine einzelne hängende Spur fällt in der Summe kaum auf: steigt
@@ -157,6 +169,16 @@ hinzu (die Identitätssperre): ein Batch von 20 neuen Geräten braucht 11 statt
 10 Anweisungen, ein neuer Record einzeln 13 statt 12. Updates bekannter Geräte
 lesen ihre Kandidaten unter der Sperre neu (2 Anweisungen mehr). Organisationen
 mit `max_cis` zählen je anlegender Transaktion einmal neu (2 Anweisungen).
+
+Lock-Tabelle: Jede Advisory-Sperre ist ein Eintrag der gemeinsamen
+Lock-Tabelle des PostgreSQL-Clusters (etwa `max_locks_per_transaction` ×
+`max_connections`, Standard 64 × 100), die sich alle Datenbanken, Mandanten
+und Dienste teilen; ist sie voll, scheitern beliebige Transaktionen mit
+„out of shared memory“. Eine Ingest-Instanz hält höchstens 6 × 257 = 1.542
+Identitätssperren (6 Batches gleichzeitig, je 256 Schlüssel plus die Sperre
+der Organisation), mehrere Instanzen entsprechend mehr. Bei mehr als zwei
+Ingest-Instanzen auf einem Cluster mit Standardwerten
+`max_locks_per_transaction` auf mindestens 128 setzen.
 
 ## Lastnachweis
 

@@ -52,8 +52,17 @@ Artefakt hoch. Das Ergebnis des G1-Laufs steht in
   `ingest_drain_inclusive_records_per_s` (alle Records durch die Zeit ab dem
   ersten Senden, zur Information), `ingest_spool_flush` (erstes Senden bis
   alles sichtbar), `ingest_backlog_peak` (größter Rückstand laut `/readyz`,
-  `details.ingest.total`). Sichtbar heißt: `GET /cis?filter[serial_number][like]=<Lauf>*`
-  zählt den Record.
+  `details.ingest.total`), `ingest_records_missing` (Records, die nie
+  sichtbar werden), `ingest_records_accepted` (mit 202 angenommene Records
+  des Szenarios `load`, zur Information). Sichtbar heißt:
+  `GET /cis?filter[serial_number][like]=<Lauf>*` zählt den Record.
+- **Vollständigkeit.** Beide Szenarien scheitern, sobald ein Record fehlt
+  (`ingest_records_missing` = 0): Ist die Queue leer (`/readyz`) und wächst
+  die Zahl sichtbarer Records nicht mehr, wartet der Lauf nicht weiter und
+  zählt den Rest als fehlend (Dead Letter, als `unlicensed_ci` gehaltene oder
+  verworfene Records). Im Szenario `load` muss k6 die Rate voll anbieten
+  (`dropped_iterations` = 0); damit ist die Sollzahl `RATE · DURATION_S`
+  und jede abgelehnte Anfrage fehlt sichtbar.
 - **Spool.** Der Collector liefert seinen Spool nacheinander aus; jede
   Spool-Nachricht ist der vollständige Upload eines Erfassungszyklus
   (`spoolFlushBatch` = 64 zählt Nachrichten je Lesedurchgang, nicht Records).

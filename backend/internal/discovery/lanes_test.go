@@ -167,6 +167,126 @@ func TestIdentityLockKeys(t *testing.T) {
 	}
 }
 
+// switchRecord is an SNMP record of a switch with ports interface MACs:
+// ports+3 identity keys (serial number, primary MAC, the port MACs, the
+// management IP).
+func switchRecord(n, ports int) IngestItem {
+	item := IngestItem{SerialNumber: fmt.Sprintf("SW-%04d", n), PrimaryMAC: fmt.Sprintf("00:1b:21:%02x:%02x:00", n>>8, n&0xff),
+		ManagementIP: fmt.Sprintf("10.0.%d.%d", n>>8, n&0xff)}
+	for p := range ports {
+		item.Interfaces = append(item.Interfaces, wire.IngestInterface{MAC: fmt.Sprintf("00:1b:%02x:%02x:%02x:%02x", 0x22+p>>8, p&0xff, n>>8, n&0xff)})
+	}
+	return item
+}
+
+// TestIdentityLocksBounded: no transaction locks more than
+// identityLockLimit identity keys plus the organization's lock (PostgreSQL's
+// shared lock table, 53200). A batch of switches is cut into windows below
+// the limit, which still batch several records; a record over the limit is
+// a window of its own and takes the organization's lock exclusively, alone;
+// with one lane windows keep ingestBatch records.
+func TestIdentityLocksBounded(t *testing.T) {
+	ic := &IdentityContext{DefaultVRF: "vrf-default"}
+	org := identityOrgLockKey("org-1")
+	if org != identityOrgLockKey("ORG-1") || org == identityOrgLockKey("org-2") {
+		t.Error("the organization's identity lock must be one per organization, in any spelling")
+	}
+	switch48 := switchRecord(1, 48)
+	if n := len(identityLockKeys("org-1", ic, &switch48)); n != 51 {
+		t.Fatalf("a 48-port switch has %d identity keys, want 51", n)
+	}
+
+	// The locks of one record around the limit.
+	for _, c := range []struct {
+		ports     int
+		exclusive bool
+	}{{identityLockLimit - 3, false}, {identityLockLimit - 2, true}} {
+		item := switchRecord(2, c.ports)
+		locks := identityLocks("org-1", ic, &item)
+		if locks.Org != org || locks.Exclusive != c.exclusive {
+			t.Errorf("%d keys: org lock %d exclusive %v, want %d %v", c.ports+3, locks.Org, locks.Exclusive, org, c.exclusive)
+		}
+		if want := c.ports + 3; c.exclusive && locks.Keys != nil || !c.exclusive && len(locks.Keys) != want {
+			t.Errorf("%d keys: %d keys locked", want, len(locks.Keys))
+		}
+	}
+	hostile := IngestItem{SerialNumber: "SN-HOSTILE", Fingerprint: map[string]any{}}
+	var macs []any
+	for i := range 20000 {
+		macs = append(macs, fmt.Sprintf("00:1b:%02x:%02x:%02x:01", i>>16, (i>>8)&0xff, i&0xff))
+	}
+	hostile.Fingerprint["mac_addresses"] = macs
+	if locks := identityLocks("org-1", ic, &hostile); !locks.Exclusive || len(locks.Keys) != 0 {
+		t.Errorf("a record with 20,000 MACs locks %d keys (exclusive %v), want the organization's lock alone", len(locks.Keys), locks.Exclusive)
+	}
+
+	// windows cuts the frame of items into the windows of processItems and
+	// checks what each locks.
+	windows := func(lanes int, items []IngestItem) [][2]int {
+		t.Helper()
+		h := (&Handler{}).WithIngestLanes(lanes)
+		frame := &batchFrame{items: items, typeIDs: make([]string, len(items)), identity: ic}
+		for i := range items {
+			frame.typeIDs[i] = "type"
+		}
+		var out [][2]int
+		for start, end := 0, 0; start < len(items); start = end {
+			end = h.windowEnd("org-1", frame, start)
+			if end <= start || end-start > ingestBatch {
+				t.Fatalf("window [%d, %d)", start, end)
+			}
+			locked := make([]*IngestItem, 0, end-start)
+			for i := start; i < end; i++ {
+				locked = append(locked, &items[i])
+			}
+			locks := identityLocks("org-1", ic, locked...)
+			if lanes > 1 && (len(locks.Keys) > identityLockLimit || locks.Exclusive && end-start != 1) {
+				t.Errorf("window [%d, %d) locks %d keys, exclusive %v", start, end, len(locks.Keys), locks.Exclusive)
+			}
+			out = append(out, [2]int{start, end})
+		}
+		return out
+	}
+	fleet := make([]IngestItem, 100)
+	for i := range fleet {
+		fleet[i] = switchRecord(i, 48)
+	}
+	if w := windows(4, fleet); len(w) != 20 || w[0] != [2]int{0, 5} {
+		t.Errorf("100 switches of 51 keys with lanes: windows %v, want 20 of 5", w)
+	}
+	if w := windows(1, fleet); len(w) != 1 {
+		t.Errorf("100 switches with one lane: windows %v, want one", w)
+	}
+	// Servers with few keys still batch ingestBatch records.
+	servers := make([]IngestItem, 150)
+	for i := range servers {
+		servers[i] = IngestItem{SerialNumber: fmt.Sprintf("SRV-%d", i), ManagementIP: fmt.Sprintf("10.1.%d.%d", i>>8, i&0xff)}
+	}
+	if w := windows(4, servers); len(w) != 2 || w[0] != [2]int{0, ingestBatch} {
+		t.Errorf("150 servers of 2 keys with lanes: windows %v, want %d and the rest", w, ingestBatch)
+	}
+	// A record over the limit is alone, the records around it batch.
+	mixed := append(append(slices.Clone(fleet[:3]), hostile), fleet[3:6]...)
+	if w := windows(4, mixed); !slices.Equal(w, [][2]int{{0, 3}, {3, 4}, {4, 7}}) {
+		t.Errorf("switches around a record over the limit: windows %v", w)
+	}
+	if w := windows(4, append([]IngestItem{hostile}, fleet[:2]...)); !slices.Equal(w, [][2]int{{0, 1}, {1, 3}}) {
+		t.Errorf("a record over the limit first: windows %v", w)
+	}
+	// Records the frame queued for review (no type) are not locked and do
+	// not count.
+	h := (&Handler{}).WithIngestLanes(4)
+	frame := &batchFrame{items: fleet[:12], typeIDs: make([]string, 12), identity: ic}
+	for i := range 12 {
+		if i%2 == 0 {
+			frame.typeIDs[i] = "type"
+		}
+	}
+	if end := h.windowEnd("org-1", frame, 0); end != 10 {
+		t.Errorf("window over records without type ends at %d, want 10 (five typed switches)", end)
+	}
+}
+
 func TestRetryReason(t *testing.T) {
 	for _, c := range []struct {
 		err  error
@@ -179,11 +299,27 @@ func TestRetryReason(t *testing.T) {
 		{fmt.Errorf("x: %w", &pgconn.PgError{Code: "40P01"}), "deadlock"},
 		{&pgconn.PgError{Code: "40001"}, "serialization"},
 		{fmt.Errorf("x: %w", errNearLimit), "near_limit"},
+		{fmt.Errorf("lock identity keys: %w", &pgconn.PgError{Code: "53200", Message: "out of shared memory"}), "out_of_memory"},
 		{errors.New("database down"), ""},
 	} {
 		if got := retryReason(c.err); got != c.want {
 			t.Errorf("retryReason(%v) = %q, want %q", c.err, got, c.want)
 		}
+	}
+	// Only shared memory makes the new attempt wait, longer each time, and
+	// never past the context.
+	start := time.Now()
+	if !retryPause(context.Background(), "deadlock", 2) || time.Since(start) >= outOfMemoryPause {
+		t.Error("a retry after losing against another lane waits")
+	}
+	start = time.Now()
+	if !retryPause(context.Background(), "out_of_memory", 1) || time.Since(start) < 2*outOfMemoryPause {
+		t.Errorf("second retry after out of shared memory waited %v, want %v", time.Since(start), 2*outOfMemoryPause)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if retryPause(ctx, "out_of_memory", 0) {
+		t.Error("the pause outlasts the context")
 	}
 }
 

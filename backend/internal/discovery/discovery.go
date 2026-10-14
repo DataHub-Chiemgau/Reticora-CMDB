@@ -1006,8 +1006,9 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 // skips them as duplicates.
 //
 // With the batch queries of the repository and the batch creation of the
-// CI repository (WP-333), each window of up to ingestBatch records first
-// runs one more transaction: one candidate query for all its records, and
+// CI repository (WP-333), each window of up to ingestBatch records (with
+// lanes, also bounded by its identity locks, see windowEnd) first runs one
+// more transaction: one candidate query for all its records, and
 // its new devices created together. Updates of known devices and every
 // record the batch leaves follow one by one in the order of the records;
 // the records of one device keep their order. When a record fails, the
@@ -1029,9 +1030,11 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			break
 		}
 		// With lanes, the reviews of unknown types of two frames may wait
-		// for each other (WP-334): the frame starts again.
+		// for each other (WP-334): the frame starts again, as it does after
+		// PostgreSQL ran out of shared memory for a moment.
 		reason := retryReason(err)
-		if !h.lanesOn() || attempt >= maxRecordRetries || (reason != "deadlock" && reason != "serialization") {
+		if !h.lanesOn() || attempt >= maxRecordRetries ||
+			(reason != "deadlock" && reason != "serialization" && reason != "out_of_memory") || !retryPause(ctx, reason, attempt) {
 			return resp, err
 		}
 		recordRetries.WithLabelValues(reason).Inc()
@@ -1050,8 +1053,8 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 	handled := make([]bool, n)
 	var recordErr error
 windows:
-	for start := 0; start < n; start += ingestBatch {
-		end := min(start+ingestBatch, n)
+	for start, end := 0, 0; start < n; start = end {
+		end = h.windowEnd(orgID, frame, start)
 		h.processWindow(ctx, orgID, frame, start, end, handled, resolvedCIID, &resp)
 		for i := start; i < end; i++ {
 			if handled[i] {

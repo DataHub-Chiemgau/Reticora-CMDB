@@ -44,6 +44,20 @@ func ProcessInLane(ctx context.Context, h *Handler, orgID string, lane int, recs
 	return h.processSerially(ctx, orgID, lane, items)
 }
 
+// ProcessItemsInLane processes ingest items in a lane of the organization
+// like ProcessInLane.
+func ProcessItemsInLane(ctx context.Context, h *Handler, orgID string, lane int, items ...IngestItem) (BulkIngestResponse, error) {
+	return h.processSerially(ctx, orgID, lane, items)
+}
+
+// ItemFromRecord is the ingest item of a record.
+func ItemFromRecord(rec *DeviceRecord) IngestItem { return itemFromRecord(rec) }
+
+// IdentityLockLimit is the most identity keys one transaction locks
+// (WP-334); over it, the transaction holds the organization's identity lock
+// exclusively instead.
+const IdentityLockLimit = identityLockLimit
+
 // SetBeforeCreate installs a hook that runs after a transaction decided to
 // create new CIs and before it inserts them.
 func SetBeforeCreate(h *Handler, fn func(context.Context)) { h.beforeCreate = fn }

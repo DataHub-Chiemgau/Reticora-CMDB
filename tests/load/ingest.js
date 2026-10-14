@@ -6,15 +6,22 @@
 //         During the load a probe record every PROBE_EVERY_S measures the
 //         delay record -> visible; after the load the time until every
 //         record of the run is visible is added as the tail delay. Budget:
-//         every delay < VISIBLE_BUDGET_S (30 s).
+//         every delay < VISIBLE_BUDGET_S (30 s), every offered request
+//         sent (no dropped iterations) and every record visible.
 //   spool One collector delivers its spool after an outage (COL-05):
 //         SPOOL_RECORDS records (10,000), observed an hour ago, one spooled
 //         upload after the other as flushSpool sends them (POST
 //         /api/v1/discovery/ingest, gzip, SPOOL_BATCH records per upload).
-//         Then it waits until every record is visible. Budgets: the flush
-//         is done within SPOOL_BUDGET_S (5 min) and the queue drains at
-//         least TARGET records/s (200), measured from the end of sending;
-//         the rate including the sending is reported as information.
+//         Then it waits until every record is visible. Budgets: every
+//         record becomes visible, the flush is done within SPOOL_BUDGET_S
+//         (5 min) and the queue drains at least TARGET records/s (200),
+//         measured from the end of sending; the rate including the sending
+//         is reported as information.
+//
+// A record that never becomes visible fails both scenarios
+// (ingest_records_missing): once the queue is empty and the count stopped
+// growing, the run stops waiting and counts what is missing (dead letters,
+// records held as unlicensed_ci, dropped messages).
 //
 // Both scenarios record the peak backlog of /readyz (details.ingest.total,
 // WP-334) while they wait.
@@ -23,7 +30,7 @@
 //   k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat key) -e SCENARIO=spool tests/load/ingest.js
 import http from 'k6/http';
 import { check, fail, sleep } from 'k6';
-import { Gauge, Trend } from 'k6/metrics';
+import { Counter, Gauge, Trend } from 'k6/metrics';
 import { BASE_URL, params, post, uuid } from './lib.js';
 
 const SCENARIO = __ENV.SCENARIO || 'load';
@@ -44,6 +51,8 @@ const drainRate = new Gauge('ingest_drain_records_per_s');
 const drainInclusive = new Gauge('ingest_drain_inclusive_records_per_s');
 const spoolFlush = new Trend('ingest_spool_flush', true);
 const backlogPeak = new Gauge('ingest_backlog_peak');
+const missing = new Counter('ingest_records_missing');
+const accepted = new Counter('ingest_records_accepted');
 
 const scenarios = {
   load: {
@@ -66,12 +75,17 @@ const thresholds = {
   load: {
     'http_req_duration{name:ingest}': ['p(95)<1000'],
     ingest_visible_delay: [`max<${VISIBLE_BUDGET_S * 1000}`],
+    // The RATE is offered in full: an iteration k6 could not start would
+    // lower the load.
+    dropped_iterations: ['count==0'],
+    ingest_records_missing: ['count==0'],
     checks: ['rate>0.99'],
   },
   spool: {
     'http_req_duration{name:spool}': ['p(95)<1000'],
     ingest_spool_flush: [`max<${SPOOL_BUDGET_S * 1000}`],
     ingest_drain_records_per_s: [`value>=${TARGET}`],
+    ingest_records_missing: ['count==0'],
     checks: ['rate>0.99'],
   },
 };
@@ -116,7 +130,9 @@ export function ingest(data) {
     const n = __VU * 100000 + __ITER * BATCH + i;
     records.push(record(`LOAD-${data.run}-${__VU}-${__ITER}-${i}`, loadIP(n), new Date()));
   }
-  post('/ingest/bulk', { records }, 'ingest', [202]);
+  if (post('/ingest/bulk', { records }, 'ingest', [202]).status === 202) {
+    accepted.add(records.length);
+  }
 }
 
 // visibleCount returns how many CIs have a serial number with prefix.
@@ -140,28 +156,33 @@ function backlog() {
   return -1;
 }
 
-// waitVisible polls until want CIs with prefix are visible, or the queue
-// is empty and the count stopped growing (dropped iterations), and returns
-// the time; -1 after WAIT_S.
+// waitVisible polls until want CIs with prefix are visible and returns the
+// time t and the count n. A shortfall is a failure (t = -1): it stops
+// waiting after WAIT_S, or as soon as the queue is empty and the count
+// stopped growing, since the missing records will never become visible.
+// The records missing are added to ingest_records_missing either way.
 function waitVisible(prefix, want) {
   const deadline = Date.now() + WAIT_S * 1000;
   let last = -1;
   let idle = 0;
+  let t = -1;
   while (Date.now() < deadline) {
     const n = visibleCount(prefix);
-    const now = Date.now();
     if (n >= want) {
-      return now;
+      t = Date.now();
+      last = n;
+      break;
     }
-    idle = backlog() === 0 && n === last && n > 0 ? idle + 1 : 0;
-    if (idle >= 3) {
-      console.warn(`${prefix}: ${n} of ${want} visible and the queue is empty`);
-      return now;
-    }
+    idle = backlog() === 0 && n === last ? idle + 1 : 0;
     last = n;
+    if (idle >= 3) {
+      console.error(`${prefix}: only ${n} of ${want} records visible and the queue is empty`);
+      break;
+    }
     sleep(0.5);
   }
-  return -1;
+  missing.add(Math.max(0, want - Math.max(last, 0)));
+  return { t, n: last };
 }
 
 // probe measures the delay record -> visible every PROBE_EVERY_S during the
@@ -197,14 +218,15 @@ export function probe(data) {
   const prefix = `LOAD-${data.run}-`;
   const want = Math.max(1, Math.round(RATE / BATCH)) * DURATION_S * BATCH;
   const atEnd = visibleCount(prefix);
-  const tAll = waitVisible(prefix, want);
-  check(tAll, { 'every load record visible': (t) => t >= 0 });
-  const tail = tAll >= 0 ? tAll - end : WAIT_S * 1000;
+  const all = waitVisible(prefix, want);
+  check(all, { 'every load record visible': (v) => v.t >= 0 && v.n >= want });
+  const tail = all.t >= 0 ? all.t - end : WAIT_S * 1000;
   visibleDelay.add(tail);
   const total = visibleCount(prefix);
   drainRate.add((total - atEnd) / Math.max(tail / 1000, 0.001));
   drainInclusive.add(total / ((DURATION_S * 1000 + tail) / 1000));
-  console.log(`load: ${total} of ${want} records visible, ${atEnd} at the end of sending, tail ${tail} ms`);
+  console.log(`load: ${total} of ${want} records visible, ${atEnd} at the end of sending, ` +
+    (all.t >= 0 ? `tail ${tail} ms` : 'not all became visible'));
 }
 
 // spool sends SPOOL_RECORDS records as a collector flushes its spool: one
@@ -228,13 +250,15 @@ export function spool(data) {
   const sent = Date.now();
   const atEnd = visibleCount(prefix);
   const backlogAtEnd = backlog();
-  const tAll = waitVisible(prefix, SPOOL_RECORDS);
-  check(tAll, { 'every spooled record visible': (t) => t >= 0 });
-  const done = tAll >= 0 ? tAll : first + WAIT_S * 1000;
+  const all = waitVisible(prefix, SPOOL_RECORDS);
+  check(all, { 'every spooled record visible': (v) => v.t >= 0 && v.n >= SPOOL_RECORDS });
+  // A shortfall counts as a flush that never ended.
+  const done = all.t >= 0 ? all.t : first + WAIT_S * 1000;
   const total = visibleCount(prefix);
   spoolFlush.add(done - first);
   drainRate.add((total - atEnd) / Math.max((done - sent) / 1000, 0.001));
   drainInclusive.add(total / ((done - first) / 1000));
   console.log(`spool: ${total} of ${SPOOL_RECORDS} records visible; sending took ${sent - first} ms, ` +
-    `${atEnd} visible and backlog ${backlogAtEnd} at its end, all visible ${done - sent} ms later`);
+    `${atEnd} visible and backlog ${backlogAtEnd} at its end, ` +
+    (all.t >= 0 ? `all visible ${done - sent} ms later` : 'not all became visible'));
 }
