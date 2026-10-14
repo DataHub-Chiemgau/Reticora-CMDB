@@ -13,7 +13,7 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
-import { useDashboardStore } from '../stores/dashboard';
+import { DASHBOARD_ROLES, useDashboardStore } from '../stores/dashboard';
 import type { DashboardRole, DashboardWidget } from '../stores/dashboard';
 
 const allWidgets: DashboardWidget[] = [
@@ -219,7 +219,7 @@ export function DashboardPage() {
           onChange={(event) => setRole(event.target.value as DashboardRole)}
           aria-label={t('dashboard.roleLabel')}
           className="max-w-xs"
-          options={(['technik', 'einkauf', 'management'] as const).map((value) => ({
+          options={DASHBOARD_ROLES.map((value) => ({
             value,
             label: t(`dashboard.roles.${value}`),
           }))}

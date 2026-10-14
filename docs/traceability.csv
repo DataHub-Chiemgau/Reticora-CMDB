@@ -405,3 +405,5 @@ UI-07;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
 UI-08;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
 UI-09;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
 UI-10;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+GLO-10;[B];C;frontend/src/i18n/catalog.test.ts;WP-194
+UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-194

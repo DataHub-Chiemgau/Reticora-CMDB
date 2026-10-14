@@ -19,4 +19,27 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
     },
   },
+  // GLO-10: these pages render status values and labels from the i18n
+  // catalog only; a literal text or label is a missing catalog key.
+  {
+    files: [
+      'src/pages/DashboardPage.tsx',
+      'src/pages/DiscoveryPage.tsx',
+      'src/pages/StocktakeListPage.tsx',
+      'src/pages/CITypeAdminPage.tsx',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'JSXText[value=/[A-Za-zÄÖÜäöüß]{2,}/]',
+          message: 'UI text comes from the i18n catalog (GLO-10): use t().',
+        },
+        {
+          selector: "Property[key.name='label'] > Literal[value=/[A-Za-zÄÖÜäöüß]{2,}/]",
+          message: 'Labels come from the i18n catalog (GLO-10): use t().',
+        },
+      ],
+    },
+  },
 );

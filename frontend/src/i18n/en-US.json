@@ -112,8 +112,8 @@
     "roleLabel": "Dashboard role",
     "roleHint": "The widget selection follows the chosen role.",
     "roles": {
-      "technik": "Engineering",
-      "einkauf": "Procurement",
+      "technician": "Technician",
+      "procurement": "Procurement",
       "management": "Management"
     },
     "widgets": {
@@ -416,7 +416,21 @@
     "scope": "Scope",
     "progress": "Progress",
     "missing": "Missing",
-    "dueDate": "Due Date"
+    "dueDate": "Due Date",
+    "allStatuses": "All",
+    "statuses": {
+      "planned": "Planned",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "scopes": {
+      "full": "Full",
+      "partial": "Partial",
+      "site": "Site",
+      "room": "Room",
+      "rack": "Rack"
+    }
   },
   "ticket": {
     "title": "Tickets",
@@ -880,7 +894,34 @@
     "fields": "Fields",
     "fromTemplate": "From template",
     "observable": "observed",
-    "schemaVersion": "Schema"
+    "schemaVersion": "Schema",
+    "dataTypes": {
+      "text": "Text",
+      "multiline": "Multiline text",
+      "integer": "Integer",
+      "decimal": "Decimal",
+      "boolean": "Yes/No",
+      "date": "Date",
+      "datetime": "Date and time",
+      "enum": "Choice",
+      "multiselect": "Multiple choice",
+      "ip": "IP address",
+      "mac": "MAC address",
+      "url": "URL",
+      "email": "Email",
+      "uuid": "UUID",
+      "json": "JSON",
+      "file": "File",
+      "user": "User",
+      "team": "Team",
+      "location": "Location",
+      "ci_ref": "CI reference",
+      "asset_ref": "Asset reference",
+      "contract_ref": "Contract reference"
+    },
+    "system": "system",
+    "logicalShort": "logical",
+    "fieldCount": "Fields: {{count}}"
   },
   "inventory": {
     "assigned": "Assigned",

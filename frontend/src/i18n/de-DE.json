@@ -112,8 +112,8 @@
     "roleLabel": "Dashboard-Rolle",
     "roleHint": "Die Widget-Auswahl richtet sich nach der gewählten Rolle.",
     "roles": {
-      "technik": "Technik",
-      "einkauf": "Einkauf",
+      "technician": "Technik",
+      "procurement": "Einkauf",
       "management": "Management"
     },
     "widgets": {
@@ -416,7 +416,21 @@
     "scope": "Umfang",
     "progress": "Fortschritt",
     "missing": "Fehlend",
-    "dueDate": "Fällig am"
+    "dueDate": "Fällig am",
+    "allStatuses": "Alle",
+    "statuses": {
+      "planned": "Geplant",
+      "in_progress": "Laufend",
+      "completed": "Abgeschlossen",
+      "cancelled": "Abgebrochen"
+    },
+    "scopes": {
+      "full": "Vollständig",
+      "partial": "Teilweise",
+      "site": "Standort",
+      "room": "Raum",
+      "rack": "Rack"
+    }
   },
   "ticket": {
     "title": "Tickets",
@@ -880,7 +894,34 @@
     "fields": "Felder",
     "fromTemplate": "Aus Vorlage",
     "observable": "beobachtet",
-    "schemaVersion": "Schema"
+    "schemaVersion": "Schema",
+    "dataTypes": {
+      "text": "Text",
+      "multiline": "Mehrzeiliger Text",
+      "integer": "Ganzzahl",
+      "decimal": "Dezimalzahl",
+      "boolean": "Ja/Nein",
+      "date": "Datum",
+      "datetime": "Datum und Uhrzeit",
+      "enum": "Auswahl",
+      "multiselect": "Mehrfachauswahl",
+      "ip": "IP-Adresse",
+      "mac": "MAC-Adresse",
+      "url": "URL",
+      "email": "E-Mail",
+      "uuid": "UUID",
+      "json": "JSON",
+      "file": "Datei",
+      "user": "Benutzer",
+      "team": "Team",
+      "location": "Ort",
+      "ci_ref": "CI-Verweis",
+      "asset_ref": "Asset-Verweis",
+      "contract_ref": "Vertragsverweis"
+    },
+    "system": "System",
+    "logicalShort": "logisch",
+    "fieldCount": "Felder: {{count}}"
   },
   "inventory": {
     "assigned": "Zugewiesen",
