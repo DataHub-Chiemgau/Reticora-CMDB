@@ -488,7 +488,10 @@
       "stop": "Stop simulation",
       "active": "Outage simulation",
       "impact": "If \"{{name}}\" fails, {{count}} more CIs are impacted (shown greyed out).",
-      "noImpact": "This CI has no dependents — an outage would have no impact on the graph."
+      "noImpact": "This CI has no dependents — an outage would have no impact on the graph.",
+      "add": "Add failure",
+      "remove": "Remove from simulation",
+      "impactMany": "If {{failed}} CIs ({{names}}) fail together, {{count}} further CIs are affected (shown in grey)."
     },
     "filterRelType": "Relationship type",
     "allRelTypes": "All relationships",
@@ -498,6 +501,14 @@
       "hosted_on": "hosted on",
       "depends_on": "depends on",
       "member_of": "member of"
+    },
+    "filterSite": "Filter by site",
+    "allSites": "All sites",
+    "start": {
+      "title": "Choose a section",
+      "site": "Site",
+      "type": "CI type",
+      "show": "Show topology"
     }
   },
   "rack": {

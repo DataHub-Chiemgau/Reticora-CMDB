@@ -640,6 +640,12 @@ export interface ImpactResult {
   count: number;
 }
 
+export interface MultiImpactResult {
+  failed_cis: TopologyNode[];
+  impacted: TopologyNode[];
+  count: number;
+}
+
 export const topologyApi = {
   get(params: TopologyParams = {}): Promise<TopologyGraphData> {
     return fetchAPI(`/topology${buildQuery(params)}`);
@@ -649,6 +655,10 @@ export const topologyApi = {
   },
   impact(ciId: string, params: { depth?: number; rel_type?: string } = {}): Promise<ImpactResult> {
     return fetchAPI(`/impact/${ciId}${buildQuery(params)}`);
+  },
+  /** Joint impact of several CIs failing at once (IMP-05). */
+  impactMany(ciIds: string[], params: { rel_type?: string } = {}): Promise<MultiImpactResult> {
+    return fetchAPI(`/impact${buildQuery({ ci_ids: ciIds.join(','), ...params })}`);
   },
 };
 

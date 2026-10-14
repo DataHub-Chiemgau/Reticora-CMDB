@@ -6,6 +6,7 @@ import {
   discoveryScopeApi,
   scopeSuggestionApi,
   topologyApi,
+  siteApi,
   rackApi,
   assetApi,
   assignmentApi,
@@ -205,6 +206,22 @@ export function useCIImpact(id: string, relType?: string) {
     queryKey: ['topology-impact', id, relType],
     queryFn: () => topologyApi.impact(id, { rel_type: relType || undefined }),
     enabled: !!id,
+  });
+}
+
+export function useImpactMany(ids: string[], relType?: string) {
+  return useQuery({
+    queryKey: ['topology-impact-many', ids, relType],
+    queryFn: () => topologyApi.impactMany(ids, { rel_type: relType || undefined }),
+    enabled: ids.length > 0,
+    retry: false,
+  });
+}
+
+export function useSites(clientId?: string) {
+  return useQuery({
+    queryKey: ['sites', 'options', clientId],
+    queryFn: () => siteApi.list({ limit: 200, ...(clientId ? { client_id: clientId } : {}) }),
   });
 }
 

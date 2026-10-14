@@ -1,10 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ApiError, type TopologyGraphData } from '../api/client';
 import { localizedText } from '../api/cmdb';
 import { useCITypes } from '../api/cmdbHooks';
-import { useTopology, useCIImpact } from '../api/hooks';
+import { useTopology, useImpactMany, useSites } from '../api/hooks';
 import { TopologyGraph } from '../components/graph/TopologyGraph';
 import type { GraphEdge, GraphNode } from '../components/graph/TopologyGraph';
 import { Badge } from '../components/ui/Badge';
@@ -72,23 +72,33 @@ export function buildGraphModel(graph: TopologyGraphData): GraphModel {
 }
 
 /**
- * Computes the outage-impact set of a failed node: every node reachable from
- * the failure via outbound edges (things that depend on the failed CI). Nodes
- * reachable only over an already-impacted path are impacted as well.
+ * Computes the outage-impact set of failed nodes: every node reachable from
+ * a failure via outbound edges (things that depend on a failed CI). Nodes
+ * reachable only over an already-impacted path are impacted as well; the
+ * failed nodes themselves are not part of the set (IMP-05).
  */
-export function computeOutageImpact(failedId: string, edges: GraphEdge[]): Set<string> {
+export function computeOutageImpact(failed: string | string[], edges: GraphEdge[]): Set<string> {
+  const failedIds = new Set(Array.isArray(failed) ? failed : [failed]);
   const impacted = new Set<string>();
-  const queue = [failedId];
+  const queue = [...failedIds];
   while (queue.length > 0) {
     const current = queue.pop() as string;
     edges.forEach((edge) => {
-      if (edge.source === current && edge.target !== failedId && !impacted.has(edge.target)) {
+      if (edge.source === current && !failedIds.has(edge.target) && !impacted.has(edge.target)) {
         impacted.add(edge.target);
         queue.push(edge.target);
       }
     });
   }
   return impacted;
+}
+
+/** parseSimulated reads the failed CIs of the simulation from the URL. */
+export function parseSimulated(value: string | null): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id, index, all) => id !== '' && all.indexOf(id) === index);
 }
 
 const depthValues = ['1', '2', '3', '4', '5'];
@@ -104,30 +114,43 @@ export function TopologyPage() {
 
   const rootCiId = searchParams.get('root') ?? '';
   const ciType = searchParams.get('type') ?? '';
+  const siteId = searchParams.get('site') ?? '';
   const depth = searchParams.get('depth') ?? '2';
-  const simulateId = searchParams.get('simulate') ?? '';
+  const simulated = useMemo(() => parseSimulated(searchParams.get('simulate')), [searchParams]);
   const relTypeFacet = searchParams.get('rel_type') ?? '';
+  const { data: sites } = useSites();
 
   const { data, isLoading, error, refetch } = useTopology({
     root_ci_id: rootCiId || undefined,
     ci_type: ciType || undefined,
+    site_id: siteId || undefined,
     depth: rootCiId ? Number(depth) : undefined,
   });
+  // More than 2,000 CIs without a filter: the server answers 422 and the
+  // page asks for a site or type first (UI-06).
+  const tooLarge = error instanceof ApiError && error.status === 422;
+  const typeOptions = (ciTypes?.data ?? []).map((type) => ({
+    value: type.id,
+    label: localizedText(type.display_name, i18n.language) || type.name,
+  }));
+  const siteOptions = (sites?.data ?? []).map((site) => ({ value: site.id, label: site.name }));
 
   const model = useMemo(() => (data ? buildGraphModel(data) : { nodes: [], edges: [] }), [data]);
 
   // Server-side impact analysis (spec §4): the backend computes the impacted
   // set authoritatively, faceted by the selected relationship class. The
   // client-side BFS below remains as the instant feedback while it loads.
-  const { data: impact } = useCIImpact(simulateId, relTypeFacet);
+  // Several CIs can fail together (IMP-05, maintenance windows and
+  // redundancy): the server evaluates them jointly.
+  const { data: impact } = useImpactMany(simulated, relTypeFacet);
 
   const outageImpact = useMemo(() => {
-    if (!simulateId) return undefined;
+    if (simulated.length === 0) return undefined;
     if (impact && Array.isArray(impact.impacted)) {
       return new Set(impact.impacted.map((n) => n.id));
     }
-    return computeOutageImpact(simulateId, model.edges);
-  }, [simulateId, impact, model.edges]);
+    return computeOutageImpact(simulated, model.edges);
+  }, [simulated, impact, model.edges]);
 
   // The facet filter also narrows the rendered edges to the selected
   // relationship class so the simulated dependency path is visible.
@@ -139,15 +162,30 @@ export function TopologyPage() {
     [model.edges, relTypeFacet],
   );
 
-  function updateParam(key: string, value: string) {
+  function updateParams(values: Record<string, string>) {
     const next = new URLSearchParams(searchParams);
-    if (value) {
-      next.set(key, value);
-    } else {
-      next.delete(key);
+    for (const [key, value] of Object.entries(values)) {
+      if (value) {
+        next.set(key, value);
+      } else {
+        next.delete(key);
+      }
     }
     setSearchParams(next, { replace: true });
   }
+
+  function updateParam(key: string, value: string) {
+    updateParams({ [key]: value });
+  }
+
+  function toggleSimulated(id: string) {
+    const next = simulated.includes(id)
+      ? simulated.filter((entry) => entry !== id)
+      : [...simulated, id];
+    updateParam('simulate', next.join(','));
+  }
+
+  const nameOf = (id: string) => data?.nodes.find((node) => node.id === id)?.name ?? id;
 
   return (
     <div className="space-y-4">
@@ -159,7 +197,7 @@ export function TopologyPage() {
           <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{t('topology.subtitle')}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {simulateId ? (
+          {simulated.length > 0 ? (
             <Button variant="danger" onClick={() => updateParam('simulate', '')}>
               {t('topology.simulation.stop')}
             </Button>
@@ -179,13 +217,14 @@ export function TopologyPage() {
             onChange={(event) => updateParam('type', event.target.value)}
             aria-label={t('topology.filterType')}
             className="max-w-xs"
-            options={[
-              { value: '', label: t('topology.allTypes') },
-              ...(ciTypes?.data ?? []).map((type) => ({
-                value: type.id,
-                label: localizedText(type.display_name, i18n.language) || type.name,
-              })),
-            ]}
+            options={[{ value: '', label: t('topology.allTypes') }, ...typeOptions]}
+          />
+          <Select
+            value={siteId}
+            onChange={(event) => updateParam('site', event.target.value)}
+            aria-label={t('topology.filterSite')}
+            className="max-w-xs"
+            options={[{ value: '', label: t('topology.allSites') }, ...siteOptions]}
           />
           <Select
             value={depth}
@@ -216,16 +255,16 @@ export function TopologyPage() {
 
       {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
 
-      {error ? (
+      {tooLarge ? (
+        <TopologyStartDialog
+          typeOptions={typeOptions}
+          siteOptions={siteOptions}
+          onStart={(type, site) => updateParams({ type, site })}
+        />
+      ) : error ? (
         <ErrorState
           title={t('topology.loadError')}
-          description={
-            error instanceof ApiError && error.status === 422
-              ? t('topology.tooLarge')
-              : error instanceof Error
-                ? error.message
-                : undefined
-          }
+          description={error instanceof Error ? error.message : undefined}
           retryLabel={t('common.retry')}
           onRetry={() => void refetch()}
         />
@@ -237,24 +276,28 @@ export function TopologyPage() {
 
       {data && model.nodes.length > 0 ? (
         <>
-          {simulateId && outageImpact ? (
+          {simulated.length > 0 && outageImpact ? (
             <Card
               className="border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950"
               title={t('topology.simulation.active')}
             >
               <p className="text-sm text-red-900 dark:text-red-100">
-                {t('topology.simulation.impact', {
-                  name: data.nodes.find((node) => node.id === simulateId)?.name ?? simulateId,
-                  count: outageImpact.size,
-                })}
+                {simulated.length === 1
+                  ? t('topology.simulation.impact', {
+                      name: nameOf(simulated[0]!),
+                      count: outageImpact.size,
+                    })
+                  : t('topology.simulation.impactMany', {
+                      names: simulated.map(nameOf).join(', '),
+                      failed: simulated.length,
+                      count: outageImpact.size,
+                    })}
               </p>
               {outageImpact.size > 0 ? (
                 <ul className="mt-2 flex flex-wrap gap-1 text-xs">
                   {[...outageImpact].map((id) => (
                     <li key={id}>
-                      <Badge variant="danger">
-                        {data.nodes.find((node) => node.id === id)?.name ?? id}
-                      </Badge>
+                      <Badge variant="danger">{nameOf(id)}</Badge>
                     </li>
                   ))}
                 </ul>
@@ -272,7 +315,7 @@ export function TopologyPage() {
                 nodes={model.nodes}
                 edges={visibleEdges}
                 dimmedNodes={outageImpact}
-                highlightedNodes={simulateId ? new Set([simulateId]) : undefined}
+                highlightedNodes={simulated.length > 0 ? new Set(simulated) : undefined}
               />
             </div>
           </Card>
@@ -299,19 +342,18 @@ export function TopologyPage() {
                     <Badge variant={getStatusBadgeVariant(node.status)}>
                       {t(getStatusTranslationKey(node.status))}
                     </Badge>
-                    {simulateId === node.id ? (
-                      <Button variant="ghost" size="sm" onClick={() => updateParam('simulate', '')}>
-                        {t('topology.simulation.stop')}
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => updateParam('simulate', node.id)}
-                      >
-                        {t('topology.simulation.simulate')}
-                      </Button>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-pressed={simulated.includes(node.id)}
+                      onClick={() => toggleSimulated(node.id)}
+                    >
+                      {simulated.includes(node.id)
+                        ? t('topology.simulation.remove')
+                        : simulated.length > 0
+                          ? t('topology.simulation.add')
+                          : t('topology.simulation.simulate')}
+                    </Button>
                     <Button variant="ghost" size="sm" onClick={() => updateParam('root', node.id)}>
                       {t('topology.focus')}
                     </Button>
@@ -323,5 +365,54 @@ export function TopologyPage() {
         </>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * TopologyStartDialog asks for a site or CI type before a topology of more
+ * than 2,000 CIs is drawn (UI-06).
+ */
+function TopologyStartDialog({
+  typeOptions,
+  siteOptions,
+  onStart,
+}: {
+  typeOptions: { value: string; label: string }[];
+  siteOptions: { value: string; label: string }[];
+  onStart: (type: string, site: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [type, setType] = useState('');
+  const [site, setSite] = useState('');
+  return (
+    <Card title={t('topology.start.title')}>
+      <form
+        className="space-y-3"
+        aria-label={t('topology.start.title')}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (type || site) onStart(type, site);
+        }}
+      >
+        <p className="text-sm text-gray-600 dark:text-gray-300">{t('topology.tooLarge')}</p>
+        <div className="flex flex-wrap gap-3">
+          <Select
+            label={t('topology.start.site')}
+            value={site}
+            onChange={(event) => setSite(event.target.value)}
+            options={[{ value: '', label: t('topology.allSites') }, ...siteOptions]}
+          />
+          <Select
+            label={t('topology.start.type')}
+            value={type}
+            onChange={(event) => setType(event.target.value)}
+            options={[{ value: '', label: t('topology.allTypes') }, ...typeOptions]}
+          />
+        </div>
+        <Button type="submit" disabled={!type && !site}>
+          {t('topology.start.show')}
+        </Button>
+      </form>
+    </Card>
   );
 }
