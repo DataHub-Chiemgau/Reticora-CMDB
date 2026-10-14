@@ -246,3 +246,31 @@ func TestParallelMerge(t *testing.T) {
 		t.Errorf("integrity violations after the parallel merges: %v", v)
 	}
 }
+
+// TestAutomatedWriteKeepsOverride is the deterministic form of "discovery
+// during edit" (ABN-03, OVR-01): discovery decided to write a field before a
+// manual change committed its override; the write that follows must leave
+// the manual value, because the repository checks the overrides under the
+// row lock of the update.
+func TestAutomatedWriteKeepsOverride(t *testing.T) {
+	f := scopetest.Seed(t, "cc")
+	bg := context.Background()
+	user := f.AppUser(t, f.OrgA, "abn03-ovr")
+	scope := database.OrgWideScope(f.OrgA, user)
+	ctx := tenant.WithTenant(database.ContextWithTenantScope(bg, &scope), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: user})
+	repo := ci.NewPGRepository(f.App)
+	id := f.CI(t, f.OrgA, f.Client1, "abn03-ovr")
+
+	manual, auto, autoOS := "manual-model", "auto-model", "auto-os"
+	if _, err := repo.Update(ctx, f.OrgA, id, ci.UpdateRequest{Model: &manual, Manual: &ci.ManualChange{Author: user},
+		ChangeReason: "abn03"}); err != nil {
+		t.Fatal(err)
+	}
+	item, err := repo.Update(ctx, f.OrgA, id, ci.UpdateRequest{Model: &auto, OSName: &autoOS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Model != manual || item.OSName != autoOS {
+		t.Errorf("after the automated write: model %q, os %q; want the manual model and the new os", item.Model, item.OSName)
+	}
+}

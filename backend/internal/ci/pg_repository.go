@@ -441,6 +441,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			if preErr := checkPrecondition(ctx, tx, orgID, before, &req); preErr != nil {
 				return preErr
 			}
+		} else if dropErr := dropOverriddenFields(ctx, tx, id, &req); dropErr != nil {
+			return dropErr
 		}
 
 		setClauses := make([]string, 0, 18)
@@ -1246,6 +1248,45 @@ func checkPrecondition(ctx context.Context, tx pgx.Tx, orgID string, before *Ite
 	}
 	if len(fields) > 0 {
 		return &ConflictError{Fields: fields, Current: before.Version}
+	}
+	return nil
+}
+
+// dropOverriddenFields removes from an automated write every field with a
+// manual override (OVR-01, REC-03). The central write decision runs before
+// the write; a manual change that committed in between holds its override
+// now, and the row lock of the update keeps it so until the commit (ABN-03:
+// discovery during an edit never overwrites the manual value).
+func dropOverriddenFields(ctx context.Context, tx pgx.Tx, ciID string, req *UpdateRequest) error {
+	rows, err := tx.Query(ctx, `SELECT field_name FROM ci_field_value WHERE ci_id = $1 AND override_at IS NOT NULL`, ciID)
+	if err != nil {
+		return fmt.Errorf("read overrides: %w", err)
+	}
+	fields, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("read overrides: %w", err)
+	}
+	columns := map[string]**string{
+		"name": &req.Name, "status": &req.Status, "client_id": &req.ClientID, "location_id": &req.LocationID,
+		"manufacturer": &req.Manufacturer, "model": &req.Model, "serial_number": &req.SerialNumber,
+		"hardware_uuid": &req.HardwareUUID, "management_ip": &req.ManagementIP, "primary_mac": &req.PrimaryMAC,
+		"hostname": &req.Hostname, "fqdn": &req.FQDN, "os_name": &req.OSName, "os_version": &req.OSVersion,
+		"firmware_version": &req.FirmwareVersion, "sys_object_id": &req.SysObjectID,
+	}
+	for _, field := range fields {
+		if column, ok := columns[field]; ok {
+			*column = nil
+			continue
+		}
+		if _, ok := req.Attributes[field]; ok {
+			attributes := make(map[string]any, len(req.Attributes))
+			for k, v := range req.Attributes {
+				if k != field {
+					attributes[k] = v
+				}
+			}
+			req.Attributes = attributes
+		}
 	}
 	return nil
 }
