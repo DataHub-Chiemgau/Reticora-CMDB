@@ -110,9 +110,11 @@ nutzen.
    Gemessen sind 58/s, nötig sind weniger Transaktionen je Record und parallele
    Spuren innerhalb einer Organisation, ohne die Identitäts-Deduplizierung zu
    verletzen. Damit sinkt auch die Verzögerung unter Volllast unter 30 s.
+   Geplant als WP-332 bis WP-334 (G1-Nachbesserung, `docs/plan/implementierungsplan.md`).
 2. **Impact unter Parallellast im Worst Case:** Der Antwortumfang (alle Pfade
    je betroffenem CI) und die Messung auf einem dedizierten Referenzhost stehen
    noch aus.
+   Geplant als WP-335 (G1-Nachbesserung).
 3. **Spool-Flush:** Für 10.000 Records im Collector-Spool fehlt ein eigenes
    Szenario.
 4. **Listen über 10.000 Objekte:** Bei 28.000 CIs lag `GET /cis` bei p95 1,9 s
