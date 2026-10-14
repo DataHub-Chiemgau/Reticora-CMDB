@@ -624,6 +624,7 @@
     "citations": "Quellen"
   },
   "export": {
+    "omittedFields": "{{count}} Felder nicht enthalten",
     "title": "Export",
     "subtitle": "Asynchrone Exporte rendern die CI-Daten des Mandants in Objektspeicher; fertige Exporte stehen 24 Stunden über eine signierte URL zum Download bereit.",
     "loading": "Exportaufträge werden geladen",

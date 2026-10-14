@@ -1897,6 +1897,12 @@ export interface ExportJob {
   completed_at?: string;
   expires_at?: string;
   download_url?: string;
+  /** Fields of the file and the visible CI fields it leaves out (EXP-01). */
+  manifest?: {
+    format: string;
+    fields: string[];
+    omitted: { field: string; reason: string }[];
+  };
   created_at: string;
   updated_at: string;
 }

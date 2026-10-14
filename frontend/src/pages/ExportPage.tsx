@@ -101,7 +101,17 @@ export function ExportPage() {
                         </p>
                       ) : null}
                     </td>
-                    <td className="py-2">{job.row_count ?? '—'}</td>
+                    <td className="py-2">
+                      {job.row_count ?? '—'}
+                      {job.manifest && job.manifest.omitted.length > 0 ? (
+                        <p
+                          className="mt-1 text-xs text-gray-500 dark:text-gray-400"
+                          title={job.manifest.omitted.map((o) => o.field).join(', ')}
+                        >
+                          {t('export.omittedFields', { count: job.manifest.omitted.length })}
+                        </p>
+                      ) : null}
+                    </td>
                     <td className="py-2">{new Date(job.created_at).toLocaleString()}</td>
                     <td className="py-2">
                       {job.download_url ? (

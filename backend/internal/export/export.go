@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -73,6 +74,8 @@ func (h *Handler) ExportCIs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The manifest names the CI fields the file leaves out (EXP-01).
+	w.Header().Set("X-Export-Omitted-Fields", strings.Join(ManifestFor(format).omittedNames(), ","))
 	writer := newRowWriter(format, w)
 	writer.begin()
 
@@ -152,9 +155,9 @@ func newRowWriter(format string, w http.ResponseWriter) *rowWriter {
 func newFormatWriter(format string, out io.Writer) *rowWriter {
 	rw := &rowWriter{format: format, out: out}
 	switch format {
-	case "csv":
-		rw.csv = csv.NewWriter(out)
-	case "datev":
+	case "csv", "datev":
+		// UTF-8 with BOM and semicolons (EXP-01), so spreadsheet programs
+		// in German locales open the file correctly.
 		rw.csv = csv.NewWriter(out)
 		rw.csv.Comma = ';'
 	default:
@@ -166,8 +169,10 @@ func newFormatWriter(format string, out io.Writer) *rowWriter {
 func (rw *rowWriter) begin() {
 	switch rw.format {
 	case "csv":
-		_ = rw.csv.Write([]string{"id", "name", "status", "ci_type_id", "manufacturer", "model", "serial_number", "management_ip", "firmware_version", "discovery_source", "created_at", "updated_at"})
+		_, _ = io.WriteString(rw.out, utf8BOM)
+		_ = rw.csv.Write(csvColumns)
 	case "datev":
+		_, _ = io.WriteString(rw.out, utf8BOM)
 		_ = rw.csv.Write([]string{"Inventarnummer", "Bezeichnung", "Hersteller", "Modell", "Seriennummer", "Anschaffungsdatum", "Standort", "Kostenstelle", "Status"})
 	default:
 		_, _ = io.WriteString(rw.out, `{"data":[`)
@@ -259,4 +264,73 @@ func attributeString(attrs map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// utf8BOM starts every CSV export (EXP-01).
+const utf8BOM = "\ufeff"
+
+// csvColumns are the CI fields of the CSV export, in this order.
+var csvColumns = []string{"id", "name", "status", "ci_type_id", "manufacturer", "model", "serial_number", "management_ip",
+	"firmware_version", "discovery_source", "created_at", "updated_at"}
+
+// datevFields are the CI fields the DATEV layout reads.
+var datevFields = []string{"id", "name", "manufacturer", "model", "serial_number", "attributes", "status"}
+
+// Manifest describes an export (EXP-01): the CI fields it carries and the
+// visible CI fields it leaves out, each with the reason.
+type Manifest struct {
+	Format  string         `json:"format"`
+	Fields  []string       `json:"fields"`
+	Omitted []OmittedField `json:"omitted"`
+}
+
+// OmittedField is a CI field an export leaves out.
+type OmittedField struct {
+	Field  string `json:"field"`
+	Reason string `json:"reason"`
+}
+
+// ciFieldNames are the JSON names of the CI fields, in declaration order.
+var ciFieldNames = func() []string {
+	t := reflect.TypeFor[ci.Item]()
+	var out []string
+	for i := range t.NumField() {
+		if name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ","); name != "" && name != "-" {
+			out = append(out, name)
+		}
+	}
+	return out
+}()
+
+// ManifestFor returns the manifest of an export format. JSON carries every
+// visible field; the CSV layouts carry their columns and list the rest.
+func ManifestFor(format string) Manifest {
+	m := Manifest{Format: format, Omitted: []OmittedField{}}
+	switch format {
+	case "csv":
+		m.Fields = csvColumns
+	case "datev":
+		m.Fields = datevFields
+	default:
+		m.Fields = ciFieldNames
+		return m
+	}
+	included := map[string]bool{}
+	for _, f := range m.Fields {
+		included[f] = true
+	}
+	for _, f := range ciFieldNames {
+		if !included[f] {
+			m.Omitted = append(m.Omitted, OmittedField{Field: f, Reason: "not part of the " + format + " layout"})
+		}
+	}
+	return m
+}
+
+func (m Manifest) omittedNames() []string {
+	out := make([]string, len(m.Omitted))
+	for i := range m.Omitted {
+		out[i] = m.Omitted[i].Field
+	}
+	return out
 }

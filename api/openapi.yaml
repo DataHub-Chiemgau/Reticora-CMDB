@@ -1720,13 +1720,20 @@ paths:
   /api/v1/export/cis:
     get:
       operationId: exportCIs
+      deprecated: true
+      x-deprecated-at: '2026-10-14'
+      x-sunset: '2027-10-15'
+      x-successor: '/api/v1/exports'
       tags: [Export]
       summary: Export configuration items
       description: |
         Streams the tenant's configuration items. Rows are fetched in
         keyset-paginated batches and flushed as they are produced, so the
         response is chunked and neither the server nor the client has to hold
-        the full result set in memory. There is no row limit.
+        the full result set in memory. There is no row limit. CSV and DATEV
+        are UTF-8 with BOM and semicolons (EXP-01); X-Export-Omitted-Fields
+        names the CI fields the layout leaves out. The export job resource
+        /api/v1/exports (202, presigned download, manifest) replaces it.
       parameters:
         - name: format
           in: query
@@ -13445,10 +13452,29 @@ components:
         offset: { type: integer }
         has_more: { type: boolean }
         next_cursor: { type: string }
+    ExportManifest:
+      type: object
+      description: The fields of an export and the visible CI fields it leaves out (EXP-01).
+      required: [format, fields, omitted]
+      properties:
+        format: { type: string }
+        fields:
+          type: array
+          items: { type: string }
+        omitted:
+          type: array
+          items:
+            type: object
+            required: [field, reason]
+            properties:
+              field: { type: string }
+              reason: { type: string }
     ExportJob:
       type: object
       required: [id, organization_id, format, status, filters, created_at, updated_at]
       properties:
+        manifest:
+          $ref: '#/components/schemas/ExportManifest'
         id:
           type: string
         organization_id:

@@ -18,6 +18,8 @@ import (
 type jobResponse struct {
 	Job
 	DownloadURL string `json:"download_url,omitempty"`
+	// Manifest lists the fields of the file and the omitted ones (EXP-01).
+	Manifest Manifest `json:"manifest"`
 }
 
 // JobHandler provides HTTP handlers for asynchronous export jobs.
@@ -150,7 +152,7 @@ func (h *JobHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 // toResponse attaches a fresh signed URL to completed, unexpired jobs. An
 // expired or failed job never exposes its object key as a URL.
 func (h *JobHandler) toResponse(r *http.Request, job *Job) jobResponse {
-	resp := jobResponse{Job: *job}
+	resp := jobResponse{Job: *job, Manifest: ManifestFor(job.Format)}
 	if job.Status != JobStatusCompleted || job.ObjectKey == "" || h.blobs == nil {
 		return resp
 	}

@@ -914,10 +914,14 @@ export interface paths {
     };
     /**
      * Export configuration items
+     * @deprecated
      * @description Streams the tenant's configuration items. Rows are fetched in
      *     keyset-paginated batches and flushed as they are produced, so the
      *     response is chunked and neither the server nor the client has to hold
-     *     the full result set in memory. There is no row limit.
+     *     the full result set in memory. There is no row limit. CSV and DATEV
+     *     are UTF-8 with BOM and semicolons (EXP-01); X-Export-Omitted-Fields
+     *     names the CI fields the layout leaves out. The export job resource
+     *     /api/v1/exports (202, presigned download, manifest) replaces it.
      */
     get: operations['exportCIs'];
     put?: never;
@@ -7757,7 +7761,17 @@ export interface components {
       has_more: boolean;
       next_cursor?: string;
     };
+    /** @description The fields of an export and the visible CI fields it leaves out (EXP-01). */
+    ExportManifest: {
+      format: string;
+      fields: string[];
+      omitted: {
+        field: string;
+        reason: string;
+      }[];
+    };
     ExportJob: {
+      manifest?: components['schemas']['ExportManifest'];
       id: string;
       organization_id: string;
       initiated_by?: string;

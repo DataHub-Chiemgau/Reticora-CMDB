@@ -197,3 +197,42 @@ func TestExportRejectsUnknownFormat(t *testing.T) {
 		t.Fatalf("expected 400, got %d", w.Code)
 	}
 }
+
+// TestCSVFormatAndManifest covers EXP-01 (WP-189): CSV in UTF-8 with BOM
+// and semicolons; the manifest lists the fields of the layout and the
+// visible CI fields it leaves out, also in a response header.
+func TestCSVFormatAndManifest(t *testing.T) {
+	repo := ci.NewMemoryRepository()
+	if err := repo.Create(context.Background(), &ci.Item{OrganizationID: "org-1", CITypeID: "type-server",
+		Name: "srv; \"quoted\"", Status: "active", Hostname: "srv01", Attributes: map[string]any{}}); err != nil {
+		t.Fatal(err)
+	}
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("GET", "/api/v1/export/cis?format=csv", nil)))
+	body := w.Body.String()
+	if !strings.HasPrefix(body, "\ufeffid;name;status;ci_type_id;") {
+		t.Errorf("header: %q", body[:min(60, len(body))])
+	}
+	// A value with the separator is quoted.
+	if !strings.Contains(body, `;"srv; ""quoted""";active;`) {
+		t.Errorf("row: %q", body)
+	}
+	if omitted := w.Header().Get("X-Export-Omitted-Fields"); !strings.Contains(omitted, "hostname") || strings.Contains(omitted, "serial_number") {
+		t.Errorf("omitted header %q", omitted)
+	}
+
+	m := ManifestFor("csv")
+	if len(m.Fields) != len(csvColumns) || len(m.Omitted) == 0 || len(m.Fields)+len(m.Omitted) != len(ciFieldNames) {
+		t.Errorf("csv manifest %+v", m)
+	}
+	for _, o := range m.Omitted {
+		if o.Reason == "" {
+			t.Errorf("omitted %s without reason", o.Field)
+		}
+	}
+	if j := ManifestFor("json"); len(j.Omitted) != 0 || len(j.Fields) != len(ciFieldNames) {
+		t.Errorf("json manifest %+v", j)
+	}
+}

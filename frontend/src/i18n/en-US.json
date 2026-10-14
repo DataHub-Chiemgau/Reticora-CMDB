@@ -624,6 +624,7 @@
     "citations": "Sources"
   },
   "export": {
+    "omittedFields": "{{count}} fields not included",
     "title": "Export",
     "subtitle": "Asynchronous exports render the tenant's CI data into object storage; finished exports are available for 24 hours via a signed URL.",
     "loading": "Loading export jobs",
