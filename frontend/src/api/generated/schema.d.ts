@@ -2760,7 +2760,7 @@ export interface paths {
         rel_type?: string;
         /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical); physical includes the containment projected from parent_ci_id. An unknown category is 422. */
         categories?: string;
-        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
+        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
         fields?: components['parameters']['ImpactFields'];
       };
       header?: never;
@@ -7015,18 +7015,33 @@ export interface components {
       rel_type?: string;
       categories?: string[];
       depth?: number;
-      /** @description The impacted CIs, certain ones first, then by name. With fields (API-02) each entry carries its id and the selected fields only. */
+      /** @description The impacted CIs with every field, certain ones first, then by name. The answer with fields (API-02) is an ImpactAnalysisFields. */
       impacted: components['schemas']['ImpactNode'][];
       count: number;
-      summary: {
-        failed: number;
-        impacted: number;
-        certain: number;
-        heuristic: number;
-        /** @description Impacted CIs per category of the last hop of their path. */
-        by_category: {
-          [key: string]: number;
-        };
+      summary: components['schemas']['ImpactSummary'];
+    };
+    /** @description The answer of /api/v1/impact and /api/v1/impact/{ci_id} with fields (API-02): the properties of ImpactAnalysis, but each impacted CI carries its id and the selected fields only (ImpactNodeFields). */
+    ImpactAnalysisFields: {
+      /** @description The failed CI (single-CI short form only). */
+      failed_ci_id?: string;
+      failed_ci?: components['schemas']['TopologyNode'];
+      failed_cis: components['schemas']['TopologyNode'][];
+      rel_type?: string;
+      categories?: string[];
+      depth?: number;
+      /** @description The impacted CIs, certain ones first, then by name. */
+      impacted: components['schemas']['ImpactNodeFields'][];
+      count: number;
+      summary: components['schemas']['ImpactSummary'];
+    };
+    ImpactSummary: {
+      failed: number;
+      impacted: number;
+      certain: number;
+      heuristic: number;
+      /** @description Impacted CIs per category of the last hop of their path. */
+      by_category: {
+        [key: string]: number;
       };
     };
     ImpactNode: components['schemas']['TopologyNode'] & {
@@ -7038,6 +7053,21 @@ export interface components {
       relay?: components['schemas']['ImpactRelay'];
       /** @description Shortest path from the failed CI with its relationship types (IMP-02). It equals the path rebuilt from via: from the CI back along via to a failed CI; on the path of a heuristic CI a certain CI on the way continues over its relay where it has one. Each step's category and heuristic flag follow from the relationship type. */
       path: components['schemas']['ImpactPathStep'][];
+    };
+    /** @description An impacted CI in the answer with fields (API-02): its id and the selected properties of ImpactNode; a property that is not selected is absent. A selected property has the meaning and the omission rule it has in ImpactNode (client_id, site_id, management_ip and relay are absent when empty). */
+    ImpactNodeFields: {
+      id: string;
+      name?: string;
+      ci_type?: string;
+      status?: string;
+      client_id?: string;
+      site_id?: string;
+      management_ip?: string;
+      heuristic?: boolean;
+      hops?: number;
+      via?: components['schemas']['ImpactVia'];
+      relay?: components['schemas']['ImpactRelay'];
+      path?: components['schemas']['ImpactPathStep'][];
     };
     /** @description The last step of the shortest path (IMP-02): the CI the failure comes from and the relationship type it passes. */
     ImpactVia: {
@@ -10763,7 +10793,7 @@ export interface components {
     ListSort: string;
     /** @description Comma-separated response fields; `id` is always returned. An unknown field yields 422. */
     ListFields: string;
-    /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
+    /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
     ImpactFields: string;
     /** @description Free-text search. */
     ListQ: string;
@@ -16721,7 +16751,7 @@ export interface operations {
         rel_type?: string;
         /** @description Maximum hops of the impact paths. */
         depth?: number;
-        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
+        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
         fields?: components['parameters']['ImpactFields'];
       };
       header?: never;
@@ -16730,13 +16760,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Impact analysis result */
+      /** @description Impact analysis result: an ImpactAnalysis without fields, an ImpactAnalysisFields with fields (API-02). */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['ImpactAnalysis'];
+          'application/json':
+            components['schemas']['ImpactAnalysis'] | components['schemas']['ImpactAnalysisFields'];
         };
       };
       400: components['responses']['BadRequest'];
@@ -16762,7 +16793,7 @@ export interface operations {
         rel_type?: string;
         /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical); physical includes the containment projected from parent_ci_id. An unknown category is 422. */
         categories?: string;
-        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
+        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
         fields?: components['parameters']['ImpactFields'];
       };
       header?: never;
@@ -16774,13 +16805,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Impact analysis result */
+      /** @description Impact analysis result: an ImpactAnalysis without fields, an ImpactAnalysisFields with fields (API-02). */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['ImpactAnalysis'];
+          'application/json':
+            components['schemas']['ImpactAnalysis'] | components['schemas']['ImpactAnalysisFields'];
         };
       };
       401: components['responses']['Unauthorized'];

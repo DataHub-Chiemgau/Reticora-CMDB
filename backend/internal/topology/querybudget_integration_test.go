@@ -31,23 +31,15 @@ import (
 // queryCounter counts the statements a pool sends (ABN-02).
 type queryCounter struct{ n atomic.Int64 }
 
-type startKey struct{}
-
-func (c *queryCounter) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
+func (c *queryCounter) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
 	c.n.Add(1)
-	q := strings.Join(strings.Fields(d.SQL), " ")
-	if len(q) > 90 {
-		q = q[:90]
-	}
-	return context.WithValue(ctx, startKey{}, [2]any{time.Now(), q})
+	return ctx
 }
 
-func (c *queryCounter) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryEndData) {
-	v, _ := ctx.Value(startKey{}).([2]any)
-	if v[0] != nil && time.Since(v[0].(time.Time)) > time.Millisecond {
-		fmt.Printf("SQL %8.2fms %s\n", float64(time.Since(v[0].(time.Time)).Microseconds())/1000, v[1])
-	}
-}
+func (c *queryCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+// ladderDepth is the deepest topology and impact (maxDepth).
+const ladderDepth = 20
 
 // TestTopologyQueryBudget covers ABN-02 and NFR-10 (WP-204) for the
 // topology and the impact analysis against PostgreSQL: a hub with 400
@@ -56,6 +48,8 @@ func (c *queryCounter) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, d pgx.Tra
 // a frontier of 1,000 nodes the walk reads all edges of the organization
 // at once (WP-335): a hub with 3,000 neighbours costs the same as one with
 // 1,200; that regime has a fixed statement more than the level regime.
+// Within a regime the count depends on the depth only: 40 chains of 20
+// levels cost the same as one.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestTopologyQueryBudget(t *testing.T) {
@@ -83,6 +77,28 @@ func TestTopologyQueryBudget(t *testing.T) {
 		hubs[n] = hub(fmt.Sprintf("budget-%d", n), n)
 	}
 	small := hubs[20]
+	// ladder hangs width chains of ladderDepth CIs below a root, each CI
+	// hosted_on the one a level up: a deep graph that stays in the level
+	// regime.
+	ladder := func(name string, width int) string {
+		t.Helper()
+		root := f.CI(t, f.OrgA, f.Client1, name)
+		if _, err := f.Admin.Exec(bg, `INSERT INTO ci (id, organization_id, client_id, ci_type_id, name, status)
+			SELECT md5($1 || $4 || l || '/' || w)::uuid, $1::uuid, $2, $3, $4 || '-' || l || '-' || w, 'active'
+			FROM generate_series(1, $6::int) AS l, generate_series(1, $5::int) AS w`,
+			f.OrgA, f.Client1, serverType, name, width, ladderDepth); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Admin.Exec(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type)
+			SELECT $1::uuid, md5($1 || $2 || l || '/' || w)::uuid,
+				CASE WHEN l = 1 THEN $3::uuid ELSE md5($1 || $2 || (l - 1) || '/' || w)::uuid END, 'hosted_on'
+			FROM generate_series(1, $5::int) AS l, generate_series(1, $4::int) AS w`,
+			f.OrgA, name, root, width, ladderDepth); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+	ladders := map[int]string{1: ladder("budget-ladder-1", 1), 40: ladder("budget-ladder-40", 40)}
 	if _, err := f.Admin.Exec(bg, `ANALYZE ci; ANALYZE ci_relationship`); err != nil {
 		t.Fatal(err)
 	}
@@ -123,15 +139,20 @@ func TestTopologyQueryBudget(t *testing.T) {
 	// Warm the pool: the first connection switches its role.
 	get("/api/v1/topology?root_ci_id="+small+"&depth=1", 20)
 	for _, c := range []struct {
-		name string
-		path func(id string) string
+		name     string
+		hubDepth int
+		path     func(id string, depth int) string
 	}{
-		{"topology", func(id string) string { return "/api/v1/topology?root_ci_id=" + id + "&depth=2" }},
-		{"impact", func(id string) string { return "/api/v1/impact/" + id }},
+		{"topology", 2, func(id string, depth int) string {
+			return fmt.Sprintf("/api/v1/topology?root_ci_id=%s&depth=%d", id, depth)
+		}},
+		{"impact", ladderDepth, func(id string, depth int) string {
+			return fmt.Sprintf("/api/v1/impact/%s?depth=%d", id, depth)
+		}},
 	} {
 		counts := map[int]int64{}
 		for _, n := range sizes {
-			counts[n] = get(c.path(hubs[n]), n)
+			counts[n] = get(c.path(hubs[n], c.hubDepth), n)
 			const budget = 40
 			if counts[n] > budget {
 				t.Errorf("%s: %d statements for %d neighbours, budget %d", c.name, counts[n], n, budget)
@@ -143,7 +164,17 @@ func TestTopologyQueryBudget(t *testing.T) {
 		if counts[1200] != counts[3000] {
 			t.Errorf("%s: %d statements for 1,200 neighbours, %d for 3,000 (organization read)", c.name, counts[1200], counts[3000])
 		}
-		t.Logf("%s: %d statements per level read, %d with the organization read", c.name, counts[400], counts[3000])
+		// Depth 20 in the level regime: the count grows with the depth,
+		// by at most two statements per level (edges, then the CIs they
+		// reach), and not with the width.
+		narrow, wide := get(c.path(ladders[1], ladderDepth), ladderDepth), get(c.path(ladders[40], ladderDepth), 40*ladderDepth)
+		if narrow != wide {
+			t.Errorf("%s at depth 20: %d statements for one chain, %d for 40 (N+1)", c.name, narrow, wide)
+		}
+		if deep := counts[400] + 2*ladderDepth; wide > deep {
+			t.Errorf("%s at depth 20: %d statements, budget %d", c.name, wide, deep)
+		}
+		t.Logf("%s: %d statements per level read, %d with the organization read, %d at depth 20", c.name, counts[400], counts[3000], wide)
 	}
 
 	for name, q := range map[string]string{

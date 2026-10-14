@@ -8,12 +8,15 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"gopkg.in/yaml.v3"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
@@ -338,6 +341,52 @@ func TestImpactFields(t *testing.T) {
 		if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), `"field":"fields"`) {
 			t.Errorf("%s: %d %s", path, w.Code, w.Body.String())
 		}
+	}
+}
+
+// TestImpactFieldsMatchSpec: the fields fields= selects are the properties
+// of ImpactNode (the full entry) and of ImpactNodeFields (the sparse entry)
+// in api/openapi.yaml, and the sparse entry requires its id only, because
+// fields= leaves every other property out (API-02, WP-335).
+func TestImpactFieldsMatchSpec(t *testing.T) {
+	raw, err := os.ReadFile("../../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type schema struct {
+		Ref        string         `yaml:"$ref"`
+		Required   []string       `yaml:"required"`
+		Properties map[string]any `yaml:"properties"`
+		AllOf      []schema       `yaml:"allOf"`
+	}
+	var doc struct {
+		Components struct {
+			Schemas map[string]schema `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err = yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	var properties func(s schema) []string
+	properties = func(s schema) []string {
+		out := slices.Collect(maps.Keys(s.Properties))
+		if s.Ref != "" {
+			out = append(out, properties(doc.Components.Schemas[strings.TrimPrefix(s.Ref, "#/components/schemas/")])...)
+		}
+		for _, sub := range s.AllOf {
+			out = append(out, properties(sub)...)
+		}
+		slices.Sort(out)
+		return out
+	}
+	want := slices.Sorted(slices.Values(impactFields))
+	for _, name := range []string{"ImpactNode", "ImpactNodeFields"} {
+		if got := properties(doc.Components.Schemas[name]); !slices.Equal(got, want) {
+			t.Errorf("%s documents %v, fields= selects %v", name, got, want)
+		}
+	}
+	if got := doc.Components.Schemas["ImpactNodeFields"].Required; !slices.Equal(got, []string{"id"}) {
+		t.Errorf("ImpactNodeFields requires %v, want only the id", got)
 	}
 }
 

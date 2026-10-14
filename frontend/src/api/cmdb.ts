@@ -633,9 +633,18 @@ export interface BlastRadius {
   single_points_of_failure?: Array<{ id: string; name: string }>;
 }
 
+/**
+ * The fields of an impacted CI that ImpactResult declares (API-02): without
+ * them the server answers with every field and the paths, megabytes for a
+ * core switch (NFR-02).
+ */
+const IMPACT_RESULT_FIELDS = 'name,ci_type,status';
+
 export const impactApi = {
   impact(ciId: string, params: { depth?: number; rel_type?: string } = {}) {
-    return fetchAPI<ImpactResult>(`/impact/${ciId}${qs(params)}`);
+    return fetchAPI<ImpactResult>(
+      `/impact/${ciId}${qs({ ...params, fields: IMPACT_RESULT_FIELDS })}`,
+    );
   },
   dependencies(ciId: string, direction: 'upstream' | 'downstream', depth?: number) {
     return fetchAPI<{ nodes: Array<{ id: string; name: string }>; count: number }>(

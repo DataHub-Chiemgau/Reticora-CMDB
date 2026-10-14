@@ -5054,11 +5054,15 @@ paths:
         - $ref: '#/components/parameters/ImpactFields'
       responses:
         '200':
-          description: Impact analysis result
+          description: >-
+            Impact analysis result: an ImpactAnalysis without fields, an
+            ImpactAnalysisFields with fields (API-02).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ImpactAnalysis'
+                anyOf:
+                  - { $ref: '#/components/schemas/ImpactAnalysis' }
+                  - { $ref: '#/components/schemas/ImpactAnalysisFields' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5107,11 +5111,15 @@ paths:
         (IMP-03). Powers the Ausfallsimulation in the topology view.
       responses:
         '200':
-          description: Impact analysis result
+          description: >-
+            Impact analysis result: an ImpactAnalysis without fields, an
+            ImpactAnalysisFields with fields (API-02).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ImpactAnalysis'
+                anyOf:
+                  - { $ref: '#/components/schemas/ImpactAnalysis' }
+                  - { $ref: '#/components/schemas/ImpactAnalysisFields' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
@@ -11478,8 +11486,10 @@ components:
         of ImpactNode (name, ci_type, status, client_id, site_id,
         management_ip, heuristic, hops, via, relay, path); `id` is always
         returned, an unknown field yields 422. Without it every field is
-        returned. Paths are only built when `path` is selected; via and
-        relay rebuild them (see ImpactNode). The topology view asks for
+        returned (ImpactAnalysis); with it the answer is an
+        ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths
+        are only built when `path` is selected; via and relay rebuild them
+        (see ImpactNode). The topology view asks for
         `name,ci_type,status,heuristic,hops,via,relay` (NFR-02).
     ListQ:
       name: q
@@ -12353,22 +12363,52 @@ components:
         impacted:
           type: array
           description: >-
-            The impacted CIs, certain ones first, then by name. With fields
-            (API-02) each entry carries its id and the selected fields only.
+            The impacted CIs with every field, certain ones first, then by
+            name. The answer with fields (API-02) is an ImpactAnalysisFields.
           items: { $ref: '#/components/schemas/ImpactNode' }
         count: { type: integer }
         summary:
+          $ref: '#/components/schemas/ImpactSummary'
+    ImpactAnalysisFields:
+      type: object
+      description: >-
+        The answer of /api/v1/impact and /api/v1/impact/{ci_id} with fields
+        (API-02): the properties of ImpactAnalysis, but each impacted CI
+        carries its id and the selected fields only (ImpactNodeFields).
+      required: [failed_cis, impacted, count, summary]
+      properties:
+        failed_ci_id:
+          type: string
+          description: The failed CI (single-CI short form only).
+        failed_ci:
+          $ref: '#/components/schemas/TopologyNode'
+        failed_cis:
+          type: array
+          items: { $ref: '#/components/schemas/TopologyNode' }
+        rel_type: { type: string }
+        categories:
+          type: array
+          items: { type: string }
+        depth: { type: integer }
+        impacted:
+          type: array
+          description: The impacted CIs, certain ones first, then by name.
+          items: { $ref: '#/components/schemas/ImpactNodeFields' }
+        count: { type: integer }
+        summary:
+          $ref: '#/components/schemas/ImpactSummary'
+    ImpactSummary:
+      type: object
+      required: [failed, impacted, certain, heuristic, by_category]
+      properties:
+        failed: { type: integer }
+        impacted: { type: integer }
+        certain: { type: integer }
+        heuristic: { type: integer }
+        by_category:
           type: object
-          required: [failed, impacted, certain, heuristic, by_category]
-          properties:
-            failed: { type: integer }
-            impacted: { type: integer }
-            certain: { type: integer }
-            heuristic: { type: integer }
-            by_category:
-              type: object
-              description: Impacted CIs per category of the last hop of their path.
-              additionalProperties: { type: integer }
+          description: Impacted CIs per category of the last hop of their path.
+          additionalProperties: { type: integer }
     ImpactNode:
       allOf:
         - $ref: '#/components/schemas/TopologyNode'
@@ -12393,6 +12433,32 @@ components:
                 one. Each step's category and heuristic flag follow from the
                 relationship type.
               items: { $ref: '#/components/schemas/ImpactPathStep' }
+    ImpactNodeFields:
+      type: object
+      required: [id]
+      description: >-
+        An impacted CI in the answer with fields (API-02): its id and the
+        selected properties of ImpactNode; a property that is not selected
+        is absent. A selected property has the meaning and the omission
+        rule it has in ImpactNode (client_id, site_id, management_ip and
+        relay are absent when empty).
+      properties:
+        id: { type: string }
+        name: { type: string }
+        ci_type: { type: string }
+        status: { type: string }
+        client_id: { type: string }
+        site_id: { type: string }
+        management_ip: { type: string }
+        heuristic: { type: boolean }
+        hops: { type: integer }
+        via:
+          $ref: '#/components/schemas/ImpactVia'
+        relay:
+          $ref: '#/components/schemas/ImpactRelay'
+        path:
+          type: array
+          items: { $ref: '#/components/schemas/ImpactPathStep' }
     ImpactVia:
       type: object
       required: [ci_id, rel_type]

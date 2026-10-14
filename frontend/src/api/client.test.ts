@@ -164,3 +164,21 @@ describe('bffQuery', () => {
     await expect(bffQuery('{ cis { totalCount } }')).rejects.toThrow('ci:read');
   });
 });
+
+describe('impact clients', () => {
+  it('ask for the fields they read, never for the full answer with paths (NFR-02)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ failed_ci_id: 'ci-1', impacted: [], count: 0 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await importClientWithSession();
+    const { impactApi } = await import('./cmdb');
+
+    await impactApi.impact('ci-1', { depth: 3 });
+
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]), 'http://localhost');
+    expect(url.pathname).toBe('/api/v1/impact/ci-1');
+    expect(url.searchParams.get('depth')).toBe('3');
+    expect(url.searchParams.get('fields')).toBe('name,ci_type,status');
+  });
+});

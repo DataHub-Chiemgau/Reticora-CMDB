@@ -93,7 +93,7 @@ jobs:
           set -o pipefail
           mkdir -p load-results
           k6 run -e BASE_URL=http://localhost:8080 -e API_KEY="$(cat "$RUNNER_TEMP/load.key")" -e DURATION="$DURATION" \
-            --summary-export load-results/api.json tests/load/api.js | tee load-results/api.txt
+            -e OBJECTS="$OBJECTS" --summary-export load-results/api.json tests/load/api.js | tee load-results/api.txt
 
       - name: Ingest delay at 200 records/s (NFR-03)
         if: always()

@@ -35,12 +35,14 @@ k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat /tmp/load.key) tests/l
 k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat /tmp/load.key) -e SCENARIO=spool tests/load/ingest.js
 ```
 
-Parameter: `DURATION` und `VUS` (api.js); `SCENARIO` (`load` oder `spool`),
-`RATE`, `BATCH`, `DURATION_S`, `PROBE_EVERY_S`, `VISIBLE_BUDGET_S`,
-`SPOOL_RECORDS`, `SPOOL_BATCH`, `SPOOL_BUDGET_S`, `TARGET` und `WAIT_S`
-(ingest.js). Der Workflow `.github/workflows/load.yml` (manuell und
-nächtlich) führt diese Schritte aus und lädt die k6-Zusammenfassungen als
-Artefakt hoch. Das Ergebnis des G1-Laufs steht in
+Parameter: `DURATION`, `VUS` und `OBJECTS` (api.js; Seed-Größe der
+Demo-Organisation, Standard 10.000, daraus die erwartete Zahl betroffener CIs
+der Impact-Szenarien); `SCENARIO` (`load` oder `spool`), `RATE`, `BATCH`,
+`DURATION_S`, `PROBE_EVERY_S`, `VISIBLE_BUDGET_S`, `SPOOL_RECORDS`,
+`SPOOL_BATCH`, `SPOOL_BUDGET_S`, `TARGET` und `WAIT_S` (ingest.js). Der
+Workflow `.github/workflows/load.yml` (manuell und nächtlich) führt diese
+Schritte aus, übergibt seine Eingabe `objects` als `OBJECTS` und lädt die
+k6-Zusammenfassungen als Artefakt hoch. Das Ergebnis des G1-Laufs steht in
 `docs/acceptance/lasttest-g1.md`.
 
 ### Ingest (NFR-03, WP-334)
