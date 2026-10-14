@@ -3,6 +3,7 @@ import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react
 import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
 import { ScopeSwitcher } from './components/ScopeSwitcher';
+import { NotificationCenter } from './components/NotificationCenter';
 import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
 import { Button } from './components/ui/Button';
@@ -79,6 +80,7 @@ const DeskListPage = lazyPage(() => import('./pages/DeskListPage'), 'DeskListPag
 const AgentListPage = lazyPage(() => import('./pages/AgentListPage'), 'AgentListPage');
 const FindingsPage = lazyPage(() => import('./pages/FindingsPage'), 'FindingsPage');
 const ReviewInboxPage = lazyPage(() => import('./pages/ReviewInboxPage'), 'ReviewInboxPage');
+const JobCenterPage = lazyPage(() => import('./pages/JobCenterPage'), 'JobCenterPage');
 const MapPage = lazyPage(() => import('./pages/MapPage'), 'MapPage');
 const RoomPlanPage = lazyPage(() => import('./pages/RoomPlanPage'), 'RoomPlanPage');
 
@@ -165,6 +167,7 @@ function App() {
       'findings',
       'discovery',
       'reviews',
+      'jobs',
       'users',
       'permissions',
       'ci-types',
@@ -237,6 +240,7 @@ function App() {
               </nav>
             ) : null}
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+              {isAuthenticated ? <NotificationCenter /> : null}
               {isAuthenticated ? (
                 <span className="max-w-48 truncate">{user?.name || user?.email}</span>
               ) : null}
@@ -325,6 +329,7 @@ function App() {
               <Route path="/agents" element={<AgentListPage />} />
               <Route path="/findings" element={<FindingsPage />} />
               <Route path="/reviews" element={<ReviewInboxPage />} />
+              <Route path="/jobs" element={<JobCenterPage />} />
               <Route path="/tickets" element={<TicketListPage />} />
               <Route path="/users" element={<UserManagementPage />} />
               <Route path="/permissions" element={<PermissionsPage />} />

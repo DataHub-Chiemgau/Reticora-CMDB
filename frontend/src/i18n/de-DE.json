@@ -44,7 +44,8 @@
     "saved-views": "Ansichten",
     "locations": "Standorte",
     "ci-types": "CI-Typen",
-    "reviews": "Reviews"
+    "reviews": "Reviews",
+    "jobs": "Jobs"
   },
   "common": {
     "save": "Speichern",
@@ -1107,5 +1108,34 @@
     "loadError": "Die Review-Items konnten nicht geladen werden",
     "empty": "Keine Review-Items",
     "emptyHint": "Der Abgleich hat nichts zu entscheiden."
+  },
+  "notifications": {
+    "title": "Benachrichtigungen",
+    "open": "Benachrichtigungen öffnen ({{count}} ungelesen)",
+    "markRead": "Als gelesen markieren",
+    "markAllRead": "Alle gelesen",
+    "unread": "Ungelesen",
+    "empty": "Keine Benachrichtigungen."
+  },
+  "jobs": {
+    "title": "Jobcenter",
+    "subtitle": "Hintergrundjobs aller Arten: Fortschritt, Abbruch und Ergebnis.",
+    "status": "Status",
+    "allStatuses": "Alle Status",
+    "statuses": {
+      "queued": "Wartend",
+      "running": "Läuft",
+      "succeeded": "Erfolgreich",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen"
+    },
+    "kind": "Art",
+    "progress": "Fortschritt",
+    "progressOf": "Fortschritt von {{kind}}",
+    "created": "Erstellt",
+    "cancel": "Abbrechen",
+    "result": "Ergebnis",
+    "loadError": "Die Jobs konnten nicht geladen werden",
+    "empty": "Keine Jobs"
   }
 }

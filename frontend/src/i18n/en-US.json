@@ -44,7 +44,8 @@
     "saved-views": "Saved views",
     "locations": "Locations",
     "ci-types": "CI Types",
-    "reviews": "Reviews"
+    "reviews": "Reviews",
+    "jobs": "Jobs"
   },
   "common": {
     "save": "Save",
@@ -1107,5 +1108,34 @@
     "loadError": "The review items could not be loaded",
     "empty": "No review items",
     "emptyHint": "Reconciliation has nothing to decide."
+  },
+  "notifications": {
+    "title": "Notifications",
+    "open": "Open notifications ({{count}} unread)",
+    "markRead": "Mark as read",
+    "markAllRead": "Mark all read",
+    "unread": "Unread",
+    "empty": "No notifications."
+  },
+  "jobs": {
+    "title": "Job center",
+    "subtitle": "Background jobs of every kind: progress, cancellation and result.",
+    "status": "Status",
+    "allStatuses": "All statuses",
+    "statuses": {
+      "queued": "Queued",
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "kind": "Kind",
+    "progress": "Progress",
+    "progressOf": "Progress of {{kind}}",
+    "created": "Created",
+    "cancel": "Cancel",
+    "result": "Result",
+    "loadError": "The jobs could not be loaded",
+    "empty": "No jobs"
   }
 }

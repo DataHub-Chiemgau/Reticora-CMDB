@@ -69,6 +69,7 @@ export const navFeatureFor: Record<string, string | undefined> = {
   agents: 'endpoint_agent',
   findings: 'compliance',
   reviews: undefined,
+  jobs: undefined,
   tickets: 'ticketing',
   users: undefined,
   permissions: undefined,
