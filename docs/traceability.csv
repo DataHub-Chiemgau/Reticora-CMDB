@@ -440,3 +440,5 @@ ABN-02;[Q];LT;tests/load/;WP-206
 ABN-03;[Q], jeweilige Phase;LT;backend/internal/ci/concurrency_integration_test.go;WP-207
 TEN-09;[Q];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-208
 TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-208
+GATE-03;[Q];SR;docs/security/review-g1.md;WP-209
+SEC-11;[Q];SR;docs/security/review-g1.md;WP-209
