@@ -79,8 +79,23 @@ func discoveredAttributes(item *IngestItem) map[string]any {
 // createDiscoveredCI creates the CI of a discovered device and records the
 // provenance of every discovered field (spec §13).
 func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *IngestItem, typeID, source string) (ci.Item, error) {
+	newItem := discoveredCI(orgID, item, typeID, source)
+	if err := h.ciRepo.Create(ctx, &newItem); err != nil {
+		return ci.Item{}, err
+	}
+	// New CIs carry no overrides; every discovered field is recorded as
+	// provenance so future drift is visible.
+	if err := h.recordDiscoveredMany(ctx, orgID, newItem.ID, discoveredFields(item), source, item.ObservedAt); err != nil {
+		return ci.Item{}, err
+	}
+	return newItem, nil
+}
+
+// discoveredCI is the CI of a discovered device, before it is created; the
+// batch of WP-333 and createDiscoveredCI build it alike.
+func discoveredCI(orgID string, item *IngestItem, typeID, source string) ci.Item {
 	now := time.Now().UTC()
-	newItem := ci.Item{
+	return ci.Item{
 		OrganizationID: orgID,
 		// The client of the discovery scope (REC-02).
 		ClientID:        item.ClientID,
@@ -101,11 +116,11 @@ func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *In
 		FirstSeenAt:     &now,
 		LastSeenAt:      &now,
 	}
-	if err := h.ciRepo.Create(ctx, &newItem); err != nil {
-		return ci.Item{}, err
-	}
-	// New CIs carry no overrides; every discovered field is recorded as
-	// provenance so future drift is visible.
+}
+
+// discoveredFields are the fields of a new discovered CI whose provenance is
+// recorded.
+func discoveredFields(item *IngestItem) map[string]any {
 	fields := map[string]any{
 		"name": item.Name, "manufacturer": item.Manufacturer, "model": item.Model,
 		"serial_number": item.SerialNumber, "management_ip": item.ManagementIP,
@@ -114,10 +129,7 @@ func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *In
 	for k, v := range item.Attributes {
 		fields[k] = v
 	}
-	if err := h.recordDiscoveredMany(ctx, orgID, newItem.ID, fields, source, item.ObservedAt); err != nil {
-		return ci.Item{}, err
-	}
-	return newItem, nil
+	return fields
 }
 
 // deviceKey identifies a discovered device across ingests so it is queued

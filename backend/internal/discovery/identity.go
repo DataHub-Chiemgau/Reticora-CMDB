@@ -352,6 +352,328 @@ func identityQuery(item *IngestItem) IdentityQuery {
 	return q
 }
 
+// IdentityKeys are the identity values of the records of a batch, each
+// once per kind, in the form identityFilter binds them (NFR-03, WP-333).
+type IdentityKeys struct {
+	Serials   []string // serial_number = v
+	UUIDs     []string // hardware_uuid = v, canonical lower case
+	MACs      []string // primary_mac = v or a fingerprint MAC, canonical
+	IPs       []string // management_ip = v, host address only
+	Hostnames []string // hostname or FQDN in lower case
+}
+
+func (k *IdentityKeys) empty() bool {
+	return len(k.Serials)+len(k.UUIDs)+len(k.MACs)+len(k.IPs)+len(k.Hostnames) == 0
+}
+
+// Kinds of identity values in IdentityKey.
+const (
+	keySerial = "serial"
+	keyUUID   = "uuid"
+	keyMAC    = "mac"
+	keyIP     = "ip"
+	keyHost   = "host"
+)
+
+// IdentityKey names one value of IdentityKeys: its kind and its position in
+// that kind's list.
+type IdentityKey struct {
+	Kind  string
+	Index int
+}
+
+// IdentityHit is a live CI the batch candidate query found, with the value
+// it matched.
+type IdentityHit struct {
+	CIID string
+	Key  IdentityKey
+}
+
+// DeletedIdentityHit is a soft-deleted CI the batch query found, with the
+// value it matched.
+type DeletedIdentityHit struct {
+	CI  ci.Item
+	Key IdentityKey
+}
+
+// BatchIdentityFinder finds the identity candidates of all records of a
+// batch with one query each for live and for soft-deleted CIs (NFR-03,
+// WP-333); which record a CI is a candidate of is decided in Go from the
+// value it matched. The PostgreSQL repository implements it.
+type BatchIdentityFinder interface {
+	// IdentityHits returns every live CI matching a value, once per
+	// matching value, in (created_at, id) order like IdentityCandidates and
+	// without an upper bound.
+	IdentityHits(ctx context.Context, orgID string, keys *IdentityKeys) ([]IdentityHit, error)
+	// DeletedIdentityHits returns the soft-deleted CIs matching a value, at
+	// most 1000 per value, in (deleted_at DESC, id) order, with the fields
+	// identity resolution compares.
+	DeletedIdentityHits(ctx context.Context, orgID string, keys *IdentityKeys) ([]DeletedIdentityHit, error)
+}
+
+// deletedCandidateLimit is the number of soft-deleted CIs a record is
+// compared with, as in DeletedIdentityCandidates.
+const deletedCandidateLimit = 1000
+
+// batchable reports whether the batch query binds the values of q exactly
+// as identityFilter does: the hardware UUID must be one PostgreSQL reads.
+// A window with another record is processed record by record, where the
+// query of that record fails as before.
+func batchable(q *IdentityQuery) bool {
+	_, ok := canonicalUUID(q.HardwareUUID)
+	return q.HardwareUUID == "" || ok
+}
+
+// canonicalUUID returns value in the canonical lower-case 8-4-4-4-12 form
+// when PostgreSQL reads it as a uuid (uuid_in: optional braces, 32 hex
+// digits, a hyphen allowed after any group of four), so one device reported
+// in two spellings has one batch key.
+func canonicalUUID(value string) (string, bool) {
+	s := value
+	if strings.HasPrefix(s, "{") {
+		if !strings.HasSuffix(s, "}") {
+			return "", false
+		}
+		s = s[1 : len(s)-1]
+	}
+	digits := make([]byte, 0, 32)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= '0' && c <= '9', c >= 'a' && c <= 'f':
+			digits = append(digits, c)
+		case c >= 'A' && c <= 'F':
+			digits = append(digits, c+'a'-'A')
+		case c == '-' && len(digits) > 0 && len(digits)%4 == 0 && len(digits) < 32 && s[i-1] != '-':
+		default:
+			return "", false
+		}
+	}
+	if len(digits) != 32 {
+		return "", false
+	}
+	d := string(digits)
+	return d[0:8] + "-" + d[8:12] + "-" + d[12:16] + "-" + d[16:20] + "-" + d[20:32], true
+}
+
+// batchKeys collects the identity values of the records with include[i],
+// each once per kind; refs[i] lists the values of record i (nil without
+// values or when not included). The values are those identityFilter binds
+// for the record.
+func batchKeys(qs []IdentityQuery, include []bool) (*IdentityKeys, [][]IdentityKey) {
+	keys := &IdentityKeys{}
+	values := map[string]map[string]int{}
+	lists := map[string]*[]string{keySerial: &keys.Serials, keyUUID: &keys.UUIDs, keyMAC: &keys.MACs, keyIP: &keys.IPs, keyHost: &keys.Hostnames}
+	refs := make([][]IdentityKey, len(qs))
+	for i := range qs {
+		if !include[i] {
+			continue
+		}
+		q := &qs[i]
+		seen := map[IdentityKey]bool{}
+		add := func(kind, value string) {
+			if value == "" {
+				return
+			}
+			if values[kind] == nil {
+				values[kind] = map[string]int{}
+			}
+			n, ok := values[kind][value]
+			if !ok {
+				list := lists[kind]
+				n = len(*list)
+				*list = append(*list, value)
+				values[kind][value] = n
+			}
+			key := IdentityKey{Kind: kind, Index: n}
+			if !seen[key] {
+				seen[key] = true
+				refs[i] = append(refs[i], key)
+			}
+		}
+		add(keySerial, q.SerialNumber)
+		if uuid, ok := canonicalUUID(q.HardwareUUID); ok {
+			add(keyUUID, uuid)
+		}
+		for _, mac := range q.MACs {
+			add(keyMAC, mac)
+		}
+		add(keyIP, hostOnly(q.ManagementIP))
+		for _, host := range q.Hostnames {
+			add(keyHost, host)
+		}
+	}
+	return keys, refs
+}
+
+// byKey maps each identity value to the records that carry it.
+func byKey(refs [][]IdentityKey) map[IdentityKey][]int {
+	out := map[IdentityKey][]int{}
+	for i, keys := range refs {
+		for _, k := range keys {
+			out[k] = append(out[k], i)
+		}
+	}
+	return out
+}
+
+// assignCandidates gives each record the CIs that matched one of its
+// values, each once, in the order of hits: exactly the candidates and the
+// order IdentityCandidates returns for the record alone.
+func assignCandidates(refs [][]IdentityKey, hits []IdentityHit) [][]string {
+	records := byKey(refs)
+	out := make([][]string, len(refs))
+	seen := make([]map[string]bool, len(refs))
+	for _, hit := range hits {
+		for _, i := range records[hit.Key] {
+			if seen[i] == nil {
+				seen[i] = map[string]bool{}
+			}
+			if !seen[i][hit.CIID] {
+				seen[i][hit.CIID] = true
+				out[i] = append(out[i], hit.CIID)
+			}
+		}
+	}
+	return out
+}
+
+// assignDeleted gives each record the soft-deleted CIs that matched one of
+// its values, each once, in the order of hits and at most
+// deletedCandidateLimit: the result DeletedIdentityCandidates returns for
+// the record alone (the newest 1000 of a record are among the newest 1000
+// of each of its values).
+func assignDeleted(refs [][]IdentityKey, hits []DeletedIdentityHit) [][]ci.Item {
+	records := byKey(refs)
+	out := make([][]ci.Item, len(refs))
+	seen := make([]map[string]bool, len(refs))
+	for h := range hits {
+		hit := &hits[h]
+		for _, i := range records[hit.Key] {
+			if seen[i] == nil {
+				seen[i] = map[string]bool{}
+			}
+			if !seen[i][hit.CI.ID] && len(out[i]) < deletedCandidateLimit {
+				seen[i][hit.CI.ID] = true
+				out[i] = append(out[i], hit.CI)
+			}
+		}
+	}
+	return out
+}
+
+// identityClusters groups the records with include[i] that can change each
+// other's identity resolution: records sharing a normalized identity value
+// (serial number and hardware UUID case-insensitive, MAC, IP address, host
+// name or FQDN) or a live candidate CI. first[i] is true for the first
+// record of its group. Only a first record may use the candidates of the
+// batch query or be created in the batch: the others follow one by one
+// after it, with a fresh query, as without the batch. A false link only
+// costs a record its batch.
+func identityClusters(qs []IdentityQuery, include []bool, candidates [][]string) []bool {
+	parent := make([]int, len(qs))
+	for i := range parent {
+		parent[i] = i
+	}
+	find := func(i int) int {
+		for parent[i] != i {
+			parent[i] = parent[parent[i]]
+			i = parent[i]
+		}
+		return i
+	}
+	owner := map[string]int{}
+	link := func(i int, key string) {
+		if key == "" {
+			return
+		}
+		j, ok := owner[key]
+		if !ok {
+			owner[key] = i
+			return
+		}
+		a, b := find(i), find(j)
+		if a > b {
+			a, b = b, a
+		}
+		parent[b] = a
+	}
+	for i := range qs {
+		if !include[i] {
+			continue
+		}
+		q := &qs[i]
+		if q.SerialNumber != "" {
+			link(i, "s|"+strings.ToLower(strings.TrimSpace(q.SerialNumber)))
+		}
+		if uuid, ok := canonicalUUID(q.HardwareUUID); ok {
+			link(i, "u|"+uuid)
+		}
+		for _, mac := range q.MACs {
+			link(i, "m|"+mac)
+		}
+		if ip := net.ParseIP(hostOnly(q.ManagementIP)); ip != nil {
+			link(i, "i|"+ip.String())
+		}
+		for _, host := range q.Hostnames {
+			link(i, "h|"+host)
+		}
+		for _, id := range candidates[i] {
+			link(i, "c|"+strings.ToLower(id))
+		}
+	}
+	first := make([]bool, len(qs))
+	for i := range qs {
+		first[i] = include[i] && find(i) == i
+	}
+	return first
+}
+
+// loadCandidates reads the CIs of all records with one read and returns
+// them per record in the order of ids; a CI that cannot be read fails like
+// in identityCandidates.
+func (h *Handler) loadCandidates(ctx context.Context, orgID string, ids [][]string) ([][]ci.Item, error) {
+	var all []string
+	seen := map[string]bool{}
+	for _, list := range ids {
+		for _, id := range list {
+			if !seen[id] {
+				seen[id] = true
+				all = append(all, id)
+			}
+		}
+	}
+	byID := make(map[string]ci.Item, len(all))
+	if reader, ok := h.ciRepo.(ci.BatchReader); ok && len(all) > 0 {
+		items, err := reader.GetByIDs(ctx, orgID, all)
+		if err != nil {
+			return nil, fmt.Errorf("load candidates: %w", err)
+		}
+		for i := range items {
+			byID[items[i].ID] = items[i]
+		}
+	} else {
+		for _, id := range all {
+			item, err := h.ciRepo.GetByID(ctx, orgID, id)
+			if err != nil {
+				return nil, fmt.Errorf("load candidate %s: %w", id, err)
+			}
+			byID[id] = *item
+		}
+	}
+	out := make([][]ci.Item, len(ids))
+	for i, list := range ids {
+		for _, id := range list {
+			item, ok := byID[id]
+			if !ok {
+				return nil, fmt.Errorf("load candidate %s: not found", id)
+			}
+			out[i] = append(out[i], item)
+		}
+	}
+	return out, nil
+}
+
 // CITypeBatchLookup resolves several CI type names or keys at once. The
 // discovery PG repository implements it with one statement (NFR-03).
 type CITypeBatchLookup interface {
@@ -519,13 +841,26 @@ func (h *Handler) resurrection(ctx context.Context, orgID string, item *IngestIt
 		return false, false, nil
 	}
 	q := identityQuery(item)
-	if q.SerialNumber == "" && q.HardwareUUID == "" && len(q.MACs) == 0 && q.ManagementIP == "" {
+	if !resurrectionGuard(&q) {
 		return false, false, nil
 	}
 	deleted, err := finder.DeletedIdentityCandidates(ctx, orgID, &q)
 	if err != nil {
 		return false, false, fmt.Errorf("deleted identity candidates: %w", err)
 	}
+	return h.resurrectionWith(ctx, orgID, item, ic, deleted)
+}
+
+// resurrectionGuard reports whether a record without a live match is
+// compared with the soft-deleted CIs: it carries an identity value besides
+// host names.
+func resurrectionGuard(q *IdentityQuery) bool {
+	return q.SerialNumber != "" || q.HardwareUUID != "" || len(q.MACs) > 0 || q.ManagementIP != ""
+}
+
+// resurrectionWith is resurrection with the soft-deleted candidates already
+// read (the batch query of WP-333).
+func (h *Handler) resurrectionWith(ctx context.Context, orgID string, item *IngestItem, ic *IdentityContext, deleted []ci.Item) (held, reviewed bool, err error) {
 	res := ResolveIdentity(deleted, item, ic)
 	var candidates []string
 	switch res.Action {

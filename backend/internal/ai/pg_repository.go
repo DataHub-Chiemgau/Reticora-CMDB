@@ -83,6 +83,48 @@ func (r *PGRepository) UpsertChunk(ctx context.Context, ch Chunk) error {
 		return err
 	})
 }
+
+// UpsertChunks upserts the chunks of one organization with one statement
+// (NFR-03, WP-333), each like UpsertChunk. A chunk repeated in chunks is
+// written once, the last one wins: one statement cannot update a row twice.
+func (r *PGRepository) UpsertChunks(ctx context.Context, chunks []Chunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	orgID := chunks[0].OrganizationID
+	index := map[[2]string]int{}
+	var types, ids, titles, contents, urls, embeddings []string
+	for i := range chunks {
+		ch := &chunks[i]
+		if ch.OrganizationID != orgID {
+			return fmt.Errorf("chunks of several organizations in one batch")
+		}
+		emb, err := json.Marshal(ch.Embedding)
+		if err != nil {
+			return fmt.Errorf("marshal embedding: %w", err)
+		}
+		k := [2]string{ch.EntityType, ch.EntityID}
+		if j, seen := index[k]; seen {
+			titles[j], contents[j], urls[j], embeddings[j] = ch.Title, ch.Content, ch.URL, string(emb)
+			continue
+		}
+		index[k] = len(types)
+		types, ids = append(types, ch.EntityType), append(ids, ch.EntityID)
+		titles, contents, urls, embeddings = append(titles, ch.Title), append(contents, ch.Content), append(urls, ch.URL), append(embeddings, string(emb))
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO ai_chunk (organization_id,entity_type,entity_id,title,content,url,embedding)
+			SELECT $1, c.entity_type, c.entity_id::uuid, c.title, c.content, c.url, c.embedding::jsonb
+			FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[])
+			     WITH ORDINALITY AS c(entity_type, entity_id, title, content, url, embedding, ord)
+			ORDER BY c.ord
+			ON CONFLICT (organization_id,entity_type,entity_id) DO UPDATE SET title=EXCLUDED.title, content=EXCLUDED.content,
+				url=EXCLUDED.url, embedding=EXCLUDED.embedding, updated_at=now()`,
+			orgID, types, ids, titles, contents, urls, embeddings)
+		return err
+	})
+}
+
 func (r *PGRepository) DeleteChunk(ctx context.Context, orgID, entityType, entityID string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `DELETE FROM ai_chunk WHERE `+chunkVisible+` AND organization_id=$1 AND entity_type=$2 AND entity_id=$3`, orgID, entityType, entityID)

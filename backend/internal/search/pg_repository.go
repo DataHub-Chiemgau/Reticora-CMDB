@@ -30,6 +30,52 @@ func (r *PGRepository) IndexDocument(ctx context.Context, doc Document) error {
 		return err
 	})
 }
+
+// IndexDocuments upserts the documents of one organization with one
+// statement (NFR-03, WP-333), each like IndexDocument. A document repeated in
+// docs is written once, the last one wins: one statement cannot update a row
+// twice.
+func (r *PGRepository) IndexDocuments(ctx context.Context, docs []Document) error {
+	if len(docs) == 0 {
+		return nil
+	}
+	orgID := docs[0].OrganizationID
+	index := map[[2]string]int{}
+	var types, ids, titles, summaries, urls, metas []string
+	for i := range docs {
+		doc := &docs[i]
+		if doc.OrganizationID == "" || doc.EntityType == "" || doc.EntityID == "" {
+			return fmt.Errorf("organization_id, entity_type and entity_id are required")
+		}
+		if doc.OrganizationID != orgID {
+			return fmt.Errorf("documents of several organizations in one batch")
+		}
+		meta, err := json.Marshal(doc.Metadata)
+		if err != nil {
+			return fmt.Errorf("marshal document metadata: %w", err)
+		}
+		k := [2]string{doc.EntityType, doc.EntityID}
+		if j, seen := index[k]; seen {
+			titles[j], summaries[j], urls[j], metas[j] = doc.Title, doc.Summary, doc.URL, string(meta)
+			continue
+		}
+		index[k] = len(types)
+		types, ids = append(types, doc.EntityType), append(ids, doc.EntityID)
+		titles, summaries, urls, metas = append(titles, doc.Title), append(summaries, doc.Summary), append(urls, doc.URL), append(metas, string(meta))
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO search_document (organization_id, entity_type, entity_id, title, summary, url, metadata)
+			SELECT $1, d.entity_type, d.entity_id::uuid, d.title, d.summary, d.url, d.metadata::jsonb
+			FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[])
+			     WITH ORDINALITY AS d(entity_type, entity_id, title, summary, url, metadata, ord)
+			ORDER BY d.ord
+			ON CONFLICT (organization_id, entity_type, entity_id) DO UPDATE SET title=EXCLUDED.title, summary=EXCLUDED.summary,
+				url=EXCLUDED.url, metadata=EXCLUDED.metadata, updated_at=now()`,
+			orgID, types, ids, titles, summaries, urls, metas)
+		return err
+	})
+}
+
 func (r *PGRepository) Delete(ctx context.Context, orgID, entityType, entityID string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `DELETE FROM search_document WHERE organization_id=$1 AND entity_type=$2 AND entity_id=$3`, orgID, entityType, entityID)

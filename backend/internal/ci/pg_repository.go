@@ -423,6 +423,222 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 	return r.uniqueField(ctx, item.OrganizationID, err)
 }
 
+// CreateMany implements BatchCreator: the CIs of one organization with one
+// statement each for the rows, their history, their audit entries and their
+// events, whatever the number of items (NFR-03, WP-333). Each CI is written
+// as Create writes it. A CI a unique index refuses is skipped (ON CONFLICT DO
+// NOTHING) and reported, so the caller can name its record and process it on
+// its own; under row level security an error could not name it. The rows are
+// inserted in the order of serial number, hardware UUID and primary MAC, so
+// concurrent batches with the same identities wait for each other instead of
+// deadlocking on the unique indexes.
+func (r *PGRepository) CreateMany(ctx context.Context, orgID string, items []*Item) (CreateManyResult, error) {
+	var res CreateManyResult
+	if len(items) == 0 {
+		return res, nil
+	}
+	for _, item := range items {
+		if item.OrganizationID != orgID {
+			return res, fmt.Errorf("create cis: item of organization %q in a batch of %q", item.OrganizationID, orgID)
+		}
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		created, refused, err := insertCIs(ctx, tx, orgID, items)
+		if err != nil {
+			return locationError(fmt.Errorf("create cis: %w", err))
+		}
+		res.Refused = refused
+		if len(created) == 0 {
+			return nil
+		}
+		if err := loadAssetFacts(ctx, tx, created); err != nil {
+			return err
+		}
+		if err := r.recordCreates(ctx, tx, orgID, created); err != nil {
+			return err
+		}
+		if err := r.recordCreatedAudit(ctx, tx, created); err != nil {
+			return err
+		}
+		return r.recordCreatedEvents(ctx, tx, created)
+	})
+	return res, err
+}
+
+// insertCIs inserts the CI rows of items with one statement and returns the
+// created items and the positions of the refused ones.
+func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (created []*Item, refused []int, err error) {
+	n := len(items)
+	text := func(value string) *string {
+		if strings.TrimSpace(value) == "" {
+			return nil
+		}
+		return &value
+	}
+	cols := make([][]*string, 21)
+	for c := range cols {
+		cols[c] = make([]*string, n)
+	}
+	firstSeen, lastSeen, manual := make([]*time.Time, n), make([]*time.Time, n), make([]bool, n)
+	for i, item := range items {
+		if item.Attributes == nil {
+			item.Attributes = make(map[string]any)
+		}
+		attributes, merr := json.Marshal(storedAttributes(item.Attributes, nil))
+		if merr != nil {
+			return nil, nil, fmt.Errorf("encode attributes: %w", merr)
+		}
+		typeID, name, status, attrs := item.CITypeID, item.Name, item.Status, string(attributes)
+		for c, v := range []*string{
+			text(item.ClientID), text(item.LocationID), &typeID, &name, &status, text(item.Manufacturer), text(item.Model),
+			text(item.SerialNumber), text(item.HardwareUUID), text(item.ManagementIP), text(item.PrimaryMAC),
+			text(item.Hostname), text(item.FQDN), text(item.OSName), text(item.OSVersion), text(item.FirmwareVersion),
+			text(item.SysObjectID), &attrs, text(item.DiscoverySource), text(item.AssetID), text(item.ParentCIID),
+		} {
+			cols[c][i] = v
+		}
+		firstSeen[i], lastSeen[i], manual[i] = item.FirstSeenAt, item.LastSeenAt, item.IsManual
+	}
+	args := []any{orgID}
+	for _, col := range cols {
+		args = append(args, col)
+	}
+	args = append(args, firstSeen, lastSeen, manual)
+	rows, err := tx.Query(ctx, `
+		WITH input AS MATERIALIZED (
+			SELECT gen_random_uuid() AS id, r.*
+			FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[],
+			            $10::text[], $11::text[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[],
+			            $17::text[], $18::text[], $19::text[], $20::text[], $21::text[], $22::text[],
+			            $23::timestamptz[], $24::timestamptz[], $25::boolean[])
+			     WITH ORDINALITY AS r(client_id, location_id, ci_type_id, name, status, manufacturer, model,
+			          serial_number, hardware_uuid, management_ip, primary_mac, hostname, fqdn, os_name, os_version,
+			          firmware_version, sys_object_id, attributes, discovery_source, asset_id, parent_ci_id,
+			          first_seen_at, last_seen_at, is_manual, ord)
+		), ins AS (
+			INSERT INTO ci (id, organization_id, client_id, location_id, ci_type_id, name, status, manufacturer,
+				model, serial_number, hardware_uuid, management_ip, primary_mac, hostname, fqdn, os_name, os_version,
+				firmware_version, sys_object_id, attributes, discovery_source, first_seen_at, last_seen_at,
+				is_manual, asset_id, parent_ci_id)
+			SELECT id, $1, client_id::uuid, location_id::uuid, ci_type_id::uuid, name, status, manufacturer, model,
+				serial_number, hardware_uuid::uuid, management_ip::inet, primary_mac::macaddr, hostname, fqdn,
+				os_name, os_version, firmware_version, sys_object_id, attributes::jsonb, discovery_source,
+				first_seen_at, last_seen_at, is_manual, asset_id::uuid, parent_ci_id::uuid
+			FROM input
+			ORDER BY serial_number, hardware_uuid, primary_mac, ord
+			ON CONFLICT DO NOTHING
+			RETURNING id, COALESCE(site_id::text, '') AS site_id, COALESCE(room_id::text, '') AS room_id,
+				COALESCE(location_id::text, '') AS location_id, health, version, schema_version, created_at, updated_at
+		)
+		SELECT input.ord, COALESCE(ins.id::text, ''), COALESCE(ins.site_id, ''), COALESCE(ins.room_id, ''),
+			COALESCE(ins.location_id, ''), COALESCE(ins.health, ''), COALESCE(ins.version, 0),
+			COALESCE(ins.schema_version, 0), ins.created_at, ins.updated_at
+		FROM input LEFT JOIN ins ON ins.id = input.id
+		ORDER BY input.ord`, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ord int64
+		var id, siteID, roomID, locationID, health string
+		var version, schemaVersion int64
+		var createdAt, updatedAt *time.Time
+		if err := rows.Scan(&ord, &id, &siteID, &roomID, &locationID, &health, &version, &schemaVersion,
+			&createdAt, &updatedAt); err != nil {
+			return nil, nil, err
+		}
+		i := int(ord) - 1
+		if id == "" {
+			refused = append(refused, i)
+			continue
+		}
+		item := items[i]
+		item.ID, item.SiteID, item.RoomID, item.LocationID, item.Health = id, siteID, roomID, locationID, health
+		item.Version, item.SchemaVersion = version, int(schemaVersion)
+		item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
+		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+		created = append(created, item)
+	}
+	return created, refused, rows.Err()
+}
+
+// recordCreates writes the history entry of each new CI, as Create does,
+// with one statement.
+func (r *PGRepository) recordCreates(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) error {
+	ids, values, versions := make([]string, len(items)), make([]string, len(items)), make([]int64, len(items))
+	for i, item := range items {
+		sealed, err := sealChangeValue(ctx, tx, orgID, "", item)
+		if err != nil {
+			return err
+		}
+		if values[i], err = marshalJSONValue(sealed); err != nil {
+			return fmt.Errorf("marshal new ci change value: %w", err)
+		}
+		ids[i], versions[i] = item.ID, item.Version
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO ci_change (organization_id, ci_id, actor_id, change_type, field_name, old_value, new_value, ci_version)
+		SELECT $1, c.ci_id::uuid, $2::uuid, 'create', NULL, 'null'::jsonb, c.new_value::jsonb, c.ci_version
+		FROM unnest($3::text[], $4::text[], $5::bigint[]) WITH ORDINALITY AS c(ci_id, new_value, ci_version, ord)
+		ORDER BY c.ord`, orgID, nilIfEmpty(tenant.FromContext(ctx).UserID), ids, values, versions); err != nil {
+		return fmt.Errorf("record ci changes: %w", err)
+	}
+	return nil
+}
+
+// recordCreatedAudit writes the ci.created audit entries of the new CIs in
+// their order, with one statement where the recorder can.
+func (r *PGRepository) recordCreatedAudit(ctx context.Context, tx pgx.Tx, items []*Item) error {
+	if r.recorder == nil {
+		return nil
+	}
+	batch, ok := r.recorder.(audit.TxBatchRecorder)
+	if !ok {
+		for _, item := range items {
+			if err := r.recordAudit(ctx, tx, "ci.created", item, map[string]interface{}{"after": item}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	t := tenant.FromContext(ctx)
+	actorType := "system"
+	if strings.TrimSpace(t.UserID) != "" {
+		actorType = "user"
+	}
+	entries := make([]audit.Entry, len(items))
+	for i, item := range items {
+		entries[i] = audit.Entry{
+			OrganizationID: item.OrganizationID,
+			ActorID:        strings.TrimSpace(t.UserID),
+			ActorType:      actorType,
+			Action:         "ci.created",
+			ResourceType:   "ci",
+			ResourceID:     item.ID,
+			Changes:        map[string]interface{}{"after": item},
+		}
+	}
+	if _, err := batch.RecordMany(ctx, tx, entries); err != nil {
+		return fmt.Errorf("record audit: %w", err)
+	}
+	return nil
+}
+
+// recordCreatedEvents writes the ci.created events of the new CIs in their
+// order with one statement.
+func (r *PGRepository) recordCreatedEvents(ctx context.Context, tx pgx.Tx, items []*Item) error {
+	if r.outbox == nil {
+		return nil
+	}
+	es := make([]*events.Event, len(items))
+	for i, item := range items {
+		es[i] = &events.Event{OrgID: item.OrganizationID, Type: events.CICreated, EntityID: item.ID, Data: item}
+	}
+	_, err := r.outbox.AppendMany(ctx, tx, es)
+	return err
+}
+
 // Update modifies an existing CI.
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
 	var item *Item

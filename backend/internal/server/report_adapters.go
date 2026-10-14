@@ -122,6 +122,22 @@ func (a overrideProvenance) RecordDiscoveredMany(ctx context.Context, orgID, ciI
 	return nil
 }
 
+// RecordDiscoveredBatch records the fields of the new CIs of an ingest batch
+// in one statement when the repository can (NFR-03, WP-333), else CI by CI.
+func (a overrideProvenance) RecordDiscoveredBatch(ctx context.Context, orgID string, batch []override.DiscoveredValues) error {
+	if many, ok := a.repo.(interface {
+		RecordDiscoveredBatch(ctx context.Context, orgID string, batch []override.DiscoveredValues) error
+	}); ok {
+		return many.RecordDiscoveredBatch(ctx, orgID, batch)
+	}
+	for _, b := range batch {
+		if err := a.RecordDiscoveredMany(ctx, orgID, b.CIID, b.Values, b.Source, b.ObservedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ClearOverride accepts the observed value of an override_conflict (REC-12).
 func (a overrideProvenance) ClearOverride(ctx context.Context, orgID, ciID, field string) error {
 	_, err := a.repo.ClearOverride(ctx, orgID, ciID, field)

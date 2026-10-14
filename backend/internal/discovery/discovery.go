@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"reflect"
 	"sort"
@@ -994,6 +995,15 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 // records before it stay committed, get their topology and are entered in
 // the ledger, and the error makes the queue deliver the batch again, which
 // skips them as duplicates.
+//
+// With the batch queries of the repository and the batch creation of the
+// CI repository (WP-333), each window of up to ingestBatch records first
+// runs one more transaction: one candidate query for all its records, and
+// its new devices created together. Updates of known devices and every
+// record the batch leaves follow one by one in the order of the records;
+// the records of one device keep their order. When a record fails, the
+// devices its window created in the batch stay committed like the records
+// before it and are entered in the ledger.
 func (h *Handler) processItems(ctx context.Context, orgID string, items []IngestItem) (BulkIngestResponse, error) {
 	var resp BulkIngestResponse
 	if h.ciRepo == nil {
@@ -1014,33 +1024,53 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 
 	// resolvedCIID[i] holds the CI id that item i resolved to (matched or
 	// created). Conflicts leave it empty so no topology is derived for them.
-	resolvedCIID := make([]string, len(frame.items))
-	done := 0
+	// handled[i] reports that record i is committed: in the batch of its
+	// window or in its own transaction.
+	n := len(frame.items)
+	resolvedCIID := make([]string, n)
+	handled := make([]bool, n)
 	var recordErr error
-	for ; done < len(frame.items); done++ {
-		if frame.typeIDs[done] == "" {
-			// Unresolvable CI type: queued for review in the frame.
-			continue
-		}
-		var out recordOutcome
-		if err := h.inTx(ctx, orgID, func(ctx context.Context) error {
-			return h.processRecord(ctx, orgID, frame, done, &out)
-		}); err != nil {
-			recordErr = err
-			break
-		}
-		// Counted once the record's transaction has committed.
-		resp.add(&out.resp)
-		resolvedCIID[done] = out.ciID
-		if out.created {
-			frame.total++
+windows:
+	for start := 0; start < n; start += ingestBatch {
+		end := min(start+ingestBatch, n)
+		h.processWindow(ctx, orgID, frame, start, end, handled, resolvedCIID, &resp)
+		for i := start; i < end; i++ {
+			if handled[i] {
+				continue
+			}
+			if frame.typeIDs[i] == "" {
+				// Unresolvable CI type: queued for review in the frame.
+				handled[i] = true
+				continue
+			}
+			var out recordOutcome
+			if err := h.inTx(ctx, orgID, func(ctx context.Context) error {
+				return h.processRecord(ctx, orgID, frame, i, &out)
+			}); err != nil {
+				recordErr = err
+				break windows
+			}
+			// Counted once the record's transaction has committed.
+			resp.add(&out.resp)
+			resolvedCIID[i] = out.ciID
+			handled[i] = true
+			if out.created {
+				frame.total++
+			}
 		}
 	}
 
-	processed := frame.items[:done]
-	resp.Relationships += h.deriveTopology(ctx, orgID, processed, resolvedCIID[:done], h.neighborCandidates(ctx, orgID, processed))
+	var processed []IngestItem
+	var processedCIID []string
+	for i := range frame.items {
+		if handled[i] {
+			processed = append(processed, frame.items[i])
+			processedCIID = append(processedCIID, resolvedCIID[i])
+		}
+	}
+	resp.Relationships += h.deriveTopology(ctx, orgID, processed, processedCIID, h.neighborCandidates(ctx, orgID, processed))
 	// Outlet mappings of PDUs and UPS outlet groups (IMP-09).
-	resp.Relationships += h.derivePowerChain(ctx, orgID, processed, resolvedCIID[:done])
+	resp.Relationships += h.derivePowerChain(ctx, orgID, processed, processedCIID)
 	if err := h.markProcessed(ctx, orgID, processed); err != nil {
 		return resp, errors.Join(recordErr, err)
 	}
@@ -1060,6 +1090,10 @@ type batchFrame struct {
 	total      int64
 	unlicensed queuedDevices
 	resp       BulkIngestResponse
+	// candidates[i] are the identity candidates of record i the batch query
+	// of its window read (WP-333); valid only with prefetched[i].
+	candidates [][]ci.Item
+	prefetched []bool
 }
 
 // recordOutcome is what processing one record changed.
@@ -1187,9 +1221,16 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 		}
 	}
 
-	candidates, err := h.identityCandidates(ctx, orgID, &item)
-	if err != nil {
-		return err
+	var candidates []ci.Item
+	if i < len(frame.prefetched) && frame.prefetched[i] {
+		// Read by the batch query of the window (WP-333): no record before
+		// this one changed them.
+		candidates = frame.candidates[i]
+	} else {
+		var err error
+		if candidates, err = h.identityCandidates(ctx, orgID, &item); err != nil {
+			return err
+		}
 	}
 	result := ResolveIdentity(candidates, &item, identity)
 	// No live CI: a soft-deleted one may be the device (CI-13).
@@ -1425,6 +1466,283 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 		}
 	}
 	return nil
+}
+
+// batchProvenance records the fields of several new CIs at once (the
+// server's override adapter, WP-333).
+type batchProvenance interface {
+	RecordDiscoveredBatch(ctx context.Context, orgID string, batch []override.DiscoveredValues) error
+}
+
+// recordDiscoveredBatch records the provenance of the fields of the new CIs
+// of a batch in one statement where the store can, else CI by CI; like
+// recordDiscovered it fails the batch only on a failed statement.
+func (h *Handler) recordDiscoveredBatch(ctx context.Context, orgID string, batch []override.DiscoveredValues) error {
+	if h.provenance == nil || len(batch) == 0 {
+		return nil
+	}
+	if many, ok := h.provenance.(batchProvenance); ok {
+		if err := many.RecordDiscoveredBatch(ctx, orgID, batch); err != nil && database.TxFailed(ctx) {
+			return err
+		}
+		return nil
+	}
+	for _, b := range batch {
+		if err := h.recordDiscoveredMany(ctx, orgID, b.CIID, b.Values, b.Source, b.ObservedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// windowOutcome is what the batch transaction of a window changed (WP-333);
+// it counts only once the transaction has committed.
+type windowOutcome struct {
+	resp       BulkIngestResponse
+	total      int64
+	unlicensed queuedDevices
+	// done[k] reports that record start+k was handled completely in the
+	// batch, with the CI ciID[k] (held and unlicensed records have none).
+	done       []bool
+	ciID       []string
+	candidates [][]ci.Item
+	prefetched []bool
+}
+
+// pendingCI is a new device of a window that the batch creates.
+type pendingCI struct {
+	k      int
+	item   IngestItem
+	ci     ci.Item
+	source string
+	result ReconcileResult
+}
+
+// processWindow runs the batch of the records [start, end) of the frame in
+// one transaction (NFR-03, WP-333): one query for the live candidates of
+// all records, one for the soft-deleted candidates of the new devices, and
+// the new devices created together (ci.BatchCreator), indexed together and
+// with their provenance in one statement. It marks the records it handled
+// and leaves the candidates it read to the records that follow one by one.
+// It never fails the ingest: when the batch cannot run or rolls back, every
+// record of the window is processed on its own, which reports any error
+// for its record.
+func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchFrame, start, end int, handled []bool,
+	resolvedCIID []string, resp *BulkIngestResponse) {
+	finder, ok := h.repo.(BatchIdentityFinder)
+	creator, creates := h.ciRepo.(ci.BatchCreator)
+	if !ok || !creates || h.tx == nil {
+		return
+	}
+	n := end - start
+	qs, include := make([]IdentityQuery, n), make([]bool, n)
+	records := 0
+	for k := range n {
+		if frame.typeIDs[start+k] == "" {
+			continue
+		}
+		qs[k] = identityQuery(&frame.items[start+k])
+		if !batchable(&qs[k]) {
+			return
+		}
+		include[k] = true
+		records++
+	}
+	if records == 0 {
+		return
+	}
+	if frame.prefetched == nil {
+		frame.candidates = make([][]ci.Item, len(frame.items))
+		frame.prefetched = make([]bool, len(frame.items))
+	}
+	var w windowOutcome
+	if err := h.inTx(ctx, orgID, func(ctx context.Context) error {
+		w = windowOutcome{
+			total: frame.total, unlicensed: queuedDevices{keys: maps.Clone(frame.unlicensed.keys)},
+			done: make([]bool, n), ciID: make([]string, n), candidates: make([][]ci.Item, n), prefetched: make([]bool, n),
+		}
+		return h.batchWindow(ctx, orgID, frame, start, qs, include, finder, creator, &w)
+	}); err != nil {
+		slog.WarnContext(ctx, "ingest batch rolled back; its records are processed one by one",
+			"event", "ingest.batch.fallback", "organization_id", orgID, "records", records, "error", err)
+		return
+	}
+	resp.add(&w.resp)
+	frame.total, frame.unlicensed = w.total, w.unlicensed
+	for k := range n {
+		i := start + k
+		frame.candidates[i], frame.prefetched[i] = w.candidates[k], w.prefetched[k]
+		if w.done[k] {
+			handled[i], resolvedCIID[i] = true, w.ciID[k]
+		}
+	}
+}
+
+// batchWindow is the batch transaction of processWindow; w collects what it
+// changed.
+func (h *Handler) batchWindow(ctx context.Context, orgID string, frame *batchFrame, start int, qs []IdentityQuery, include []bool,
+	finder BatchIdentityFinder, creator ci.BatchCreator, w *windowOutcome) error {
+	keys, refs := batchKeys(qs, include)
+	var hits []IdentityHit
+	if !keys.empty() {
+		var err error
+		if hits, err = finder.IdentityHits(ctx, orgID, keys); err != nil {
+			return fmt.Errorf("identity candidates: %w", err)
+		}
+	}
+	ids := assignCandidates(refs, hits)
+	candidates, loadErr := h.loadCandidates(ctx, orgID, ids)
+	if loadErr != nil {
+		return loadErr
+	}
+	// Only the first record of records that can change each other's
+	// resolution keeps its candidates or is created here; the others
+	// follow it one by one.
+	first := identityClusters(qs, include, ids)
+	var fresh []int
+	results := make([]ReconcileResult, len(qs))
+	deletedOf := make([]bool, len(qs))
+	for k := range qs {
+		if !first[k] {
+			continue
+		}
+		w.candidates[k], w.prefetched[k] = candidates[k], true
+		i := start + k
+		results[k] = ResolveIdentity(candidates[k], &frame.items[i], frame.identity)
+		// A device no collector profile matched opens its review on its own.
+		if results[k].Action == ReconcileCreated && !frame.noProfile[i] {
+			fresh = append(fresh, k)
+			deletedOf[k] = resurrectionGuard(&qs[k])
+		}
+	}
+	if len(fresh) == 0 {
+		return nil
+	}
+	// No live CI: a soft-deleted one may be the device (CI-13).
+	var deleted [][]ci.Item
+	if dkeys, drefs := batchKeys(qs, deletedOf); !dkeys.empty() {
+		dhits, derr := finder.DeletedIdentityHits(ctx, orgID, dkeys)
+		if derr != nil {
+			return fmt.Errorf("deleted identity candidates: %w", derr)
+		}
+		deleted = assignDeleted(drefs, dhits)
+	} else {
+		deleted = make([][]ci.Item, len(qs))
+	}
+
+	validator := h.batchValidator()
+	var pending []pendingCI
+	for _, k := range fresh {
+		i := start + k
+		// The batch works on a copy: a record it leaves is processed on its
+		// own from what it reported.
+		item := cloneItem(&frame.items[i])
+		typeID := frame.typeIDs[i]
+		held, reviewed, err := h.resurrectionWith(ctx, orgID, &item, frame.identity, deleted[k])
+		if err != nil {
+			return err
+		}
+		if held {
+			w.resp.Resurrected++
+			if reviewed {
+				w.resp.ReviewItems++
+			}
+			w.done[k] = true
+			continue
+		}
+		source := item.Source
+		if source == "" {
+			source = ci.SourceSweep
+		}
+		dropped, err := dropInvalidWith(ctx, validator, orgID, typeID, "", &item)
+		if err != nil {
+			return err
+		}
+		w.resp.InvalidValues += dropped
+		withoutBlocklistedIdentity(&item)
+		// Over max_cis the device is held as unlicensed_ci (ENT-03, CH21).
+		if h.limits != nil {
+			queued, err := h.admitNewCI(ctx, orgID, w.total, &item, typeID, source, &w.unlicensed)
+			if err != nil {
+				return err
+			}
+			if queued {
+				w.resp.Unlicensed++
+				w.done[k] = true
+				continue
+			}
+		}
+		withoutTakenIdentity(&item, candidates[k])
+		pending = append(pending, pendingCI{k: k, item: item, ci: discoveredCI(orgID, &item, typeID, source), source: source, result: results[k]})
+		w.total++
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
+	items := make([]*ci.Item, len(pending))
+	for p := range pending {
+		items[p] = &pending[p].ci
+	}
+	created, createErr := creator.CreateMany(ctx, orgID, items)
+	if createErr != nil {
+		return createErr
+	}
+	refused := make(map[int]bool, len(created.Refused))
+	for _, p := range created.Refused {
+		refused[p] = true
+		// Another CI holds a unique value (WP-207): the record is processed
+		// on its own with a fresh query, which matches that CI or names the
+		// violated index.
+		rec := &pending[p]
+		slog.WarnContext(ctx, "ingest batch: CI refused by a unique index; record processed on its own",
+			"event", "ingest.batch.unique", "organization_id", orgID, "record_id", rec.item.RecordID,
+			"serial_number", rec.item.SerialNumber)
+		w.total--
+		w.prefetched[rec.k], w.candidates[rec.k] = false, nil
+	}
+	provenance := make([]override.DiscoveredValues, 0, len(pending))
+	for p := range pending {
+		if !refused[p] {
+			rec := &pending[p]
+			provenance = append(provenance, override.DiscoveredValues{CIID: rec.ci.ID, Values: discoveredFields(&rec.item),
+				Source: rec.source, ObservedAt: rec.item.ObservedAt})
+		}
+	}
+	if err := h.recordDiscoveredBatch(ctx, orgID, provenance); err != nil {
+		return err
+	}
+	for p := range pending {
+		if refused[p] {
+			continue
+		}
+		rec := &pending[p]
+		if err := h.syncInterfaces(ctx, orgID, rec.ci.ID, &rec.item); err != nil {
+			return err
+		}
+		// A hostname or FQDN hit is never merged (CH29): the new CI is
+		// reviewed as a probable duplicate.
+		if len(rec.result.ProbableDuplicates) > 0 {
+			review := probableDuplicateReview(orgID, rec.ci.ID, &rec.item, rec.result.ProbableDuplicates)
+			if _, err := h.openReview(ctx, review); err != nil {
+				return err
+			}
+			w.resp.ReviewItems++
+		}
+		w.resp.Created++
+		w.done[rec.k], w.ciID[rec.k] = true, rec.ci.ID
+	}
+	return nil
+}
+
+// cloneItem copies a record with its own attribute, fingerprint and raw
+// data maps, which the batch changes or hands on.
+func cloneItem(item *IngestItem) IngestItem {
+	out := *item
+	out.Attributes = maps.Clone(item.Attributes)
+	out.Fingerprint = maps.Clone(item.Fingerprint)
+	out.RawData = maps.Clone(item.RawData)
+	return out
 }
 
 func stringPtr(value string) *string {

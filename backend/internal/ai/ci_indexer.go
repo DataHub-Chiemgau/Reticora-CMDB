@@ -80,14 +80,7 @@ func NewCIChunkIndexer(repo Repository, provider Provider) *CIChunkIndexer {
 
 // IndexDocument upserts the retrieval chunk for a CI document.
 func (x *CIChunkIndexer) IndexDocument(ctx context.Context, doc ci.Document) error {
-	chunk := Chunk{
-		OrganizationID: doc.OrganizationID,
-		EntityType:     doc.EntityType,
-		EntityID:       doc.EntityID,
-		Title:          doc.Title,
-		Content:        doc.Summary,
-		URL:            doc.URL,
-	}
+	chunk := chunkOf(&doc)
 	// The provider is called only for organizations that opted in and hold
 	// the ai add-on (AI-02).
 	if x.provider == nil || !x.provider.EmbeddingsEnabled() || x.consent == nil ||
@@ -111,6 +104,69 @@ func (x *CIChunkIndexer) IndexDocument(ctx context.Context, doc ci.Document) err
 		}
 		if err := x.repo.UpsertChunk(ctx, chunk); err != nil {
 			slog.WarnContext(ctx, "AI chunk embedding not stored", "entity_id", chunk.EntityID, "error", err)
+		}
+	})
+	return nil
+}
+
+// chunkOf is the retrieval chunk of a CI document.
+func chunkOf(doc *ci.Document) Chunk {
+	return Chunk{
+		OrganizationID: doc.OrganizationID,
+		EntityType:     doc.EntityType,
+		EntityID:       doc.EntityID,
+		Title:          doc.Title,
+		Content:        doc.Summary,
+		URL:            doc.URL,
+	}
+}
+
+// ChunkBatchWriter upserts several chunks of one organization at once
+// (NFR-03, WP-333); the PostgreSQL repository implements it.
+type ChunkBatchWriter interface {
+	UpsertChunks(ctx context.Context, chunks []Chunk) error
+}
+
+// IndexDocuments implements ci.BatchIndexer: the chunks of the documents of
+// one organization with one statement where the repository can, else chunk
+// by chunk. The consent is checked once for the batch; inside a context
+// transaction the embeddings follow after the commit, as in IndexDocument.
+func (x *CIChunkIndexer) IndexDocuments(ctx context.Context, docs []ci.Document) error {
+	batch, ok := x.repo.(ChunkBatchWriter)
+	if !ok || len(docs) == 0 {
+		for i := range docs {
+			if err := x.IndexDocument(ctx, docs[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	chunks := make([]Chunk, len(docs))
+	for i := range docs {
+		chunks[i] = chunkOf(&docs[i])
+	}
+	if x.provider == nil || !x.provider.EmbeddingsEnabled() || x.consent == nil ||
+		!x.consent.AllowsExternalAI(ctx, docs[0].OrganizationID) {
+		return batch.UpsertChunks(ctx, chunks)
+	}
+	if !database.InTx(ctx) {
+		for i := range chunks {
+			x.embed(&chunks[i])
+		}
+		return batch.UpsertChunks(ctx, chunks)
+	}
+	if err := batch.UpsertChunks(ctx, chunks); err != nil {
+		return err
+	}
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		var embedded []Chunk
+		for i := range chunks {
+			if x.embed(&chunks[i]) {
+				embedded = append(embedded, chunks[i])
+			}
+		}
+		if err := batch.UpsertChunks(ctx, embedded); err != nil {
+			slog.WarnContext(ctx, "AI chunk embeddings not stored", "chunks", len(embedded), "error", err)
 		}
 	})
 	return nil

@@ -16,6 +16,32 @@ type BatchReader interface {
 	GetByIDs(ctx context.Context, orgID string, ids []string) ([]Item, error)
 }
 
+// BatchCreator creates several CIs of one organization with a number of
+// statements that does not grow with the batch (NFR-03, WP-333): the CI
+// rows, their history, their audit entries chained in the order of items and
+// their ci.created events. Search and AI index decorators add their
+// documents with one statement each.
+type BatchCreator interface {
+	// CreateMany creates items in their order and sets on each what Create
+	// sets (ID, SiteID, RoomID, LocationID, Health, Version, SchemaVersion,
+	// CreatedAt, UpdatedAt). An item a unique index refuses (serial number,
+	// hardware UUID, primary MAC, unique attribute; WP-207) is not created:
+	// its position is in Refused, its ID stays empty and nothing of it is
+	// written. Any other error fails the whole call.
+	CreateMany(ctx context.Context, orgID string, items []*Item) (CreateManyResult, error)
+}
+
+// CreateManyResult lists the positions of the items a unique index refused.
+type CreateManyResult struct {
+	Refused []int
+}
+
+// BatchIndexer is the batch form of Indexer (NFR-03, WP-333): the documents
+// of the CIs of one batch with one statement.
+type BatchIndexer interface {
+	IndexDocuments(ctx context.Context, docs []Document) error
+}
+
 // Repository defines persistence operations for CIs.
 type Repository interface {
 	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error)

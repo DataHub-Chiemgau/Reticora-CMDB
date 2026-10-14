@@ -301,6 +301,44 @@ type ObservedValidator interface {
 	InvalidObserved(ctx context.Context, orgID, ciTypeID, ciID string, values map[string]any) ([]string, error)
 }
 
+// ObservedRulesSource resolves the field rules of a CI type for new CIs
+// once; ci.Service implements it (WP-333).
+type ObservedRulesSource interface {
+	ObservedRules(ctx context.Context, orgID, ciTypeID string) (func(values map[string]any) []string, error)
+}
+
+// observedMemo validates the values of the new CIs of one batch with the
+// rules of each CI type resolved once (NFR-03, WP-333); a CI that exists
+// already is validated by next.
+type observedMemo struct {
+	next  ObservedValidator
+	src   ObservedRulesSource
+	rules map[string]func(values map[string]any) []string
+}
+
+// batchValidator is the validator of the new CIs of one batch.
+func (h *Handler) batchValidator() ObservedValidator {
+	if src, ok := h.observed.(ObservedRulesSource); ok {
+		return &observedMemo{next: h.observed, src: src, rules: map[string]func(map[string]any) []string{}}
+	}
+	return h.observed
+}
+
+func (m *observedMemo) InvalidObserved(ctx context.Context, orgID, ciTypeID, ciID string, values map[string]any) ([]string, error) {
+	if ciID != "" || len(values) == 0 {
+		return m.next.InvalidObserved(ctx, orgID, ciTypeID, ciID, values)
+	}
+	rule, ok := m.rules[ciTypeID]
+	if !ok {
+		var err error
+		if rule, err = m.src.ObservedRules(ctx, orgID, ciTypeID); err != nil {
+			return nil, err
+		}
+		m.rules[ciTypeID] = rule
+	}
+	return rule(values), nil
+}
+
 // WithObservedValidator makes ingest validate discovered values: a value
 // the field metadata rejects is dropped instead of stored.
 func (h *Handler) WithObservedValidator(v ObservedValidator) *Handler {
@@ -323,7 +361,12 @@ func observedTypedFields(item *IngestItem) map[string]*string {
 // metadata of the CI type (typed columns and attributes alike) and returns
 // how many were dropped. Required fields do not apply to observations.
 func (h *Handler) dropInvalidObserved(ctx context.Context, orgID, typeID, ciID string, item *IngestItem) (int, error) {
-	if h.observed == nil || typeID == "" {
+	return dropInvalidWith(ctx, h.observed, orgID, typeID, ciID, item)
+}
+
+// dropInvalidWith is dropInvalidObserved with validator v.
+func dropInvalidWith(ctx context.Context, v ObservedValidator, orgID, typeID, ciID string, item *IngestItem) (int, error) {
+	if v == nil || typeID == "" {
 		return 0, nil
 	}
 	typed := observedTypedFields(item)
@@ -336,7 +379,7 @@ func (h *Handler) dropInvalidObserved(ctx context.Context, orgID, typeID, ciID s
 			values[name] = *ptr
 		}
 	}
-	invalid, err := h.observed.InvalidObserved(ctx, orgID, typeID, ciID, values)
+	invalid, err := v.InvalidObserved(ctx, orgID, typeID, ciID, values)
 	if err != nil {
 		return 0, err
 	}

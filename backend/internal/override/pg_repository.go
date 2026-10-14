@@ -211,6 +211,80 @@ func (r *PGRepository) RecordDiscoveredMany(ctx context.Context, orgID, ciID str
 	})
 }
 
+// DiscoveredValues are the discovered fields of one CI with their source
+// and observation time.
+type DiscoveredValues struct {
+	CIID       string
+	Values     map[string]any
+	Source     string
+	ObservedAt time.Time
+}
+
+// RecordDiscoveredBatch upserts the discovered columns of the fields of
+// several CIs, each at most once in batch, with one statement, each CI like
+// RecordDiscoveredMany (NFR-03, WP-333); the override columns stay
+// untouched. The visibility check is
+// part of the statement: the fields of a CI the tenant scope does not show
+// are not written, and the call reports "not found".
+func (r *PGRepository) RecordDiscoveredBatch(ctx context.Context, orgID string, batch []DiscoveredValues) error {
+	var ids, names []string
+	var raw, sources []*string
+	var ranks []int32
+	var observed []time.Time
+	for _, b := range batch {
+		observedAt := b.ObservedAt
+		if observedAt.IsZero() {
+			observedAt = time.Now()
+		}
+		var source *string
+		if strings.TrimSpace(b.Source) != "" {
+			source = &b.Source
+		}
+		fields := make([]string, 0, len(b.Values))
+		for name := range b.Values {
+			fields = append(fields, name)
+		}
+		sort.Strings(fields)
+		for _, name := range fields {
+			var value *string
+			if v, ok := jsonValue(b.Values[name]).(string); ok {
+				value = &v
+			}
+			ids, names, raw = append(ids, b.CIID), append(names, name), append(raw, value)
+			sources, ranks, observed = append(sources, source), append(ranks, int32(SourceRank(b.Source))), append(observed, observedAt.UTC())
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			INSERT INTO ci_field_value (
+				organization_id, ci_id, field_name, discovered_value,
+				discovered_source, discovered_at, discovered_rank, observed_at
+			)
+			SELECT $1, f.ci_id::uuid, f.name, f.value::jsonb, f.source, now(), f.rank, f.observed_at
+			FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::integer[], $7::timestamptz[])
+			     WITH ORDINALITY AS f(ci_id, name, value, source, rank, observed_at, ord)
+			WHERE EXISTS (SELECT 1 FROM ci WHERE ci.id = f.ci_id::uuid)
+			ORDER BY f.ord
+			ON CONFLICT (ci_id, field_name) DO UPDATE SET
+				discovered_value = EXCLUDED.discovered_value,
+				discovered_source = EXCLUDED.discovered_source,
+				discovered_at = EXCLUDED.discovered_at,
+				discovered_rank = EXCLUDED.discovered_rank,
+				observed_at = EXCLUDED.observed_at`,
+			orgID, ids, names, raw, sources, ranks, observed)
+		if err != nil {
+			return fmt.Errorf("record discovered values: %w", err)
+		}
+		if tag.RowsAffected() != int64(len(ids)) {
+			return fmt.Errorf("not found")
+		}
+		return nil
+	})
+}
+
 // SetOverride sets or replaces the manual override of a field.
 func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName string, value any, author, reason string, protected bool) (*FieldValue, error) {
 	if reason == "" {

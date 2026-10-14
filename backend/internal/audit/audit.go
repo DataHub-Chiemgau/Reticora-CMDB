@@ -179,8 +179,59 @@ func AcquireAdvisoryLock(ctx context.Context, tx pgx.Tx, orgID string) error {
 
 // Record appends an audit entry inside tx and returns the persisted entry.
 func (r *PGRecorder) Record(ctx context.Context, tx pgx.Tx, entry Entry) (*Entry, error) {
+	if err := normalize(ctx, &entry); err != nil {
+		return nil, err
+	}
+
+	if err := AcquireAdvisoryLock(ctx, tx, entry.OrganizationID); err != nil {
+		return nil, err
+	}
+
+	// The insert trigger sets seq, previous_hash and hash under the chain
+	// lock (migration 000117).
+	changesJSON, err := sealedChanges(ctx, tx, &entry)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO audit_log (
+			organization_id,
+			timestamp,
+			actor_id,
+			actor_type,
+			action,
+			resource_type,
+			resource_id,
+			changes,
+			source,
+			request_id,
+			correlation_id,
+			hash
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, '')
+		RETURNING id::text, seq, timestamp, previous_hash, hash
+	`, entry.OrganizationID, entry.Timestamp, nilIfEmpty(entry.ActorID), entry.ActorType, entry.Action,
+		entry.ResourceType, nilIfEmpty(entry.ResourceID), changesJSON, entry.Source,
+		nilIfEmpty(entry.RequestID), nilIfEmpty(entry.CorrelationID)).
+		Scan(&entry.ID, &entry.Seq, &entry.Timestamp, &entry.PreviousHash, &entry.Hash); err != nil {
+		return nil, fmt.Errorf("audit: insert entry: %w", err)
+	}
+
+	// The timestamptz column stores microsecond precision while the hash input
+	// uses nanoseconds; re-reading the persisted timestamp can therefore yield a
+	// value that differs from the hashed one. Truncating after the read keeps
+	// the caller-visible timestamp consistent with the stored value and does
+	// not alter the hash chain.
+	entry.Timestamp = entry.Timestamp.UTC().Truncate(time.Microsecond)
+
+	return &entry, nil
+}
+
+// normalize completes an entry before it is written: timestamp, actor type,
+// changes, and the request, correlation and source of the request that
+// makes the change (AUD-07).
+func normalize(ctx context.Context, entry *Entry) error {
 	if entry.OrganizationID == "" {
-		return nil, fmt.Errorf("audit: organization_id is required")
+		return fmt.Errorf("audit: organization_id is required")
 	}
 	if entry.Timestamp.IsZero() {
 		entry.Timestamp = time.Now().UTC()
@@ -207,57 +258,117 @@ func (r *PGRecorder) Record(ctx context.Context, tx pgx.Tx, entry Entry) (*Entry
 	}
 	MarkRecorded(ctx)
 	entry.Source = sourceOrDefault(entry.Source)
+	return nil
+}
 
-	if err := AcquireAdvisoryLock(ctx, tx, entry.OrganizationID); err != nil {
-		return nil, err
-	}
-
-	// Personal values are stored as vault surrogates (SEC-05, AUD-04).
+// sealedChanges stores the personal values of the changes as vault
+// surrogates (SEC-05, AUD-04) and returns the JSON the row stores.
+func sealedChanges(ctx context.Context, tx pgx.Tx, entry *Entry) (string, error) {
 	sealed, _, err := pii.SealTx(ctx, tx, entry.OrganizationID, entry.Changes)
 	if err != nil {
-		return nil, fmt.Errorf("audit: seal personal data: %w", err)
+		return "", fmt.Errorf("audit: seal personal data: %w", err)
 	}
 	if m, ok := sealed.(map[string]interface{}); ok {
 		entry.Changes = m
 	}
-
-	// The insert trigger sets seq, previous_hash and hash under the chain
-	// lock (migration 000117).
 	changesJSON, err := json.Marshal(entry.Changes)
 	if err != nil {
-		return nil, fmt.Errorf("audit: marshal changes: %w", err)
+		return "", fmt.Errorf("audit: marshal changes: %w", err)
 	}
-	if err := tx.QueryRow(ctx, `
-		INSERT INTO audit_log (
-			organization_id,
-			timestamp,
-			actor_id,
-			actor_type,
-			action,
-			resource_type,
-			resource_id,
-			changes,
-			source,
-			request_id,
-			correlation_id,
-			hash
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, '')
-		RETURNING id::text, seq, timestamp, previous_hash, hash
-	`, entry.OrganizationID, entry.Timestamp, nilIfEmpty(entry.ActorID), entry.ActorType, entry.Action,
-		entry.ResourceType, nilIfEmpty(entry.ResourceID), string(changesJSON), entry.Source,
-		nilIfEmpty(entry.RequestID), nilIfEmpty(entry.CorrelationID)).
-		Scan(&entry.ID, &entry.Seq, &entry.Timestamp, &entry.PreviousHash, &entry.Hash); err != nil {
-		return nil, fmt.Errorf("audit: insert entry: %w", err)
+	return string(changesJSON), nil
+}
+
+// TxBatchRecorder appends several entries of one organization inside tx with
+// one statement (NFR-03, WP-333).
+type TxBatchRecorder interface {
+	RecordMany(ctx context.Context, tx pgx.Tx, entries []Entry) ([]Entry, error)
+}
+
+// RecordMany appends the entries of one organization inside tx with one
+// INSERT and returns the persisted entries in their order. The insert
+// trigger takes the chain lock of the organization on the first row, holds
+// it until the transaction ends and chains the rows in the order of entries
+// (AUD-01, AUD-04): a row-level trigger sees the rows the statement inserted
+// before it. A chain out of order is an error, never a written entry.
+func (r *PGRecorder) RecordMany(ctx context.Context, tx pgx.Tx, entries []Entry) ([]Entry, error) {
+	out := make([]Entry, len(entries))
+	if len(entries) == 0 {
+		return out, nil
 	}
+	n := len(entries)
+	orgs, actors, actorTypes, actions := make([]string, n), make([]*string, n), make([]string, n), make([]string, n)
+	resourceTypes, resourceIDs, changes, sources := make([]string, n), make([]*string, n), make([]string, n), make([]string, n)
+	requests, correlations, timestamps := make([]*string, n), make([]*string, n), make([]time.Time, n)
+	for i := range entries {
+		entry := entries[i]
+		if err := normalize(ctx, &entry); err != nil {
+			return nil, err
+		}
+		if entry.OrganizationID != entries[0].OrganizationID {
+			return nil, fmt.Errorf("audit: entries of several organizations in one batch")
+		}
+		changesJSON, err := sealedChanges(ctx, tx, &entry)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = entry
+		orgs[i], timestamps[i], actorTypes[i], actions[i] = entry.OrganizationID, entry.Timestamp, entry.ActorType, entry.Action
+		resourceTypes[i], changes[i], sources[i] = entry.ResourceType, changesJSON, entry.Source
+		actors[i], resourceIDs[i] = textOrNil(entry.ActorID), textOrNil(entry.ResourceID)
+		requests[i], correlations[i] = textOrNil(entry.RequestID), textOrNil(entry.CorrelationID)
+	}
+	rows, err := tx.Query(ctx, `
+		WITH input AS MATERIALIZED (
+			SELECT gen_random_uuid() AS id, e.*
+			FROM unnest($1::text[], $2::timestamptz[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[],
+			            $8::text[], $9::text[], $10::text[], $11::text[])
+			     WITH ORDINALITY AS e(organization_id, ts, actor_id, actor_type, action, resource_type, resource_id,
+			                          changes, source, request_id, correlation_id, ord)
+		), ins AS (
+			INSERT INTO audit_log (id, organization_id, timestamp, actor_id, actor_type, action, resource_type,
+				resource_id, changes, source, request_id, correlation_id, hash)
+			SELECT id, organization_id::uuid, ts, actor_id::uuid, actor_type, action, resource_type, resource_id::uuid,
+				changes::jsonb, source, request_id, correlation_id, ''
+			FROM input ORDER BY ord
+			RETURNING id, seq, timestamp, previous_hash, hash
+		)
+		SELECT input.ord, ins.id::text, ins.seq, ins.timestamp, ins.previous_hash, ins.hash
+		FROM input JOIN ins ON ins.id = input.id ORDER BY input.ord`,
+		orgs, timestamps, actors, actorTypes, actions, resourceTypes, resourceIDs, changes, sources, requests, correlations)
+	if err != nil {
+		return nil, fmt.Errorf("audit: insert entries: %w", err)
+	}
+	defer rows.Close()
+	read := 0
+	for rows.Next() {
+		var ord int64
+		var e Entry
+		if err := rows.Scan(&ord, &e.ID, &e.Seq, &e.Timestamp, &e.PreviousHash, &e.Hash); err != nil {
+			return nil, fmt.Errorf("audit: insert entries: %w", err)
+		}
+		i := int(ord) - 1
+		if i != read || (read > 0 && e.Seq != out[read-1].Seq+1) {
+			return nil, fmt.Errorf("audit: batch chained out of order at entry %d", read)
+		}
+		out[i].ID, out[i].Seq, out[i].PreviousHash, out[i].Hash = e.ID, e.Seq, e.PreviousHash, e.Hash
+		out[i].Timestamp = e.Timestamp.UTC().Truncate(time.Microsecond)
+		read++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("audit: insert entries: %w", err)
+	}
+	if read != n {
+		return nil, fmt.Errorf("audit: %d of %d entries written", read, n)
+	}
+	return out, nil
+}
 
-	// The timestamptz column stores microsecond precision while the hash input
-	// uses nanoseconds; re-reading the persisted timestamp can therefore yield a
-	// value that differs from the hashed one. Truncating after the read keeps
-	// the caller-visible timestamp consistent with the stored value and does
-	// not alter the hash chain.
-	entry.Timestamp = entry.Timestamp.UTC().Truncate(time.Microsecond)
-
-	return &entry, nil
+// textOrNil is the array element of an optional text column.
+func textOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // Verify walks the persisted audit chain for an organization and reports integrity.

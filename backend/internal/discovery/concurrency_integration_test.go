@@ -46,6 +46,11 @@ import (
 //     entry, event, search document, provenance and interfaces were written
 //     leaves none of them and notifies nothing, and the redelivered record
 //     creates the CI once and announces its review after the commit;
+//   - double batch (WP-333): two instances create the same five new devices
+//     in a batch each at once; every device ends with exactly one CI;
+//   - rollback of a batch (WP-333): a failure in the batch transaction of a
+//     window, after its CIs, provenance and a review were written, leaves
+//     none of them and announces nothing; the records follow one by one;
 //   - the integrity check finds no orphans, duplicates or cycles afterwards.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
@@ -63,8 +68,8 @@ func TestDiscoveryConcurrency(t *testing.T) {
 		return mux
 	}
 	instances := []*chi.Mux{instance(), instance()}
-	ingest := func(mux *chi.Mux, rec plugins.DeviceRecord) int {
-		body, err := json.Marshal(plugins.DeviceRecordBatch{Records: []plugins.DeviceRecord{rec}})
+	ingest := func(mux *chi.Mux, recs ...plugins.DeviceRecord) int {
+		body, err := json.Marshal(plugins.DeviceRecordBatch{Records: recs})
 		if err != nil {
 			t.Error(err)
 			return 0
@@ -236,6 +241,96 @@ func TestDiscoveryConcurrency(t *testing.T) {
 			t.Errorf("round %d: %d reviews announced (%d inside a transaction, errors %v, %d review.created events), want %d after the commit",
 				round, notified, inTx, errs, announced, round+1)
 		}
+	}
+
+	// Double batch (WP-333): two instances ingest the same window of five
+	// new devices at once, each with one batch transaction for them. The
+	// unique indexes refuse the devices of the slower batch, which follow
+	// one by one and match the CIs of the faster one.
+	for round := 0; round < 5; round++ {
+		serials := make([]string, 5)
+		for i := range serials {
+			serials[i] = fmt.Sprintf("ABN03-BATCH-%d-%d", round, i)
+		}
+		// Each instance gets records of its own (own record ids).
+		window := func() []plugins.DeviceRecord {
+			recs := make([]plugins.DeviceRecord, len(serials))
+			for i := range recs {
+				recs[i] = plugins.RecordFromResult("snmp", &plugins.Result{CIType: "server", Name: serials[i],
+					IP: fmt.Sprintf("198.51.100.%d", 1+round*len(serials)+i), Manufacturer: "Reticora Labs", Model: "M1",
+					Serial: serials[i]}, time.Now().Add(-time.Second))
+			}
+			return recs
+		}
+		codes := make([]int, len(instances))
+		together(
+			func() { codes[0] = ingest(instances[0], window()...) },
+			func() { codes[1] = ingest(instances[1], window()...) },
+		)
+		for i, code := range codes {
+			if code != http.StatusAccepted {
+				if retry := ingest(instances[i], window()...); retry != http.StatusAccepted {
+					t.Errorf("batch round %d: instance %d: %d, retry %d", round, i, code, retry)
+				}
+			}
+		}
+		for _, serial := range serials {
+			if n := count(serial); n != 1 {
+				t.Errorf("batch round %d: double ingest left %d CIs for %s, want 1", round, n, serial)
+			}
+		}
+	}
+
+	// Rollback of a batch (WP-333): the batch transaction of a window fails
+	// after it created the CIs, wrote their provenance and opened a review
+	// (probable duplicate by hostname, CH29). Nothing of it stays and the
+	// review is not announced; the records follow one by one, create each
+	// CI once and announce the review after their commit.
+	host := plugins.RecordFromResult("snmp", &plugins.Result{CIType: "server", Name: "ABN03-BROLL-HOST", IP: "198.51.100.200",
+		Manufacturer: "Reticora Labs", Model: "M1", Serial: "ABN03-BROLL-HOST"}, time.Now().Add(-time.Second))
+	host.Identity.Hostname = "abn03-batch-host"
+	if code := ingest(full, host); code != http.StatusAccepted {
+		t.Fatalf("batch rollback: first device: %d", code)
+	}
+	duplicate := plugins.RecordFromResult("snmp", &plugins.Result{CIType: "server", Name: "ABN03-BROLL-0", IP: "198.51.100.201",
+		Manufacturer: "Reticora Labs", Model: "M1", Serial: "ABN03-BROLL-0"}, time.Now().Add(-time.Second))
+	duplicate.Identity.Hostname = "abn03-batch-host"
+	failing := plugins.RecordFromResult("snmp", &plugins.Result{CIType: "server", Name: "ABN03-BROLL-1", IP: "198.51.100.202",
+		Manufacturer: "Reticora Labs", Model: "M1", Serial: "ABN03-BROLL-1"}, time.Now().Add(-time.Second))
+	failing.Interfaces = []plugins.DeviceInterface{{Name: "eth0", MAC: "00:1b:21:aa:02:01",
+		IPs: []plugins.DeviceIP{{Address: "198.51.100.202", PrefixLength: 24}}}}
+	notifiedBefore, _, _ := notifier.state()
+	syncer.arm()
+	if code := ingest(full, duplicate, failing); code != http.StatusAccepted || syncer.armed.Load() {
+		t.Fatalf("batch rollback: ingest %d, failure injected %v; want 202 after the records one by one", code, !syncer.armed.Load())
+	}
+	for _, serial := range []string{"ABN03-BROLL-0", "ABN03-BROLL-1"} {
+		var created, audited, interfaces, reviews, announced int
+		if err := f.Admin.QueryRow(bg, `SELECT
+				(SELECT count(*) FROM event_outbox e WHERE e.organization_id = c.organization_id AND e.entity_id = c.id::text AND e.type = 'ci.created'),
+				(SELECT count(*) FROM audit_log a WHERE a.organization_id = c.organization_id AND a.resource_id = c.id AND a.action = 'ci.created'),
+				(SELECT count(*) FROM network_interface n WHERE n.ci_id = c.id),
+				(SELECT count(*) FROM review_item r WHERE r.organization_id = c.organization_id AND r.payload->>'ci_id' = c.id::text),
+				(SELECT count(*) FROM review_item r JOIN event_outbox e ON e.organization_id = r.organization_id
+					AND e.entity_id = r.id::text AND e.type = 'review.created'
+					WHERE r.organization_id = c.organization_id AND r.payload->>'ci_id' = c.id::text)
+			FROM ci c WHERE c.organization_id = $1 AND c.serial_number = $2`, f.OrgA, serial).
+			Scan(&created, &audited, &interfaces, &reviews, &announced); err != nil {
+			t.Fatalf("batch rollback: CI %s: %v", serial, err)
+		}
+		wantInterfaces, wantReviews := 0, 1
+		if serial == "ABN03-BROLL-1" {
+			wantInterfaces, wantReviews = 1, 0
+		}
+		if n := count(serial); n != 1 || created != 1 || audited != 1 || interfaces != wantInterfaces ||
+			reviews != wantReviews || announced != wantReviews {
+			t.Errorf("batch rollback: %s: %d CIs, %d ci.created events, %d audit entries, %d interfaces, %d reviews announced %d times; "+
+				"want 1, 1, 1, %d, %d, %d", serial, n, created, audited, interfaces, reviews, announced, wantInterfaces, wantReviews, wantReviews)
+		}
+	}
+	if notified, inTx, errs := notifier.state(); notified != notifiedBefore+1 || inTx != 0 || len(errs) > 0 {
+		t.Errorf("batch rollback: %d reviews announced (%d inside a transaction, errors %v), want 1 after the commit",
+			notified-notifiedBefore, inTx, errs)
 	}
 
 	if v := integrityViolations(t, f, f.OrgA); len(v) > 0 {

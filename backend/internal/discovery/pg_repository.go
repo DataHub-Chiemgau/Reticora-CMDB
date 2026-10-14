@@ -844,6 +844,202 @@ func identityFilter(orgID string, q *IdentityQuery) (predicate string, args []an
 	return "(" + strings.Join(terms, " OR ") + ")", args, true
 }
 
+// identityBranch is one branch of the batch candidate queries (WP-333): the
+// CIs one kind of identity value matches, with the kind and the ordinality n
+// of the matching value in its array.
+type identityBranch struct {
+	name string
+	sql  string
+}
+
+// identityBranches builds the branches of the batch candidate query for the
+// non-empty kinds of keys, mirroring identityFilter term by term with the
+// same operators: the arrays are cast on the parameter, never on the
+// column, so every join stays an index condition under row level security
+// (texteq, uuid_eq, macaddr_eq and network_eq are leakproof). The arguments
+// follow the organization ($1). Live CIs come with created_at; deleted CIs
+// with at most 1000 per value in (deleted_at DESC, id) order, a superset of
+// the 1000 newest per record, which the caller caps.
+func identityBranches(keys *IdentityKeys, deleted bool) (branches []identityBranch, args []any) {
+	add := func(values []string) int {
+		args = append(args, values)
+		return len(args) + 1
+	}
+	live := func(name, kind, unnest, cond string) {
+		branches = append(branches, identityBranch{name, fmt.Sprintf(`SELECT c.id, c.created_at, '%s'::text AS kind, k.n
+			FROM unnest(%s) WITH ORDINALITY AS k(v, n) JOIN ci c ON %s
+			WHERE c.organization_id = $1 AND c.deleted_at IS NULL`, kind, unnest, cond)})
+	}
+	gone := func(name, kind, unnest, cond string) {
+		branches = append(branches, identityBranch{name, fmt.Sprintf(`SELECT '%s'::text AS kind, k.n, d.id
+			FROM unnest(%s) WITH ORDINALITY AS k(v, n)
+			CROSS JOIN LATERAL (SELECT c.id FROM ci c WHERE c.organization_id = $1 AND c.deleted_at IS NOT NULL AND %s
+				ORDER BY c.deleted_at DESC, c.id LIMIT 1000) d`, kind, unnest, cond)})
+	}
+	branch := func(name, kind, unnest, liveCond, goneCond string) {
+		if deleted {
+			gone(name, kind, unnest, goneCond)
+		} else {
+			live(name, kind, unnest, liveCond)
+		}
+	}
+	if len(keys.Serials) > 0 {
+		branch("serial", "serial", fmt.Sprintf("$%d::text[]", add(keys.Serials)), "c.serial_number = k.v", "c.serial_number = k.v")
+	}
+	if len(keys.UUIDs) > 0 {
+		branch("uuid", "uuid", fmt.Sprintf("$%d::text[]::uuid[]", add(keys.UUIDs)), "c.hardware_uuid = k.v", "c.hardware_uuid = k.v")
+	}
+	if len(keys.MACs) > 0 {
+		n := add(keys.MACs)
+		branch("primary_mac", "mac", fmt.Sprintf("$%d::text[]::macaddr[]", n), "c.primary_mac = k.v", "c.primary_mac = k.v")
+		// Interface MACs of the fingerprint: jsonb containment is not
+		// leakproof and reads the organization's CIs once per batch (per
+		// record before); the array elements narrow the containment test
+		// to the matching values, the test itself stays exact.
+		state := "IS NULL"
+		if deleted {
+			state = "IS NOT NULL"
+		}
+		var columns string
+		if deleted {
+			columns = "'mac'::text AS kind, k.n, c.id"
+		} else {
+			columns = "c.id, c.created_at, 'mac'::text AS kind, k.n"
+		}
+		branches = append(branches, identityBranch{"fingerprint_mac", fmt.Sprintf(`SELECT %s
+			FROM ci c
+			CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(c.attributes -> 'fingerprint' -> 'mac_addresses') = 'array'
+				THEN c.attributes -> 'fingerprint' -> 'mac_addresses' END) AS fm(v)
+			JOIN unnest($%d::text[]) WITH ORDINALITY AS k(v, n) ON k.v = fm.v
+			WHERE c.organization_id = $1 AND c.deleted_at %s
+				AND c.attributes @> jsonb_build_object('fingerprint', jsonb_build_object('mac_addresses', jsonb_build_array(k.v)))`,
+			columns, n, state)})
+	}
+	if len(keys.IPs) > 0 {
+		branch("ip", "ip", fmt.Sprintf("$%d::text[]::inet[]", add(keys.IPs)), "c.management_ip = k.v", "c.management_ip = k.v")
+	}
+	if len(keys.Hostnames) > 0 {
+		n := add(keys.Hostnames)
+		if deleted {
+			gone("host", "host", fmt.Sprintf("$%d::text[]", n), "(c.hostname_lc = k.v OR c.fqdn_lc = k.v)")
+		} else {
+			live("hostname", "host", fmt.Sprintf("$%d::text[]", n), "c.hostname_lc = k.v")
+			live("fqdn", "host", fmt.Sprintf("$%d::text[]", n), "c.fqdn_lc = k.v")
+		}
+	}
+	return branches, args
+}
+
+// identityHitsSQL is the live candidate query of branches, read page by
+// page on (created_at, id, kind, n) from parameter first on. UNION drops the
+// repeated hit of a MAC that is primary and in the fingerprint, and of a
+// host name that is hostname and FQDN.
+func identityHitsSQL(branches []identityBranch, first int) string {
+	parts := make([]string, len(branches))
+	for i, b := range branches {
+		parts[i] = b.sql
+	}
+	return fmt.Sprintf(`/* ingest identity hits */ SELECT h.id::text, h.created_at, h.kind, h.n FROM (%s) h
+		WHERE $%[2]d::text = '' OR (h.created_at, h.id, h.kind, h.n) > ($%[3]d::timestamptz, NULLIF($%[2]d::text, '')::uuid, $%[4]d::text, $%[5]d::bigint)
+		ORDER BY h.created_at, h.id, h.kind, h.n LIMIT $%[6]d`,
+		strings.Join(parts, "\n\t\tUNION\n\t\t"), first, first+1, first+2, first+3, first+4)
+}
+
+// deletedHitsSQL is the deleted candidate query of branches.
+func deletedHitsSQL(branches []identityBranch) string {
+	parts := make([]string, len(branches))
+	for i, b := range branches {
+		parts[i] = b.sql
+	}
+	return `/* ingest deleted identity hits */ WITH hit AS (` + strings.Join(parts, "\n\t\tUNION\n\t\t") + `)
+		SELECT hit.kind, hit.n, c.id::text, c.ci_type_id::text, COALESCE(c.client_id::text, ''), c.name,
+			COALESCE(c.serial_number, ''), COALESCE(c.hardware_uuid::text, ''), COALESCE(c.primary_mac::text, ''),
+			COALESCE(host(c.management_ip), ''), COALESCE(c.sys_object_id, ''), COALESCE(c.hostname, ''),
+			COALESCE(c.fqdn, ''), COALESCE(c.attributes, '{}'::jsonb), c.deleted_at
+		FROM hit JOIN ci c ON c.id = hit.id
+		ORDER BY c.deleted_at DESC, c.id, hit.kind, hit.n`
+}
+
+// IdentityHits implements BatchIdentityFinder: the live CIs matching the
+// identity values of a whole batch with one query, each with the value it
+// matched, read page by page without an upper bound like
+// IdentityCandidates (NFR-03, WP-333).
+func (r *PGRepository) IdentityHits(ctx context.Context, orgID string, keys *IdentityKeys) ([]IdentityHit, error) {
+	branches, base := identityBranches(keys, false)
+	if len(branches) == 0 {
+		return nil, nil
+	}
+	query := identityHitsSQL(branches, len(base)+2)
+	var hits []IdentityHit
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var (
+			afterCreated time.Time
+			afterID      string
+			afterKind    string
+			afterN       int64
+		)
+		for {
+			args := append(append([]any{orgID}, base...), afterID, afterCreated, afterKind, afterN, identityPage)
+			rows, err := tx.Query(ctx, query, args...)
+			if err != nil {
+				return err
+			}
+			page := 0
+			for rows.Next() {
+				if err := rows.Scan(&afterID, &afterCreated, &afterKind, &afterN); err != nil {
+					rows.Close()
+					return err
+				}
+				hits = append(hits, IdentityHit{CIID: afterID, Key: IdentityKey{Kind: afterKind, Index: int(afterN) - 1}})
+				page++
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			if page < identityPage {
+				return nil
+			}
+		}
+	})
+	return hits, err
+}
+
+// DeletedIdentityHits implements BatchIdentityFinder: the soft-deleted CIs
+// matching the identity values of a batch with one query, at most 1000 per
+// value, with the fields identity resolution compares (CI-13, WP-333).
+func (r *PGRepository) DeletedIdentityHits(ctx context.Context, orgID string, keys *IdentityKeys) ([]DeletedIdentityHit, error) {
+	branches, base := identityBranches(keys, true)
+	if len(branches) == 0 {
+		return nil, nil
+	}
+	var hits []DeletedIdentityHit
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, deletedHitsSQL(branches), append([]any{orgID}, base...)...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var hit DeletedIdentityHit
+			var n int64
+			var deletedAt time.Time
+			item := &hit.CI
+			item.OrganizationID = orgID
+			if err := rows.Scan(&hit.Key.Kind, &n, &item.ID, &item.CITypeID, &item.ClientID, &item.Name, &item.SerialNumber,
+				&item.HardwareUUID, &item.PrimaryMAC, &item.ManagementIP, &item.SysObjectID, &item.Hostname, &item.FQDN,
+				&item.Attributes, &deletedAt); err != nil {
+				return err
+			}
+			hit.Key.Index = int(n) - 1
+			item.DeletedAt = &deletedAt
+			hits = append(hits, hit)
+		}
+		return rows.Err()
+	})
+	return hits, err
+}
+
 // hostOnly drops a prefix length and anything that is no IP address.
 func hostOnly(ip string) string {
 	ip = strings.TrimSpace(ip)
