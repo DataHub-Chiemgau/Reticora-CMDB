@@ -446,3 +446,5 @@ GATE-03;[Q];SR;docs/security/pentest-g1.md;WP-210
 WHK-01;[B];G1;backend/internal/webhook/whk01_test.go;WP-213
 WHK-01;[B];G1;backend/internal/webhook/whk01_integration_test.go;WP-213
 AUD-02;[B];G1;backend/internal/contact/handler_test.go;WP-213
+GATE-03;[Q];G1;docs/acceptance/g1-installation.md;WP-211
+INS-01;[Q];G1;docs/acceptance/g1-installation.md;WP-211
