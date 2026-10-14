@@ -1963,7 +1963,24 @@ export interface AlertRuleCreateRequest {
   enabled?: boolean;
 }
 
+export interface CIMetricSeries {
+  name: string;
+  points: MetricPoint[];
+}
+
+export interface CIMetricsResponse {
+  ci_id: string;
+  from: string;
+  series: CIMetricSeries[];
+}
+
 export const monitoringApi = {
+  ciMetrics(
+    ciId: string,
+    params: { name?: string; step?: string } = {},
+  ): Promise<CIMetricsResponse> {
+    return fetchAPI(`/cis/${ciId}/metrics${buildQuery(params)}`);
+  },
   queryMetrics(params: MetricQueryParams = {}): Promise<MetricPoint[]> {
     return fetchAPI(`/monitoring/metrics${buildQuery(params)}`);
   },

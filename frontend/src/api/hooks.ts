@@ -786,6 +786,15 @@ export function useMetricPoints(params: MetricQueryParams) {
   });
 }
 
+export function useCIMetrics(ciId: string | undefined, enabled = false) {
+  return useQuery({
+    queryKey: ['ci-metrics', ciId],
+    queryFn: () => monitoringApi.ciMetrics(ciId!, { step: '15m' }),
+    enabled: !!ciId && enabled,
+    retry: false,
+  });
+}
+
 export function useAlertRules() {
   return useQuery({
     queryKey: ['alert-rules'],

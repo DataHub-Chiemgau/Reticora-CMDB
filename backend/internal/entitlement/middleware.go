@@ -64,6 +64,7 @@ var gatedSuffixes = []struct {
 }{
 	{"/api/v1/cis/", "/dependencies", FeatureTopology},
 	{"/api/v1/cis/", "/blast-radius", FeatureTopology},
+	{"/api/v1/cis/", "/metrics", FeatureMonitoring},
 }
 
 // ingestRoutes deliver discovery results or start scans; they are the only

@@ -2433,6 +2433,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/cis/{id}/metrics': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Metric series of one CI (MON-02)
+     * @description Returns the series of one CI for the detail view: the named metric or, without name, every metric the CI reported since from (default the last 24 hours). Requires the monitoring feature.
+     */
+    get: operations['getCIMetrics'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/monitoring/alerts': {
     parameters: {
       query?: never;
@@ -9346,6 +9366,17 @@ export interface components {
     };
     MetricsIngestResponse: {
       ingested: number;
+      /** @description Samples without ci_id whose target label matched no CI; they are not stored (MON-02). */
+      unassigned?: number;
+    };
+    CIMetricsResponse: {
+      ci_id: string;
+      /** Format: date-time */
+      from: string;
+      series: {
+        name: string;
+        points: components['schemas']['MetricPoint'][];
+      }[];
     };
     MetricPoint: {
       /** Format: date-time */
@@ -16011,6 +16042,37 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  getCIMetrics: {
+    parameters: {
+      query?: {
+        name?: string;
+        from?: string;
+        to?: string;
+        /** @description Go duration string used for aggregation, for example 5m or 1h. */
+        step?: string;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Metric series of the CI */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CIMetricsResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
     };
   };
   listAlerts: {

@@ -454,10 +454,17 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 				continue
 			}
 			if protocol == "sweep" {
-				hosts.set(pass.key, hitTargets(hits))
+				reachable := hitTargets(hits)
+				// The sweep is the reachability series of the CIs (MON-02).
+				uploadSamples(ctx, up, reachabilitySamples(hosts.get(pass.key), reachable))
+				hosts.set(pass.key, reachable)
 			}
 			collected, failed := collectHits(ctx, protocol, plug, hits, creds)
 			errs = append(errs, failed...)
+			if protocol == "power" {
+				// UPS and PDU readings of the power devices (MON-02).
+				uploadSamples(ctx, up, pollPowerValues(ctx, hits, plugins.CredentialsFor("snmp", credentialsFor(cfg))))
+			}
 			slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
 			passRecords = append(passRecords, collected...)
 		}
@@ -1542,4 +1549,77 @@ func int64EnvOrDefault(key string, fallback int64) int64 {
 
 func (c collectorConfig) String() string {
 	return fmt.Sprintf("server=%s collector=%s", c.ServerURL, c.CollectorID)
+}
+
+// Metric names of the baseline series (MON-02).
+const (
+	metricSweepReachable = "sweep_reachable"
+)
+
+// reachabilitySamples are the sweep results as a series: 1 for every
+// reachable host, 0 for a host of the previous sweep that no longer
+// answers. The server assigns them to CIs by the target label.
+func reachabilitySamples(previous, reachable []string) []plugins.MetricSample {
+	up := make(map[string]bool, len(reachable))
+	samples := make([]plugins.MetricSample, 0, len(reachable)+len(previous))
+	for _, host := range reachable {
+		up[host] = true
+		samples = append(samples, plugins.MetricSample{Name: metricSweepReachable, Value: 1,
+			Labels: map[string]string{"target": host, "kind": "sweep"}})
+	}
+	for _, host := range previous {
+		if !up[host] {
+			samples = append(samples, plugins.MetricSample{Name: metricSweepReachable, Value: 0,
+				Labels: map[string]string{"target": host, "kind": "sweep"}})
+		}
+	}
+	return samples
+}
+
+// upsPollMetrics are the UPS-MIB readings of a power device (RFC 1628);
+// the names are those the power plugin announces.
+var upsPollMetrics = []snmp.PollMetric{
+	{Name: "ups_battery_status", OID: "1.3.6.1.2.1.33.1.2.1.0"},
+	{Name: "ups_battery_runtime_seconds", OID: "1.3.6.1.2.1.33.1.2.3.0"},
+	{Name: "ups_battery_charge_percent", OID: "1.3.6.1.2.1.33.1.2.4.0"},
+	{Name: "ups_output_load_percent", OID: "1.3.6.1.2.1.33.1.4.4.1.5.1"},
+}
+
+// pollPowerValues reads the UPS-MIB values of the power devices the power
+// plugin found; the runtime is reported in minutes and converted.
+func pollPowerValues(ctx context.Context, hits []plugins.Result, creds map[string]string) []plugins.MetricSample {
+	poller, ok := pluginRegistry["snmp"].(*snmp.Plugin)
+	if !ok {
+		return nil
+	}
+	var samples []plugins.MetricSample
+	for i := range hits {
+		if hits[i].IP == "" || ctx.Err() != nil {
+			continue
+		}
+		polled, err := poller.Poll(ctx, hits[i].IP, creds, upsPollMetrics)
+		if err != nil {
+			slog.Debug("power value poll failed", "target", hits[i].IP, "error", err)
+			continue
+		}
+		for j := range polled {
+			polled[j].Labels["kind"] = "power"
+			if polled[j].Name == "ups_battery_runtime_seconds" {
+				polled[j].Value *= 60
+			}
+		}
+		samples = append(samples, polled...)
+	}
+	return samples
+}
+
+// uploadSamples sends metric samples; a failure is logged, the next run
+// sends fresh values.
+func uploadSamples(ctx context.Context, up *uploader, samples []plugins.MetricSample) {
+	if len(samples) == 0 || up == nil {
+		return
+	}
+	if err := up.uploadMetricSamples(ctx, samples); err != nil {
+		slog.Warn("metric sample upload failed", "count", len(samples), "error", err)
+	}
 }

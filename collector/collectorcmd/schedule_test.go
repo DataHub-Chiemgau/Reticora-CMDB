@@ -128,9 +128,13 @@ func (p *recordingPlugin) Collect(_ context.Context, target string, _ map[string
 // sweep of the scope found, not the whole range.
 func TestPollsTargetTheSweptHosts(t *testing.T) {
 	t.Cleanup(func() { collectorScopes = &scopeCache{} })
-	var uploads atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		uploads.Add(1)
+	var uploads, metricUploads atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/monitoring/metrics") {
+			metricUploads.Add(1)
+		} else {
+			uploads.Add(1)
+		}
 		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer srv.Close()
@@ -166,6 +170,10 @@ func TestPollsTargetTheSweptHosts(t *testing.T) {
 	}
 	if uploads.Load() != 2 {
 		t.Errorf("uploads = %d", uploads.Load())
+	}
+	// The sweep reports the reachability of its hosts once (MON-02).
+	if metricUploads.Load() != 1 {
+		t.Errorf("metric uploads = %d", metricUploads.Load())
 	}
 }
 

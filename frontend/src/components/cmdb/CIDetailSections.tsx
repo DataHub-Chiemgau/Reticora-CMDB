@@ -1,7 +1,7 @@
 /**
  * CIDetailSections — advanced, collapsible sections for the CI detail page
  * (spec §18 progressive disclosure): instance fields, field provenance /
- * manual overrides, lifecycle, and impact analysis. Each is an expandable
+ * manual overrides, lifecycle, impact analysis and metrics. Each is an expandable
  * <details> so normal users never see the metadata model.
  */
 import { useState } from 'react';
@@ -20,6 +20,8 @@ import {
 } from '../../api/cmdbHooks';
 import { DynamicForm, validateAll } from '../form/DynamicForm';
 import { ApiError } from '../../api/client';
+import type { MetricPoint } from '../../api/client';
+import { useCIMetrics } from '../../api/hooks';
 import type { FieldDefinition } from '../../lib/fieldmeta';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -467,6 +469,90 @@ export function ImpactSection({ ciId }: { ciId: string }) {
           </div>
         </div>
       ) : null}
+    </Section>
+  );
+}
+
+// ─── Metrics (MON-02) ────────────────────────────────────────────────────────
+
+/** sparklinePath draws the points of a series as one SVG polyline path. */
+export function sparklinePath(points: MetricPoint[], width: number, height: number): string {
+  if (points.length === 0) return '';
+  const values = points.map((p) => p.value);
+  const min = Math.min(...values);
+  const span = Math.max(...values) - min || 1;
+  const stepX = points.length > 1 ? width / (points.length - 1) : 0;
+  return points
+    .map((p, i) => {
+      const x = i * stepX;
+      const y = height - ((p.value - min) / span) * height;
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+}
+
+/**
+ * CIMetricsSection shows the collector series of a CI (MON-02): one line per
+ * metric over the last 24 hours, loaded on demand. Without the monitoring
+ * feature the API answers 403 and the section says so.
+ */
+export function CIMetricsSection({ ciId }: { ciId: string }) {
+  const { t } = useTranslation();
+  const [enabled, setEnabled] = useState(false);
+  const metrics = useCIMetrics(ciId, enabled);
+  const forbidden = metrics.error instanceof ApiError && metrics.error.status === 403;
+
+  return (
+    <Section title={t('monitoring.ciTitle', 'Metriken')}>
+      {!enabled ? (
+        <Button size="sm" variant="secondary" onClick={() => setEnabled(true)}>
+          {t('monitoring.ciLoad', 'Metriken laden')}
+        </Button>
+      ) : metrics.isLoading ? (
+        <SkeletonList rows={2} label="…" />
+      ) : forbidden ? (
+        <p className="text-sm text-gray-500">
+          {t(
+            'monitoring.ciNotLicensed',
+            'Monitoring ist für diese Organisation nicht freigeschaltet.',
+          )}
+        </p>
+      ) : metrics.error ? (
+        <p className="text-sm text-red-600">{(metrics.error as Error).message}</p>
+      ) : (metrics.data?.series.length ?? 0) === 0 ? (
+        <p className="text-sm text-gray-500">
+          {t('monitoring.ciNone', 'Keine Messwerte in den letzten 24 Stunden.')}
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {metrics.data!.series.map((series) => {
+            const latest = series.points[series.points.length - 1];
+            return (
+              <li key={series.name} className="flex items-center gap-3 text-sm">
+                <span className="w-56 truncate font-mono text-xs">{series.name}</span>
+                <svg
+                  role="img"
+                  aria-label={series.name}
+                  width={160}
+                  height={28}
+                  className="text-blue-600 dark:text-blue-400"
+                >
+                  <path
+                    d={sparklinePath(series.points, 160, 28)}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.5}
+                  />
+                </svg>
+                <span className="text-xs text-gray-500">
+                  {t('monitoring.ciLatest', 'Aktuell')}:{' '}
+                  <strong>{latest ? latest.value : '–'}</strong>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </Section>
   );
 }

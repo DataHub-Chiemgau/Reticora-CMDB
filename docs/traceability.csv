@@ -395,3 +395,4 @@ SRC-01;[B];C;backend/internal/search/search_test.go;WP-186
 SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/filter_test.go;WP-187
 VIE-01;[B];C;backend/internal/savedview/savedview_integration_test.go;WP-188
 EXP-01;[B], DATEV [P2];C;backend/internal/export/export_test.go;WP-189
+MON-02;[B];C;backend/internal/monitoring/monitoring_test.go;WP-190

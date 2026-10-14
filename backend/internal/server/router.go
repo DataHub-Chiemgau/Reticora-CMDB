@@ -429,7 +429,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
 		ipam.NewHandler(repos.IPAM),
-		monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)),
+		monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)).WithCIResolver(ciAddressResolver{repo: repos.CI}),
 		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
 			WithSources(bffSources(&repos, topologyHandler, bffJobs)),
 		relationshiptype.NewHandler(repos.RelationshipType),

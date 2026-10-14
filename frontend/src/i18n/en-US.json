@@ -671,7 +671,12 @@
     "severity_info": "Info",
     "alertRules": "Alert rules",
     "noAlerts": "No alert rules",
-    "noAlertsHint": "Create a rule to be notified when thresholds are crossed."
+    "noAlertsHint": "Create a rule to be notified when thresholds are crossed.",
+    "ciTitle": "Metrics",
+    "ciLoad": "Load metrics",
+    "ciNone": "No samples in the last 24 hours.",
+    "ciNotLicensed": "Monitoring is not enabled for this organization.",
+    "ciLatest": "Latest"
   },
   "audit": {
     "title": "Audit log",

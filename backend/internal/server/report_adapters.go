@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -182,4 +183,18 @@ func bffSources(repos *Repositories, topo *topology.Handler, jobSource graphqlbf
 		sources.Reviews = reviewSource
 	}
 	return sources
+}
+
+// ciAddressResolver assigns collector metric samples to the CI whose
+// management IP the collector polled (MON-02).
+type ciAddressResolver struct{ repo ci.Repository }
+
+func (a ciAddressResolver) ResolveCI(ctx context.Context, orgID, address string) (ciID string, ok bool) {
+	items, _, err := a.repo.List(ctx, orgID, ci.FilterParams{Filters: []api.Filter{
+		{Field: "management_ip", Op: api.OpExact, Kind: api.KindText, Values: []string{address}},
+	}}, api.PaginationParams{Limit: 2})
+	if err != nil || len(items) != 1 {
+		return "", false
+	}
+	return items[0].ID, true
 }

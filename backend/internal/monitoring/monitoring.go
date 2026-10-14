@@ -105,12 +105,12 @@ type AlertStore interface {
 // pointers leave the stored value untouched, so a PATCH can toggle a single
 // field (typically enabled) without resending the whole rule.
 type UpdateAlertRuleRequest struct {
-	Name       *string  `json:"name"`
-	Condition  *string  `json:"condition"`
-	Threshold  *float64 `json:"threshold"`
-	Duration   *string  `json:"duration"`
-	Severity   *string  `json:"severity"`
-	Enabled    *bool    `json:"enabled"`
+	Name      *string  `json:"name"`
+	Condition *string  `json:"condition"`
+	Threshold *float64 `json:"threshold"`
+	Duration  *string  `json:"duration"`
+	Severity  *string  `json:"severity"`
+	Enabled   *bool    `json:"enabled"`
 }
 
 // MarshalJSON encodes duration values as Go duration strings.
@@ -438,6 +438,25 @@ type EvaluatingStore interface {
 type Handler struct {
 	store  MetricStore
 	alerts AlertStore
+	cis    CIResolver
+}
+
+// CIResolver assigns a collector sample to its CI by the address the
+// collector polled (label target, MON-02).
+type CIResolver interface {
+	ResolveCI(ctx context.Context, orgID, address string) (ciID string, ok bool)
+}
+
+// MetricNamer lists the metric names of a CI since a time (the series of
+// the CI detail view).
+type MetricNamer interface {
+	MetricNames(ctx context.Context, orgID, ciID string, since time.Time) ([]string, error)
+}
+
+// WithCIResolver assigns samples without ci_id by their target label.
+func (h *Handler) WithCIResolver(r CIResolver) *Handler {
+	h.cis = r
+	return h
 }
 
 // NewHandler creates a new monitoring handler backed by in-memory stores
@@ -456,6 +475,7 @@ func NewHandler(store MetricStore, alerts ...AlertStore) *Handler {
 // RegisterRoutes registers monitoring routes.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/monitoring/metrics", h.QueryMetrics)
+	r.Get("/api/v1/cis/{id}/metrics", h.CIMetrics)
 	r.Post("/api/v1/monitoring/metrics", h.IngestMetrics)
 	r.Get("/api/v1/monitoring/alerts", h.ListAlerts)
 	r.Post("/api/v1/monitoring/alerts", h.CreateAlert)
@@ -517,11 +537,17 @@ func (h *Handler) IngestMetrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.store.Ingest(r.Context(), metrics); err != nil {
-		api.WriteRepoError(w, err)
-		return
+	// Collector samples carry the polled address, not the CI: assign them
+	// by it; a sample without a CI is not stored (metric_sample.ci_id is
+	// required) and counted as unassigned (MON-02).
+	assigned, unassigned := h.assignCIs(r.Context(), orgID, metrics)
+	if len(assigned) > 0 {
+		if err := h.store.Ingest(r.Context(), assigned); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
 	}
-	api.WriteJSON(w, http.StatusAccepted, map[string]any{"ingested": len(metrics)})
+	api.WriteJSON(w, http.StatusAccepted, map[string]any{"ingested": len(assigned), "unassigned": unassigned})
 }
 
 // ListAlerts handles GET /api/v1/monitoring/alerts.
@@ -767,4 +793,96 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// assignCIs fills the ci_id of samples from their target label and returns
+// the samples with a CI and the number of the others.
+func (h *Handler) assignCIs(ctx context.Context, orgID string, metrics []Metric) (assigned []Metric, unassigned int) {
+	resolved := map[string]string{}
+	assigned = make([]Metric, 0, len(metrics))
+	for i := range metrics {
+		m := metrics[i]
+		if m.CIID == "" && h.cis != nil {
+			if target := strings.TrimSpace(m.Labels["target"]); target != "" {
+				id, seen := resolved[target]
+				if !seen {
+					id, _ = h.cis.ResolveCI(ctx, orgID, target)
+					resolved[target] = id
+				}
+				m.CIID = id
+			}
+		}
+		if m.CIID == "" {
+			unassigned++
+			continue
+		}
+		assigned = append(assigned, m)
+	}
+	return assigned, unassigned
+}
+
+// CISeries is one metric of a CI over time.
+type CISeries struct {
+	Name   string        `json:"name"`
+	Points []MetricPoint `json:"points"`
+}
+
+// defaultCIMetricsWindow is the window of GET /cis/{id}/metrics without from.
+const defaultCIMetricsWindow = 24 * time.Hour
+
+// CIMetrics handles GET /api/v1/cis/{id}/metrics?name=&from=&to=&step=
+// (MON-02): the series of one CI, all its metrics or the named one; the
+// detail view draws them as lines.
+func (h *Handler) CIMetrics(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := requireOrgID(w, r)
+	if !ok {
+		return
+	}
+	query, err := metricQueryFromRequest(r, orgID)
+	if err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	query.CIID = chi.URLParam(r, "id")
+	if query.From.IsZero() {
+		query.From = time.Now().UTC().Add(-defaultCIMetricsWindow)
+	}
+	names := []string{query.Name}
+	if query.Name == "" {
+		namer, ok := h.store.(MetricNamer)
+		if !ok {
+			names = nil
+		} else if names, err = namer.MetricNames(r.Context(), orgID, query.CIID, query.From); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
+	}
+	series := make([]CISeries, 0, len(names))
+	for _, name := range names {
+		q := query
+		q.Name = name
+		points, qerr := h.store.Query(r.Context(), q)
+		if qerr != nil {
+			api.WriteRepoError(w, qerr)
+			return
+		}
+		series = append(series, CISeries{Name: name, Points: points})
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]any{"ci_id": query.CIID, "from": query.From, "series": series})
+}
+
+// MetricNames implements MetricNamer.
+func (s *MemoryMetricStore) MetricNames(_ context.Context, orgID, ciID string, since time.Time) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range s.metrics {
+		if m.OrgID == orgID && m.CIID == ciID && !m.Timestamp.Before(since) && !seen[m.Name] {
+			seen[m.Name] = true
+			out = append(out, m.Name)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }

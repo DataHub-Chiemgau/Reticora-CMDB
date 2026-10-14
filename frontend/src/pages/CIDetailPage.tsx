@@ -16,6 +16,7 @@ import {
   ProvenanceSection,
   LifecycleSection,
   ImpactSection,
+  CIMetricsSection,
   CIHistorySection,
 } from '../components/cmdb/CIDetailSections';
 import { CIRelationshipsCard } from '../components/cmdb/CIRelationshipsCard';
@@ -233,6 +234,7 @@ export function CIDetailPage() {
         <ProvenanceSection ciId={ci.id} />
         <LifecycleSection entityType="cis" entityId={ci.id} currentState={ci.lifecycle_state} />
         <ImpactSection ciId={ci.id} />
+        <CIMetricsSection ciId={ci.id} />
         <CIHistorySection ciId={ci.id} />
       </div>
 

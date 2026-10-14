@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -198,4 +199,77 @@ func extractJSONField(body, field string) string {
 		return ""
 	}
 	return body[start : start+end]
+}
+
+type fakeCIResolver map[string]string
+
+func (f fakeCIResolver) ResolveCI(_ context.Context, _, address string) (string, bool) {
+	id, ok := f[address]
+	return id, ok
+}
+
+func TestIngestAssignsCollectorSamplesByTarget(t *testing.T) {
+	store := NewMemoryMetricStore()
+	h := NewHandler(store).WithCIResolver(fakeCIResolver{"10.0.0.5": "ci-5"})
+	r := chi.NewRouter()
+	h.RegisterRoutes(r)
+
+	body := `{"metrics":[
+		{"name":"sweep_reachable","value":1,"labels":{"target":"10.0.0.5","kind":"sweep"}},
+		{"name":"sweep_reachable","value":0,"labels":{"target":"10.0.0.9","kind":"sweep"}},
+		{"name":"ups_battery_charge_percent","value":97,"labels":{"target":"10.0.0.5"}},
+		{"ci_id":"ci-1","name":"cpu_usage","value":12}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/monitoring/metrics", strings.NewReader(body))
+	req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("ingest status = %d: %s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); !strings.Contains(got, `"ingested":3`) || !strings.Contains(got, `"unassigned":1`) {
+		t.Fatalf("ingest response = %s", got)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/cis/ci-5/metrics", nil)
+	req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ci metrics status = %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		CIID   string     `json:"ci_id"`
+		Series []CISeries `json:"series"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.CIID != "ci-5" || len(resp.Series) != 2 {
+		t.Fatalf("ci metrics = %+v", resp)
+	}
+	if resp.Series[0].Name != "sweep_reachable" || resp.Series[1].Name != "ups_battery_charge_percent" {
+		t.Fatalf("series names = %s, %s", resp.Series[0].Name, resp.Series[1].Name)
+	}
+	if len(resp.Series[1].Points) != 1 || resp.Series[1].Points[0].Value != 97 {
+		t.Fatalf("ups series = %+v", resp.Series[1].Points)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/cis/ci-5/metrics?name=sweep_reachable", nil)
+	req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "ups_battery") {
+		t.Fatalf("named ci metrics = %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestIngestWithoutResolverDropsSamplesWithoutCI(t *testing.T) {
+	h := NewHandler(NewMemoryMetricStore())
+	assigned, unassigned := h.assignCIs(t.Context(), "org-1", []Metric{
+		{Name: "sweep_reachable", Labels: map[string]string{"target": "10.0.0.5"}},
+		{CIID: "ci-1", Name: "cpu_usage"},
+	})
+	if len(assigned) != 1 || assigned[0].CIID != "ci-1" || unassigned != 1 {
+		t.Fatalf("assigned = %+v, unassigned = %d", assigned, unassigned)
+	}
 }

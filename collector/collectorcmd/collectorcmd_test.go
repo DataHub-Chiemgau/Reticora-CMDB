@@ -830,3 +830,23 @@ func TestEnrollCommand(t *testing.T) {
 		t.Error("no arguments starts the collector")
 	}
 }
+
+func TestReachabilitySamplesReportLostHosts(t *testing.T) {
+	samples := reachabilitySamples([]string{"10.0.0.1", "10.0.0.2"}, []string{"10.0.0.2", "10.0.0.3"})
+	got := map[string]float64{}
+	for _, s := range samples {
+		if s.Name != metricSweepReachable || s.Labels["kind"] != "sweep" {
+			t.Fatalf("unexpected sample %+v", s)
+		}
+		got[s.Labels["target"]] = s.Value
+	}
+	want := map[string]float64{"10.0.0.1": 0, "10.0.0.2": 1, "10.0.0.3": 1}
+	if len(got) != len(want) {
+		t.Fatalf("samples = %v, want %v", got, want)
+	}
+	for host, v := range want {
+		if got[host] != v {
+			t.Fatalf("sample of %s = %v, want %v", host, got[host], v)
+		}
+	}
+}

@@ -4425,6 +4425,54 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/cis/{id}/metrics:
+    get:
+      operationId: getCIMetrics
+      tags: [Monitoring]
+      summary: Metric series of one CI (MON-02)
+      description: >-
+        Returns the series of one CI for the detail view: the named metric or,
+        without name, every metric the CI reported since from (default the last
+        24 hours). Requires the monitoring feature.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: step
+          in: query
+          schema:
+            type: string
+          description: Go duration string used for aggregation, for example 5m or 1h.
+      responses:
+        '200':
+          description: Metric series of the CI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIMetricsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/monitoring/alerts:
     get:
       operationId: listAlerts
@@ -15928,6 +15976,31 @@ components:
       properties:
         ingested:
           type: integer
+        unassigned:
+          type: integer
+          description: Samples without ci_id whose target label matched no CI; they are not stored (MON-02).
+
+    CIMetricsResponse:
+      type: object
+      required: [ci_id, from, series]
+      properties:
+        ci_id:
+          type: string
+        from:
+          type: string
+          format: date-time
+        series:
+          type: array
+          items:
+            type: object
+            required: [name, points]
+            properties:
+              name:
+                type: string
+              points:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MetricPoint'
 
     MetricPoint:
       type: object

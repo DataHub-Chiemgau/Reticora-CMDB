@@ -102,6 +102,7 @@ GET /api/v1/cis/{id}/dependencies topology:read
 GET /api/v1/cis/{id}/field-definitions ci:read
 GET /api/v1/cis/{id}/fields ci:read
 GET /api/v1/cis/{id}/interfaces ipam:read
+GET /api/v1/cis/{id}/metrics ci:read
 GET /api/v1/cis/{id}/parent ci:read
 GET /api/v1/cis/{id}/relationships relationship:read
 GET /api/v1/cis/{id}/state ci:read

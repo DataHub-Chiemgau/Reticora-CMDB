@@ -671,7 +671,12 @@
     "severity_info": "Info",
     "alertRules": "Alarmregeln",
     "noAlerts": "Keine Alarmregeln",
-    "noAlertsHint": "Erstellen Sie eine Regel, um bei Schwellenwertüberschreitungen benachrichtigt zu werden."
+    "noAlertsHint": "Erstellen Sie eine Regel, um bei Schwellenwertüberschreitungen benachrichtigt zu werden.",
+    "ciTitle": "Metriken",
+    "ciLoad": "Metriken laden",
+    "ciNone": "Keine Messwerte in den letzten 24 Stunden.",
+    "ciNotLicensed": "Monitoring ist für diese Organisation nicht freigeschaltet.",
+    "ciLatest": "Aktuell"
   },
   "audit": {
     "title": "Audit-Protokoll",
