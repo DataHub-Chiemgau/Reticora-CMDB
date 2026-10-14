@@ -36,7 +36,9 @@ func appRole() string {
 // Every connection switches into the restricted application role before it is
 // handed out, so RLS policies apply even when the configured login role is a
 // superuser or the schema owner. If isolation cannot be guaranteed, pool
-// creation fails instead of silently serving cross-tenant data.
+// creation fails instead of silently serving cross-tenant data. Every
+// connection uses the UTF-8 client encoding the quoting of the tenant
+// transaction relies on (pinClientEncoding); another one is refused.
 func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	if strings.TrimSpace(databaseURL) == "" {
 		return nil, fmt.Errorf("database URL is required")
@@ -49,17 +51,25 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 
 	config.MaxConns = 25
 	config.MinConns = 5
+	pinClientEncoding(config)
 
-	if role := appRole(); role != "" {
+	role := appRole()
+	if role != "" {
 		if err := ValidateRoleName(role); err != nil {
 			return nil, err
 		}
-		config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-			if _, err := conn.Exec(ctx, "SET ROLE "+quoteIdentifier(role)); err != nil {
-				return fmt.Errorf("switch to application role %q: %w", role, err)
-			}
+	}
+	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		if encErr := checkClientEncoding(conn); encErr != nil {
+			return encErr
+		}
+		if role == "" {
 			return nil
 		}
+		if _, roleErr := conn.Exec(ctx, "SET ROLE "+quoteIdentifier(role)); roleErr != nil {
+			return fmt.Errorf("switch to application role %q: %w", role, roleErr)
+		}
+		return nil
 	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, config)
@@ -102,6 +112,7 @@ func NewMaintenancePool(ctx context.Context, databaseURL string) (*pgxpool.Pool,
 	}
 	config.MaxConns = 5
 	config.MinConns = 1
+	pinClientEncoding(config)
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("create pool: %w", err)
@@ -153,6 +164,34 @@ func ValidateRoleName(role string) error {
 
 func quoteIdentifier(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// clientEncoding is the client encoding of every pooled connection. The
+// statement that opens a tenant transaction carries the user id as a string
+// literal (beginTenantSQL), and PostgreSQL converts a statement from the
+// client encoding before it reads the literal. Doubling backslashes and
+// quotes is safe in UTF-8, where no byte of a multi-byte character is a
+// backslash or a quote; in client-only encodings such as SJIS or BIG5 it is
+// not (a trailing 0x5C byte swallows the next backslash).
+const clientEncoding = "UTF8"
+
+// pinClientEncoding makes the connections of config use clientEncoding,
+// whatever the database URL or the role defaults set: a startup parameter
+// overrides both.
+func pinClientEncoding(config *pgxpool.Config) {
+	if config.ConnConfig.RuntimeParams == nil {
+		config.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	config.ConnConfig.RuntimeParams["client_encoding"] = clientEncoding
+}
+
+// checkClientEncoding refuses a connection whose client encoding, as the
+// server reported it at startup, is not clientEncoding.
+func checkClientEncoding(conn *pgx.Conn) error {
+	if enc := conn.PgConn().ParameterStatus("client_encoding"); enc != clientEncoding {
+		return fmt.Errorf("refusing connection: client_encoding is %q, want %s", enc, clientEncoding)
+	}
+	return nil
 }
 
 // WithTenant is the single database entry point for tenant-scoped work
@@ -215,8 +254,9 @@ func beginTenantSQL(scope *TenantScope) string {
 
 // quoteLiteral renders s as an escape string constant: backslashes and
 // single quotes are doubled, which means the same under every setting of
-// standard_conforming_strings and backslash_quote. Validate keeps NUL bytes
-// and invalid UTF-8 out of the values.
+// standard_conforming_strings and backslash_quote in the UTF-8 client
+// encoding the pools pin (pinClientEncoding). Validate keeps NUL bytes and
+// invalid UTF-8 out of the values.
 func quoteLiteral(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	return "E'" + strings.ReplaceAll(s, `'`, `''`) + "'"

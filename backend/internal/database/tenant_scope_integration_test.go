@@ -433,6 +433,34 @@ func TestContextTxJoin(t *testing.T) {
 		t.Errorf("after the savepoint: callbacks %v, clients %d/%d", ran, clients("join-savepoint"), clients("join-after-commit"))
 	}
 
+	// A savepoint whose fn swallows a failed statement and returns nil is
+	// rolled back too (ErrTxAborted) instead of released: the transaction
+	// goes on, the writes and callbacks of fn are undone.
+	swallowedErr := database.WithRequestTenantTx(reqCtx, pool, scopeOrgA, func(ctx context.Context) error {
+		spErr := database.Savepoint(ctx, func(ctx context.Context) error {
+			database.AfterCommit(ctx, func(context.Context) { t.Error("callback of the rolled back savepoint ran") })
+			if err := insertClient(ctx, "", "join-swallowed-inside"); err != nil {
+				return err
+			}
+			_ = insertClient(ctx, scopeClient1, "join-swallowed-duplicate")
+			return nil
+		})
+		if !errors.Is(spErr, database.ErrTxAborted) {
+			t.Errorf("savepoint with a swallowed error: %v, want ErrTxAborted", spErr)
+		}
+		if database.TxFailed(ctx) {
+			t.Error("transaction failed after the savepoint with a swallowed error")
+		}
+		return insertClient(ctx, "", "join-swallowed-after")
+	})
+	if swallowedErr != nil {
+		t.Fatalf("transaction around the savepoint with a swallowed error: %v", swallowedErr)
+	}
+	if clients("join-swallowed-inside") != 0 || clients("join-swallowed-after") != 1 {
+		t.Errorf("after the savepoint with a swallowed error: clients %d inside (want 0), %d after (want 1)",
+			clients("join-swallowed-inside"), clients("join-swallowed-after"))
+	}
+
 	// A rollback drops the callbacks.
 	errAbort := errors.New("abort")
 	if rollbackErr := database.WithRequestTenantTx(reqCtx, pool, scopeOrgA, func(ctx context.Context) error {
@@ -447,7 +475,8 @@ func TestContextTxJoin(t *testing.T) {
 // statement that opens the transaction; whatever it contains, it arrives
 // unchanged in app.user_id, sets nothing else and RLS still restricts the
 // transaction to its organization and client. It holds with
-// standard_conforming_strings and backslash_quote off as well.
+// standard_conforming_strings and backslash_quote off as well, and for a
+// database URL that asks for the SJIS client encoding: the pool keeps UTF-8.
 func TestWithTenantQuotesHostileUserID(t *testing.T) {
 	ctx, app := seedScopeFixture(t)
 	cfg := app.Config()
@@ -464,9 +493,33 @@ func TestWithTenantQuotesHostileUserID(t *testing.T) {
 		t.Fatalf("legacy settings: standard_conforming_strings %q, backslash_quote %q, %v", conforming, backslashQuote, err)
 	}
 
+	// A database URL that asks for a client-only multi-byte encoding gets
+	// UTF-8 all the same. In SJIS the bytes 0x81 0x5C ("ā" is C4 81 in UTF-8,
+	// then the backslash) are one character, so with backslash_quote on the
+	// doubled backslash would leave \' to escape the doubled quote, the next
+	// quote would end the literal and the dollar-quoted rest of the user id
+	// would set another organization.
+	dsn := testDatabaseURL(t)
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	sjis, err := database.NewPool(ctx, dsn+sep+"client_encoding=SJIS&backslash_quote=on&standard_conforming_strings=off")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sjis.Close)
+	var encoding string
+	if err = sjis.QueryRow(ctx, `SELECT current_setting('client_encoding'), current_setting('backslash_quote')`).
+		Scan(&encoding, &backslashQuote); err != nil || encoding != "UTF8" || backslashQuote != "on" {
+		t.Fatalf("pool from a URL with client_encoding=SJIS: client_encoding %q, backslash_quote %q, %v; want UTF8 and on",
+			encoding, backslashQuote, err)
+	}
+
 	hostile := []string{`'`, `\`, `;`, `--`, `\'`, `''`, "line\nbreak", `E'\x41'`, "ünïcödé",
-		`x'); SELECT set_config('app.org_id', '` + scopeOrgB + `', true); --`}
-	for name, pool := range map[string]*pgxpool.Pool{"default": app, "legacy string settings": legacy} {
+		`x'); SELECT set_config('app.org_id', '` + scopeOrgB + `', true); --`,
+		"ā\\', true), set_config($$app.org_id$$, $$" + scopeOrgB + "$$, true) --"}
+	for name, pool := range map[string]*pgxpool.Pool{"default": app, "legacy string settings": legacy, "client_encoding=SJIS requested": sjis} {
 		for _, user := range hostile {
 			scope := database.OrgWideScope(scopeOrgA, user)
 			scope.Clients = database.ScopeIDs(scopeClient1)

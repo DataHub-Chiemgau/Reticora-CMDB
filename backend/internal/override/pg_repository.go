@@ -65,16 +65,34 @@ func (r *PGRepository) withEffectiveTx(ctx context.Context, tx pgx.Tx, fv *Field
 const visibleCI = "EXISTS (SELECT 1 FROM ci WHERE ci.id = ci_field_value.ci_id)"
 
 // requireVisibleCI rejects writes to a CI the tenant scope does not show; the
-// foreign key alone would accept a CI of another client.
+// foreign key alone would accept a CI of another client. It locks the CI row
+// (lockCI).
 func requireVisibleCI(ctx context.Context, tx pgx.Tx, ciID string) error {
-	var visible bool
-	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1)", ciID).Scan(&visible); err != nil {
-		return fmt.Errorf("check ci visibility: %w", err)
+	visible, err := lockCI(ctx, tx, ciID)
+	if err != nil {
+		return err
 	}
 	if !visible {
 		return fmt.Errorf("not found")
 	}
 	return nil
+}
+
+// lockCI locks the row of the CI before any of its field values and reports
+// whether the CI is visible, in one statement. Every write of a field value
+// updates the CI row as well (syncCIField, the projection trigger of
+// migration 000135), while the ingest's record transaction and ci.Update lock
+// the CI row first (discovery LockCI, SELECT … FOR UPDATE): taking it first
+// here too keeps one lock order, so the two wait for each other instead of
+// deadlocking (40P01). Only a row the scope may update is locked; the others
+// are not written either.
+func lockCI(ctx context.Context, tx pgx.Tx, ciID string) (visible bool, err error) {
+	var locked bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1),
+		EXISTS (SELECT 1 FROM ci WHERE id = $1 FOR UPDATE)`, ciID).Scan(&visible, &locked); err != nil {
+		return false, fmt.Errorf("check ci visibility: %w", err)
+	}
+	return visible, nil
 }
 
 // ListForCI returns all tracked field values of a CI with resolved effective
@@ -380,6 +398,11 @@ func userID(author string) any {
 func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error) {
 	var out *FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// The CI row first (lockCI); an invisible CI is not found by the
+		// update below.
+		if _, err := lockCI(ctx, tx, ciID); err != nil {
+			return err
+		}
 		row := tx.QueryRow(ctx, fmt.Sprintf(`
 			UPDATE ci_field_value SET
 				override_value = NULL, override_author = NULL,

@@ -78,28 +78,35 @@ func NewCIChunkIndexer(repo Repository, provider Provider) *CIChunkIndexer {
 	return &CIChunkIndexer{repo: repo, provider: provider}
 }
 
+// mayEmbed reports whether embeddings can be requested at all: a provider
+// with embeddings and a consent to ask. It reads no external state.
+func (x *CIChunkIndexer) mayEmbed() bool {
+	return x.provider != nil && x.provider.EmbeddingsEnabled() && x.consent != nil
+}
+
 // IndexDocument upserts the retrieval chunk for a CI document.
 func (x *CIChunkIndexer) IndexDocument(ctx context.Context, doc ci.Document) error {
 	chunk := chunkOf(&doc)
-	// The provider is called only for organizations that opted in and hold
-	// the ai add-on (AI-02).
-	if x.provider == nil || !x.provider.EmbeddingsEnabled() || x.consent == nil ||
-		!x.consent.AllowsExternalAI(ctx, doc.OrganizationID) {
+	if !x.mayEmbed() {
 		return x.repo.UpsertChunk(ctx, chunk)
 	}
 	if !database.InTx(ctx) {
-		x.embed(&chunk)
+		// The provider is called only for organizations that opted in and
+		// hold the ai add-on (AI-02).
+		if x.consent.AllowsExternalAI(ctx, doc.OrganizationID) {
+			x.embed(&chunk)
+		}
 		return x.repo.UpsertChunk(ctx, chunk)
 	}
 	// Inside a context transaction the chunk is written lexically with the
-	// CI, and the embedding, an external HTTP call, is added after the
-	// commit: the transaction never holds its locks while the provider
-	// answers (NFR-03).
+	// CI; the consent (entitlement cache, opt-in) and the embedding, an
+	// external HTTP call, follow after the commit: the transaction never
+	// holds its locks while Redis or the provider answers (NFR-03).
 	if err := x.repo.UpsertChunk(ctx, chunk); err != nil {
 		return err
 	}
 	database.AfterCommit(ctx, func(ctx context.Context) {
-		if !x.embed(&chunk) {
+		if !x.consent.AllowsExternalAI(ctx, chunk.OrganizationID) || !x.embed(&chunk) {
 			return
 		}
 		if err := x.repo.UpsertChunk(ctx, chunk); err != nil {
@@ -130,7 +137,8 @@ type ChunkBatchWriter interface {
 // IndexDocuments implements ci.BatchIndexer: the chunks of the documents of
 // one organization with one statement where the repository can, else chunk
 // by chunk. The consent is checked once for the batch; inside a context
-// transaction the embeddings follow after the commit, as in IndexDocument.
+// transaction the consent and the embeddings follow after the commit, as in
+// IndexDocument.
 func (x *CIChunkIndexer) IndexDocuments(ctx context.Context, docs []ci.Document) error {
 	batch, ok := x.repo.(ChunkBatchWriter)
 	if !ok || len(docs) == 0 {
@@ -145,13 +153,15 @@ func (x *CIChunkIndexer) IndexDocuments(ctx context.Context, docs []ci.Document)
 	for i := range docs {
 		chunks[i] = chunkOf(&docs[i])
 	}
-	if x.provider == nil || !x.provider.EmbeddingsEnabled() || x.consent == nil ||
-		!x.consent.AllowsExternalAI(ctx, docs[0].OrganizationID) {
+	if !x.mayEmbed() {
 		return batch.UpsertChunks(ctx, chunks)
 	}
+	orgID := docs[0].OrganizationID
 	if !database.InTx(ctx) {
-		for i := range chunks {
-			x.embed(&chunks[i])
+		if x.consent.AllowsExternalAI(ctx, orgID) {
+			for i := range chunks {
+				x.embed(&chunks[i])
+			}
 		}
 		return batch.UpsertChunks(ctx, chunks)
 	}
@@ -159,6 +169,9 @@ func (x *CIChunkIndexer) IndexDocuments(ctx context.Context, docs []ci.Document)
 		return err
 	}
 	database.AfterCommit(ctx, func(ctx context.Context) {
+		if !x.consent.AllowsExternalAI(ctx, orgID) {
+			return
+		}
 		var embedded []Chunk
 		for i := range chunks {
 			if x.embed(&chunks[i]) {

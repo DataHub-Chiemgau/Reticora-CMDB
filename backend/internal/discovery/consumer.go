@@ -241,6 +241,17 @@ type ProcessedRecord struct {
 	ObservedAt  time.Time
 }
 
+// ledgerKey is the record_id as the ledger stores it: a uuid in canonical
+// lower-case form. The contract accepts upper-case hex digits; PostgreSQL
+// reads both spellings as one uuid and returns the lower-case one, so the
+// ledger compares and deduplicates the canonical form.
+func ledgerKey(recordID string) string {
+	if id, ok := canonicalUUID(recordID); ok {
+		return id
+	}
+	return recordID
+}
+
 // skipProcessed removes records processed within the dedupe window and
 // repeated record_ids of the same batch.
 func (h *Handler) skipProcessed(ctx context.Context, orgID string, items []IngestItem) (kept []IngestItem, duplicates int, err error) {
@@ -251,7 +262,7 @@ func (h *Handler) skipProcessed(ctx context.Context, orgID string, items []Inges
 	var ids []string
 	for i := range items {
 		if items[i].RecordID != "" {
-			ids = append(ids, items[i].RecordID)
+			ids = append(ids, ledgerKey(items[i].RecordID))
 		}
 	}
 	if len(ids) == 0 {
@@ -262,7 +273,7 @@ func (h *Handler) skipProcessed(ctx context.Context, orgID string, items []Inges
 		return nil, 0, fmt.Errorf("read processed records: %w", err)
 	}
 	for i := range items {
-		id := items[i].RecordID
+		id := ledgerKey(items[i].RecordID)
 		if id != "" && seen[id] {
 			duplicates++
 			continue
@@ -275,9 +286,10 @@ func (h *Handler) skipProcessed(ctx context.Context, orgID string, items []Inges
 	return kept, duplicates, nil
 }
 
-// markProcessed remembers the record_ids of processed items, each once (the
-// last item of a repeated record_id wins); without record_ids nothing is
-// written.
+// markProcessed remembers the record_ids of processed items, each once in
+// canonical form (the last item of a repeated record_id wins, whatever its
+// spelling: two spellings of one uuid in the one ledger statement would fail
+// it); without record_ids nothing is written.
 func (h *Handler) markProcessed(ctx context.Context, orgID string, items []IngestItem) error {
 	ledger, ok := h.repo.(RecordLedger)
 	if !ok {
@@ -289,7 +301,7 @@ func (h *Handler) markProcessed(ctx context.Context, orgID string, items []Inges
 		if items[i].RecordID == "" {
 			continue
 		}
-		rec := ProcessedRecord{RecordID: items[i].RecordID, CollectorID: items[i].CollectorID, ObservedAt: items[i].ObservedAt}
+		rec := ProcessedRecord{RecordID: ledgerKey(items[i].RecordID), CollectorID: items[i].CollectorID, ObservedAt: items[i].ObservedAt}
 		if j, seen := index[rec.RecordID]; seen {
 			records[j] = rec
 			continue

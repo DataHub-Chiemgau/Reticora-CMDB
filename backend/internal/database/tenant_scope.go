@@ -268,13 +268,18 @@ func (t *tenantTx) runAfterCommit(ctx context.Context) {
 
 // ContextWithTx returns ctx carrying tx: WithTenant and WithRequestTenant
 // called with it join tx (no BEGIN, no set_config, no COMMIT) when their
-// scope is the scope of tx, and fail with ErrTxScopeMismatch otherwise. The
-// scope of tx becomes the tenant scope of the context. A transaction that
-// WithTenant did not open makes every join fail with ErrTxNotJoinable.
+// scope is the scope of tx, and fail with ErrTxScopeMismatch otherwise. A
+// context without a tenant scope takes the scope of tx; a context with a
+// scope keeps it, so a scope that differs from the transaction's is never
+// widened to it: its joins fail, and after WithoutTx its calls run under its
+// own scope. A transaction that WithTenant did not open makes every join
+// fail with ErrTxNotJoinable.
 func ContextWithTx(ctx context.Context, tx pgx.Tx) context.Context {
 	if t, ok := tx.(*tenantTx); ok && t != nil {
-		scope := t.scope
-		ctx = ContextWithTenantScope(ctx, &scope)
+		if _, scoped := TenantScopeFromContext(ctx); !scoped {
+			scope := t.scope
+			ctx = ContextWithTenantScope(ctx, &scope)
+		}
 	}
 	return context.WithValue(ctx, txKey{}, tx)
 }
@@ -315,9 +320,10 @@ func TxFailed(ctx context.Context) bool {
 }
 
 // Savepoint runs fn under a savepoint of the context's transaction: when fn
-// fails, its writes and its AfterCommit callbacks are undone and the
-// transaction stays usable (two statements). Without a context transaction
-// fn runs as it is.
+// fails, or returns nil although one of its statements failed (ErrTxAborted),
+// its writes and its AfterCommit callbacks are undone and the transaction
+// stays usable (two statements). Without a context transaction fn runs as it
+// is.
 func Savepoint(ctx context.Context, fn func(ctx context.Context) error) error {
 	t, ok := ctx.Value(txKey{}).(*tenantTx)
 	if !ok || t == nil || t.state.Load() != txOpen {
@@ -330,7 +336,13 @@ func Savepoint(ctx context.Context, fn func(ctx context.Context) error) error {
 	t.mu.Lock()
 	mark := len(t.after)
 	t.mu.Unlock()
-	if err := fn(ctx); err != nil {
+	err = fn(ctx)
+	if err == nil && t.aborted() {
+		// A swallowed statement error: RELEASE would fail and leave the
+		// transaction aborted, ROLLBACK TO keeps it usable.
+		err = ErrTxAborted
+	}
+	if err != nil {
 		if rbErr := sp.Rollback(ctx); rbErr != nil {
 			return errors.Join(err, fmt.Errorf("rollback to savepoint: %w", rbErr))
 		}

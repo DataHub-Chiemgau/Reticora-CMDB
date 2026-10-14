@@ -293,6 +293,24 @@ func TestContextTxFailsClosed(t *testing.T) {
 	if got, ok := TenantScopeFromContext(WithoutTx(joined)); !ok || !got.sameAs(&scope) {
 		t.Error("WithoutTx dropped the tenant scope")
 	}
+
+	// A context that already carries another scope keeps it: the wider
+	// scope of the transaction never replaces it, its joins fail, and after
+	// WithoutTx it is still the narrow scope.
+	narrowCtx := ContextWithTx(ContextWithTenantScope(context.Background(), &narrowed), open)
+	if got, ok := TenantScopeFromContext(narrowCtx); !ok || !got.sameAs(&narrowed) {
+		t.Errorf("scope of a narrowed context after ContextWithTx: %+v, want the narrowed scope", got)
+	}
+	if err := WithRequestTenant(narrowCtx, nil, testOrg, refuse); !errors.Is(err, ErrTxScopeMismatch) {
+		t.Errorf("narrowed context joining a wider transaction: %v, want ErrTxScopeMismatch", err)
+	}
+	if got, ok := TenantScopeFromContext(WithoutTx(narrowCtx)); !ok || !got.sameAs(&narrowed) {
+		t.Errorf("scope after WithoutTx: %+v, want the narrowed scope", got)
+	}
+	sameCtx := ContextWithTx(ContextWithTenantScope(context.Background(), &scope), open)
+	if err := WithRequestTenant(sameCtx, nil, testOrg, func(context.Context, pgx.Tx) error { return nil }); err != nil {
+		t.Errorf("context with the transaction's scope: %v, want a join", err)
+	}
 }
 
 func txInState(scope TenantScope, state int32) *tenantTx {
