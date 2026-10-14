@@ -67,6 +67,21 @@ func readIngestItems(w http.ResponseWriter, r *http.Request) ([]IngestItem, bool
 		api.WriteError(w, status, http.StatusText(status), err.Error())
 		return nil, false
 	}
+	items, status, msg := body.ingestItems()
+	if status != 0 {
+		api.WriteError(w, status, http.StatusText(status), msg)
+		return nil, false
+	}
+	if len(body.Items) > 0 {
+		w.Header().Set("Deprecation", legacyIngestDeprecation)
+	}
+	return items, true
+}
+
+// ingestItems validates a body and maps it onto ingest items; a refusal
+// returns its HTTP status and message. The HTTP ingest and the collectors'
+// edge channel share it.
+func (body *ingestBody) ingestItems() (items []IngestItem, status int, msg string) {
 	// Reserved attribute namespaces are written by reconciliation only
 	// (GLO-13): a record or item carrying one is a malformed request.
 	var reserved []string
@@ -81,16 +96,14 @@ func readIngestItems(w http.ResponseWriter, r *http.Request) ([]IngestItem, bool
 		}
 	}
 	if len(reserved) > 0 {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", strings.Join(reserved, "; "))
-		return nil, false
+		return nil, http.StatusBadRequest, strings.Join(reserved, "; ")
 	}
 	switch {
 	case len(body.Records) > 0 && len(body.Items) > 0:
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "send either records or items, not both")
-		return nil, false
+		return nil, http.StatusBadRequest, "send either records or items, not both"
 	case len(body.Records) > 0:
 		var violations []string
-		items := make([]IngestItem, 0, len(body.Records))
+		items = make([]IngestItem, 0, len(body.Records))
 		for i := range body.Records {
 			for _, v := range body.Records[i].Validate() {
 				violations = append(violations, fmt.Sprintf("records[%d].%s", i, v))
@@ -101,16 +114,13 @@ func readIngestItems(w http.ResponseWriter, r *http.Request) ([]IngestItem, bool
 			if len(violations) > maxRecordViolations {
 				violations = append(violations[:maxRecordViolations], fmt.Sprintf("and %d more", len(violations)-maxRecordViolations))
 			}
-			api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", strings.Join(violations, "; "))
-			return nil, false
+			return nil, http.StatusUnprocessableEntity, strings.Join(violations, "; ")
 		}
-		return items, true
+		return items, 0, ""
 	case len(body.Items) > 0:
-		w.Header().Set("Deprecation", legacyIngestDeprecation)
-		return body.Items, true
+		return body.Items, 0, ""
 	}
-	api.WriteError(w, http.StatusBadRequest, "Bad Request", "records cannot be empty")
-	return nil, false
+	return nil, http.StatusBadRequest, "records cannot be empty"
 }
 
 // itemFromRecord maps a DeviceRecord onto the ingest item that

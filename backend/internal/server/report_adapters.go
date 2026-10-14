@@ -116,6 +116,29 @@ func (a overrideProvenance) Decide(ctx context.Context, w *override.Write) overr
 	return override.DecideAutomatedWrite(ctx, a.repo, w)
 }
 
+// edgeLicense adapts the entitlement service to the discovery license check
+// of the collectors' edge data path.
+type edgeLicense struct{ svc *entitlement.Service }
+
+func (l edgeLicense) DiscoveryLicense(ctx context.Context, orgID string) (state, problemType string, err error) {
+	ent, status, err := l.svc.Status(ctx, orgID, entitlement.FeatureDiscovery)
+	if err != nil {
+		return "", "", err
+	}
+	switch status {
+	case entitlement.StatusActive:
+		return discovery.LicenseActive, "", nil
+	case entitlement.StatusExpired:
+		expired := &entitlement.LicenseExpiredError{}
+		if ent.ValidUntil != nil {
+			expired.ValidUntil = *ent.ValidUntil
+		}
+		return discovery.LicenseExpired, expired.ProblemType(), nil
+	default:
+		return discovery.LicenseNotEntitled, (&entitlement.FeatureNotEntitledError{FeatureKey: entitlement.FeatureDiscovery}).ProblemType(), nil
+	}
+}
+
 // ciLookup adapts ci.Repository to the asset.CILookup port (spec §4: the
 // asset reads the linked CI's technical identity read-only).
 type ciLookup struct {

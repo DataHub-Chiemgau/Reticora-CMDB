@@ -419,6 +419,7 @@ type FieldProvenance struct {
 // Handler provides HTTP handlers for discovery endpoints.
 type Handler struct {
 	limits     LimitGuard
+	license    EdgeLicense
 	repo       Repository
 	ciRepo     ci.Repository
 	relRepo    relationship.Repository

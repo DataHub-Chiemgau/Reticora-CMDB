@@ -678,8 +678,12 @@ func (u *uploader) uploadRecordsAt(ctx context.Context, records []plugins.Device
 	return nil
 }
 
-// postPayload compresses and POSTs a single JSON payload to the ingest endpoint.
+// postPayload delivers a single JSON payload: over the edge when the
+// collector holds its NATS channel, else compressed to the HTTP ingest.
 func (u *uploader) postPayload(ctx context.Context, payload []byte) error {
+	if err := u.postViaEdge(ctx, payload); !errors.Is(err, errNoEdge) {
+		return err
+	}
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(payload); err != nil {
@@ -967,6 +971,9 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 	if err != nil {
 		slog.Error("encode heartbeat failed", "error", err)
 		return "", false
+	}
+	if license, ok, handled := heartbeatViaEdge(ctx, body); handled {
+		return license, ok
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {

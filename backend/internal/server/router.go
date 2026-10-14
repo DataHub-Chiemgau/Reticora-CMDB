@@ -359,6 +359,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		WithInstanceFields(repos.CIType).
 		WithLimits(opts.Entitlements)
 	opts.Entitlements.WithUnlicensed(discoveryHandler)
+	// The collectors' edge data path checks the discovery license like the
+	// entitlement middleware on the HTTP ingest (COL-08, ENT-07).
+	if opts.Entitlements != nil {
+		discoveryHandler.WithEdgeLicense(edgeLicense{svc: opts.Entitlements})
+	}
 	if opts.CollectorCA != nil {
 		discoveryHandler.WithCA(opts.CollectorCA)
 	}
