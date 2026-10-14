@@ -5,19 +5,39 @@ package topology
 // when every provider of that type failed; over any other type (hosted_on)
 // one failed provider suffices.
 
-// stepFilter decides whether an impact step over an edge is followed.
-type stepFilter func(e *Edge, rule impactRule, heuristic bool) bool
-
 // providerKey identifies the providers of one dependent over one type.
 type providerKey struct{ dependent, relType string }
 
-// downSet returns the CIs that are down when the failed CIs fail: the
-// failed CIs and, until nothing changes, every dependent whose failure a
-// followed step implies (all providers down for a redundant type, one for
-// the others).
-func downSet(failed map[string]bool, edges []Edge, rules map[string]impactRule, follow stepFilter) map[string]bool {
-	// The providers of each dependent per redundant type, over every edge
-	// of the graph: a provider outside the analysis keeps the dependent up.
+// downLevel is how a failure of the failed CIs affects a CI.
+type downLevel uint8
+
+const (
+	// levelUp: the CI keeps working.
+	levelUp downLevel = iota
+	// levelCertain: the CI goes down over directed steps alone.
+	levelCertain
+	// levelHeuristic: the CI goes down only when undirected network steps
+	// (IMP-03) are followed as well.
+	levelHeuristic
+)
+
+// incidence lists the edges of each CI in graph order, so a step only looks
+// at the edges of the CI it leaves (NFR-02).
+func incidence(edges []Edge) map[string][]int {
+	incident := make(map[string][]int, len(edges))
+	for i := range edges {
+		incident[edges[i].SourceCIID] = append(incident[edges[i].SourceCIID], i)
+		if edges[i].TargetCIID != edges[i].SourceCIID {
+			incident[edges[i].TargetCIID] = append(incident[edges[i].TargetCIID], i)
+		}
+	}
+	return incident
+}
+
+// redundantProviders lists the providers of each dependent per redundant
+// type, over every edge of the graph: a provider outside the analysis
+// keeps the dependent up.
+func redundantProviders(edges []Edge, rules map[string]impactRule) map[providerKey][]string {
 	providers := map[providerKey][]string{}
 	for i := range edges {
 		rule := ruleOf(rules, edges[i].RelType)
@@ -31,47 +51,80 @@ func downSet(failed map[string]bool, edges []Edge, rules map[string]impactRule, 
 			}
 		}
 	}
-	incident := make(map[string][]int, len(edges))
-	for i := range edges {
-		incident[edges[i].SourceCIID] = append(incident[edges[i].SourceCIID], i)
-		if edges[i].TargetCIID != edges[i].SourceCIID {
-			incident[edges[i].TargetCIID] = append(incident[edges[i].TargetCIID], i)
-		}
-	}
-	// A worklist reaches the same fixpoint as repeated scans: a CI only
-	// goes down through an edge of a CI that just went down (NFR-02).
-	down := map[string]bool{}
-	queue := make([]string, 0, len(failed))
-	for id := range failed {
-		down[id] = true
-		queue = append(queue, id)
-	}
-	for len(queue) > 0 {
-		from := queue[0]
-		queue = queue[1:]
-		for _, i := range incident[from] {
-			rule := ruleOf(rules, edges[i].RelType)
-			to, heuristic, ok := impactStep(&edges[i], from, rule)
-			if !ok || down[to] || !follow(&edges[i], rule, heuristic) {
-				continue
-			}
-			if rule.redundant && !allDown(providers[providerKey{to, edges[i].RelType}], down) {
-				continue
-			}
-			down[to] = true
-			queue = append(queue, to)
-		}
-	}
-	return down
+	return providers
 }
 
-func allDown(ids []string, down map[string]bool) bool {
-	for _, id := range ids {
-		if !down[id] {
-			return false
+// closeDown is the downward closure of computeImpact; a variable, so a test
+// counts the closures of one analysis.
+var closeDown = downClosure
+
+// downClosure returns which CIs are down when the failed CIs fail, and how:
+// the failed CIs and, until nothing changes, every dependent whose failure a
+// followed step implies (all providers down for a redundant type, one for
+// the others). A worklist reaches the same fixpoint as repeated scans: a CI
+// only goes down through an edge of a CI that just went down (NFR-02). The
+// first pass takes the directed steps only (levelCertain) and keeps the
+// undirected ones aside; the second retries those and continues from that
+// fixpoint over all steps (levelHeuristic). Every step the first pass did
+// not take is tried again in the second (a redundant one when its last
+// provider goes down), so one closure yields both the closure without and
+// the one with undirected steps.
+func downClosure(failed map[string]bool, edges []Edge, incident map[string][]int, rules map[string]impactRule,
+	follow func(*Edge, impactRule) bool) map[string]downLevel {
+	providers := redundantProviders(edges, rules)
+	level := make(map[string]downLevel, len(failed))
+	queue := make([]string, 0, len(failed))
+	for id := range failed {
+		level[id] = levelCertain
+		queue = append(queue, id)
+	}
+	allDown := func(ids []string) bool {
+		for _, id := range ids {
+			if level[id] == levelUp {
+				return false
+			}
+		}
+		return true
+	}
+	type step struct {
+		edge int
+		to   string
+	}
+	var undirected []step
+	// take marks to as down unless a redundant type keeps a provider up.
+	take := func(i int, to string, rule impactRule, mark downLevel) {
+		if rule.redundant && !allDown(providers[providerKey{to, edges[i].RelType}]) {
+			return
+		}
+		level[to] = mark
+		queue = append(queue, to)
+	}
+	drain := func(mark downLevel) {
+		for len(queue) > 0 {
+			from := queue[0]
+			queue = queue[1:]
+			for _, i := range incident[from] {
+				rule := ruleOf(rules, edges[i].RelType)
+				to, heuristic, ok := impactStep(&edges[i], from, rule)
+				if !ok || level[to] != levelUp || !follow(&edges[i], rule) {
+					continue
+				}
+				if heuristic && mark == levelCertain {
+					undirected = append(undirected, step{i, to})
+					continue
+				}
+				take(i, to, rule, mark)
+			}
 		}
 	}
-	return true
+	drain(levelCertain)
+	for _, s := range undirected {
+		if level[s.to] == levelUp {
+			take(s.edge, s.to, ruleOf(rules, edges[s.edge].RelType), levelHeuristic)
+		}
+	}
+	drain(levelHeuristic)
+	return level
 }
 
 // redundancyFindings classifies the direct dependents of the failed CI:

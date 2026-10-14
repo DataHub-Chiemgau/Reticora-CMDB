@@ -71,9 +71,12 @@ func MemoryRepositories() Repositories {
 		discoveryRepo.SeedCIType(typ, typ)
 	}
 	lifecycleStates := lifecycle.NewMemoryStateStore()
+	cis := ci.NewMemoryRepository()
 	return Repositories{
-		CI:                ci.NewMemoryRepository(),
-		Relationship:      relationship.NewMemoryRepository(),
+		CI: cis,
+		// Graph walks pass only through visible, not deleted CIs (IMP-07),
+		// as in PostgreSQL.
+		Relationship:      relationship.NewMemoryRepository().WithNodeVisibility(ci.VisibleIDs(cis)),
 		Webhook:           webhook.NewMemoryRepository(),
 		WebhookDeliveries: webhook.NewMemoryDeliveryStore(),
 		Discovery:         discoveryRepo,

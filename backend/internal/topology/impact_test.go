@@ -4,8 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -164,16 +169,16 @@ func TestComputeImpactPathsAndCategories(t *testing.T) {
 		{ID: "e5", SourceCIID: "pdu", TargetCIID: "blade", RelType: "contains"},
 	}
 	hits := computeImpact([]string{"pdu"}, edges, impactQuery{depth: maxDepth}, testRules)
-	app := hits["app"]
-	if len(app.path) != 2 || app.path[0].RelType != "powered_by" || app.path[1].RelType != "depends_on" ||
-		app.path[0].FromCIID != "pdu" || app.path[1].ToCIID != "app" {
-		t.Errorf("shortest path to the app: %+v", app.path)
+	app := impactPath(hits, "app")
+	if hits["app"].hops != 2 || len(app) != 2 || app[0].RelType != "powered_by" || app[1].RelType != "depends_on" ||
+		app[0].FromCIID != "pdu" || app[1].ToCIID != "app" {
+		t.Errorf("shortest path to the app: %+v", app)
 	}
-	if blade := hits["blade"]; len(blade.path) != 1 || blade.path[0].Category != "physical" {
-		t.Errorf("projected containment: %+v", blade.path)
+	if blade := impactPath(hits, "blade"); len(blade) != 1 || blade[0].Category != "physical" {
+		t.Errorf("projected containment: %+v", blade)
 	}
 	power := computeImpact([]string{"pdu"}, edges, impactQuery{categories: map[string]bool{"power": true}, depth: maxDepth}, testRules)
-	if len(power) != 1 || len(power["server"].path) != 1 {
+	if len(power) != 1 || power["server"].hops != 1 || len(impactPath(power, "server")) != 1 {
 		t.Errorf("power category: %v", power)
 	}
 	physical := computeImpact([]string{"pdu"}, edges, impactQuery{categories: map[string]bool{"physical": true}, depth: maxDepth}, testRules)
@@ -198,8 +203,8 @@ func TestComputeImpactTwentyHops(t *testing.T) {
 		edges = append(edges, Edge{ID: fmt.Sprintf("e%02d", i), SourceCIID: fmt.Sprintf("n%02d", i+1), TargetCIID: fmt.Sprintf("n%02d", i), RelType: "hosted_on"})
 	}
 	hits := computeImpact([]string{"n00"}, edges, impactQuery{depth: maxDepth}, testRules)
-	if len(hits) != 20 || len(hits["n20"].path) != 20 {
-		t.Errorf("impact over 21 hops: %d CIs, path to n20 %d", len(hits), len(hits["n20"].path))
+	if path := impactPath(hits, "n20"); len(hits) != 20 || hits["n20"].hops != 20 || len(path) != 20 || path[0].FromCIID != "n00" {
+		t.Errorf("impact over 21 hops: %d CIs, path to n20 %+v", len(hits), path)
 	}
 	if _, ok := hits["n21"]; ok {
 		t.Error("the 21st hop was reached")
@@ -209,7 +214,7 @@ func TestComputeImpactTwentyHops(t *testing.T) {
 // countingCIs counts the reads of the CI repository during a graph walk.
 type countingCIs struct {
 	*ci.MemoryRepository
-	single, batch int
+	single, batch, nodes int
 }
 
 func (c *countingCIs) GetByID(ctx context.Context, orgID, id string) (*ci.Item, error) {
@@ -222,9 +227,14 @@ func (c *countingCIs) GetByIDs(ctx context.Context, orgID string, ids []string) 
 	return c.MemoryRepository.GetByIDs(ctx, orgID, ids)
 }
 
+func (c *countingCIs) ListNodes(ctx context.Context, orgID string, ids []string) ([]ci.Node, error) {
+	c.nodes++
+	return c.MemoryRepository.ListNodes(ctx, orgID, ids)
+}
+
 // TestImpactReadsNodesInOneQuery covers NFR-02: the impact of a CI with
-// many dependents reads the root and then all nodes in one batch, not one
-// query per node.
+// many dependents reads the root and then all nodes in one read of the
+// node projection (WP-335), not one query per node and not the full CIs.
 func TestImpactReadsNodesInOneQuery(t *testing.T) {
 	cis := &countingCIs{MemoryRepository: ci.NewMemoryRepository()}
 	rels := relationship.NewMemoryRepository()
@@ -253,15 +263,415 @@ func TestImpactReadsNodesInOneQuery(t *testing.T) {
 	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Count != 30 {
 		t.Fatalf("impact: %d %s", w.Code, w.Body.String())
 	}
-	if body.Impacted[0].Hops != 1 || len(body.Impacted[0].Path) != 1 || body.Impacted[0].Path[0].RelType != "powered_by" {
-		t.Errorf("path: %+v", body.Impacted[0])
+	if first := body.Impacted[0]; first.Hops != 1 || len(first.Path) != 1 || first.Path[0].RelType != "powered_by" ||
+		first.Via != (Via{CIID: pdu, RelType: "powered_by"}) || first.Relay != nil {
+		t.Errorf("path: %+v", first)
 	}
-	if cis.single > 2 || cis.batch != 1 {
-		t.Errorf("CI reads: %d single, %d batch; want the root and one batch", cis.single, cis.batch)
+	if cis.single > 2 || cis.batch != 0 || cis.nodes != 1 {
+		t.Errorf("CI reads: %d single, %d batch, %d node reads; want the root and one node read", cis.single, cis.batch, cis.nodes)
 	}
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, tenantReq("GET", "/api/v1/impact/"+pdu+"?categories=cooling"))
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Errorf("unknown category: %d", w.Code)
 	}
+}
+
+// TestImpactFields covers API-02 on the impact (WP-335): fields= narrows
+// every impacted CI to its id and the selected fields and builds no path
+// unless it is selected; without fields the answer keeps every field of
+// before plus via (API-01, additive only); an unknown field is 422; the
+// deprecated topology path answers in the full form.
+func TestImpactFields(t *testing.T) {
+	ciRepo, relRepo, ids := seed(t)
+	mux := chi.NewRouter()
+	NewHandler(ciRepo, relRepo).RegisterRoutes(mux)
+	impacted := func(path string) []map[string]json.RawMessage {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantReq("GET", path))
+		var body struct {
+			Impacted []map[string]json.RawMessage `json:"impacted"`
+		}
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &body) != nil || len(body.Impacted) != 2 {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+		return body.Impacted
+	}
+	keys := func(entry map[string]json.RawMessage) string {
+		out := make([]string, 0, len(entry))
+		for k := range entry {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return strings.Join(out, ",")
+	}
+	full := "ci_type,client_id,heuristic,hops,id,name,path,status,via"
+	for _, path := range []string{"/api/v1/impact/" + ids["pdu1"], "/api/v1/impact?ci_ids=" + ids["pdu1"],
+		"/api/v1/topology/cis/" + ids["pdu1"] + "/impact?fields=hops"} {
+		for _, entry := range impacted(path) {
+			if got := keys(entry); got != full {
+				t.Errorf("%s: fields %s, want %s", path, got, full)
+			}
+		}
+	}
+	for _, path := range []string{"/api/v1/impact/" + ids["pdu1"] + "?fields=hops,via,heuristic", "/api/v1/impact?fields=hops,,via,%20heuristic&ci_ids=" + ids["pdu1"]} {
+		for _, entry := range impacted(path) {
+			if got := keys(entry); got != "heuristic,hops,id,via" {
+				t.Errorf("%s: fields %s", path, got)
+			}
+			if string(entry["id"]) == `"`+ids["srv1"]+`"` && string(entry["via"]) != `{"ci_id":"`+ids["pdu1"]+`","rel_type":"powered_by"}` {
+				t.Errorf("%s: via of srv1 %s", path, entry["via"])
+			}
+		}
+	}
+	// A selected field keeps the omission rule of the full form: client_id
+	// is left out where it is empty, heuristic false is returned.
+	for _, entry := range impacted("/api/v1/impact/" + ids["pdu1"] + "?fields=id,path,client_id,heuristic") {
+		if got := keys(entry); got != "client_id,heuristic,id,path" {
+			t.Errorf("fields with path: %s", got)
+		}
+	}
+	for _, path := range []string{"/api/v1/impact/" + ids["pdu1"] + "?fields=hops,paths", "/api/v1/impact?fields=x&ci_ids=" + ids["pdu1"]} {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantReq("GET", path))
+		if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), `"field":"fields"`) {
+			t.Errorf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+	}
+}
+
+// TestImpactShortcutKeepsPaths: a heuristic CI whose shortest path passes a
+// certain CI over an undirected shortcut keeps that path and its hops; the
+// certain CI keeps its directed path and names the shortcut as relay
+// (IMP-02, IMP-03, WP-335).
+func TestImpactShortcutKeepsPaths(t *testing.T) {
+	// a fails; b hosted_on a, p hosted_on b (certain, two hops); a
+	// connected_to p (one heuristic hop); x connected_to p.
+	edges := []Edge{
+		{ID: "e1", SourceCIID: "b", TargetCIID: "a", RelType: "hosted_on"},
+		{ID: "e2", SourceCIID: "p", TargetCIID: "b", RelType: "hosted_on"},
+		{ID: "e3", SourceCIID: "a", TargetCIID: "p", RelType: "connected_to"},
+		{ID: "e4", SourceCIID: "x", TargetCIID: "p", RelType: "connected_to"},
+	}
+	for _, depth := range []int{2, maxDepth} {
+		hits := computeImpact([]string{"a"}, edges, impactQuery{depth: depth}, testRules)
+		p, x := hits["p"], hits["x"]
+		if p.heuristic || p.hops != 2 || p.via.via() != (Via{CIID: "b", RelType: "hosted_on"}) ||
+			p.relay == nil || p.relay.via() != (Via{CIID: "a", RelType: "connected_to"}) {
+			t.Errorf("depth %d: certain p %+v", depth, p)
+		}
+		if !x.heuristic || x.hops != 2 || x.via.via() != (Via{CIID: "p", RelType: "connected_to"}) {
+			t.Errorf("depth %d: heuristic x %+v", depth, x)
+		}
+		want := []PathStep{{FromCIID: "a", ToCIID: "p", RelType: "connected_to", Category: "network", Heuristic: true},
+			{FromCIID: "p", ToCIID: "x", RelType: "connected_to", Category: "network", Heuristic: true}}
+		if got := impactPath(hits, "x"); !reflect.DeepEqual(got, want) {
+			t.Errorf("depth %d: path to x %+v", depth, got)
+		}
+		if got := impactPath(hits, "p"); len(got) != 2 || got[0].ToCIID != "b" || got[1].RelType != "hosted_on" {
+			t.Errorf("depth %d: path to p %+v", depth, got)
+		}
+	}
+}
+
+// TestComputeImpactViaRebuildsPaths covers the via encoding of WP-335: on
+// the graphs of these tests and on random graphs with every facet and
+// depth, the impacted CIs and their heuristic flags equal the former
+// computation (legacyComputeImpact), and the path a client rebuilds from
+// via, relay and the type rules alone equals the former path step by step,
+// as does impactPath.
+func TestComputeImpactViaRebuildsPaths(t *testing.T) {
+	rules := maps.Clone(testRules)
+	// An undirected redundant type and a reverse type exercise the
+	// redundancy check on heuristic steps.
+	rules["mesh"] = impactRule{direction: relationshiptype.ImpactUndirected, category: "network", redundant: true}
+	rules["feeds"] = impactRule{direction: relationshiptype.ImpactTargetDependsOnSource, category: "logical"}
+	types := []string{"powered_by", "hosted_on", "connected_to", "contains", "depends_on", "member_of_cluster",
+		"uplink_to", "runs_on", "mesh", "feeds", "monitors", "unknown_type"}
+	type graphCase struct {
+		name   string
+		edges  []Edge
+		failed []string
+	}
+	cases := []graphCase{
+		{"direction", []Edge{
+			{ID: "e1", SourceCIID: "server", TargetCIID: "pdu", RelType: "powered_by"},
+			{ID: "e2", SourceCIID: "vm", TargetCIID: "server", RelType: "hosted_on"},
+			{ID: "e3", SourceCIID: "app", TargetCIID: "vm", RelType: "runs_on"},
+			{ID: "e4", SourceCIID: "app", TargetCIID: "server", RelType: "depends_on"},
+			{ID: "e5", SourceCIID: "pdu", TargetCIID: "blade", RelType: "contains"},
+		}, []string{"pdu"}},
+		{"shortcut", []Edge{
+			{ID: "e1", SourceCIID: "b", TargetCIID: "a", RelType: "hosted_on"},
+			{ID: "e2", SourceCIID: "p", TargetCIID: "b", RelType: "hosted_on"},
+			{ID: "e3", SourceCIID: "a", TargetCIID: "p", RelType: "connected_to"},
+			{ID: "e4", SourceCIID: "x", TargetCIID: "p", RelType: "connected_to"},
+		}, []string{"a"}},
+	}
+	rng := rand.New(rand.NewPCG(335, 2))
+	for g := 0; g < 500; g++ {
+		n := 4 + rng.IntN(11)
+		var edges []Edge
+		for e := 0; e < n+rng.IntN(2*n); e++ {
+			edges = append(edges, Edge{ID: fmt.Sprintf("e%03d", e), SourceCIID: fmt.Sprintf("n%02d", rng.IntN(n)),
+				TargetCIID: fmt.Sprintf("n%02d", rng.IntN(n)), RelType: types[rng.IntN(len(types))]})
+		}
+		var failed []string
+		for f := 0; f < 1+rng.IntN(3); f++ {
+			failed = append(failed, fmt.Sprintf("n%02d", rng.IntN(n)))
+		}
+		cases = append(cases, graphCase{fmt.Sprintf("random %d", g), edges, failed})
+	}
+	queries := []impactQuery{{}, {relType: "connected_to"}, {relType: "powered_by"},
+		{categories: map[string]bool{"power": true, "hosting": true}}, {categories: map[string]bool{"network": true}}}
+	compared, relays := 0, 0
+	for _, c := range cases {
+		for _, base := range queries {
+			for _, depth := range []int{1, 2, 3, maxDepth} {
+				q := base
+				q.depth = depth
+				legacy := legacyComputeImpact(c.failed, c.edges, q, rules)
+				hits := computeImpact(c.failed, c.edges, q, rules)
+				if len(hits) != len(legacy) {
+					t.Fatalf("%s %+v: %d impacted, former %d", c.name, q, len(hits), len(legacy))
+				}
+				// What a client receives: id, heuristic, hops, via, relay.
+				answer := map[string]ImpactNode{}
+				for id, hit := range hits {
+					entry := ImpactNode{Node: Node{ID: id}, Heuristic: hit.heuristic, Hops: hit.hops, Via: hit.via.via()}
+					if hit.relay != nil {
+						relay := hit.relay.via()
+						entry.Relay = &relay
+						relays++
+					}
+					answer[id] = entry
+				}
+				for id, old := range legacy {
+					hit, ok := hits[id]
+					if !ok || hit.heuristic != old.heuristic || hit.hops != len(old.path) {
+						t.Fatalf("%s %+v: %s impacted %v %+v, former %+v", c.name, q, id, ok, hit, old)
+					}
+					if got := rebuildFromVia(answer, id, rules); !reflect.DeepEqual(got, old.path) {
+						t.Fatalf("%s %+v: path to %s rebuilt from via %+v, former %+v", c.name, q, id, got, old.path)
+					}
+					if got := impactPath(hits, id); !reflect.DeepEqual(got, old.path) {
+						t.Fatalf("%s %+v: impactPath to %s %+v, former %+v", c.name, q, id, got, old.path)
+					}
+					compared++
+				}
+			}
+		}
+	}
+	t.Logf("%d impacted CIs compared on %d graphs, %d of them with a relay", compared, len(cases), relays)
+}
+
+// rebuildFromVia rebuilds the path to id the way a client does from the
+// answer: back along via to a failed CI; on the path of a heuristic CI
+// over the relay of a certain CI where it has one. Category and heuristic
+// flag of a step come from the type's rule.
+func rebuildFromVia(answer map[string]ImpactNode, id string, rules map[string]impactRule) []PathStep {
+	target := answer[id]
+	path := make([]PathStep, target.Hops)
+	to := id
+	for i := target.Hops - 1; i >= 0; i-- {
+		at := answer[to]
+		step := at.Via
+		if target.Heuristic && at.Relay != nil {
+			step = *at.Relay
+		}
+		rule := ruleOf(rules, step.RelType)
+		path[i] = PathStep{FromCIID: step.CIID, ToCIID: to, RelType: step.RelType, Category: rule.category,
+			Heuristic: rule.direction == relationshiptype.ImpactUndirected}
+		to = step.CIID
+	}
+	return path
+}
+
+// TestComputeImpactClosesDownOnce: one analysis computes the downward
+// closure once for both walks (WP-335), and its levels equal the former
+// closures without and with undirected steps on random graphs.
+func TestComputeImpactClosesDownOnce(t *testing.T) {
+	calls := 0
+	t.Cleanup(func() { closeDown = downClosure })
+	closeDown = func(failed map[string]bool, edges []Edge, incident map[string][]int, rules map[string]impactRule,
+		follow func(*Edge, impactRule) bool) map[string]downLevel {
+		calls++
+		return downClosure(failed, edges, incident, rules, follow)
+	}
+	edges := []Edge{
+		{ID: "e1", SourceCIID: "server", TargetCIID: "pdu", RelType: "powered_by"},
+		{ID: "e2", SourceCIID: "sw", TargetCIID: "server", RelType: "connected_to"},
+	}
+	if hits := computeImpact([]string{"pdu"}, edges, impactQuery{depth: maxDepth}, testRules); len(hits) != 2 || calls != 1 {
+		t.Errorf("%d impacted, %d closures; want 2 and 1", len(hits), calls)
+	}
+
+	types := []string{"powered_by", "hosted_on", "connected_to", "member_of_cluster", "contains", "depends_on", "mesh"}
+	rules := maps.Clone(testRules)
+	rules["mesh"] = impactRule{direction: relationshiptype.ImpactUndirected, category: "network", redundant: true}
+	rng := rand.New(rand.NewPCG(335, 4))
+	for g := 0; g < 500; g++ {
+		n := 3 + rng.IntN(10)
+		var edges []Edge
+		for e := 0; e < n+rng.IntN(2*n); e++ {
+			edges = append(edges, Edge{ID: fmt.Sprintf("e%03d", e), SourceCIID: fmt.Sprintf("n%02d", rng.IntN(n)),
+				TargetCIID: fmt.Sprintf("n%02d", rng.IntN(n)), RelType: types[rng.IntN(len(types))]})
+		}
+		failed := map[string]bool{fmt.Sprintf("n%02d", rng.IntN(n)): true, fmt.Sprintf("n%02d", rng.IntN(n)): true}
+		follow := func(*Edge, impactRule) bool { return true }
+		level := downClosure(failed, edges, incidence(edges), rules, follow)
+		certain := legacyDownSet(failed, edges, rules, func(_ *Edge, _ impactRule, heuristic bool) bool { return !heuristic })
+		all := legacyDownSet(failed, edges, rules, func(*Edge, impactRule, bool) bool { return true })
+		for i := 0; i < n; i++ {
+			id := fmt.Sprintf("n%02d", i)
+			want := levelUp
+			switch {
+			case certain[id]:
+				want = levelCertain
+			case all[id]:
+				want = levelHeuristic
+			}
+			if level[id] != want {
+				t.Fatalf("graph %d %v failed %v: %s level %d, former closures %d", g, edges, failed, id, level[id], want)
+			}
+		}
+	}
+}
+
+// legacyHit, legacyComputeImpact, legacyStepFilter and legacyDownSet are
+// the impact computation before WP-335 (two closures, a copied path per
+// CI), kept as the oracle of the tests above.
+type legacyHit struct {
+	heuristic bool
+	path      []PathStep
+}
+
+type legacyStepFilter func(e *Edge, rule impactRule, heuristic bool) bool
+
+func legacyComputeImpact(failedIDs []string, edges []Edge, q impactQuery, rules map[string]impactRule) map[string]legacyHit {
+	failed := map[string]bool{}
+	for _, id := range failedIDs {
+		failed[id] = true
+	}
+	incident := make(map[string][]int, len(edges))
+	for i := range edges {
+		incident[edges[i].SourceCIID] = append(incident[edges[i].SourceCIID], i)
+		if edges[i].TargetCIID != edges[i].SourceCIID {
+			incident[edges[i].TargetCIID] = append(incident[edges[i].TargetCIID], i)
+		}
+	}
+	walk := func(withHeuristic bool) map[string][]PathStep {
+		follow := func(e *Edge, rule impactRule) bool {
+			if q.relType != "" && e.RelType != q.relType {
+				return false
+			}
+			return len(q.categories) == 0 || q.categories[rule.category]
+		}
+		down := legacyDownSet(failed, edges, rules, func(e *Edge, rule impactRule, heuristic bool) bool {
+			return follow(e, rule) && (withHeuristic || !heuristic)
+		})
+		paths := map[string][]PathStep{}
+		queue := make([]string, 0, len(failedIDs))
+		for _, id := range failedIDs {
+			if _, ok := paths[id]; !ok {
+				paths[id] = []PathStep{}
+				queue = append(queue, id)
+			}
+		}
+		for len(queue) > 0 {
+			current := queue[0]
+			queue = queue[1:]
+			if q.depth > 0 && len(paths[current]) >= q.depth {
+				continue
+			}
+			for _, i := range incident[current] {
+				rule := ruleOf(rules, edges[i].RelType)
+				if !follow(&edges[i], rule) {
+					continue
+				}
+				to, heuristic, ok := impactStep(&edges[i], current, rule)
+				if !ok || (heuristic && !withHeuristic) || !down[to] {
+					continue
+				}
+				if _, seen := paths[to]; seen {
+					continue
+				}
+				prev := paths[current]
+				path := make([]PathStep, len(prev), len(prev)+1)
+				copy(path, prev)
+				paths[to] = append(path, PathStep{FromCIID: current, ToCIID: to, RelType: edges[i].RelType,
+					Category: rule.category, Heuristic: heuristic})
+				queue = append(queue, to)
+			}
+		}
+		for id := range failed {
+			delete(paths, id)
+		}
+		return paths
+	}
+	certain := walk(false)
+	impacted := map[string]legacyHit{}
+	for id, path := range walk(true) {
+		if sure, ok := certain[id]; ok {
+			impacted[id] = legacyHit{path: sure}
+			continue
+		}
+		impacted[id] = legacyHit{heuristic: true, path: path}
+	}
+	return impacted
+}
+
+func legacyDownSet(failed map[string]bool, edges []Edge, rules map[string]impactRule, follow legacyStepFilter) map[string]bool {
+	providers := map[providerKey][]string{}
+	for i := range edges {
+		rule := ruleOf(rules, edges[i].RelType)
+		if !rule.redundant {
+			continue
+		}
+		for _, from := range []string{edges[i].SourceCIID, edges[i].TargetCIID} {
+			if to, _, ok := impactStep(&edges[i], from, rule); ok {
+				key := providerKey{to, edges[i].RelType}
+				providers[key] = append(providers[key], from)
+			}
+		}
+	}
+	incident := make(map[string][]int, len(edges))
+	for i := range edges {
+		incident[edges[i].SourceCIID] = append(incident[edges[i].SourceCIID], i)
+		if edges[i].TargetCIID != edges[i].SourceCIID {
+			incident[edges[i].TargetCIID] = append(incident[edges[i].TargetCIID], i)
+		}
+	}
+	down := map[string]bool{}
+	queue := make([]string, 0, len(failed))
+	for id := range failed {
+		down[id] = true
+		queue = append(queue, id)
+	}
+	allDown := func(ids []string) bool {
+		for _, id := range ids {
+			if !down[id] {
+				return false
+			}
+		}
+		return true
+	}
+	for len(queue) > 0 {
+		from := queue[0]
+		queue = queue[1:]
+		for _, i := range incident[from] {
+			rule := ruleOf(rules, edges[i].RelType)
+			to, heuristic, ok := impactStep(&edges[i], from, rule)
+			if !ok || down[to] || !follow(&edges[i], rule, heuristic) {
+				continue
+			}
+			if rule.redundant && !allDown(providers[providerKey{to, edges[i].RelType}]) {
+				continue
+			}
+			down[to] = true
+			queue = append(queue, to)
+		}
+	}
+	return down
 }

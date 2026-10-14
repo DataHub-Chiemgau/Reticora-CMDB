@@ -467,3 +467,6 @@ NFR-03;[B], Teilumfang [P5];G1;backend/internal/ci/create_many_integration_test.
 NFR-03;[B], Teilumfang [P5];G1;backend/internal/discovery/consumer_integration_test.go;WP-334
 NFR-03;[B], Teilumfang [P5];G1;tests/load/ingest.js;WP-334
 NFR-10;[Q];G1;tests/load/ingest.js;WP-334
+NFR-02;[B];G1;backend/internal/topology/querybudget_integration_test.go;WP-335
+NFR-02;[B];G1;tests/load/api.js;WP-335
+ABN-02;[Q];G1;backend/internal/topology/querybudget_integration_test.go;WP-335

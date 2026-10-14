@@ -117,6 +117,23 @@ func (r *indexingRepository) GetByIDs(ctx context.Context, orgID string, ids []s
 	return items, nil
 }
 
+// ListNodes forwards the graph projection (NFR-02); without it the nodes
+// come from the batch read.
+func (r *indexingRepository) ListNodes(ctx context.Context, orgID string, ids []string) ([]Node, error) {
+	if reader, ok := r.Repository.(NodeReader); ok {
+		return reader.ListNodes(ctx, orgID, ids)
+	}
+	items, err := r.GetByIDs(ctx, orgID, ids)
+	if err != nil {
+		return nil, err
+	}
+	nodes := make([]Node, 0, len(items))
+	for i := range items {
+		nodes = append(nodes, NodeOf(&items[i]))
+	}
+	return nodes, nil
+}
+
 // ChangeType forwards the type change (CI-11) and indexes the CI again.
 func (r *indexingRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode string) (*TypeChangeResult, error) {
 	changer, ok := r.Repository.(TypeChanger)

@@ -6,7 +6,9 @@ package topology
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 
@@ -84,13 +86,22 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// Several CIs failing at once (IMP-05): redundancy analysis and
 	// maintenance windows.
 	r.Get("/api/v1/impact", h.GetMultiImpact)
-	r.Get("/api/v1/impact/{ci_id}", func(w http.ResponseWriter, r *http.Request) {
-		chi.RouteContext(r.Context()).URLParams.Add("id", chi.URLParam(r, "ci_id"))
-		h.GetImpact(w, r)
-	})
+	r.Get("/api/v1/impact/{ci_id}", h.GetCIImpact)
 	// Directed dependency/impact analysis (spec §15).
 	r.Get("/api/v1/cis/{id}/dependencies", h.GetDependencies)
 	r.Get("/api/v1/cis/{id}/blast-radius", h.GetBlastRadius)
+}
+
+func nodeFromCI(n *ci.Node) Node {
+	return Node{
+		ID:           n.ID,
+		Name:         n.Name,
+		CIType:       n.CITypeID,
+		Status:       n.Status,
+		ClientID:     n.ClientID,
+		SiteID:       n.SiteID,
+		ManagementIP: n.ManagementIP,
+	}
 }
 
 func nodeFromItem(item ci.Item) Node {
@@ -162,14 +173,25 @@ func (h *Handler) GetNeighbors(w http.ResponseWriter, r *http.Request) {
 // undirected and only a network heuristic, so CIs reached only through it
 // are marked heuristic (IMP-03). The rel_type facet (powered_by,
 // connected_to, hosted_on, …) narrows the simulation to one dependency
-// class.
+// class. The deprecated path answers in the full form until its sunset
+// (API-01); fields= narrows the answer on the catalog path only.
 func (h *Handler) GetImpact(w http.ResponseWriter, r *http.Request) {
+	h.writeSingleImpact(w, r, chi.URLParam(r, "id"), false)
+}
+
+// GetCIImpact handles GET /api/v1/impact/{ci_id}, the catalog path of
+// GetImpact (API-05): fields= returns a compact answer (API-02).
+func (h *Handler) GetCIImpact(w http.ResponseWriter, r *http.Request) {
+	h.writeSingleImpact(w, r, chi.URLParam(r, "ci_id"), true)
+}
+
+func (h *Handler) writeSingleImpact(w http.ResponseWriter, r *http.Request, id string, sparse bool) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	h.writeImpact(w, r, t.OrganizationID, []string{chi.URLParam(r, "id")}, true)
+	h.writeImpact(w, r, t.OrganizationID, []string{id}, true, sparse)
 }
 
 // Graph returns the topology graph: from rootCIID up to depth hops (the CI
@@ -214,7 +236,8 @@ func (h *Handler) buildFull(ctx context.Context, orgID string, filter ci.FilterP
 		if err != nil {
 			return Graph{}, err
 		}
-		for _, rel := range rels {
+		for i := range rels {
+			rel := &rels[i]
 			if _, ok := nodeSet[rel.SourceCIID]; !ok {
 				continue
 			}
@@ -259,10 +282,13 @@ func (h *Handler) buildFromRootViaTraversal(ctx context.Context, orgID, rootCIID
 	}
 
 	nodes := map[string]Node{rootCIID: nodeFromItem(*root)}
-	edgeSet := make(map[string]Edge, len(rels))
+	// The traversal returns each edge once, ordered by id; the graph keeps
+	// that order.
+	edges := make([]Edge, 0, len(rels))
 	var ids []string
-	for _, rel := range rels {
-		edgeSet[rel.ID] = edgeFromRel(rel)
+	for i := range rels {
+		rel := &rels[i]
+		edges = append(edges, edgeFromRel(rel))
 		for _, neighborID := range []string{rel.SourceCIID, rel.TargetCIID} {
 			if neighborID != "" && neighborID != rootCIID {
 				ids = append(ids, neighborID)
@@ -275,7 +301,7 @@ func (h *Handler) buildFromRootViaTraversal(ctx context.Context, orgID, rootCIID
 		return Graph{}, err
 	}
 
-	return assembleGraph(nodes, edgeSet, rootCIID, ciType), nil
+	return assembleGraph(nodes, edges, rootCIID, ciType), nil
 }
 
 // buildFromRootIterative performs a breadth-first traversal from rootCIID up
@@ -303,7 +329,8 @@ func (h *Handler) buildFromRootIterative(ctx context.Context, orgID, rootCIID st
 			if err != nil {
 				return Graph{}, err
 			}
-			for _, rel := range rels {
+			for i := range rels {
+				rel := &rels[i]
 				edgeSet[rel.ID] = edgeFromRel(rel)
 				neighborID := rel.TargetCIID
 				if neighborID == id {
@@ -328,11 +355,12 @@ func (h *Handler) buildFromRootIterative(ctx context.Context, orgID, rootCIID st
 		}
 	}
 
-	return assembleGraph(nodes, edgeSet, rootCIID, ciType), nil
+	return assembleGraph(nodes, slices.Collect(maps.Values(edgeSet)), rootCIID, ciType), nil
 }
 
 // resolveNodes adds the visible, not deleted CIs among ids to nodes, in one
-// query when the repository reads in batches.
+// query when the repository reads in batches: the node projection without
+// attributes (NFR-02), else the full CIs.
 func (h *Handler) resolveNodes(ctx context.Context, orgID string, ids []string, nodes map[string]Node) error {
 	missing := make([]string, 0, len(ids))
 	seen := map[string]bool{}
@@ -345,7 +373,17 @@ func (h *Handler) resolveNodes(ctx context.Context, orgID string, ids []string, 
 	if len(missing) == 0 {
 		return nil
 	}
-	if reader, ok := h.ciRepo.(ci.BatchReader); ok {
+	switch reader := h.ciRepo.(type) {
+	case ci.NodeReader:
+		list, err := reader.ListNodes(ctx, orgID, missing)
+		if err != nil {
+			return err
+		}
+		for i := range list {
+			nodes[list[i].ID] = nodeFromCI(&list[i])
+		}
+		return nil
+	case ci.BatchReader:
 		items, err := reader.GetByIDs(ctx, orgID, missing)
 		if err != nil {
 			return err
@@ -363,7 +401,7 @@ func (h *Handler) resolveNodes(ctx context.Context, orgID string, ids []string, 
 	return nil
 }
 
-func assembleGraph(nodes map[string]Node, edgeSet map[string]Edge, rootCIID, ciType string) Graph {
+func assembleGraph(nodes map[string]Node, edges []Edge, rootCIID, ciType string) Graph {
 	included := make(map[string]struct{}, len(nodes))
 	nodeList := make([]Node, 0, len(nodes))
 	for id, node := range nodes {
@@ -374,8 +412,8 @@ func assembleGraph(nodes map[string]Node, edgeSet map[string]Edge, rootCIID, ciT
 		nodeList = append(nodeList, node)
 	}
 
-	edgeList := make([]Edge, 0, len(edgeSet))
-	for _, edge := range edgeSet {
+	edgeList := make([]Edge, 0, len(edges))
+	for _, edge := range edges {
 		if _, ok := included[edge.SourceCIID]; !ok {
 			continue
 		}
@@ -392,7 +430,7 @@ func (h *Handler) listRelationships(ctx context.Context, orgID, ciID string) ([]
 	return rels, err
 }
 
-func edgeFromRel(rel relationship.Relationship) Edge {
+func edgeFromRel(rel *relationship.Relationship) Edge {
 	return Edge{
 		ID:         rel.ID,
 		SourceCIID: rel.SourceCIID,

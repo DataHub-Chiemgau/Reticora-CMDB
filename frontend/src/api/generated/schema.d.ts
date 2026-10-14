@@ -2720,7 +2720,7 @@ export interface paths {
     /**
      * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
      * @deprecated
-     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Powers the Ausfallsimulation in the topology view.
+     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Powers the Ausfallsimulation in the topology view. Answers with every field of the impacted CIs until its sunset; the sparse fieldset (fields) is only offered by the successor.
      */
     get: operations['getCIImpactLegacy'];
     put?: never;
@@ -2760,6 +2760,8 @@ export interface paths {
         rel_type?: string;
         /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical); physical includes the containment projected from parent_ci_id. An unknown category is 422. */
         categories?: string;
+        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
+        fields?: components['parameters']['ImpactFields'];
       };
       header?: never;
       path: {
@@ -7013,6 +7015,7 @@ export interface components {
       rel_type?: string;
       categories?: string[];
       depth?: number;
+      /** @description The impacted CIs, certain ones first, then by name. With fields (API-02) each entry carries its id and the selected fields only. */
       impacted: components['schemas']['ImpactNode'][];
       count: number;
       summary: {
@@ -7031,9 +7034,18 @@ export interface components {
       heuristic: boolean;
       /** @description Length of the shortest path from the failed CI. */
       hops: number;
-      /** @description Shortest path from the failed CI with its relationship types (IMP-02). */
+      via: components['schemas']['ImpactVia'];
+      relay?: components['schemas']['ImpactRelay'];
+      /** @description Shortest path from the failed CI with its relationship types (IMP-02). It equals the path rebuilt from via: from the CI back along via to a failed CI; on the path of a heuristic CI a certain CI on the way continues over its relay where it has one. Each step's category and heuristic flag follow from the relationship type. */
       path: components['schemas']['ImpactPathStep'][];
     };
+    /** @description The last step of the shortest path (IMP-02): the CI the failure comes from and the relationship type it passes. */
+    ImpactVia: {
+      ci_id: string;
+      rel_type: string;
+    };
+    /** @description Only on a certain CI that the shortest path over all relationships (connected_to included) reaches over another step than via: the step the paths of heuristic CIs behind it take. */
+    ImpactRelay: components['schemas']['ImpactVia'];
     ImpactPathStep: {
       from_ci_id: string;
       to_ci_id: string;
@@ -10751,6 +10763,8 @@ export interface components {
     ListSort: string;
     /** @description Comma-separated response fields; `id` is always returned. An unknown field yields 422. */
     ListFields: string;
+    /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
+    ImpactFields: string;
     /** @description Free-text search. */
     ListQ: string;
     /**
@@ -16707,6 +16721,8 @@ export interface operations {
         rel_type?: string;
         /** @description Maximum hops of the impact paths. */
         depth?: number;
+        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
+        fields?: components['parameters']['ImpactFields'];
       };
       header?: never;
       path?: never;
@@ -16726,7 +16742,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description Unknown category or more than 100 CIs. */
+      /** @description Unknown category, unknown field in fields or more than 100 CIs. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -16746,6 +16762,8 @@ export interface operations {
         rel_type?: string;
         /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical); physical includes the containment projected from parent_ci_id. An unknown category is 422. */
         categories?: string;
+        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
+        fields?: components['parameters']['ImpactFields'];
       };
       header?: never;
       path: {
@@ -16767,7 +16785,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description Unknown category. */
+      /** @description Unknown category or unknown field in fields. */
       422: {
         headers: {
           [name: string]: unknown;

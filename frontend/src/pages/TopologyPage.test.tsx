@@ -254,6 +254,8 @@ describe('TopologyPage', () => {
       .map((call) => String(call[0]))
       .find((url) => url.includes('/impact'));
     expect(impactUrl).toContain('ci_ids=ci-1%2Cci-2');
+    // The page needs the ids only: it asks for the compact answer (NFR-02).
+    expect(impactUrl).toContain('fields=name%2Cci_type%2Cstatus%2Cheuristic%2Chops%2Cvia%2Crelay');
     // Both failed CIs can be taken out of the simulation one by one.
     expect(screen.getAllByRole('button', { name: 'Aus Simulation entfernen' })).toHaveLength(2);
   });

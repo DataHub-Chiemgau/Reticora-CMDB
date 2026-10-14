@@ -5000,7 +5000,9 @@ paths:
         reaches the source, over target_depends_on_source the other way,
         none does not propagate. connected_to is undirected and only a
         network heuristic: CIs reached only through it carry heuristic true
-        (IMP-03). Powers the Ausfallsimulation in the topology view.
+        (IMP-03). Powers the Ausfallsimulation in the topology view. Answers
+        with every field of the impacted CIs until its sunset; the sparse
+        fieldset (fields) is only offered by the successor.
       responses:
         '200':
           description: Impact analysis result
@@ -5049,6 +5051,7 @@ paths:
           in: query
           schema: { type: integer, default: 20, maximum: 20 }
           description: Maximum hops of the impact paths.
+        - $ref: '#/components/parameters/ImpactFields'
       responses:
         '200':
           description: Impact analysis result
@@ -5063,7 +5066,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: Unknown category or more than 100 CIs.
+          description: Unknown category, unknown field in fields or more than 100 CIs.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -5090,6 +5093,7 @@ paths:
           Comma-separated relationship categories to follow (network, power,
           hosting, logical, physical); physical includes the containment
           projected from parent_ci_id. An unknown category is 422.
+      - $ref: '#/components/parameters/ImpactFields'
     get:
       operationId: getCIImpact
       tags: [Topology]
@@ -5111,7 +5115,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
-          description: Unknown category.
+          description: Unknown category or unknown field in fields.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -11464,6 +11468,19 @@ components:
       schema:
         type: string
       description: Comma-separated response fields; `id` is always returned. An unknown field yields 422.
+    ImpactFields:
+      name: fields
+      in: query
+      schema:
+        type: string
+      description: >-
+        Sparse fieldset of the impacted CIs (API-02): comma-separated fields
+        of ImpactNode (name, ci_type, status, client_id, site_id,
+        management_ip, heuristic, hops, via, relay, path); `id` is always
+        returned, an unknown field yields 422. Without it every field is
+        returned. Paths are only built when `path` is selected; via and
+        relay rebuild them (see ImpactNode). The topology view asks for
+        `name,ci_type,status,heuristic,hops,via,relay` (NFR-02).
     ListQ:
       name: q
       in: query
@@ -12335,6 +12352,9 @@ components:
         depth: { type: integer }
         impacted:
           type: array
+          description: >-
+            The impacted CIs, certain ones first, then by name. With fields
+            (API-02) each entry carries its id and the selected fields only.
           items: { $ref: '#/components/schemas/ImpactNode' }
         count: { type: integer }
         summary:
@@ -12353,16 +12373,42 @@ components:
       allOf:
         - $ref: '#/components/schemas/TopologyNode'
         - type: object
-          required: [heuristic, hops, path]
+          required: [heuristic, hops, via, path]
           properties:
             heuristic:
               type: boolean
               description: Reached only over an undirected network edge (connected_to), a second-class path (IMP-03).
             hops: { type: integer, description: Length of the shortest path from the failed CI. }
+            via:
+              $ref: '#/components/schemas/ImpactVia'
+            relay:
+              $ref: '#/components/schemas/ImpactRelay'
             path:
               type: array
-              description: Shortest path from the failed CI with its relationship types (IMP-02).
+              description: >-
+                Shortest path from the failed CI with its relationship types
+                (IMP-02). It equals the path rebuilt from via: from the CI
+                back along via to a failed CI; on the path of a heuristic CI
+                a certain CI on the way continues over its relay where it has
+                one. Each step's category and heuristic flag follow from the
+                relationship type.
               items: { $ref: '#/components/schemas/ImpactPathStep' }
+    ImpactVia:
+      type: object
+      required: [ci_id, rel_type]
+      description: >-
+        The last step of the shortest path (IMP-02): the CI the failure comes
+        from and the relationship type it passes.
+      properties:
+        ci_id: { type: string }
+        rel_type: { type: string }
+    ImpactRelay:
+      allOf:
+        - $ref: '#/components/schemas/ImpactVia'
+      description: >-
+        Only on a certain CI that the shortest path over all relationships
+        (connected_to included) reaches over another step than via: the step
+        the paths of heuristic CIs behind it take.
     ImpactPathStep:
       type: object
       required: [from_ci_id, to_ci_id, rel_type, category]

@@ -88,7 +88,7 @@ func TestImpactDirectionAgainstPostgres(t *testing.T) {
 // pgCountingCIs counts the CI reads of an impact walk against PostgreSQL.
 type pgCountingCIs struct {
 	*ci.PGRepository
-	single, batch int
+	single, batch, nodes int
 }
 
 func (c *pgCountingCIs) GetByID(ctx context.Context, orgID, id string) (*ci.Item, error) {
@@ -101,11 +101,16 @@ func (c *pgCountingCIs) GetByIDs(ctx context.Context, orgID string, ids []string
 	return c.PGRepository.GetByIDs(ctx, orgID, ids)
 }
 
+func (c *pgCountingCIs) ListNodes(ctx context.Context, orgID string, ids []string) ([]ci.Node, error) {
+	c.nodes++
+	return c.PGRepository.ListNodes(ctx, orgID, ids)
+}
+
 // TestImpactPathsAgainstPostgres covers IMP-02 and NFR-02 (WP-177) against
 // PostgreSQL: a chain of 21 hosted_on hops is followed for 20 hops with the
 // shortest path and its type sequence; the containment projected from
 // parent_ci_id is in the category physical; the nodes are read in one
-// batch.
+// read of the node projection (WP-335).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestImpactPathsAgainstPostgres(t *testing.T) {
@@ -159,8 +164,8 @@ func TestImpactPathsAgainstPostgres(t *testing.T) {
 			t.Errorf("path to chain 20: %+v", all[i].Path)
 		}
 	}
-	if cis.batch != 1 || cis.single > 2 {
-		t.Errorf("CI reads: %d single, %d batch", cis.single, cis.batch)
+	if cis.nodes != 1 || cis.batch != 0 || cis.single > 2 {
+		t.Errorf("CI reads: %d single, %d batch, %d node reads", cis.single, cis.batch, cis.nodes)
 	}
 	physical := impact("?categories=physical")
 	if len(physical) != 1 || physical[0].ID != blade || physical[0].Path[0].RelType != "contains" {

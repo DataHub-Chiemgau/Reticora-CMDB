@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -246,3 +249,80 @@ func TestHandler_UpdateIsTenantScoped(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// TestVisibleEdgesFailClosed covers IMP-07 for the organization read
+// (WP-335): an edge is kept only when both endpoints are visible; an
+// endpoint missing from the set or empty drops it.
+func TestVisibleEdgesFailClosed(t *testing.T) {
+	edges := []edgeRow{
+		{id: "e1", sourceCIID: "a", targetCIID: "b"},
+		{id: "e2", sourceCIID: "b", targetCIID: "hidden"},
+		{id: "e3", sourceCIID: "unknown", targetCIID: "a"},
+		{id: "e4", sourceCIID: "a", targetCIID: ""},
+		{id: "e5", sourceCIID: "b", targetCIID: "b"},
+	}
+	kept := visibleEdges(edges, edgeRowEnds, map[string]bool{"a": true, "b": true, "hidden": false})
+	if len(kept) != 2 || kept[0].id != "e1" || kept[1].id != "e5" {
+		t.Errorf("kept %+v, want e1 and e5", kept)
+	}
+}
+
+// TestSelectEdgeRowsMatchesSelectTraversal: the organization read selects
+// the same edges as the shared semantics, node limit and depth included.
+func TestSelectEdgeRowsMatchesSelectTraversal(t *testing.T) {
+	var rows []edgeRow
+	var rels []Relationship
+	for i := 0; i < 40; i++ {
+		e := edgeRow{id: fmt.Sprintf("e%02d", i), sourceCIID: fmt.Sprintf("n%02d", i%13), targetCIID: fmt.Sprintf("n%02d", (i*7+3)%13),
+			relType: "connected_to", source: "discovery"}
+		rows = append(rows, e)
+		rels = append(rels, Relationship{ID: e.id, SourceCIID: e.sourceCIID, TargetCIID: e.targetCIID, RelType: e.relType, Source: e.source})
+	}
+	for _, depth := range []int{0, 1, 2, 5} {
+		for _, maxNodes := range []int{1, 3, 8, 100} {
+			got := selectEdgeRows("n00", rows, depth, maxNodes)
+			want := SelectTraversal("n00", rels, depth, maxNodes)
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("depth %d, %d nodes: %+v, want %+v", depth, maxNodes, got, want)
+			}
+		}
+	}
+}
+
+// TestMemoryTraversalVisibility covers IMP-07 in the memory profile
+// (WP-335): with a NodeVisibility an invisible intermediate CI connects
+// nothing, and an error of the check fails the walk.
+func TestMemoryTraversalVisibility(t *testing.T) {
+	ctx := context.Background()
+	hidden := map[string]bool{"b": true}
+	var asked []string
+	repo := NewMemoryRepository().WithNodeVisibility(func(_ context.Context, orgID string, ids []string) (map[string]bool, error) {
+		if orgID != "org-1" {
+			return nil, errors.New("wrong organization")
+		}
+		asked = ids
+		out := map[string]bool{}
+		for _, id := range ids {
+			out[id] = !hidden[id]
+		}
+		return out, nil
+	})
+	for _, e := range [][2]string{{"a", "b"}, {"b", "c"}, {"a", "d"}} {
+		if err := repo.Create(ctx, &Relationship{OrganizationID: "org-1", SourceCIID: e[0], TargetCIID: e[1], RelType: "connected_to"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rels, err := repo.TraverseFrom(ctx, "org-1", "a", 5, MaxTraversalNodes)
+	if err != nil || len(rels) != 1 || rels[0].TargetCIID != "d" || len(asked) != 4 {
+		t.Errorf("walk past an invisible CI: %+v %v (asked for %v)", rels, err, asked)
+	}
+	if _, err := repo.TraverseFrom(ctx, "org-2", "a", 5, MaxTraversalNodes); err != nil {
+		t.Errorf("an organization without edges asks nothing: %v", err)
+	}
+	repo.WithNodeVisibility(func(context.Context, string, []string) (map[string]bool, error) {
+		return nil, errors.New("visibility unavailable")
+	})
+	if _, err := repo.TraverseFrom(ctx, "org-1", "a", 5, MaxTraversalNodes); err == nil {
+		t.Error("a failed visibility check returned a walk")
+	}
+}

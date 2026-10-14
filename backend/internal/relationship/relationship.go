@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -201,6 +202,22 @@ type MemoryRepository struct {
 	mu    sync.RWMutex
 	items map[string]*Relationship
 	seq   int
+	// visible decides which CIs a traversal may pass through (IMP-07).
+	visible NodeVisibility
+}
+
+// NodeVisibility returns which of ids are visible, not deleted CIs of the
+// organization under the caller's scope (IMP-07).
+type NodeVisibility func(ctx context.Context, orgID string, ids []string) (map[string]bool, error)
+
+// WithNodeVisibility makes TraverseFrom pass only through visible, not
+// deleted CIs, like the PostgreSQL repository; without it every endpoint
+// counts as visible.
+func (r *MemoryRepository) WithNodeVisibility(visible NodeVisibility) *MemoryRepository {
+	r.mu.Lock()
+	r.visible = visible
+	r.mu.Unlock()
+	return r
 }
 
 // NewMemoryRepository creates a new in-memory relationship repository.
@@ -302,19 +319,56 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 }
 
 // TraverseFrom walks the in-memory graph from rootCIID with the semantics of
-// SelectTraversal, like the recursive CTE of the PostgreSQL repository. The
-// memory repository has no CI table, so every endpoint counts as visible.
-func (r *MemoryRepository) TraverseFrom(_ context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error) {
+// SelectTraversal, like the PostgreSQL repository. The memory repository
+// has no CI table: with a NodeVisibility it keeps the edges between visible,
+// not deleted CIs (IMP-07), without one every endpoint counts as visible.
+func (r *MemoryRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	edges := make([]Relationship, 0, len(r.items))
 	for _, rel := range r.items {
 		if rel.OrganizationID == orgID {
 			edges = append(edges, *rel)
 		}
 	}
+	visibility := r.visible
+	r.mu.RUnlock()
+
+	if visibility != nil && len(edges) > 0 {
+		seen := map[string]bool{}
+		var ids []string
+		for i := range edges {
+			for _, id := range []string{edges[i].SourceCIID, edges[i].TargetCIID} {
+				if id != "" && !seen[id] {
+					seen[id] = true
+					ids = append(ids, id)
+				}
+			}
+		}
+		visible, err := visibility(ctx, orgID, ids)
+		if err != nil {
+			return nil, err
+		}
+		edges = visibleEdges(edges, relationshipEnds, visible)
+	}
 	return SelectTraversal(rootCIID, edges, maxDepth, maxNodes), nil
+}
+
+func relationshipEnds(rel *Relationship) (source, target string) {
+	return rel.SourceCIID, rel.TargetCIID
+}
+
+// visibleEdges keeps the edges whose source and target are both in visible,
+// so a walk over the result never passes through an invisible or deleted CI
+// (IMP-07). An endpoint missing from visible is invisible (fail closed). It
+// filters edges in place.
+func visibleEdges[E any](edges []E, ends func(*E) (source, target string), visible map[string]bool) []E {
+	kept := edges[:0]
+	for i := range edges {
+		if source, target := ends(&edges[i]); visible[source] && visible[target] {
+			kept = append(kept, edges[i])
+		}
+	}
+	return kept
 }
 
 // MaxTraversalNodes is the node limit of every traversal (topology, impact):
@@ -327,16 +381,28 @@ const MaxTraversalNodes = 10000
 // id) are kept, and the result holds each edge between kept nodes that leaves
 // a node closer than maxDepth, ordered by id.
 func SelectTraversal(rootCIID string, edges []Relationship, maxDepth, maxNodes int) []Relationship {
-	result := make([]Relationship, 0)
+	kept := selectEdges(rootCIID, edges, relationshipEnds, maxDepth, maxNodes)
+	slices.SortFunc(kept, func(a, b int) int { return strings.Compare(edges[a].ID, edges[b].ID) })
+	result := make([]Relationship, 0, len(kept))
+	for _, i := range kept {
+		result = append(result, edges[i])
+	}
+	return result
+}
+
+// selectEdges returns the indexes of the edges SelectTraversal keeps; ends
+// reads the source and target of an edge.
+func selectEdges[E any](rootCIID string, edges []E, ends func(*E) (source, target string), maxDepth, maxNodes int) []int {
 	if maxDepth < 1 || maxNodes < 1 || rootCIID == "" {
-		return result
+		return nil
 	}
 	// Adjacency index: each node expands its own edges only (NFR-02).
 	incident := make(map[string][]int, len(edges))
 	for i := range edges {
-		incident[edges[i].SourceCIID] = append(incident[edges[i].SourceCIID], i)
-		if edges[i].TargetCIID != edges[i].SourceCIID {
-			incident[edges[i].TargetCIID] = append(incident[edges[i].TargetCIID], i)
+		source, target := ends(&edges[i])
+		incident[source] = append(incident[source], i)
+		if target != source {
+			incident[target] = append(incident[target], i)
 		}
 	}
 	depth := map[string]int{rootCIID: 0}
@@ -345,10 +411,10 @@ func SelectTraversal(rootCIID string, edges []Relationship, maxDepth, maxNodes i
 		var next []string
 		for _, id := range frontier {
 			for _, i := range incident[id] {
-				rel := &edges[i]
-				neighbor := rel.TargetCIID
+				source, target := ends(&edges[i])
+				neighbor := target
 				if neighbor == id {
-					neighbor = rel.SourceCIID
+					neighbor = source
 				}
 				if _, seen := depth[neighbor]; seen || neighbor == "" {
 					continue
@@ -360,34 +426,36 @@ func SelectTraversal(rootCIID string, edges []Relationship, maxDepth, maxNodes i
 		frontier = next
 	}
 
-	ids := make([]string, 0, len(depth))
-	for id := range depth {
-		ids = append(ids, id)
-	}
-	sort.Slice(ids, func(i, j int) bool {
-		if depth[ids[i]] != depth[ids[j]] {
-			return depth[ids[i]] < depth[ids[j]]
+	// Beyond the node limit only the nodes closest to the root are kept.
+	kept := func(id string) bool { _, ok := depth[id]; return ok }
+	if len(depth) > maxNodes {
+		ids := make([]string, 0, len(depth))
+		for id := range depth {
+			ids = append(ids, id)
 		}
-		return ids[i] < ids[j]
-	})
-	if len(ids) > maxNodes {
-		ids = ids[:maxNodes]
+		sort.Slice(ids, func(i, j int) bool {
+			if depth[ids[i]] != depth[ids[j]] {
+				return depth[ids[i]] < depth[ids[j]]
+			}
+			return ids[i] < ids[j]
+		})
+		limited := make(map[string]bool, maxNodes)
+		for _, id := range ids[:maxNodes] {
+			limited[id] = true
+		}
+		kept = func(id string) bool { return limited[id] }
 	}
-	kept := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		kept[id] = true
-	}
+	var result []int
 	for i := range edges {
-		rel := &edges[i]
-		if !kept[rel.SourceCIID] || !kept[rel.TargetCIID] {
+		source, target := ends(&edges[i])
+		if !kept(source) || !kept(target) {
 			continue
 		}
-		if min(depth[rel.SourceCIID], depth[rel.TargetCIID]) >= maxDepth {
+		if min(depth[source], depth[target]) >= maxDepth {
 			continue
 		}
-		result = append(result, *rel)
+		result = append(result, i)
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
 }
 

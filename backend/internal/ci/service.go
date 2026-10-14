@@ -42,6 +42,48 @@ type BatchIndexer interface {
 	IndexDocuments(ctx context.Context, docs []Document) error
 }
 
+// Node is the graph projection of a CI that topology and impact read
+// (NFR-02): no attributes, no asset facts.
+type Node struct {
+	ID           string
+	Name         string
+	CITypeID     string
+	Status       string
+	ClientID     string
+	SiteID       string
+	ManagementIP string
+}
+
+// NodeOf projects an item onto its graph node.
+func NodeOf(item *Item) Node {
+	return Node{ID: item.ID, Name: item.Name, CITypeID: item.CITypeID, Status: item.Status,
+		ClientID: item.ClientID, SiteID: item.SiteID, ManagementIP: item.ManagementIP}
+}
+
+// NodeReader reads the graph projection of several CIs in one statement
+// (NFR-02): the visible, not deleted CIs among ids, in no particular order,
+// with the effective name, status and management IP (OVR-01), the values
+// GetByIDs returns.
+type NodeReader interface {
+	ListNodes(ctx context.Context, orgID string, ids []string) ([]Node, error)
+}
+
+// VisibleIDs adapts a NodeReader to the visibility check of a graph walk
+// (IMP-07): which of ids are visible, not deleted CIs.
+func VisibleIDs(reader NodeReader) func(ctx context.Context, orgID string, ids []string) (map[string]bool, error) {
+	return func(ctx context.Context, orgID string, ids []string) (map[string]bool, error) {
+		nodes, err := reader.ListNodes(ctx, orgID, ids)
+		if err != nil {
+			return nil, err
+		}
+		visible := make(map[string]bool, len(nodes))
+		for i := range nodes {
+			visible[nodes[i].ID] = true
+		}
+		return visible, nil
+	}
+}
+
 // Repository defines persistence operations for CIs.
 type Repository interface {
 	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error)

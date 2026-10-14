@@ -14,13 +14,16 @@ import (
 // traversal runs under the caller's full scope and only passes through CIs
 // that are visible and not deleted. An invisible or deleted intermediate
 // node never connects two visible ones, and the PostgreSQL result equals the
-// shared selection of relationship.SelectTraversal.
+// shared selection of relationship.SelectTraversal. Both reads of the walk
+// hold this (WP-335): level by level, and the read of all edges of the
+// organization whose visibility is checked in Go; a containment whose
+// parent is deleted or out of scope, which the structure view does not
+// check, connects nothing either.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestTraversalStaysInsideScope(t *testing.T) {
 	f := scopetest.Seed(t, "4c")
 	bg := context.Background()
-	repo := relationship.NewPGRepository(f.App)
 
 	site1, site2 := f.ID(), f.ID()
 	for _, s := range []string{site1, site2} {
@@ -62,60 +65,26 @@ func TestTraversalStaysInsideScope(t *testing.T) {
 			t.Fatalf("seed edge: %v", err)
 		}
 	}
+	// Containment projected from parent_ci_id: under the deleted CI and
+	// under the CI of client 2; the structure view checks only the child.
+	deletedChild := ciAt("child-of-deleted", f.Client1, site1)
+	foreignChild := ciAt("child-of-foreign", f.Client1, site1)
+	for child, parent := range map[string]string{deletedChild: deleted, foreignChild: foreign} {
+		if _, err := f.Admin.Exec(bg, `UPDATE ci SET parent_ci_id = $2 WHERE id = $1`, child, parent); err != nil {
+			t.Fatalf("contain %s: %v", child, err)
+		}
+	}
 	if _, err := f.Admin.Exec(bg, `UPDATE ci SET deleted_at = now() WHERE id = $1`, deleted); err != nil {
 		t.Fatalf("delete ci: %v", err)
-	}
-
-	reached := func(ctx context.Context, maxNodes int) ([]relationship.Relationship, map[string]bool) {
-		t.Helper()
-		rels, err := repo.TraverseFrom(ctx, f.OrgA, root, 5, maxNodes)
-		if err != nil {
-			t.Fatalf("traverse: %v", err)
-		}
-		nodes := map[string]bool{}
-		for _, r := range rels {
-			nodes[r.SourceCIID], nodes[r.TargetCIID] = true, true
-		}
-		return rels, nodes
-	}
-
-	// Org-wide: the deleted node blocks the walk, everything else is reached.
-	_, nodes := reached(f.OrgCtx(f.OrgA), relationship.MaxTraversalNodes)
-	for id, want := range map[string]bool{
-		foreign: true, hiddenTarget: true, otherSite: true, siteTarget: true, direct: true, second: true,
-		deleted: false, deletedTarget: false,
-	} {
-		if nodes[id] != want {
-			t.Errorf("org-wide: node %s reached=%v, want %v", id, nodes[id], want)
-		}
-	}
-
-	// Client 1: the CI of client 2 does not connect root and hiddenTarget.
-	_, nodes = reached(f.ClientCtx(f.Client1), relationship.MaxTraversalNodes)
-	if nodes[foreign] || nodes[hiddenTarget] {
-		t.Errorf("client 1 reached through a CI of client 2: foreign=%v behind=%v", nodes[foreign], nodes[hiddenTarget])
-	}
-	if !nodes[second] {
-		t.Error("client 1 did not reach the visible chain root-direct-second")
-	}
-
-	// Site 1: the CI at site 2 does not connect root and siteTarget.
-	scope := database.OrgWideScope(f.OrgA, f.User)
-	scope.Sites = database.ScopeIDs(site1)
-	_, nodes = reached(database.ContextWithTenantScope(bg, &scope), relationship.MaxTraversalNodes)
-	if nodes[otherSite] || nodes[siteTarget] {
-		t.Errorf("site 1 reached through a CI of site 2: other=%v behind=%v", nodes[otherSite], nodes[siteTarget])
-	}
-
-	// Organization B sees nothing of the graph.
-	if rels, err := repo.TraverseFrom(f.OrgCtx(f.OrgB), f.OrgB, root, 5, relationship.MaxTraversalNodes); err != nil || len(rels) != 0 {
-		t.Errorf("org B: %d relationships, %v", len(rels), err)
 	}
 
 	// The node limit selects the same edges as the memory semantics.
 	var visible []relationship.Relationship
 	rows, err := f.Admin.Query(bg, `SELECT id::text, source_ci_id::text, target_ci_id::text FROM ci_relationship
-		WHERE organization_id = $1 AND source_ci_id <> $2 AND target_ci_id <> $2`, f.OrgA, deleted)
+		WHERE organization_id = $1 AND source_ci_id <> $2 AND target_ci_id <> $2
+		UNION ALL
+		SELECT md5('contains:' || source_ci_id::text || ':' || target_ci_id::text)::uuid::text, source_ci_id::text, target_ci_id::text
+		FROM ci_structure_edge WHERE rel_type = 'contains' AND organization_id = $1 AND source_ci_id <> $2`, f.OrgA, deleted)
 	if err != nil {
 		t.Fatalf("list relationships: %v", err)
 	}
@@ -127,12 +96,70 @@ func TestTraversalStaysInsideScope(t *testing.T) {
 		visible = append(visible, r)
 	}
 	rows.Close()
-	for _, maxNodes := range []int{1, 2, 4, 6} {
-		got, _ := reached(f.OrgCtx(f.OrgA), maxNodes)
-		want := relationship.SelectTraversal(root, visible, 5, maxNodes)
-		if ids(got) != ids(want) {
-			t.Errorf("maxNodes %d: PostgreSQL %s, memory semantics %s", maxNodes, ids(got), ids(want))
-		}
+
+	for _, mode := range []struct {
+		name string
+		repo *relationship.PGRepository
+	}{
+		{"levels", relationship.NewPGRepository(f.App)},
+		{"organization read", relationship.NewPGRepository(f.App).WithBulkFrontier(0)},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			reached := func(ctx context.Context, maxNodes int) ([]relationship.Relationship, map[string]bool) {
+				t.Helper()
+				rels, err := mode.repo.TraverseFrom(ctx, f.OrgA, root, 5, maxNodes)
+				if err != nil {
+					t.Fatalf("traverse: %v", err)
+				}
+				nodes := map[string]bool{}
+				for _, r := range rels {
+					nodes[r.SourceCIID], nodes[r.TargetCIID] = true, true
+				}
+				return rels, nodes
+			}
+
+			// Org-wide: the deleted node blocks the walk, everything else is reached.
+			_, nodes := reached(f.OrgCtx(f.OrgA), relationship.MaxTraversalNodes)
+			for id, want := range map[string]bool{
+				foreign: true, hiddenTarget: true, otherSite: true, siteTarget: true, direct: true, second: true,
+				foreignChild: true, deleted: false, deletedTarget: false, deletedChild: false,
+			} {
+				if nodes[id] != want {
+					t.Errorf("org-wide: node %s reached=%v, want %v", id, nodes[id], want)
+				}
+			}
+
+			// Client 1: the CI of client 2 does not connect root and hiddenTarget.
+			_, nodes = reached(f.ClientCtx(f.Client1), relationship.MaxTraversalNodes)
+			if nodes[foreign] || nodes[hiddenTarget] || nodes[foreignChild] {
+				t.Errorf("client 1 reached through a CI of client 2: foreign=%v behind=%v contained=%v",
+					nodes[foreign], nodes[hiddenTarget], nodes[foreignChild])
+			}
+			if !nodes[second] || nodes[deletedChild] {
+				t.Errorf("client 1: chain root-direct-second %v, child of the deleted CI %v", nodes[second], nodes[deletedChild])
+			}
+
+			// Site 1: the CI at site 2 does not connect root and siteTarget.
+			scope := database.OrgWideScope(f.OrgA, f.User)
+			scope.Sites = database.ScopeIDs(site1)
+			_, nodes = reached(database.ContextWithTenantScope(bg, &scope), relationship.MaxTraversalNodes)
+			if nodes[otherSite] || nodes[siteTarget] {
+				t.Errorf("site 1 reached through a CI of site 2: other=%v behind=%v", nodes[otherSite], nodes[siteTarget])
+			}
+
+			// Organization B sees nothing of the graph.
+			if rels, err := mode.repo.TraverseFrom(f.OrgCtx(f.OrgB), f.OrgB, root, 5, relationship.MaxTraversalNodes); err != nil || len(rels) != 0 {
+				t.Errorf("org B: %d relationships, %v", len(rels), err)
+			}
+
+			for _, maxNodes := range []int{1, 2, 4, 6, relationship.MaxTraversalNodes} {
+				got, _ := reached(f.OrgCtx(f.OrgA), maxNodes)
+				want := relationship.SelectTraversal(root, visible, 5, maxNodes)
+				if ids(got) != ids(want) {
+					t.Errorf("maxNodes %d: PostgreSQL %s, memory semantics %s", maxNodes, ids(got), ids(want))
+				}
+			}
+		})
 	}
 }
 

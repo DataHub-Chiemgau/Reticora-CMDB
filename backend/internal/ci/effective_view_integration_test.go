@@ -120,3 +120,99 @@ func TestEffectiveViewAndOverrideClear(t *testing.T) {
 		t.Errorf("override of location_id: %v, want ErrNotOverridable", err)
 	}
 }
+
+// TestListNodesProjection covers the node projection of topology and impact
+// (NFR-02, WP-335): ListNodes returns the effective name, status and
+// management IP like GetByIDs, also for an override the CI row does not
+// carry yet (OVR-01), leaves out deleted CIs and CIs outside the caller's
+// scope, and answers the same when many ids make it read the whole
+// organization.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestListNodesProjection(t *testing.T) {
+	f := scopetest.Seed(t, "e3")
+	bg := context.Background()
+	repo := ci.NewPGRepository(f.App)
+	named := f.CI(t, f.OrgA, f.Client1, "node-named")
+	plain := f.CI(t, f.OrgA, f.Client1, "node-plain")
+	other := f.CI(t, f.OrgA, f.Client2, "node-other-client")
+	gone := f.CI(t, f.OrgA, f.Client1, "node-deleted")
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET management_ip = '10.9.8.7', status = 'maintenance' WHERE id = $1`, plain); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET deleted_at = now() WHERE id = $1`, gone); err != nil {
+		t.Fatal(err)
+	}
+	// Overrides written without updating the row: the projection overlays
+	// them like every other read.
+	if _, err := f.Admin.Exec(bg, `INSERT INTO ci_field_value (organization_id, ci_id, field_name, override_value, override_reason, override_at, protected)
+		VALUES ($1, $2, 'name', '"override-name"', 'legacy', now(), true), ($1, $2, 'status', '"retired"', 'legacy', now(), true),
+		       ($1, $2, 'model', '"not projected"', 'legacy', now(), true)`, f.OrgA, named); err != nil {
+		t.Fatal(err)
+	}
+	// Beyond 2,000 ids the projection reads the organization.
+	var many []string
+	rows, err := f.Admin.Query(bg, `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status)
+		SELECT $1, $2, t.id, 'node-bulk-' || g, 'active' FROM generate_series(1, 2001) g
+		JOIN ci_type t ON t.key = 'server' AND t.organization_id IS NULL RETURNING id::text`, f.OrgA, f.Client1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		many = append(many, id)
+	}
+	rows.Close()
+	want := func(ctx context.Context, ids []string) map[string]ci.Node {
+		t.Helper()
+		items, err := repo.GetByIDs(ctx, f.OrgA, ids)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]ci.Node{}
+		for i := range items {
+			out[items[i].ID] = ci.NodeOf(&items[i])
+		}
+		return out
+	}
+	few := []string{named, plain, other, gone, f.ID()}
+	for name, c := range map[string]struct {
+		ctx  context.Context
+		ids  []string
+		seen []string
+	}{
+		"org-wide":           {f.OrgCtx(f.OrgA), few, []string{named, plain, other}},
+		"client 1":           {f.ClientCtx(f.Client1), few, []string{named, plain}},
+		"org-wide, many ids": {f.OrgCtx(f.OrgA), append(append([]string{}, many...), few...), append([]string{named, plain, other}, many...)},
+		"client 1, many ids": {f.ClientCtx(f.Client1), append(append([]string{}, many...), few...), append([]string{named, plain}, many...)},
+	} {
+		nodes, err := repo.ListNodes(c.ctx, f.OrgA, c.ids)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		expected := want(c.ctx, c.ids)
+		if len(nodes) != len(c.seen) || len(expected) != len(c.seen) {
+			t.Errorf("%s: %d nodes, GetByIDs %d, want %d", name, len(nodes), len(expected), len(c.seen))
+		}
+		for _, n := range nodes {
+			if n != expected[n.ID] {
+				t.Errorf("%s: node %+v, GetByIDs %+v", name, n, expected[n.ID])
+			}
+			if n.ID == named && (n.Name != "override-name" || n.Status != "retired") {
+				t.Errorf("%s: overridden node %+v", name, n)
+			}
+			if n.ID == plain && (n.ManagementIP != "10.9.8.7" || n.Status != "maintenance" || n.ClientID != f.Client1) {
+				t.Errorf("%s: plain node %+v", name, n)
+			}
+		}
+	}
+	if nodes, err := repo.ListNodes(f.OrgCtx(f.OrgA), f.OrgA, nil); err != nil || len(nodes) != 0 {
+		t.Errorf("no ids: %+v %v", nodes, err)
+	}
+	if nodes, err := repo.ListNodes(f.OrgCtx(f.OrgB), f.OrgB, few); err != nil || len(nodes) != 0 {
+		t.Errorf("organization B reads %+v %v", nodes, err)
+	}
+}

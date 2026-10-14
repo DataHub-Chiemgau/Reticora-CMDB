@@ -12,7 +12,8 @@ Budgets: Wird ein Budget verfehlt, schlägt der Lauf fehl.
 | `api.js` `detail` | `GET /cis/{id}` | < 300 ms |
 | `api.js` `rack` | `GET /racks/{id}/layout` | < 300 ms |
 | `api.js` `topology` | Topologie des Core-Switches, Tiefe 1 (> 2.000 Knoten) | < 3 s |
-| `api.js` `impact` | Impact des Core-Switches, Tiefe 20 (ganze Organisation) | < 2 s |
+| `api.js` `impact` | Impact des Core-Switches, Tiefe 20 (ganze Organisation), kompakte Antwort der Topologie-Ansicht (`fields=…`, ≤ 250 Byte je betroffenem CI) | < 2 s |
+| `api.js` `impact_full` | derselbe Impact in der vollständigen Antwort (alle Felder und Pfade) | < 2 s |
 | `api.js` `bulk` | Bulk-Statuswechsel von 500 CIs bis Job-Ende | < 30 s |
 | `ingest.js` `load` | `POST /ingest/bulk` mit `RATE` Records/s für `DURATION_S`; Verzögerung Record → sichtbar (Probe-Records während der Last, danach bis alle Records sichtbar sind) | < 30 s |
 | `ingest.js` `spool` | Spool-Flush eines Collectors (COL-05): 10.000 Records als nacheinander gesendete Uploads (`POST /discovery/ingest`, gzip); Abbau-Rate ab Sendeende, Dauer bis alle sichtbar | ≥ 200/s, < 5 min |

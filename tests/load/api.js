@@ -26,6 +26,7 @@ export const options = {
     rack: reads('rack'),
     topology: { ...reads('topology'), vus: 2 },
     impact: { ...reads('impact'), vus: 2 },
+    impact_full: { ...reads('impactFull'), vus: 2 },
     bulk: { executor: 'per-vu-iterations', exec: 'bulk', vus: 1, iterations: 3, maxDuration: '10m' },
   },
   thresholds: {
@@ -36,6 +37,7 @@ export const options = {
     'http_req_duration{name:rack}': ['p(95)<300'],
     'http_req_duration{name:topology}': ['p(95)<3000'],
     'http_req_duration{name:impact}': ['p(95)<2000'],
+    'http_req_duration{name:impact_full}': ['p(95)<2000'],
     bulk_500_duration: ['p(95)<30000'],
     checks: ['rate>0.99'],
   },
@@ -92,8 +94,32 @@ export function topology(data) {
   sleep(1);
 }
 
+// The fields of the impacted CIs the topology view asks for (frontend
+// IMPACT_COMPACT_FIELDS): hops and via instead of paths (NFR-02, WP-335).
+const IMPACT_FIELDS = 'name,ci_type,status,heuristic,hops,via,relay';
+
+// impactCount reads count without parsing megabytes of JSON: the keys of
+// the answer are sorted, so the top-level count comes before the CIs.
+const impactCount = (res) => Number((/"count":(\d+)/.exec(res.body || '') || [])[1] || 0);
+
+// impact is the impact of the core switch as the topology view asks for it:
+// the whole organization at depth 20, at most 250 bytes per impacted CI.
 export function impact(data) {
-  get(`/impact/${data.core}?depth=20`, 'impact');
+  const res = get(`/impact/${data.core}?depth=20&fields=${IMPACT_FIELDS}`, 'impact');
+  const count = impactCount(res);
+  check(res, {
+    'impact covers the organization': () => count > 9000,
+    'impact <= 250 B per impacted CI': (r) => count > 0 && r.body.length / count <= 250,
+  });
+  sleep(1);
+}
+
+// impactFull is the same impact in the full answer (every field and the
+// paths), the default for API clients (API-01).
+export function impactFull(data) {
+  const res = get(`/impact/${data.core}?depth=20`, 'impact_full');
+  const count = impactCount(res);
+  check(res, { 'full impact covers the organization': () => count > 9000 });
   sleep(1);
 }
 

@@ -26,8 +26,8 @@ import (
 // countingCIs counts the CI reads of a request.
 type countingCIs struct {
 	*ci.MemoryRepository
-	mu            sync.Mutex
-	single, batch int
+	mu                   sync.Mutex
+	single, batch, nodes int
 }
 
 func (c *countingCIs) GetByID(ctx context.Context, orgID, id string) (*ci.Item, error) {
@@ -44,9 +44,16 @@ func (c *countingCIs) GetByIDs(ctx context.Context, orgID string, ids []string) 
 	return c.MemoryRepository.GetByIDs(ctx, orgID, ids)
 }
 
+func (c *countingCIs) ListNodes(ctx context.Context, orgID string, ids []string) ([]ci.Node, error) {
+	c.mu.Lock()
+	c.nodes++
+	c.mu.Unlock()
+	return c.MemoryRepository.ListNodes(ctx, orgID, ids)
+}
+
 func (c *countingCIs) reset() {
 	c.mu.Lock()
-	c.single, c.batch = 0, 0
+	c.single, c.batch, c.nodes = 0, 0, 0
 	c.mu.Unlock()
 }
 
@@ -155,8 +162,8 @@ func TestNewQueries(t *testing.T) {
 	if nodes, _ := graph["nodes"].([]any); len(resp.Errors) != 0 || len(nodes) != 21 {
 		t.Errorf("topology: %+v", resp)
 	}
-	if f.cis.single > 2 || f.cis.batch > 2 {
-		t.Errorf("topology CI reads: %d single, %d batch", f.cis.single, f.cis.batch)
+	if f.cis.single > 2 || f.cis.batch > 2 || f.cis.nodes != 1 {
+		t.Errorf("topology CI reads: %d single, %d batch, %d node reads", f.cis.single, f.cis.batch, f.cis.nodes)
 	}
 
 	resp = f.query(t, allRead, `{ rackLayout(rackId: "`+f.rack+`") { rack { name heightUnits } mounts { positionU ci { name } } freeFront freeRear } }`)

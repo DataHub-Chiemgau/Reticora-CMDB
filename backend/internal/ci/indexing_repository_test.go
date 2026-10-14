@@ -3,6 +3,7 @@ package ci
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -135,5 +136,43 @@ func TestIndexingRepository_ForwardsChangeHistory(t *testing.T) {
 	}
 	if total != 0 || len(changes) != 0 {
 		t.Errorf("expected empty forwarded history from memory repo, got %d rows (total %d)", len(changes), total)
+	}
+}
+
+// TestIndexingRepository_ForwardsListNodes: the decorated repository keeps
+// the node projection of topology and impact (NFR-02, WP-335), also when
+// it is wrapped twice as in production; over a repository without it the
+// nodes come from the batch read.
+func TestIndexingRepository_ForwardsListNodes(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+	item := &Item{OrganizationID: "org-1", CITypeID: "type-switch", Name: "sw-1", Status: "active", ClientID: "client-1",
+		SiteID: "site-1", ManagementIP: "10.0.0.1", Attributes: map[string]any{"ports": 48}}
+	gone := &Item{OrganizationID: "org-1", CITypeID: "type-switch", Name: "gone", Status: "active"}
+	for _, it := range []*Item{item, gone} {
+		if err := repo.Create(ctx, it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.Delete(ctx, "org-1", gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	want := []Node{{ID: item.ID, Name: "sw-1", CITypeID: "type-switch", Status: item.Status, ClientID: "client-1", SiteID: "site-1",
+		ManagementIP: "10.0.0.1"}}
+	for name, decorated := range map[string]Repository{
+		"twice":    NewIndexingRepository(NewIndexingRepository(repo, &recordingIndexer{}), &recordingIndexer{}),
+		"fallback": NewIndexingRepository(struct{ Repository }{repo}, &recordingIndexer{}),
+	} {
+		reader, ok := decorated.(NodeReader)
+		if !ok {
+			t.Fatalf("%s: the decorated repository must implement NodeReader", name)
+		}
+		nodes, err := reader.ListNodes(ctx, "org-1", []string{item.ID, gone.ID, "missing"})
+		if err != nil || !reflect.DeepEqual(nodes, want) {
+			t.Errorf("%s: %+v %v, want %+v", name, nodes, err, want)
+		}
+		if nodes, err = reader.ListNodes(ctx, "org-2", []string{item.ID}); err != nil || len(nodes) != 0 {
+			t.Errorf("%s: another organization reads %+v %v", name, nodes, err)
+		}
 	}
 }

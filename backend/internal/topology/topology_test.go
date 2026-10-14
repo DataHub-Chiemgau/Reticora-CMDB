@@ -20,11 +20,12 @@ func tenantReq(method, path string) *http.Request {
 }
 
 // seed builds a small graph: sw1 -connected_to- srv1, srv1 -powered_by- pdu1,
-// plus an isolated CI in another org that must never appear.
+// plus an isolated CI in another org that must never appear. The walks
+// pass only through visible, not deleted CIs (IMP-07).
 func seed(t *testing.T) (*ci.MemoryRepository, *relationship.MemoryRepository, map[string]string) {
 	t.Helper()
 	ciRepo := ci.NewMemoryRepository()
-	relRepo := relationship.NewMemoryRepository()
+	relRepo := relationship.NewMemoryRepository().WithNodeVisibility(ci.VisibleIDs(ciRepo))
 	ids := map[string]string{}
 
 	add := func(name, ctype, client string) string {
@@ -159,6 +160,51 @@ func TestTopologyUnauthorized(t *testing.T) {
 	mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/topology", nil))
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+// TestTopologySkipsDeletedCIs covers IMP-07 and CI-05 in the memory
+// profile (WP-335): a deleted CI does not connect the CIs behind it, so a
+// CI reachable within the depth only through it stays out of the topology.
+func TestTopologySkipsDeletedCIs(t *testing.T) {
+	ciRepo, relRepo, ids := seed(t)
+	add := func(name string) string {
+		item := &ci.Item{OrganizationID: "org-1", Name: name, CITypeID: "server", Status: "active"}
+		if err := ciRepo.Create(context.Background(), item); err != nil {
+			t.Fatal(err)
+		}
+		return item.ID
+	}
+	// sw1 - gone - far (two hops), and the long way sw1 - srv1 - mid - far.
+	gone, mid, far := add("gone"), add("mid"), add("far")
+	for _, e := range [][2]string{{ids["sw1"], gone}, {gone, far}, {ids["srv1"], mid}, {mid, far}} {
+		if err := relRepo.Create(context.Background(), &relationship.Relationship{OrganizationID: "org-1", SourceCIID: e[0], TargetCIID: e[1], RelType: "connected_to"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mux := chi.NewRouter()
+	NewHandler(ciRepo, relRepo).RegisterRoutes(mux)
+	nodes := func() map[string]bool {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantReq("GET", "/api/v1/topology?root_ci_id="+ids["sw1"]+"&depth=2"))
+		var g Graph
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &g) != nil {
+			t.Fatalf("topology: %d %s", w.Code, w.Body.String())
+		}
+		out := map[string]bool{}
+		for _, n := range g.Nodes {
+			out[n.ID] = true
+		}
+		return out
+	}
+	if before := nodes(); !before[gone] || !before[far] {
+		t.Fatalf("before the delete: %v", before)
+	}
+	if err := ciRepo.Delete(context.Background(), "org-1", gone); err != nil {
+		t.Fatal(err)
+	}
+	if after := nodes(); after[gone] || after[far] || !after[mid] {
+		t.Errorf("after the delete: gone %v, far %v (behind the deleted CI), mid %v", after[gone], after[far], after[mid])
 	}
 }
 

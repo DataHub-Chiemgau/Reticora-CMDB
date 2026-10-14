@@ -368,6 +368,91 @@ func (r *PGRepository) GetByIDs(ctx context.Context, orgID string, ids []string)
 	return items, err
 }
 
+// nodeOverrideFields are the override columns among the fields of a Node.
+var nodeOverrideFields = []string{"name", "status", "management_ip"}
+
+// nodeOrgReadAbove: a projection of more CIs reads the nodes of the whole
+// organization and keeps the requested ones; beyond it, sending and
+// planning the id array costs more than that read at the reference size of
+// NFR-10 (10,000 objects). A larger organization pays one more read of its
+// CIs, as the traversal that reached so many CIs reads all its edges.
+const nodeOrgReadAbove = 2000
+
+// nodeQuery reads the node projection with the overrides of the projected
+// fields ($2); the two %s narrow the overrides and the CIs.
+const nodeQuery = `SELECT c.id::text, c.name, c.ci_type_id::text, c.status, COALESCE(c.client_id::text, ''),
+		COALESCE(c.site_id::text, ''), COALESCE(host(c.management_ip), ''), o.overrides
+	FROM ci c
+	LEFT JOIN (SELECT f.ci_id, jsonb_object_agg(f.field_name, f.override_value) AS overrides
+		FROM ci_field_value f
+		WHERE %s AND f.field_name = ANY($2::text[]) AND f.override_at IS NOT NULL
+		GROUP BY f.ci_id) o ON o.ci_id = c.id
+	WHERE c.organization_id = $1 AND %s AND c.deleted_at IS NULL`
+
+var (
+	nodesByID  = fmt.Sprintf(nodeQuery, "f.ci_id = ANY($3::uuid[])", "c.id = ANY($3::uuid[])")
+	nodesByOrg = fmt.Sprintf(nodeQuery, "f.organization_id = $1", "true")
+)
+
+// ListNodes implements NodeReader: the projection of the visible, not
+// deleted CIs among ids with their overrides in one statement, without
+// attributes and asset facts.
+func (r *PGRepository) ListNodes(ctx context.Context, orgID string, ids []string) ([]Node, error) {
+	nodes := []Node{}
+	if len(ids) == 0 {
+		return nodes, nil
+	}
+	query, args := nodesByID, []any{orgID, nodeOverrideFields, ids}
+	var wanted map[string]bool
+	if len(ids) > nodeOrgReadAbove {
+		query, args = nodesByOrg, args[:2]
+		wanted = make(map[string]bool, len(ids))
+		for _, id := range ids {
+			wanted[id] = true
+		}
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list ci nodes: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var n Node
+			var overrides map[string]any
+			if err = rows.Scan(&n.ID, &n.Name, &n.CITypeID, &n.Status, &n.ClientID, &n.SiteID, &n.ManagementIP, &overrides); err != nil {
+				return fmt.Errorf("scan ci node: %w", err)
+			}
+			if wanted != nil && !wanted[n.ID] {
+				continue
+			}
+			for field, value := range overrides {
+				applyNodeOverride(&n, field, value)
+			}
+			nodes = append(nodes, n)
+		}
+		return rows.Err()
+	})
+	return nodes, err
+}
+
+// applyNodeOverride sets an overridden field of a node like applyOverride
+// on an item, so both reads return the same effective value.
+func applyNodeOverride(n *Node, field string, value any) {
+	text := ""
+	if value != nil {
+		text = fmt.Sprint(value)
+	}
+	switch field {
+	case "name":
+		n.Name = text
+	case "status":
+		n.Status = text
+	case "management_ip":
+		n.ManagementIP = text
+	}
+}
+
 // Create inserts a new CI.
 func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 	err := database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
