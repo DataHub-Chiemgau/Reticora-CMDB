@@ -17,7 +17,8 @@ const (
 	// WorkPackagesEnv lists the WPs of the pull request (e.g. "WP-005 WP-006");
 	// every row the plan prescribes for them must be present.
 	WorkPackagesEnv = "TRACEABILITY_WPS"
-	// RequireCompleteEnv=1 makes missing [B]/[Pn]/[A] IDs blocking (gate G1).
+	// RequireCompleteEnv=1 also makes missing [Pn]/[A] IDs blocking; missing
+	// [B]/[Q] IDs block since gate G1 regardless (WP-213).
 	RequireCompleteEnv = "TRACEABILITY_REQUIRE_COMPLETE"
 )
 
@@ -229,6 +230,22 @@ func TestMissingListsRequiredIDsWithoutRow(t *testing.T) {
 	}
 }
 
+func TestRequiredForGateSelectsBaselineAndQualityTags(t *testing.T) {
+	c := Catalog{
+		"A-01": "[B]", "A-02": "[P3]", "A-03": "[A]", "A-04": "[Q]", "A-05": "[O]",
+		"A-06": "[B], Teilumfang [P5]", "A-07": "[P2–P4, A]", "A-08": "B/G1", "A-09": "nicht geliefert",
+		"A-10": "", "A-11": "[Q], Bezug GA", "A-12": "[B–P4], [A]", "A-13": "B/G1, Teil P2/G2", "A-14": "P2/G2",
+	}
+	got := c.RequiredForGate()
+	want := []string{"A-01", "A-04", "A-06", "A-08", "A-11", "A-12", "A-13"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("RequiredForGate() = %v, want %v", got, want)
+	}
+	if got := MissingForGate([]Entry{{ID: "A-01"}, {ID: "A-04"}}, c); strings.Join(got, ",") != "A-06,A-08,A-11,A-12,A-13" {
+		t.Fatalf("MissingForGate() = %v", got)
+	}
+}
+
 func TestWorkPackagesIn(t *testing.T) {
 	got := WorkPackagesIn("WP-005: Traceability; Arbeitspakete: WP-005, WP-006 und WP-1234")
 	want := []string{"WP-005", "WP-006", "WP-123"}
@@ -276,6 +293,11 @@ func TestTraceabilityFile(t *testing.T) {
 		errs = append(errs, CheckWorkPackages(entries, plan, wps)...)
 	}
 
+	gate := MissingForGate(entries, catalog)
+	t.Logf("gate G1: %d of %d [B]/[Q] IDs traced", len(catalog.RequiredForGate())-len(gate), len(catalog.RequiredForGate()))
+	if len(gate) > 0 {
+		errs = append(errs, &missingError{what: "[B]/[Q] IDs", ids: gate})
+	}
 	required := catalog.Required()
 	missing := Missing(entries, catalog)
 	t.Logf("%d rows, %d known IDs; %d of %d [B]/[Pn]/[A] IDs traced, %d without a row",
@@ -283,7 +305,7 @@ func TestTraceabilityFile(t *testing.T) {
 	if len(missing) > 0 {
 		t.Logf("IDs without a row: %s", strings.Join(missing, " "))
 		if os.Getenv(RequireCompleteEnv) == "1" {
-			errs = append(errs, &missingError{ids: missing})
+			errs = append(errs, &missingError{what: "required IDs", ids: missing})
 		}
 	}
 
@@ -292,10 +314,13 @@ func TestTraceabilityFile(t *testing.T) {
 	}
 }
 
-type missingError struct{ ids []string }
+type missingError struct {
+	what string
+	ids  []string
+}
 
 func (e *missingError) Error() string {
-	return "required IDs without traceability row: " + strings.Join(e.ids, " ")
+	return e.what + " without traceability row: " + strings.Join(e.ids, " ")
 }
 
 func readInto(t *testing.T, name string, parse func(io.Reader) error) {

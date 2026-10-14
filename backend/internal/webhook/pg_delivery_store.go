@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -111,7 +112,7 @@ func (s *PGDeliveryStore) CountDue(ctx context.Context, now time.Time) (int, err
 	err := database.WithSystem(ctx, s.pool, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
 			SELECT count(*) FROM webhook_delivery
-			WHERE status IN ('pending', 'retrying') AND next_retry_at IS NOT NULL AND next_retry_at <= $1`, now).Scan(&n)
+			WHERE status IN ('pending', 'failed', 'delivering') AND next_retry_at IS NOT NULL AND next_retry_at <= $1`, now).Scan(&n)
 	})
 	if err != nil {
 		return 0, fmt.Errorf("count due webhook deliveries: %w", err)
@@ -129,7 +130,7 @@ func (s *PGDeliveryStore) ClaimDue(ctx context.Context, now time.Time, limit int
 		rows, err := tx.Query(ctx, `
 			SELECT DISTINCT organization_id::text
 			FROM webhook_delivery
-			WHERE status IN ('pending', 'retrying')
+			WHERE status IN ('pending', 'failed', 'delivering')
 			  AND next_retry_at IS NOT NULL
 			  AND next_retry_at <= $1`, now)
 		if err != nil {
@@ -170,7 +171,7 @@ func (s *PGDeliveryStore) claimDueForOrg(ctx context.Context, orgID string, now 
 			WITH due AS (
 				SELECT id
 				FROM webhook_delivery
-				WHERE status IN ('pending', 'retrying')
+				WHERE status IN ('pending', 'failed', 'delivering')
 				  AND next_retry_at IS NOT NULL
 				  AND next_retry_at <= $1
 				ORDER BY next_retry_at
@@ -178,7 +179,7 @@ func (s *PGDeliveryStore) claimDueForOrg(ctx context.Context, orgID string, now 
 				FOR UPDATE SKIP LOCKED
 			)
 			UPDATE webhook_delivery d
-			SET status = 'retrying',
+			SET status = 'delivering',
 			    next_retry_at = $3,
 			    updated_at = now()
 			FROM due
@@ -424,4 +425,48 @@ func nullableString(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+// CountDeadSince counts the dead deliveries of a subscription since a time
+// (WHK-01: three within 24 hours switch the subscription off).
+func (s *PGDeliveryStore) CountDeadSince(ctx context.Context, orgID, subscriptionID string, since time.Time) (int, error) {
+	var n int
+	err := database.WithTenant(ctx, s.pool, orgScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM webhook_dead_letter
+			WHERE organization_id = $1 AND subscription_id = $2 AND dead_at >= $3`, orgID, subscriptionID, since).Scan(&n)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count dead webhook deliveries: %w", err)
+	}
+	return n, nil
+}
+
+// Requeue puts a failed or dead delivery back into the queue with a fresh
+// retry budget and removes its dead letter (WHK-01).
+func (s *PGDeliveryStore) Requeue(ctx context.Context, orgID, subscriptionID, deliveryID string, now time.Time) (DeliveryRecord, error) {
+	var rec DeliveryRecord
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var status string
+		err := tx.QueryRow(ctx, `SELECT status FROM webhook_delivery WHERE id = $1 AND subscription_id = $2 FOR UPDATE`,
+			deliveryID, subscriptionID).Scan(&status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
+		}
+		if err != nil {
+			return fmt.Errorf("read webhook delivery: %w", err)
+		}
+		if status != StatusFailed && status != StatusDead {
+			return ErrNotRetryable
+		}
+		if _, err = tx.Exec(ctx, `DELETE FROM webhook_dead_letter WHERE delivery_id = $1`, deliveryID); err != nil {
+			return fmt.Errorf("remove dead letter: %w", err)
+		}
+		return tx.QueryRow(ctx, `UPDATE webhook_delivery
+			SET status = 'pending', attempt = 0, error = NULL, next_retry_at = $2, updated_at = now()
+			WHERE id = $1
+			RETURNING id::text, organization_id::text, subscription_id::text, event, status, attempt, max_attempts, created_at`,
+			deliveryID, now).Scan(&rec.ID, &rec.OrganizationID, &rec.SubscriptionID, &rec.Event, &rec.Status,
+			&rec.Attempt, &rec.MaxAttempts, &rec.CreatedAt)
+	})
+	return rec, err
 }

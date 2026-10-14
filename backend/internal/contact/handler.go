@@ -176,7 +176,7 @@ func (h *Handler) Link(w http.ResponseWriter, r *http.Request) {
 	}
 	relType := req.RelationshipType
 	if relType == "" {
-		relType = "responsible"
+		relType = "owner"
 	}
 	if !ValidRelationshipTypes[relType] {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid relationship_type")

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -22,8 +23,19 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
 
+// retrySchedule is the backoff of WHK-01: the delays before the second to
+// the sixth attempt; after the sixth failed attempt the delivery is dead.
+var retrySchedule = []time.Duration{30 * time.Second, 2 * time.Minute, 10 * time.Minute, time.Hour, 6 * time.Hour}
+
+// Deactivation of WHK-01: a subscription with deadLimit dead deliveries
+// within deadWindow is deactivated and its owners are notified.
 const (
-	defaultMaxAttempts  = 5
+	deadLimit  = 3
+	deadWindow = 24 * time.Hour
+)
+
+const (
+	defaultMaxAttempts  = 6
 	defaultBaseBackoff  = 30 * time.Second
 	defaultMaxBackoff   = time.Hour
 	defaultPollInterval = 15 * time.Second
@@ -66,6 +78,9 @@ type DispatcherOptions struct {
 	// attempt up to MaxBackoff.
 	BaseBackoff time.Duration
 	MaxBackoff  time.Duration
+	// schedule replaces BaseBackoff/MaxBackoff with fixed delays per attempt
+	// (WHK-01); set when neither is given.
+	schedule []time.Duration
 	// PollInterval controls how often the retry worker looks for due
 	// deliveries. A negative value disables the worker.
 	PollInterval time.Duration
@@ -171,6 +186,10 @@ func NewDispatcher(repo Repository, client *http.Client, opts ...DispatcherOptio
 	}
 	if options.MaxAttempts <= 0 {
 		options.MaxAttempts = defaultMaxAttempts
+	}
+	// Without an explicit backoff the schedule of WHK-01 applies.
+	if options.BaseBackoff <= 0 && options.MaxBackoff <= 0 {
+		options.schedule = retrySchedule
 	}
 	if options.BaseBackoff <= 0 {
 		options.BaseBackoff = defaultBaseBackoff
@@ -388,6 +407,28 @@ func (d *Dispatcher) ListDeliveries(ctx context.Context, orgID, subscriptionID s
 	return d.store.ListBySubscription(ctx, orgID, subscriptionID, page)
 }
 
+// ErrNotRetryable reports a delivery that is not failed or dead.
+var ErrNotRetryable = errors.New("only a failed or dead delivery can be retried")
+
+// requeuer puts a failed or dead delivery back into the queue (PostgreSQL
+// and memory store).
+type requeuer interface {
+	Requeue(ctx context.Context, orgID, subscriptionID, deliveryID string, now time.Time) (DeliveryRecord, error)
+}
+
+// Retry queues a failed or dead delivery for a new round of attempts
+// (WHK-01); the retry worker sends it with the next poll.
+func (d *Dispatcher) Retry(ctx context.Context, orgID, subscriptionID, deliveryID string) (DeliveryRecord, error) {
+	if d == nil || d.store == nil {
+		return DeliveryRecord{}, ErrNoDeliveryStore
+	}
+	r, ok := d.store.(requeuer)
+	if !ok {
+		return DeliveryRecord{}, ErrNoDeliveryStore
+	}
+	return r.Requeue(ctx, orgID, subscriptionID, deliveryID, d.now())
+}
+
 // ListDeadLetters returns the dead-letter queue of a tenant.
 func (d *Dispatcher) ListDeadLetters(ctx context.Context, orgID string, page api.PaginationParams) ([]DeadLetter, int, error) {
 	if d == nil || d.store == nil {
@@ -537,38 +578,39 @@ func (d *Dispatcher) finalize(ctx context.Context, rec DeliveryRecord, statusCod
 
 	switch {
 	case err == nil:
-		rec.Status = StatusSuccess
+		rec.Status = StatusDelivered
 		rec.Error = ""
 		rec.DeliveredAt = &now
 		rec.NextRetryAt = nil
 	case exhausted:
-		rec.Status = StatusFailed
+		rec.Status = StatusDead
 		rec.Error = err.Error()
 		rec.NextRetryAt = nil
 	default:
 		next := now.Add(d.backoff(rec.Attempt))
-		rec.Status = StatusRetrying
+		rec.Status = StatusFailed
 		rec.Error = err.Error()
 		rec.NextRetryAt = &next
 	}
 
 	// A delivery that exhausted its retry budget leaves the active queue and
 	// is preserved in the dead-letter queue for operator inspection/replay.
-	if rec.Status == StatusFailed {
+	if rec.Status == StatusDead {
 		if dlqErr := d.store.MoveToDeadLetter(ctx, rec); dlqErr != nil {
 			slog.Error("move webhook delivery to dead-letter queue failed",
 				"error", dlqErr, "delivery_id", rec.ID, "organization_id", rec.OrganizationID)
-			// Fall back to marking the delivery failed so the outcome is
-			// still recorded even though the dead letter could not be written.
+			// Fall back to marking the delivery dead so the outcome is still
+			// recorded even though the dead letter could not be written.
 			if updateErr := d.store.Update(ctx, rec); updateErr != nil {
 				slog.Error("update webhook delivery failed",
 					"error", updateErr, "delivery_id", rec.ID, "organization_id", rec.OrganizationID)
 			}
 		}
+		disabled := d.deactivateOnRepeatedDeath(ctx, &rec, now)
 		if d.opts.Events != nil {
 			if err := d.opts.Events.Emit(ctx, &events.Event{OrgID: rec.OrganizationID, Type: events.WebhookDead, EntityID: rec.SubscriptionID,
 				Data: map[string]any{"delivery_id": rec.ID, "subscription_id": rec.SubscriptionID, "event": rec.Event,
-					"attempts": rec.Attempt, "last_error": rec.Error}}); err != nil {
+					"attempts": rec.Attempt, "last_error": rec.Error, "subscription_disabled": disabled}}); err != nil {
 				slog.Error("report dead webhook delivery", "error", err, "delivery_id", rec.ID)
 			}
 		}
@@ -581,10 +623,55 @@ func (d *Dispatcher) finalize(ctx context.Context, rec DeliveryRecord, statusCod
 	}
 }
 
+// deadCounter counts the dead deliveries of a subscription (PostgreSQL and
+// memory store).
+type deadCounter interface {
+	CountDeadSince(ctx context.Context, orgID, subscriptionID string, since time.Time) (int, error)
+}
+
+// deactivator switches a subscription off (PostgreSQL and memory
+// repository).
+type deactivator interface {
+	Deactivate(ctx context.Context, orgID, id string) error
+}
+
+// deactivateOnRepeatedDeath switches a subscription off once deadLimit of
+// its deliveries died within deadWindow (WHK-01); the webhook.dead event of
+// the last one tells the owners (webhook managers, NTF-05). It reports
+// whether the subscription was switched off.
+func (d *Dispatcher) deactivateOnRepeatedDeath(ctx context.Context, rec *DeliveryRecord, now time.Time) bool {
+	counter, ok := d.store.(deadCounter)
+	if !ok {
+		return false
+	}
+	off, ok := d.repo.(deactivator)
+	if !ok {
+		return false
+	}
+	dead, err := counter.CountDeadSince(ctx, rec.OrganizationID, rec.SubscriptionID, now.Add(-deadWindow))
+	if err != nil {
+		slog.Error("count dead webhook deliveries", "error", err, "subscription_id", rec.SubscriptionID)
+		return false
+	}
+	if dead < deadLimit {
+		return false
+	}
+	if err := off.Deactivate(ctx, rec.OrganizationID, rec.SubscriptionID); err != nil {
+		slog.Error("deactivate webhook subscription", "error", err, "subscription_id", rec.SubscriptionID)
+		return false
+	}
+	slog.Warn("webhook subscription deactivated", "event", "webhook.subscription.disabled",
+		"organization_id", rec.OrganizationID, "subscription_id", rec.SubscriptionID, "dead_deliveries", dead)
+	return true
+}
+
 // backoff returns the delay before the attempt following the given one.
 func (d *Dispatcher) backoff(attempt int) time.Duration {
 	if attempt < 1 {
 		attempt = 1
+	}
+	if n := len(d.opts.schedule); n > 0 {
+		return d.opts.schedule[min(attempt, n)-1]
 	}
 	delay := d.opts.BaseBackoff
 	for i := 1; i < attempt; i++ {
@@ -604,13 +691,21 @@ func (d *Dispatcher) send(job deliveryJob) (int, time.Duration, error) {
 		return 0, time.Since(start), err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	signature := signPayload(job.sub.Secret, job.payload)
+	// The headers of WHK-01; the X-Webhook-* names stay for subscribers of
+	// the earlier releases.
+	req.Header.Set("X-Reticora-Event", job.event)
+	req.Header.Set("X-Reticora-Delivery", job.deliveryID)
+	req.Header.Set("X-Reticora-Signature", signature)
 	req.Header.Set("X-Webhook-Event", job.event)
 	req.Header.Set("X-Webhook-ID", job.deliveryID)
-	req.Header.Set("X-Webhook-Signature", signPayload(job.sub.Secret, job.payload))
+	req.Header.Set("X-Webhook-Signature", signature)
 	// During the overlap after a rotation the old secret signs as well
 	// (SEC-06).
 	if job.sub.PreviousSecret != "" && job.sub.PreviousSecretExpiresAt != nil && d.now().Before(*job.sub.PreviousSecretExpiresAt) {
-		req.Header.Set("X-Webhook-Signature-Previous", signPayload(job.sub.PreviousSecret, job.payload))
+		previous := signPayload(job.sub.PreviousSecret, job.payload)
+		req.Header.Set("X-Reticora-Signature-Previous", previous)
+		req.Header.Set("X-Webhook-Signature-Previous", previous)
 	}
 	for key, value := range job.sub.Headers {
 		req.Header.Set(key, value)

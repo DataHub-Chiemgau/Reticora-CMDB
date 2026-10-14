@@ -1,0 +1,33 @@
+{
+  "szenario": "ABN-01 (e) Konflikt-Szenario",
+  "eingefroren": "2026-10-14",
+  "ci": {
+    "id": "22222222-2222-4222-8222-222222222222",
+    "name": "srv-abn-01",
+    "ci_type_id": "type-server",
+    "organization_id": "org-1",
+    "model_discovered": "R-1U",
+    "discovered_source": "snmp"
+  },
+  "override": {
+    "field": "model",
+    "value": "R-2U-manual",
+    "reason": "Abnahme ABN-01"
+  },
+  "reviews": [
+    {
+      "id": "conflict-accept",
+      "kind": "override_conflict",
+      "payload": { "name": "srv-abn-01", "field": "model", "override": "R-2U-manual", "observed": "R-3U" },
+      "created_at": "2026-10-14T09:00:00Z",
+      "action": "accept"
+    },
+    {
+      "id": "conflict-dismiss",
+      "kind": "override_conflict",
+      "payload": { "name": "srv-abn-02", "field": "os_name", "override": "Linux (manual)", "observed": "Linux 6.1" },
+      "created_at": "2026-10-14T09:01:00Z",
+      "action": "dismiss"
+    }
+  ]
+}

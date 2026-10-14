@@ -113,8 +113,8 @@ func TestCIContactLinkUnlink(t *testing.T) {
 	}
 	var link CIContact
 	json.Unmarshal(w.Body.Bytes(), &link)
-	if link.RelationshipType != "responsible" {
-		t.Errorf("expected default responsible, got %q", link.RelationshipType)
+	if link.RelationshipType != "owner" {
+		t.Errorf("expected default owner, got %q", link.RelationshipType)
 	}
 
 	// list for CI
@@ -133,5 +133,40 @@ func TestCIContactLinkUnlink(t *testing.T) {
 	}
 	if w := do(mux, "DELETE", "/api/v1/ci-contacts/"+link.ID, "", "org-1"); w.Code != http.StatusNotFound {
 		t.Errorf("unlink again: expected 404, got %d", w.Code)
+	}
+}
+
+// TestCIContactRoles covers AUD-02: a ci_contact link carries one of the roles
+// operations, escalation, owner and vendor; the former roles operator and
+// responsible (migrated by 000138) are rejected.
+func TestCIContactRoles(t *testing.T) {
+	repo := NewMemoryRepository()
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+	c := &Contact{OrganizationID: "org-1", DisplayName: "Jane"}
+	if err := repo.Create(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range []string{"operations", "escalation", "owner", "vendor"} {
+		w := do(mux, "POST", "/api/v1/cis/ci-"+role+"/contacts", `{"contact_id":"`+c.ID+`","relationship_type":"`+role+`"}`, "org-1")
+		if w.Code != http.StatusCreated {
+			t.Fatalf("role %s: expected 201, got %d: %s", role, w.Code, w.Body.String())
+		}
+		var link CIContact
+		if err := json.Unmarshal(w.Body.Bytes(), &link); err != nil {
+			t.Fatal(err)
+		}
+		if link.RelationshipType != role {
+			t.Errorf("role %s: stored %q", role, link.RelationshipType)
+		}
+	}
+	for _, role := range []string{"operator", "responsible", "technical"} {
+		w := do(mux, "POST", "/api/v1/cis/ci-x/contacts", `{"contact_id":"`+c.ID+`","relationship_type":"`+role+`"}`, "org-1")
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("former role %s: expected 400, got %d", role, w.Code)
+		}
+	}
+	if len(ValidRelationshipTypes) != 4 {
+		t.Errorf("ValidRelationshipTypes has %d roles, want 4", len(ValidRelationshipTypes))
 	}
 }

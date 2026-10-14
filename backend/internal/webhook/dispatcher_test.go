@@ -104,7 +104,7 @@ func TestDispatcherPersistsAndRetriesFailedDelivery(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(records) == 1 && records[0].Status == StatusRetrying {
+		if len(records) == 1 && records[0].Status == StatusFailed {
 			stored = records
 			break
 		}
@@ -127,7 +127,7 @@ func TestDispatcherPersistsAndRetriesFailedDelivery(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(records) == 1 && records[0].Status == StatusSuccess {
+		if len(records) == 1 && records[0].Status == StatusDelivered {
 			if records[0].Attempt != 2 || records[0].DeliveredAt == nil || records[0].NextRetryAt != nil {
 				t.Fatalf("unexpected successful delivery record: %+v", records[0])
 			}
@@ -355,7 +355,7 @@ func TestDispatcherClaimsTheFirstAttempt(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(records) == 1 && records[0].Status == StatusSuccess {
+		if len(records) == 1 && records[0].Status == StatusDelivered {
 			break
 		}
 		if time.Now().After(deadline) {

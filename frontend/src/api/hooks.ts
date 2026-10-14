@@ -756,6 +756,18 @@ export function useTestWebhook() {
   });
 }
 
+export function useRetryWebhookDelivery() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, deliveryId }: { id: string; deliveryId: string }) =>
+      webhookApi.retry(id, deliveryId),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ['webhook-deliveries', id] });
+      queryClient.invalidateQueries({ queryKey: ['webhook-dead-letters'] });
+    },
+  });
+}
+
 export function useWebhookDeliveries(id: string | null, params: ListParams = {}) {
   return useQuery({
     queryKey: ['webhook-deliveries', id, params],

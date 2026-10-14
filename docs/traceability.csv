@@ -443,3 +443,22 @@ TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-
 GATE-03;[Q];SR;docs/security/review-g1.md;WP-209
 SEC-11;[Q];SR;docs/security/review-g1.md;WP-209
 GATE-03;[Q];SR;docs/security/pentest-g1.md;WP-210
+GATE-03;[Q];G1;docs/acceptance/g1-installation.md;WP-211
+INS-01;[Q];G1;docs/acceptance/g1-installation.md;WP-211
+ABN-01;[Q];G1;frontend/e2e/conflict.spec.ts;WP-212
+GATE-01;[Q];G1;tests/rep01-structure.test.sh;WP-213
+GATE-02;[Q];G1;tests/rep01-structure.test.sh;WP-213
+GATE-05;[Q];G1;tests/rep01-structure.test.sh;WP-213
+SEQ-01;[Q];G1;tests/rep01-structure.test.sh;WP-213
+DOD-01;[Q];G1;tests/rep01-structure.test.sh;WP-213
+GLO-11;[Q];G1;tests/rep01-structure.test.sh;WP-213
+REP-01;[B];G1;tests/rep01-structure.test.sh;WP-213
+GLO-11;[Q];G1;backend/internal/traceability/traceability_test.go;WP-213
+WHK-01;[B];G1;backend/internal/webhook/whk01_test.go;WP-213
+WHK-01;[B];G1;backend/internal/webhook/whk01_integration_test.go;WP-213
+AUD-02;[B];G1;backend/internal/contact/handler_test.go;WP-213
+AUT-05;[B];G1;docs/acceptance/g1-gate.md;WP-213
+AUT-06;[B];G1;docs/acceptance/g1-gate.md;WP-213
+NET-04;[B];G1;docs/acceptance/g1-gate.md;WP-213
+NFR-08;[B];G1;docs/acceptance/g1-gate.md;WP-213
+GATE-04;[Q], Bezug GA;G1;docs/acceptance/g1-gate.md;WP-213

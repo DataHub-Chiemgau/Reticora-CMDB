@@ -481,6 +481,7 @@ POST /api/v1/users/{id}/anonymize user:manage
 POST /api/v1/vlans ipam:write
 POST /api/v1/vrfs vrf:manage
 POST /api/v1/webhooks webhook:manage
+POST /api/v1/webhooks/{id}/deliveries/{delivery_id}/retry webhook:manage
 POST /api/v1/webhooks/{id}/rotate-secret webhook:manage
 POST /api/v1/webhooks/{id}/test webhook:manage
 POST /api/v1/workflow-runs/{id}/approval workflow:write
