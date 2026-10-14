@@ -2092,6 +2092,23 @@ export const entitlementApi = {
   },
 };
 
+/**
+ * A module with a phase tag from P2 or [A] and whether this release serves
+ * it (WP-214). Switched-off modules have no routes; the UI hides them.
+ */
+export interface ModuleStatus {
+  key: string;
+  phase: 'P2' | 'P3' | 'P4' | 'A';
+  nav: string[];
+  enabled: boolean;
+}
+
+export const moduleApi = {
+  list(): Promise<{ data: ModuleStatus[] }> {
+    return fetchAPI('/modules');
+  },
+};
+
 // ─── Sites / GIS ────────────────────────────────────────────────────────────
 
 export interface Site {

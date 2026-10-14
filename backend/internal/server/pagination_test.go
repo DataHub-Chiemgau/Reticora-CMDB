@@ -20,6 +20,7 @@ import (
 // list resources: a file export streams every row in one document.
 var notALists = map[string]string{
 	"/api/v1/export/cis": "export download (JSON file of the whole selection)",
+	"/api/v1/modules":    "the fixed module catalog of the release (WP-214), no tenant data",
 }
 
 // TestEveryListIsCursorPaginated is the architecture test of API-02 over

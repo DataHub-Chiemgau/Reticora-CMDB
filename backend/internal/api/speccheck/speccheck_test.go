@@ -76,3 +76,31 @@ func TestDiff(t *testing.T) {
 		t.Errorf("onlyRight: %v", onlyRight)
 	}
 }
+
+func TestPhasesReadsPathExtensions(t *testing.T) {
+	spec := filepath.Join(t.TempDir(), "openapi.yaml")
+	content := `openapi: 3.1.0
+paths:
+  /api/v1/things:
+    get:
+      operationId: listThings
+  /api/v1/tickets:
+    x-phase: P2
+    get:
+      operationId: listTickets
+components:
+  schemas:
+    Thing:
+      x-phase: P9
+`
+	if err := os.WriteFile(spec, []byte(content), 0o600); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	phases, err := Phases(spec)
+	if err != nil {
+		t.Fatalf("phases: %v", err)
+	}
+	if len(phases) != 1 || phases["/api/v1/tickets"] != "P2" {
+		t.Fatalf("phases = %v, want only /api/v1/tickets: P2", phases)
+	}
+}

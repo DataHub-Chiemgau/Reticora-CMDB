@@ -856,10 +856,11 @@ export function useVerifyAuditChain() {
 
 // --- Security & Privacy (Epic F) ---
 
-export function useSecurityReport(standard = 'iso27001') {
+export function useSecurityReport(standard = 'iso27001', enabled = true) {
   return useQuery({
     queryKey: ['security-report', standard],
     queryFn: () => complianceApi.report(standard),
+    enabled,
   });
 }
 

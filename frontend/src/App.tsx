@@ -14,7 +14,7 @@ import { fetchAuthConfig, getStoredAuthConfig } from './auth/oidc';
 import { logout } from './auth/session';
 import { LoginPage } from './pages/auth/LoginPage';
 import { CallbackPage } from './pages/auth/CallbackPage';
-import { useEntitlements, navFeatureFor } from './hooks/useEntitlements';
+import { useEntitlements, useModules, navFeatureFor } from './hooks/useEntitlements';
 import { useThemeStore } from './stores/theme';
 
 // Route-level code splitting: every feature page is a separate chunk so the
@@ -141,6 +141,9 @@ function App() {
   // Entitlement-gated navigation: modules the tenant's plan does not include
   // are hidden instead of producing a 403 on click (progressive disclosure).
   const { isEnabled } = useEntitlements();
+  // Modules of later phases are switched off in the G1 release (WP-214):
+  // their pages are hidden whatever the plan includes.
+  const { isPageEnabled } = useModules();
   const navItems: { page: AppPage; label: string }[] = (
     [
       'dashboard',
@@ -185,7 +188,7 @@ function App() {
       'security',
     ] as AppPage[]
   )
-    .filter((page) => isEnabled(navFeatureFor[page]))
+    .filter((page) => isEnabled(navFeatureFor[page]) && isPageEnabled(page))
     .map((page) => ({ page, label: t(`nav.${page}`, page) }));
 
   function openCreateCI() {
@@ -366,6 +369,7 @@ function App() {
           onCreateCI={openCreateCI}
           onToggleDarkMode={toggleDarkMode}
           isFeatureEnabled={isEnabled}
+          isPageEnabled={isPageEnabled}
         />
       ) : null}
       {isAuthenticated ? (

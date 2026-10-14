@@ -2114,6 +2114,26 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /api/v1/modules:
+    get:
+      operationId: listModules
+      tags: [Entitlements]
+      summary: List the late modules and whether this release serves them
+      description: >-
+        Modules with a phase tag from P2 or [A] (API-06, RBA-05) are switched
+        off in the G1 release unless RETICORA_MODULES enables them (WP-214,
+        E-03). Their operations carry x-phase in this specification and answer
+        404 while the module is off; the UI hides their navigation.
+      responses:
+        '200':
+          description: The late modules of this release
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /api/v1/entitlements/check/{feature}:
     parameters:
       - name: feature
@@ -2138,6 +2158,7 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/assets:
+    x-phase: P2
     get:
       operationId: listAssets
       tags: [Assets]
@@ -2196,6 +2217,7 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/assets/{id}:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -2249,6 +2271,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/assignments:
+    x-phase: P2
     get:
       operationId: listAssignments
       tags: [Assignments]
@@ -2310,6 +2333,7 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/assignments/{id}:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -2340,6 +2364,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/documents:
+    x-phase: P2
     get:
       operationId: listDocuments
       tags: [Documents]
@@ -2393,6 +2418,7 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/documents/{id}:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -2446,6 +2472,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/orders:
+    x-phase: P2
     get:
       operationId: listOrders
       tags: [Orders]
@@ -2493,6 +2520,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/orders/{id}:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -2546,6 +2574,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/orders/{id}/submit:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -2565,6 +2594,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/orders/{id}/approve:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -2584,6 +2614,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/orders/{id}/reject:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -2603,6 +2634,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/orders/{id}/items:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -2630,6 +2662,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/maintenance-windows:
+    x-phase: P3
     get:
       operationId: listMaintenanceWindows
       tags: [Maintenance]
@@ -2673,6 +2706,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/maintenance-windows/{id}:
+    x-phase: P3
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -2726,6 +2760,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/maintenance-windows/{id}/notify:
+    x-phase: P3
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -2741,6 +2776,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/maintenance-windows/{id}/notifications:
+    x-phase: P3
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -2754,6 +2790,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/disposal-records:
+    x-phase: P4
     get:
       operationId: listDisposalRecords
       tags: [Disposal]
@@ -2803,6 +2840,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/disposal-records/{id}:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -2822,6 +2860,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/keys:
+    x-phase: P4
     get:
       operationId: listKeys
       tags: [Keys]
@@ -2863,6 +2902,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/keys/{id}:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -2916,6 +2956,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/keys/{id}/issue:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -2937,6 +2978,7 @@ paths:
           $ref: '#/components/responses/Conflict'
 
   /api/v1/keys/{id}/return:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -2958,6 +3000,7 @@ paths:
           $ref: '#/components/responses/Conflict'
 
   /api/v1/keys/{id}/assignments:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -2971,6 +3014,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/trainings:
+    x-phase: P4
     get:
       operationId: listTrainings
       tags: [Trainings]
@@ -3012,6 +3056,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/trainings/{id}:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3065,6 +3110,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/trainings/{id}/assignments:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3095,6 +3141,7 @@ paths:
           $ref: '#/components/responses/Conflict'
 
   /api/v1/training-assignments/{id}/complete:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -3116,6 +3163,7 @@ paths:
           $ref: '#/components/responses/Conflict'
 
   /api/v1/desks:
+    x-phase: P4
     get:
       operationId: listDesks
       tags: [Desks]
@@ -3157,6 +3205,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/desks/{id}:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3210,6 +3259,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/desks/{id}/bookings:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3240,6 +3290,7 @@ paths:
           $ref: '#/components/responses/Conflict'
 
   /api/v1/desk-bookings/{id}/cancel:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -3261,6 +3312,7 @@ paths:
           $ref: '#/components/responses/Conflict'
 
   /api/v1/assets/{id}/label.svg:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
       - name: base_url
@@ -3282,6 +3334,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/asset-locations:
+    x-phase: P2
     post:
       operationId: recordAssetLocation
       tags: [Assets]
@@ -3305,6 +3358,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/assets/{id}/locations:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3326,6 +3380,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/agents:
+    x-phase: P4
     get:
       operationId: listAgents
       tags: [Agents]
@@ -3345,6 +3400,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/agents/enroll:
+    x-phase: P4
     post:
       operationId: enrollAgent
       tags: [Agents]
@@ -3375,6 +3431,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
 
   /api/v1/agents/enrollment-tokens:
+    x-phase: P4
     post:
       operationId: createAgentEnrollmentToken
       tags: [Agents]
@@ -3402,6 +3459,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/agents/{id}/site:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -3430,6 +3488,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/agents/telemetry:
+    x-phase: P4
     post:
       operationId: ingestAgentTelemetry
       tags: [Agents]
@@ -3458,6 +3517,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/agents/{id}/heartbeat:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -3473,6 +3533,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/agents/{id}/policy:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     patch:
@@ -3500,6 +3561,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/agents/{id}/disable:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -3519,6 +3581,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/agents/{id}/enable:
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -3538,6 +3601,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/security/findings:
+    x-phase: P3
     get:
       operationId: listSecurityFindings
       tags: [Security]
@@ -3590,6 +3654,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/security/findings/summary:
+    x-phase: P3
     get:
       operationId: securityFindingsSummary
       tags: [Security]
@@ -3601,6 +3666,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/security/findings/{id}:
+    x-phase: P3
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3643,6 +3709,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/consumables:
+    x-phase: P2
     get:
       operationId: listConsumables
       tags: [Consumables]
@@ -3694,6 +3761,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/consumables/{id}:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3747,6 +3815,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/consumables/{id}/movements:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3789,6 +3858,7 @@ paths:
           $ref: '#/components/responses/Conflict'
 
   /api/v1/stocktakes:
+    x-phase: P2
     get:
       operationId: listStocktakes
       tags: [Stocktake]
@@ -3846,6 +3916,7 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/stocktakes/{id}:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3899,6 +3970,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/stocktakes/{id}/scans:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3945,6 +4017,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/stocktakes/{id}/difference:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3969,6 +4042,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/stocktakes/{id}/complete:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -4007,6 +4081,7 @@ paths:
                 $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/tickets:
+    x-phase: P2
     get:
       operationId: listTickets
       tags: [Tickets]
@@ -4076,6 +4151,7 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/tickets/{id}:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4129,6 +4205,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/tickets/{id}/comments:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4513,6 +4590,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
 
   /api/v1/monitoring/alerts:
+    x-phase: P3
     get:
       operationId: listAlerts
       tags: [Monitoring]
@@ -4553,6 +4631,7 @@ paths:
           $ref: '#/components/responses/Conflict'
 
   /api/v1/monitoring/alerts/{id}:
+    x-phase: P3
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     patch:
@@ -7072,6 +7151,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/assignments/{id}/return:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -7105,6 +7185,7 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/assignments/{id}/transfer:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -7745,6 +7826,7 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/documents/{id}/content:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     put:
@@ -7821,6 +7903,7 @@ paths:
                 $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/documents/{id}/links:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -8725,6 +8808,7 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/slas:
+    x-phase: P2
     get:
       operationId: listSLAPolicies
       tags: [SLA]
@@ -8778,6 +8862,7 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/slas/breaches:
+    x-phase: P2
     get:
       operationId: listSLABreaches
       tags: [SLA]
@@ -8804,6 +8889,7 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/slas/{id}:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -8857,6 +8943,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/tickets/{id}/sla:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -8901,6 +8988,7 @@ paths:
 
 
   /api/v1/forms:
+    x-phase: P3
     get:
       operationId: listFormDefinitions
       tags: [Forms]
@@ -8932,6 +9020,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/forms/{id}:
+    x-phase: P3
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     get:
       operationId: getFormDefinition
@@ -8962,6 +9051,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/forms/{id}/submissions:
+    x-phase: P3
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     get:
       operationId: listFormSubmissions
@@ -8991,6 +9081,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/form-submissions:
+    x-phase: P3
     get:
       operationId: listAllFormSubmissions
       tags: [Forms]
@@ -9016,6 +9107,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/form-submissions/{id}:
+    x-phase: P3
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     get:
       operationId: getFormSubmission
@@ -9026,6 +9118,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/workflows:
+    x-phase: P3
     get:
       operationId: listWorkflows
       tags: [Workflows]
@@ -9052,6 +9145,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/workflows/{id}:
+    x-phase: P3
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     get:
       operationId: getWorkflow
@@ -9080,6 +9174,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/workflows/{id}/runs:
+    x-phase: P3
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     post:
       operationId: triggerWorkflowRun
@@ -9092,6 +9187,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/workflow-runs:
+    x-phase: P3
     get:
       operationId: listWorkflowRuns
       tags: [Workflows]
@@ -9111,6 +9207,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/workflow-runs/{id}:
+    x-phase: P3
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     get:
       operationId: getWorkflowRun
@@ -9121,6 +9218,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/workflow-runs/{id}/approval:
+    x-phase: P3
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     post:
       operationId: approveWorkflowRun
@@ -9132,6 +9230,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/compliance/rules:
+    x-phase: P3
     get:
       operationId: listComplianceRules
       tags: [Compliance]
@@ -9164,6 +9263,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/rules/{id}:
+    x-phase: P3
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     get:
       operationId: getComplianceRule
@@ -9192,6 +9292,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/compliance/evaluations:
+    x-phase: P3
     post:
       operationId: evaluateCompliance
       tags: [Compliance]
@@ -9201,6 +9302,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/results:
+    x-phase: P3
     get:
       operationId: listComplianceResults
       tags: [Compliance]
@@ -9220,6 +9322,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/score:
+    x-phase: P3
     get:
       operationId: getComplianceScore
       tags: [Compliance]
@@ -9233,6 +9336,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/report:
+    x-phase: P3
     get:
       operationId: getSecurityReport
       tags: [Compliance]
@@ -9259,6 +9363,7 @@ paths:
         '503': { description: Reporting not configured, content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
 
   /api/v1/iga/connectors:
+    x-phase: A
     get:
       operationId: listIGAConnectors
       tags: [IGA]
@@ -9294,6 +9399,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/connectors/{id}:
+    x-phase: A
     parameters:
         - $ref: '#/components/parameters/ResourceID'
     get:
@@ -9345,6 +9451,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/connectors/{id}/test:
+    x-phase: A
     parameters:
         - $ref: '#/components/parameters/ResourceID'
     post:
@@ -9363,6 +9470,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/connectors/{id}/sync:
+    x-phase: A
     parameters:
         - $ref: '#/components/parameters/ResourceID'
     post:
@@ -9381,6 +9489,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/tasks:
+    x-phase: A
     get:
       operationId: listIGAProvisioningTasks
       tags: [IGA]
@@ -9397,6 +9506,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/tasks/{id}:
+    x-phase: A
     parameters:
         - $ref: '#/components/parameters/ResourceID'
     get:
@@ -9415,6 +9525,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/tasks/{id}/retry:
+    x-phase: A
     parameters:
         - $ref: '#/components/parameters/ResourceID'
     post:
@@ -9433,6 +9544,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/jml-policies:
+    x-phase: A
     get:
       operationId: listIGAJMLPolicies
       tags: [IGA]
@@ -9468,6 +9580,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/jml/resolve:
+    x-phase: A
     post:
       operationId: resolveIGALifecycle
       tags: [IGA]
@@ -9489,6 +9602,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/access-requests:
+    x-phase: A
     get:
       operationId: listIGAAccessRequests
       tags: [IGA]
@@ -9524,6 +9638,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/access-requests/{id}/approve:
+    x-phase: A
     parameters:
         - $ref: '#/components/parameters/ResourceID'
     post:
@@ -9547,6 +9662,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/access-requests/{id}/reject:
+    x-phase: A
     parameters:
         - $ref: '#/components/parameters/ResourceID'
     post:
@@ -9570,6 +9686,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/access-reviews:
+    x-phase: A
     get:
       operationId: listIGAAccessReviews
       tags: [IGA]
@@ -9605,6 +9722,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/access-reviews/{id}/items:
+    x-phase: A
     parameters:
         - $ref: '#/components/parameters/ResourceID'
     get:
@@ -9623,6 +9741,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/access-reviews/{id}/items/{itemId}/decision:
+    x-phase: A
     parameters:
         - $ref: '#/components/parameters/ResourceID'
         - name: itemId
@@ -9650,6 +9769,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/drift:
+    x-phase: A
     get:
       operationId: listIGADriftFindings
       tags: [IGA]
@@ -9666,6 +9786,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/drift/reconcile:
+    x-phase: A
     post:
       operationId: reconcileIGADrift
       tags: [IGA]
@@ -9687,6 +9808,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/iga/drift/{id}/remediate:
+    x-phase: A
     parameters:
         - $ref: '#/components/parameters/ResourceID'
     post:
@@ -9705,6 +9827,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /scim/v2/ServiceProviderConfig:
+    x-phase: A
     get:
       operationId: getSCIMServiceProviderConfig
       tags: [SCIM]
@@ -9721,6 +9844,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /scim/v2/Users:
+    x-phase: A
     get:
         operationId: listSCIMUsers
         tags: [SCIM]
@@ -9745,6 +9869,7 @@ paths:
         responses:
           '201': { description: SCIM user, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
   /scim/v2/Users/{id}:
+    x-phase: A
     parameters:
         - $ref: '#/components/parameters/ResourceID'
     get:
@@ -9815,6 +9940,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /scim/v2/Groups:
+    x-phase: A
     get:
         operationId: listSCIMGroups
         tags: [SCIM]
@@ -9836,6 +9962,7 @@ paths:
         responses:
           '201': { description: SCIM group, content: { application/json: { schema: { $ref: '#/components/schemas/SCIMResource' } } } }
   /scim/v2/Groups/{id}:
+    x-phase: A
     parameters:
         - $ref: '#/components/parameters/ResourceID'
     get:
@@ -9948,6 +10075,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
 
   /api/v1/ai/conversations:
+    x-phase: A
     get:
       operationId: listAIConversations
       tags: [AI]
@@ -9984,6 +10112,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
 
   /api/v1/ai/ask:
+    x-phase: A
     post:
       operationId: askAI
       tags: [AI]
@@ -10005,6 +10134,7 @@ paths:
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
   /api/v1/assets/{id}/children:
+    x-phase: P2
     get:
       operationId: listAssetsIdChildren
       summary: List child composition entries of a parent asset
@@ -10015,6 +10145,7 @@ paths:
           description: Unauthorized
 
   /api/v1/assets/{id}/lifecycle-transitions:
+    x-phase: P2
     post:
       operationId: createAssetsIdLifecycleTransitions
       summary: Execute a lifecycle transition on an asset
@@ -10025,6 +10156,7 @@ paths:
           description: Unauthorized
 
   /api/v1/assets/{id}/movements:
+    x-phase: P2
     get:
       operationId: listAssetsIdMovements
       summary: List the movement ledger of an asset
@@ -10035,6 +10167,7 @@ paths:
           description: Unauthorized
 
   /api/v1/assets/{id}/state:
+    x-phase: P2
     get:
       operationId: listAssetsIdState
       summary: Reconstruct asset state at a point in time
@@ -10544,6 +10677,7 @@ paths:
           description: Unauthorized
 
   /api/v1/compositions:
+    x-phase: P2
     get:
       operationId: listCompositions
       summary: Manage parent-asset/child composition links
@@ -10562,6 +10696,7 @@ paths:
           description: Unauthorized
 
   /api/v1/compositions/{id}:
+    x-phase: P2
     get:
       operationId: getCompositionsId
       summary: Read, update or delete a composition link
@@ -10669,6 +10804,7 @@ paths:
           description: Unauthorized
 
   /api/v1/inventory/availability:
+    x-phase: P2
     get:
       operationId: listInventoryAvailability
       summary: Query inventory availability projections
@@ -10679,6 +10815,7 @@ paths:
           description: Unauthorized
 
   /api/v1/inventory/items:
+    x-phase: P2
     get:
       operationId: listInventoryItems
       summary: Manage quantity-based inventory items
@@ -10697,6 +10834,7 @@ paths:
           description: Unauthorized
 
   /api/v1/inventory/items/{id}:
+    x-phase: P2
     get:
       operationId: getInventoryItemsId
       summary: Read, update or delete a quantity inventory item
@@ -10996,6 +11134,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/reservations:
+    x-phase: P2
     get:
       operationId: listReservations
       summary: Manage inventory reservations
@@ -11014,6 +11153,7 @@ paths:
           description: Unauthorized
 
   /api/v1/reservations/{id}:
+    x-phase: P2
     get:
       operationId: getReservationsId
       summary: Read a reservation
@@ -11024,6 +11164,7 @@ paths:
           description: Unauthorized
 
   /api/v1/reservations/{id}/release:
+    x-phase: P2
     post:
       operationId: createReservationsIdRelease
       summary: Release a reservation
@@ -11141,6 +11282,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/stock-movements:
+    x-phase: P2
     get:
       operationId: listStockMovements
       summary: List and record inventory movements (append-only ledger)
@@ -11160,6 +11302,7 @@ paths:
 
 
   /api/v1/inventory/items/{id}/convert:
+    x-phase: P2
     post:
       operationId: convertInventoryItemToAsset
       summary: Convert one unit of a quantity item into a serialized asset
@@ -13743,6 +13886,33 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/Entitlement'
+
+    ModuleStatus:
+      type: object
+      required: [key, phase, nav, enabled]
+      properties:
+        key:
+          type: string
+          example: ticketing
+        phase:
+          type: string
+          enum: [P2, P3, P4, A]
+        nav:
+          type: array
+          description: Navigation pages of the UI that belong to the module.
+          items:
+            type: string
+        enabled:
+          type: boolean
+
+    ModuleListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModuleStatus'
 
     Asset:
       type: object

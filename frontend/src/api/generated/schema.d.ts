@@ -1164,6 +1164,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/modules': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the late modules and whether this release serves them
+     * @description Modules with a phase tag from P2 or [A] (API-06, RBA-05) are switched off in the G1 release unless RETICORA_MODULES enables them (WP-214, E-03). Their operations carry x-phase in this specification and answer 404 while the module is off; the UI hides their navigation.
+     */
+    get: operations['listModules'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/entitlements/check/{feature}': {
     parameters: {
       query?: never;
@@ -7903,6 +7923,18 @@ export interface components {
     EntitlementListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Entitlement'][];
     };
+    ModuleStatus: {
+      /** @example ticketing */
+      key: string;
+      /** @enum {string} */
+      phase: 'P2' | 'P3' | 'P4' | 'A';
+      /** @description Navigation pages of the UI that belong to the module. */
+      nav: string[];
+      enabled: boolean;
+    };
+    ModuleListResponse: {
+      data: components['schemas']['ModuleStatus'][];
+    };
     Asset: {
       id: string;
       organization_id: string;
@@ -12884,6 +12916,27 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['EntitlementListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  listModules: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The late modules of this release */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ModuleListResponse'];
         };
       };
       401: components['responses']['Unauthorized'];

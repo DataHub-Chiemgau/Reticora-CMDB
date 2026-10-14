@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { DashboardPage } from './DashboardPage';
 import { renderWithProviders, stubFetchRoutes } from '../test/utils';
+import { useAuthStore } from '../auth/authStore';
 
 function paginated<T>(data: T[]) {
   return { data, total: data.length, limit: 50, offset: 0, has_more: false };
@@ -10,6 +11,7 @@ function paginated<T>(data: T[]) {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  useAuthStore.setState({ token: null, expiresAt: null, user: null });
 });
 
 describe('DashboardPage', () => {
@@ -84,5 +86,31 @@ describe('DashboardPage', () => {
     expect(await screen.findByText('Assets gesamt')).toBeInTheDocument();
     expect(screen.getByText('Laufende Inventuren')).toBeInTheDocument();
     expect(screen.queryByText('Gesamte CIs')).not.toBeInTheDocument();
+  });
+
+  it('hides the widgets of switched-off modules (WP-214)', async () => {
+    useAuthStore.setState({
+      token: 'header.payload.signature',
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      user: { sub: 'user-1' },
+    });
+    stubFetchRoutes({
+      '/modules': {
+        data: [
+          { key: 'ticketing', phase: 'P2', nav: ['tickets', 'slas'], enabled: false },
+          { key: 'inventory', phase: 'P2', nav: ['assets'], enabled: true },
+        ],
+      },
+      '/cis': paginated([]),
+      '/collectors': paginated([]),
+      '/assets': paginated([]),
+    });
+
+    renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Tickets' })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText('Offene Tickets')).not.toBeInTheDocument();
   });
 });

@@ -13,6 +13,7 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
+import { useModules } from '../hooks/useEntitlements';
 import { DASHBOARD_ROLES, useDashboardStore } from '../stores/dashboard';
 import type { DashboardRole, DashboardWidget } from '../stores/dashboard';
 
@@ -25,6 +26,15 @@ const allWidgets: DashboardWidget[] = [
   'stocktake',
   'tickets',
 ];
+
+// The widgets that read a late module (WP-214); without it they are hidden.
+const widgetModule: Partial<Record<DashboardWidget, string>> = {
+  slaBreaches: 'ticketing',
+  compliance: 'compliance',
+  assets: 'inventory',
+  stocktake: 'stocktake',
+  tickets: 'ticketing',
+};
 
 function MetricCard({
   label,
@@ -202,6 +212,11 @@ export function DashboardPage() {
   const hidden = useDashboardStore((state) => state.hidden);
   const toggleWidget = useDashboardStore((state) => state.toggleWidget);
   const isVisible = useDashboardStore((state) => state.isVisible);
+  const { isModuleEnabled } = useModules();
+  const widgets = allWidgets.filter((widget) => {
+    const module = widgetModule[widget];
+    return !module || isModuleEnabled(module);
+  });
 
   return (
     <div className="space-y-6">
@@ -227,7 +242,7 @@ export function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {allWidgets.map((widget) => {
+        {widgets.map((widget) => {
           if (!isVisible(widget)) {
             return null;
           }
@@ -238,7 +253,7 @@ export function DashboardPage() {
 
       <Card title={t('dashboard.customize')}>
         <div className="flex flex-wrap gap-2">
-          {allWidgets.map((widget) => {
+          {widgets.map((widget) => {
             const active = !hidden.includes(widget);
             return (
               <Button

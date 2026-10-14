@@ -224,6 +224,9 @@ type Options struct {
 	// CollectorCA signs the collector certificates (COL-04); nil answers
 	// certificate requests with 503.
 	CollectorCA *discovery.CA
+	// Modules are the enabled late modules (WP-214, E-03); nil enables all
+	// (tests). The server passes the set from RETICORA_MODULES.
+	Modules *ModuleSet
 }
 
 // registrar is implemented by every domain handler.
@@ -310,7 +313,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// attaches the permission middleware resolved from the route table.
 	// Routes without a mapping fail closed; the router test locks in that
 	// every route is mapped.
-	protected := authorizingRouter{Router: mux, after: opts.RouteMiddleware, auditor: routeAuditor(&opts)}
+	protected := authorizingRouter{Router: mux, after: opts.RouteMiddleware, auditor: routeAuditor(&opts), modules: opts.Modules}
 
 	identityHandler := identity.NewHandler(opts.OIDC, opts.Sessions).
 		WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole).
@@ -453,6 +456,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
 		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),
 		signup.NewHandler(opts.Signup).WithProtection(opts.SignupProtection),
+		modulesHandler{set: opts.Modules},
 	}
 	for _, h := range registrars {
 		h.RegisterRoutes(protected)
