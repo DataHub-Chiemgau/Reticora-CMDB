@@ -442,3 +442,4 @@ TEN-09;[Q];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-
 TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-208
 GATE-03;[Q];SR;docs/security/review-g1.md;WP-209
 SEC-11;[Q];SR;docs/security/review-g1.md;WP-209
+GATE-03;[Q];SR;docs/security/pentest-g1.md;WP-210
