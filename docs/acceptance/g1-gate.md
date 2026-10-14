@@ -32,8 +32,8 @@ Diese Punkte blockieren:
 
 | # | Blocker | Regel | Verantwortlich | Weg |
 |---|---|---|---|---|
-| B1 | Ingest-Durchsatz 58 statt 200 Records/s je Instanz (NFR-03, Befund SR-02, High) | GATE-02, GATE-03 (Lasttest bestanden), Sicherheitsreview ohne offene High | Auftragnehmer | Folge-WP nach `docs/acceptance/lasttest-g1.md` |
-| B2 | Impact im Worst Case unter Parallellast p95 2,39 s statt < 2 s (NFR-02, SR-05) | GATE-02 | Auftragnehmer | Folge-WP; Messung auf dem Referenzhost |
+| B1 | Ingest-Durchsatz 58 statt 200 Records/s je Instanz (NFR-03, Befund SR-02, High) | GATE-02, GATE-03 (Lasttest bestanden), Sicherheitsreview ohne offene High | Auftragnehmer | WP-332 bis WP-334 (`docs/plan/implementierungsplan.md`, G1-Nachbesserung; E-56 offen) |
+| B2 | Impact im Worst Case unter Parallellast p95 2,39 s statt < 2 s (NFR-02, SR-05) | GATE-02 | Auftragnehmer | WP-335 (`docs/plan/implementierungsplan.md`, G1-Nachbesserung); Referenzhost bleibt SR-06 |
 | B3 | Externer Pentest ohne offene High/Critical (NFR-08 nach E-28) | GATE-03 | Auftraggeber (E-28, A-07) | `docs/security/pentest-g1.md` |
 | B4 | v2-Originaltexte fehlen: AUT-05, AUT-06, NET-04, ABN-01 (a)/(b) | GATE-02 | Auftraggeber (E-02, A-02) | Texte liefern, danach WPs nach Plan |
 | B5 | Skalierungsziel unbestätigt (E-17) | – (kein eigener Gate-Punkt; gemessen mit 10.000 Objekten nach CH15) | Auftraggeber | Bestätigung oder neuer Zielwert, dann Nachmessung |

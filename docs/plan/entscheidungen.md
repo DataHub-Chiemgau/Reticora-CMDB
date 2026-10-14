@@ -12,6 +12,8 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Nachtrag vom 2026-10-05:** [E-32](#e-32) ist entschieden (IPMI erhält den Rang von Redfish, 90). Stand jetzt: 25 entschieden, 4 vorläufig entschieden, 7 offen.
 
+**Nachtrag vom 2026-10-14:** [E-56](#e-56) (Reihenfolge bei parallelen Ingest-Spuren, G1-Nachbesserung) ist aufgenommen und offen; sie sperrt WP-334.
+
 | Nr. | Thema | Status | Sperrt / betrifft | WPs mit Verweis |
 |---|---|---|---|---:|
 | [E-01](#e-01) | Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 | entschieden | Keine Sperre mehr; WPs mit Verweis prüfen ihre Kriterien gegen den Text. | 130 |
@@ -50,6 +52,7 @@ Stand: 2026-10-01. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 | [E-34](#e-34) | ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan | vorläufig entschieden | Folgeänderung zu WP-071 (`ent-model`), WP-203 (`lt-seed`). | 2 |
 | [E-35](#e-35) | NFR-09: Inhalt der Subprozessorenliste | offen | WP-105 (`a-reference`). | 1 |
 | [E-36](#e-36) | DB-05: Zeilen für Vertrag, installierte Software und Health-Findings | entschieden | WP-077 (`db05-asset`), WP-080 (`db05-lcy`), WP-230 (`m-agent`). | 3 |
+| [E-56](#e-56) | NFR-03: Reihenfolge der Verarbeitung bei parallelen Ingest-Spuren | offen | WP-334 (`nfr03-lanes`). | 1 |
 
 ## E-01
 
@@ -978,6 +981,32 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 
 **Betroffene WPs:** WP-077 (`db05-asset`), WP-080 (`db05-lcy`), WP-230 (`m-agent`)
 
+## E-56
+
+**Thema:** NFR-03: Reihenfolge der Verarbeitung bei parallelen Ingest-Spuren
+
+**Status:** offen (2026-10-14)
+
+**Festlegung:** Keine. Die Empfehlung gilt als Übergangsregel für die Planung von WP-334; das WP startet erst nach Bestätigung (Aufgabe A-12).
+
+**Frage:** Der Ingest verarbeitet heute je Organisation seriell nach `observed_at`: ein Batch von 100 ist gleichzeitig in Arbeit, ein Mutex je Organisation verhindert parallele Verarbeitung. Gemessen sind 58 Records/s (`docs/acceptance/lasttest-g1.md`, SR-02). Weniger Transaktionen (WP-332) und der Batch-Schreibpfad (WP-333) senken die Zeit je Record; die 200 Records/s je Instanz aus NFR-03 brauchen zusätzlich parallele Spuren innerhalb einer Organisation. Welche Reihenfolgegarantie gilt dann?
+
+**Optionen:**
+
+1. Spuren je Identitätsschlüssel (Hardware-UUID, Seriennummer, MAC, IP; ohne starken Schlüssel Spur 0): `observed_at`-Reihenfolge und Dedupe je Gerät, über Geräte hinweg keine Reihenfolge. Eine Doppelanlage über Spuren hinweg fängt der Unique-Index mit Wiederholung ab, wie heute über Instanzen (WP-207).
+2. Spuren je Collector: Reihenfolge je Collector; mehr Durchsatz nur bei mehreren Collectors je Organisation.
+3. Seriell bleiben: WP-332 und WP-333 müssen allein reichen; die Nachmessung entscheidet, ob NFR-03 erfüllt ist.
+
+**Empfehlung:** Option 1. Die Reconciliation entscheidet je Gerät; REC-03 (`observed_at`, Rang) braucht nur die Reihenfolge je Gerät. Die Topologieableitung bleibt je Batch.
+
+**Blockiert / Auswirkung:** WP-334 (`nfr03-lanes`).
+
+**Quelle:** NFR-03, REC-01, REC-03; `docs/acceptance/lasttest-g1.md`; `docs/security/review-g1.md` (SR-02)
+
+**Betroffene IDs:** NFR-03, NFR-10, REC-01
+
+**Betroffene WPs:** WP-334 (`nfr03-lanes`)
+
 ## Offene Aufgaben
 
 Diese Aufgaben folgen aus den Empfehlungen. Die betroffenen WPs starten erst, wenn die Aufgabe erledigt ist (oder sie nutzen die Übergangsregel der Entscheidung).
@@ -995,3 +1024,4 @@ Diese Aufgaben folgen aus den Empfehlungen. Die betroffenen WPs starten erst, we
 | A-09 | [E-32](#e-32) | REC-03-Rang für IPMI festlegen (der am 2026-10-01 gelieferte REC-03-Text nennt IPMI nicht) | Auftraggeber/Product Owner | vor WP-058 (`rec-decide`) |
 | A-10 | [E-33](#e-33) | **erledigt 2026-10-12** (ALTCHA, disposable-email-domains, Trial nach ENT-07): Captcha-Anbieter, Wegwerf-Domain-Liste und Trial-Werte festlegen | Produkt/Datenschutz | vor WP-111 (`b-signup`) |
 | A-11 | [E-35](#e-35) | Subprozessorenliste liefern | Betreiber | vor WP-105 (`a-reference`) |
+| A-12 | [E-56](#e-56) | Reihenfolgegarantie bei parallelen Ingest-Spuren bestätigen (Empfehlung: je Gerät) | Product Owner | vor WP-334 (`nfr03-lanes`) |
