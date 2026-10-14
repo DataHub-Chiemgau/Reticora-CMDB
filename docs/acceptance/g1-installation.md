@@ -15,11 +15,13 @@ auf einem Ubuntu-24.04-Runner.
 | Datum | 2026-10-14, 04:37–04:43 UTC |
 | Ergebnis | **success**, alle vier Jobs grün |
 
-Die Commits nach dem Kandidaten (Gate-PR WP-211 bis WP-213) ändern weder den
-Installer noch `deploy/`. Die Pfadfilter des Workflows lösen beim Gate-PR
-deshalb keinen neuen Lauf aus. Der Nachweis bleibt gültig, bis sich Installer,
-Compose-Stack oder Images ändern. Danach wird der Workflow erneut ausgelöst und
-diese Tabelle aktualisiert.
+Der Gate-PR (WP-211 bis WP-213) ändert Backend und Frontend (WHK-01,
+AUD-02). Der Workflow lief deshalb ein zweites Mal auf dem Stand des PRs:
+[#123, Run 38513566388](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38513566388),
+Commit `37752e1`, 2026-10-14 04:51–04:58 UTC. Auch dieser Lauf ist
+**success**, mit denselben vier Jobs und der Onboarding-E2E. Danach ändert sich
+nur Dokumentation. Ändern sich Installer, Compose-Stack oder Images, wird der
+Workflow erneut ausgelöst und diese Tabelle aktualisiert.
 
 ## Ergebnisse je Plattform
 
