@@ -68,11 +68,23 @@ curl -fsS "http://localhost:${server_port}/api/v1/signup/challenge" >/dev/null |
     exit 1
 }
 
+# nginx in the frontend resolved the server at its start: the recreated
+# server container has a new address, so the frontend restarts too.
+(cd "$compose_dir" && docker compose --env-file "$env_file" "${files[@]}" restart frontend)
+frontend_port="$(env_value RETICORA_FRONTEND_PORT)"; frontend_port="${frontend_port:-3000}"
+for _ in $(seq 1 60); do
+    curl -fsS "http://localhost:${frontend_port}/api/v1/auth/config" >/dev/null 2>&1 && break
+    sleep 2
+done
+curl -fsS "http://localhost:${frontend_port}/api/v1/auth/config" >/dev/null || {
+    echo "FAIL: the frontend does not reach the server after the restart"
+    exit 1
+}
+
 echo "== Collector (simulated fleet)"
 collector_bin="${RUNNER_TEMP:-/tmp}/reticora-collector"
 (cd "$repo/collector" && GOWORK=off CGO_ENABLED=0 go build -o "$collector_bin" ./cmd/collector)
 
-frontend_port="$(env_value RETICORA_FRONTEND_PORT)"; frontend_port="${frontend_port:-3000}"
 host_ip="$(hostname -I | awk '{print $1}')"
 vars=(
     "BASE_URL=http://localhost:${frontend_port}"
