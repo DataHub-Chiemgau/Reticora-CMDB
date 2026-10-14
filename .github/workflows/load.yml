@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       objects:
-        description: CIs of the demo organization (NFR-10: 10000)
+        description: "CIs of the demo organization (NFR-10: 10000)"
         default: "10000"
       duration:
         description: Duration of each read scenario
