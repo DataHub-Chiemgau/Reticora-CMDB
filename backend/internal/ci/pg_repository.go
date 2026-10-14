@@ -78,11 +78,47 @@ func (r *PGRepository) WithEvents(outbox *events.Outbox) *PGRepository {
 	return r
 }
 
+// lastInTx writes the audit entries or events of a CI change: in a context
+// transaction (the ingest, NFR-03) right before its commit, after every
+// other write; else at once. Both take an organization-wide lock until the
+// commit (audit chain, event outbox: migrations 000117, 000120), so the
+// ingest lanes of an organization wait for each other only for these
+// writes and the commit (WP-334). The writes keep their order.
+func lastInTx(ctx context.Context, write func() error) error {
+	if !database.InTx(ctx) {
+		return write()
+	}
+	return database.BeforeCommit(ctx, write)
+}
+
+// snapshot copies item for a write that may run later: the caller may
+// overwrite the CI it got back before the transaction commits.
+func snapshot(item *Item) *Item {
+	if item == nil {
+		return nil
+	}
+	cp := *item
+	return &cp
+}
+
+// snapshotChanges copies the CIs of an audit change set (see snapshot).
+func snapshotChanges(changes map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(changes))
+	for k, v := range changes {
+		if item, ok := v.(*Item); ok {
+			v = snapshot(item)
+		}
+		out[k] = v
+	}
+	return out
+}
+
 // recordEvent writes the domain event of a CI mutation in tx.
 func (r *PGRepository) recordEvent(ctx context.Context, tx pgx.Tx, eventType string, item *Item, changedFields []string) error {
 	if r.outbox == nil {
 		return nil
 	}
+	item = snapshot(item)
 	var data any = item
 	if changedFields != nil {
 		raw, err := json.Marshal(item)
@@ -96,8 +132,10 @@ func (r *PGRepository) recordEvent(ctx context.Context, tx pgx.Tx, eventType str
 		m["changed_fields"] = changedFields
 		data = m
 	}
-	_, err := r.outbox.Append(ctx, tx, &events.Event{OrgID: item.OrganizationID, Type: eventType, EntityID: item.ID, Data: data})
-	return err
+	return lastInTx(ctx, func() error {
+		_, err := r.outbox.Append(ctx, tx, &events.Event{OrgID: item.OrganizationID, Type: eventType, EntityID: item.ID, Data: data})
+		return err
+	})
 }
 
 // NewPGRepository creates a new PostgreSQL-backed CI repository.
@@ -616,13 +654,15 @@ func (r *PGRepository) recordCreatedAudit(ctx context.Context, tx pgx.Tx, items 
 			Action:         "ci.created",
 			ResourceType:   "ci",
 			ResourceID:     item.ID,
-			Changes:        map[string]interface{}{"after": item},
+			Changes:        map[string]interface{}{"after": snapshot(item)},
 		}
 	}
-	if _, err := batch.RecordMany(ctx, tx, entries); err != nil {
-		return fmt.Errorf("record audit: %w", err)
-	}
-	return nil
+	return lastInTx(ctx, func() error {
+		if _, err := batch.RecordMany(ctx, tx, entries); err != nil {
+			return fmt.Errorf("record audit: %w", err)
+		}
+		return nil
+	})
 }
 
 // recordCreatedEvents writes the ci.created events of the new CIs in their
@@ -633,10 +673,12 @@ func (r *PGRepository) recordCreatedEvents(ctx context.Context, tx pgx.Tx, items
 	}
 	es := make([]*events.Event, len(items))
 	for i, item := range items {
-		es[i] = &events.Event{OrgID: item.OrganizationID, Type: events.CICreated, EntityID: item.ID, Data: item}
+		es[i] = &events.Event{OrgID: item.OrganizationID, Type: events.CICreated, EntityID: item.ID, Data: snapshot(item)}
 	}
-	_, err := r.outbox.AppendMany(ctx, tx, es)
-	return err
+	return lastInTx(ctx, func() error {
+		_, err := r.outbox.AppendMany(ctx, tx, es)
+		return err
+	})
 }
 
 // Update modifies an existing CI.
@@ -1113,18 +1155,21 @@ func (r *PGRepository) recordAudit(ctx context.Context, tx pgx.Tx, action string
 	if strings.TrimSpace(t.UserID) != "" {
 		actorType = "user"
 	}
-	if _, err := r.recorder.Record(ctx, tx, audit.Entry{
+	entry := audit.Entry{
 		OrganizationID: item.OrganizationID,
 		ActorID:        strings.TrimSpace(t.UserID),
 		ActorType:      actorType,
 		Action:         action,
 		ResourceType:   "ci",
 		ResourceID:     item.ID,
-		Changes:        changes,
-	}); err != nil {
-		return fmt.Errorf("record audit: %w", err)
+		Changes:        snapshotChanges(changes),
 	}
-	return nil
+	return lastInTx(ctx, func() error {
+		if _, err := r.recorder.Record(ctx, tx, entry); err != nil {
+			return fmt.Errorf("record audit: %w", err)
+		}
+		return nil
+	})
 }
 
 func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciID string, version int64, changeType, fieldName string, oldValue, newValue any) error {

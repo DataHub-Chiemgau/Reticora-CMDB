@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"net"
 	"net/http"
 	"strings"
@@ -510,6 +511,50 @@ func (r *PGRepository) LockCI(ctx context.Context, orgID, ciID string) error {
 	})
 }
 
+// LockIdentities implements IdentityLocker: one statement takes the
+// transaction-scoped advisory locks of keys in ascending order (the lock
+// function runs after the sort), so transactions that share keys never wait
+// for each other in a cycle (WP-334).
+func (r *PGRepository) LockIdentities(ctx context.Context, orgID string, keys []int64) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(k) FROM (SELECT DISTINCT unnest($1::bigint[]) AS k) s ORDER BY k`,
+			keys); err != nil {
+			return fmt.Errorf("lock identity keys: %w", err)
+		}
+		return nil
+	})
+}
+
+// ciCountLockNamespace keys the max_cis lock of an organization (one-argument
+// form, like the identity locks, with a prefix of its own).
+const ciCountLockNamespace = "reticora/max-cis\x00"
+
+// LockCICount implements CICountLocker: it takes the organization's max_cis
+// lock, exclusive or shared, until the end of the context transaction and
+// then counts the CIs the transaction sees, as ci.List counts them. The
+// count is a statement of its own, so it sees what every holder before
+// committed.
+func (r *PGRepository) LockCICount(ctx context.Context, orgID string, exclusive bool) (int64, error) {
+	lock := "pg_advisory_xact_lock_shared"
+	if exclusive {
+		lock = "pg_advisory_xact_lock"
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(ciCountLockNamespace + strings.ToLower(orgID)))
+	key := int64(h.Sum64()) //nolint:gosec // a hash, its sign does not matter
+	var count int64
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT "+lock+"($1)", key); err != nil {
+			return fmt.Errorf("lock max_cis: %w", err)
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`, orgID).Scan(&count); err != nil {
+			return fmt.Errorf("count cis: %w", err)
+		}
+		return nil
+	})
+	return count, err
+}
+
 // CreateEnrollmentCode stores the hash of a new enrollment code.
 func (r *PGRepository) CreateEnrollmentCode(ctx context.Context, code *EnrollmentCode) error {
 	return database.WithRequestTenant(ctx, r.pool, code.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
@@ -675,7 +720,9 @@ func (r *PGRepository) ProcessedRecords(ctx context.Context, orgID string, recor
 // MarkRecordsProcessed remembers processed records and forgets those older
 // than the dedupe window (REC-01, RecordLedger), in one statement for the
 // whole batch (NFR-03). The record ids must be distinct; an expired entry of
-// a record of the batch is refreshed, not deleted.
+// a record of the batch is refreshed, not deleted. The lanes of an
+// organization write the ledger side by side (WP-334): each forgets at most
+// 1000 expired entries and skips those another lane is deleting.
 func (r *PGRepository) MarkRecordsProcessed(ctx context.Context, orgID string, records []ProcessedRecord) error {
 	ids := make([]string, len(records))
 	collectors := make([]string, len(records))
@@ -685,8 +732,10 @@ func (r *PGRepository) MarkRecordsProcessed(ctx context.Context, orgID string, r
 	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `WITH expired AS (
-				DELETE FROM ingest_record WHERE organization_id = $1 AND processed_at <= now() - $5::interval
-				  AND record_id <> ALL($2::uuid[]))
+				DELETE FROM ingest_record WHERE (organization_id, record_id) IN (
+					SELECT organization_id, record_id FROM ingest_record
+					WHERE organization_id = $1 AND processed_at <= now() - $5::interval AND record_id <> ALL($2::uuid[])
+					ORDER BY processed_at LIMIT 1000 FOR UPDATE SKIP LOCKED))
 			INSERT INTO ingest_record (organization_id, record_id, collector_id, observed_at)
 			SELECT $1, r.record_id, NULLIF(r.collector_id, ''), r.observed_at
 			FROM unnest($2::uuid[], $3::text[], $4::timestamptz[]) AS r(record_id, collector_id, observed_at)

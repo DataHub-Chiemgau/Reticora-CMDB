@@ -160,6 +160,29 @@ func (b *ingestBatch) frameStatements() int {
 	return n
 }
 
+// checkLockedTail asserts that the statements under the organization's
+// audit chain and outbox locks come last (WP-334): from the first of them
+// only audit entries, events and the commit follow.
+func checkLockedTail(t *testing.T, tx []string) {
+	t.Helper()
+	locked := regexp.MustCompile(`insert into audit_log|insert into event_outbox|pg_advisory_xact_lock\(\$1, \$2\)|^commit$`)
+	first := -1
+	for i, sql := range tx {
+		if locked.MatchString(sql) && sql != "commit" {
+			first = i
+			break
+		}
+	}
+	if first < 0 {
+		return
+	}
+	for _, sql := range tx[first:] {
+		if !locked.MatchString(sql) {
+			t.Errorf("%q runs under the audit or outbox lock; they must come last: %q", sql, tx[first:])
+		}
+	}
+}
+
 // TestIngestStatementBudget covers WP-332 and WP-333 (NFR-03) against
 // PostgreSQL with the write path of the server (audit, outbox, search
 // index, provenance in one statement) and a batch of 20 new devices like
@@ -193,7 +216,7 @@ func TestIngestStatementBudget(t *testing.T) {
 
 	// Every repository on the counting pool: a join runs on the
 	// transaction's connection whatever pool the callee holds.
-	handler := func(production, batch bool) http.Handler {
+	handler := func(production, batch bool, lanes ...int) http.Handler {
 		var indexer ci.Indexer = search.NewCIIndexer(search.NewPGRepository(pool))
 		cis := ci.NewIndexingRepository(ci.NewPGRepositoryWithAudit(pool, audit.NewPGRecorder()).WithEvents(events.NewOutbox()), indexer)
 		if production {
@@ -204,6 +227,9 @@ func TestIngestStatementBudget(t *testing.T) {
 		}
 		h := discovery.NewHandler(discovery.NewPGRepository(pool), cis).
 			WithProvenance(manyProvenance{provenance{repo: override.NewPGRepository(pool)}})
+		if len(lanes) > 0 {
+			h.WithIngestLanes(lanes[0])
+		}
 		if production {
 			types := citype.NewPGRepository(pool)
 			h.WithInstanceFields(types).WithObservedValidator(ci.NewService(cis).WithFieldResolver(types))
@@ -295,6 +321,7 @@ func TestIngestStatementBudget(t *testing.T) {
 			if tx[len(tx)-1] != "commit" {
 				t.Errorf("record transaction ends with %q", tx[len(tx)-1])
 			}
+			checkLockedTail(t, tx)
 		}
 		return largest
 	}
@@ -396,6 +423,7 @@ func TestIngestStatementBudget(t *testing.T) {
 		if tx[len(tx)-1] != "commit" {
 			t.Errorf("batch transaction ends with %q", tx[len(tx)-1])
 		}
+		checkLockedTail(t, tx)
 		for _, other := range b.frame {
 			for _, pattern := range writes {
 				if count(other, pattern) > 0 {
@@ -505,6 +533,62 @@ func TestIngestStatementBudget(t *testing.T) {
 		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci WHERE organization_id = $1 AND model = 'L-2U'`, f.OrgA).Scan(&models); err != nil || models != 20 {
 			t.Errorf("%d CIs updated to the new model, want 20 (%v)", models, err)
 		}
+	})
+
+	// With lanes (WP-334) every record and batch transaction first takes
+	// the identity locks of its records: one statement more, right after
+	// BEGIN. With one lane there is none (the subtests above).
+	t.Run("lanes", func(t *testing.T) {
+		lock := regexp.MustCompile(`^select pg_advisory_xact_lock\(k\) from \(select distinct unnest`)
+		locks := func(tx []string) int {
+			n := 0
+			for _, sql := range tx {
+				if lock.MatchString(sql) {
+					n++
+				}
+			}
+			return n
+		}
+		mux := handler(false, true, 4)
+		ingest(t, mux, 1)
+		b := ingest(t, mux, 20)
+		// One batch per lane of the 20 devices.
+		lanes := map[int]bool{}
+		for i := range last {
+			lanes[discovery.IngestLane(&discovery.IngestItem{SerialNumber: last[i].Identity.SerialNumber}, 4)] = true
+		}
+		if len(b.records) != len(lanes) {
+			t.Fatalf("%d transactions create the 20 new devices of %d lanes, want one batch per lane: %q", len(b.records), len(lanes), b.records)
+		}
+		var tx []string
+		for _, batch := range b.records {
+			if locks(batch) != 1 || !lock.MatchString(batch[1]) || len(batch) > batchBudget+1 {
+				t.Errorf("batch transaction with lanes: %d statements, the identity locks %d times (want once, first): %q",
+					len(batch), locks(batch), batch)
+			}
+			if len(batch) > len(tx) {
+				tx = batch
+			}
+		}
+		for _, other := range b.frame {
+			if locks(other) != 0 {
+				t.Errorf("a frame transaction takes identity locks: %q", other)
+			}
+		}
+		perRecord := handler(false, false, 4)
+		ingest(t, perRecord, 1)
+		r := ingest(t, perRecord, 20)
+		largest := checkRecords(t, &r, 20)
+		for _, tx := range r.records {
+			if locks(tx) != 1 || !lock.MatchString(tx[1]) {
+				t.Errorf("record transaction with lanes takes the identity locks %d times (want once, first): %q", locks(tx), tx)
+			}
+		}
+		if largest > ingestRecordBudget+1 {
+			t.Errorf("record transaction with lanes: %d statements, budget %d plus the lock", largest, ingestRecordBudget)
+		}
+		t.Logf("with 4 lanes: 20 new devices in %d batch transactions (one per lane) of at most %d statements, a new record in %d statements",
+			len(b.records), len(tx), largest)
 	})
 
 	// Two records of one device in a window: the first is created in the

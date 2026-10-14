@@ -7,7 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,11 +23,13 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// Ingest pipeline (REC-01): every record is published on ingest.<org>.<collector>
-// and processed by the ingest consumer in the tenant scope of the principal
-// that delivered it. A record_id is processed once within RecordDedupeWindow;
-// the consumer handles one batch at a time, ordered by observed_at, so the
-// records of a CI are processed serially in source-time order.
+// Ingest pipeline (REC-01): every record is published on
+// ingest.<org>.<lane>.<collector> and processed by the consumer of its lane
+// in the tenant scope of the principal that delivered it. A record_id is
+// processed once within RecordDedupeWindow; a lane handles one batch at a
+// time, ordered by observed_at, so the records of a device with the same
+// strongest identity key are processed serially in source-time order
+// (lanes.go, WP-334).
 
 // RecordDedupeWindow is how long a processed record_id is remembered.
 const RecordDedupeWindow = 48 * time.Hour
@@ -72,14 +78,14 @@ func decodeScopeSet(ids *[]string) database.ScopeSet {
 	return database.ScopeIDs(*ids...)
 }
 
-// Subject returns the subject the message is published on.
-func (m *IngestMessage) Subject() string {
-	collector := m.CollectorID
-	if collector == "" {
-		collector = "api"
-	}
-	return "ingest." + m.OrganizationID + "." + subjectToken(collector)
+// Subject returns the subject the message is published on with lanes
+// ingest lanes (LaneSubject).
+func (m *IngestMessage) Subject(lanes int) string {
+	return LaneSubject(m.OrganizationID, m.lane(lanes), m.CollectorID)
 }
+
+// lane is the ingest lane of the message's record.
+func (m *IngestMessage) lane(lanes int) int { return IngestLane(&m.Item, lanes) }
 
 // subjectToken keeps a value usable as one NATS subject token.
 func subjectToken(v string) string {
@@ -163,25 +169,28 @@ func (h *Handler) dispatch(ctx context.Context, msgs []IngestMessage) (BulkInges
 }
 
 // ProcessMessages is the ingest consumer's processing step: it orders the
-// messages by observed_at and processes them per organization, serially per
-// organization within this process, each in the tenant scope it carries.
+// messages by observed_at and processes them per organization and ingest
+// lane, serially per organization and lane within this process, each in the
+// tenant scope it carries.
 func (h *Handler) ProcessMessages(ctx context.Context, msgs []IngestMessage) (BulkIngestResponse, error) {
 	ordered := append([]IngestMessage(nil), msgs...)
 	sortByObservedAt(ordered)
 	var total BulkIngestResponse
 	for len(ordered) > 0 {
 		head := ordered[0]
+		lane := head.lane(h.ingestLanes)
 		var group []IngestItem
 		var rest []IngestMessage
 		for i := range ordered {
-			if ordered[i].OrganizationID == head.OrganizationID && sameScope(ordered[i].Scope, head.Scope) {
+			if ordered[i].OrganizationID == head.OrganizationID && sameScope(ordered[i].Scope, head.Scope) &&
+				ordered[i].lane(h.ingestLanes) == lane {
 				group = append(group, ordered[i].item())
 			} else {
 				rest = append(rest, ordered[i])
 			}
 		}
 		ordered = rest
-		resp, err := h.processSerially(head.context(ctx), head.OrganizationID, group)
+		resp, err := h.processSerially(head.context(ctx), head.OrganizationID, lane, group)
 		total.add(&resp)
 		if err != nil {
 			return total, err
@@ -196,14 +205,52 @@ func sameScope(a, b *MessageScope) bool {
 	return bytes.Equal(ja, jb)
 }
 
-// processSerially processes the items of one organization while no other
-// ingest of that organization runs in this process.
-func (h *Handler) processSerially(ctx context.Context, orgID string, items []IngestItem) (BulkIngestResponse, error) {
-	lock, _ := h.serial.LoadOrStore(orgID, &sync.Mutex{})
-	mu := lock.(*sync.Mutex)
+// processSerially processes the items of one lane of an organization while
+// no other ingest of that lane runs in this process. With one lane that is
+// the organization.
+func (h *Handler) processSerially(ctx context.Context, orgID string, lane int, items []IngestItem) (BulkIngestResponse, error) {
+	mu := h.laneMutex(orgID, lane)
 	mu.Lock()
 	defer mu.Unlock()
 	return h.processItems(ctx, orgID, items)
+}
+
+// settledKey carries the records of a consumed batch that need no further
+// delivery.
+type settledKey struct{}
+
+// settledRecords are the ledger keys of the records that were skipped as
+// already processed, or processed and entered in the ledger.
+type settledRecords struct {
+	mu   sync.Mutex
+	keys map[string]bool
+}
+
+// withSettled returns ctx collecting the settled records of an ingest.
+func withSettled(ctx context.Context) (context.Context, *settledRecords) {
+	s := &settledRecords{keys: map[string]bool{}}
+	return context.WithValue(ctx, settledKey{}, s), s
+}
+
+// settle records items as settled in the collector of ctx, if any.
+func settle(ctx context.Context, items []IngestItem) {
+	s, ok := ctx.Value(settledKey{}).(*settledRecords)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range items {
+		if items[i].RecordID != "" {
+			s.keys[ledgerKey(items[i].RecordID)] = true
+		}
+	}
+}
+
+func (s *settledRecords) has(recordID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return recordID != "" && s.keys[ledgerKey(recordID)]
 }
 
 func (r *BulkIngestResponse) add(o *BulkIngestResponse) {
@@ -272,6 +319,11 @@ func (h *Handler) skipProcessed(ctx context.Context, orgID string, items []Inges
 	if err != nil {
 		return nil, 0, fmt.Errorf("read processed records: %w", err)
 	}
+	inLedger := maps.Clone(seen)
+	// A record in the ledger is settled whatever happens to this batch; a
+	// repeat within the batch is not, it shares the fate of its first
+	// occurrence.
+	var processed []IngestItem
 	for i := range items {
 		id := ledgerKey(items[i].RecordID)
 		if id != "" && seen[id] {
@@ -283,6 +335,12 @@ func (h *Handler) skipProcessed(ctx context.Context, orgID string, items []Inges
 		}
 		kept = append(kept, items[i])
 	}
+	for i := range items {
+		if id := ledgerKey(items[i].RecordID); id != "" && inLedger[id] {
+			processed = append(processed, items[i])
+		}
+	}
+	settle(ctx, processed)
 	return kept, duplicates, nil
 }
 
@@ -315,16 +373,75 @@ func (h *Handler) markProcessed(ctx context.Context, orgID string, items []Inges
 	return ledger.MarkRecordsProcessed(ctx, orgID, records)
 }
 
-// Names of the JetStream stream and consumer of the ingest pipeline.
+// Names of the JetStream stream and consumers of the ingest pipeline.
 const (
-	IngestStream   = "RETICORA_INGEST"
+	IngestStream = "RETICORA_INGEST"
+	// IngestConsumer is the consumer of the releases before the lanes. It
+	// keeps draining their subjects ingest.<org>.<collector> (filter
+	// ingest.*.*, disjoint from the lanes) and is never deleted by the
+	// server: a rolling upgrade or a rollback loses no message.
 	IngestConsumer = "reticora-ingest"
+	// IngestLaneConsumerPrefix plus the lane number names the consumer of a
+	// lane (filter ingest.*.<lane>.*).
+	IngestLaneConsumerPrefix = "reticora-ingest-lane-"
+	legacyIngestFilter       = "ingest.*.*"
 	// ingestBatch is the number of messages one fetch processes together;
-	// MaxAckPending equals it, so one batch is in flight across all server
-	// instances and the records of a CI stay serial.
+	// MaxAckPending of every consumer equals it, so one batch per lane is in
+	// flight across all server instances.
 	ingestBatch      = 100
 	ingestMaxDeliver = 5
+	// laneRefresh is how often the queue restores the filter of the former
+	// consumer and looks for lanes to drain.
+	laneRefresh = 30 * time.Second
+	// legacyLane is the lane of the former consumer.
+	legacyLane = -1
 )
+
+func laneConsumerName(lane int) string { return IngestLaneConsumerPrefix + strconv.Itoa(lane) }
+
+func laneFilter(lane int) string {
+	if lane == legacyLane {
+		return legacyIngestFilter
+	}
+	return "ingest.*." + strconv.Itoa(lane) + ".*"
+}
+
+// laneLabel is the lane in /readyz and the metrics: its number, or
+// "legacy" for the former consumer.
+func laneLabel(lane int) string {
+	if lane == legacyLane {
+		return "legacy"
+	}
+	return strconv.Itoa(lane)
+}
+
+// laneOf returns the lane a consumer name stands for; ok is false for the
+// other consumers of the stream.
+func laneOf(name string) (lane int, ok bool) {
+	if name == IngestConsumer {
+		return legacyLane, true
+	}
+	rest, found := strings.CutPrefix(name, IngestLaneConsumerPrefix)
+	if !found {
+		return 0, false
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil || n < 0 || strconv.Itoa(n) != rest {
+		return 0, false
+	}
+	return n, true
+}
+
+func ingestConsumerConfig(name string, lane int) jetstream.ConsumerConfig {
+	return jetstream.ConsumerConfig{
+		Durable:       name,
+		FilterSubject: laneFilter(lane),
+		AckPolicy:     jetstream.AckExplicitPolicy,
+		AckWait:       2 * time.Minute,
+		MaxDeliver:    ingestMaxDeliver,
+		MaxAckPending: ingestBatch,
+	}
+}
 
 var ingestDeadLetters atomic.Int64
 
@@ -332,17 +449,41 @@ var ingestDeadLetters atomic.Int64
 // undecodable, or failed ingestMaxDeliver times.
 func IngestDeadLetters() int64 { return ingestDeadLetters.Load() }
 
-// NATSIngestQueue is the ingest.> pipeline on NATS JetStream.
+// processingSlots bounds the batches the lanes of a process work on at the
+// same time to a quarter of the database pool, so that the ingest leaves
+// the API its connections whatever the lane count (WP-334).
+func processingSlots() int { return max(1, database.PoolMaxConns/4) }
+
+// NATSIngestQueue is the ingest.> pipeline on NATS JetStream: a consumer
+// per lane, the former consumer of the releases before the lanes, and the
+// lanes that a configuration with more lanes left behind (drain lanes).
 type NATSIngestQueue struct {
-	nc       *nats.Conn
-	js       jetstream.JetStream
+	nc      *nats.Conn
+	js      jetstream.JetStream
+	stream  jetstream.Stream
+	lanes   int
+	handler *Handler
+	// slots holds a token per batch in work (processingSlots).
+	slots chan struct{}
+
+	mu        sync.Mutex
+	consumers map[string]*laneConsumer
+}
+
+// laneConsumer is a consumer the queue fetches from. Own consumers (the
+// lanes 0..lanes-1 and the former consumer) are created again when they
+// disappear; a drain lane is consumed until an operator removes it.
+type laneConsumer struct {
 	consumer jetstream.Consumer
-	handler  *Handler
+	lane     int
+	own      bool
 }
 
 // NewNATSIngestQueue connects to NATS and ensures the work-queue stream on
-// ingest.> and its durable consumer.
-func NewNATSIngestQueue(ctx context.Context, url string, opts ...nats.Option) (*NATSIngestQueue, error) {
+// ingest.>, the consumers of its lanes (1..MaxIngestLanes, RETICORA_INGEST_
+// LANES) and the former consumer, restricted to the subjects of the
+// releases before the lanes.
+func NewNATSIngestQueue(ctx context.Context, url string, lanes int, opts ...nats.Option) (*NATSIngestQueue, error) {
 	nc, err := nats.Connect(url, append([]nats.Option{nats.Name("reticora-ingest"), nats.MaxReconnects(-1)}, opts...)...)
 	if err != nil {
 		return nil, fmt.Errorf("connect NATS: %w", err)
@@ -364,29 +505,136 @@ func NewNATSIngestQueue(ctx context.Context, url string, opts ...nats.Option) (*
 		nc.Close()
 		return nil, fmt.Errorf("ensure stream %s: %w", IngestStream, err)
 	}
-	consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
-		Durable:       IngestConsumer,
-		AckPolicy:     jetstream.AckExplicitPolicy,
-		AckWait:       2 * time.Minute,
-		MaxDeliver:    ingestMaxDeliver,
-		MaxAckPending: ingestBatch,
-	})
-	if err != nil {
+	q := &NATSIngestQueue{nc: nc, js: js, stream: stream, lanes: clampLanes(lanes),
+		slots: make(chan struct{}, processingSlots()), consumers: map[string]*laneConsumer{}}
+	// The former consumer first: a work-queue stream refuses a filtered
+	// consumer next to an unfiltered one, so the consumer of the releases
+	// before must be restricted to their subjects before any lane exists.
+	// The update keeps its pending messages and their acknowledgements.
+	if err = q.ensure(ctx, IngestConsumer, legacyLane); err != nil {
 		nc.Close()
-		return nil, fmt.Errorf("ensure consumer %s: %w", IngestConsumer, err)
+		return nil, err
 	}
-	return &NATSIngestQueue{nc: nc, js: js, consumer: consumer}, nil
+	for lane := range q.lanes {
+		if err = q.ensure(ctx, laneConsumerName(lane), lane); err != nil {
+			nc.Close()
+			return nil, err
+		}
+	}
+	if err = q.discover(ctx); err != nil {
+		nc.Close()
+		return nil, err
+	}
+	ingestLanesGauge.Set(float64(q.lanes))
+	return q, nil
 }
 
-// Publish stores each message on its ingest.<org>.<collector> subject and
-// waits for the stream's acknowledgement.
+// Lanes is the number of lanes the queue publishes to.
+func (q *NATSIngestQueue) Lanes() int { return q.lanes }
+
+// ensure creates or updates an own consumer.
+func (q *NATSIngestQueue) ensure(ctx context.Context, name string, lane int) error {
+	c, err := q.stream.CreateOrUpdateConsumer(ctx, ingestConsumerConfig(name, lane))
+	if err != nil {
+		return fmt.Errorf("ensure consumer %s: %w", name, err)
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.consumers[name] = &laneConsumer{consumer: c, lane: lane, own: true}
+	return nil
+}
+
+// owns reports whether lane is one this instance keeps.
+func (q *NATSIngestQueue) owns(lane int) bool { return lane == legacyLane || lane < q.lanes }
+
+// discover rebuilds the drain lanes from the consumers of the stream: a
+// lane consumer beyond this instance's lanes is drained (a configuration
+// with more lanes published there), one that disappeared is forgotten.
+func (q *NATSIngestQueue) discover(ctx context.Context) error {
+	lister := q.stream.ConsumerNames(ctx)
+	present := map[string]bool{}
+	for name := range lister.Name() {
+		present[name] = true
+	}
+	if err := lister.Err(); err != nil {
+		return fmt.Errorf("list ingest consumers: %w", err)
+	}
+	for name := range present {
+		lane, ok := laneOf(name)
+		if !ok || q.owns(lane) || q.consumer(name) != nil {
+			continue
+		}
+		c, err := q.stream.Consumer(ctx, name)
+		if errors.Is(err, jetstream.ErrConsumerNotFound) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("drain lane %s: %w", name, err)
+		}
+		q.mu.Lock()
+		q.consumers[name] = &laneConsumer{consumer: c, lane: lane}
+		q.mu.Unlock()
+		slog.Info("ingest lane beyond RETICORA_INGEST_LANES is drained", "event", "ingest.lane.drain", "consumer", name)
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for name, lc := range q.consumers {
+		if !lc.own && !present[name] {
+			delete(q.consumers, name)
+		}
+	}
+	return nil
+}
+
+// refresh restores the filter of the former consumer, which a server of an
+// earlier release sets back to "all subjects" when it starts, and rebuilds
+// the drain lanes.
+func (q *NATSIngestQueue) refresh(ctx context.Context) {
+	c, err := q.stream.Consumer(ctx, IngestConsumer)
+	switch {
+	case errors.Is(err, jetstream.ErrConsumerNotFound),
+		err == nil && c.CachedInfo().Config.FilterSubject != legacyIngestFilter:
+		if err = q.ensure(ctx, IngestConsumer, legacyLane); err != nil {
+			slog.Warn("former ingest consumer not restored", "consumer", IngestConsumer, "error", err)
+		} else {
+			slog.Warn("filter of the former ingest consumer restored", "event", "ingest.legacy_filter_restored",
+				"consumer", IngestConsumer, "filter", legacyIngestFilter)
+		}
+	case err != nil:
+		slog.Warn("former ingest consumer not checked", "consumer", IngestConsumer, "error", err)
+	}
+	if err = q.discover(ctx); err != nil {
+		slog.Warn("ingest drain lanes not checked", "error", err)
+	}
+}
+
+// consumer returns the current consumer of name, or nil.
+func (q *NATSIngestQueue) consumer(name string) jetstream.Consumer {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if lc, ok := q.consumers[name]; ok {
+		return lc.consumer
+	}
+	return nil
+}
+
+// names lists the consumers the queue fetches from.
+func (q *NATSIngestQueue) names() []string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return slices.Sorted(maps.Keys(q.consumers))
+}
+
+// Publish stores each message on the subject of its lane
+// (ingest.<org>.<lane>.<collector>) and waits for the stream's
+// acknowledgement.
 func (q *NATSIngestQueue) Publish(ctx context.Context, msgs []IngestMessage) error {
 	for i := range msgs {
 		data, err := json.Marshal(&msgs[i])
 		if err != nil {
 			return fmt.Errorf("encode ingest message: %w", err)
 		}
-		if _, err = q.js.Publish(ctx, msgs[i].Subject(), data); err != nil {
+		if _, err = q.js.Publish(ctx, msgs[i].Subject(q.lanes), data); err != nil {
 			return fmt.Errorf("publish ingest message: %w", err)
 		}
 	}
@@ -397,13 +645,14 @@ func (q *NATSIngestQueue) Publish(ctx context.Context, msgs []IngestMessage) err
 func (q *NATSIngestQueue) Close() { q.nc.Close() }
 
 // Attach sets the handler that processes consumed messages and makes it
-// publish to this queue.
+// publish to this queue with the queue's lanes.
 func (q *NATSIngestQueue) Attach(h *Handler) {
 	q.handler = h
-	h.WithIngestQueue(q)
+	h.WithIngestQueue(q).WithIngestLanes(q.lanes)
 }
 
-// Run consumes ingest.> with the attached handler until ctx ends.
+// Run consumes every lane with the attached handler until ctx ends: one
+// goroutine per consumer, started again for consumers found later.
 func (q *NATSIngestQueue) Run(ctx context.Context) {
 	if q.handler == nil {
 		slog.Error("ingest consumer not started: no handler attached")
@@ -415,13 +664,53 @@ func (q *NATSIngestQueue) Run(ctx context.Context) {
 			slog.Error("collector edge data path", "error", err)
 		}
 	}()
-	runIngestConsumer(ctx, jetstreamSource{q.consumer}, q.handler)
+	var wg sync.WaitGroup
+	running := map[string]bool{}
+	// A lane that ends hands over its name unless the queue stops: no lane
+	// waits for a reader at shutdown, whatever the number of lanes.
+	ended := make(chan string)
+	start := func() {
+		for _, name := range q.names() {
+			if running[name] {
+				continue
+			}
+			running[name] = true
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				runIngestConsumer(ctx, &laneSource{q: q, name: name}, q.handler, q.slots)
+				select {
+				case ended <- name:
+				case <-ctx.Done():
+				}
+			}()
+		}
+	}
+	start()
+	ticker := time.NewTicker(laneRefresh)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			wg.Wait()
+			return
+		case name := <-ended:
+			delete(running, name)
+		case <-ticker.C:
+			q.refresh(ctx)
+			start()
+		}
+	}
 }
 
-// ingestSource fetches batches of deliveries; jetstreamSource and the
-// tests implement it.
+// ingestSource fetches batches of deliveries; laneSource and the tests
+// implement it.
 type ingestSource interface {
 	Fetch(ctx context.Context, limit int) ([]ingestDelivery, error)
+	// Recheck runs when a fetch found no consumer: it creates an own
+	// consumer again and reports false when the lane ended (a drain lane
+	// an operator removed).
+	Recheck(ctx context.Context) bool
 }
 
 type ingestDelivery interface {
@@ -432,13 +721,60 @@ type ingestDelivery interface {
 	Delivered() uint64
 }
 
-type jetstreamSource struct{ consumer jetstream.Consumer }
+// laneSource fetches from the current consumer of a lane.
+type laneSource struct {
+	q    *NATSIngestQueue
+	name string
+}
 
-func (s jetstreamSource) Fetch(ctx context.Context, limit int) ([]ingestDelivery, error) {
+func (s *laneSource) Fetch(ctx context.Context, limit int) ([]ingestDelivery, error) {
+	c := s.q.consumer(s.name)
+	if c == nil {
+		return nil, jetstream.ErrConsumerNotFound
+	}
+	return fetch(ctx, c, limit)
+}
+
+func (s *laneSource) Recheck(ctx context.Context) bool {
+	q := s.q
+	q.mu.Lock()
+	lc, known := q.consumers[s.name]
+	q.mu.Unlock()
+	if !known {
+		return false
+	}
+	_, err := q.stream.Consumer(ctx, s.name)
+	switch {
+	case errors.Is(err, jetstream.ErrConsumerNotFound) && lc.own:
+		if err = q.ensure(ctx, s.name, lc.lane); err == nil {
+			slog.Warn("ingest consumer created again", "event", "ingest.lane.recreated", "consumer", s.name)
+			return true
+		}
+	case errors.Is(err, jetstream.ErrConsumerNotFound):
+		q.mu.Lock()
+		delete(q.consumers, s.name)
+		q.mu.Unlock()
+		slog.Info("drained ingest lane removed", "event", "ingest.lane.removed", "consumer", s.name)
+		return false
+	}
+	if err != nil {
+		slog.Warn("ingest consumer not checked", "consumer", s.name, "error", err)
+	}
+	// The consumer exists (the server was briefly without a responder) or
+	// could not be checked: wait a moment and fetch again.
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(time.Second):
+		return true
+	}
+}
+
+func fetch(ctx context.Context, consumer jetstream.Consumer, limit int) ([]ingestDelivery, error) {
 	// Wait at most a second for messages, and stop with ctx.
 	waitCtx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	batch, err := s.consumer.Fetch(limit, jetstream.FetchContext(waitCtx))
+	batch, err := consumer.Fetch(limit, jetstream.FetchContext(waitCtx))
 	if err != nil {
 		return nil, err
 	}
@@ -463,13 +799,29 @@ func (d jetstreamDelivery) Delivered() uint64 {
 	return meta.NumDelivered
 }
 
-// runIngestConsumer is the consumer loop: fetch a batch, process it in
-// observed_at order, acknowledge what was processed.
-func runIngestConsumer(ctx context.Context, src ingestSource, h *Handler) {
+// consumerGone reports a fetch at a consumer that no longer exists: the pull
+// finds no responder, or a pull waiting at the deletion is told so. That is
+// no worker failure; the source checks the consumer.
+func consumerGone(err error) bool {
+	return errors.Is(err, nats.ErrNoResponders) || errors.Is(err, jetstream.ErrConsumerDeleted) ||
+		errors.Is(err, jetstream.ErrConsumerNotFound)
+}
+
+// runIngestConsumer is the loop of a lane: fetch a batch, process it in
+// observed_at order within a processing slot (slots, nil: unbounded),
+// acknowledge what was processed. It ends with ctx, or when the lane ended
+// (Recheck).
+func runIngestConsumer(ctx context.Context, src ingestSource, h *Handler, slots chan struct{}) {
 	for ctx.Err() == nil {
 		deliveries, err := src.Fetch(ctx, ingestBatch)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, nats.ErrTimeout) &&
 			!errors.Is(err, context.DeadlineExceeded) && len(deliveries) == 0 {
+			if consumerGone(err) {
+				if !src.Recheck(ctx) {
+					return
+				}
+				continue
+			}
 			observability.ObserveWorkerRun("ingest", 1)
 			slog.Warn("ingest consumer fetch failed", "error", err)
 			select {
@@ -479,24 +831,76 @@ func runIngestConsumer(ctx context.Context, src ingestSource, h *Handler) {
 			}
 			continue
 		}
-		consumeBatch(ctx, h, deliveries)
+		if len(deliveries) > 0 && slots != nil {
+			select {
+			case slots <- struct{}{}:
+			case <-ctx.Done():
+				// Stopping before the batch started: it goes back to the
+				// queue.
+				for _, d := range deliveries {
+					_ = d.Nak()
+				}
+				return
+			}
+			consumeBatch(ctx, h, deliveries)
+			<-slots
+		} else {
+			consumeBatch(ctx, h, deliveries)
+		}
 		observability.ObserveWorkerRun("ingest", 0)
 	}
 }
 
-// Backlog reports the messages waiting for the ingest worker: not yet
-// delivered plus delivered but unacknowledged (OPS-05).
-func (q *NATSIngestQueue) Backlog(ctx context.Context) (int, error) {
-	info, err := q.consumer.Info(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("ingest consumer info: %w", err)
+// IngestBacklog is the backlog of the ingest consumers (/readyz details,
+// OPS-05): per lane ("legacy" for the former consumer) the messages not yet
+// delivered plus those delivered but unacknowledged, summed over all
+// organizations.
+type IngestBacklog struct {
+	Lanes   int            `json:"lanes"`
+	Backlog map[string]int `json:"backlog"`
+	Total   int            `json:"total"`
+}
+
+// LaneBacklog reads the backlog of every ingest consumer of the stream with
+// one listing.
+func (q *NATSIngestQueue) LaneBacklog(ctx context.Context) (*IngestBacklog, error) {
+	out := &IngestBacklog{Lanes: q.lanes, Backlog: map[string]int{}}
+	lister := q.stream.ListConsumers(ctx)
+	for info := range lister.Info() {
+		lane, ok := laneOf(info.Name)
+		if !ok {
+			continue
+		}
+		n := int(info.NumPending) + info.NumAckPending //nolint:gosec // a message count
+		out.Backlog[laneLabel(lane)] = n
+		out.Total += n
 	}
-	return int(info.NumPending) + info.NumAckPending, nil
+	if err := lister.Err(); err != nil {
+		return nil, fmt.Errorf("ingest consumer info: %w", err)
+	}
+	return out, nil
+}
+
+// Backlog reports the messages waiting for the ingest worker, summed over
+// the lanes (reticora_worker_backlog), and samples the backlog per lane into
+// reticora_ingest_lane_backlog (OPS-05).
+func (q *NATSIngestQueue) Backlog(ctx context.Context) (int, error) {
+	backlog, err := q.LaneBacklog(ctx)
+	if err != nil {
+		return 0, err
+	}
+	laneBacklog.Reset()
+	for lane, n := range backlog.Backlog {
+		laneBacklog.WithLabelValues(lane).Set(float64(n))
+	}
+	return backlog.Total, nil
 }
 
 // consumeBatch processes one fetched batch. Undecodable messages are
-// terminated; a failed organization group is redelivered, and given up
-// after ingestMaxDeliver attempts.
+// terminated; the messages of a group (organization, scope, lane) are
+// acknowledged when it was processed, and so are its records processed
+// before or within it when it failed; the others are redelivered, and given
+// up after ingestMaxDeliver attempts.
 func consumeBatch(ctx context.Context, h *Handler, deliveries []ingestDelivery) {
 	type entry struct {
 		msg IngestMessage
@@ -515,13 +919,16 @@ func consumeBatch(ctx context.Context, h *Handler, deliveries []ingestDelivery) 
 	}
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].msg.ObservedAt.Before(entries[j].msg.ObservedAt) })
 
-	// One group per organization and scope, processed in order.
+	// One group per organization, scope and lane, processed in order. The
+	// lane is the record's, whatever subject carried it: the former
+	// consumer and drain lanes join the lanes of this instance.
 	for len(entries) > 0 {
 		head := entries[0].msg
+		lane := head.lane(h.ingestLanes)
 		var group, rest []entry
 		for i := range entries {
 			e := &entries[i]
-			if e.msg.OrganizationID == head.OrganizationID && sameScope(e.msg.Scope, head.Scope) {
+			if e.msg.OrganizationID == head.OrganizationID && sameScope(e.msg.Scope, head.Scope) && e.msg.lane(h.ingestLanes) == lane {
 				group = append(group, *e)
 			} else {
 				rest = append(rest, *e)
@@ -532,12 +939,14 @@ func consumeBatch(ctx context.Context, h *Handler, deliveries []ingestDelivery) 
 		for i := range group {
 			msgs[i] = group[i].msg
 		}
-		_, err := h.ProcessMessages(ctx, msgs)
+		groupCtx, settled := withSettled(ctx)
+		_, err := h.ProcessMessages(groupCtx, msgs)
 		for i := range group {
 			e := &group[i]
 			switch {
-			case err == nil:
+			case err == nil, settled.has(e.msg.RecordID):
 				_ = e.d.Ack()
+				laneRecords.WithLabelValues(strconv.Itoa(lane)).Inc()
 			case e.d.Delivered() >= ingestMaxDeliver:
 				ingestDeadLetters.Add(1)
 				slog.Error("ingest message given up", "event", "ingest.message.failed",

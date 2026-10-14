@@ -31,6 +31,10 @@ func appRole() string {
 	return DefaultAppRole
 }
 
+// PoolMaxConns is the size of the application pool NewPool creates; the
+// ingest lanes take at most a quarter of it (WP-334).
+const PoolMaxConns = 25
+
 // NewPool creates a pgx connection pool suitable for production use.
 //
 // Every connection switches into the restricted application role before it is
@@ -49,7 +53,7 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("parse pool config: %w", err)
 	}
 
-	config.MaxConns = 25
+	config.MaxConns = PoolMaxConns
 	config.MinConns = 5
 	pinClientEncoding(config)
 
@@ -203,8 +207,9 @@ func checkClientEncoding(conn *pgx.Conn) error {
 //
 // When ctx carries a transaction (ContextWithTx), fn runs in it if scope is
 // its scope (ErrTxScopeMismatch otherwise); the owner commits. A statement
-// error that fn swallowed rolls the transaction back (ErrTxAborted). After
-// the commit the AfterCommit callbacks run.
+// error that fn swallowed rolls the transaction back (ErrTxAborted). Before
+// the commit the BeforeCommit writes run, after it the AfterCommit
+// callbacks.
 func WithTenant(ctx context.Context, pool *pgxpool.Pool, scope *TenantScope, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	if err := scope.Validate(); err != nil {
 		return err
@@ -225,6 +230,12 @@ func WithTenant(ctx context.Context, pool *pgxpool.Pool, scope *TenantScope, fn 
 	}()
 
 	if err := fn(ctx, t); err != nil {
+		return err
+	}
+	if t.aborted() {
+		return ErrTxAborted
+	}
+	if err := t.runBeforeCommit(); err != nil {
 		return err
 	}
 	if t.aborted() {

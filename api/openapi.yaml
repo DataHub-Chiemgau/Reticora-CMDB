@@ -117,7 +117,9 @@ paths:
         Checks the configured dependencies (database with required
         extensions, Redis, object storage, NATS) with a timeout per check.
         Liveness stays on /healthz. Failing checks are only named; the cause
-        is logged by the server.
+        is logged by the server. With NATS, `details.ingest` reports the
+        backlog of the ingest lanes (WP-334, OPS-05), summed over all
+        organizations; it is informational and never changes the status.
       responses:
         '200':
           description: All dependencies are usable
@@ -12512,6 +12514,56 @@ components:
           example:
             database: ok
             redis: unavailable
+        details:
+          type: object
+          description: >-
+            Informational figures per subsystem; they never change the
+            status. A detail that cannot be read is `{"error": "unavailable"}`.
+          properties:
+            ingest:
+              oneOf:
+                - $ref: '#/components/schemas/IngestBacklog'
+                - $ref: '#/components/schemas/ReadinessDetailUnavailable'
+          additionalProperties: true
+
+    ReadinessDetailUnavailable:
+      type: object
+      description: A readiness detail that could not be read; the cause is logged.
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum: [unavailable]
+
+    IngestBacklog:
+      type: object
+      description: >-
+        Backlog of the ingest consumers (WP-334, NFR-03): per lane the
+        messages not yet delivered plus those delivered but unacknowledged,
+        summed over all organizations. `legacy` is the consumer of the
+        releases before the lanes; lanes beyond `lanes` are being drained.
+      required: [lanes, backlog, total]
+      properties:
+        lanes:
+          type: integer
+          minimum: 1
+          maximum: 16
+          description: RETICORA_INGEST_LANES of this instance.
+        backlog:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+          example:
+            '0': 12
+            '1': 0
+            '2': 7
+            '3': 0
+            legacy: 0
+        total:
+          type: integer
+          minimum: 0
+          example: 19
 
     CallbackRequest:
       type: object

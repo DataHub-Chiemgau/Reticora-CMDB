@@ -872,6 +872,7 @@ The server is configured via environment variables:
   bypass RLS. Set this only when the login role is already restricted; setting it
   to an empty value disables the role switch but not the startup check.
 - `RETICORA_NATS_URL` — NATS server URL.
+- `RETICORA_INGEST_LANES` — parallel ingest lanes per organization (default `4`, `1`–`16`, the same on every instance; `1` is the serial ingest of the releases before WP-334). See [`docs/betrieb/ingest-spuren.md`](betrieb/ingest-spuren.md).
 - `RETICORA_REDIS_URL` — Redis connection string.
 - `RETICORA_ENVIRONMENT` — Environment name (development/staging/production).
 - `RETICORA_DEFAULT_PLAN` — Plan provisioned for the `--no-db` demo organization (default `essential`); organizations in the database are provisioned with their own plan.

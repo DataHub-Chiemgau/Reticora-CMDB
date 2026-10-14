@@ -30,7 +30,7 @@ export interface paths {
     };
     /**
      * Readiness check
-     * @description Checks the configured dependencies (database with required extensions, Redis, object storage, NATS) with a timeout per check. Liveness stays on /healthz. Failing checks are only named; the cause is logged by the server.
+     * @description Checks the configured dependencies (database with required extensions, Redis, object storage, NATS) with a timeout per check. Liveness stays on /healthz. Failing checks are only named; the cause is logged by the server. With NATS, `details.ingest` reports the backlog of the ingest lanes (WP-334, OPS-05), summed over all organizations; it is informational and never changes the status.
      */
     get: operations['getReadiness'];
     put?: never;
@@ -7139,6 +7139,38 @@ export interface components {
       checks: {
         [key: string]: 'ok' | 'unavailable';
       };
+      /** @description Informational figures per subsystem; they never change the status. A detail that cannot be read is `{"error": "unavailable"}`. */
+      details?: {
+        ingest?:
+          | components['schemas']['IngestBacklog']
+          | components['schemas']['ReadinessDetailUnavailable'];
+      } & {
+        [key: string]: unknown;
+      };
+    };
+    /** @description A readiness detail that could not be read; the cause is logged. */
+    ReadinessDetailUnavailable: {
+      /** @enum {string} */
+      error: 'unavailable';
+    };
+    /** @description Backlog of the ingest consumers (WP-334, NFR-03): per lane the messages not yet delivered plus those delivered but unacknowledged, summed over all organizations. `legacy` is the consumer of the releases before the lanes; lanes beyond `lanes` are being drained. */
+    IngestBacklog: {
+      /** @description RETICORA_INGEST_LANES of this instance. */
+      lanes: number;
+      /**
+       * @example {
+       *       "0": 12,
+       *       "1": 0,
+       *       "2": 7,
+       *       "3": 0,
+       *       "legacy": 0
+       *     }
+       */
+      backlog: {
+        [key: string]: number;
+      };
+      /** @example 19 */
+      total: number;
     };
     CallbackRequest: {
       code: string;

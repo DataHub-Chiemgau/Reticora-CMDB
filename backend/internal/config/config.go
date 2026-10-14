@@ -35,6 +35,11 @@ type Config struct {
 
 	// Messaging
 	NATSUrl string
+	// IngestLanes is the number of parallel ingest lanes per organization
+	// (RETICORA_INGEST_LANES, default 4, 1-MaxIngestLanes; NFR-03, WP-334,
+	// E-56). 1 processes the ingest of an organization serially as before.
+	// Every instance must use the same value.
+	IngestLanes int
 
 	// Cache / Rate-Limiting / Idempotency
 	RedisURL string
@@ -198,6 +203,7 @@ func Load() *Config {
 
 		DatabaseURL: l.str("RETICORA_DATABASE_URL", "postgres://localhost:5432/reticora?sslmode=disable"),
 		NATSUrl:     l.str("RETICORA_NATS_URL", "nats://localhost:4222"),
+		IngestLanes: l.integer("RETICORA_INGEST_LANES", DefaultIngestLanes),
 		RedisURL:    l.str("RETICORA_REDIS_URL", "redis://localhost:6379"),
 
 		S3Endpoint:  l.str("RETICORA_S3_ENDPOINT", "localhost:9000"),
@@ -306,6 +312,15 @@ const (
 	MinRetentionHistoryDays    = 3 * 365
 	MinRetentionSoftDeleteDays = 90
 	MinRetentionReviewItemDays = 365
+)
+
+// Ingest lanes per organization (RETICORA_INGEST_LANES, WP-334): the
+// default and the largest value (discovery.MaxIngestLanes). Every lane may
+// hold a database connection; the server bounds the batches in work to a
+// quarter of its pool whatever the value.
+const (
+	DefaultIngestLanes = 4
+	MaxIngestLanes     = 16
 )
 
 // Background workers with an independent operator switch (OPS-02). The
@@ -448,6 +463,9 @@ func (c *Config) Validate(noDB bool) error {
 	}
 	if c.RateLimitOrgRPM < c.RateLimitRPM {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_ORG_RPM (%d) must not be below RETICORA_RATE_LIMIT_RPM (%d)", c.RateLimitOrgRPM, c.RateLimitRPM))
+	}
+	if c.IngestLanes < 1 || c.IngestLanes > MaxIngestLanes {
+		errs = append(errs, fmt.Errorf("RETICORA_INGEST_LANES must be between 1 and %d, got %d", MaxIngestLanes, c.IngestLanes))
 	}
 	if c.RateLimitRPM <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_RPM must be positive, got %d", c.RateLimitRPM))

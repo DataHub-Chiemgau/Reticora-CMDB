@@ -51,6 +51,15 @@ import (
 //   - rollback of a batch (WP-333): a failure in the batch transaction of a
 //     window, after its CIs, provenance and a review were written, leaves
 //     none of them and announces nothing; the records follow one by one;
+//   - double ingest across lanes (WP-334, E-56): one device whose records
+//     carry different strongest keys is ingested at once in two lanes of
+//     one instance (serial only and serial plus UUID; sweep with MAC and IP
+//     and SNMP with serial, MAC, IP and sysObjectID; IP plus sysObjectID
+//     with and without serial); the identity locks serialize the two, so
+//     the device ends with exactly one CI, counted per serial, MAC and IP;
+//   - two lanes update one CI at once with disjoint new attributes: both
+//     succeed, without a deadlock reaching the queue, and every attribute
+//     is stored;
 //   - the integrity check finds no orphans, duplicates or cycles afterwards.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
@@ -333,8 +342,140 @@ func TestDiscoveryConcurrency(t *testing.T) {
 			notified-notifiedBefore, inTx, errs)
 	}
 
+	// Double ingest across lanes (WP-334): each pair of records of one new
+	// device runs in two lanes at once; both decide only after the other
+	// had its chance (a barrier before the creation, which the identity
+	// lock keeps the second one from reaching).
+	laned := discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App)).
+		WithProvenance(provenance{repo: override.NewPGRepository(f.App)}).WithIngestLanes(4)
+	pair := &pairBarrier{}
+	discovery.SetBeforeCreate(laned, func(context.Context) { pair.wait(300 * time.Millisecond) })
+	lanesCtx := ctx
+	countBy := func(column, value string) int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci WHERE organization_id = $1 AND deleted_at IS NULL AND `+column+` = $2`,
+			f.OrgA, value).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	seen := time.Now().Add(-time.Minute)
+	for round := 0; round < 3; round++ {
+		serial := fmt.Sprintf("ABN03-LANES-%d", round)
+		ip := fmt.Sprintf("203.0.113.%d", 10+round)
+		mac := fmt.Sprintf("00:1b:21:bb:00:%02x", round)
+		uuid := fmt.Sprintf("4c4c4544-0000-4000-8000-0000000000%02x", round)
+		snmp := func(s, ip, sysObjectID string) plugins.DeviceRecord {
+			rec := plugins.RecordFromResult("snmp", &plugins.Result{CIType: "server", Name: "lanes-" + ip, IP: ip,
+				Manufacturer: "Reticora Labs", Model: "M1", Serial: s}, seen)
+			rec.Classification.SysObjectID = sysObjectID
+			return rec
+		}
+		withUUID := snmp(serial, ip, "")
+		withUUID.Source = "ssh"
+		withUUID.Identity.HardwareUUID = uuid
+		sweep := plugins.RecordFromResult("sweep", &plugins.Result{CIType: "server", Name: "lanes-sweep", IP: ip + "1"}, seen)
+		sweep.Identity.PrimaryMAC = mac
+		withMAC := snmp(serial+"-M", ip+"1", "1.3.6.1.4.1.9.1.1")
+		withMAC.Identity.PrimaryMAC = mac
+		for _, c := range []struct {
+			name       string
+			a, b       plugins.DeviceRecord
+			column, by string
+		}{
+			{"serial only vs serial and UUID", snmp(serial, ip, ""), withUUID, "serial_number", serial},
+			{"sweep vs SNMP", sweep, withMAC, "primary_mac", mac},
+			{"IP and sysObjectID vs serial, IP and sysObjectID", snmp("", ip+"2", "1.3.6.1.4.1.9.1.2"),
+				snmp(serial+"-I", ip+"2", "1.3.6.1.4.1.9.1.2"), "management_ip", ip + "2"},
+		} {
+			errs := make([]error, 2)
+			together(
+				func() { _, errs[0] = discovery.ProcessInLane(lanesCtx, laned, f.OrgA, 0, c.a) },
+				func() { _, errs[1] = discovery.ProcessInLane(lanesCtx, laned, f.OrgA, 1, c.b) },
+			)
+			if errs[0] != nil || errs[1] != nil {
+				t.Errorf("lanes round %d, %s: %v", round, c.name, errs)
+			}
+			if n := countBy(c.column, c.by); n != 1 {
+				t.Errorf("lanes round %d, %s: %d CIs with %s %s, want 1", round, c.name, n, c.column, c.by)
+			}
+		}
+	}
+	if met := pair.met.Load(); met != 0 {
+		t.Errorf("two records of one device decided to create a CI at the same time %d times", met)
+	}
+	if n := countBy("hardware_uuid", "4c4c4544-0000-4000-8000-000000000000"); n != 1 {
+		t.Errorf("CI with the reported UUID: %d, want 1", n)
+	}
+
+	// Two lanes update one CI at once with disjoint new attributes.
+	discovery.SetBeforeCreate(laned, nil)
+	for round := 0; round < 10; round++ {
+		serial := fmt.Sprintf("ABN03-LANES-UPD-%d", round)
+		base := device(serial, "M1")
+		if _, err := discovery.ProcessInLane(lanesCtx, laned, f.OrgA, 0, base); err != nil {
+			t.Fatal(err)
+		}
+		update := func(prefix string) plugins.DeviceRecord {
+			rec := device(serial, "M1")
+			rec.Attributes = map[string]any{}
+			for i := 0; i < 5; i++ {
+				rec.Attributes[fmt.Sprintf("%s_%d", prefix, i)] = fmt.Sprintf("%s-%d", prefix, round)
+			}
+			return rec
+		}
+		errs := make([]error, 2)
+		together(
+			func() { _, errs[0] = discovery.ProcessInLane(lanesCtx, laned, f.OrgA, 2, update("lane_a")) },
+			func() { _, errs[1] = discovery.ProcessInLane(lanesCtx, laned, f.OrgA, 3, update("lane_b")) },
+		)
+		if errs[0] != nil || errs[1] != nil {
+			t.Errorf("update round %d: %v (a failed record would go back to the queue)", round, errs)
+		}
+		var attrs int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci c, jsonb_object_keys(c.attributes) k
+			WHERE c.organization_id = $1 AND c.serial_number = $2 AND (k LIKE 'lane_a_%' OR k LIKE 'lane_b_%')`, f.OrgA, serial).Scan(&attrs); err != nil {
+			t.Fatal(err)
+		}
+		if attrs != 10 || count(serial) != 1 {
+			t.Errorf("update round %d: %d of 10 attributes, %d CIs", round, attrs, count(serial))
+		}
+	}
+
 	if v := integrityViolations(t, f, f.OrgA); len(v) > 0 {
 		t.Errorf("integrity violations after the concurrency matrix: %v", v)
+	}
+}
+
+// pairBarrier lets two parties through together, or each alone after a
+// timeout; met counts the times both arrived together.
+type pairBarrier struct {
+	mu      sync.Mutex
+	waiting chan struct{}
+	met     atomic.Int32
+}
+
+func (b *pairBarrier) wait(timeout time.Duration) {
+	b.mu.Lock()
+	if b.waiting != nil {
+		close(b.waiting)
+		b.waiting = nil
+		b.met.Add(1)
+		b.mu.Unlock()
+		return
+	}
+	ch := make(chan struct{})
+	b.waiting = ch
+	b.mu.Unlock()
+	select {
+	case <-ch:
+	case <-time.After(timeout):
+		b.mu.Lock()
+		if b.waiting == ch {
+			b.waiting = nil
+		}
+		b.mu.Unlock()
 	}
 }
 

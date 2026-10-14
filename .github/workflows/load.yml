@@ -21,7 +21,7 @@ permissions:
 jobs:
   load:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     services:
       postgres:
         image: timescale/timescaledb:2.17.2-pg16
@@ -79,6 +79,7 @@ jobs:
           RETICORA_SESSION_KEY_PATH="$RUNNER_TEMP/session.pem" \
           RETICORA_MASTER_KEY="$(head -c 32 /dev/urandom | base64)" \
           RETICORA_RATE_LIMIT_RPM=1000000 RETICORA_RATE_LIMIT_ORG_RPM=1000000 \
+          RETICORA_INGEST_LANES=4 \
           nohup "$RUNNER_TEMP/server" > "$RUNNER_TEMP/server.log" 2>&1 &
           for i in $(seq 1 60); do curl -fsS http://localhost:8080/healthz >/dev/null && exit 0; sleep 1; done
           cat "$RUNNER_TEMP/server.log"; exit 1
@@ -94,12 +95,23 @@ jobs:
           k6 run -e BASE_URL=http://localhost:8080 -e API_KEY="$(cat "$RUNNER_TEMP/load.key")" -e DURATION="$DURATION" \
             --summary-export load-results/api.json tests/load/api.js | tee load-results/api.txt
 
-      - name: Ingest throughput and delay (NFR-03)
+      - name: Ingest delay at 200 records/s (NFR-03)
         if: always()
         run: |
           set -o pipefail
-          k6 run -e BASE_URL=http://localhost:8080 -e API_KEY="$(cat "$RUNNER_TEMP/load.key")" \
+          k6 run -e BASE_URL=http://localhost:8080 -e API_KEY="$(cat "$RUNNER_TEMP/load.key")" -e SCENARIO=load \
             --summary-export load-results/ingest.json tests/load/ingest.js | tee load-results/ingest.txt
+
+      - name: Spool flush and drain rate (NFR-03, COL-05)
+        if: always()
+        run: |
+          set -o pipefail
+          k6 run -e BASE_URL=http://localhost:8080 -e API_KEY="$(cat "$RUNNER_TEMP/load.key")" -e SCENARIO=spool \
+            --summary-export load-results/ingest-spool.json tests/load/ingest.js | tee load-results/ingest-spool.txt
+
+      - name: Ingest backlog per lane
+        if: always()
+        run: curl -fsS http://localhost:8080/readyz > load-results/readyz.json || true
 
       - name: Collect the server log
         if: always()

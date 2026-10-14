@@ -87,6 +87,36 @@ func TestReadyzWithoutChecks(t *testing.T) {
 	}
 }
 
+// TestReadyzDetails covers WP-334 (OPS-05): a check with a Detail reports
+// it under details; a Detail-only check is not listed in checks and never
+// changes the status, not even when it fails, and its error is not leaked.
+func TestReadyzDetails(t *testing.T) {
+	backlog := ReadinessCheck{Name: "ingest", Detail: func(context.Context) (any, error) {
+		return map[string]any{"lanes": 4, "backlog": map[string]int{"0": 12, "1": 0, "legacy": 0}, "total": 12}, nil
+	}}
+	code, body, raw := serveReadiness(t, ok("database"), backlog)
+	if code != http.StatusOK || body.Status != "ready" || len(body.Checks) != 1 || body.Checks["database"] != "ok" {
+		t.Fatalf("got %d %+v", code, body)
+	}
+	if !strings.Contains(raw, `"details":{"ingest":{"backlog":{"0":12,"1":0,"legacy":0},"lanes":4,"total":12}}`) {
+		t.Fatalf("details: %s", raw)
+	}
+
+	broken := ReadinessCheck{Name: "ingest", Detail: func(context.Context) (any, error) {
+		return nil, errors.New("nats: secret detail")
+	}}
+	code, body, raw = serveReadiness(t, ok("database"), broken)
+	if code != http.StatusOK || body.Status != "ready" || strings.Contains(raw, "secret detail") ||
+		!strings.Contains(raw, `"details":{"ingest":{"error":"unavailable"}}`) {
+		t.Fatalf("failing detail: %d %s", code, raw)
+	}
+
+	// Without a Detail the response has no details.
+	if _, _, raw = serveReadiness(t, ok("database")); strings.Contains(raw, "details") {
+		t.Fatalf("details without a Detail: %s", raw)
+	}
+}
+
 func TestHealthzStaysLiveness(t *testing.T) {
 	mux := chi.NewRouter()
 	failing := ReadinessCheck{Name: "database", Check: func(context.Context) error { return errors.New("down") }}

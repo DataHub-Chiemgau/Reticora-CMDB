@@ -3,6 +3,7 @@ package database_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -477,6 +478,113 @@ func TestContextTxJoin(t *testing.T) {
 // transaction to its organization and client. It holds with
 // standard_conforming_strings and backslash_quote off as well, and for a
 // database URL that asks for the SJIS client encoding: the pool keeps UTF-8.
+// TestBeforeCommit covers the writes a transaction puts last (WP-334): they
+// run after everything else of the context transaction, in the order they
+// were registered, also when a joined call registered them; a savepoint
+// rolled back drops its writes, a failing write rolls the transaction back,
+// a rolled-back transaction runs none, and without a context transaction a
+// write runs at once.
+func TestBeforeCommit(t *testing.T) {
+	ctx, app := seedScopeFixture(t)
+	pool, log := tracedPool(t, app)
+	scope := database.OrgWideScope(scopeOrgA, scopeUser)
+	reqCtx := database.ContextWithTenantScope(ctx, &scope)
+	clients := func(slug string) int {
+		t.Helper()
+		var n int
+		if err := database.WithTenant(ctx, app, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(*) FROM client WHERE slug = $1`, slug).Scan(&n)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	var order []string
+	write := func(ctx context.Context, name string) error {
+		return database.WithRequestTenant(ctx, pool, scopeOrgA, func(ctx context.Context, tx pgx.Tx) error {
+			order = append(order, name)
+			_, err := tx.Exec(ctx, `INSERT INTO client (organization_id, name, slug) VALUES ($1, $2, $2)`, scopeOrgA, "before-commit-"+name)
+			return err
+		})
+	}
+	last := func(ctx context.Context, name string) error {
+		return database.WithRequestTenant(ctx, pool, scopeOrgA, func(ctx context.Context, tx pgx.Tx) error {
+			return database.BeforeCommit(ctx, func() error {
+				order = append(order, name)
+				_, err := tx.Exec(ctx, `INSERT INTO client (organization_id, name, slug) VALUES ($1, $2, $2)`, scopeOrgA, "before-commit-"+name)
+				return err
+			})
+		})
+	}
+	log.take()
+	err := database.WithRequestTenantTx(reqCtx, pool, scopeOrgA, func(ctx context.Context) error {
+		if err := write(ctx, "a"); err != nil {
+			return err
+		}
+		if err := last(ctx, "x"); err != nil {
+			return err
+		}
+		// A savepoint that fails drops the writes registered in it.
+		if err := database.Savepoint(ctx, func(ctx context.Context) error {
+			if err := last(ctx, "dropped"); err != nil {
+				return err
+			}
+			return errors.New("refused")
+		}); err == nil {
+			return errors.New("savepoint did not fail")
+		}
+		if err := last(ctx, "y"); err != nil {
+			return err
+		}
+		return write(ctx, "b")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(order, ",") != "a,b,x,y" {
+		t.Errorf("order %v, want the registered writes last: a,b,x,y", order)
+	}
+	if statements, begins, commits := log.take(); begins != 1 || commits != 1 {
+		t.Errorf("%d begins and %d commits, want one transaction: %q", begins, commits, statements)
+	}
+	for _, slug := range []string{"a", "b", "x", "y"} {
+		if clients("before-commit-"+slug) != 1 {
+			t.Errorf("write %s not committed", slug)
+		}
+	}
+	if clients("before-commit-dropped") != 0 {
+		t.Error("the write of a rolled-back savepoint ran")
+	}
+
+	// A failing write rolls the transaction back; a transaction that fails
+	// runs none.
+	order = nil
+	err = database.WithRequestTenantTx(reqCtx, pool, scopeOrgA, func(ctx context.Context) error {
+		if werr := write(ctx, "c"); werr != nil {
+			return werr
+		}
+		return database.BeforeCommit(ctx, func() error { return errors.New("late failure") })
+	})
+	if err == nil || err.Error() != "late failure" || clients("before-commit-c") != 0 {
+		t.Errorf("failing write: %v, %d rows of the transaction kept", err, clients("before-commit-c"))
+	}
+	err = database.WithRequestTenantTx(reqCtx, pool, scopeOrgA, func(ctx context.Context) error {
+		if lerr := last(ctx, "never"); lerr != nil {
+			return lerr
+		}
+		return errors.New("rolled back")
+	})
+	if err == nil || slices.Contains(order, "never") || clients("before-commit-never") != 0 {
+		t.Errorf("rolled-back transaction ran its writes: %v, %v", err, order)
+	}
+
+	// Without a context transaction the write runs at once.
+	ran := false
+	if err = database.BeforeCommit(ctx, func() error { ran = true; return nil }); err != nil || !ran {
+		t.Errorf("without a transaction: ran %v, %v", ran, err)
+	}
+}
+
 func TestWithTenantQuotesHostileUserID(t *testing.T) {
 	ctx, app := seedScopeFixture(t)
 	cfg := app.Config()

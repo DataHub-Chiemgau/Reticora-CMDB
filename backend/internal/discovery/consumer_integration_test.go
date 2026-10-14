@@ -4,9 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -14,10 +19,15 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // TestIngestRecordLedger covers WP-085 (REC-01) against PostgreSQL: the
@@ -122,7 +132,7 @@ func TestIngestRecordLedger(t *testing.T) {
 		return
 	}
 	queueCtx, cancel := context.WithTimeout(bg, 10*time.Second)
-	queue, err := discovery.NewNATSIngestQueue(queueCtx, url)
+	queue, err := discovery.NewNATSIngestQueue(queueCtx, url, 4)
 	cancel()
 	if err != nil {
 		t.Fatal(err)
@@ -160,4 +170,308 @@ func TestIngestRecordLedger(t *testing.T) {
 		f.OrgA, streamed.RecordID).Scan(&processed); err != nil || processed != 1 {
 		t.Errorf("streamed record in the ledger: %d, %v", processed, err)
 	}
+}
+
+// TestIngestLanes covers WP-334 (NFR-03, E-56, OPS-05) on NATS JetStream and
+// PostgreSQL:
+//   - upgrade: the unfiltered consumer of the release before the lanes, with
+//     three of its messages pending, is restricted to ingest.*.* in place and
+//     its messages are processed;
+//   - a consumer per lane (filter ingest.*.<lane>.*, MaxAckPending 100); the
+//     records are published on the subject of their lane, over HTTP and over
+//     the collector edge;
+//   - backlog per lane in LaneBacklog and reticora_ingest_lane_backlog while
+//     nothing consumes, none after the consumers ran;
+//   - order per device: the records of one serial number are processed in
+//     observed_at order across requests and within one;
+//   - fewer lanes: a server with one lane drains lane 3; a drain lane the
+//     operator removes ends without a worker error; a server of an earlier
+//     release that resets the former consumer's filter is corrected;
+//   - Run stops at once with 16 lanes.
+//
+// It needs TEST_NATS_URL (a stream of its own: the test deletes
+// RETICORA_INGEST) and TEST_DATABASE_URL.
+func TestIngestLanes(t *testing.T) {
+	url := os.Getenv("TEST_NATS_URL")
+	if url == "" {
+		t.Skip("TEST_NATS_URL not set; skipping the ingest lanes on NATS")
+	}
+	f := scopetest.Seed(t, "f2")
+	bg := context.Background()
+	nc, err := nats.Connect(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The stream as the release before the lanes left it.
+	if err = js.DeleteStream(bg, discovery.IngestStream); err != nil && !errors.Is(err, jetstream.ErrStreamNotFound) {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = js.DeleteStream(context.Background(), discovery.IngestStream) })
+	stream, err := js.CreateOrUpdateStream(bg, jetstream.StreamConfig{Name: discovery.IngestStream, Subjects: []string{"ingest.>"},
+		Retention: jetstream.WorkQueuePolicy, Storage: jetstream.FileStorage, MaxAge: discovery.RecordDedupeWindow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldConsumer := jetstream.ConsumerConfig{Durable: discovery.IngestConsumer, AckPolicy: jetstream.AckExplicitPolicy,
+		AckWait: 2 * time.Minute, MaxDeliver: 5, MaxAckPending: 100}
+	if _, err = stream.CreateOrUpdateConsumer(bg, oldConsumer); err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Now().UTC().Add(-time.Hour)
+	message := func(serial string, at time.Time) []byte {
+		raw, merr := json.Marshal(&discovery.IngestMessage{OrganizationID: f.OrgA, CollectorID: "col-77",
+			Scope:    &discovery.MessageScope{UserID: f.User},
+			Item:     discovery.IngestItem{CITypeName: "server", Name: serial, SerialNumber: serial, Source: "snmp"},
+			RecordID: plugins.NewRecordID(), ObservedAt: at})
+		if merr != nil {
+			t.Fatal(merr)
+		}
+		return raw
+	}
+	for i := range 3 {
+		if _, err = js.Publish(bg, "ingest."+f.OrgA+".col-77", message(fmt.Sprintf("LANES-OLD-%d", i), t0)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	open := func(lanes int) *discovery.NATSIngestQueue {
+		t.Helper()
+		qctx, cancel := context.WithTimeout(bg, 10*time.Second)
+		defer cancel()
+		q, qerr := discovery.NewNATSIngestQueue(qctx, url, lanes)
+		if qerr != nil {
+			t.Fatal(qerr)
+		}
+		t.Cleanup(q.Close)
+		return q
+	}
+	consumerConfig := func(name string) jetstream.ConsumerConfig {
+		t.Helper()
+		c, cerr := stream.Consumer(bg, name)
+		if cerr != nil {
+			t.Fatalf("consumer %s: %v", name, cerr)
+		}
+		return c.CachedInfo().Config
+	}
+	queue4 := open(4)
+	if cfg := consumerConfig(discovery.IngestConsumer); cfg.FilterSubject != "ingest.*.*" {
+		t.Errorf("former consumer filter %q, want ingest.*.*", cfg.FilterSubject)
+	}
+	for lane := range 4 {
+		name := fmt.Sprintf("%s%d", discovery.IngestLaneConsumerPrefix, lane)
+		if cfg := consumerConfig(name); cfg.FilterSubject != fmt.Sprintf("ingest.*.%d.*", lane) || cfg.MaxAckPending != 100 {
+			t.Errorf("%s: filter %q, MaxAckPending %d", name, cfg.FilterSubject, cfg.MaxAckPending)
+		}
+	}
+
+	h4 := discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App))
+	queue4.Attach(h4)
+	mux := chi.NewRouter()
+	h4.RegisterRoutes(mux)
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	post := func(records ...plugins.DeviceRecord) {
+		t.Helper()
+		body, merr := json.Marshal(plugins.DeviceRecordBatch{Records: records})
+		if merr != nil {
+			t.Fatal(merr)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/discovery/ingest", bytes.NewReader(body)).WithContext(ctx)
+		req.Header.Set("X-Collector-ID", "col-f2")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+		}
+	}
+	ips := map[string]string{}
+	device := func(serial, model string, at time.Time) plugins.DeviceRecord {
+		if ips[serial] == "" {
+			ips[serial] = fmt.Sprintf("10.77.0.%d", len(ips)+1)
+		}
+		return plugins.RecordFromResult("snmp", &plugins.Result{CIType: "server", Name: serial, Serial: serial, Model: model,
+			IP: ips[serial]}, at)
+	}
+	want := map[string]uint64{"ingest." + f.OrgA + ".col-77": 3}
+	perLane := map[string]int{"legacy": 3}
+	var records []plugins.DeviceRecord
+	for i := range 40 {
+		serial := fmt.Sprintf("LANES-%02d", i)
+		records = append(records, device(serial, "m", t0))
+		lane := discovery.IngestLane(&discovery.IngestItem{SerialNumber: serial}, 4)
+		want[discovery.LaneSubject(f.OrgA, lane, "col-f2")]++
+		perLane[strconv.Itoa(lane)]++
+	}
+	post(records...)
+	edge, _ := json.Marshal(plugins.DeviceRecordBatch{Records: []plugins.DeviceRecord{device("LANES-EDGE", "m", t0)}})
+	if reply := h4.EdgeIngest(ctx, f.OrgA, "col-edge", edge); reply.Status != http.StatusAccepted || reply.Result.Queued != 1 {
+		t.Fatalf("edge ingest: %+v", reply)
+	}
+	edgeLane := discovery.IngestLane(&discovery.IngestItem{SerialNumber: "LANES-EDGE"}, 4)
+	want[discovery.LaneSubject(f.OrgA, edgeLane, "col-edge")]++
+	perLane[strconv.Itoa(edgeLane)]++
+
+	// Before anything consumes: the subjects and the backlog per lane.
+	info, err := stream.Info(bg, jetstream.WithSubjectFilter("ingest."+f.OrgA+".>"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !maps.Equal(info.State.Subjects, want) {
+		t.Errorf("messages per subject %v, want %v", info.State.Subjects, want)
+	}
+	backlog, err := queue4.LaneBacklog(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backlog.Lanes != 4 || backlog.Total != 44 || !maps.Equal(backlog.Backlog, map[string]int{"legacy": 3, "0": perLane["0"],
+		"1": perLane["1"], "2": perLane["2"], "3": perLane["3"]}) {
+		t.Errorf("backlog %+v, want 44 as %v", backlog, perLane)
+	}
+	reg := prometheus.NewRegistry()
+	discovery.RegisterMetrics(reg)
+	if total, berr := queue4.Backlog(bg); berr != nil || total != 44 {
+		t.Errorf("Backlog = %d, %v", total, berr)
+	}
+	if got := gaugeValue(t, reg, "reticora_ingest_lane_backlog", "legacy"); got != 3 {
+		t.Errorf("reticora_ingest_lane_backlog{lane=legacy} = %v, want 3", got)
+	}
+
+	countLike := func(pattern string) int {
+		t.Helper()
+		var n int
+		if cerr := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci WHERE organization_id = $1 AND serial_number LIKE $2`, f.OrgA,
+			pattern).Scan(&n); cerr != nil {
+			t.Fatal(cerr)
+		}
+		return n
+	}
+	waitFor := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(30 * time.Second)
+		for !cond() {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	run := func(q *discovery.NATSIngestQueue) func() {
+		runCtx, stop := context.WithCancel(bg)
+		done := make(chan struct{})
+		go func() {
+			q.Run(runCtx)
+			close(done)
+		}()
+		return func() {
+			t.Helper()
+			stop()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Error("Run did not stop")
+			}
+		}
+	}
+	stop4 := run(queue4)
+	waitFor("44 CIs", func() bool { return countLike("LANES-%") == 44 })
+	waitFor("an empty backlog", func() bool {
+		b, berr := queue4.LaneBacklog(bg)
+		return berr == nil && b.Total == 0
+	})
+
+	// Order per device, across requests and within one.
+	post(device("LANES-ORDER", "m1", t0))
+	waitFor("LANES-ORDER", func() bool { return countLike("LANES-ORDER") == 1 })
+	post(device("LANES-ORDER", "m3", t0.Add(2*time.Minute)), device("LANES-ORDER", "m2", t0.Add(time.Minute)))
+	var models []string
+	waitFor("model m3", func() bool {
+		models = nil
+		rows, qerr := f.Admin.Query(bg, `SELECT ch.new_value #>> '{}' FROM ci_change ch JOIN ci c ON c.id = ch.ci_id
+			WHERE c.organization_id = $1 AND c.serial_number = 'LANES-ORDER' AND ch.field_name = 'model' ORDER BY ch.created_at`, f.OrgA)
+		if qerr != nil {
+			t.Fatal(qerr)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var m string
+			if serr := rows.Scan(&m); serr != nil {
+				t.Fatal(serr)
+			}
+			models = append(models, m)
+		}
+		return len(models) >= 2
+	})
+	if !slices.Equal(models, []string{"m2", "m3"}) {
+		t.Errorf("model history %v, want [m2 m3]", models)
+	}
+	stop4()
+
+	// One lane: lane 3 is drained.
+	queue1 := open(1)
+	h1 := discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App))
+	queue1.Attach(h1)
+	if _, err = js.Publish(bg, "ingest."+f.OrgA+".3.col-77", message("LANES-DRAIN", t0)); err != nil {
+		t.Fatal(err)
+	}
+	lane3 := discovery.IngestLaneConsumerPrefix + "3"
+	if consumers := discovery.QueueConsumers(queue1); !slices.Equal(consumers, []string{discovery.IngestConsumer,
+		discovery.IngestLaneConsumerPrefix + "0", discovery.IngestLaneConsumerPrefix + "1", discovery.IngestLaneConsumerPrefix + "2", lane3}) {
+		t.Errorf("consumers with one lane: %v", consumers)
+	}
+	errorsBefore := testutil.ToFloat64(observability.WorkerErrors.WithLabelValues("ingest"))
+	stop1 := run(queue1)
+	waitFor("the drained record", func() bool { return countLike("LANES-DRAIN") == 1 })
+	if err = stream.DeleteConsumer(bg, lane3); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("the removed drain lane to end", func() bool { return !slices.Contains(discovery.QueueConsumers(queue1), lane3) })
+	if after := testutil.ToFloat64(observability.WorkerErrors.WithLabelValues("ingest")); after != errorsBefore {
+		t.Errorf("worker errors %v -> %v after removing a drain lane", errorsBefore, after)
+	}
+
+	// A server of an earlier release asserts its unfiltered consumer again.
+	// NATS 2.10 accepts that as an update; the next check restores the
+	// filter. A server that refuses it leaves nothing to restore.
+	if _, err = stream.CreateOrUpdateConsumer(bg, oldConsumer); err != nil {
+		t.Logf("NATS refuses the unfiltered consumer next to the lanes: %v", err)
+	} else {
+		discovery.RefreshQueue(bg, queue1)
+		if cfg := consumerConfig(discovery.IngestConsumer); cfg.FilterSubject != "ingest.*.*" {
+			t.Errorf("former consumer filter after the check %q, want ingest.*.*", cfg.FilterSubject)
+		}
+	}
+	stop1()
+
+	// Sixteen lanes and the former consumer stop together.
+	queue16 := open(16)
+	queue16.Attach(discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App)))
+	stop16 := run(queue16)
+	time.Sleep(1500 * time.Millisecond)
+	stop16()
+}
+
+// gaugeValue returns the value of a gauge with the label lane.
+func gaugeValue(t *testing.T, reg *prometheus.Registry, name, lane string) float64 {
+	t.Helper()
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mf := range families {
+		if mf.GetName() != name {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "lane" && l.GetValue() == lane {
+					return m.GetGauge().GetValue()
+				}
+			}
+		}
+	}
+	return -1
 }

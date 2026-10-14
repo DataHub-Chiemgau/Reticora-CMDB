@@ -256,13 +256,18 @@ func main() {
 		}
 		readiness = append(readiness, server.TCPReadiness("nats", addr))
 		queueCtx, cancelQueue := context.WithTimeout(context.Background(), 30*time.Second)
-		ingestQueue, natsErr = discovery.NewNATSIngestQueue(queueCtx, cfg.NATSUrl)
+		ingestQueue, natsErr = discovery.NewNATSIngestQueue(queueCtx, cfg.NATSUrl, cfg.IngestLanes)
 		cancelQueue()
 		if natsErr != nil {
 			slog.Error("failed to set up the ingest queue on NATS", "error", natsErr)
 			os.Exit(1)
 		}
 		defer ingestQueue.Close()
+		slog.Info("ingest lanes", "lanes", ingestQueue.Lanes())
+		// The backlog per lane, informational: it never takes the instance
+		// out of the load balancer (WP-334, OPS-05).
+		readiness = append(readiness, server.ReadinessCheck{Name: "ingest",
+			Detail: func(ctx context.Context) (any, error) { return ingestQueue.LaneBacklog(ctx) }})
 	}
 	// Jobs are distributed over the JOBS work queue on NATS (TEC-14); job
 	// kinds register their handlers with jobQueue.Handle.

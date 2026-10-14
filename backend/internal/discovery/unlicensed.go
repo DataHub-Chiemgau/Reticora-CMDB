@@ -43,8 +43,9 @@ var unlicensedQueued atomic.Int64
 // start.
 func UnlicensedQueued() int64 { return unlicensedQueued.Load() }
 
-// RegisterMetrics registers reticora_unlicensed_ci_total (ENT-03) and
-// reticora_ingest_future_records_total (GLO-12).
+// RegisterMetrics registers reticora_unlicensed_ci_total (ENT-03),
+// reticora_ingest_future_records_total (GLO-12) and the metrics of the
+// ingest lanes (WP-334).
 func RegisterMetrics(reg prometheus.Registerer) {
 	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
 		Namespace: "reticora",
@@ -58,6 +59,7 @@ func RegisterMetrics(reg prometheus.Registerer) {
 	}, func() float64 { return float64(UnlicensedQueued()) }))
 	// Discovery error states (DIS-08).
 	reg.MustRegister(scopeRuns, discoveryErrors)
+	reg.MustRegister(ingestLanesGauge, laneBacklog, laneRecords, recordRetries)
 }
 
 // discoveredAttributes are the attributes a discovered device stores on its
@@ -156,7 +158,41 @@ func deviceKey(item *IngestItem) string {
 
 // queuedDevices holds the device keys of open unlicensed_ci items of one
 // ingest, loaded on first use.
-type queuedDevices struct{ keys map[string]bool }
+type queuedDevices struct {
+	keys map[string]bool
+	// added lists the keys set since they were loaded, so that the keys of
+	// a transaction that rolled back can be taken back (WP-334 retries).
+	added []string
+}
+
+// queue marks the device key as queued.
+func (q *queuedDevices) queue(key string) {
+	if !q.keys[key] {
+		q.keys[key] = true
+		q.added = append(q.added, key)
+	}
+}
+
+// mark returns the state rollback restores.
+func (q *queuedDevices) mark() int {
+	if q.keys == nil {
+		return -1
+	}
+	return len(q.added)
+}
+
+// rollback forgets the keys queued after mark; keys loaded after it are
+// dropped as a whole and loaded again on next use.
+func (q *queuedDevices) rollback(mark int) {
+	if mark < 0 {
+		q.keys, q.added = nil, nil
+		return
+	}
+	for _, key := range q.added[mark:] {
+		delete(q.keys, key)
+	}
+	q.added = q.added[:mark]
+}
 
 // admitNewCI checks max_cis for a new discovered device. Over the limit the
 // device is queued as unlicensed_ci (once per device) and admitNewCI reports
@@ -212,12 +248,12 @@ func (h *Handler) admitNewCI(ctx context.Context, orgID string, current int64, i
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			// Queued concurrently by another ingest.
-			queued.keys[key] = true
+			queued.queue(key)
 			return true, nil
 		}
 		return false, err
 	}
-	queued.keys[key] = true
+	queued.queue(key)
 	if !opened {
 		return true, nil
 	}

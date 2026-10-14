@@ -238,18 +238,50 @@ type DiscoveredValues struct {
 	ObservedAt time.Time
 }
 
+// recordDiscoveredBatchSQL upserts the discovered values of the fields of
+// several CIs ($2 … $7, one element per field) whose CIs ($8, each once) the
+// tenant scope shows.
+const recordDiscoveredBatchSQL = `
+	WITH visible AS MATERIALIZED (
+		SELECT v.id FROM unnest($8::uuid[]) AS k(id)
+		CROSS JOIN LATERAL (SELECT ci.id FROM ci WHERE ci.id = k.id) v
+	)
+	INSERT INTO ci_field_value (
+		organization_id, ci_id, field_name, discovered_value,
+		discovered_source, discovered_at, discovered_rank, observed_at
+	)
+	SELECT $1, f.ci_id::uuid, f.name, f.value::jsonb, f.source, now(), f.rank, f.observed_at
+	FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::integer[], $7::timestamptz[])
+	     WITH ORDINALITY AS f(ci_id, name, value, source, rank, observed_at, ord)
+	JOIN visible ON visible.id = f.ci_id::uuid
+	ORDER BY f.ord
+	ON CONFLICT (ci_id, field_name) DO UPDATE SET
+		discovered_value = EXCLUDED.discovered_value,
+		discovered_source = EXCLUDED.discovered_source,
+		discovered_at = EXCLUDED.discovered_at,
+		discovered_rank = EXCLUDED.discovered_rank,
+		observed_at = EXCLUDED.observed_at`
+
 // RecordDiscoveredBatch upserts the discovered columns of the fields of
 // several CIs, each at most once in batch, with one statement, each CI like
 // RecordDiscoveredMany (NFR-03, WP-333); the override columns stay
 // untouched. The visibility check is
 // part of the statement: the fields of a CI the tenant scope does not show
-// are not written, and the call reports "not found".
+// are not written, and the call reports "not found". It reads each CI once
+// by its key (WP-334): a semi join of the values with the CIs of the
+// organization made the planner, with statistics from before a large
+// ingest, compare every value with every CI.
 func (r *PGRepository) RecordDiscoveredBatch(ctx context.Context, orgID string, batch []DiscoveredValues) error {
-	var ids, names []string
+	var ids, names, cis []string
 	var raw, sources []*string
 	var ranks []int32
 	var observed []time.Time
+	seen := make(map[string]bool, len(batch))
 	for _, b := range batch {
+		if !seen[b.CIID] {
+			seen[b.CIID] = true
+			cis = append(cis, b.CIID)
+		}
 		observedAt := b.ObservedAt
 		if observedAt.IsZero() {
 			observedAt = time.Now()
@@ -276,23 +308,7 @@ func (r *PGRepository) RecordDiscoveredBatch(ctx context.Context, orgID string, 
 		return nil
 	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `
-			INSERT INTO ci_field_value (
-				organization_id, ci_id, field_name, discovered_value,
-				discovered_source, discovered_at, discovered_rank, observed_at
-			)
-			SELECT $1, f.ci_id::uuid, f.name, f.value::jsonb, f.source, now(), f.rank, f.observed_at
-			FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::integer[], $7::timestamptz[])
-			     WITH ORDINALITY AS f(ci_id, name, value, source, rank, observed_at, ord)
-			WHERE EXISTS (SELECT 1 FROM ci WHERE ci.id = f.ci_id::uuid)
-			ORDER BY f.ord
-			ON CONFLICT (ci_id, field_name) DO UPDATE SET
-				discovered_value = EXCLUDED.discovered_value,
-				discovered_source = EXCLUDED.discovered_source,
-				discovered_at = EXCLUDED.discovered_at,
-				discovered_rank = EXCLUDED.discovered_rank,
-				observed_at = EXCLUDED.observed_at`,
-			orgID, ids, names, raw, sources, ranks, observed)
+		tag, err := tx.Exec(ctx, recordDiscoveredBatchSQL, orgID, ids, names, raw, sources, ranks, observed, cis)
 		if err != nil {
 			return fmt.Errorf("record discovered values: %w", err)
 		}

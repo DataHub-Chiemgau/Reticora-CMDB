@@ -1,6 +1,9 @@
 package discovery
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // Hooks of the batch candidate queries for the integration tests of
 // package discovery_test (WP-333).
@@ -28,3 +31,25 @@ func IdentityBranchQuery(orgID string, keys *IdentityKeys, deleted bool, name st
 	}
 	return "", nil, false
 }
+
+// ProcessInLane processes records in a lane of the organization as that
+// lane's consumer would, whatever lane their keys select (WP-334): records
+// of one device with different strongest keys, a lane count changed under
+// way, or two instances. ctx carries the tenant and its scope.
+func ProcessInLane(ctx context.Context, h *Handler, orgID string, lane int, recs ...DeviceRecord) (BulkIngestResponse, error) {
+	items := make([]IngestItem, len(recs))
+	for i := range recs {
+		items[i] = itemFromRecord(&recs[i])
+	}
+	return h.processSerially(ctx, orgID, lane, items)
+}
+
+// SetBeforeCreate installs a hook that runs after a transaction decided to
+// create new CIs and before it inserts them.
+func SetBeforeCreate(h *Handler, fn func(context.Context)) { h.beforeCreate = fn }
+
+// QueueConsumers lists the consumers the queue fetches from.
+func QueueConsumers(q *NATSIngestQueue) []string { return q.names() }
+
+// RefreshQueue runs the periodic check of the queue at once.
+func RefreshQueue(ctx context.Context, q *NATSIngestQueue) { q.refresh(ctx) }

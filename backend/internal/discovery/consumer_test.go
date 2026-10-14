@@ -146,8 +146,11 @@ func TestIngestQueuePublishesAndConsumes(t *testing.T) {
 		t.Fatalf("published %d messages", len(queue.msgs))
 	}
 	msg := queue.msgs[0]
-	if msg.Subject() != "ingest."+scope.OrgID+".col-85" || msg.Item.Model != "q1" || msg.RecordID == "" || !msg.ObservedAt.Equal(t0) {
-		t.Errorf("first message: subject %s, %+v", msg.Subject(), msg)
+	if msg.Subject(1) != "ingest."+scope.OrgID+".0.col-85" || msg.Item.Model != "q1" || msg.RecordID == "" || !msg.ObservedAt.Equal(t0) {
+		t.Errorf("first message: subject %s, %+v", msg.Subject(1), msg)
+	}
+	if want := LaneSubject(scope.OrgID, IngestLane(&msg.Item, 4), "col-85"); msg.Subject(4) != want {
+		t.Errorf("subject with 4 lanes: %s, want %s", msg.Subject(4), want)
 	}
 	restored, ok := database.TenantScopeFromContext(msg.context(context.Background()))
 	if !ok || restored.UserID != scope.UserID || restored.Clients.IsAll() || len(restored.Clients.IDs()) != 1 ||

@@ -239,12 +239,32 @@ type tenantTx struct {
 	state atomic.Int32
 	mu    sync.Mutex
 	after []func(context.Context)
+	// before are the writes BeforeCommit put last.
+	before []func() error
 }
 
 // aborted reports whether a statement failed in the open transaction; it
 // reads the connection's transaction status without a round trip.
 func (t *tenantTx) aborted() bool {
 	return t.state.Load() == txOpen && t.Conn().PgConn().TxStatus() == 'E'
+}
+
+// runBeforeCommit runs the writes registered with BeforeCommit in order,
+// including those registered while they run, and stops at the first error.
+func (t *tenantTx) runBeforeCommit() error {
+	for i := 0; ; i++ {
+		t.mu.Lock()
+		if i >= len(t.before) {
+			t.before = nil
+			t.mu.Unlock()
+			return nil
+		}
+		fn := t.before[i]
+		t.mu.Unlock()
+		if err := fn(); err != nil {
+			return err
+		}
+	}
 }
 
 // runAfterCommit runs the callbacks registered with AfterCommit in order,
@@ -334,7 +354,7 @@ func Savepoint(ctx context.Context, fn func(ctx context.Context) error) error {
 		return fmt.Errorf("savepoint: %w", err)
 	}
 	t.mu.Lock()
-	mark := len(t.after)
+	mark, beforeMark := len(t.after), len(t.before)
 	t.mu.Unlock()
 	err = fn(ctx)
 	if err == nil && t.aborted() {
@@ -347,12 +367,39 @@ func Savepoint(ctx context.Context, fn func(ctx context.Context) error) error {
 			return errors.Join(err, fmt.Errorf("rollback to savepoint: %w", rbErr))
 		}
 		t.mu.Lock()
-		t.after = t.after[:mark]
+		t.after, t.before = t.after[:mark], t.before[:beforeMark]
 		t.mu.Unlock()
 		return err
 	}
 	if err := sp.Commit(ctx); err != nil {
 		return fmt.Errorf("release savepoint: %w", err)
+	}
+	return nil
+}
+
+// BeforeCommit runs write in the context's transaction right before its
+// commit, after everything else the transaction does; writes registered
+// this way run in the order they were registered, a rollback (also of a
+// savepoint around the registration) drops them, and an error of one rolls
+// the transaction back. Without a context transaction write runs at once.
+// Writes that take an organization-wide lock until the commit go here (the
+// audit chain and the event outbox, migrations 000117 and 000120), so that
+// concurrent transactions of the organization wait for each other only for
+// these writes and the commit (WP-334). write must not depend on later
+// changes of the values it captured.
+func BeforeCommit(ctx context.Context, write func() error) error {
+	t, ok := ctx.Value(txKey{}).(*tenantTx)
+	if !ok || t == nil {
+		return write()
+	}
+	t.mu.Lock()
+	open := t.state.Load() == txOpen
+	if open {
+		t.before = append(t.before, write)
+	}
+	t.mu.Unlock()
+	if !open {
+		return ErrTxDone
 	}
 	return nil
 }
