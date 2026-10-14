@@ -146,15 +146,18 @@ down:
 	docker compose down
 
 # ─── Seed ───────────────────────────────────────────────────────────────────────
-# SIM-01 (WP-106): until the demo/scale seed of WP-203 exists, make seed
-# creates one tenant with a valid audit hash chain through the production code
-# path (cmd/audit-seed). Any error fails the target; the slug must be new.
-SEED_ORG_SLUG ?= seed-demo
-SEED_AUDIT_ENTRIES ?= 5
+# SIM-01 (WP-203): make seed creates the demo organization (plan pro,
+# admin@demo.local) and "acme", each with two clients, racks, CIs with LLDP,
+# mounts, metrics, a collector with scopes, reviews, an echo webhook and a VRF
+# example (cmd/seed). SEED_OBJECTS scales the demo organization for the load
+# test of NFR-10 (10000; at most 50000). The seed is deterministic and
+# idempotent; any error fails the target.
+SEED_OBJECTS ?= 40
+SEED_METRICS ?= 2000
 seed:
 	@echo "==> Seeding database..."
-	cd $(BACKEND_DIR) && go run ./cmd/audit-seed -database-url "$(DATABASE_URL)" \
-		-org-slug "$(SEED_ORG_SLUG)" -entries $(SEED_AUDIT_ENTRIES)
+	cd $(BACKEND_DIR) && go run ./cmd/seed -database-url "$(DATABASE_URL)" \
+		-objects $(SEED_OBJECTS) -metrics $(SEED_METRICS)
 
 # ─── E2E ────────────────────────────────────────────────────────────────────────
 e2e:

@@ -182,7 +182,8 @@ jobs:
             exit 1
           fi
 
-      # SIM-01 (WP-106): make seed must succeed against the migrated database.
+      # SIM-01 (WP-106, WP-203): make seed must succeed against the migrated
+      # database.
       # It runs after the tests so the seeded tenant cannot affect them.
       - name: Seed the database (make seed)
         run: make seed
