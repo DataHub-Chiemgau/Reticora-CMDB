@@ -398,8 +398,17 @@ func main() {
 	// The internal CA of the collector certificates (COL-04) and the
 	// collector NATS endpoint (COL-08).
 	collectorPKI := collectorCA(auditPool, encryptor)
+	// Late modules (phase P2 and later, add-ons) are off unless
+	// RETICORA_MODULES enables them (WP-214, E-03).
+	modules, err := server.ParseModules(cfg.Modules)
+	if err != nil {
+		slog.Error("invalid module configuration", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("late modules", "enabled", modules.EnabledKeys())
 	mux, httpMetrics, err := server.NewRouter(repos, server.Options{
 		Version:            version,
+		Modules:            modules,
 		MetricsTenantLabel: cfg.MetricsTenantLabel,
 		Entitlements:       entitlementSvc,
 		Dispatcher:         webhookDispatcher,
@@ -449,8 +458,12 @@ func main() {
 	} else {
 		systemScheduler = jobs.NewScheduler(jobs.NewMemoryLocker(), jobs.NewMemoryStateStore())
 	}
-	// Release expired reservations (spec §10).
-	systemJobs := []jobs.Schedule{reservation.NewSweeper(repos.Reservation, webhookDispatcher).Schedule()}
+	// Release expired reservations (spec §10); reservations belong to the
+	// inventory module (WP-214).
+	var systemJobs []jobs.Schedule
+	if modules.Enabled("inventory") {
+		systemJobs = append(systemJobs, reservation.NewSweeper(repos.Reservation, webhookDispatcher).Schedule())
+	}
 	// Retention runs per kind of data (NFR-06, AUD-09) and key rotation
 	// (SEC-06).
 	if auditPool != nil {
@@ -592,7 +605,10 @@ func main() {
 			Run:  func(ctx context.Context) { evaluator.Run(ctx, time.Minute) },
 		})
 	}
-	workerSet, err := server.StartWorkers(cfg.WorkerEnabled, workers...)
+	// A worker of a switched-off module does not start (WP-214).
+	workerSet, err := server.StartWorkers(func(name string) bool {
+		return cfg.WorkerEnabled(name) && modules.WorkerAllowed(name)
+	}, workers...)
 	if err != nil {
 		slog.Error("worker registration failed", "error", err)
 		os.Exit(1)

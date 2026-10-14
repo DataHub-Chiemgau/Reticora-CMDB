@@ -63,8 +63,11 @@ var readPermissionFor = map[string]identity.Permission{
 	"roles":        identity.PermRoleRead,
 	"permissions":  identity.PermPermissionRead,
 	"entitlements": identity.PermEntitlementRead,
-	"audit":        identity.PermAuditRead,
-	"audit-log":    identity.PermAuditRead,
+	// The modules of this release (WP-214) steer the navigation like the
+	// entitlements.
+	"modules":   identity.PermEntitlementRead,
+	"audit":     identity.PermAuditRead,
+	"audit-log": identity.PermAuditRead,
 	// Catalog paths of API-05.
 	"impact":  identity.PermTopologyRead,
 	"exports": identity.PermCIRead,
@@ -160,6 +163,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"roles":          identity.PermRoleManage,
 	"permissions":    identity.PermPermissionManage,
 	"entitlements":   identity.PermEntitlementManage, // no tenant write route: the operator writes (ENT-04)
+	"modules":        identity.PermEntitlementManage, // no write route: RETICORA_MODULES sets them (WP-214)
 	"webhooks":       identity.PermWebhookManage,
 	"credentials":    identity.PermCredentialManage,
 	"export":         identity.PermExportRun,
@@ -468,10 +472,13 @@ type authorizingRouter struct {
 	after []func(http.Handler) http.Handler
 	// auditor stores the audit entry of each successful write (AUD-07).
 	auditor middleware.RouteAuditor
+	// modules drops the routes of switched-off late modules (WP-214); nil
+	// registers every route.
+	modules *ModuleSet
 }
 
 func (a authorizingRouter) With(middlewares ...func(http.Handler) http.Handler) chi.Router {
-	return authorizingRouter{Router: a.Router.With(middlewares...), prefix: a.prefix, after: a.after, auditor: a.auditor}
+	return authorizingRouter{Router: a.Router.With(middlewares...), prefix: a.prefix, after: a.after, auditor: a.auditor, modules: a.modules}
 }
 
 // auditExemptions are the write routes that write no audit entry of their
@@ -539,6 +546,10 @@ func (a authorizingRouter) fullPattern(pattern string) string {
 
 func (a authorizingRouter) handle(method, pattern string, h http.Handler) {
 	full := a.fullPattern(pattern)
+	// A switched-off module has no routes: they answer 404 (WP-214).
+	if !a.modules.RouteAllowed(full) {
+		return
+	}
 	chain := append([]func(http.Handler) http.Handler{AuthorizeRoute(method, full)}, a.after...)
 	if isWriteMethod(method) {
 		// Behind idempotency: a replayed response writes no second entry.
@@ -587,7 +598,7 @@ func (a authorizingRouter) Connect(pattern string, h http.HandlerFunc) {
 
 func (a authorizingRouter) Route(pattern string, fn func(r chi.Router)) chi.Router {
 	return a.Router.Route(pattern, func(r chi.Router) {
-		fn(authorizingRouter{Router: r, prefix: a.fullPattern(pattern), after: a.after, auditor: a.auditor})
+		fn(authorizingRouter{Router: r, prefix: a.fullPattern(pattern), after: a.after, auditor: a.auditor, modules: a.modules})
 	})
 }
 

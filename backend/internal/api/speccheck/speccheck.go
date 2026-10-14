@@ -118,3 +118,45 @@ func sortOperations(ops []Operation) {
 		return ops[i].Path < ops[j].Path
 	})
 }
+
+// Phases returns the x-phase extension of every path that carries one: the
+// operations of late modules, which a release may switch off (WP-214).
+func Phases(path string) (map[string]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open spec: %w", err)
+	}
+	defer file.Close()
+
+	phases := map[string]string{}
+	inPaths, current := false, ""
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimRight(scanner.Text(), " \t")
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") {
+			inPaths = strings.HasPrefix(line, "paths:")
+			current = ""
+			continue
+		}
+		if !inPaths {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+		trimmed := strings.TrimSpace(line)
+		if indent == 2 && strings.HasPrefix(trimmed, "/") && strings.HasSuffix(trimmed, ":") {
+			current = strings.TrimSuffix(trimmed, ":")
+			continue
+		}
+		if indent == 4 && current != "" && strings.HasPrefix(trimmed, "x-phase:") {
+			phases[current] = strings.TrimSpace(strings.TrimPrefix(trimmed, "x-phase:"))
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read spec: %w", err)
+	}
+	return phases, nil
+}

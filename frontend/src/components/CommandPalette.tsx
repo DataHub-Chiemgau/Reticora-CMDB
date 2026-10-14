@@ -102,6 +102,11 @@ interface CommandPaletteProps {
    * Defaults to always-true so tests and ungated contexts keep full commands.
    */
   isFeatureEnabled?: (feature: string | undefined) => boolean;
+  /**
+   * isPageEnabled reports whether the release serves the page's module
+   * (WP-214). Defaults to always-true like isFeatureEnabled.
+   */
+  isPageEnabled?: (page: AppPage) => boolean;
 }
 
 interface CommandItem {
@@ -141,6 +146,7 @@ export function CommandPalette({
   onCreateCI,
   onToggleDarkMode,
   isFeatureEnabled = () => true,
+  isPageEnabled = () => true,
 }: CommandPaletteProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -320,9 +326,9 @@ export function CommandPalette({
         // include, mirroring the gated main navigation.
         if (!cmd.id.startsWith('nav-')) return true;
         const page = cmd.id.slice(4) as AppPage;
-        return isFeatureEnabled(navFeatureFor[page]);
+        return isFeatureEnabled(navFeatureFor[page]) && isPageEnabled(page);
       }),
-    [onCreateCI, onNavigate, onToggleDarkMode, t, isFeatureEnabled],
+    [onCreateCI, onNavigate, onToggleDarkMode, t, isFeatureEnabled, isPageEnabled],
   );
 
   const filteredCommands = useMemo(() => {

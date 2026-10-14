@@ -173,6 +173,10 @@ type Config struct {
 	// OfflineDetector switches the CI offline detector on (REC-09, LCY-05;
 	// RETICORA_OFFLINE_DETECTOR_ENABLED, default true).
 	OfflineDetector bool
+	// Modules lists the enabled late modules (RETICORA_MODULES, WP-214):
+	// empty switches every module with a phase tag from P2 or [A] off (the
+	// G1 default after E-03), "all" switches them all on.
+	Modules string
 
 	// workers holds the operator switch of every registered background
 	// worker (OPS-02, see WorkerNames).
@@ -272,6 +276,7 @@ func Load() *Config {
 		LLMEmbeddingModel: l.str("RETICORA_LLM_EMBEDDING_MODEL", ""),
 		AirGapped:         l.boolean("RETICORA_AIR_GAPPED", false),
 		OfflineDetector:   l.boolean("RETICORA_OFFLINE_DETECTOR_ENABLED", true),
+		Modules:           l.str("RETICORA_MODULES", ""),
 
 		LogLevel: slog.LevelInfo,
 	}

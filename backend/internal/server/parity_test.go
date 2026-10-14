@@ -29,6 +29,13 @@ func testRouter(t *testing.T) *chi.Mux {
 // profile, which has no PostgreSQL audit trail.
 func testRouterWith(t *testing.T, auditHandler *audit.Handler) *chi.Mux {
 	t.Helper()
+	return testRouterWithModules(t, auditHandler, nil)
+}
+
+// testRouterWithModules builds the router with a set of late modules; nil
+// enables them all (WP-214).
+func testRouterWithModules(t *testing.T, auditHandler *audit.Handler, modules *ModuleSet) *chi.Mux {
+	t.Helper()
 
 	key, err := crypto.GenerateMasterKey()
 	if err != nil {
@@ -52,6 +59,7 @@ func testRouterWith(t *testing.T, auditHandler *audit.Handler) *chi.Mux {
 		Credentials:  credential.NewService(repos.Credential, encryptor),
 		OIDC:         identity.NewOIDCProvider(identity.OIDCConfig{}),
 		Audit:        auditHandler,
+		Modules:      modules,
 	})
 	if err != nil {
 		t.Fatalf("build router: %v", err)
@@ -84,37 +92,59 @@ func routerOperations(t *testing.T, mux *chi.Mux) []speccheck.Operation {
 
 // TestRoutesAndSpecificationAreInParity covers API-01 for both profiles:
 // the PostgreSQL profile and --no-db serve exactly the documented
-// operations.
+// operations. With every late module on, that is the whole specification;
+// with the G1 default (WP-214, E-03) it is the specification without the
+// paths marked x-phase.
 func TestRoutesAndSpecificationAreInParity(t *testing.T) {
 	documented, err := speccheck.Load(filepath.Clean(specPath))
 	if err != nil {
 		t.Fatalf("load spec: %v", err)
 	}
+	phases, err := speccheck.Phases(filepath.Clean(specPath))
+	if err != nil {
+		t.Fatalf("load phases: %v", err)
+	}
+	g1, err := ParseModules("")
+	if err != nil {
+		t.Fatalf("parse modules: %v", err)
+	}
 
 	for profile, auditHandler := range map[string]*audit.Handler{"postgres": {}, "no-db": nil} {
-		registered := routerOperations(t, testRouterWith(t, auditHandler))
+		for release, modules := range map[string]*ModuleSet{"all modules": AllModules(), "G1": g1} {
+			registered := routerOperations(t, testRouterWithModules(t, auditHandler, modules))
 
-		// /metrics is the Prometheus scrape endpoint, not part of the tenant
-		// API contract, and is therefore excluded from the specification.
-		filtered := registered[:0]
-		for _, op := range registered {
-			if op.Path == "/metrics" {
-				continue
+			// /metrics is the Prometheus scrape endpoint, not part of the tenant
+			// API contract, and is therefore excluded from the specification.
+			filtered := registered[:0]
+			for _, op := range registered {
+				if op.Path == "/metrics" {
+					continue
+				}
+				// The GraphQL BFF is not publicly documented (GQL-01).
+				if strings.HasPrefix(op.Path, "/bff/") {
+					continue
+				}
+				filtered = append(filtered, op)
 			}
-			// The GraphQL BFF is not publicly documented (GQL-01).
-			if strings.HasPrefix(op.Path, "/bff/") {
-				continue
+
+			expected := documented
+			if release == "G1" {
+				expected = nil
+				for _, op := range documented {
+					if _, late := phases[op.Path]; !late {
+						expected = append(expected, op)
+					}
+				}
 			}
-			filtered = append(filtered, op)
-		}
 
-		undocumented, unimplemented := speccheck.Diff(filtered, documented)
+			undocumented, unimplemented := speccheck.Diff(filtered, expected)
 
-		if len(undocumented) > 0 {
-			t.Errorf("%s: routes registered but missing from api/openapi.yaml:\n%s", profile, format(undocumented))
-		}
-		if len(unimplemented) > 0 {
-			t.Errorf("%s: operations documented in api/openapi.yaml but not registered:\n%s", profile, format(unimplemented))
+			if len(undocumented) > 0 {
+				t.Errorf("%s, %s: routes registered but missing from api/openapi.yaml (or marked x-phase):\n%s", profile, release, format(undocumented))
+			}
+			if len(unimplemented) > 0 {
+				t.Errorf("%s, %s: operations documented in api/openapi.yaml but not registered:\n%s", profile, release, format(unimplemented))
+			}
 		}
 	}
 }

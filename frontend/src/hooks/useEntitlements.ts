@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { entitlementApi } from '../api/client';
+import { entitlementApi, moduleApi } from '../api/client';
 import { useAuthStore } from '../auth/authStore';
 
 /**
@@ -41,6 +41,30 @@ export function useEntitlements() {
   };
 
   return { entitlements: map, isEnabled, isLoading: query.isLoading };
+}
+
+/**
+ * useModules resolves which late modules (phase P2 and later, add-ons) this
+ * release serves (WP-214, E-03). The pages of a switched-off module are
+ * hidden whatever the plan says: their routes do not exist on the server.
+ */
+export function useModules() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated());
+  const query = useQuery({
+    queryKey: ['modules'],
+    queryFn: async () => (await moduleApi.list()).data ?? [],
+    enabled: isAuthenticated,
+    staleTime: 5 * 60_000,
+  });
+
+  const modules = query.data;
+  const isModuleEnabled = (key: string): boolean =>
+    // Unknown until loaded: hide nothing so the navigation does not flicker.
+    !modules || (modules.find((m) => m.key === key)?.enabled ?? true);
+  const isPageEnabled = (page: string): boolean =>
+    !modules || !modules.some((m) => !m.enabled && m.nav.includes(page));
+
+  return { modules, isModuleEnabled, isPageEnabled, isLoading: query.isLoading };
 }
 
 /**

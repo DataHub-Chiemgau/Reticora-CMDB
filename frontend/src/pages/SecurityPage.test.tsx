@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { SecurityPage } from './SecurityPage';
 import { renderWithProviders, stubFetchRoutes } from '../test/utils';
+import { useAuthStore } from '../auth/authStore';
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  useAuthStore.setState({ token: null, expiresAt: null, user: null });
 });
 
 const reportFixture = {
@@ -39,5 +41,30 @@ describe('SecurityPage', () => {
     expect(await screen.findByText('encryption at rest')).toBeInTheDocument();
     expect(screen.getByText('80%')).toBeInTheDocument();
     expect(screen.getByText('Intakt')).toBeInTheDocument();
+  });
+
+  it('keeps the DSGVO controls without the compliance module (WP-214)', async () => {
+    useAuthStore.setState({
+      token: 'header.payload.signature',
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      user: { sub: 'user-1' },
+    });
+    const fetchMock = stubFetchRoutes({
+      '/modules': {
+        data: [{ key: 'compliance', phase: 'P3', nav: ['compliance'], enabled: false }],
+      },
+      '/privacy/retention': { status: 404 },
+    });
+
+    renderWithProviders(<SecurityPage />, { route: '/security' });
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/modules'))).toBe(true),
+    );
+    expect(await screen.findByText('Aufbewahrung (DSGVO)')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Integrität der Audit-Kette')).toBeNull());
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/compliance/report'))).toBe(
+      false,
+    );
   });
 });
