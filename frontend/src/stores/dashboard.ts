@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 
-export type DashboardRole = 'technik' | 'einkauf' | 'management';
+export type DashboardRole = 'technician' | 'procurement' | 'management';
+
+export const DASHBOARD_ROLES: readonly DashboardRole[] = [
+  'technician',
+  'procurement',
+  'management',
+];
 
 export type DashboardWidget =
   'ciSummary' | 'collectors' | 'slaBreaches' | 'compliance' | 'assets' | 'stocktake' | 'tickets';
@@ -8,17 +14,32 @@ export type DashboardWidget =
 const ROLE_STORAGE_KEY = 'reticora-dashboard-role';
 
 export const roleWidgets: Record<DashboardRole, DashboardWidget[]> = {
-  technik: ['ciSummary', 'collectors', 'slaBreaches', 'compliance'],
-  einkauf: ['assets', 'stocktake'],
+  technician: ['ciSummary', 'collectors', 'slaBreaches', 'compliance'],
+  procurement: ['assets', 'stocktake'],
   management: ['ciSummary', 'tickets', 'compliance', 'slaBreaches'],
 };
 
+// The values stored before GLO-10 (German enum values) map onto the
+// English ones.
+const LEGACY_ROLES: Record<string, DashboardRole> = {
+  technik: 'technician',
+  einkauf: 'procurement',
+};
+
+export function parseDashboardRole(raw: string | null): DashboardRole {
+  if (raw && raw in LEGACY_ROLES) return LEGACY_ROLES[raw]!;
+  return DASHBOARD_ROLES.find((role) => role === raw) ?? 'technician';
+}
+
 function readStoredRole(): DashboardRole {
   if (typeof window === 'undefined') {
-    return 'technik';
+    return 'technician';
   }
-  const raw = window.localStorage.getItem(ROLE_STORAGE_KEY);
-  return raw === 'einkauf' || raw === 'management' ? raw : 'technik';
+  try {
+    return parseDashboardRole(window.localStorage.getItem(ROLE_STORAGE_KEY));
+  } catch {
+    return 'technician';
+  }
 }
 
 interface DashboardState {

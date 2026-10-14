@@ -40,9 +40,16 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	// The page is filtered by the caller's permissions after the query, so
+	// the next page continues at the backend offset, not after the hits
+	// left over (API-02).
+	more := res.HasMore
 	res.Data = h.filterAllowed(r.Context(), t, res.Data)
 	res.Total = len(res.Data)
-	res.HasMore = false
+	res.HasMore = more
+	if more {
+		res.NextCursor = api.EncodeOffsetCursor(page.Offset + page.Limit)
+	}
 	api.WriteJSON(w, http.StatusOK, res)
 }
 

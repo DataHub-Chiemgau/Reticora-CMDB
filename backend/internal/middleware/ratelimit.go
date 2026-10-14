@@ -9,63 +9,57 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 )
 
-// tokenBucket implements a simple token bucket rate limiter.
-type tokenBucket struct {
-	tokens     float64
-	maxTokens  float64
-	refillRate float64 // tokens per second
-	lastRefill time.Time
+// Default limits of API-04: 600 requests per minute per API key or
+// session, 6,000 per minute per organization.
+const (
+	DefaultCredentialPerMinute   = 600
+	DefaultOrganizationPerMinute = 6000
+)
+
+// RateLimits are the per-minute budgets of the authenticated rate limit
+// (API-04). PerCredential counts one API key or one session (token id);
+// PerOrganization counts all requests of an organization. Requests without
+// a principal are counted per client IP with PerCredential.
+type RateLimits struct {
+	PerCredential   int
+	PerOrganization int
 }
 
-// memoryRateLimiterStore is a simple in-memory rate limiter fallback.
-type memoryRateLimiterStore struct {
-	mu      sync.Mutex
-	buckets map[string]*tokenBucket
-	rpm     int
+func (l RateLimits) withDefaults() RateLimits {
+	if l.PerCredential <= 0 {
+		l.PerCredential = DefaultCredentialPerMinute
+	}
+	if l.PerOrganization <= 0 {
+		l.PerOrganization = DefaultOrganizationPerMinute
+	}
+	return l
 }
 
-// RateLimiter returns middleware that enforces a token-bucket rate limit.
-// Default: 600 requests/minute per principal (user ID or API key).
-// The key is derived exclusively from the authenticated principal context;
-// unauthenticated requests (public auth endpoints) are keyed by client IP.
-// When a cache.Store is provided (Redis), it uses a sliding-window counter.
-// Otherwise falls back to an in-memory token bucket.
+// RateLimiter returns the rate limit of API-04 with an in-memory store
+// (single instance, tests); the organization budget is the default.
 func RateLimiter(requestsPerMinute int) func(http.Handler) http.Handler {
-	if requestsPerMinute <= 0 {
-		requestsPerMinute = 600
-	}
-
-	store := &memoryRateLimiterStore{
-		buckets: make(map[string]*tokenBucket),
-		rpm:     requestsPerMinute,
-	}
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !store.allow(rateLimitKey(r)) {
-				httpx.RateLimited(w, r, "rate limit exceeded, try again later")
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
+	return RateLimiterWithLimits(RateLimits{PerCredential: requestsPerMinute}, cache.NewMemoryStore())
 }
 
-// RateLimiterWithStore returns middleware using the provided cache store for
-// distributed rate limiting via a sliding-window counter.
+// RateLimiterWithStore returns the rate limit of API-04 on a shared store
+// (Redis) with the default organization budget.
 func RateLimiterWithStore(requestsPerMinute int, store cache.Store) func(http.Handler) http.Handler {
-	if requestsPerMinute <= 0 {
-		requestsPerMinute = 600
-	}
+	return RateLimiterWithLimits(RateLimits{PerCredential: requestsPerMinute}, store)
+}
 
+// RateLimiterWithLimits enforces the per-credential and the per-organization
+// budget (API-04) with fixed one-minute windows in the store, so all
+// replicas share them. Every response carries X-RateLimit-Limit,
+// X-RateLimit-Remaining and X-RateLimit-Reset for the tighter budget; a
+// refused request gets 429 with Retry-After. A store error fails closed.
+func RateLimiterWithLimits(limits RateLimits, store cache.Store) func(http.Handler) http.Handler {
+	limits = limits.withDefaults()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// The operational probes must report the state of the
@@ -76,7 +70,7 @@ func RateLimiterWithStore(requestsPerMinute int, store cache.Store) func(http.Ha
 				next.ServeHTTP(w, r)
 				return
 			}
-			allowed, err := allowWithStore(r.Context(), store, rateLimitKey(r), requestsPerMinute)
+			decision, err := limits.take(r, store, time.Now().UTC())
 			if err != nil {
 				// Fail closed: a cache outage must not turn the rate limiter
 				// off, otherwise brute-force protection silently disappears
@@ -85,14 +79,67 @@ func RateLimiterWithStore(requestsPerMinute int, store cache.Store) func(http.Ha
 				httpx.RateLimited(w, r, "rate limiter unavailable, try again later")
 				return
 			}
-			if !allowed {
-				httpx.RateLimited(w, r, "rate limit exceeded, try again later")
+			decision.writeHeaders(w)
+			if !decision.allowed {
+				w.Header().Set("Retry-After", strconv.Itoa(decision.reset))
+				httpx.RateLimited(w, r, "rate limit exceeded for this "+decision.scope+", try again later")
 				return
 			}
-
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// rateDecision is the outcome of one request against its budgets: the
+// budget closest to exhaustion decides the headers.
+type rateDecision struct {
+	allowed   bool
+	limit     int
+	remaining int
+	reset     int // seconds until the window ends
+	scope     string
+}
+
+func (d rateDecision) writeHeaders(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("X-RateLimit-Limit", strconv.Itoa(d.limit))
+	h.Set("X-RateLimit-Remaining", strconv.Itoa(d.remaining))
+	h.Set("X-RateLimit-Reset", strconv.Itoa(d.reset))
+}
+
+// take counts the request in its budgets and reports the decision.
+func (l RateLimits) take(r *http.Request, store cache.Store, now time.Time) (rateDecision, error) {
+	window := now.Unix() / 60
+	reset := int(60 - now.Unix()%60)
+	type budget struct {
+		key, scope string
+		limit      int
+	}
+	budgets := []budget{{rateLimitKey(r), "credential", l.PerCredential}}
+	if principal, ok := PrincipalFromContext(r.Context()); ok && principal.OrganizationID != "" {
+		budgets = append(budgets, budget{"org:" + principal.OrganizationID, "organization", l.PerOrganization})
+	}
+	d := rateDecision{allowed: true, remaining: -1, reset: reset}
+	for _, b := range budgets {
+		count, err := store.Increment(r.Context(), fmt.Sprintf("ratelimit:%s:%d", b.key, window), 2*time.Minute)
+		if err != nil {
+			return rateDecision{}, err
+		}
+		remaining := max(int64(b.limit)-count, 0)
+		if count > int64(b.limit) {
+			d.allowed = false
+			if d.scope == "" {
+				d.scope = b.scope
+			}
+		}
+		if d.remaining < 0 || int(remaining) < d.remaining {
+			d.remaining, d.limit = int(remaining), b.limit
+		}
+	}
+	if d.scope == "" {
+		d.scope = "credential"
+	}
+	return d, nil
 }
 
 // isOperationalProbe reports the unauthenticated health and metrics
@@ -109,58 +156,17 @@ func isOperationalProbe(r *http.Request) bool {
 	return false
 }
 
-// allowWithStore implements a fixed-window rate limit using the cache store.
-// Key format: ratelimit:{key}:{minute_timestamp}
-func allowWithStore(ctx context.Context, store cache.Store, key string, rpm int) (bool, error) {
-	now := time.Now().UTC()
-	windowKey := fmt.Sprintf("ratelimit:%s:%d", key, now.Unix()/60)
-
-	count, err := store.Increment(ctx, windowKey, 2*time.Minute)
-	if err != nil {
-		return false, err
-	}
-
-	return count <= int64(rpm), nil
-}
-
-func (s *memoryRateLimiterStore) allow(key string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	bucket, exists := s.buckets[key]
-	if !exists {
-		bucket = &tokenBucket{
-			tokens:     float64(s.rpm),
-			maxTokens:  float64(s.rpm),
-			refillRate: float64(s.rpm) / 60.0, // per second
-			lastRefill: time.Now(),
-		}
-		s.buckets[key] = bucket
-	}
-
-	// Refill tokens
-	now := time.Now()
-	elapsed := now.Sub(bucket.lastRefill).Seconds()
-	bucket.tokens += elapsed * bucket.refillRate
-	if bucket.tokens > bucket.maxTokens {
-		bucket.tokens = bucket.maxTokens
-	}
-	bucket.lastRefill = now
-
-	// Try to consume one token
-	if bucket.tokens < 1 {
-		return false
-	}
-	bucket.tokens--
-	return true
-}
-
 // rateLimitKey derives the bucket key from the authenticated principal so the
-// caller cannot influence its own limit by rotating headers. Requests without
-// a principal (public auth endpoints) are bucketed by client IP, which keeps
-// credential-stuffing and code-exchange brute force throttled.
+// caller cannot influence its own limit by rotating headers: the credential
+// (API key or session token id) when known, otherwise the principal.
+// Requests without a principal (public auth endpoints) are bucketed by
+// client IP, which keeps credential-stuffing and code-exchange brute force
+// throttled.
 func rateLimitKey(r *http.Request) string {
 	if principal, ok := PrincipalFromContext(r.Context()); ok && principal.OrganizationID != "" {
+		if principal.Credential != "" {
+			return "cred:" + principal.OrganizationID + ":" + principal.Credential
+		}
 		subject := principal.Subject
 		if subject == "" {
 			subject = "anonymous"

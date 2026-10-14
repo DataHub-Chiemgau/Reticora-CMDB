@@ -43,7 +43,9 @@
     "inventory": "Inventory",
     "saved-views": "Saved views",
     "locations": "Locations",
-    "ci-types": "CI Types"
+    "ci-types": "CI Types",
+    "reviews": "Reviews",
+    "jobs": "Jobs"
   },
   "common": {
     "save": "Save",
@@ -112,8 +114,8 @@
     "roleLabel": "Dashboard role",
     "roleHint": "The widget selection follows the chosen role.",
     "roles": {
-      "technik": "Engineering",
-      "einkauf": "Procurement",
+      "technician": "Technician",
+      "procurement": "Procurement",
       "management": "Management"
     },
     "widgets": {
@@ -183,6 +185,9 @@
       "selectAll": "Select all visible CIs",
       "selectRow": "Select {{name}}",
       "toolbarLabel": "Bulk edit",
+      "queued": "Status change for {{count}} CIs runs as a job",
+      "partial": "{{succeeded}} CIs updated, {{failed}} failed",
+      "failures": "Failed CIs",
       "success": "Updated status of {{count}} CIs",
       "error": "The bulk change could not be fully applied"
     },
@@ -216,6 +221,18 @@
       "warning": "Health: warning",
       "critical": "Health: critical",
       "unknown": "Health: unknown"
+    },
+    "site": "Site",
+    "room": "Room",
+    "firstSeen": "First seen",
+    "history": "History",
+    "historyEmpty": "No changes yet.",
+    "historyLoadError": "The history could not be loaded.",
+    "historySite": "Site {{site}}",
+    "historySource": {
+      "ci_change": "Change",
+      "entity_change": "History",
+      "audit": "Audit"
     }
   },
   "form": {
@@ -401,7 +418,21 @@
     "scope": "Scope",
     "progress": "Progress",
     "missing": "Missing",
-    "dueDate": "Due Date"
+    "dueDate": "Due Date",
+    "allStatuses": "All",
+    "statuses": {
+      "planned": "Planned",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "scopes": {
+      "full": "Full",
+      "partial": "Partial",
+      "site": "Site",
+      "room": "Room",
+      "rack": "Rack"
+    }
   },
   "ticket": {
     "title": "Tickets",
@@ -434,7 +465,8 @@
     "callbackTitle": "Completing sign-in",
     "callbackProgress": "Please wait while we verify your session.",
     "callbackError": "Sign-in could not be completed.",
-    "sessionExpired": "Your session has expired. Please sign in again."
+    "sessionExpired": "Your session has expired. Please sign in again.",
+    "backendUnreachable": "The server cannot be reached. Check that Reticora is running and the address is correct, then try again."
   },
   "topology": {
     "subtitle": "Relationships between configuration items as a graph.",
@@ -444,6 +476,7 @@
     "loadError": "The topology could not be loaded",
     "empty": "No topology data",
     "emptyHint": "Relationships appear here once they are recorded or derived from discovery.",
+    "tooLarge": "The topology holds more than 2,000 CIs. Choose a CI type, a site or a start CI.",
     "allTypes": "All CI types",
     "filterType": "Filter by CI type",
     "filterDepth": "Traversal depth",
@@ -458,7 +491,10 @@
       "stop": "Stop simulation",
       "active": "Outage simulation",
       "impact": "If \"{{name}}\" fails, {{count}} more CIs are impacted (shown greyed out).",
-      "noImpact": "This CI has no dependents — an outage would have no impact on the graph."
+      "noImpact": "This CI has no dependents — an outage would have no impact on the graph.",
+      "add": "Add failure",
+      "remove": "Remove from simulation",
+      "impactMany": "If {{failed}} CIs ({{names}}) fail together, {{count}} further CIs are affected (shown in grey)."
     },
     "filterRelType": "Relationship type",
     "allRelTypes": "All relationships",
@@ -468,7 +504,16 @@
       "hosted_on": "hosted on",
       "depends_on": "depends on",
       "member_of": "member of"
-    }
+    },
+    "filterSite": "Filter by site",
+    "allSites": "All sites",
+    "start": {
+      "title": "Choose a section",
+      "site": "Site",
+      "type": "CI type",
+      "show": "Show topology"
+    },
+    "graphUnavailable": "The graph view needs WebGL, which is not available in this browser. The node list below shows the same data."
   },
   "rack": {
     "title": "Racks",
@@ -608,6 +653,7 @@
     "citations": "Sources"
   },
   "export": {
+    "omittedFields": "{{count}} fields not included",
     "title": "Export",
     "subtitle": "Asynchronous exports render the tenant's CI data into object storage; finished exports are available for 24 hours via a signed URL.",
     "loading": "Loading export jobs",
@@ -654,7 +700,12 @@
     "severity_info": "Info",
     "alertRules": "Alert rules",
     "noAlerts": "No alert rules",
-    "noAlertsHint": "Create a rule to be notified when thresholds are crossed."
+    "noAlertsHint": "Create a rule to be notified when thresholds are crossed.",
+    "ciTitle": "Metrics",
+    "ciLoad": "Load metrics",
+    "ciNone": "No samples in the last 24 hours.",
+    "ciNotLicensed": "Monitoring is not enabled for this organization.",
+    "ciLatest": "Latest"
   },
   "audit": {
     "title": "Audit log",
@@ -858,7 +909,34 @@
     "fields": "Fields",
     "fromTemplate": "From template",
     "observable": "observed",
-    "schemaVersion": "Schema"
+    "schemaVersion": "Schema",
+    "dataTypes": {
+      "text": "Text",
+      "multiline": "Multiline text",
+      "integer": "Integer",
+      "decimal": "Decimal",
+      "boolean": "Yes/No",
+      "date": "Date",
+      "datetime": "Date and time",
+      "enum": "Choice",
+      "multiselect": "Multiple choice",
+      "ip": "IP address",
+      "mac": "MAC address",
+      "url": "URL",
+      "email": "Email",
+      "uuid": "UUID",
+      "json": "JSON",
+      "file": "File",
+      "user": "User",
+      "team": "Team",
+      "location": "Location",
+      "ci_ref": "CI reference",
+      "asset_ref": "Asset reference",
+      "contract_ref": "Contract reference"
+    },
+    "system": "system",
+    "logicalShort": "logical",
+    "fieldCount": "Fields: {{count}}"
   },
   "inventory": {
     "assigned": "Assigned",
@@ -928,6 +1006,7 @@
     }
   },
   "savedviews": {
+    "sharedWithRoles": "for {{count}} roles",
     "title": "Saved views",
     "presets": "Presets",
     "hint": "Select a view on the left.",
@@ -970,5 +1049,161 @@
   "relationshipCard": {
     "suppress": "Remove and suppress",
     "suppressHint": "Discovery edge: removed and not recreated by discovery."
+  },
+  "scope": {
+    "label": "Scope",
+    "organization": "Organization",
+    "client": "Client",
+    "site": "Site",
+    "allClients": "All clients",
+    "allSites": "All sites"
+  },
+  "reviews": {
+    "title": "Review inbox",
+    "subtitle": "Open reconciliation decisions: compare the observation with the CI, then merge, create, accept or dismiss.",
+    "status": "Status",
+    "allStatuses": "All statuses",
+    "statuses": {
+      "open": "Open",
+      "resolved": "Resolved",
+      "dismissed": "Dismissed"
+    },
+    "kind": "Type",
+    "allKinds": "All types",
+    "kinds": {
+      "unclassified_device": "Unclassified device",
+      "ambiguous_identity": "Ambiguous identity",
+      "conflicting_values": "Conflicting values",
+      "probable_duplicate": "Probable duplicate",
+      "override_conflict": "Override conflict",
+      "resurrected_device": "Resurrected device",
+      "unlicensed_ci": "Unlicensed CI",
+      "scope_suggested": "Suggested scope",
+      "serial_mismatch": "Serial number mismatch",
+      "duplicate_ip": "Duplicate IP address",
+      "unknown_relationship": "Unknown relationship"
+    },
+    "escalatedOnly": "Escalated only",
+    "escalated": "Escalated",
+    "selectAll": "Select all open",
+    "select": "Select “{{name}}”",
+    "bulk": {
+      "label": "Bulk action",
+      "selected": "{{count}} selected",
+      "action": "Action",
+      "choose": "Choose action",
+      "run": "Run",
+      "result": "{{resolved}} resolved, {{failed}} failed."
+    },
+    "actions": {
+      "merge": "Merge",
+      "new": "Create new",
+      "dismiss": "Dismiss",
+      "accept": "Accept"
+    },
+    "candidate": "Candidate",
+    "diff": "Observation compared with the CI",
+    "field": "Field",
+    "observed": "Observed",
+    "current": "In the CI",
+    "differs": "differs",
+    "loadError": "The review items could not be loaded",
+    "empty": "No review items",
+    "emptyHint": "Reconciliation has nothing to decide."
+  },
+  "notifications": {
+    "title": "Notifications",
+    "open": "Open notifications ({{count}} unread)",
+    "markRead": "Mark as read",
+    "markAllRead": "Mark all read",
+    "unread": "Unread",
+    "empty": "No notifications."
+  },
+  "jobs": {
+    "title": "Job center",
+    "subtitle": "Background jobs of every kind: progress, cancellation and result.",
+    "status": "Status",
+    "allStatuses": "All statuses",
+    "statuses": {
+      "queued": "Queued",
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "kind": "Kind",
+    "progress": "Progress",
+    "progressOf": "Progress of {{kind}}",
+    "created": "Created",
+    "cancel": "Cancel",
+    "result": "Result",
+    "loadError": "The jobs could not be loaded",
+    "empty": "No jobs"
+  },
+  "provenance": {
+    "show": "Provenance of {{field}}",
+    "source": "Source",
+    "rank": "Rank",
+    "recordedAt": "Recorded",
+    "observedAt": "Observed",
+    "overrideReason": "Reason",
+    "overrideAuthor": "Author",
+    "covers": "Covers",
+    "reasons": {
+      "override": "Manual override",
+      "source_rank": "Highest-ranked source",
+      "asset": "From the asset",
+      "record": "Value of the CI record"
+    }
+  },
+  "onboarding": {
+    "title": "Getting started",
+    "subtitle": "From the account to the first CIs in five steps.",
+    "progress": "Setup progress",
+    "progressText": "{{done}} of {{total}} steps done",
+    "steps": {
+      "signup": "Sign up",
+      "verify": "Verification",
+      "collector": "Connect a collector",
+      "scopes": "Confirm scopes",
+      "cis": "First CIs"
+    },
+    "signup": {
+      "organization": "Organization",
+      "email": "E-mail address",
+      "name": "Your name",
+      "submit": "Create account",
+      "sent": "We sent a confirmation link to {{email}}. Open it to continue."
+    },
+    "verify": {
+      "password": "Set a password (at least 12 characters)",
+      "submit": "Confirm account",
+      "done": "Your organization “{{slug}}” has been created.",
+      "login": "Sign in and continue",
+      "expired": "The confirmation link has expired. Please sign up again.",
+      "invalid": "The confirmation link is invalid or was already used.",
+      "trial": "Your trial runs until {{date}}."
+    },
+    "collector": {
+      "hint": "Install the collector in your network and enter an enrollment code there.",
+      "create": "Create enrollment code",
+      "code": "Your enrollment code:",
+      "waiting": "Waiting for the collector to connect …"
+    },
+    "scopes": {
+      "hint": "The collector reported these networks. Confirm which ones to scan.",
+      "waiting": "No networks reported yet.",
+      "accept": "Confirm",
+      "dismiss": "Dismiss",
+      "continue": "Continue"
+    },
+    "cis": {
+      "waiting": "The first discovery is running. As soon as CIs are found, the flow continues."
+    },
+    "done": {
+      "title": "Done",
+      "text": "{{count}} CIs are already in your CMDB.",
+      "open": "Open the CMDB"
+    }
   }
 }

@@ -60,8 +60,66 @@ func (r *PGRepository) Record(ctx context.Context, change *Change) error {
 	})
 }
 
-// List returns the changes of one entity, newest first.
+// unifiedCIHistory is the history of a CI (CI-06): its ci_change rows
+// (with the site at the time), the entity_change rows and the audit
+// entries of the CI, one chronological trail.
+const unifiedCIHistory = `
+	SELECT id::text, organization_id::text, 'ci', ci_id::text, COALESCE(actor_id::text, ''), change_type,
+	       COALESCE(field_name, ''), old_value, new_value, COALESCE(comment, ''), created_at, 'ci_change', COALESCE(site_id::text, '')
+	FROM ci_change WHERE organization_id = $1 AND ci_id = $2
+	UNION ALL
+	SELECT id::text, organization_id::text, entity_type, entity_id::text, COALESCE(actor_id::text, ''), change_type,
+	       COALESCE(field_name, ''), old_value, new_value, COALESCE(comment, ''), created_at, 'entity_change', ''
+	FROM entity_change WHERE organization_id = $1 AND entity_type = 'ci' AND entity_id = $2
+	UNION ALL
+	SELECT id::text, organization_id::text, 'ci', resource_id::text, COALESCE(actor_id::text, ''), action,
+	       '', NULL, changes, '', "timestamp", 'audit', ''
+	FROM audit_log WHERE organization_id = $1 AND resource_type = 'ci' AND resource_id = $2`
+
+// listCI returns the unified history of a CI the caller can see, newest
+// first.
+func (r *PGRepository) listCI(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Change, int, error) {
+	out := []Change{}
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var visible bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid)", ciID).Scan(&visible); err != nil || !visible {
+			return err
+		}
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM ("+unifiedCIHistory+") h", orgID, ciID).Scan(&total); err != nil {
+			return fmt.Errorf("count CI history: %w", err)
+		}
+		rows, err := tx.Query(ctx, "SELECT * FROM ("+unifiedCIHistory+") h ORDER BY 11 DESC, 1 LIMIT $3 OFFSET $4", orgID, ciID, page.Limit, page.Offset)
+		if err != nil {
+			return fmt.Errorf("list CI history: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			c := Change{}
+			var oldRaw, newRaw []byte
+			if err := rows.Scan(&c.ID, &c.OrganizationID, &c.EntityType, &c.EntityID, &c.ActorID, &c.ChangeType, &c.FieldName,
+				&oldRaw, &newRaw, &c.Comment, &c.CreatedAt, &c.Source, &c.SiteID); err != nil {
+				return err
+			}
+			if len(oldRaw) > 0 {
+				_ = json.Unmarshal(oldRaw, &c.OldValue)
+			}
+			if len(newRaw) > 0 {
+				_ = json.Unmarshal(newRaw, &c.NewValue)
+			}
+			out = append(out, c)
+		}
+		return rows.Err()
+	})
+	return out, total, err
+}
+
+// List returns the changes of one entity, newest first; for a CI the
+// unified history of CI-06.
 func (r *PGRepository) List(ctx context.Context, orgID, entityType, entityID string, page api.PaginationParams) ([]Change, int, error) {
+	if entityType == "ci" {
+		return r.listCI(ctx, orgID, entityID, page)
+	}
 	var out []Change
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {

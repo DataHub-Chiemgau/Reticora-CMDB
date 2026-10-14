@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -171,12 +172,10 @@ func (h *Handler) rotateKeys(w http.ResponseWriter, r *http.Request) {
 
 // writeError writes an RFC 7807 problem response.
 func writeError(w http.ResponseWriter, status int, detail string) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]any{
-		"type":   "about:blank",
-		"title":  http.StatusText(status),
-		"status": status,
-		"detail": detail,
+	api.WriteProblemBody(w, status, api.ProblemDetail{
+		Type:   "about:blank",
+		Title:  http.StatusText(status),
+		Status: status,
+		Detail: detail,
 	})
 }

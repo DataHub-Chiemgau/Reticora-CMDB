@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -109,6 +111,27 @@ func NewPGRepositoryWithAudit(pool *pgxpool.Pool, recorder audit.TxRecorder) *PG
 }
 
 // List returns paginated CIs filtered by the given parameters.
+// attributeFilterKind checks that an attribute may be filtered (API-02):
+// it must be defined (else 422) and searchable (else 400 with a hint), and
+// its data type gives the filter kind.
+func attributeFilterKind(ctx context.Context, tx pgx.Tx, f api.Filter, key string) (string, error) {
+	var dataType string
+	var searchable bool
+	err := tx.QueryRow(ctx, `SELECT data_type, bool_or(searchable) FROM attribute_definition
+		WHERE key = $1 GROUP BY data_type ORDER BY bool_or(searchable) DESC LIMIT 1`, key).Scan(&dataType, &searchable)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", &api.FieldError{Field: "filter[" + f.Field + "]", Status: http.StatusUnprocessableEntity, Message: fmt.Sprintf("unknown attribute %q", key)}
+	}
+	if err != nil {
+		return "", fmt.Errorf("attribute definition %s: %w", key, err)
+	}
+	if !searchable {
+		return "", &api.FieldError{Field: "filter[" + f.Field + "]",
+			Message: fmt.Sprintf("attribute %q is not searchable; mark it searchable in its attribute definition to filter on it", key)}
+	}
+	return fieldmeta.FilterKind(dataType), nil
+}
+
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
 	items := make([]Item, 0)
 	var total int
@@ -147,6 +170,29 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			whereParts = append(whereParts, fmt.Sprintf("name ILIKE $%d", argPos))
 			args = append(args, "%"+filter.Search+"%")
 			argPos++
+		}
+		for _, f := range filter.Filters {
+			expr := filterColumns[f.Field].expr
+			if key, ok := f.Attribute(); ok {
+				kind, err := attributeFilterKind(ctx, tx, f, key)
+				if err != nil {
+					return err
+				}
+				f.Kind = kind
+				if cerr := f.Check(); cerr != nil {
+					return cerr
+				}
+				expr = fmt.Sprintf("attributes->>$%d::text", argPos)
+				args = append(args, key)
+				argPos++
+			}
+			if expr == "" {
+				return &api.FieldError{Field: "filter[" + f.Field + "]", Status: http.StatusUnprocessableEntity, Message: "unknown filter field"}
+			}
+			clause, fargs := f.SQL(expr, argPos)
+			whereParts = append(whereParts, clause)
+			args = append(args, fargs...)
+			argPos += len(fargs)
 		}
 
 		whereClause := strings.Join(whereParts, " AND ")
@@ -242,6 +288,46 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, er
 	}
 
 	return item, nil
+}
+
+// GetByIDs implements BatchReader: the visible, not deleted CIs among ids
+// in one query.
+func (r *PGRepository) GetByIDs(ctx context.Context, orgID string, ids []string) ([]Item, error) {
+	items := []Item{}
+	if len(ids) == 0 {
+		return items, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, fmt.Sprintf("SELECT %s FROM ci WHERE organization_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL",
+			ciSelectColumns), orgID, ids)
+		if err != nil {
+			return fmt.Errorf("get cis by id: %w", err)
+		}
+		var ptrs []*Item
+		for rows.Next() {
+			item, serr := scanCI(rows)
+			if serr != nil {
+				rows.Close()
+				return serr
+			}
+			ptrs = append(ptrs, item)
+		}
+		rows.Close()
+		if rerr := rows.Err(); rerr != nil {
+			return rerr
+		}
+		if oerr := overlayOverrides(ctx, tx, ptrs); oerr != nil {
+			return oerr
+		}
+		if aerr := loadAssetFacts(ctx, tx, ptrs); aerr != nil {
+			return aerr
+		}
+		for _, item := range ptrs {
+			items = append(items, *item)
+		}
+		return nil
+	})
+	return items, err
 }
 
 // Create inserts a new CI.
@@ -515,14 +601,31 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 			return fmt.Errorf("get ci for delete: %w", err)
 		}
 
-		cmdTag, err := tx.Exec(ctx, "UPDATE ci SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL", id, orgID)
+		// CI-05: the CI is decommissioned (its operative status; the
+		// lifecycle state stays, LCY-01) and its asset link is released;
+		// the change row keeps what a restore brings back.
+		var assetPrimary bool
+		if before.AssetID != "" {
+			tag, uerr := tx.Exec(ctx, "UPDATE asset SET ci_id = NULL WHERE id = $1 AND ci_id = $2", before.AssetID, id)
+			if uerr != nil {
+				return fmt.Errorf("release asset link: %w", uerr)
+			}
+			assetPrimary = tag.RowsAffected() > 0
+		}
+		cmdTag, err := tx.Exec(ctx, `UPDATE ci SET deleted_at = NOW(), updated_at = NOW(), status = 'decommissioned', asset_id = NULL
+			WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`, id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete ci: %w", err)
 		}
 		if cmdTag.RowsAffected() == 0 {
 			return fmt.Errorf("not found")
 		}
-		if err := r.recordCIChange(ctx, tx, orgID, id, before.Version, "delete", "", before, nil); err != nil {
+		released := map[string]any{"status": StatusDecommissioned}
+		if before.AssetID != "" {
+			released["unlinked_asset_id"] = before.AssetID
+			released["asset_primary"] = assetPrimary
+		}
+		if err := r.recordCIChange(ctx, tx, orgID, id, before.Version, "delete", "", before, released); err != nil {
 			return err
 		}
 		if err := r.recordAudit(ctx, tx, "ci.deleted", before, map[string]interface{}{"before": before}); err != nil {
@@ -536,9 +639,55 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 // device seen again is the deleted one. It records the decision in the
 // change history and the audit trail.
 func (r *PGRepository) Restore(ctx context.Context, orgID, id string) (*Item, error) {
+	return r.restore(ctx, orgID, id, 0, "reconciliation_decision", "resurrected_device")
+}
+
+// RestoreDeleted implements Restorer: POST /cis/{id}/restore within the
+// retention (CI-05); an older deletion is ErrRetentionExpired.
+func (r *PGRepository) RestoreDeleted(ctx context.Context, orgID, id string, retention time.Duration) (*Item, error) {
+	return r.restore(ctx, orgID, id, retention, "update", "api")
+}
+
+// restore clears deleted_at of a deleted CI (retention 0: no limit) and
+// records the change, the audit entry and the ci.restored event.
+func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention time.Duration, changeType, reason string) (*Item, error) {
 	var restored *Item
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "UPDATE ci SET deleted_at = NULL, updated_at = NOW() WHERE id = $1 AND organization_id = $2 AND deleted_at IS NOT NULL", id, orgID)
+		var deletedAt *time.Time
+		var mergedInto string
+		if err := tx.QueryRow(ctx, "SELECT deleted_at, COALESCE(merged_into_id::text, '') FROM ci WHERE id = $1 AND organization_id = $2",
+			id, orgID).Scan(&deletedAt, &mergedInto); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("not found")
+			}
+			return fmt.Errorf("get ci for restore: %w", err)
+		}
+		if deletedAt == nil {
+			return fmt.Errorf("not found")
+		}
+		// A merged CI comes back only through the unmerge (CI-12).
+		if mergedInto != "" {
+			return ErrMergeConflict
+		}
+		if retention > 0 && time.Since(*deletedAt) > retention {
+			return ErrRetentionExpired
+		}
+		// The status and the asset link of the deletion come back (CI-05).
+		var status, assetID string
+		var primary bool
+		err := tx.QueryRow(ctx, `SELECT COALESCE(old_value->>'status', ''), COALESCE(new_value->>'unlinked_asset_id', ''),
+				COALESCE((new_value->>'asset_primary')::boolean, false)
+			FROM ci_change WHERE ci_id = $1 AND change_type = 'delete' ORDER BY created_at DESC LIMIT 1`, id).Scan(&status, &assetID, &primary)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("read deletion: %w", err)
+		}
+		if status == "" || status == StatusDecommissioned {
+			status = StatusActive
+		}
+		tag, err := tx.Exec(ctx, `UPDATE ci SET deleted_at = NULL, updated_at = NOW(), version = version + 1,
+				status = CASE WHEN status = 'decommissioned' THEN $3 ELSE status END,
+				asset_id = COALESCE(asset_id, (SELECT a.id FROM asset a WHERE a.id = NULLIF($4, '')::uuid))
+			WHERE id = $1 AND organization_id = $2 AND deleted_at IS NOT NULL`, id, orgID, status, assetID)
 		if err != nil {
 			// A reactivated CI may hold a value of a unique attribute that
 			// another CI took in the meantime (MET-15).
@@ -547,14 +696,19 @@ func (r *PGRepository) Restore(ctx context.Context, orgID, id string) (*Item, er
 		if tag.RowsAffected() == 0 {
 			return fmt.Errorf("not found")
 		}
+		if primary && assetID != "" {
+			if _, err = tx.Exec(ctx, "UPDATE asset SET ci_id = $1 WHERE id = $2 AND ci_id IS NULL", id, assetID); err != nil {
+				return fmt.Errorf("restore asset link: %w", err)
+			}
+		}
 		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2", ciSelectColumns)
 		if restored, err = scanCI(tx.QueryRow(ctx, query, id, orgID)); err != nil {
 			return fmt.Errorf("get restored ci: %w", err)
 		}
-		if changeErr := r.recordCIChange(ctx, tx, orgID, id, restored.Version, "reconciliation_decision", "deleted_at", "deleted", nil); changeErr != nil {
+		if changeErr := r.recordCIChange(ctx, tx, orgID, id, restored.Version, changeType, "deleted_at", "deleted", nil); changeErr != nil {
 			return changeErr
 		}
-		if err := r.recordAudit(ctx, tx, "ci.restored", restored, map[string]interface{}{"reason": "resurrected_device"}); err != nil {
+		if err := r.recordAudit(ctx, tx, "ci.restored", restored, map[string]interface{}{"reason": reason}); err != nil {
 			return err
 		}
 		return r.recordEvent(ctx, tx, events.CIRestored, restored, nil)
@@ -1178,4 +1332,69 @@ func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, cli
 		return qerr
 	})
 	return keys, err
+}
+
+// ChangeType implements TypeChanger (CI-11): the CI keeps its row, so its
+// relationships, mounts, asset link and history stay; required attributes
+// of the target type the CI lacks are reported as findings.
+func (r *PGRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode string) (*TypeChangeResult, error) {
+	result := &TypeChangeResult{Findings: []TypeFinding{}}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
+		before, err := scanCI(tx.QueryRow(ctx, query, ciID, orgID))
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("not found")
+			}
+			return fmt.Errorf("get ci for type change: %w", err)
+		}
+		var toKey string
+		var required []string
+		err = tx.QueryRow(ctx, `SELECT COALESCE(key, name), COALESCE(required_fields, '{}') FROM ci_type
+			WHERE id = $1 AND (organization_id = $2 OR organization_id IS NULL)`, typeID, orgID).Scan(&toKey, &required)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrUnknownType
+			}
+			return fmt.Errorf("get target type: %w", err)
+		}
+		var fromKey string
+		if err = tx.QueryRow(ctx, "SELECT COALESCE(key, name) FROM ci_type WHERE id = $1", before.CITypeID).Scan(&fromKey); err != nil &&
+			!errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("get current type: %w", err)
+		}
+		if mode == TypeChangeDiscovery && !DiscoveryMayReclassify(fromKey, toKey) {
+			return ErrReclassificationRefused
+		}
+		result.Findings = MissingRequired(required, before.Attributes)
+		if before.CITypeID == typeID {
+			result.CI = before
+			return nil
+		}
+		if _, err = tx.Exec(ctx, `UPDATE ci SET ci_type_id = $3, version = version + 1, updated_at = NOW()
+			WHERE id = $1 AND organization_id = $2`, ciID, orgID, typeID); err != nil {
+			return fmt.Errorf("change ci type: %w", err)
+		}
+		after, err := scanCI(tx.QueryRow(ctx, fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2", ciSelectColumns), ciID, orgID))
+		if err != nil {
+			return fmt.Errorf("get changed ci: %w", err)
+		}
+		result.CI, result.Changed = after, true
+		change := map[string]any{"ci_type_id": typeID, "type": toKey, "mode": mode, "findings": result.Findings}
+		if changeErr := r.recordCIChange(ctx, tx, orgID, ciID, after.Version, "type_change", "ci_type_id",
+			map[string]any{"ci_type_id": before.CITypeID, "type": fromKey}, change); changeErr != nil {
+			return changeErr
+		}
+		if auditErr := r.recordAudit(ctx, tx, "ci.type_changed", after, map[string]interface{}{
+			"from": fromKey, "to": toKey, "mode": mode, "findings": result.Findings,
+		}); auditErr != nil {
+			return auditErr
+		}
+		// EVT-02 has no own type event: ci.changed names ci_type_id.
+		return r.recordEvent(ctx, tx, events.CIChanged, after, []string{"ci_type_id"})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }

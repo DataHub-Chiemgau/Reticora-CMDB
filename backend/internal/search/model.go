@@ -47,6 +47,8 @@ type Result struct {
 	Limit   int   `json:"limit"`
 	Offset  int   `json:"offset"`
 	HasMore bool  `json:"has_more"`
+	// NextCursor continues after this page (API-02).
+	NextCursor string `json:"next_cursor,omitempty"`
 }
 
 type ReindexResult struct {

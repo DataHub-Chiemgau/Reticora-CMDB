@@ -49,7 +49,7 @@ func TestSavedViewScope(t *testing.T) {
 	if err != nil || len(views) != 1 || views[0].ID != viewA.ID {
 		t.Fatalf("organization A views: %+v err=%v, want only the A view", views, err)
 	}
-	if _, err = repo.GetByID(ctx, f.OrgB, viewB.ID); !errors.Is(err, database.ErrTenantMismatch) {
+	if _, err = repo.GetByID(ctx, f.OrgB, viewB.ID, f.User); !errors.Is(err, database.ErrTenantMismatch) {
 		t.Fatalf("read organization B view: got %v, want ErrTenantMismatch", err)
 	}
 	if _, _, err = engine.Query(context.Background(), f.OrgA, savedview.FilterSpec{}, api.PaginationParams{Limit: 10}); !errors.Is(err, database.ErrNoTenantScope) {

@@ -146,9 +146,9 @@ func replaceAll(s, old, new string) string {
 // (GQL-04): the route needs an authenticated principal but no blanket
 // permission; each resolver checks its own read permission.
 func TestGraphQLRouteRequiresAuthenticationOnly(t *testing.T) {
-	required, access := PermissionForRoute(http.MethodPost, "/api/v1/graphql")
+	required, access := PermissionForRoute(http.MethodPost, "/bff/graphql")
 	if access != routeProtected || required != "" {
-		t.Fatalf("POST /api/v1/graphql: permission %q access %v, want authenticated-only", required, access)
+		t.Fatalf("POST /bff/graphql: permission %q access %v, want authenticated-only", required, access)
 	}
 }
 
@@ -164,7 +164,7 @@ const routePermissionsFile = "testdata/route_permissions.txt"
 func TestEveryOperationRequiresItsExpectedPermission(t *testing.T) {
 	var b strings.Builder
 	for _, op := range routeTable(t, testRouter(t)) {
-		if !strings.HasPrefix(op.Path, "/api/") && !strings.HasPrefix(op.Path, "/scim/") {
+		if !strings.HasPrefix(op.Path, "/api/") && !strings.HasPrefix(op.Path, "/scim/") && !strings.HasPrefix(op.Path, "/bff/") {
 			continue
 		}
 		required, access := PermissionForRoute(op.Method, op.Path)
@@ -279,5 +279,54 @@ func TestRouteMiddlewareRunsAfterAuthorization(t *testing.T) {
 	}
 	if code := call(identity.PermOrderApprove); code != http.StatusOK || strings.Join(trace, ",") != "validation,idempotency,handler" {
 		t.Errorf("permitted request: status %d, trace %v", code, trace)
+	}
+}
+
+// catalogResources are the resources of API-05 (verbatim, E-25).
+var catalogResources = []string{
+	"org", "clients", "sites", "buildings", "rooms", "racks", "mounts", "locations", "vrfs", "vlans",
+	"ci-types", "attribute-definitions", "cis", "relationships", "relationship-types", "subnets", "ips",
+	"cables", "contacts", "topology", "impact", "collectors", "discovery-scopes", "credentials",
+	"review-items", "webhooks", "exports", "jobs", "notifications", "notification-channels", "me",
+	"users", "teams", "service-accounts", "invitations", "roles", "role-assignments", "api-keys",
+	"audit-log", "entitlements", "admin-entitlements", "signup",
+}
+
+// catalogResourcePending names catalog resources a later work package of
+// the plan introduces, with that package.
+var catalogResourcePending = map[string]string{}
+
+// TestCatalogResourcesAreServed covers API-05: every resource of the
+// catalog is served under its catalog path /api/v1/<resource> (the
+// operator's admin-entitlements under /api/v1/admin/), with a mapped
+// permission.
+func TestCatalogResourcesAreServed(t *testing.T) {
+	registered := routerOperations(t, testRouter(t))
+	for _, resource := range catalogResources {
+		prefix := "/api/v1/" + resource
+		if resource == "admin-entitlements" {
+			// The operator grants entitlements per organization (WP-074).
+			prefix = "/api/v1/admin/orgs/{id}/entitlements"
+		}
+		served := false
+		for _, op := range registered {
+			if op.Path == prefix || strings.HasPrefix(op.Path, prefix+"/") {
+				served = true
+				if _, access := PermissionForRoute(op.Method, op.Path); access == routeUnmapped {
+					t.Errorf("%s: no permission mapping", op)
+				}
+			}
+		}
+		if pending, ok := catalogResourcePending[resource]; ok {
+			if served {
+				t.Errorf("%s is served now; drop it from catalogResourcePending", resource)
+			} else {
+				t.Logf("%s: introduced by %s", resource, pending)
+			}
+			continue
+		}
+		if !served {
+			t.Errorf("catalog resource %s is not served under %s", resource, prefix)
+		}
 	}
 }

@@ -55,10 +55,13 @@ type response struct {
 func call(t *testing.T, h http.Handler, orgID, method, path string) response {
 	t.Helper()
 	body := ""
-	if path == "/api/v1/graphql" {
+	if path == "/bff/graphql" {
 		body = `{"query":"{ cis { totalCount } }"}`
 	}
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	scope := database.OrgWideScope(orgID, "")
 	ctx := database.ContextWithTenantScope(req.Context(), &scope)
 	ctx = tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: orgID})
@@ -144,7 +147,7 @@ func TestEntitlementEnforcement(t *testing.T) {
 	if got := call(t, routesA, f.OrgB, http.MethodGet, "/api/v1/cis"); got.status != http.StatusNoContent {
 		t.Errorf("org B core route: %+v", got)
 	}
-	if got := call(t, routesA, f.OrgB, http.MethodPost, "/api/v1/graphql"); got.status != http.StatusOK {
+	if got := call(t, routesA, f.OrgB, http.MethodPost, "/bff/graphql"); got.status != http.StatusOK {
 		t.Errorf("org B GraphQL core field: %+v", got)
 	}
 

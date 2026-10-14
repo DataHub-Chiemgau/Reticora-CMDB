@@ -222,3 +222,29 @@ func scanPoints(rows pgx.Rows) ([]MetricPoint, error) {
 	}
 	return points, rows.Err()
 }
+
+// maxCIMetricNames bounds the series of one CI.
+const maxCIMetricNames = 50
+
+// MetricNames implements MetricNamer.
+func (s *PGMetricStore) MetricNames(ctx context.Context, orgID, ciID string, since time.Time) ([]string, error) {
+	var names []string
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT DISTINCT metric_name FROM metric_sample_v
+			WHERE organization_id = $1 AND ci_id = $2::uuid AND time >= $3 ORDER BY metric_name LIMIT $4`,
+			orgID, ciID, since, maxCIMetricNames)
+		if err != nil {
+			return fmt.Errorf("list metric names: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var n string
+			if err := rows.Scan(&n); err != nil {
+				return err
+			}
+			names = append(names, n)
+		}
+		return rows.Err()
+	})
+	return names, err
+}

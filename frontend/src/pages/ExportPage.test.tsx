@@ -15,7 +15,7 @@ afterEach(() => {
 describe('ExportPage', () => {
   it('renders a completed job with a download link', async () => {
     stubFetchRoutes({
-      '/export/jobs': paginated([
+      '/exports': paginated([
         {
           id: 'job-1',
           organization_id: 'org-1',
@@ -27,6 +27,14 @@ describe('ExportPage', () => {
           file_size_bytes: 1024,
           expires_at: '2099-01-01T00:00:00Z',
           download_url: 'https://minio.example/exports/org-1/job-1.csv?X-Amz-Signature=abc',
+          manifest: {
+            format: 'csv',
+            fields: ['id', 'name'],
+            omitted: [
+              { field: 'hostname', reason: 'not part of the csv layout' },
+              { field: 'attributes', reason: 'not part of the csv layout' },
+            ],
+          },
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:01:00Z',
         },
@@ -36,12 +44,17 @@ describe('ExportPage', () => {
     renderWithProviders(<ExportPage />, { route: '/export' });
 
     expect(await screen.findByText('42')).toBeInTheDocument();
+    // The manifest names the fields the file leaves out (EXP-01).
+    expect(screen.getByText('2 Felder nicht enthalten')).toHaveAttribute(
+      'title',
+      'hostname, attributes',
+    );
     const link = screen.getByText('Herunterladen');
     expect(link).toHaveAttribute('href', expect.stringContaining('job-1.csv'));
   });
 
   it('shows the empty state when no jobs exist', async () => {
-    stubFetchRoutes({ '/export/jobs': paginated([]) });
+    stubFetchRoutes({ '/exports': paginated([]) });
 
     renderWithProviders(<ExportPage />, { route: '/export' });
 

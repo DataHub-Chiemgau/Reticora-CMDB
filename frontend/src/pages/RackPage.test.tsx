@@ -79,7 +79,7 @@ describe('buildRackUnits', () => {
 describe('RackPage', () => {
   it('selects the first rack and renders its mounts', async () => {
     stubFetchRoutes({
-      '/racks/rack-1/mounts': paginated(mounts),
+      '/racks/rack-1/layout': { rack, mounts, free: { front: [], rear: [] } },
       '/racks': paginated([rack]),
       '/cis/ci-1': ci,
     });
@@ -95,7 +95,7 @@ describe('RackPage', () => {
 
   it('switches to the rear face and shows rear mounts', async () => {
     stubFetchRoutes({
-      '/racks/rack-1/mounts': paginated(mounts),
+      '/racks/rack-1/layout': { rack, mounts, free: { front: [], rear: [] } },
       '/racks': paginated([rack]),
       '/cis/ci-1': ci,
     });

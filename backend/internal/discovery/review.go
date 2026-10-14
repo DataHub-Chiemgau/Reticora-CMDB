@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 )
 
@@ -57,9 +58,19 @@ func (h *Handler) ReviewService() *reviews.Service {
 		if h.reviewNotifier != nil {
 			svc.WithNotifier(h.reviewNotifier)
 		}
+		if h.reviewJobs != nil {
+			svc.WithJobs(h.reviewJobs)
+		}
 		h.reviews = svc
 	})
 	return h.reviews
+}
+
+// WithReviewJobs records the merge resolutions of review items as jobs
+// (JOB-04).
+func (h *Handler) WithReviewJobs(tracker jobs.Tracker) *Handler {
+	h.reviewJobs = tracker
+	return h
 }
 
 // WithReviewNotifier attaches the notification of opened review items

@@ -2,8 +2,12 @@ package ci
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -26,6 +30,21 @@ type EventDispatcher interface {
 type Handler struct {
 	svc        *Service
 	dispatcher EventDispatcher
+	includes   map[string]IncludeFunc
+	provenance ProvenanceSource
+}
+
+// IncludeFunc loads one related collection of a CI for ?include= (API-05).
+type IncludeFunc func(ctx context.Context, orgID, ciID string) (any, error)
+
+// IncludeAsset is always available: the canonical asset facts of the CI.
+const IncludeAsset = "asset"
+
+// WithIncludes adds the related collections GET /cis/{id}?include= can
+// embed (relationships, contacts …) besides the asset.
+func (h *Handler) WithIncludes(includes map[string]IncludeFunc) *Handler {
+	h.includes = includes
+	return h
 }
 
 // NewHandler creates a new CI handler.
@@ -43,8 +62,14 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/cis", h.Create)
 	r.Get("/api/v1/cis/{id}", h.Get)
 	r.Get("/api/v1/cis/{id}/changes", h.ListChanges)
+	r.Get("/api/v1/cis/{id}/provenance", h.Provenance)
 	r.Patch("/api/v1/cis/{id}", h.Update)
 	r.Delete("/api/v1/cis/{id}", h.Delete)
+	r.Post("/api/v1/cis/{id}/restore", h.Restore)
+	r.Post("/api/v1/cis/{id}/type", h.ChangeType)
+	r.Post("/api/v1/cis/{id}/merge", h.Merge)
+	r.Post("/api/v1/cis/bulk", h.Bulk)
+	r.Post("/api/v1/cis/{id}/unmerge", h.Unmerge)
 }
 
 // List handles GET /api/v1/cis
@@ -60,6 +85,13 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", page.CursorError.Error())
 		return
 	}
+	// filter[field][op], sort, fields and q (API-02); the former single
+	// query parameters stay as shorthands.
+	lq, err := api.ParseListQuery(r, ListFields)
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	filter := FilterParams{
 		Status:   r.URL.Query().Get("status"),
 		TypeID:   r.URL.Query().Get("ci_type_id"),
@@ -67,14 +99,21 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		SiteID:   r.URL.Query().Get("site_id"),
 		RoomID:   r.URL.Query().Get("room_id"),
 		Search:   r.URL.Query().Get("search"),
-		SortBy:   r.URL.Query().Get("sort_by"),
-		SortDir:  r.URL.Query().Get("sort_dir"),
+		SortBy:   lq.SortBy,
+		SortDir:  lq.SortDir,
+		Filters:  lq.Filters,
+	}
+	if lq.Q != "" {
+		filter.Search = lq.Q
 	}
 
 	items, total, err := h.svc.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
 		if errors.Is(err, api.ErrInvalidCursor) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
+		if api.WriteFieldError(w, err) {
 			return
 		}
 		api.WriteRepoError(w, err)
@@ -85,13 +124,24 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if page.Cursor != nil {
 		hasMore = len(items) == page.Limit
 	}
+	next := NextCursor(items, filter, page.Limit)
+	if len(lq.Fields) > 0 {
+		data, perr := api.SelectFields(items, lq.Fields)
+		if perr != nil {
+			api.WriteRepoError(w, perr)
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, api.ListResponse[map[string]json.RawMessage]{Data: data, Total: total, Limit: page.Limit,
+			Offset: page.Offset, HasMore: hasMore, NextCursor: next})
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Item]{
 		Data:       items,
 		Total:      total,
 		Limit:      page.Limit,
 		Offset:     page.Offset,
 		HasMore:    hasMore,
-		NextCursor: NextCursor(items, filter, page.Limit),
+		NextCursor: next,
 	})
 }
 
@@ -106,12 +156,231 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	item, err := h.svc.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
+		// A merged CI points to its survivor for 12 months (CI-12).
+		if survivor, ok, merr := h.svc.MergedInto(r.Context(), t.OrganizationID, id); merr == nil && ok {
+			w.Header().Set("Location", "/api/v1/cis/"+survivor)
+			api.WriteError(w, http.StatusMovedPermanently, "Moved Permanently", "the CI was merged into "+survivor)
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
 		return
 	}
 
 	w.Header().Set("ETag", api.ETag(item.Version))
+	if raw := strings.TrimSpace(r.URL.Query().Get("include")); raw != "" {
+		body, ierr := h.withIncludes(r.Context(), t.OrganizationID, item, raw)
+		if ierr != nil {
+			if !api.WriteFieldError(w, ierr) {
+				api.WriteRepoError(w, ierr)
+			}
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, body)
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// withIncludes embeds the requested related collections into the CI
+// (API-05): include=relationships,contacts,asset. An unknown name is 422.
+func (h *Handler) withIncludes(ctx context.Context, orgID string, item *Item, raw string) (map[string]json.RawMessage, error) {
+	encoded, err := json.Marshal(item)
+	if err != nil {
+		return nil, err
+	}
+	var body map[string]json.RawMessage
+	if uerr := json.Unmarshal(encoded, &body); uerr != nil {
+		return nil, uerr
+	}
+	for _, name := range strings.Split(raw, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		var value any
+		switch load, ok := h.includes[name]; {
+		case name == IncludeAsset:
+			value = item.Asset
+		case ok:
+			if value, err = load(ctx, orgID, item.ID); err != nil {
+				return nil, err
+			}
+		default:
+			known := []string{IncludeAsset}
+			for k := range h.includes {
+				known = append(known, k)
+			}
+			sort.Strings(known)
+			return nil, &api.FieldError{Field: "include", Status: http.StatusUnprocessableEntity,
+				Message: fmt.Sprintf("unknown include %q; allowed: %s", name, strings.Join(known, ", "))}
+		}
+		if body[name], err = json.Marshal(value); err != nil {
+			return nil, err
+		}
+	}
+	return body, nil
+}
+
+// Restore handles POST /api/v1/cis/{id}/restore: a deleted CI comes back
+// within the retention (CI-05); after it the answer is 410.
+func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	item, err := h.svc.Restore(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	switch {
+	case errors.Is(err, ErrRetentionExpired):
+		api.WriteError(w, http.StatusGone, "Gone", err.Error())
+		return
+	case errors.Is(err, ErrMergeConflict):
+		api.WriteError(w, http.StatusConflict, "Conflict", "the CI was merged; use the unmerge")
+		return
+	case err != nil && err.Error() == "not found":
+		api.WriteError(w, http.StatusNotFound, "Not Found", "no deleted CI with this id")
+		return
+	case err != nil:
+		if api.WriteFieldError(w, err) {
+			return
+		}
+		api.WriteRepoError(w, err)
+		return
+	}
+	w.Header().Set("ETag", api.ETag(item.Version))
+	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// ChangeType handles POST /api/v1/cis/{id}/type: the manual type change
+// (CI-11). Missing required attributes of the target type are findings.
+func (h *Handler) ChangeType(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	var body struct {
+		CITypeID string `json:"ci_type_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.CITypeID) == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "ci_type_id is required")
+		return
+	}
+	result, err := h.svc.ChangeType(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), strings.TrimSpace(body.CITypeID))
+	switch {
+	case errors.Is(err, ErrUnknownType):
+		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		return
+	case err != nil && err.Error() == "not found":
+		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
+		return
+	case err != nil:
+		api.WriteRepoError(w, err)
+		return
+	}
+	w.Header().Set("ETag", api.ETag(result.CI.Version))
+	api.WriteJSON(w, http.StatusOK, result)
+}
+
+// Merge handles POST /api/v1/cis/{id}/merge {victim_id}: the victim is
+// merged into the CI of the path (CI-12).
+func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	var body struct {
+		VictimID string `json:"victim_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.VictimID) == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "victim_id is required")
+		return
+	}
+	result, err := h.svc.Merge(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), strings.TrimSpace(body.VictimID))
+	switch {
+	case errors.Is(err, ErrMergeConflict):
+		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		return
+	case errors.Is(err, ErrMergeSelf):
+		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		return
+	case errors.Is(err, ErrMergeUnsupported):
+		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", err.Error())
+		return
+	case err != nil && err.Error() == "not found":
+		api.WriteError(w, http.StatusNotFound, "Not Found", "survivor or victim not found")
+		return
+	case err != nil:
+		if api.WriteFieldError(w, err) {
+			return
+		}
+		api.WriteRepoError(w, err)
+		return
+	}
+	w.Header().Set("ETag", api.ETag(result.Survivor.Version))
+	api.WriteJSON(w, http.StatusOK, result)
+}
+
+// Unmerge handles POST /api/v1/cis/{id}/unmerge: the merged CI of the path
+// and its survivor return to their state before the merge, within 30 days
+// (CI-12); afterwards 410.
+func (h *Handler) Unmerge(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	result, err := h.svc.Unmerge(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	switch {
+	case errors.Is(err, ErrSnapshotExpired):
+		api.WriteError(w, http.StatusGone, "Gone", err.Error())
+		return
+	case errors.Is(err, ErrMergeConflict):
+		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		return
+	case errors.Is(err, ErrMergeUnsupported):
+		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", err.Error())
+		return
+	case err != nil && err.Error() == "not found":
+		api.WriteError(w, http.StatusNotFound, "Not Found", "no merge of this CI to revert")
+		return
+	case err != nil:
+		if api.WriteFieldError(w, err) {
+			return
+		}
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, result)
+}
+
+// Bulk handles POST /api/v1/cis/bulk (API-08, BLK-01): below 100 ids the
+// answer is the report per id (200); from 100 ids on 202 with the job
+// whose result is the report.
+func (h *Handler) Bulk(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	var req BulkRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	result, job, err := h.svc.Bulk(r.Context(), t.OrganizationID, &req)
+	switch {
+	case err != nil:
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
+	case job != nil:
+		w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
+		api.WriteJSON(w, http.StatusAccepted, map[string]any{"job_id": job.ID, "status": job.Status, "kind": job.Kind})
+	default:
+		api.WriteJSON(w, http.StatusOK, result)
+	}
 }
 
 // Create handles POST /api/v1/cis

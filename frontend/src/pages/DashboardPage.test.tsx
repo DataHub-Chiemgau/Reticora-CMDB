@@ -78,7 +78,7 @@ describe('DashboardPage', () => {
     expect(await screen.findByText('Gesamte CIs')).toBeInTheDocument();
 
     const roleSelect = screen.getByRole('combobox', { name: 'Dashboard-Rolle' });
-    fireEvent.change(roleSelect, { target: { value: 'einkauf' } });
+    fireEvent.change(roleSelect, { target: { value: 'procurement' } });
 
     // Procurement role replaces the CI overview with inventory widgets.
     expect(await screen.findByText('Assets gesamt')).toBeInTheDocument();

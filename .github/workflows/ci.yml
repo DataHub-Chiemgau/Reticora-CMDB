@@ -289,7 +289,10 @@ jobs:
   # NFR-07/UI-18 (WP-193): the E2E suite, including the axe WCAG 2.1 AA check
   # of all main pages (e2e/a11y.spec.ts), runs in every browser project of
   # playwright.config.ts: Chrome, Edge, Firefox, Safari (WebKit), mobile Chrome
-  # and mobile Safari.
+  # and mobile Safari. TST-03 (WP-201): so do the browser flows CI, review,
+  # drag/undo, topology, export and command palette (e2e/*.spec.ts, mocked
+  # backend in e2e/support/backend.ts); the onboarding suite against a real
+  # installation runs in install-smoke.yml.
   e2e:
     runs-on: ubuntu-latest
     needs: [frontend]

@@ -2,6 +2,9 @@
 package api
 
 import (
+	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,8 +16,9 @@ import (
 // DefaultPageLimit is used when a request does not specify a limit.
 const DefaultPageLimit = 50
 
-// MaxPageLimit caps the page size a client may request.
-const MaxPageLimit = 100
+// MaxPageLimit caps the page size a client may request (API-02); a larger
+// limit is capped to it.
+const MaxPageLimit = 200
 
 // PaginationParams holds pagination parameters. Both the legacy
 // limit/offset form and the cursor (keyset) form are supported; when Cursor is
@@ -29,14 +33,17 @@ type PaginationParams struct {
 	CursorError error
 }
 
-// ParsePagination extracts pagination parameters from the request query. A
-// malformed cursor is reported through PaginationParams.CursorError so callers
-// can reject the request instead of silently falling back to offset paging.
+// ParsePagination extracts pagination parameters from the request query
+// (API-02): limit (default 50, at most 200; a larger value is capped),
+// offset and the signed cursor. An offset cursor sets Offset; a keyset
+// cursor is returned in Cursor. A malformed or forged cursor is reported
+// through PaginationParams.CursorError so callers can reject the request
+// instead of silently falling back to the first page.
 func ParsePagination(r *http.Request) PaginationParams {
 	p := PaginationParams{Limit: DefaultPageLimit, Offset: 0}
 	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= MaxPageLimit {
-			p.Limit = n
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			p.Limit = min(n, MaxPageLimit)
 		}
 	}
 	if v := r.URL.Query().Get("offset"); v != "" {
@@ -48,6 +55,10 @@ func ParsePagination(r *http.Request) PaginationParams {
 		cursor, err := DecodeCursor(v)
 		if err != nil {
 			p.CursorError = err
+			return p
+		}
+		if cursor.IsOffset() {
+			p.Offset = cursor.Offset
 			return p
 		}
 		p.Cursor = &cursor
@@ -66,25 +77,114 @@ type ListResponse[T any] struct {
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
-// ProblemDetail implements RFC 7807.
+// ProblemDetail implements RFC 7807. TraceID is filled by WriteProblemBody
+// from the request id of the response (API-03).
 type ProblemDetail struct {
 	Type     string `json:"type"`
 	Title    string `json:"title"`
 	Status   int    `json:"status"`
 	Detail   string `json:"detail,omitempty"`
 	Instance string `json:"instance,omitempty"`
+	TraceID  string `json:"trace_id,omitempty"`
 }
 
-// WriteJSON writes a JSON response.
+// ProblemContentType is the media type of every error response (API-03).
+const ProblemContentType = "application/problem+json"
+
+// RequestIDHeader carries the request id the RequestID middleware assigns;
+// it is the trace_id of a problem.
+const RequestIDHeader = "X-Request-ID"
+
+// CompleteList is the ListResponse of a list that is always returned in
+// full (a small catalog, a sub-collection, a tree): one page, no
+// next_cursor.
+func CompleteList[T any](items []T) ListResponse[T] {
+	if items == nil {
+		items = []T{}
+	}
+	return ListResponse[T]{Data: items, Total: len(items), Limit: len(items)}
+}
+
+// pagedList is implemented by ListResponse: it fills next_cursor when the
+// handler did not set one.
+type pagedList interface {
+	withNextCursor() any
+}
+
+// withNextCursor sets an offset cursor for the next page when the handler
+// reports more rows (HasMore) but issued no keyset cursor, so every list
+// answers with next_cursor (API-02).
+func (l ListResponse[T]) withNextCursor() any {
+	if l.NextCursor != "" {
+		return l
+	}
+	if l.HasMore && len(l.Data) > 0 {
+		l.NextCursor = EncodeOffsetCursor(l.Offset + len(l.Data))
+	}
+	return l
+}
+
+// WriteJSON writes a JSON response. An error status (4xx/5xx) goes through
+// WriteProblemBody, so every error carries the problem media type and a
+// trace_id; a ListResponse gets its next_cursor.
 func WriteJSON(w http.ResponseWriter, status int, v any) {
+	if status >= http.StatusBadRequest {
+		WriteProblemBody(w, status, v)
+		return
+	}
+	if list, ok := v.(pagedList); ok {
+		v = list.withNextCursor()
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
 }
 
+// WriteProblemBody is the one writer of error responses (API-03): body is a
+// ProblemDetail or a struct embedding one (extension members such as
+// violations). It sets application/problem+json and adds the trace_id —
+// the request id of the response (X-Request-ID, set by the RequestID
+// middleware); without one a fresh id is assigned and returned in the
+// header, so the client can always quote it.
+func WriteProblemBody(w http.ResponseWriter, status int, body any) {
+	traceID := w.Header().Get(RequestIDHeader)
+	if traceID == "" {
+		traceID = newTraceID()
+		w.Header().Set(RequestIDHeader, traceID)
+	}
+	payload := withTraceID(body, traceID)
+	w.Header().Set("Content-Type", ProblemContentType)
+	w.WriteHeader(status)
+	_, _ = w.Write(payload)
+}
+
+// withTraceID encodes body and sets its trace_id member unless the body
+// carries one already; a body that is not a JSON object is kept as is.
+func withTraceID(body any, traceID string) []byte {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		raw, _ = json.Marshal(ProblemDetail{Type: "https://reticora.io/problems/500", Title: "Internal Server Error", Status: http.StatusInternalServerError})
+	}
+	var members map[string]json.RawMessage
+	if json.Unmarshal(raw, &members) != nil {
+		return append(raw, '\n')
+	}
+	if existing, ok := members["trace_id"]; !ok || bytes.Equal(existing, []byte(`""`)) {
+		members["trace_id"], _ = json.Marshal(traceID)
+	}
+	out, _ := json.Marshal(members)
+	return append(out, '\n')
+}
+
+func newTraceID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
 // WriteError writes an RFC 7807 problem detail.
 func WriteError(w http.ResponseWriter, status int, title, detail string) {
-	WriteJSON(w, status, ProblemDetail{
+	WriteProblemBody(w, status, ProblemDetail{
 		Type:   fmt.Sprintf("https://reticora.io/problems/%d", status),
 		Title:  title,
 		Status: status,
@@ -105,7 +205,7 @@ const (
 
 // WriteProblem writes an RFC 7807 problem detail with its own type.
 func WriteProblem(w http.ResponseWriter, status int, problemType, title, detail string) {
-	WriteJSON(w, status, ProblemDetail{Type: problemType, Title: title, Status: status, Detail: detail})
+	WriteProblemBody(w, status, ProblemDetail{Type: problemType, Title: title, Status: status, Detail: detail})
 }
 
 // TypedProblem is an error that names its RFC 7807 problem type.
@@ -166,7 +266,7 @@ func ParseIfMatch(r *http.Request) (version int64, ok bool, err error) {
 
 // WritePreconditionFailed writes the 412 problem of API-03.
 func WritePreconditionFailed(w http.ResponseWriter, detail string) {
-	WriteJSON(w, http.StatusPreconditionFailed, ProblemDetail{
+	WriteProblemBody(w, http.StatusPreconditionFailed, ProblemDetail{
 		Type:   "urn:reticora:problem:precondition-failed",
 		Title:  "Precondition Failed",
 		Status: http.StatusPreconditionFailed,

@@ -2,10 +2,19 @@ package ci
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 )
+
+// BatchReader reads several CIs in one query, so graph walks resolve their
+// nodes without one query per node (NFR-02).
+type BatchReader interface {
+	GetByIDs(ctx context.Context, orgID string, ids []string) ([]Item, error)
+}
 
 // Repository defines persistence operations for CIs.
 type Repository interface {
@@ -14,6 +23,19 @@ type Repository interface {
 	Create(ctx context.Context, item *Item) error
 	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error)
 	Delete(ctx context.Context, orgID, id string) error
+}
+
+// RestoreRetention is how long a deleted CI can be restored (CI-05); after
+// it the hard-delete job removes it.
+const RestoreRetention = 90 * 24 * time.Hour
+
+// ErrRetentionExpired: the CI was deleted longer ago than the retention and
+// can no longer be restored (410).
+var ErrRetentionExpired = errors.New("the CI was deleted longer ago than the restore retention")
+
+// Restorer restores soft-deleted CIs within the retention (CI-05).
+type Restorer interface {
+	RestoreDeleted(ctx context.Context, orgID, id string, retention time.Duration) (*Item, error)
 }
 
 // LimitFeatureKey is the entitlement feature whose limit caps the number of CIs
@@ -128,6 +150,9 @@ type Service struct {
 	repo   Repository
 	limit  LimitGuard
 	fields FieldResolver
+	jobs   jobs.Tracker
+	// bulkJobs runs bulk operations from 100 ids on (API-08).
+	bulkJobs BulkJobs
 }
 
 // NewService creates a CI service.
@@ -270,6 +295,15 @@ func checkAssetOwnedFields(before *Item, req *UpdateRequest) error {
 }
 
 // Delete removes a CI after loading its prior state.
+// Restore brings a deleted CI back within the retention (CI-05, API-05).
+func (s *Service) Restore(ctx context.Context, orgID, id string) (*Item, error) {
+	restorer, ok := s.repo.(Restorer)
+	if !ok {
+		return nil, errors.New("restore is not supported by this repository")
+	}
+	return restorer.RestoreDeleted(ctx, orgID, id, RestoreRetention)
+}
+
 func (s *Service) Delete(ctx context.Context, orgID, id string) (*Item, error) {
 	item, err := s.repo.GetByID(ctx, orgID, id)
 	if err != nil {

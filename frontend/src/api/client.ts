@@ -1,4 +1,5 @@
 import { clearSession, getSessionToken, refreshSession } from '../auth/session';
+import { useScopeStore } from '../stores/scope';
 
 const API_BASE = '/api/v1';
 
@@ -275,11 +276,18 @@ export class ApiError extends Error {
   readonly title?: string;
   readonly detail?: string;
   readonly violations: FieldViolation[];
+  /** traceId is the request id of the failed request (API-03), for support. */
+  readonly traceId?: string;
 
   constructor(
     status: number,
     message: string,
-    options: { title?: string; detail?: string; violations?: FieldViolation[] } = {},
+    options: {
+      title?: string;
+      detail?: string;
+      violations?: FieldViolation[];
+      traceId?: string;
+    } = {},
   ) {
     super(message);
     this.name = 'ApiError';
@@ -287,6 +295,7 @@ export class ApiError extends Error {
     this.title = options.title;
     this.detail = options.detail;
     this.violations = options.violations ?? [];
+    this.traceId = options.traceId;
   }
 
   /** Whether the failure carries per-field violations that a form can render. */
@@ -317,9 +326,11 @@ export class ApiError extends Error {
       title?: unknown;
       detail?: unknown;
       violations?: unknown;
+      trace_id?: unknown;
     };
 
     const title = typeof problem.title === 'string' ? problem.title : undefined;
+    const traceId = typeof problem.trace_id === 'string' ? problem.trace_id : undefined;
     const detail = typeof problem.detail === 'string' ? problem.detail : undefined;
 
     const violations: FieldViolation[] = Array.isArray(problem.violations)
@@ -336,13 +347,51 @@ export class ApiError extends Error {
         })
       : [];
 
-    return new ApiError(status, detail || title || statusText, { title, detail, violations });
+    return new ApiError(status, detail || title || statusText, {
+      title,
+      detail,
+      violations,
+      traceId,
+    });
   }
 }
 
+/**
+ * SCOPED_LISTS are the list endpoints that filter by client and site; the
+ * scope chosen in the layout (UI-01/UI-02) is added to their GET requests
+ * unless the caller set the parameter itself.
+ */
+const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> = {
+  '/cis': ['client_id', 'site_id'],
+  '/topology': ['client_id', 'site_id'],
+  '/assets': ['client_id'],
+  '/contacts': ['client_id'],
+  '/sites': ['client_id'],
+};
+
+/** withScope adds the selected scope to a GET of a scoped list. */
+export function withScope(path: string, method = 'GET'): string {
+  if (method.toUpperCase() !== 'GET') return path;
+  const [base, query = ''] = path.split('?', 2) as [string, string?];
+  const keys = SCOPED_LISTS[base];
+  if (!keys) return path;
+  const { clientId, siteId } = useScopeStore.getState();
+  const params = new URLSearchParams(query);
+  const values = { client_id: clientId, site_id: siteId };
+  for (const key of keys) {
+    if (values[key] && !params.has(key)) params.set(key, values[key]);
+  }
+  const next = params.toString();
+  return next ? `${base}?${next}` : base;
+}
+
 export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
+  return fetchURL<T>(`${API_BASE}${withScope(path, options?.method)}`, options);
+}
+
+async function fetchURL<T>(url: string, options?: RequestInit): Promise<T> {
   const request = () =>
-    fetch(`${API_BASE}${path}`, {
+    fetch(url, {
       ...options,
       headers: mergeHeaders(options),
     });
@@ -372,6 +421,29 @@ export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<
   return res.json();
 }
 
+/** BFF_PATH is the GraphQL backend-for-frontend of the UI (GQL-01). */
+export const BFF_PATH = '/bff/graphql';
+
+interface GraphQLResult<T> {
+  data?: T | null;
+  errors?: { message: string; extensions?: { code?: string } }[];
+}
+
+/**
+ * bffQuery runs a read query against the GraphQL BFF with the session of
+ * the UI; mutations go through REST (GQL-02). GraphQL errors are thrown.
+ */
+export async function bffQuery<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+  const result = await fetchURL<GraphQLResult<T>>(BFF_PATH, {
+    method: 'POST',
+    body: JSON.stringify({ query, variables }),
+  });
+  if (result.errors && result.errors.length > 0) {
+    throw new Error(result.errors.map((error) => error.message).join('; '));
+  }
+  return result.data as T;
+}
+
 function buildQuery(params: object) {
   const query = new URLSearchParams();
   Object.entries(params as Record<string, string | number | boolean | undefined>).forEach(
@@ -383,6 +455,27 @@ function buildQuery(params: object) {
   );
   const value = query.toString();
   return value ? `?${value}` : '';
+}
+
+export interface CIBulkItemResult {
+  id: string;
+  result: 'ok' | 'error';
+  code: number;
+  error?: string;
+}
+
+export interface CIBulkResult {
+  action: string;
+  total: number;
+  succeeded: number;
+  failed: number;
+  items: CIBulkItemResult[];
+}
+
+export interface CIBulkJob {
+  job_id: string;
+  status: string;
+  kind: string;
 }
 
 export const ciApi = {
@@ -416,6 +509,17 @@ export const ciApi = {
 
   delete(id: string): Promise<void> {
     return fetchAPI(`/cis/${id}`, { method: 'DELETE' });
+  },
+
+  /**
+   * bulk changes the status of up to 500 CIs (API-08): below 100 ids the
+   * answer is the report per id, from 100 ids on the job that produces it.
+   */
+  bulk(ids: string[], status: string): Promise<CIBulkResult | CIBulkJob> {
+    return fetchAPI('/cis/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'set_status', ids, status }),
+    });
   },
 
   relationships(id: string): Promise<PaginatedResponse<Relationship>> {
@@ -536,6 +640,12 @@ export interface ImpactResult {
   count: number;
 }
 
+export interface MultiImpactResult {
+  failed_cis: TopologyNode[];
+  impacted: TopologyNode[];
+  count: number;
+}
+
 export const topologyApi = {
   get(params: TopologyParams = {}): Promise<TopologyGraphData> {
     return fetchAPI(`/topology${buildQuery(params)}`);
@@ -544,7 +654,11 @@ export const topologyApi = {
     return fetchAPI(`/topology/cis/${ciId}/neighbors`);
   },
   impact(ciId: string, params: { depth?: number; rel_type?: string } = {}): Promise<ImpactResult> {
-    return fetchAPI(`/topology/cis/${ciId}/impact${buildQuery(params)}`);
+    return fetchAPI(`/impact/${ciId}${buildQuery(params)}`);
+  },
+  /** Joint impact of several CIs failing at once (IMP-05). */
+  impactMany(ciIds: string[], params: { rel_type?: string } = {}): Promise<MultiImpactResult> {
+    return fetchAPI(`/impact${buildQuery({ ci_ids: ciIds.join(','), ...params })}`);
   },
 };
 
@@ -588,10 +702,28 @@ export const rackApi = {
   get(id: string): Promise<Rack> {
     return fetchAPI(`/racks/${id}`);
   },
-  listMounts(rackId: string, params: ListParams = {}): Promise<PaginatedResponse<RackMount>> {
-    return fetchAPI(`/racks/${rackId}/mounts${buildQuery(params)}`);
+  /** Occupancy of a rack: mounts by position and free units per face (RCK-02). */
+  layout(rackId: string): Promise<RackLayout> {
+    return fetchAPI(`/racks/${rackId}/layout`);
+  },
+  /** Mounts a CI at a position or moves its mount (RCK-02); 409 on a collision. */
+  putMount(
+    rackId: string,
+    ciId: string,
+    body: { position_u: number; height_u?: number; face?: string },
+  ): Promise<RackMount> {
+    return fetchAPI(`/racks/${rackId}/mounts/${ciId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
   },
 };
+
+export interface RackLayout {
+  rack: Rack;
+  mounts: RackMount[];
+  free: Record<string, number[]>;
+}
 
 // --- Phase 2: Asset Management ---
 
@@ -1181,7 +1313,7 @@ export const roleApi = {
     scope_type?: string;
     scope_id?: string;
   }): Promise<unknown> {
-    return fetchAPI('/roles/assign', { method: 'POST', body: JSON.stringify(data) });
+    return fetchAPI('/role-assignments', { method: 'POST', body: JSON.stringify(data) });
   },
 };
 
@@ -1805,6 +1937,12 @@ export interface ExportJob {
   completed_at?: string;
   expires_at?: string;
   download_url?: string;
+  /** Fields of the file and the visible CI fields it leaves out (EXP-01). */
+  manifest?: {
+    format: string;
+    fields: string[];
+    omitted: { field: string; reason: string }[];
+  };
   created_at: string;
   updated_at: string;
 }
@@ -1816,13 +1954,13 @@ export interface ExportJobCreateRequest {
 
 export const exportApi = {
   listJobs(params: ListParams = {}): Promise<PaginatedResponse<ExportJob>> {
-    return fetchAPI(`/export/jobs${buildQuery(params)}`);
+    return fetchAPI(`/exports${buildQuery(params)}`);
   },
   createJob(data: ExportJobCreateRequest): Promise<ExportJob> {
-    return fetchAPI('/export/jobs', { method: 'POST', body: JSON.stringify(data) });
+    return fetchAPI('/exports', { method: 'POST', body: JSON.stringify(data) });
   },
   getJob(id: string): Promise<ExportJob> {
-    return fetchAPI(`/export/jobs/${id}`);
+    return fetchAPI(`/exports/${id}`);
   },
 };
 
@@ -1865,7 +2003,24 @@ export interface AlertRuleCreateRequest {
   enabled?: boolean;
 }
 
+export interface CIMetricSeries {
+  name: string;
+  points: MetricPoint[];
+}
+
+export interface CIMetricsResponse {
+  ci_id: string;
+  from: string;
+  series: CIMetricSeries[];
+}
+
 export const monitoringApi = {
+  ciMetrics(
+    ciId: string,
+    params: { name?: string; step?: string } = {},
+  ): Promise<CIMetricsResponse> {
+    return fetchAPI(`/cis/${ciId}/metrics${buildQuery(params)}`);
+  },
   queryMetrics(params: MetricQueryParams = {}): Promise<MetricPoint[]> {
     return fetchAPI(`/monitoring/metrics${buildQuery(params)}`);
   },
@@ -1910,10 +2065,10 @@ export interface AuditVerifyResult {
 
 export const auditApi = {
   list(params: ListParams = {}): Promise<PaginatedResponse<AuditEntry>> {
-    return fetchAPI(`/audit${buildQuery(params)}`);
+    return fetchAPI(`/audit-log${buildQuery(params)}`);
   },
   verify(): Promise<AuditVerifyResult> {
-    return fetchAPI('/audit/verify', { method: 'POST' });
+    return fetchAPI('/audit-log/verify', { method: 'POST' });
   },
 };
 
@@ -1953,7 +2108,7 @@ export interface Site {
 }
 
 export const siteApi = {
-  list(params: ListParams = {}): Promise<PaginatedResponse<Site>> {
+  list(params: ListParams & { client_id?: string } = {}): Promise<PaginatedResponse<Site>> {
     return fetchAPI(`/sites${buildQuery(params)}`);
   },
   get(id: string): Promise<Site> {

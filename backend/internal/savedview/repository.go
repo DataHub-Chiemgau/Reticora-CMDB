@@ -13,7 +13,9 @@ import (
 // Repository defines persistence for saved views.
 type Repository interface {
 	List(ctx context.Context, orgID, ownerID string, page api.PaginationParams) ([]View, int, error)
-	GetByID(ctx context.Context, orgID, id string) (*View, error)
+	// GetByID returns a view the user may read; a private view of
+	// somebody else is not found (VIE-01).
+	GetByID(ctx context.Context, orgID, id, userID string) (*View, error)
 	Create(ctx context.Context, view *View) error
 	Update(ctx context.Context, orgID, id, ownerID string, req UpsertRequest) (*View, error)
 	Delete(ctx context.Context, orgID, id, ownerID string) error
@@ -63,11 +65,11 @@ func (r *MemoryRepository) List(_ context.Context, orgID, ownerID string, page a
 	return out[start:end], total, nil
 }
 
-func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*View, error) {
+func (r *MemoryRepository) GetByID(_ context.Context, orgID, id, userID string) (*View, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	v, ok := r.views[id]
-	if !ok || v.OrganizationID != orgID {
+	if !ok || v.OrganizationID != orgID || (!v.Shared && v.OwnerID != userID) {
 		return nil, fmt.Errorf("not found")
 	}
 	out := *v
@@ -83,6 +85,7 @@ func (r *MemoryRepository) Create(_ context.Context, view *View) error {
 			return fmt.Errorf("a saved view with this name already exists")
 		}
 	}
+	normalizeView(view)
 	view.ID = r.nextID()
 	now := time.Now().UTC()
 	view.CreatedAt = now
@@ -112,6 +115,15 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id, ownerID string, 
 	}
 	if req.FilterSpec != nil {
 		v.FilterSpec = req.FilterSpec
+	}
+	if req.Sort != nil {
+		v.Sort = req.Sort
+	}
+	if req.Columns != nil {
+		v.Columns = req.Columns
+	}
+	if req.SharedWithRoles != nil {
+		v.SharedWithRoles = req.SharedWithRoles
 	}
 	v.Shared = req.Shared
 	v.UpdatedAt = time.Now().UTC()

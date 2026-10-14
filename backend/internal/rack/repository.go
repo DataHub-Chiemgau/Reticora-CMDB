@@ -34,6 +34,8 @@ type Repository interface {
 	ListMounts(ctx context.Context, orgID, rackID string, page api.PaginationParams) ([]RackMount, int, error)
 	CreateMount(ctx context.Context, m *RackMount) error
 	GetMount(ctx context.Context, orgID, id string) (*RackMount, error)
+	// MountByCI returns the mount of a CI (ci_id is unique, RCK-01).
+	MountByCI(ctx context.Context, orgID, ciID string) (*RackMount, error)
 	UpdateMount(ctx context.Context, orgID, id string, req UpdateMountRequest) (*RackMount, error)
 	DeleteMount(ctx context.Context, orgID, id string) error
 
@@ -268,6 +270,19 @@ func (r *MemoryRepository) GetMount(_ context.Context, orgID, id string) (*RackM
 	}
 	cp := *m
 	return &cp, nil
+}
+
+// MountByCI implements Repository.
+func (r *MemoryRepository) MountByCI(_ context.Context, orgID, ciID string) (*RackMount, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, m := range r.mounts {
+		if m.OrganizationID == orgID && m.CIID == ciID {
+			cp := *m
+			return &cp, nil
+		}
+	}
+	return nil, ErrNotFound
 }
 
 func (r *MemoryRepository) UpdateMount(_ context.Context, orgID, id string, req UpdateMountRequest) (*RackMount, error) {

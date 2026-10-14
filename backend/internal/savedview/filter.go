@@ -169,6 +169,16 @@ func (f FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (stri
 		add(fmt.Sprintf(`%s->>%s = %s`, jsonbCol, pk, pv), k, fmt.Sprintf("%v", v))
 	}
 
+	if f.Where != nil {
+		if err := f.Where.Validate(entityKind); err != nil {
+			return "", nil, err
+		}
+		clause, astArgs, _, err := f.Where.CompileSQL(entityKind, table, nil, pos)
+		if err != nil {
+			return "", nil, err
+		}
+		add(clause, astArgs...)
+	}
 	if len(parts) == 0 {
 		return "true", args, nil
 	}
@@ -185,4 +195,304 @@ type QueryResult struct {
 	Name       string         `json:"name"`
 	Summary    string         `json:"summary,omitempty"`
 	Attributes map[string]any `json:"attributes,omitempty"`
+}
+
+// Filter AST (SRC-03, MET-45): Where combines comparisons with and, or and
+// not. A node is either a group (exactly one of And, Or, Not) or a
+// comparison of a whitelisted field with an operator and a value. Fields
+// are the columns of the entity, its dynamic attributes (attributes.<key>)
+// and, for CIs, the fields of the linked asset (asset.<field>). Only values
+// reach the SQL as parameters; columns come from the whitelist.
+
+// Expr is one node of the filter AST.
+type Expr struct {
+	And   []Expr `json:"and,omitempty"`
+	Or    []Expr `json:"or,omitempty"`
+	Not   *Expr  `json:"not,omitempty"`
+	Field string `json:"field,omitempty"`
+	Op    string `json:"op,omitempty"`
+	Value any    `json:"value,omitempty"`
+}
+
+// Operators of a comparison.
+const (
+	OpEq     = "eq"
+	OpNe     = "ne"
+	OpLt     = "lt"
+	OpLte    = "lte"
+	OpGt     = "gt"
+	OpGte    = "gte"
+	OpLike   = "like"
+	OpIn     = "in"
+	OpExists = "exists"
+)
+
+// Limits of one AST.
+const (
+	MaxExprDepth = 10
+	MaxExprNodes = 100
+)
+
+// Field kinds decide the casts and the allowed operators.
+const (
+	kindText   = "text"
+	kindNumber = "number"
+	kindTime   = "time"
+	kindUUID   = "uuid"
+	kindBool   = "bool"
+)
+
+type astField struct{ expr, kind string }
+
+// astFields are the whitelisted fields per entity kind; %s is the table.
+var astFields = map[string]map[string]astField{
+	"ci": {
+		"name": {"%s.name", kindText}, "status": {"%s.status", kindText}, "hostname": {"%s.hostname", kindText},
+		"fqdn": {"%s.fqdn", kindText}, "serial_number": {"%s.serial_number", kindText},
+		"manufacturer": {"%s.manufacturer", kindText}, "model": {"%s.model", kindText},
+		"os_name": {"%s.os_name", kindText}, "os_version": {"%s.os_version", kindText},
+		"management_ip": {"host(%s.management_ip)", kindText}, "lifecycle_state": {"%s.lifecycle_state", kindText},
+		"discovery_source": {"%s.discovery_source", kindText}, "health": {"%s.health", kindText},
+		"ci_type":   {"(SELECT COALESCE(t.key, t.name) FROM ci_type t WHERE t.id = %s.ci_type_id)", kindText},
+		"client_id": {"%s.client_id", kindUUID}, "site_id": {"%s.site_id", kindUUID}, "location_id": {"%s.location_id", kindUUID},
+		"is_manual": {"%s.is_manual", kindBool}, "created_at": {"%s.created_at", kindTime},
+		"updated_at": {"%s.updated_at", kindTime}, "last_seen_at": {"%s.last_seen_at", kindTime},
+	},
+	"asset": {
+		"name": {"%s.name", kindText}, "asset_tag": {"%s.asset_tag", kindText}, "category": {"%s.category", kindText},
+		"status": {"%s.status", kindText}, "serial_number": {"%s.serial_number", kindText},
+		"supplier": {"%s.supplier", kindText}, "lifecycle_state": {"%s.lifecycle_state", kindText},
+		"barcode": {"%s.barcode", kindText}, "rfid_tag": {"%s.rfid_tag", kindText},
+		"purchase_cost": {"%s.purchase_cost", kindNumber}, "purchase_date": {"%s.purchase_date", kindTime},
+		"warranty_end": {"%s.warranty_end", kindTime}, "client_id": {"%s.client_id", kindUUID},
+		"location_id": {"%s.location_id", kindUUID}, "created_at": {"%s.created_at", kindTime},
+	},
+}
+
+// attributeKey is the syntax of a dynamic attribute key.
+func validAttributeKey(key string) bool {
+	if key == "" || len(key) > 64 {
+		return false
+	}
+	for _, r := range key {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+// ASTError is an invalid filter AST; the API answers 422 with its path.
+type ASTError struct {
+	Path    string
+	Message string
+}
+
+func (e *ASTError) Error() string { return "where" + e.Path + ": " + e.Message }
+
+// Validate checks the AST against the field whitelist of the entity kind,
+// the operators of each field kind and the size limits.
+func (e *Expr) Validate(entityKind string) error {
+	nodes := 0
+	return e.validate(entityKind, "", 1, &nodes)
+}
+
+func (e *Expr) validate(entityKind, path string, depth int, nodes *int) error {
+	*nodes++
+	if depth > MaxExprDepth {
+		return &ASTError{path, fmt.Sprintf("nested deeper than %d levels", MaxExprDepth)}
+	}
+	if *nodes > MaxExprNodes {
+		return &ASTError{path, fmt.Sprintf("more than %d nodes", MaxExprNodes)}
+	}
+	parts := 0
+	for _, set := range []bool{len(e.And) > 0, len(e.Or) > 0, e.Not != nil, e.Field != ""} {
+		if set {
+			parts++
+		}
+	}
+	if parts != 1 {
+		return &ASTError{path, "a node is exactly one of and, or, not or a comparison"}
+	}
+	for i := range e.And {
+		if err := e.And[i].validate(entityKind, fmt.Sprintf("%s.and[%d]", path, i), depth+1, nodes); err != nil {
+			return err
+		}
+	}
+	for i := range e.Or {
+		if err := e.Or[i].validate(entityKind, fmt.Sprintf("%s.or[%d]", path, i), depth+1, nodes); err != nil {
+			return err
+		}
+	}
+	if e.Not != nil {
+		return e.Not.validate(entityKind, path+".not", depth+1, nodes)
+	}
+	if e.Field == "" {
+		return nil
+	}
+	kind, err := e.fieldKind(entityKind)
+	if err != nil {
+		return &ASTError{path, err.Error()}
+	}
+	return e.validateComparison(kind, path)
+}
+
+// fieldKind resolves the comparison's field; attributes compare by the
+// value's type.
+func (e *Expr) fieldKind(entityKind string) (string, error) {
+	if key, ok := strings.CutPrefix(e.Field, "attributes."); ok {
+		if !validAttributeKey(key) {
+			return "", fmt.Errorf("invalid attribute key %q", key)
+		}
+		if _, isNumber := e.Value.(float64); isNumber {
+			return kindNumber, nil
+		}
+		return kindText, nil
+	}
+	if sub, ok := strings.CutPrefix(e.Field, "asset."); ok && entityKind == "ci" {
+		f, known := astFields["asset"][sub]
+		if !known {
+			return "", fmt.Errorf("unknown asset field %q", sub)
+		}
+		return f.kind, nil
+	}
+	f, known := astFields[entityKind][e.Field]
+	if !known {
+		return "", fmt.Errorf("unknown field %q", e.Field)
+	}
+	return f.kind, nil
+}
+
+func (e *Expr) validateComparison(kind, path string) error {
+	switch e.Op {
+	case OpExists:
+		return nil
+	case OpEq, OpNe:
+	case OpLt, OpLte, OpGt, OpGte:
+		if kind == kindUUID || kind == kindBool {
+			return &ASTError{path, "operator " + e.Op + " does not apply to " + e.Field}
+		}
+	case OpLike:
+		if kind != kindText {
+			return &ASTError{path, "like applies to text fields only"}
+		}
+	case OpIn:
+		values, ok := e.Value.([]any)
+		if !ok || len(values) == 0 {
+			return &ASTError{path, "in needs a non-empty list"}
+		}
+		return nil
+	default:
+		return &ASTError{path, fmt.Sprintf("unknown operator %q", e.Op)}
+	}
+	switch e.Value.(type) {
+	case string, float64, bool:
+		return nil
+	}
+	return &ASTError{path, "the value must be a string, number or boolean"}
+}
+
+// CompileSQL renders the AST as a SQL predicate on table; args are
+// appended and numbered from startAt.
+func (e *Expr) CompileSQL(entityKind, table string, args []any, startAt int) (sql string, out []any, next int, err error) {
+	next = startAt
+	param := func(v any) string {
+		args = append(args, v)
+		p := fmt.Sprintf("$%d", next)
+		next++
+		return p
+	}
+	var compile func(n *Expr) (string, error)
+	compile = func(n *Expr) (string, error) {
+		group := func(items []Expr, sep string) (string, error) {
+			parts := make([]string, len(items))
+			for i := range items {
+				s, cerr := compile(&items[i])
+				if cerr != nil {
+					return "", cerr
+				}
+				parts[i] = s
+			}
+			return "(" + strings.Join(parts, sep) + ")", nil
+		}
+		switch {
+		case len(n.And) > 0:
+			return group(n.And, " AND ")
+		case len(n.Or) > 0:
+			return group(n.Or, " OR ")
+		case n.Not != nil:
+			s, cerr := compile(n.Not)
+			return "(NOT COALESCE(" + s + ", false))", cerr
+		}
+		kind, ferr := n.fieldKind(entityKind)
+		if ferr != nil {
+			return "", ferr
+		}
+		col, wrap := n.column(entityKind, table, param)
+		return wrap(comparison(col, kind, n, param)), nil
+	}
+	sql, err = compile(e)
+	return sql, args, next, err
+}
+
+// column returns the SQL expression of the field and, for asset fields of
+// a CI, the wrapper that evaluates the comparison on the linked asset.
+func (e *Expr) column(entityKind, table string, param func(any) string) (col string, wrap func(string) string) {
+	wrap = func(s string) string { return s }
+	if key, ok := strings.CutPrefix(e.Field, "attributes."); ok {
+		jsonb := table + ".attributes"
+		if entityKind == "asset" {
+			jsonb = table + ".custom_fields"
+		}
+		return fmt.Sprintf("%s->>%s", jsonb, param(key)), wrap
+	}
+	if sub, ok := strings.CutPrefix(e.Field, "asset."); ok && entityKind == "ci" {
+		wrap = func(s string) string {
+			return fmt.Sprintf("EXISTS (SELECT 1 FROM asset sa WHERE sa.id = %s.asset_id AND %s)", table, s)
+		}
+		return fmt.Sprintf(astFields["asset"][sub].expr, "sa"), wrap
+	}
+	return fmt.Sprintf(astFields[entityKind][e.Field].expr, table), wrap
+}
+
+// comparison renders one comparison with the casts of the field kind.
+func comparison(col, kind string, e *Expr, param func(any) string) string {
+	cast := map[string]string{kindText: "", kindNumber: "::numeric", kindTime: "::timestamptz", kindUUID: "::uuid", kindBool: "::boolean"}[kind]
+	lhs := col
+	if kind != kindText {
+		lhs = "(" + col + ")" + cast
+	}
+	value := func(v any) string { return param(fmt.Sprint(v)) + cast }
+	switch e.Op {
+	case OpExists:
+		if b, _ := e.Value.(bool); e.Value != nil && !b {
+			return col + " IS NULL"
+		}
+		return col + " IS NOT NULL"
+	case OpLike:
+		return lhs + " ILIKE " + param(likePattern(fmt.Sprint(e.Value)))
+	case OpIn:
+		values := e.Value.([]any)
+		texts := make([]string, len(values))
+		for i, v := range values {
+			texts[i] = fmt.Sprint(v)
+		}
+		arrayCast := "::text[]"
+		if kind != kindText {
+			arrayCast = cast + "[]"
+		}
+		return lhs + " = ANY(" + param(texts) + arrayCast + ")"
+	}
+	op := map[string]string{OpEq: "=", OpNe: "IS DISTINCT FROM", OpLt: "<", OpLte: "<=", OpGt: ">", OpGte: ">="}[e.Op]
+	return lhs + " " + op + " " + value(e.Value)
+}
+
+// likePattern escapes the LIKE metacharacters; * is the wildcard, without
+// one the value matches as a substring.
+func likePattern(v string) string {
+	v = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(v)
+	if strings.Contains(v, "*") {
+		return strings.ReplaceAll(v, "*", "%")
+	}
+	return "%" + v + "%"
 }

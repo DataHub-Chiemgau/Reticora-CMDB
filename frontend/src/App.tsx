@@ -2,6 +2,8 @@ import { Suspense, lazy, useMemo, useState } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
+import { ScopeSwitcher } from './components/ScopeSwitcher';
+import { NotificationCenter } from './components/NotificationCenter';
 import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
 import { Button } from './components/ui/Button';
@@ -77,6 +79,9 @@ const TrainingListPage = lazyPage(() => import('./pages/TrainingListPage'), 'Tra
 const DeskListPage = lazyPage(() => import('./pages/DeskListPage'), 'DeskListPage');
 const AgentListPage = lazyPage(() => import('./pages/AgentListPage'), 'AgentListPage');
 const FindingsPage = lazyPage(() => import('./pages/FindingsPage'), 'FindingsPage');
+const ReviewInboxPage = lazyPage(() => import('./pages/ReviewInboxPage'), 'ReviewInboxPage');
+const JobCenterPage = lazyPage(() => import('./pages/JobCenterPage'), 'JobCenterPage');
+const OnboardingPage = lazyPage(() => import('./pages/OnboardingPage'), 'OnboardingPage');
 const MapPage = lazyPage(() => import('./pages/MapPage'), 'MapPage');
 const RoomPlanPage = lazyPage(() => import('./pages/RoomPlanPage'), 'RoomPlanPage');
 
@@ -162,6 +167,8 @@ function App() {
       'agents',
       'findings',
       'discovery',
+      'reviews',
+      'jobs',
       'users',
       'permissions',
       'ci-types',
@@ -212,8 +219,9 @@ function App() {
       </a>
       <header className="border-b border-gray-200 bg-white/90 px-6 py-4 backdrop-blur dark:border-gray-800 dark:bg-gray-950/90">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
+          <div className="flex flex-col gap-2">
             <h1 className="text-xl font-semibold">{t('app.title')}</h1>
+            {isAuthenticated ? <ScopeSwitcher /> : null}
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             {isAuthenticated ? (
@@ -233,6 +241,7 @@ function App() {
               </nav>
             ) : null}
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+              {isAuthenticated ? <NotificationCenter /> : null}
               {isAuthenticated ? (
                 <span className="max-w-48 truncate">{user?.name || user?.email}</span>
               ) : null}
@@ -286,6 +295,15 @@ function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/auth/callback" element={<CallbackPage />} />
+          {/* Signup and verification run without a session (UI-17). */}
+          <Route
+            path="/onboarding"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <OnboardingPage />
+              </Suspense>
+            }
+          />
           <Route element={<RequireAuth />}>
             <Route
               element={
@@ -320,6 +338,8 @@ function App() {
               <Route path="/desks" element={<DeskListPage />} />
               <Route path="/agents" element={<AgentListPage />} />
               <Route path="/findings" element={<FindingsPage />} />
+              <Route path="/reviews" element={<ReviewInboxPage />} />
+              <Route path="/jobs" element={<JobCenterPage />} />
               <Route path="/tickets" element={<TicketListPage />} />
               <Route path="/users" element={<UserManagementPage />} />
               <Route path="/permissions" element={<PermissionsPage />} />

@@ -558,6 +558,12 @@ export const overrideApi = {
   listForCI(ciId: string): Promise<{ data: FieldValue[] }> {
     return fetchAPI(`/cis/${ciId}/fields`);
   },
+  /** The provenance of every typed field of the CI (REC-10). */
+  provenance(ciId: string) {
+    return fetchAPI<{ data: components['schemas']['CIFieldProvenance'][] }>(
+      `/cis/${ciId}/provenance`,
+    );
+  },
   setOverride(ciId: string, field: string, value: unknown, reason: string, protectedFlag = true) {
     return fetchAPI(`/cis/${ciId}/fields/${encodeURIComponent(field)}/override`, {
       method: 'PUT',
@@ -587,6 +593,10 @@ export interface EntityChange {
   new_value?: unknown;
   comment?: string;
   created_at: string;
+  /** Trail of the entry in the unified CI history (CI-06). */
+  source?: 'ci_change' | 'entity_change' | 'audit';
+  /** Site of the CI when the change was made. */
+  site_id?: string;
 }
 
 export interface StateSnapshot {
@@ -625,7 +635,7 @@ export interface BlastRadius {
 
 export const impactApi = {
   impact(ciId: string, params: { depth?: number; rel_type?: string } = {}) {
-    return fetchAPI<ImpactResult>(`/topology/cis/${ciId}/impact${qs(params)}`);
+    return fetchAPI<ImpactResult>(`/impact/${ciId}${qs(params)}`);
   },
   dependencies(ciId: string, direction: 'upstream' | 'downstream', depth?: number) {
     return fetchAPI<{ nodes: Array<{ id: string; name: string }>; count: number }>(
@@ -639,13 +649,23 @@ export const impactApi = {
 
 // ─── Saved views + filter query (§17) ────────────────────────────────────────
 
+export interface SavedViewSortKey {
+  field: string;
+  dir?: 'asc' | 'desc';
+}
+
 export interface SavedView {
   id: string;
   owner_id?: string;
   name: string;
   entity_kind: string;
   filter_spec: Record<string, unknown>;
+  /** Sort keys and columns of the view (VIE-01). */
+  sort?: SavedViewSortKey[];
+  columns?: string[];
   shared: boolean;
+  /** Role ids whose holders may read the view. */
+  shared_with_roles?: string[];
   created_at: string;
 }
 
@@ -668,7 +688,10 @@ export const savedViewApi = {
     name: string;
     entity_kind: string;
     filter_spec: Record<string, unknown>;
+    sort?: SavedViewSortKey[];
+    columns?: string[];
     shared?: boolean;
+    shared_with_roles?: string[];
   }) {
     return fetchAPI('/saved-views', { method: 'POST', body: JSON.stringify(data) });
   },

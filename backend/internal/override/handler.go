@@ -60,7 +60,7 @@ func (h *Handler) ListForCI(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
+	api.WriteJSON(w, http.StatusOK, api.CompleteList(items))
 }
 
 // SetOverride handles PUT /api/v1/cis/{id}/fields/{name}/override

@@ -1,7 +1,7 @@
 /**
  * CIDetailSections — advanced, collapsible sections for the CI detail page
  * (spec §18 progressive disclosure): instance fields, field provenance /
- * manual overrides, lifecycle, and impact analysis. Each is an expandable
+ * manual overrides, lifecycle, impact analysis and metrics. Each is an expandable
  * <details> so normal users never see the metadata model.
  */
 import { useState } from 'react';
@@ -10,15 +10,19 @@ import {
   useInstanceFields,
   useUpsertInstanceField,
   useDeleteInstanceField,
-  useFieldValues,
+  useFieldProvenance,
   useSetOverride,
   useClearOverride,
   useBlastRadius,
   useLifecycleDefinitions,
   useLifecycleTransition,
+  useEntityHistory,
 } from '../../api/cmdbHooks';
 import { DynamicForm, validateAll } from '../form/DynamicForm';
 import { ApiError } from '../../api/client';
+import type { MetricPoint } from '../../api/client';
+import { useCIMetrics } from '../../api/hooks';
+import { ProvenanceTooltip } from './ProvenanceTooltip';
 import type { FieldDefinition } from '../../lib/fieldmeta';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -214,7 +218,8 @@ export function InstanceFieldsSection({
 
 export function ProvenanceSection({ ciId }: { ciId: string }) {
   const { t } = useTranslation();
-  const values = useFieldValues(ciId);
+  // Every typed field with its source, time and selection reason (REC-10).
+  const values = useFieldProvenance(ciId);
   const setOverride = useSetOverride(ciId);
   const clearOverride = useClearOverride(ciId);
   const [overrideField, setOverrideField] = useState<string | undefined>();
@@ -234,11 +239,14 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
       <ul className="space-y-2 text-sm">
         {rows.map((fv) => (
           <li
-            key={fv.field_name}
+            key={fv.field}
             className="rounded-md border border-gray-100 px-3 py-2 dark:border-gray-800"
           >
             <div className="flex items-center justify-between">
-              <span className="font-medium">{fv.field_name}</span>
+              <span className="flex items-center gap-1 font-medium">
+                {fv.field}
+                <ProvenanceTooltip provenance={fv} />
+              </span>
               <div className="flex items-center gap-2">
                 {fv.diverged ? (
                   <Badge variant="warning">{t('ci.diverged', 'abweichend')}</Badge>
@@ -246,10 +254,10 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
                 {fv.protected ? (
                   <Badge variant="info">{t('ci.protected', 'geschützt')}</Badge>
                 ) : null}
-                {fv.override_value !== undefined && fv.override_value !== null ? (
+                {fv.reason === 'override' ? (
                   <button
                     className="text-xs text-red-600 hover:underline"
-                    onClick={() => clearOverride.mutate(fv.field_name)}
+                    onClick={() => clearOverride.mutate(fv.field)}
                   >
                     {t('ci.clearOverride', 'Override aufheben')}
                   </button>
@@ -257,7 +265,7 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
                   <button
                     className="text-xs text-primary hover:underline"
                     onClick={() => {
-                      setOverrideField(fv.field_name);
+                      setOverrideField(fv.field);
                       setDraft({ value: '', reason: '' });
                     }}
                   >
@@ -269,28 +277,24 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
             <dl className="mt-1 grid grid-cols-3 gap-2 text-xs">
               <div>
                 <dt className="text-gray-400">{t('ci.discovered', 'Discovery')}</dt>
-                <dd className="font-mono">{JSON.stringify(fv.discovered_value) ?? '—'}</dd>
+                <dd className="font-mono">
+                  {JSON.stringify(fv.reason === 'override' ? fv.discovered_value : fv.value) ?? '—'}
+                </dd>
               </div>
               <div>
                 <dt className="text-gray-400">{t('ci.override', 'Override')}</dt>
                 <dd className="font-mono">
-                  {fv.override_value !== undefined && fv.override_value !== null
-                    ? JSON.stringify(fv.override_value)
-                    : '—'}
+                  {fv.reason === 'override' ? JSON.stringify(fv.value) : '—'}
                 </dd>
               </div>
               <div>
                 <dt className="text-gray-400">{t('ci.effective', 'Effektiv')}</dt>
-                <dd className="font-mono font-semibold">
-                  {JSON.stringify(fv.effective_value) ?? '—'}
-                </dd>
+                <dd className="font-mono font-semibold">{JSON.stringify(fv.value) ?? '—'}</dd>
               </div>
             </dl>
-            {fv.discovered_source ? (
-              <p className="mt-1 text-xs text-gray-400">
-                {t('ci.source', 'Quelle')}: {fv.discovered_source}
-              </p>
-            ) : null}
+            <p className="mt-1 text-xs text-gray-400">
+              {t('ci.source', 'Quelle')}: {fv.source}
+            </p>
           </li>
         ))}
         {rows.length === 0 && !values.isLoading ? (
@@ -466,6 +470,141 @@ export function ImpactSection({ ciId }: { ciId: string }) {
           </div>
         </div>
       ) : null}
+    </Section>
+  );
+}
+
+// ─── Metrics (MON-02) ────────────────────────────────────────────────────────
+
+/** sparklinePath draws the points of a series as one SVG polyline path. */
+export function sparklinePath(points: MetricPoint[], width: number, height: number): string {
+  if (points.length === 0) return '';
+  const values = points.map((p) => p.value);
+  const min = Math.min(...values);
+  const span = Math.max(...values) - min || 1;
+  const stepX = points.length > 1 ? width / (points.length - 1) : 0;
+  return points
+    .map((p, i) => {
+      const x = i * stepX;
+      const y = height - ((p.value - min) / span) * height;
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+}
+
+/**
+ * CIMetricsSection shows the collector series of a CI (MON-02): one line per
+ * metric over the last 24 hours, loaded on demand. Without the monitoring
+ * feature the API answers 403 and the section says so.
+ */
+export function CIMetricsSection({ ciId }: { ciId: string }) {
+  const { t } = useTranslation();
+  const [enabled, setEnabled] = useState(false);
+  const metrics = useCIMetrics(ciId, enabled);
+  const forbidden = metrics.error instanceof ApiError && metrics.error.status === 403;
+
+  return (
+    <Section title={t('monitoring.ciTitle', 'Metriken')}>
+      {!enabled ? (
+        <Button size="sm" variant="secondary" onClick={() => setEnabled(true)}>
+          {t('monitoring.ciLoad', 'Metriken laden')}
+        </Button>
+      ) : metrics.isLoading ? (
+        <SkeletonList rows={2} label="…" />
+      ) : forbidden ? (
+        <p className="text-sm text-gray-500">
+          {t(
+            'monitoring.ciNotLicensed',
+            'Monitoring ist für diese Organisation nicht freigeschaltet.',
+          )}
+        </p>
+      ) : metrics.error ? (
+        <p className="text-sm text-red-600">{(metrics.error as Error).message}</p>
+      ) : (metrics.data?.series.length ?? 0) === 0 ? (
+        <p className="text-sm text-gray-500">
+          {t('monitoring.ciNone', 'Keine Messwerte in den letzten 24 Stunden.')}
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {metrics.data!.series.map((series) => {
+            const latest = series.points[series.points.length - 1];
+            return (
+              <li key={series.name} className="flex items-center gap-3 text-sm">
+                <span className="w-56 truncate font-mono text-xs">{series.name}</span>
+                <svg
+                  role="img"
+                  aria-label={series.name}
+                  width={160}
+                  height={28}
+                  className="text-blue-600 dark:text-blue-400"
+                >
+                  <path
+                    d={sparklinePath(series.points, 160, 28)}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.5}
+                  />
+                </svg>
+                <span className="text-xs text-gray-500">
+                  {t('monitoring.ciLatest', 'Aktuell')}:{' '}
+                  <strong>{latest ? latest.value : '–'}</strong>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Section>
+  );
+}
+
+// ─── History (CI-06) ─────────────────────────────────────────────────────────
+
+/**
+ * CIHistorySection lists the unified history of a CI (CI-06): changes,
+ * history rows and audit entries, newest first, each with its time and the
+ * site of the CI at that time.
+ */
+export function CIHistorySection({ ciId }: { ciId: string }) {
+  const { t, i18n } = useTranslation();
+  const history = useEntityHistory('ci', ciId);
+  const entries = history.data?.data ?? [];
+  const format = (value: string) =>
+    new Date(value).toLocaleString(i18n.language, { dateStyle: 'medium', timeStyle: 'short' });
+  return (
+    <Section title={t('ci.history')} count={history.data?.total}>
+      {history.isLoading ? (
+        <SkeletonList rows={3} label={t('app.loading')} />
+      ) : history.error ? (
+        <p className="text-sm text-red-600">{t('ci.historyLoadError')}</p>
+      ) : entries.length === 0 ? (
+        <p className="text-sm text-gray-500">{t('ci.historyEmpty')}</p>
+      ) : (
+        <ol className="space-y-2 text-sm" aria-label={t('ci.history')}>
+          {entries.map((entry) => (
+            <li
+              key={`${entry.source ?? 'change'}-${entry.id}`}
+              className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
+            >
+              <time dateTime={entry.created_at} className="text-gray-500 dark:text-gray-400">
+                {format(entry.created_at)}
+              </time>
+              <span className="font-medium">
+                {entry.change_type}
+                {entry.field_name ? ` · ${entry.field_name}` : ''}
+              </span>
+              {entry.source ? (
+                <Badge variant="neutral">{t(`ci.historySource.${entry.source}`)}</Badge>
+              ) : null}
+              {entry.site_id ? (
+                <span className="text-gray-500 dark:text-gray-400">
+                  {t('ci.historySite', { site: entry.site_id })}
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      )}
     </Section>
   );
 }

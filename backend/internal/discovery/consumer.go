@@ -387,6 +387,12 @@ func (q *NATSIngestQueue) Run(ctx context.Context) {
 		slog.Error("ingest consumer not started: no handler attached")
 		return
 	}
+	// The collectors deliver over the edge to the same handler (COL-08).
+	go func() {
+		if err := q.handler.ServeCollectorEdge(ctx, q.nc); err != nil {
+			slog.Error("collector edge data path", "error", err)
+		}
+	}()
 	runIngestConsumer(ctx, jetstreamSource{q.consumer}, q.handler)
 }
 

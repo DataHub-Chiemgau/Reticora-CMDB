@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -15,12 +16,25 @@ type MemoryRepository struct {
 	mu    sync.RWMutex
 	items map[string]*Item
 	seq   int
+	// deleted keeps what a restore brings back (CI-05).
+	deleted map[string]deletedState
+	// types holds the CI types known for a type change (CI-11).
+	types map[string]memoryType
 }
+
+type memoryType struct {
+	key      string
+	required []string
+}
+
+type deletedState struct{ status, assetID string }
 
 // NewMemoryRepository creates a new in-memory repository.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		items: make(map[string]*Item),
+		items:   make(map[string]*Item),
+		deleted: make(map[string]deletedState),
+		types:   make(map[string]memoryType),
 	}
 }
 
@@ -30,7 +44,7 @@ func (r *MemoryRepository) List(ctx context.Context, orgID string, filter Filter
 
 	var result []Item
 	for _, item := range r.items {
-		if item.OrganizationID != orgID {
+		if item.OrganizationID != orgID || item.DeletedAt != nil {
 			continue
 		}
 		if filter.Status != "" && item.Status != filter.Status {
@@ -45,6 +59,9 @@ func (r *MemoryRepository) List(ctx context.Context, orgID string, filter Filter
 		if filter.Search != "" && !containsIgnoreCase(item.Name, filter.Search) &&
 			!containsIgnoreCase(item.SerialNumber, filter.Search) &&
 			!containsIgnoreCase(item.ManagementIP, filter.Search) {
+			continue
+		}
+		if !matchesFilters(item, filter.Filters) {
 			continue
 		}
 		result = append(result, *item)
@@ -100,10 +117,23 @@ func (r *MemoryRepository) GetByID(ctx context.Context, orgID, id string) (*Item
 	defer r.mu.RUnlock()
 
 	item, ok := r.items[id]
-	if !ok || item.OrganizationID != orgID {
+	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
 		return nil, fmt.Errorf("not found")
 	}
 	return item, nil
+}
+
+// GetByIDs implements BatchReader.
+func (r *MemoryRepository) GetByIDs(_ context.Context, orgID string, ids []string) ([]Item, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := []Item{}
+	for _, id := range ids {
+		if item, ok := r.items[id]; ok && item.OrganizationID == orgID && item.DeletedAt == nil {
+			items = append(items, *item)
+		}
+	}
+	return items, nil
 }
 
 func (r *MemoryRepository) Create(ctx context.Context, item *Item) error {
@@ -128,7 +158,7 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 	defer r.mu.Unlock()
 
 	item, ok := r.items[id]
-	if !ok || item.OrganizationID != orgID {
+	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
 		return nil, fmt.Errorf("not found")
 	}
 
@@ -187,11 +217,41 @@ func (r *MemoryRepository) Delete(ctx context.Context, orgID, id string) error {
 	defer r.mu.Unlock()
 
 	item, ok := r.items[id]
-	if !ok || item.OrganizationID != orgID {
+	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
 		return fmt.Errorf("not found")
 	}
-	delete(r.items, id)
+	// A deleted CI is kept for the retention like in PostgreSQL (CI-05):
+	// decommissioned, without its asset link.
+	now := time.Now().UTC()
+	r.deleted[id] = deletedState{status: item.Status, assetID: item.AssetID}
+	item.DeletedAt = &now
+	item.Status = StatusDecommissioned
+	item.AssetID = ""
 	return nil
+}
+
+// RestoreDeleted implements Restorer.
+func (r *MemoryRepository) RestoreDeleted(_ context.Context, orgID, id string, retention time.Duration) (*Item, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.items[id]
+	if !ok || item.OrganizationID != orgID || item.DeletedAt == nil {
+		return nil, fmt.Errorf("not found")
+	}
+	if time.Since(*item.DeletedAt) > retention {
+		return nil, ErrRetentionExpired
+	}
+	item.DeletedAt = nil
+	if prev, ok := r.deleted[id]; ok {
+		item.Status, item.AssetID = prev.status, prev.assetID
+		if item.Status == "" || item.Status == StatusDecommissioned {
+			item.Status = StatusActive
+		}
+		delete(r.deleted, id)
+	}
+	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	item.Version++
+	return item, nil
 }
 
 // ListChanges returns no persisted history for the in-memory repository.
@@ -228,4 +288,56 @@ func toLower(r rune) rune {
 		return r + 32
 	}
 	return r
+}
+
+// matchesFilters applies the filter[field][op] conditions in memory. The
+// memory repository has no attribute definitions: an attribute compares as
+// a number when the filter value is one, otherwise as text.
+func matchesFilters(item *Item, filters []api.Filter) bool {
+	for _, f := range filters {
+		if f.Kind == "" {
+			f.Kind = api.KindText
+			if _, err := strconv.ParseFloat(f.Values[0], 64); err == nil {
+				f.Kind = api.KindNumber
+			}
+		}
+		if !f.Match(fieldValue(item, f.Field)) {
+			return false
+		}
+	}
+	return true
+}
+
+// SetType registers a CI type for type changes (CI-11).
+func (r *MemoryRepository) SetType(id, key string, required ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.types[id] = memoryType{key: key, required: required}
+}
+
+// ChangeType implements TypeChanger like the PostgreSQL repository.
+func (r *MemoryRepository) ChangeType(_ context.Context, orgID, ciID, typeID, mode string) (*TypeChangeResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.items[ciID]
+	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
+		return nil, fmt.Errorf("not found")
+	}
+	to, ok := r.types[typeID]
+	if !ok {
+		return nil, ErrUnknownType
+	}
+	if mode == TypeChangeDiscovery && !DiscoveryMayReclassify(r.types[item.CITypeID].key, to.key) {
+		return nil, ErrReclassificationRefused
+	}
+	result := &TypeChangeResult{Findings: MissingRequired(to.required, item.Attributes)}
+	if item.CITypeID != typeID {
+		item.CITypeID = typeID
+		item.Version++
+		item.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		result.Changed = true
+	}
+	cp := *item
+	result.CI = &cp
+	return result, nil
 }

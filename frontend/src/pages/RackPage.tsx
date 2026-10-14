@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { CI, RackMount } from '../api/client';
-import { useMountedCIs, useRackList, useRackMounts } from '../api/hooks';
+import { useMountedCIs, useRackLayout, useRackList } from '../api/hooks';
 import { RackSVG } from '../components/rack/RackSVG';
 import type { RackUnit } from '../components/rack/RackSVG';
 import { Card } from '../components/ui/Card';
@@ -41,7 +41,7 @@ export function RackPage() {
   const [face, setFace] = useState<RackFace>('front');
 
   const racksQuery = useRackList({ limit: 100 });
-  const mountsQuery = useRackMounts(selectedRackId);
+  const mountsQuery = useRackLayout(selectedRackId);
 
   const racks = useMemo(() => racksQuery.data?.data ?? [], [racksQuery.data]);
 
@@ -54,7 +54,7 @@ export function RackPage() {
 
   const selectedRack = racks.find((rack) => rack.id === selectedRackId);
 
-  const mounts = useMemo(() => mountsQuery.data?.data ?? [], [mountsQuery.data]);
+  const mounts = useMemo(() => mountsQuery.data?.mounts ?? [], [mountsQuery.data]);
   const visibleMounts = useMemo(
     () => mounts.filter((mount) => (mount.face || 'front') === face),
     [mounts, face],

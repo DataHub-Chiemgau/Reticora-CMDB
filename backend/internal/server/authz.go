@@ -28,6 +28,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"rooms":                identity.PermLocationRead,
 	"racks":                identity.PermRackRead,
 	"rack-mounts":          identity.PermRackRead,
+	"mounts":               identity.PermRackRead,
 	"contacts":             identity.PermContactRead,
 	"ci-contacts":          identity.PermContactRead,
 	"collectors":           identity.PermDiscoveryRead,
@@ -63,7 +64,14 @@ var readPermissionFor = map[string]identity.Permission{
 	"permissions":  identity.PermPermissionRead,
 	"entitlements": identity.PermEntitlementRead,
 	"audit":        identity.PermAuditRead,
-	"webhooks":     identity.PermWebhookRead,
+	"audit-log":    identity.PermAuditRead,
+	// Catalog paths of API-05.
+	"impact":  identity.PermTopologyRead,
+	"exports": identity.PermCIRead,
+	// Jobs (API-09): cancel and revert check the permission of the kind.
+	"jobs":             identity.PermJobRead,
+	"role-assignments": identity.PermRoleRead,
+	"webhooks":         identity.PermWebhookRead,
 	// Notification channels and their deliveries are administered like
 	// webhooks (NTF-01, NTF-04).
 	"notification-channels":   identity.PermWebhookRead,
@@ -71,6 +79,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"credentials":             identity.PermCredentialRead,
 	"export":                  identity.PermCIRead,
 	"ip-addresses":            identity.PermIPAMRead,
+	"ips":                     identity.PermIPAMRead,
 	"subnets":                 identity.PermIPAMRead,
 	"vlans":                   identity.PermIPAMRead,
 	"vrfs":                    identity.PermIPAMRead,
@@ -157,7 +166,13 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"search":         identity.PermSearchWrite,
 	// Audit integrity verification is a read-side operation; the audit trail
 	// itself is append-only and written by the system, not the API.
-	"audit": identity.PermAuditRead,
+	"audit":     identity.PermAuditRead,
+	"audit-log": identity.PermAuditRead,
+	"impact":    identity.PermTopologyRead,
+	"exports":   identity.PermExportRun,
+	"jobs":      identity.PermJobRead,
+	// Assigning a role is managing roles (RBA-01).
+	"role-assignments": identity.PermRoleManage,
 	// Topology is read-only; the graph is derived from CIs and relationships.
 	"topology": identity.PermTopologyRead,
 	"iga":      identity.PermIGAWrite,
@@ -210,8 +225,13 @@ type routeRule struct {
 
 // routeRules are checked in order; the first match wins.
 var routeRules = []routeRule{
-	// Deleting a CI is its own right; ci:write does not delete.
+	// Deleting a CI is its own right; ci:write does not delete. Restoring
+	// undoes a deletion and needs the same right (CI-05).
 	{http.MethodDelete, "cis/*", identity.PermCIDelete},
+	{http.MethodPost, "cis/*/restore", identity.PermCIDelete},
+	// A merge deletes the victim, the unmerge restores it (CI-12).
+	{http.MethodPost, "cis/*/merge", identity.PermCIDelete},
+	{http.MethodPost, "cis/*/unmerge", identity.PermCIDelete},
 	// Instance attributes (MET-14, CI-10) and manual overrides (CI-10).
 	{http.MethodPut, "cis/*/field-definitions", identity.PermCIInstanceAttributeManage},
 	{http.MethodDelete, "cis/*/field-definitions/*", identity.PermCIInstanceAttributeManage},
@@ -243,6 +263,8 @@ var routeRules = []routeRule{
 	// Reading jobs (RBA-01); starting an export stays export:run.
 	{http.MethodGet, "export/jobs", identity.PermJobRead},
 	{http.MethodGet, "export/jobs/*", identity.PermJobRead},
+	{http.MethodGet, "exports", identity.PermJobRead},
+	{http.MethodGet, "exports/*", identity.PermJobRead},
 }
 
 // matchRouteRule returns the permission of the first rule matching the
@@ -303,6 +325,12 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 		return identity.PermIGAWrite, routeProtected
 	}
 
+	// The GraphQL BFF only reads; each resolver checks its own read
+	// permission and entitlement (GQL-04), so the route requires an
+	// authenticated principal only; the handler admits sessions only.
+	if strings.HasPrefix(path, "/bff/") {
+		return "", routeProtected
+	}
 	if !strings.HasPrefix(path, "/api/") {
 		return "", routePublic
 	}
@@ -355,8 +383,11 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 		}
 		return identity.PermAgentManage, routeProtected
 	case "me":
-		// /me/permissions is read-only self-service for any authenticated
-		// principal.
+		// /me is the signed-in principal itself and needs no permission;
+		// /me/permissions is read-only self-service.
+		if len(segments) == 1 {
+			return "", routeProtected
+		}
 		return identity.PermPermissionRead, routeProtected
 	case "auth":
 		// /auth/me requires authentication but no specific permission.
@@ -364,11 +395,6 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 	case "notifications":
 		// The notification center serves the signed-in user's own inbox
 		// and preferences (NTF-04).
-		return "", routeProtected
-	case "graphql":
-		// The GraphQL BFF only reads; each resolver checks its own read
-		// permission and entitlement (GQL-04), so the route requires an
-		// authenticated principal only.
 		return "", routeProtected
 	}
 
@@ -456,7 +482,7 @@ var auditExemptions = map[string]string{
 	"POST /api/v1/audit/verify": "reads the chain",
 	"POST /api/v1/search/query": "a search, reads",
 	"POST /api/v1/ai/ask":       "a question to the assistant, reads",
-	"POST /api/v1/graphql":      "the BFF refuses mutations, reads",
+	"POST /bff/graphql":         "the BFF refuses mutations, reads",
 	// Marking one's own notifications read changes no shared state.
 	"POST /api/v1/notifications/{id}/read": "marks the own inbox read",
 	"POST /api/v1/notifications/read-all":  "marks the own inbox read",

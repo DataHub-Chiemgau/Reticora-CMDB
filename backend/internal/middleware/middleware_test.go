@@ -351,3 +351,45 @@ func TestClientIPTrustsOnlyConfiguredProxies(t *testing.T) {
 		t.Error("invalid CIDR accepted")
 	}
 }
+
+// TestRateLimitAndRecoveryAnswerWithTheProblemWriter covers API-03: the 429
+// of the rate limiter and the 500 of Recovery are problem+json with the
+// request id that RequestID put on the response — not a value the client
+// sent in its own X-Request-ID header.
+func TestRateLimitAndRecoveryAnswerWithTheProblemWriter(t *testing.T) {
+	limited := Chain(RequestID, RateLimiter(1))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	panicking := Chain(RequestID, Recovery)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("boom")
+	}))
+	check := func(name string, h http.Handler, requests, want int) {
+		t.Helper()
+		var w *httptest.ResponseRecorder
+		for i := 0; i < requests; i++ {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/cis", nil)
+			req.RemoteAddr = "192.0.2.10:1234"
+			req.Header.Set("X-Request-ID", "client-chosen")
+			w = httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+		}
+		if w.Code != want {
+			t.Fatalf("%s: status %d, want %d", name, w.Code, want)
+		}
+		if ct := w.Header().Get("Content-Type"); ct != "application/problem+json" {
+			t.Errorf("%s: Content-Type %q", name, ct)
+		}
+		var body struct {
+			TraceID string `json:"trace_id"`
+			Status  int    `json:"status"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.TraceID == "" || body.TraceID == "client-chosen" || body.TraceID != w.Header().Get("X-Request-ID") || body.Status != want {
+			t.Errorf("%s: trace_id %q, X-Request-ID %q, status %d", name, body.TraceID, w.Header().Get("X-Request-ID"), body.Status)
+		}
+	}
+	check("rate limit", limited, 2, http.StatusTooManyRequests)
+	check("recovery", panicking, 1, http.StatusInternalServerError)
+}

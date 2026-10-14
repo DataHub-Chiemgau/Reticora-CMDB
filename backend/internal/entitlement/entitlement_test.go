@@ -167,6 +167,9 @@ func TestRequiredFeatureMapping(t *testing.T) {
 		"/api/v1/topology/cis/c1/neighbors": FeatureTopology,
 		"/api/v1/cis/c1/dependencies":       FeatureTopology,
 		"/api/v1/cis/c1/blast-radius":       FeatureTopology,
+		// WP-168 (API-05): catalog paths are gated like their predecessors.
+		"/api/v1/impact/c1":  FeatureTopology,
+		"/api/v1/exports/j1": FeatureExportCSV,
 	}
 	for path, want := range cases {
 		got, gated := RequiredFeature(path)

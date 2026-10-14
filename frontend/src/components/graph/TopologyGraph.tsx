@@ -1,4 +1,5 @@
-import { FC, useEffect, useRef } from 'react';
+import { FC, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import Graph from 'graphology';
 import Sigma from 'sigma';
 
@@ -42,8 +43,13 @@ export const TopologyGraph: FC<TopologyGraphProps> = ({
   highlightedNodes,
   className,
 }) => {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
+  // Sigma draws with WebGL; without it (disabled, blocklisted GPU) the
+  // renderer throws. The graph then shows a note and the rest of the page
+  // (node list, simulation) stays usable.
+  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -66,9 +72,16 @@ export const TopologyGraph: FC<TopologyGraphProps> = ({
       }
     });
 
-    const renderer = new Sigma(graph, containerRef.current, {
-      renderEdgeLabels: true,
-    });
+    let renderer: Sigma;
+    try {
+      renderer = new Sigma(graph, containerRef.current, {
+        renderEdgeLabels: true,
+      });
+    } catch {
+      setUnavailable(true);
+      return;
+    }
+    setUnavailable(false);
 
     if (dimmedNodes || highlightedNodes) {
       renderer.setSetting('nodeReducer', (node, data) => {
@@ -100,5 +113,20 @@ export const TopologyGraph: FC<TopologyGraphProps> = ({
     };
   }, [nodes, edges, dimmedNodes, highlightedNodes]);
 
-  return <div ref={containerRef} className={className} style={{ width: '100%', height: '100%' }} />;
+  return (
+    <div
+      ref={containerRef}
+      className={className}
+      style={{ width: '100%', height: '100%', position: 'relative' }}
+    >
+      {unavailable ? (
+        <p
+          role="status"
+          className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-gray-600 dark:text-gray-300"
+        >
+          {t('topology.graphUnavailable')}
+        </p>
+      ) : null}
+    </div>
+  );
 };

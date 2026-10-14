@@ -239,7 +239,7 @@ func (h *Handler) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	if _, ok := tenantOr401(w, r); !ok {
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"data": Templates()})
+	api.WriteJSON(w, http.StatusOK, api.CompleteList(Templates()))
 }
 
 // Export handles GET /api/v1/ci-types/export: the metamodel as a JSON
@@ -420,7 +420,7 @@ func (h *Handler) Versions(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ci type not found")
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
+	api.WriteJSON(w, http.StatusOK, api.CompleteList(items))
 }
 
 // ListFields handles GET /api/v1/ci-types/{id}/fields
@@ -434,7 +434,7 @@ func (h *Handler) ListFields(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ci type not found")
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
+	api.WriteJSON(w, http.StatusOK, api.CompleteList(items))
 }
 
 // UpsertField handles PUT /api/v1/ci-types/{id}/fields
@@ -485,7 +485,7 @@ func (h *Handler) ListGlobalFields(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
+	api.WriteJSON(w, http.StatusOK, api.CompleteList(items))
 }
 
 // UpsertGlobalField handles PUT /api/v1/ci-fields/global
@@ -537,7 +537,7 @@ func (h *Handler) ListInstanceFields(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
+	api.WriteJSON(w, http.StatusOK, api.CompleteList(items))
 }
 
 // UpsertInstanceField handles PUT /api/v1/cis/{id}/field-definitions

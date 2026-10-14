@@ -52,6 +52,9 @@ type RackMount struct {
 
 // CreateMountRequest is the payload for mounting a CI into a rack.
 type CreateMountRequest struct {
+	// RackID names the rack on POST /mounts; the nested route takes it
+	// from the path.
+	RackID    string `json:"rack_id,omitempty"`
 	CIID      string `json:"ci_id"`
 	PositionU int    `json:"position_u"`
 	HeightU   int    `json:"height_u,omitempty"`

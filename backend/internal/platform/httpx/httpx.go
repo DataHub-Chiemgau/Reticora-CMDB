@@ -4,6 +4,8 @@ package httpx
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
 // RespondJSON marshals v as JSON and writes it to w with the given status code.
@@ -16,18 +18,10 @@ func RespondJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // ProblemDetail represents an RFC 7807 problem response.
-type ProblemDetail struct {
-	Type     string `json:"type"`
-	Title    string `json:"title"`
-	Status   int    `json:"status"`
-	Detail   string `json:"detail,omitempty"`
-	Instance string `json:"instance,omitempty"`
-	TraceID  string `json:"trace_id,omitempty"`
-}
+type ProblemDetail = api.ProblemDetail
 
-// RespondProblem writes an RFC 7807 problem detail response.
+// RespondProblem writes an RFC 7807 problem detail response through the one
+// problem writer (api.WriteProblemBody), which adds the trace_id.
 func RespondProblem(w http.ResponseWriter, p ProblemDetail) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(p.Status)
-	_ = json.NewEncoder(w).Encode(p)
+	api.WriteProblemBody(w, p.Status, p)
 }

@@ -44,6 +44,8 @@ var gatedRoutes = []struct {
 	{"/api/v1/exports", FeatureExportCSV},
 	{"/api/v1/export", FeatureExportCSV},
 	{"/api/v1/topology", FeatureTopology},
+	// Impact analysis is part of the topology feature (API-05 path).
+	{"/api/v1/impact", FeatureTopology},
 	{"/api/v1/monitoring", FeatureMonitoring},
 	{"/api/v1/metrics", FeatureMonitoring},
 	{"/api/v1/forms", FeatureWorkflowForms},
@@ -62,6 +64,7 @@ var gatedSuffixes = []struct {
 }{
 	{"/api/v1/cis/", "/dependencies", FeatureTopology},
 	{"/api/v1/cis/", "/blast-radius", FeatureTopology},
+	{"/api/v1/cis/", "/metrics", FeatureMonitoring},
 }
 
 // ingestRoutes deliver discovery results or start scans; they are the only

@@ -161,7 +161,8 @@ func TestJobRendersCorrectCSV(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	if !strings.HasPrefix(out, "id,name,status") {
+	// UTF-8 BOM and semicolons (EXP-01).
+	if !strings.HasPrefix(out, "\ufeffid;name;status") {
 		t.Fatalf("unexpected CSV header: %q", out[:min(40, len(out))])
 	}
 	if lines := strings.Count(strings.TrimSpace(out), "\n") + 1; lines != 3 {
@@ -316,5 +317,23 @@ func TestCompletedExportIsReported(t *testing.T) {
 	data := rec.got[0].Data.(map[string]any)
 	if data["format"] != "json" || data["row_count"] != 2 || data["initiated_by"] == "" {
 		t.Errorf("data: %v", data)
+	}
+}
+
+// TestJobResponseCarriesManifest: an export job names its fields and the
+// omitted ones (EXP-01).
+func TestJobResponseCarriesManifest(t *testing.T) {
+	cis := ci.NewMemoryRepository()
+	_, _, _, mux := newJobEnv(t, cis)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("POST", "/api/v1/exports", strings.NewReader(`{"format":"csv"}`))))
+	var resp struct {
+		Manifest Manifest `json:"manifest"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusAccepted {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	if resp.Manifest.Format != "csv" || len(resp.Manifest.Fields) == 0 || len(resp.Manifest.Omitted) == 0 {
+		t.Errorf("manifest %+v", resp.Manifest)
 	}
 }

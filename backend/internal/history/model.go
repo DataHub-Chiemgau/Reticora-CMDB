@@ -20,7 +20,19 @@ type Change struct {
 	NewValue       any       `json:"new_value,omitempty"`
 	Comment        string    `json:"comment,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
+	// Source names the trail of the entry in the unified CI history
+	// (CI-06): ci_change, entity_change or audit.
+	Source string `json:"source,omitempty"`
+	// SiteID is the site of the CI when the change was made (ci_change).
+	SiteID string `json:"site_id,omitempty"`
 }
+
+// Sources of the unified CI history.
+const (
+	SourceCIChange     = "ci_change"
+	SourceEntityChange = "entity_change"
+	SourceAudit        = "audit"
+)
 
 // StateSnapshot is the reconstructed state of an entity at a point in time.
 type StateSnapshot struct {

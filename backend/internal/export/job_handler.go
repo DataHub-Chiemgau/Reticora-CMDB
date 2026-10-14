@@ -18,6 +18,8 @@ import (
 type jobResponse struct {
 	Job
 	DownloadURL string `json:"download_url,omitempty"`
+	// Manifest lists the fields of the file and the omitted ones (EXP-01).
+	Manifest Manifest `json:"manifest"`
 }
 
 // JobHandler provides HTTP handlers for asynchronous export jobs.
@@ -40,9 +42,13 @@ func NewJobHandler(jobs JobRepository, worker *JobWorker, blobs blob.Store) *Job
 
 // RegisterRoutes registers the export job routes.
 func (h *JobHandler) RegisterRoutes(r chi.Router) {
-	r.Post("/api/v1/export/jobs", h.CreateJob)
-	r.Get("/api/v1/export/jobs", h.ListJobs)
-	r.Get("/api/v1/export/jobs/{id}", h.GetJob)
+	// exports is the catalog path (API-05); export/jobs stays until its
+	// sunset (API-01).
+	for _, base := range []string{"/api/v1/exports", "/api/v1/export/jobs"} {
+		r.Post(base, h.CreateJob)
+		r.Get(base, h.ListJobs)
+		r.Get(base+"/{id}", h.GetJob)
+	}
 }
 
 // CreateJob handles POST /api/v1/export/jobs and queues an asynchronous
@@ -146,7 +152,7 @@ func (h *JobHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 // toResponse attaches a fresh signed URL to completed, unexpired jobs. An
 // expired or failed job never exposes its object key as a URL.
 func (h *JobHandler) toResponse(r *http.Request, job *Job) jobResponse {
-	resp := jobResponse{Job: *job}
+	resp := jobResponse{Job: *job, Manifest: ManifestFor(job.Format)}
 	if job.Status != JobStatusCompleted || job.ObjectKey == "" || h.blobs == nil {
 		return resp
 	}

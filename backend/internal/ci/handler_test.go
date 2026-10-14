@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -271,5 +272,63 @@ func TestHandler_ListFilter(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp.Total != 1 {
 		t.Errorf("expected 1 item with status=active, got %d", resp.Total)
+	}
+}
+
+// TestHandler_IncludeAndRestore covers API-05 and CI-05: GET /cis/{id}
+// embeds the requested related collections (unknown names are 422), and a
+// deleted CI is restored within the retention (later: 410; not deleted:
+// 404).
+func TestHandler_IncludeAndRestore(t *testing.T) {
+	repo := NewMemoryRepository()
+	h := NewHandler(NewService(repo)).WithIncludes(map[string]IncludeFunc{
+		"relationships": func(_ context.Context, orgID, ciID string) (any, error) {
+			return []map[string]string{{"source_ci_id": ciID, "organization_id": orgID}}, nil
+		},
+	})
+	mux := chi.NewRouter()
+	h.RegisterRoutes(mux)
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, tenantCtx(httptest.NewRequest(method, path, bytes.NewBufferString(body))))
+		return w
+	}
+	w := call("POST", "/api/v1/cis", `{"name":"inc-1","ci_type_id":"type-switch"}`)
+	var item Item
+	_ = json.Unmarshal(w.Body.Bytes(), &item)
+
+	w = call("GET", "/api/v1/cis/"+item.ID+"?include=relationships,asset", "")
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("include: %d %s", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(got["relationships"], []byte(item.ID)) || string(got["asset"]) != "null" || string(got["name"]) != `"inc-1"` {
+		t.Errorf("include body %s", w.Body.String())
+	}
+	if w = call("GET", "/api/v1/cis/"+item.ID+"?include=secrets", ""); w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("unknown include: %d", w.Code)
+	}
+
+	if w = call("POST", "/api/v1/cis/"+item.ID+"/restore", ""); w.Code != http.StatusNotFound {
+		t.Errorf("restore of a live CI: %d", w.Code)
+	}
+	if w = call("DELETE", "/api/v1/cis/"+item.ID, ""); w.Code != http.StatusNoContent && w.Code != http.StatusOK {
+		t.Fatalf("delete: %d", w.Code)
+	}
+	if w = call("GET", "/api/v1/cis/"+item.ID, ""); w.Code != http.StatusNotFound {
+		t.Errorf("deleted CI still served: %d", w.Code)
+	}
+	if w = call("POST", "/api/v1/cis/"+item.ID+"/restore", ""); w.Code != http.StatusOK {
+		t.Fatalf("restore: %d %s", w.Code, w.Body.String())
+	}
+	if w = call("GET", "/api/v1/cis/"+item.ID, ""); w.Code != http.StatusOK {
+		t.Errorf("restored CI not served: %d", w.Code)
+	}
+	call("DELETE", "/api/v1/cis/"+item.ID, "")
+	expired := repo.items[item.ID]
+	old := expired.DeletedAt.Add(-RestoreRetention - time.Hour)
+	expired.DeletedAt = &old
+	if w = call("POST", "/api/v1/cis/"+item.ID+"/restore", ""); w.Code != http.StatusGone {
+		t.Errorf("restore after the retention: %d %s", w.Code, w.Body.String())
 	}
 }

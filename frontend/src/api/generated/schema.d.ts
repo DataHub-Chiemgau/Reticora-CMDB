@@ -314,6 +314,26 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
+    /**
+     * Get the currently authenticated session claims
+     * @deprecated
+     */
+    get: operations['getCurrentSessionLegacy'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/me': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
     /** Get the currently authenticated session claims */
     get: operations['getCurrentSession'];
     put?: never;
@@ -356,7 +376,10 @@ export interface paths {
     get: operations['getCI'];
     put?: never;
     post?: never;
-    /** Delete a configuration item */
+    /**
+     * Delete a configuration item
+     * @description Soft delete (CI-05): sets deleted_at and the operative status decommissioned (the lifecycle state stays, LCY-01) and releases the asset link; relationships stay, traversal and impact skip the CI. POST /cis/{id}/restore brings it back within 90 days, afterwards the retention run deletes it with its interfaces and IP addresses.
+     */
     delete: operations['deleteCI'];
     options?: never;
     head?: never;
@@ -367,10 +390,142 @@ export interface paths {
     patch: operations['updateCI'];
     trace?: never;
   };
+  '/api/v1/cis/{id}/restore': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore a deleted CI within the retention (CI-05, API-05)
+     * @description Clears the deletion of a CI deleted less than 90 days ago; the change history and the audit trail record the restore (ci.restored). Requires ci:delete.
+     */
+    post: operations['restoreCI'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/cis/{id}/type': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Change the type of a CI (CI-11)
+     * @description Manual reclassification. The CI keeps its id, relationships, mounts, asset link and history; required attributes of the target type the CI does not carry are returned as findings and do not block. The change is recorded as ci_change type_change, audit ci.type_changed and event ci.changed (changed_fields ci_type_id). Discovery uses the same service but may only raise generic_device to a specific type.
+     */
+    post: operations['changeCIType'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/cis/{id}/merge': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Merge a victim CI into this CI (CI-12)
+     * @description Moves relationships, interfaces with their IP addresses, contacts, history, document links and the asset link of the victim to this CI (the survivor). Attributes follow the provenance rank of the discovery sources, tags are united; field values and overrides of both CIs stay, contradicting overrides open an override_conflict review. The victim is soft-deleted with merged_into_id; GET on it answers 301 to the survivor for 12 months. A snapshot allows the unmerge within 30 days. The merge runs as a job of kind ci.merge (reference ci_merge/merge_id). Requires ci:delete.
+     */
+    post: operations['mergeCI'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/cis/{id}/unmerge': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Revert the merge of this (merged) CI within 30 days (CI-12)
+     * @description Restores the merged CI of the path and its survivor from the merge snapshot: both CI rows, the moved relationships, interfaces, contacts, history, document links, field values and the asset link, and the rows the merge removed. After 30 days the snapshot is gone (410). Requires ci:delete.
+     */
+    post: operations['unmergeCI'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/cis/bulk': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Bulk status change of up to 500 CIs (API-08, BLK-01)
+     * @description Sets the status of every CI in ids. Below 100 ids the answer is the partial failure report (200): every id with ok or its error and the HTTP status the single change would have answered. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}). More than 500 ids is 422. Requires ci:write.
+     */
+    post: operations['bulkCIs'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/cis/{id}/provenance': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Provenance of every typed field of a CI (REC-10)
+     * @description One entry per typed field and attribute of the CI with a value: the shown value, its source, the REC-03 rank of the source, when it was recorded and observed, and why it is shown (override, source_rank, asset or record). An override also names its author and reason and the observed value it covers.
+     */
+    get: operations['getCIProvenance'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/cis/{id}/changes': {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -401,7 +556,36 @@ export interface paths {
   '/api/v1/audit': {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List audit log entries
+     * @deprecated
+     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05).
+     */
+    get: operations['listAuditEntriesLegacy'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/audit-log': {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -427,6 +611,27 @@ export interface paths {
     trace?: never;
   };
   '/api/v1/audit/verify': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Verify the audit hash chain
+     * @deprecated
+     * @description Walks the organization's audit chain in `seq` order and reports the first violation (AUD-04): a gap in the sequence, a broken `previous_hash` link (the first entry links to 32 zero bytes) or a hash that does not match SHA-256(previous_hash || SHA-256(canonical JSON)) of the stored entry.
+     */
+    post: operations['verifyAuditChainLegacy'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/audit-log/verify': {
     parameters: {
       query?: never;
       header?: never;
@@ -729,10 +934,14 @@ export interface paths {
     };
     /**
      * Export configuration items
+     * @deprecated
      * @description Streams the tenant's configuration items. Rows are fetched in
      *     keyset-paginated batches and flushed as they are produced, so the
      *     response is chunked and neither the server nor the client has to hold
-     *     the full result set in memory. There is no row limit.
+     *     the full result set in memory. There is no row limit. CSV and DATEV
+     *     are UTF-8 with BOM and semicolons (EXP-01); X-Export-Omitted-Fields
+     *     names the CI fields the layout leaves out. The export job resource
+     *     /api/v1/exports (202, presigned download, manifest) replaces it.
      */
     get: operations['exportCIs'];
     put?: never;
@@ -744,6 +953,123 @@ export interface paths {
     trace?: never;
   };
   '/api/v1/export/jobs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List asynchronous export jobs
+     * @deprecated
+     * @description Returns the caller's own export jobs newest first; jobs of other users are not listed. Completed, unexpired jobs carry a time-limited signed download URL.
+     */
+    get: operations['listExportJobsLegacy'];
+    put?: never;
+    /**
+     * Queue an asynchronous CI export
+     * @deprecated
+     * @description Queues an asynchronous export. The job records the caller's tenant
+     *     scope (`scope`); a background worker renders the CI set visible in
+     *     exactly this scope in the requested format into object storage. Once
+     *     the job is `completed` it exposes a signed download URL until
+     *     `expires_at`. Requires blob storage to be configured — otherwise 503.
+     */
+    post: operations['createExportJobLegacy'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/jobs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the jobs of the organization (API-09, JOB-03)
+     * @description Export, import, bulk, merge, template migration and the system jobs share one job model (JOB-01). Requires job:read.
+     */
+    get: operations['listJobs'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/jobs/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** A job with its status, progress and result */
+    get: operations['getJob'];
+    put?: never;
+    post?: never;
+    /**
+     * Cancel a queued or running job
+     * @description Allowed for the creator of the job and for holders of the permission of its kind (ci.bulk ci:write, ci.merge ci:delete, export export:run). A finished job is 409.
+     */
+    delete: operations['cancelJob'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/jobs/{id}/result': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** The result of a succeeded job */
+    get: operations['getJobResult'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/jobs/{id}/revert': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Revert a succeeded job where the revert is defined (E-25)
+     * @description Phase 1 defines the revert of ci.merge (the unmerge within 30 days, CI-12); every other kind, and a job that did not succeed, is 409. The bulk revert follows with BLK-02.
+     */
+    post: operations['revertJob'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/exports': {
     parameters: {
       query?: never;
       header?: never;
@@ -772,6 +1098,30 @@ export interface paths {
     trace?: never;
   };
   '/api/v1/export/jobs/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get an export job
+     * @deprecated
+     * @description Only the job's creator reads it; for anyone else the job does not exist (404).
+     */
+    get: operations['getExportJobLegacy'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/exports/{id}': {
     parameters: {
       query?: never;
       header?: never;
@@ -2103,6 +2453,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/cis/{id}/metrics': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Metric series of one CI (MON-02)
+     * @description Returns the series of one CI for the detail view: the named metric or, without name, every metric the CI reported since from (default the last 24 hours). Requires the monitoring feature.
+     */
+    get: operations['getCIMetrics'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/monitoring/alerts': {
     parameters: {
       query?: never;
@@ -2140,23 +2510,6 @@ export interface paths {
     head?: never;
     /** Partially update an alert rule (e.g. toggle enabled) */
     patch: operations['updateAlert'];
-    trace?: never;
-  };
-  '/api/v1/graphql': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Execute a GraphQL query */
-    post: operations['executeGraphQL'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
     trace?: never;
   };
   '/api/v1/review-items': {
@@ -2306,10 +2659,12 @@ export interface paths {
   '/api/v1/topology/cis/{id}/impact': {
     parameters: {
       query?: {
-        /** @description Traversal depth; defaults to the maximum for impact analysis. */
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
         depth?: number;
         /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
         rel_type?: string;
+        /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical); physical includes the containment projected from parent_ci_id. An unknown category is 422. */
+        categories?: string;
       };
       header?: never;
       path: {
@@ -2320,7 +2675,58 @@ export interface paths {
     };
     /**
      * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
-     * @description Follows directed edges (source supports/powers/connects target) from the failed CI and returns the transitively impacted CI set. Powers the Ausfallsimulation in the topology view (spec §4).
+     * @deprecated
+     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Powers the Ausfallsimulation in the topology view.
+     */
+    get: operations['getCIImpactLegacy'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/impact': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Joint impact of several CIs failing at once (IMP-05)
+     * @description Redundancy analysis and maintenance windows: the CIs in ci_ids fail together; a CI behind a redundant type (powered_by, member_of_cluster) is impacted only when all its providers are among the failed or impacted CIs (IMP-04). The answer lists the failed CIs, the impacted CIs with their shortest paths and a summary.
+     */
+    get: operations['getMultiImpact'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/impact/{ci_id}': {
+    parameters: {
+      query?: {
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
+        depth?: number;
+        /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
+        rel_type?: string;
+        /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical); physical includes the containment projected from parent_ci_id. An unknown category is 422. */
+        categories?: string;
+      };
+      header?: never;
+      path: {
+        /** @description The CI whose outage is simulated. */
+        ci_id: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
+     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Powers the Ausfallsimulation in the topology view.
      */
     get: operations['getCIImpact'];
     put?: never;
@@ -2552,6 +2958,54 @@ export interface paths {
     patch: operations['updateRack'];
     trace?: never;
   };
+  '/api/v1/racks/{id}/layout': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Occupancy of a rack (RCK-02)
+     * @description The rack, its mounts ordered by position and the free units of the front and the rear (a mount on both faces occupies both).
+     */
+    get: operations['getRackLayout'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/racks/{id}/mounts/{ci_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        ci_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Mount a CI at a position or move its mount (RCK-02)
+     * @description Mounts the CI into this rack (201) or moves its mount here (200); a CI has at most one mount. The location of the CI, or of its asset, becomes the rack; ci_change and the audit record the mount (RCK-03, DB-05).
+     */
+    put: operations['putRackMount'];
+    post?: never;
+    /** Unmount a CI from this rack (RCK-03) */
+    delete: operations['deleteRackMountByCI'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/racks/{id}/mounts': {
     parameters: {
       query?: never;
@@ -2562,11 +3016,15 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** List mounts in a rack */
+    /**
+     * List mounts in a rack
+     * @deprecated
+     */
     get: operations['listRackMounts'];
     put?: never;
     /**
      * Mount a CI into a rack
+     * @deprecated
      * @description The location of the CI, or of its asset, becomes the rack; ci_change and the audit record the mount (RCK-03, DB-05).
      */
     post: operations['createRackMount'];
@@ -2576,7 +3034,61 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/mounts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the mounts of a rack (API-05) */
+    get: operations['listMounts'];
+    put?: never;
+    /**
+     * Mount a CI into a rack (API-05)
+     * @description Like POST /racks/{id}/mounts with the rack in `rack_id`; the location of the CI, or of its asset, becomes the rack (RCK-03, DB-05).
+     */
+    post: operations['createMount'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/rack-mounts/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get a rack mount
+     * @deprecated
+     */
+    get: operations['getRackMountLegacy'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a rack mount
+     * @deprecated
+     * @description Unmounts the CI. Its location, or its asset's, becomes the rack's room; ci_change and the audit record the change (RCK-03, DB-05).
+     */
+    delete: operations['deleteRackMountLegacy'];
+    options?: never;
+    head?: never;
+    /**
+     * Update a rack mount
+     * @deprecated
+     * @description Repositions the mount (another rack included). The location of the CI, or of its asset, becomes the rack; ci_change and the audit record the change (RCK-03, DB-05).
+     */
+    patch: operations['updateRackMountLegacy'];
+    trace?: never;
+  };
+  '/api/v1/mounts/{id}': {
     parameters: {
       query?: never;
       header?: never;
@@ -3014,6 +3526,30 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
+    /**
+     * List IP addresses
+     * @deprecated
+     */
+    get: operations['listIPAddressesLegacy'];
+    put?: never;
+    /**
+     * Create an IP address
+     * @deprecated
+     */
+    post: operations['createIPAddressLegacy'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ips': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
     /** List IP addresses */
     get: operations['listIPAddresses'];
     put?: never;
@@ -3026,6 +3562,37 @@ export interface paths {
     trace?: never;
   };
   '/api/v1/ip-addresses/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get an IP address
+     * @deprecated
+     */
+    get: operations['getIPAddressLegacy'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete an IP address
+     * @deprecated
+     */
+    delete: operations['deleteIPAddressLegacy'];
+    options?: never;
+    head?: never;
+    /**
+     * Update an IP address
+     * @deprecated
+     */
+    patch: operations['updateIPAddressLegacy'];
+    trace?: never;
+  };
+  '/api/v1/ips/{id}': {
     parameters: {
       query?: never;
       header?: never;
@@ -3751,8 +4318,29 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Assign a custom role to a user */
-    post: operations['assignRole'];
+    /**
+     * Assign a custom role to a user
+     * @deprecated
+     */
+    post: operations['assignRoleLegacy'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/role-assignments': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the role assignments of a user (API-05) */
+    get: operations['listRoleAssignments'];
+    put?: never;
+    /** Assign a role to a user (API-05) */
+    post: operations['createRoleAssignment'];
     delete?: never;
     options?: never;
     head?: never;
@@ -3837,8 +4425,11 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** List custom role assignments for a user */
-    get: operations['listUserRoles'];
+    /**
+     * List custom role assignments for a user
+     * @deprecated
+     */
+    get: operations['listUserRolesLegacy'];
     put?: never;
     post?: never;
     delete?: never;
@@ -5161,7 +5752,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Compute the blast radius of a CI failure */
+    /**
+     * Compute the blast radius of a CI failure
+     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed. single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one.
+     */
     get: operations['listCisIdBlastRadius'];
     put?: never;
     post?: never;
@@ -5359,6 +5953,26 @@ export interface paths {
     head?: never;
     /** Read, update or delete a composition link */
     patch: operations['updateCompositionsId'];
+    trace?: never;
+  };
+  '/api/v1/history/snapshots': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * State snapshot of a CI or asset as a job (JOB-04)
+     * @description Replays the history of the entity up to at (default now) as a job of kind history.snapshot; 202 with the job, whose result is the state (GET /api/v1/jobs/{id}/result). Without the job model (no database) the state is answered at once (200). GET /cis/{id}/state stays the direct read.
+     */
+    post: operations['createStateSnapshot'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/v1/history/{entityType}/{id}': {
@@ -5672,10 +6286,13 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage saved views */
+    /**
+     * Saved views the caller may read (VIE-01)
+     * @description Own views, views shared org-wide and views shared with a role of the caller.
+     */
     get: operations['listSavedViews'];
     put?: never;
-    /** Manage saved views */
+    /** Create a saved view (VIE-01) */
     post: operations['createSavedViews'];
     delete?: never;
     options?: never;
@@ -5707,15 +6324,21 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read, update or delete a saved view */
+    /**
+     * Read a saved view
+     * @description A private view of somebody else, or a view shared with roles the caller does not hold, is 404 (VIE-01).
+     */
     get: operations['getSavedViewsId'];
     put?: never;
     post?: never;
-    /** Read, update or delete a saved view */
+    /** Delete a saved view */
     delete: operations['deleteSavedViewsId'];
     options?: never;
     head?: never;
-    /** Read, update or delete a saved view */
+    /**
+     * Update a saved view
+     * @description The owner changes the view; a view shared org-wide is editable by everybody, a role-shared one only by its owner.
+     */
     patch: operations['updateSavedViewsId'];
     trace?: never;
   };
@@ -5763,7 +6386,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Execute a structured filter spec (saved-view DSL) against CIs or assets */
+    /**
+     * Execute a structured filter spec (saved-view DSL) against CIs or assets
+     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in or exists. Fields are the whitelisted columns of the entity kind, its dynamic attributes (attributes.<key>) and, for CIs, the fields of the linked asset (asset.<field>). At most 10 levels and 100 nodes; an invalid AST is 422 naming the node.
+     */
     post: operations['queryByFilterSpec'];
     delete?: never;
     options?: never;
@@ -5818,6 +6444,8 @@ export interface components {
       updated_at: string;
     };
     AttributeDefinitionListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['AttributeDefinition'][];
       total?: number;
       limit?: number;
@@ -6025,6 +6653,8 @@ export interface components {
       updated_at: string;
     };
     CITypeListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['CIType'][];
       total?: number;
       limit?: number;
@@ -6115,6 +6745,8 @@ export interface components {
       token?: string;
     };
     InvitationListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['Invitation'][];
       total: number;
       limit: number;
@@ -6217,6 +6849,8 @@ export interface components {
     };
     IGAArray: components['schemas']['IGAObject'][];
     IGAListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data?: components['schemas']['IGAObject'][];
       total?: number;
       limit?: number;
@@ -6233,7 +6867,196 @@ export interface components {
       itemsPerPage: number;
       Resources: components['schemas']['SCIMResource'][];
     };
-    /** @description RFC 7807 Problem Details object. */
+    CIMergeResult: {
+      /** Format: uuid */
+      merge_id: string;
+      survivor: components['schemas']['CI'];
+      /** Format: uuid */
+      victim_id: string;
+      /** @description Moved rows per reference kind. */
+      moved: {
+        [key: string]: number;
+      };
+      /** @description Fields whose overrides contradict; each opened an override_conflict review. */
+      override_conflicts: string[];
+      /** Format: date-time */
+      tombstone_until: string;
+      /** Format: date-time */
+      snapshot_until: string;
+    };
+    CIUnmergeResult: {
+      /** Format: uuid */
+      merge_id: string;
+      survivor: components['schemas']['CI'];
+      victim: components['schemas']['CI'];
+    };
+    RackLayout: {
+      rack: components['schemas']['Rack'];
+      mounts: components['schemas']['RackMount'][];
+      /** @description Free units per face (front, rear). */
+      free: {
+        [key: string]: number[];
+      };
+    };
+    PutRackMountRequest: {
+      position_u: number;
+      /** @default 1 */
+      height_u: number;
+      /**
+       * @default front
+       * @enum {string}
+       */
+      face: 'front' | 'rear' | 'both';
+    };
+    /** @description One node of the filter AST (SRC-03): exactly one of and, or, not or a comparison (field, op, value). */
+    FilterExpr: {
+      and?: components['schemas']['FilterExpr'][];
+      or?: components['schemas']['FilterExpr'][];
+      not?: components['schemas']['FilterExpr'];
+      /** @description A column of the entity kind, attributes.<key> or (CIs) asset.<field>. */
+      field?: string;
+      /** @enum {string} */
+      op?: 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'like' | 'in' | 'exists';
+      /** @description A string, number or boolean; a list for in. */
+      value?: unknown;
+    };
+    SavedViewSortKey: {
+      field: string;
+      /**
+       * @default asc
+       * @enum {string}
+       */
+      dir: 'asc' | 'desc';
+    };
+    SavedView: {
+      id: string;
+      organization_id: string;
+      owner_id?: string;
+      name: string;
+      /** @enum {string} */
+      entity_kind: 'ci' | 'asset';
+      /** @description The filter spec; where holds the filter AST (FilterExpr). */
+      filter_spec: {
+        [key: string]: unknown;
+      };
+      sort: components['schemas']['SavedViewSortKey'][];
+      columns: string[];
+      shared: boolean;
+      /** @description Role or custom role ids whose holders may read the view. */
+      shared_with_roles: string[];
+      /** Format: date-time */
+      created_at?: string;
+      /** Format: date-time */
+      updated_at?: string;
+    };
+    SavedViewRequest: {
+      name?: string;
+      /** @enum {string} */
+      entity_kind?: 'ci' | 'asset';
+      filter_spec?: {
+        [key: string]: unknown;
+      };
+      sort?: components['schemas']['SavedViewSortKey'][];
+      columns?: string[];
+      shared?: boolean;
+      shared_with_roles?: string[];
+    };
+    ImpactAnalysis: {
+      /** @description The failed CI (single-CI short form only). */
+      failed_ci_id?: string;
+      failed_ci?: components['schemas']['TopologyNode'];
+      failed_cis: components['schemas']['TopologyNode'][];
+      rel_type?: string;
+      categories?: string[];
+      depth?: number;
+      impacted: components['schemas']['ImpactNode'][];
+      count: number;
+      summary: {
+        failed: number;
+        impacted: number;
+        certain: number;
+        heuristic: number;
+        /** @description Impacted CIs per category of the last hop of their path. */
+        by_category: {
+          [key: string]: number;
+        };
+      };
+    };
+    ImpactNode: components['schemas']['TopologyNode'] & {
+      /** @description Reached only over an undirected network edge (connected_to), a second-class path (IMP-03). */
+      heuristic: boolean;
+      /** @description Length of the shortest path from the failed CI. */
+      hops: number;
+      /** @description Shortest path from the failed CI with its relationship types (IMP-02). */
+      path: components['schemas']['ImpactPathStep'][];
+    };
+    ImpactPathStep: {
+      from_ci_id: string;
+      to_ci_id: string;
+      rel_type: string;
+      category: string;
+      heuristic?: boolean;
+    };
+    CIBulkResult: {
+      action: string;
+      total: number;
+      succeeded: number;
+      failed: number;
+      items: {
+        id: string;
+        /** @enum {string} */
+        result: 'ok' | 'error';
+        code: number;
+        error?: string;
+      }[];
+    };
+    CITypeChangeResult: {
+      ci: components['schemas']['CI'];
+      /** @description False when the CI already had the type. */
+      changed: boolean;
+      /** @description Required attributes of the target type the CI does not carry. */
+      findings: {
+        field: string;
+        message: string;
+      }[];
+    };
+    HistoryChange: {
+      id: string;
+      /** Format: uuid */
+      organization_id?: string;
+      entity_type: string;
+      /** Format: uuid */
+      entity_id: string;
+      actor_id?: string;
+      /** @description The change type, or the audit action for source audit. */
+      change_type: string;
+      field_name?: string;
+      old_value?: unknown;
+      new_value?: unknown;
+      comment?: string;
+      /** Format: date-time */
+      created_at: string;
+      /**
+       * @description The trail of the entry (CI history only).
+       * @enum {string}
+       */
+      source?: 'ci_change' | 'entity_change' | 'audit';
+      /**
+       * Format: uuid
+       * @description The site of the CI when the change was made.
+       */
+      site_id?: string;
+    };
+    HistoryListResponse: {
+      data: components['schemas']['HistoryChange'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+    };
+    /** @description RFC 7807 Problem Details object (API-03). Every error response (4xx/5xx) is `application/problem+json` and carries `trace_id`, the request id also returned in the `X-Request-ID` header. */
     ProblemDetail: {
       /** Format: uri */
       type: string;
@@ -6242,7 +7065,8 @@ export interface components {
       detail?: string;
       /** Format: uri */
       instance?: string;
-      trace_id?: string;
+      /** @description Request id of the failed request (equals the X-Request-ID response header). */
+      trace_id: string;
       /** @description Request field a 400 or 409 refers to (e.g. the unique `name` of a client). */
       field?: string;
     };
@@ -6941,7 +7765,53 @@ export interface components {
       format: 'csv' | 'json' | 'datev';
       filters?: components['schemas']['ExportJobFilters'];
     };
+    Job: {
+      id: string;
+      organization_id?: string;
+      kind: string;
+      /** @enum {string} */
+      status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+      progress: number;
+      params?: unknown;
+      result?: unknown;
+      error?: string;
+      idempotency_key?: string;
+      created_by?: string;
+      attempts: number;
+      max_attempts: number;
+      /** Format: date-time */
+      run_after?: string;
+      timeout_seconds?: number;
+      ref_table?: string;
+      ref_id?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+      /** Format: date-time */
+      started_at?: string;
+      /** Format: date-time */
+      finished_at?: string;
+    };
+    JobListResponse: {
+      data: components['schemas']['Job'][];
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+      next_cursor?: string;
+    };
+    /** @description The fields of an export and the visible CI fields it leaves out (EXP-01). */
+    ExportManifest: {
+      format: string;
+      fields: string[];
+      omitted: {
+        field: string;
+        reason: string;
+      }[];
+    };
     ExportJob: {
+      manifest?: components['schemas']['ExportManifest'];
       id: string;
       organization_id: string;
       initiated_by?: string;
@@ -6976,6 +7846,8 @@ export interface components {
       teams: string[] | null;
     };
     ExportJobListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['ExportJob'][];
       total: number;
       limit: number;
@@ -8084,10 +8956,14 @@ export interface components {
       parent_id?: string;
     };
     LocationListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['Location'][];
       total: number;
     };
     LocationTreeResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['LocationTreeNode'][];
     };
     ValidationProblem: components['schemas']['ProblemDetail'] & {
@@ -8330,6 +9206,8 @@ export interface components {
       key: string;
     };
     APIKeyListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['APIKey'][];
       total: number;
       limit: number;
@@ -8376,6 +9254,8 @@ export interface components {
       updated_at: string;
     };
     ServiceAccountListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['ServiceAccount'][];
       total: number;
       limit: number;
@@ -8416,6 +9296,8 @@ export interface components {
       created_at: string;
     };
     OperatorOrgListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['OperatorOrg'][];
       total: number;
       limit: number;
@@ -8440,6 +9322,8 @@ export interface components {
       entry_hash: string;
     };
     OperatorAuditListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['OperatorAuditEntry'][];
       total: number;
       limit: number;
@@ -8502,6 +9386,38 @@ export interface components {
     };
     MetricsIngestResponse: {
       ingested: number;
+      /** @description Samples without ci_id whose target label matched no CI; they are not stored (MON-02). */
+      unassigned?: number;
+    };
+    CIMetricsResponse: {
+      ci_id: string;
+      /** Format: date-time */
+      from: string;
+      series: {
+        name: string;
+        points: components['schemas']['MetricPoint'][];
+      }[];
+    };
+    /** @description Provenance of one field of a CI (REC-10). */
+    CIFieldProvenance: {
+      field: string;
+      value: unknown;
+      /** @description The source of the shown value; manual_override for an override, asset for asset-canonical fields. */
+      source: string;
+      /** @description REC-03 rank of the source (100 for manual and overrides). */
+      rank: number;
+      /** @enum {string} */
+      reason: 'override' | 'source_rank' | 'asset' | 'record';
+      /** Format: date-time */
+      recorded_at?: string;
+      /** Format: date-time */
+      observed_at?: string;
+      override_author?: string;
+      override_reason?: string;
+      protected?: boolean;
+      discovered_value?: unknown;
+      discovered_source?: string;
+      diverged: boolean;
     };
     MetricPoint: {
       /** Format: date-time */
@@ -8557,22 +9473,6 @@ export interface components {
       severity?: 'critical' | 'warning' | 'info';
       /** @default true */
       enabled: boolean;
-    };
-    GraphQLRequest: {
-      query: string;
-      variables?: {
-        [key: string]: unknown;
-      };
-      operationName?: string;
-    };
-    GraphQLError: {
-      message: string;
-    };
-    GraphQLResponse: {
-      data?: {
-        [key: string]: unknown;
-      };
-      errors?: components['schemas']['GraphQLError'][];
     };
     DiscoveryJobCreateRequest: {
       collector_id: string;
@@ -9582,6 +10482,8 @@ export interface components {
       updated_at: string;
     };
     SearchResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
       data: components['schemas']['SearchHit'][];
       total: number;
       limit: number;
@@ -9684,9 +10586,14 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
-    /** @description The pre-auth budget of the client IP is spent (AUT-10) */
+    /** @description A rate limit is spent: the pre-auth budget of the client IP (AUT-10), the budget of the API key or session, or the organization budget (API-04). */
     TooManyRequests: {
       headers: {
+        /** @description Seconds until the budget is renewed. */
+        'Retry-After'?: number;
+        'X-RateLimit-Limit': components['headers']['X-RateLimit-Limit'];
+        'X-RateLimit-Remaining': components['headers']['X-RateLimit-Remaining'];
+        'X-RateLimit-Reset': components['headers']['X-RateLimit-Reset'];
         [name: string]: unknown;
       };
       content: {
@@ -9733,7 +10640,7 @@ export interface components {
   parameters: {
     /** @description Resource identifier. */
     ResourceID: string;
-    /** @description Maximum number of items to return. */
+    /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
     Limit: number;
     /**
      * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -9741,9 +10648,29 @@ export interface components {
      */
     Offset: number;
     /**
-     * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-     *     Cursors are bound to the sort order they were issued for; sending one
-     *     with a different `sort_by`/`sort_dir` combination yields 400.
+     * @description Field filters of API-02: `filter[field]=value` (exact),
+     *     `filter[field][op]=value` with op `exact`, `gte`, `lte`, `like`
+     *     (`*` as wildcard, otherwise substring) or `in` (comma-separated).
+     *     `filter[attributes.<key>]` filters a JSONB attribute; only searchable
+     *     attributes may be filtered (otherwise 400 with a hint), and they
+     *     compare by their data type. An unknown field yields 422, an unknown
+     *     operator or a malformed value 400.
+     */
+    ListFilter: {
+      [key: string]: unknown;
+    };
+    /** @description Sort field from the list's whitelist; a leading `-` sorts descending. An unknown field yields 422. */
+    ListSort: string;
+    /** @description Comma-separated response fields; `id` is always returned. An unknown field yields 422. */
+    ListFields: string;
+    /** @description Free-text search. */
+    ListQ: string;
+    /**
+     * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+     *     are HMAC-signed by the server (API-02); a forged or altered cursor
+     *     yields 400. Keyset cursors are bound to the sort order they were
+     *     issued for; sending one with a different `sort_by`/`sort_dir`
+     *     combination yields 400.
      */
     Cursor: string;
     /** @description Free-text search term. */
@@ -9759,7 +10686,14 @@ export interface components {
     RoomID: string;
   };
   requestBodies: never;
-  headers: never;
+  headers: {
+    /** @description Requests per minute of the budget closest to exhaustion (API-04). */
+    'X-RateLimit-Limit': number;
+    /** @description Requests left in the current minute of that budget. */
+    'X-RateLimit-Remaining': number;
+    /** @description Seconds until the current window ends. */
+    'X-RateLimit-Reset': number;
+  };
   pathItems: never;
 }
 export type $defs = Record<string, never>;
@@ -9982,8 +10916,16 @@ export interface operations {
   listOperatorAudit: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -10224,6 +11166,28 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
+  getCurrentSessionLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current session claims */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SessionClaims'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
   getCurrentSession: {
     parameters: {
       query?: never;
@@ -10249,7 +11213,7 @@ export interface operations {
   listCIs: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -10257,9 +11221,11 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         /**
-         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-         *     Cursors are bound to the sort order they were issued for; sending one
-         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
         /** @description Free-text search term. */
@@ -10273,6 +11239,22 @@ export interface operations {
         client_id?: components['parameters']['ClientID'];
         site_id?: components['parameters']['SiteID'];
         room_id?: components['parameters']['RoomID'];
+        /**
+         * @description Field filters of API-02: `filter[field]=value` (exact),
+         *     `filter[field][op]=value` with op `exact`, `gte`, `lte`, `like`
+         *     (`*` as wildcard, otherwise substring) or `in` (comma-separated).
+         *     `filter[attributes.<key>]` filters a JSONB attribute; only searchable
+         *     attributes may be filtered (otherwise 400 with a hint), and they
+         *     compare by their data type. An unknown field yields 422, an unknown
+         *     operator or a malformed value 400.
+         */
+        filter?: components['parameters']['ListFilter'];
+        /** @description Sort field from the list's whitelist; a leading `-` sorts descending. An unknown field yields 422. */
+        sort?: components['parameters']['ListSort'];
+        /** @description Comma-separated response fields; `id` is always returned. An unknown field yields 422. */
+        fields?: components['parameters']['ListFields'];
+        /** @description Free-text search. */
+        q?: components['parameters']['ListQ'];
       };
       header?: never;
       path?: never;
@@ -10291,6 +11273,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description An unknown field in filter, sort or fields (API-02). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -10332,7 +11323,10 @@ export interface operations {
   };
   getCI: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Comma-separated related collections to embed (API-05): `relationships`, `contacts`, `asset`. An unknown name yields 422. */
+        include?: string;
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -10353,8 +11347,25 @@ export interface operations {
           'application/json': components['schemas']['CI'];
         };
       };
+      /** @description The CI was merged into another; Location names the survivor (12 months, CI-12). */
+      301: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description Unknown include name. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   deleteCI: {
@@ -10435,10 +11446,272 @@ export interface operations {
       };
     };
   };
+  restoreCI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The restored CI */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CI'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description The CI was deleted longer ago than the retention. */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  changeCIType: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** Format: uuid */
+          ci_type_id: string;
+        };
+      };
+    };
+    responses: {
+      /** @description The type change and its findings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CITypeChangeResult'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description The target type does not exist. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  mergeCI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** Format: uuid */
+          victim_id: string;
+        };
+      };
+    };
+    responses: {
+      /** @description The merge result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CIMergeResult'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description One of the CIs is part of another merge. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Survivor and victim are the same CI. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  unmergeCI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Both CIs after the unmerge */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CIUnmergeResult'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description One of the CIs is locked by another write. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The merge snapshot is older than 30 days. */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  bulkCIs: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /**
+           * @default set_status
+           * @enum {string}
+           */
+          action?: 'set_status';
+          ids: string[];
+          /** @enum {string} */
+          status: 'active' | 'inactive' | 'maintenance' | 'decommissioned' | 'unknown';
+        };
+      };
+    };
+    responses: {
+      /** @description The report per id */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CIBulkResult'];
+        };
+      };
+      /** @description The bulk change runs as a job */
+      202: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            job_id: string;
+            status: string;
+            kind: string;
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description More than 500 ids, an unknown action or status. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  getCIProvenance: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Field provenance, sorted by field */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+            next_cursor?: string;
+            data: components['schemas']['CIFieldProvenance'][];
+            total?: number;
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
   listCIChanges: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -10468,10 +11741,10 @@ export interface operations {
       404: components['responses']['NotFound'];
     };
   };
-  listAuditEntries: {
+  listAuditEntriesLegacy: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -10505,6 +11778,69 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listAuditEntries: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        action?: string;
+        resource_type?: string;
+        resource_id?: string;
+        actor_id?: string;
+        source?: components['schemas']['AuditSource'];
+        request_id?: string;
+        correlation_id?: string;
+        from?: string;
+        to?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated audit log */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AuditEntryListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  verifyAuditChainLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Verification result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AuditVerifyResult'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   verifyAuditChain: {
@@ -10526,6 +11862,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   getRetentionPolicy: {
@@ -10606,8 +11943,16 @@ export interface operations {
   listRelationships: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -10734,8 +12079,16 @@ export interface operations {
   listWebhooks: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -10902,8 +12255,16 @@ export interface operations {
   listWebhookDeliveries: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -10937,8 +12298,16 @@ export interface operations {
   listWebhookDeadLetters: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -11022,8 +12391,16 @@ export interface operations {
   listDiscoveryJobs: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -11132,11 +12509,264 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
+  listExportJobsLegacy: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Export jobs */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ExportJobListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createExportJobLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateExportJobRequest'];
+      };
+    };
+    responses: {
+      /** @description Export job queued */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ExportJob'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listJobs: {
+    parameters: {
+      query?: {
+        kind?: string;
+        status?: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of jobs */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description Unknown status. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  getJob: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The job */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Job'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  cancelJob: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The cancelled job */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Job'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description The job is finished already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  getJobResult: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The result of the job (its shape depends on the kind) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': unknown;
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description The job has no result yet. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  revertJob: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The job was reverted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            job_id: string;
+            reverted: boolean;
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description The kind defines no revert or the job did not succeed. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
   listExportJobs: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -11186,6 +12816,31 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getExportJobLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Export job */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ExportJob'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   getExportJob: {
@@ -11261,7 +12916,7 @@ export interface operations {
   listAssets: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -11269,9 +12924,11 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         /**
-         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-         *     Cursors are bound to the sort order they were issued for; sending one
-         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
         /** @description Free-text search term. */
@@ -11412,7 +13069,7 @@ export interface operations {
   listAssignments: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -11420,9 +13077,11 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         /**
-         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-         *     Cursors are bound to the sort order they were issued for; sending one
-         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
         /** @description Free-text search term. */
@@ -11533,7 +13192,7 @@ export interface operations {
   listDocuments: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -11541,9 +13200,11 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         /**
-         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-         *     Cursors are bound to the sort order they were issued for; sending one
-         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
         /** @description Free-text search term. */
@@ -11682,8 +13343,16 @@ export interface operations {
   listOrders: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -11924,8 +13593,16 @@ export interface operations {
   listMaintenanceWindows: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -12103,8 +13780,16 @@ export interface operations {
   listDisposalRecords: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -12186,8 +13871,16 @@ export interface operations {
   listKeys: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -12407,8 +14100,16 @@ export interface operations {
   listTrainings: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -12628,8 +14329,16 @@ export interface operations {
   listDesks: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -12903,8 +14612,16 @@ export interface operations {
   listAssetLocations: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -12935,8 +14652,16 @@ export interface operations {
   listAgents: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -13176,8 +14901,16 @@ export interface operations {
   listSecurityFindings: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -13309,8 +15042,16 @@ export interface operations {
   listConsumables: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -13448,8 +15189,16 @@ export interface operations {
   listConsumableMovements: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -13509,7 +15258,7 @@ export interface operations {
   listStocktakes: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -13517,9 +15266,11 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         /**
-         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-         *     Cursors are bound to the sort order they were issued for; sending one
-         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
         /** @description Free-text search term. */
@@ -13659,8 +15410,16 @@ export interface operations {
   listStocktakeScans: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -13722,8 +15481,16 @@ export interface operations {
   getStocktakeDifference: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -13793,7 +15560,7 @@ export interface operations {
   listTickets: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
@@ -13801,9 +15568,11 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         /**
-         * @description Opaque keyset cursor taken from `next_cursor` of the previous page.
-         *     Cursors are bound to the sort order they were issued for; sending one
-         *     with a different `sort_by`/`sort_dir` combination yields 400.
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
         /** @description Free-text search term. */
@@ -13946,8 +15715,16 @@ export interface operations {
   listTicketComments: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -14134,8 +15911,16 @@ export interface operations {
   listUsers: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -14329,6 +16114,37 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
+  getCIMetrics: {
+    parameters: {
+      query?: {
+        name?: string;
+        from?: string;
+        to?: string;
+        /** @description Go duration string used for aggregation, for example 5m or 1h. */
+        step?: string;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Metric series of the CI */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CIMetricsResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+    };
+  };
   listAlerts: {
     parameters: {
       query?: never;
@@ -14430,37 +16246,19 @@ export interface operations {
       404: components['responses']['NotFound'];
     };
   };
-  executeGraphQL: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['GraphQLRequest'];
-      };
-    };
-    responses: {
-      /** @description GraphQL response envelope */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['GraphQLResponse'];
-        };
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-    };
-  };
   listReviewItems: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -14571,8 +16369,16 @@ export interface operations {
   listDiscoveryReviewItems: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -14649,10 +16455,11 @@ export interface operations {
       query?: {
         client_id?: string;
         site_id?: string;
+        /** @description CI type id (ci.ci_type_id) to filter by. */
         ci_type?: string;
         /** @description When set, returns a subgraph reachable from this CI. */
         root_ci_id?: string;
-        /** @description Traversal depth from root_ci_id (default 2, max 10). */
+        /** @description Traversal depth from root_ci_id (default 2, max 20). */
         depth?: number;
       };
       header?: never;
@@ -14671,6 +16478,15 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      /** @description Without root_ci_id the filtered topology holds more than 2,000 CIs (IMP-06); narrow it with site_id, client_id or ci_type (a CI type id) or set root_ci_id. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -14700,13 +16516,15 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
-  getCIImpact: {
+  getCIImpactLegacy: {
     parameters: {
       query?: {
-        /** @description Traversal depth; defaults to the maximum for impact analysis. */
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
         depth?: number;
         /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
         rel_type?: string;
+        /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical); physical includes the containment projected from parent_ci_id. An unknown category is 422. */
+        categories?: string;
       };
       header?: never;
       path: {
@@ -14723,18 +16541,103 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': {
-            failed_ci_id?: string;
-            failed_ci?: components['schemas']['TopologyNode'];
-            rel_type?: string;
-            depth?: number;
-            impacted?: components['schemas']['TopologyNode'][];
-            count?: number;
-          };
+          'application/json': components['schemas']['ImpactAnalysis'];
         };
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description Unknown category. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getMultiImpact: {
+    parameters: {
+      query: {
+        /** @description Comma-separated ids of the failing CIs (at most 100). */
+        ci_ids: string;
+        /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical). */
+        categories?: string;
+        /** @description Restrict the analysis to one relationship type. */
+        rel_type?: string;
+        /** @description Maximum hops of the impact paths. */
+        depth?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Impact analysis result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImpactAnalysis'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description Unknown category or more than 100 CIs. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  getCIImpact: {
+    parameters: {
+      query?: {
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
+        depth?: number;
+        /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
+        rel_type?: string;
+        /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical); physical includes the containment projected from parent_ci_id. An unknown category is 422. */
+        categories?: string;
+      };
+      header?: never;
+      path: {
+        /** @description The CI whose outage is simulated. */
+        ci_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Impact analysis result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImpactAnalysis'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description Unknown category. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -14790,8 +16693,16 @@ export interface operations {
   listClients: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -14927,8 +16838,16 @@ export interface operations {
   listSites: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -15066,8 +16985,16 @@ export interface operations {
   listBuildings: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -15205,8 +17132,16 @@ export interface operations {
   listRooms: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -15344,8 +17279,16 @@ export interface operations {
   listRacks: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -15482,11 +17425,117 @@ export interface operations {
       422: components['responses']['UnprocessableEntity'];
     };
   };
+  getRackLayout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The rack layout */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackLayout'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  putRackMount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        ci_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PutRackMountRequest'];
+      };
+    };
+    responses: {
+      /** @description The mount was moved */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMount'];
+        };
+      };
+      /** @description The CI was mounted */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMount'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description The mount collides with another on an overlapping face, exceeds the rack height or mounts a child CI of a composition (RCK-01, RCK-02). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  deleteRackMountByCI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        ci_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The CI was unmounted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
   listRackMounts: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -15533,6 +17582,169 @@ export interface operations {
     responses: {
       /** @description Rack mount created */
       201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMount'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  listMounts: {
+    parameters: {
+      query: {
+        rack_id: string;
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of rack mounts */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMountListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  createMount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateRackMountRequest'];
+      };
+    };
+    responses: {
+      /** @description Rack mount created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMount'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description The mount collides or is not allowed (RCK-01, RCK-02). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  getRackMountLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rack mount details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RackMount'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteRackMountLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rack mount deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateRackMountLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateRackMountRequest'];
+      };
+    };
+    responses: {
+      /** @description Rack mount updated */
+      200: {
         headers: {
           [name: string]: unknown;
         };
@@ -15644,8 +17856,16 @@ export interface operations {
   listCables: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -15779,8 +17999,16 @@ export interface operations {
   listContacts: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -15915,8 +18143,16 @@ export interface operations {
   listCIContacts: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -16001,8 +18237,16 @@ export interface operations {
   listNotifications: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -16136,6 +18380,8 @@ export interface operations {
         };
         content: {
           'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+            next_cursor?: string;
             data: components['schemas']['NotificationChannel'][];
           };
         };
@@ -16249,8 +18495,16 @@ export interface operations {
   listNotificationDeliveries: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
       };
       header?: never;
       path?: never;
@@ -16265,6 +18519,8 @@ export interface operations {
         };
         content: {
           'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+            next_cursor?: string;
             data: components['schemas']['NotificationDelivery'][];
           };
         };
@@ -16275,8 +18531,16 @@ export interface operations {
   listVRFs: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -16420,8 +18684,16 @@ export interface operations {
   listVLANs: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -16558,8 +18830,16 @@ export interface operations {
   listSubnets: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -16695,8 +18975,16 @@ export interface operations {
   listSubnetAddresses: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -16725,11 +19013,85 @@ export interface operations {
       404: components['responses']['NotFound'];
     };
   };
+  listIPAddressesLegacy: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        subnet_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of IP addresses */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAddressListResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createIPAddressLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateIPAddressRequest'];
+      };
+    };
+    responses: {
+      /** @description IP address created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAddress'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
   listIPAddresses: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -16781,6 +19143,84 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  getIPAddressLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description IP address details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAddress'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteIPAddressLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description IP address deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateIPAddressLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateIPAddressRequest'];
+      };
+    };
+    responses: {
+      /** @description IP address updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAddress'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   getIPAddress: {
@@ -16864,8 +19304,16 @@ export interface operations {
   listCIInterfaces: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -17069,8 +19517,16 @@ export interface operations {
   listCIRelationships: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -17102,8 +19558,16 @@ export interface operations {
   listCollectors: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -17357,8 +19821,16 @@ export interface operations {
   listDiscoveryScopes: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -18175,8 +20647,16 @@ export interface operations {
   listTeams: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -18392,8 +20872,16 @@ export interface operations {
   listRoles: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -18446,7 +20934,63 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
-  assignRole: {
+  assignRoleLegacy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AssignRoleRequest'];
+      };
+    };
+    responses: {
+      /** @description Role assigned */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RoleAssignment'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listRoleAssignments: {
+    parameters: {
+      query: {
+        user_id: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Role assignments of the user */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            data: components['schemas']['RoleAssignment'][];
+            /** @description Always absent; the assignments of a user are returned in full. */
+            next_cursor?: string;
+            total?: number;
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  createRoleAssignment: {
     parameters: {
       query?: never;
       header?: never;
@@ -18615,7 +21159,7 @@ export interface operations {
       404: components['responses']['NotFound'];
     };
   };
-  listUserRoles: {
+  listUserRolesLegacy: {
     parameters: {
       query?: never;
       header?: never;
@@ -18743,8 +21287,16 @@ export interface operations {
   listSLAPolicies: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -18802,8 +21354,16 @@ export interface operations {
   listSLABreaches: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -18966,8 +21526,16 @@ export interface operations {
   listFormDefinitions: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -19103,8 +21671,16 @@ export interface operations {
   listFormSubmissions: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -19175,8 +21751,16 @@ export interface operations {
   listAllFormSubmissions: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -19234,8 +21818,16 @@ export interface operations {
   listWorkflows: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -19400,8 +21992,16 @@ export interface operations {
   listWorkflowRuns: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -19486,8 +22086,16 @@ export interface operations {
   listComplianceRules: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -19646,8 +22254,16 @@ export interface operations {
   listComplianceResults: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -21602,8 +24218,16 @@ export interface operations {
         q?: string;
         /** @description Comma-separated entity type filter. */
         type?: string;
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -22118,6 +24742,8 @@ export interface operations {
         };
         content: {
           'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+            next_cursor?: string;
             data: components['schemas']['CIType'][];
           };
         };
@@ -22535,6 +25161,8 @@ export interface operations {
         };
         content: {
           'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+            next_cursor?: string;
             data: components['schemas']['FieldProvenance'][];
           };
         };
@@ -22815,21 +25443,99 @@ export interface operations {
       };
     };
   };
-  getHistoryEntitytypeId: {
+  createStateSnapshot: {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': {
+          /** @enum {string} */
+          entity_type: 'ci' | 'asset';
+          entity_id: string;
+          /** Format: date-time */
+          at?: string;
+        };
+      };
+    };
     responses: {
-      /** @description List the unified change history of an entity */
+      /** @description The state (without the job model) */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': unknown;
+        };
+      };
+      /** @description The snapshot runs as a job */
+      202: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            job_id: string;
+            status: string;
+            kind: string;
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description Unknown entity type. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  getHistoryEntitytypeId: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        entityType: string;
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The change history of an entity, newest first. For a CI it is the unified history of CI-06: its ci_change rows (with the site at the time), entity_change rows and audit entries. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HistoryListResponse'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -23323,8 +26029,16 @@ export interface operations {
   listRelationshipTypes: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return. */
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
         /**
          * @description Number of items to skip before returning data. Ignored when `cursor` is
          *     supplied.
@@ -23562,12 +26276,21 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Manage saved views */
+      /** @description Saved views */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': {
+            data?: components['schemas']['SavedView'][];
+            total?: number;
+            limit?: number;
+            offset?: number;
+            has_more?: boolean;
+            next_cursor?: string;
+          };
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -23585,21 +26308,37 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SavedViewRequest'];
+      };
+    };
     responses: {
-      /** @description Manage saved views */
+      /** @description The created view */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['SavedView'];
+        };
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Invalid filter AST, sort key, column or role id. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };
@@ -23637,12 +26376,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Read, update or delete a saved view */
+      /** @description The view */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['SavedView'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -23651,6 +26392,7 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   deleteSavedViewsId: {
@@ -23662,7 +26404,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Read, update or delete a saved view */
+      /** @description Deleted */
       204: {
         headers: {
           [name: string]: unknown;
@@ -23676,6 +26418,7 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   updateSavedViewsId: {
@@ -23685,14 +26428,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SavedViewRequest'];
+      };
+    };
     responses: {
-      /** @description Read, update or delete a saved view */
+      /** @description The updated view */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['SavedView'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -23700,6 +26449,16 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      404: components['responses']['NotFound'];
+      /** @description Invalid filter AST, sort key, column or role id. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };
@@ -23792,7 +26551,17 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': {
+          /** @enum {string} */
+          entity_kind?: 'ci' | 'asset';
+          where?: components['schemas']['FilterExpr'];
+        } & {
+          [key: string]: unknown;
+        };
+      };
+    };
     responses: {
       /** @description Filtered query results */
       200: {
@@ -23814,6 +26583,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Invalid filter AST. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };

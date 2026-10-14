@@ -22,7 +22,7 @@ import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
 
 // Data types of MET-11: phase 1, then phase 2 (file, json, references).
-const FIELD_TYPES = [
+export const FIELD_TYPES = [
   'text',
   'multiline',
   'integer',
@@ -163,7 +163,7 @@ export function CITypeAdminPage() {
               <div className="flex items-center justify-between">
                 <span className="font-medium text-gray-900 dark:text-gray-100">{label(ty)}</span>
                 <div className="flex gap-1">
-                  {ty.is_system ? <Badge variant="info">system</Badge> : null}
+                  {ty.is_system ? <Badge variant="info">{t('citypes.system')}</Badge> : null}
                   {!ty.is_active ? (
                     <Badge variant="warning">{t('citypes.inactive', 'deaktiviert')}</Badge>
                   ) : null}
@@ -226,7 +226,8 @@ export function CITypeAdminPage() {
               <p className="font-medium">{label(tpl)}</p>
               <p className="text-xs text-gray-500">
                 {tpl.category}
-                {tpl.is_logical ? ' · logisch' : ''} · {(tpl.fields ?? []).length} Felder
+                {tpl.is_logical ? ` · ${t('citypes.logicalShort')}` : ''} ·{' '}
+                {t('citypes.fieldCount', { count: (tpl.fields ?? []).length })}
               </p>
             </button>
           ))}
@@ -305,7 +306,10 @@ export function CITypeAdminPage() {
           />
           <Select
             label={t('citypes.fieldType', 'Typ')}
-            options={FIELD_TYPES.map((ft) => ({ value: ft, label: ft }))}
+            options={FIELD_TYPES.map((ft) => ({
+              value: ft,
+              label: t(`citypes.dataTypes.${ft}`, ft),
+            }))}
             value={fieldDraft.data_type}
             onChange={(e) =>
               setFieldDraft({

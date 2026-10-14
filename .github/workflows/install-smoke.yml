@@ -20,6 +20,8 @@ on:
       - 'tests/install-*.sh'
       - 'tests/backup-*.sh'
       - 'tests/nats-mtls.test.sh'
+      - 'frontend/e2e/onboarding.spec.ts'
+      - 'frontend/e2e/fixtures/**'
       - '.github/workflows/install-smoke.yml'
   pull_request:
     branches: [main]
@@ -32,6 +34,8 @@ on:
       - 'tests/install-*.sh'
       - 'tests/backup-*.sh'
       - 'tests/nats-mtls.test.sh'
+      - 'frontend/e2e/onboarding.spec.ts'
+      - 'frontend/e2e/fixtures/**'
       - '.github/workflows/install-smoke.yml'
   # Manual runs (e.g. the G1 evidence for GATE-03) are not path filtered.
   workflow_dispatch:
@@ -157,6 +161,44 @@ jobs:
             exit 1
           }
 
+      # WP-200 (INS-04, TST-03, ABN-01 d): the onboarding suite against the
+      # installation just made: self-signup with verification e-mail, login,
+      # dashboard, collector enrollment with the simulated fleet, review,
+      # impact, export, and the install error images. One native platform
+      # suffices; the installation itself is covered by every platform.
+      - uses: actions/setup-go@v5
+        if: matrix.platform == 'ubuntu-24.04'
+        with:
+          go-version: "1.26.9"
+          cache-dependency-path: collector/go.sum
+
+      - uses: actions/setup-node@v4
+        if: matrix.platform == 'ubuntu-24.04'
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Prepare the onboarding suite (signup configuration, mail catcher, collector)
+        if: matrix.platform == 'ubuntu-24.04'
+        run: ./frontend/e2e/fixtures/setup-onboarding.sh deploy/docker-compose .env
+
+      - name: Run the onboarding E2E suite
+        if: matrix.platform == 'ubuntu-24.04'
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test -c e2e/fixtures/playwright.install.config.ts
+
+      - name: Upload the onboarding report
+        if: failure() && matrix.platform == 'ubuntu-24.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: onboarding-e2e
+          path: frontend/test-results/
+          retention-days: 7
+
       - name: Show logs on failure
         if: failure()
         run: |
@@ -169,6 +211,8 @@ jobs:
           docker compose --env-file .env logs --tail 80 keycloak || true
           echo "=== frontend logs ==="
           docker compose --env-file .env logs --tail 80 frontend || true
+          echo "=== mailpit logs ==="
+          docker ps -aq --filter name=mailpit | xargs -r docker logs --tail 40 || true
 
       - name: Cleanup
         if: always()

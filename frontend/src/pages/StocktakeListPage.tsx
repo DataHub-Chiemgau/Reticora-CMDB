@@ -8,21 +8,9 @@ import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 
-const statusOptions = [
-  { value: '', label: 'Alle' },
-  { value: 'planned', label: 'Geplant' },
-  { value: 'in_progress', label: 'Laufend' },
-  { value: 'completed', label: 'Abgeschlossen' },
-  { value: 'cancelled', label: 'Abgebrochen' },
-];
-
-const scopeOptions = [
-  { value: 'full', label: 'Vollständig' },
-  { value: 'partial', label: 'Teilweise' },
-  { value: 'site', label: 'Standort' },
-  { value: 'room', label: 'Raum' },
-  { value: 'rack', label: 'Rack' },
-];
+/** The stocktake statuses and scopes; their labels come from the catalog. */
+export const STOCKTAKE_STATUSES = ['planned', 'in_progress', 'completed', 'cancelled'] as const;
+export const STOCKTAKE_SCOPES = ['full', 'partial', 'site', 'room', 'rack'] as const;
 
 function statusVariant(status: string) {
   switch (status) {
@@ -82,7 +70,13 @@ export function StocktakeListPage() {
           label={t('ci.status', 'Status')}
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          options={statusOptions}
+          options={[
+            { value: '', label: t('stocktake.allStatuses') },
+            ...STOCKTAKE_STATUSES.map((value) => ({
+              value,
+              label: t(`stocktake.statuses.${value}`),
+            })),
+          ]}
         />
       </div>
 
@@ -107,9 +101,11 @@ export function StocktakeListPage() {
                   <tr key={st.id} className="text-sm text-gray-700 dark:text-gray-300">
                     <td className="py-2 font-medium">{st.title}</td>
                     <td className="py-2">
-                      <Badge variant={statusVariant(st.status)}>{st.status}</Badge>
+                      <Badge variant={statusVariant(st.status)}>
+                        {t(`stocktake.statuses.${st.status}`, st.status)}
+                      </Badge>
                     </td>
-                    <td className="py-2">{st.scope}</td>
+                    <td className="py-2">{t(`stocktake.scopes.${st.scope}`, st.scope)}</td>
                     <td className="py-2">
                       {st.total_scanned}/{st.total_expected}
                     </td>
@@ -165,7 +161,10 @@ export function StocktakeListPage() {
             label={t('stocktake.scope', 'Umfang')}
             value={form.scope}
             onChange={(e) => setForm({ ...form, scope: e.target.value })}
-            options={scopeOptions}
+            options={STOCKTAKE_SCOPES.map((value) => ({
+              value,
+              label: t(`stocktake.scopes.${value}`),
+            }))}
           />
           <Input
             label={t('stocktake.dueDate', 'Fällig am')}

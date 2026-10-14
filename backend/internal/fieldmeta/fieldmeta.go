@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
@@ -67,6 +68,23 @@ var ValidFieldTypes = map[string]bool{
 	TypeContractRef: true,
 	// Legacy aliases
 	"string": true, "number": true,
+}
+
+// FilterKind maps a field type onto the kind of a list filter (API-02):
+// numbers compare numerically, dates and datetimes as instants, booleans
+// and uuids by value, everything else as text.
+func FilterKind(dataType string) string {
+	switch dataType {
+	case TypeInteger, TypeDecimal, "number":
+		return api.KindNumber
+	case TypeDate, TypeDatetime:
+		return api.KindTime
+	case TypeBoolean:
+		return api.KindBool
+	case TypeUUID:
+		return api.KindUUID
+	}
+	return api.KindText
 }
 
 // Phase1Types are the data types of MET-11 phase 1, exactly.

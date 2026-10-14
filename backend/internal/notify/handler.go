@@ -202,7 +202,7 @@ func (h *Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
 	for i := range channels {
 		out[i] = redact(&channels[i])
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"data": out})
+	api.WriteJSON(w, http.StatusOK, api.CompleteList(out))
 }
 
 // channelRequest is the body of create and update.
@@ -328,11 +328,20 @@ func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit := api.ParsePagination(r).Limit
-	items, err := h.c.Deliveries.List(r.Context(), t.OrganizationID, limit)
+	page := api.ParsePagination(r)
+	if page.CursorError != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", page.CursorError.Error())
+		return
+	}
+	// One row more than the page tells whether another page follows.
+	items, err := h.c.Deliveries.List(r.Context(), t.OrganizationID, page.Limit+1, page.Offset)
 	if err != nil {
 		writeError(w, err)
 		return
+	}
+	hasMore := len(items) > page.Limit
+	if hasMore {
+		items = items[:page.Limit]
 	}
 	if items == nil {
 		items = []QueuedDelivery{}
@@ -342,5 +351,5 @@ func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
 			items[i].Recipient.Email = strings.TrimPrefix(items[i].RecipientKey, "mail:")
 		}
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[QueuedDelivery]{Data: items, Limit: page.Limit, Offset: page.Offset, HasMore: hasMore})
 }

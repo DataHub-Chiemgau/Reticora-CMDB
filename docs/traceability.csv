@@ -359,3 +359,69 @@ REL-04;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-16
 REL-05;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-160
 IMP-09;[B];D;backend/internal/discovery/power_test.go;WP-161
 SIM-02;[B];D;collector/plugins/simulate/simulate_test.go;WP-162
+API-03;[B];C;backend/internal/api/problem_test.go;WP-163
+API-02;[B];C;backend/internal/api/cursor_test.go;WP-164
+API-02;[B];C;backend/internal/api/listquery_test.go;WP-165
+API-04;[B];C;backend/internal/middleware/ratelimit_test.go;WP-166
+API-01;[B];C;backend/internal/middleware/openapi_test.go;WP-167
+API-05;[B];C;backend/internal/server/authz_test.go;WP-168
+API-05;[B];C;backend/internal/ci/handler_test.go;WP-169
+CI-05;[B];C;backend/internal/ci/handler_test.go;WP-169
+CI-05;[B];C;backend/internal/ci/delete_integration_test.go;WP-170
+LCY-01;[B];C;backend/internal/ci/delete_integration_test.go;WP-170
+CI-06;[B];C;backend/internal/history/history_integration_test.go;WP-171
+AUD-03;[B];C;backend/internal/history/history_integration_test.go;WP-171
+CI-11;[B];C;backend/internal/ci/typechange_test.go;WP-172
+CI-12;[B];C;backend/internal/ci/merge_integration_test.go;WP-173
+CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-174
+RCK-02;[B];C;backend/internal/rack/handler_test.go;WP-175
+IMP-01;[B];C;backend/internal/topology/impact_test.go;WP-176
+IMP-03;[B];C;backend/internal/topology/impact_test.go;WP-176
+IMP-02;[B];C;backend/internal/topology/impact_test.go;WP-177
+NFR-02;[B];C;backend/internal/topology/impact_test.go;WP-177
+CI-09;[B];C;backend/internal/ci/assetfree_integration_test.go;WP-178
+IMP-04;[B];C;backend/internal/topology/redundancy_test.go;WP-179
+IMP-05;[B];C;backend/internal/topology/multi_integration_test.go;WP-180
+IMP-06;[B];C;backend/internal/topology/multi_integration_test.go;WP-180
+API-08;[B];C;backend/internal/ci/bulk_test.go;WP-181
+BLK-01;[B];C;backend/internal/ci/bulk_test.go;WP-181
+API-09;[B];C;backend/internal/jobs/handler_test.go;WP-182
+JOB-03;[B];C;backend/internal/jobs/handler_test.go;WP-182
+JOB-04;[B];C;backend/internal/reviews/merge_job_integration_test.go;WP-183
+GQL-01;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-184
+SEC-10;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-184
+GQL-02;[B];C;backend/internal/graphqlbff/resolver_test.go;WP-185
+SRC-01;[B];C;backend/internal/search/search_test.go;WP-186
+SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/filter_test.go;WP-187
+VIE-01;[B];C;backend/internal/savedview/savedview_integration_test.go;WP-188
+EXP-01;[B], DATEV [P2];C;backend/internal/export/export_test.go;WP-189
+MON-02;[B];C;backend/internal/monitoring/monitoring_test.go;WP-190
+UI-01;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-02;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-03;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-04;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-05;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-07;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-08;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-09;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-10;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+GLO-10;[B];C;frontend/src/i18n/catalog.test.ts;WP-194
+UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-194
+UI-06;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-195
+UI-16;[B];C;frontend/src/pages/ReviewInboxPage.test.tsx;WP-196
+UI-16;[B];C;frontend/src/components/NotificationCenter.test.tsx;WP-197
+REC-10;[B];C;backend/internal/ci/provenance_integration_test.go;WP-198
+UI-17;[B];C;frontend/src/pages/OnboardingPage.test.tsx;WP-199
+INS-04;[Q];C;frontend/e2e/onboarding.spec.ts;WP-200
+TST-03;[B], Teilumfang [P2];C;frontend/e2e/onboarding.spec.ts;WP-200
+ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-200
+TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-201
+TST-01;[B], Teilumfang [P2];C;backend/internal/discovery/tst01_integration_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/reviews/tst01_integration_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/events/tst01_integration_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/rack/tst01_integration_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/discovery/topology_integration_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/rules/rules_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/api/cursor_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/platform/crypto/crypto_test.go;WP-202
+TST-01;[B], Teilumfang [P2];C;backend/internal/export/export_test.go;WP-202

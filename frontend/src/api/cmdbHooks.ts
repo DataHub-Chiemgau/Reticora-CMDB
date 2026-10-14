@@ -264,6 +264,14 @@ export function useFieldValues(ciId: string | undefined) {
   });
 }
 
+export function useFieldProvenance(ciId: string | undefined) {
+  return useQuery({
+    queryKey: ['ci-fields', ciId, 'provenance'],
+    queryFn: () => overrideApi.provenance(ciId!),
+    enabled: !!ciId,
+  });
+}
+
 export function useSetOverride(ciId: string) {
   const qc = useQueryClient();
   return useMutation({

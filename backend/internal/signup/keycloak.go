@@ -57,11 +57,28 @@ type keycloakUser struct {
 	Username        string               `json:"username"`
 	Email           string               `json:"email"`
 	FirstName       string               `json:"firstName,omitempty"`
+	LastName        string               `json:"lastName,omitempty"`
 	Enabled         bool                 `json:"enabled"`
 	EmailVerified   bool                 `json:"emailVerified"`
 	Attributes      map[string][]string  `json:"attributes"`
 	Credentials     []keycloakCredential `json:"credentials,omitempty"`
 	RequiredActions []string             `json:"requiredActions,omitempty"`
+}
+
+// splitName splits a display name into first and last name: the realm's
+// user profile requires both, and an account without them is sent to the
+// profile form after its first login instead of into the application. A
+// single word stays the first name.
+func splitName(display string) (first, last string) {
+	fields := strings.Fields(display)
+	switch len(fields) {
+	case 0:
+		return "", ""
+	case 1:
+		return fields[0], ""
+	default:
+		return strings.Join(fields[:len(fields)-1], " "), fields[len(fields)-1]
+	}
 }
 
 // inviteActions are the actions the invited first org_admin completes.
@@ -70,8 +87,9 @@ var inviteActions = []string{"UPDATE_PASSWORD", "VERIFY_EMAIL"}
 // CreateAccount creates the user with verified address, the organization_id
 // attribute the login reads, and the password as permanent credential.
 func (k *KeycloakAccounts) CreateAccount(ctx context.Context, a Account) (string, error) {
+	first, last := splitName(a.DisplayName)
 	return k.createUser(ctx, &keycloakUser{
-		Username: a.Email, Email: a.Email, FirstName: a.DisplayName, Enabled: true, EmailVerified: true,
+		Username: a.Email, Email: a.Email, FirstName: first, LastName: last, Enabled: true, EmailVerified: true,
 		Attributes:  map[string][]string{"organization_id": {a.OrganizationID}},
 		Credentials: []keycloakCredential{{Type: "password", Value: a.Password}},
 	})
@@ -92,8 +110,9 @@ func (k *KeycloakAccounts) CreateInvitedAccount(ctx context.Context, email, disp
 // the link to set one and verify the address (execute-actions-email; the
 // realm's SMTP settings apply). Used by the operator path (TLC-02).
 func (k *KeycloakAccounts) InviteAccount(ctx context.Context, a Account) (string, error) {
+	first, last := splitName(a.DisplayName)
 	id, err := k.createUser(ctx, &keycloakUser{
-		Username: a.Email, Email: a.Email, FirstName: a.DisplayName, Enabled: true,
+		Username: a.Email, Email: a.Email, FirstName: first, LastName: last, Enabled: true,
 		Attributes:      map[string][]string{"organization_id": {a.OrganizationID}},
 		RequiredActions: inviteActions,
 	})

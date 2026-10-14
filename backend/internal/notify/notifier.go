@@ -138,7 +138,7 @@ type DeliveryStore interface {
 	// error, provider id, sent time).
 	Finish(ctx context.Context, d *QueuedDelivery) error
 	// List returns the deliveries of an organization, newest first.
-	List(ctx context.Context, orgID string, limit int) ([]QueuedDelivery, error)
+	List(ctx context.Context, orgID string, limit, offset int) ([]QueuedDelivery, error)
 }
 
 // PreferenceStore reads and writes user preferences.
@@ -386,14 +386,20 @@ func (s *MemoryStore) Finish(_ context.Context, d *QueuedDelivery) error {
 }
 
 // List implements DeliveryStore.
-func (s *MemoryStore) List(_ context.Context, orgID string, limit int) ([]QueuedDelivery, error) {
+func (s *MemoryStore) List(_ context.Context, orgID string, limit, offset int) ([]QueuedDelivery, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []QueuedDelivery
+	skipped := 0
 	for i := len(s.rows) - 1; i >= 0 && len(out) < limit; i-- {
-		if s.rows[i].OrganizationID == orgID {
-			out = append(out, *s.rows[i])
+		if s.rows[i].OrganizationID != orgID {
+			continue
 		}
+		if skipped < offset {
+			skipped++
+			continue
+		}
+		out = append(out, *s.rows[i])
 	}
 	return out, nil
 }

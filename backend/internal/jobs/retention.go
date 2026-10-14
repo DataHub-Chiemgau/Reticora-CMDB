@@ -108,8 +108,9 @@ func (r *Retention) RunHistory(ctx context.Context) error {
 }
 
 // RunSoftDeleted removes CIs soft-deleted longer than the soft-delete
-// period. A CI still referenced (asset, assignment, ticket ...) stays and
-// is counted as kept.
+// period (default 90 days) with HardDeleteCI: their IP addresses go, the
+// references of assets, assignments, tickets and scans are released. A CI
+// that still cannot be deleted stays and is counted as kept.
 func (r *Retention) RunSoftDeleted(ctx context.Context) error {
 	cutoff := r.now().Add(-r.policy.SoftDeleted)
 	return r.eachOrganization(ctx, RetentionSoftDeleted, true, func(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
@@ -126,7 +127,7 @@ func (r *Retention) RunSoftDeleted(ctx context.Context) error {
 			if _, err = tx.Exec(ctx, `SAVEPOINT retention_ci`); err != nil {
 				return deleted, err
 			}
-			if _, err = tx.Exec(ctx, `DELETE FROM ci WHERE id = $1`, id); err != nil {
+			if err = HardDeleteCI(ctx, tx, orgID, id); err != nil {
 				kept++
 				if _, rerr := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT retention_ci`); rerr != nil {
 					return deleted, rerr

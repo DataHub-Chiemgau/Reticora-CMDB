@@ -1,9 +1,15 @@
 package topology
 
 import (
+	"context"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -30,9 +36,12 @@ type BlastRadius struct {
 	AffectedServices []Node   `json:"affected_services,omitempty"`
 	ClientIDs        []string `json:"client_ids,omitempty"`
 	SiteIDs          []string `json:"site_ids,omitempty"`
-	// SinglePointsOfFailure lists CIs in the affected set whose only
-	// redundancy path is the failed node (articulation approximation).
+	// SinglePointsOfFailure lists the affected CIs that depend on the failed
+	// CI directly without an alternative provider (IMP-04).
 	SinglePointsOfFailure []Node `json:"single_points_of_failure,omitempty"`
+	// ProtectedByRedundancy lists the CIs that depend on the failed CI over
+	// a redundant type but keep a working provider (IMP-04).
+	ProtectedByRedundancy []Node `json:"protected_by_redundancy,omitempty"`
 }
 
 // GetDependencies handles GET /api/v1/cis/{id}/dependencies?direction=up|down
@@ -98,7 +107,8 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	impacted := computeImpact(id, graph.Edges, "")
+	rules := h.impactRules(r.Context(), t.OrganizationID)
+	impacted := computeImpact([]string{id}, graph.Edges, impactQuery{depth: maxDepth}, rules)
 	result := BlastRadius{CIID: id}
 	services := map[string]struct{}{}
 	clients := map[string]struct{}{}
@@ -130,7 +140,7 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 			result.AffectedServices = append(result.AffectedServices, node)
 		}
 	}
-	result.SinglePointsOfFailure = findSPOFs(id, graph.Edges, result.AffectedCIs)
+	result.SinglePointsOfFailure, result.ProtectedByRedundancy = redundancyFindings(id, graph, impacted, rules)
 	api.WriteJSON(w, http.StatusOK, result)
 }
 
@@ -163,36 +173,336 @@ func walkDirected(rootID string, edges []Edge, upstream bool) map[string]struct{
 	return reachable
 }
 
-// findSPOFs approximates single points of failure within the affected set: a
-// node is a SPOF when removing the failed CI leaves it with no remaining
-// incoming redundancy edge of the same dependency class.
-func findSPOFs(failedID string, edges []Edge, affected []Node) []Node {
-	incoming := map[string]map[string]int{} // target -> relType -> count from non-failed sources
-	for _, edge := range edges {
-		if edge.SourceCIID == failedID {
-			continue
-		}
-		if _, ok := incoming[edge.TargetCIID]; !ok {
-			incoming[edge.TargetCIID] = map[string]int{}
-		}
-		incoming[edge.TargetCIID][edge.RelType]++
+// ImpactNode is an impacted CI with its shortest path from the failed CI
+// (IMP-02); Heuristic marks a CI reached only over an undirected network
+// edge (connected_to), a second-class path (IMP-03).
+type ImpactNode struct {
+	Node
+	Heuristic bool       `json:"heuristic"`
+	Hops      int        `json:"hops"`
+	Path      []PathStep `json:"path"`
+}
+
+// WithRelationshipTypes makes the impact follow the impact_direction of the
+// organization's relationship types, custom types included (IMP-01).
+func (h *Handler) WithRelationshipTypes(types relationshiptype.Repository) *Handler {
+	h.types = types
+	return h
+}
+
+// maxRelationshipTypes bounds the types read for one impact analysis.
+const maxRelationshipTypes = 500
+
+// impactRule is the impact semantics of a relationship type.
+type impactRule struct {
+	direction string
+	category  string
+	// redundant: a dependent fails only when all its providers of the type
+	// failed (IMP-04).
+	redundant bool
+}
+
+// impactRules maps each relationship type key onto its impact direction
+// and category: the built-in catalogue (CH27, E-18), overlaid by the
+// organization's types.
+func (h *Handler) impactRules(ctx context.Context, orgID string) map[string]impactRule {
+	rules := map[string]impactRule{}
+	catalogue := relationshiptype.Catalogue()
+	for i := range catalogue {
+		rules[catalogue[i].Key] = impactRule{catalogue[i].ImpactDirection, catalogue[i].Category, catalogue[i].Redundant}
 	}
-	var spofs []Node
-	for _, node := range affected {
-		if node.ID == failedID {
-			continue
+	if h.types == nil {
+		return rules
+	}
+	types, _, err := h.types.List(ctx, orgID, api.PaginationParams{Limit: maxRelationshipTypes})
+	if err != nil {
+		slog.WarnContext(ctx, "relationship types unavailable; impact uses the built-in catalogue", "error", err)
+		return rules
+	}
+	for i := range types {
+		rules[types[i].Key] = impactRule{types[i].ImpactDirection, types[i].Category, types[i].Redundant}
+	}
+	return rules
+}
+
+// ruleOf returns the rule of a type; a type without a rule counts as a
+// logical source_depends_on_target, the reading of a directed dependency.
+func ruleOf(rules map[string]impactRule, relType string) impactRule {
+	if rule, ok := rules[relType]; ok {
+		return rule
+	}
+	return impactRule{direction: relationshiptype.ImpactSourceDependsOnTarget, category: "logical"}
+}
+
+// impactStep returns the CI a failure of from reaches over edge, if any.
+// heuristic is true for an undirected edge.
+func impactStep(edge *Edge, from string, rule impactRule) (to string, heuristic, ok bool) {
+	switch rule.direction {
+	case relationshiptype.ImpactSourceDependsOnTarget:
+		if edge.TargetCIID == from {
+			return edge.SourceCIID, false, true
 		}
-		// Direct dependents of the failed node with no surviving incoming
-		// edge of the same type have no redundancy.
-		for _, edge := range edges {
-			if edge.SourceCIID != failedID || edge.TargetCIID != node.ID {
+	case relationshiptype.ImpactTargetDependsOnSource:
+		if edge.SourceCIID == from {
+			return edge.TargetCIID, false, true
+		}
+	case relationshiptype.ImpactUndirected:
+		switch from {
+		case edge.SourceCIID:
+			return edge.TargetCIID, true, true
+		case edge.TargetCIID:
+			return edge.SourceCIID, true, true
+		}
+	}
+	return "", false, false
+}
+
+// PathStep is one hop of an impact path: the failure passes from FromCIID
+// to ToCIID over a relationship of RelType (IMP-02).
+type PathStep struct {
+	FromCIID  string `json:"from_ci_id"`
+	ToCIID    string `json:"to_ci_id"`
+	RelType   string `json:"rel_type"`
+	Category  string `json:"category"`
+	Heuristic bool   `json:"heuristic,omitempty"`
+}
+
+// impactHit is how the failure reaches one CI: the shortest path, and
+// whether only an undirected network edge reaches it.
+type impactHit struct {
+	heuristic bool
+	path      []PathStep
+}
+
+// impactQuery narrows an impact analysis: one relationship type, a set of
+// categories (empty: all) and the maximum number of hops.
+type impactQuery struct {
+	relType    string
+	categories map[string]bool
+	depth      int
+}
+
+// computeImpact returns the CIs a failure of the failed CIs reaches along
+// the impact directions (IMP-01) with the shortest path to each (IMP-02); a
+// CI reached only over an undirected network edge is heuristic (IMP-03) and
+// then carries its shortest path over all edges. The redundancy postfilter
+// (IMP-04) keeps a CI that still has a working provider of a redundant
+// type. Breadth-first over edges in a fixed order, so the paths are
+// deterministic.
+func computeImpact(failedIDs []string, edges []Edge, q impactQuery, rules map[string]impactRule) map[string]impactHit {
+	failed := map[string]bool{}
+	for _, id := range failedIDs {
+		failed[id] = true
+	}
+	walk := func(withHeuristic bool) map[string][]PathStep {
+		follow := func(e *Edge, rule impactRule) bool {
+			if q.relType != "" && e.RelType != q.relType {
+				return false
+			}
+			return len(q.categories) == 0 || q.categories[rule.category]
+		}
+		down := downSet(failed, edges, rules, func(e *Edge, rule impactRule, heuristic bool) bool {
+			return follow(e, rule) && (withHeuristic || !heuristic)
+		})
+		paths := map[string][]PathStep{}
+		queue := make([]string, 0, len(failedIDs))
+		for _, id := range failedIDs {
+			if _, ok := paths[id]; !ok {
+				paths[id] = []PathStep{}
+				queue = append(queue, id)
+			}
+		}
+		for len(queue) > 0 {
+			current := queue[0]
+			queue = queue[1:]
+			if q.depth > 0 && len(paths[current]) >= q.depth {
 				continue
 			}
-			if incoming[node.ID][edge.RelType] == 0 {
-				spofs = append(spofs, node)
-				break
+			for i := range edges {
+				rule := ruleOf(rules, edges[i].RelType)
+				if !follow(&edges[i], rule) {
+					continue
+				}
+				to, heuristic, ok := impactStep(&edges[i], current, rule)
+				if !ok || (heuristic && !withHeuristic) || !down[to] {
+					continue
+				}
+				if _, seen := paths[to]; seen {
+					continue
+				}
+				prev := paths[current]
+				path := make([]PathStep, len(prev), len(prev)+1)
+				copy(path, prev)
+				paths[to] = append(path, PathStep{FromCIID: current, ToCIID: to, RelType: edges[i].RelType,
+					Category: rule.category, Heuristic: heuristic})
+				queue = append(queue, to)
 			}
 		}
+		for id := range failed {
+			delete(paths, id)
+		}
+		return paths
 	}
-	return spofs
+	certain := walk(false)
+	impacted := map[string]impactHit{}
+	for id, path := range walk(true) {
+		if sure, ok := certain[id]; ok {
+			impacted[id] = impactHit{path: sure}
+			continue
+		}
+		impacted[id] = impactHit{heuristic: true, path: path}
+	}
+	return impacted
+}
+
+// parseCategories reads categories=power,network (IMP-02); an unknown
+// category is a field error (422).
+func parseCategories(raw string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, c := range strings.Split(raw, ",") {
+		if c = strings.TrimSpace(c); c == "" {
+			continue
+		}
+		known := false
+		for _, k := range relationshiptype.Categories {
+			known = known || k == c
+		}
+		if !known {
+			return nil, &api.FieldError{Field: "categories", Message: "unknown category " + c + "; known: " +
+				strings.Join(relationshiptype.Categories, ", "), Status: http.StatusUnprocessableEntity}
+		}
+		out[c] = true
+	}
+	return out, nil
+}
+
+// MaxImpactCIs bounds the failed CIs of one analysis.
+const MaxImpactCIs = 100
+
+// ImpactSummary sums up an impact analysis (IMP-05).
+type ImpactSummary struct {
+	Failed     int            `json:"failed"`
+	Impacted   int            `json:"impacted"`
+	Certain    int            `json:"certain"`
+	Heuristic  int            `json:"heuristic"`
+	ByCategory map[string]int `json:"by_category"`
+}
+
+// GetMultiImpact handles GET /api/v1/impact?ci_ids=a,b&categories=…: the
+// joint impact of several CIs failing at once (IMP-05).
+func (h *Handler) GetMultiImpact(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	var ids []string
+	seen := map[string]bool{}
+	for _, id := range strings.Split(r.URL.Query().Get("ci_ids"), ",") {
+		if id = strings.TrimSpace(id); id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	switch {
+	case len(ids) == 0:
+		api.WriteFieldError(w, &api.FieldError{Field: "ci_ids", Message: "is required (comma-separated CI ids)"})
+		return
+	case len(ids) > MaxImpactCIs:
+		api.WriteFieldError(w, &api.FieldError{Field: "ci_ids", Message: fmt.Sprintf("at most %d CIs per analysis", MaxImpactCIs),
+			Status: http.StatusUnprocessableEntity})
+		return
+	}
+	h.writeImpact(w, r, t.OrganizationID, ids, false)
+}
+
+// writeImpact analyses the failure of ids and writes the answer: the
+// failed CIs, the impacted CIs with their paths and a summary; single adds
+// the fields of the single-CI short form.
+func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID string, ids []string, single bool) {
+	ctx := r.Context()
+	q := r.URL.Query()
+	depth := parseDepth(q.Get("depth"))
+	if q.Get("depth") == "" {
+		depth = maxDepth
+	}
+	categories, err := parseCategories(q.Get("categories"))
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	failed := make([]Node, 0, len(ids))
+	nodes := map[string]Node{}
+	edges := map[string]Edge{}
+	for _, id := range ids {
+		root, gerr := h.ciRepo.GetByID(ctx, orgID, id)
+		if gerr != nil {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found: "+id)
+			return
+		}
+		failed = append(failed, nodeFromItem(*root))
+		graph, berr := h.buildFromRoot(ctx, orgID, id, depth, "")
+		if berr != nil {
+			api.WriteRepoError(w, berr)
+			return
+		}
+		for _, n := range graph.Nodes {
+			nodes[n.ID] = n
+		}
+		for _, e := range graph.Edges {
+			edges[e.ID] = e
+		}
+	}
+	edgeList := make([]Edge, 0, len(edges))
+	for _, e := range edges {
+		edgeList = append(edgeList, e)
+	}
+	sort.Slice(edgeList, func(i, j int) bool { return edgeList[i].ID < edgeList[j].ID })
+
+	relType := q.Get("rel_type")
+	impacted := computeImpact(ids, edgeList, impactQuery{relType: relType, categories: categories, depth: depth},
+		h.impactRules(ctx, orgID))
+	impactedNodes := make([]ImpactNode, 0, len(impacted))
+	summary := ImpactSummary{Failed: len(failed), ByCategory: map[string]int{}}
+	for id, hit := range impacted {
+		node, ok := nodes[id]
+		if !ok {
+			continue
+		}
+		impactedNodes = append(impactedNodes, ImpactNode{Node: node, Heuristic: hit.heuristic, Hops: len(hit.path), Path: hit.path})
+		if hit.heuristic {
+			summary.Heuristic++
+		} else {
+			summary.Certain++
+		}
+		if len(hit.path) > 0 {
+			summary.ByCategory[hit.path[len(hit.path)-1].Category]++
+		}
+	}
+	summary.Impacted = len(impactedNodes)
+	// Certain impacts first, then by name: a stable answer.
+	sort.Slice(impactedNodes, func(i, j int) bool {
+		a, b := &impactedNodes[i], &impactedNodes[j]
+		if a.Heuristic != b.Heuristic {
+			return !a.Heuristic
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return a.ID < b.ID
+	})
+	body := map[string]any{
+		"failed_cis": failed,
+		"rel_type":   relType,
+		"categories": sortedKeys(categories),
+		"depth":      depth,
+		"impacted":   impactedNodes,
+		"count":      len(impactedNodes),
+		"summary":    summary,
+	}
+	if single {
+		body["failed_ci_id"] = ids[0]
+		body["failed_ci"] = failed[0]
+	}
+	api.WriteJSON(w, http.StatusOK, body)
 }

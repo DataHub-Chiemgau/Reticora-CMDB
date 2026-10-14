@@ -6,6 +6,7 @@ import {
   discoveryScopeApi,
   scopeSuggestionApi,
   topologyApi,
+  siteApi,
   rackApi,
   assetApi,
   assignmentApi,
@@ -208,6 +209,22 @@ export function useCIImpact(id: string, relType?: string) {
   });
 }
 
+export function useImpactMany(ids: string[], relType?: string) {
+  return useQuery({
+    queryKey: ['topology-impact-many', ids, relType],
+    queryFn: () => topologyApi.impactMany(ids, { rel_type: relType || undefined }),
+    enabled: ids.length > 0,
+    retry: false,
+  });
+}
+
+export function useSites(clientId?: string) {
+  return useQuery({
+    queryKey: ['sites', 'options', clientId],
+    queryFn: () => siteApi.list({ limit: 200, ...(clientId ? { client_id: clientId } : {}) }),
+  });
+}
+
 export function useRackList(params: RackListParams = {}) {
   return useQuery({
     queryKey: ['racks', params],
@@ -215,10 +232,10 @@ export function useRackList(params: RackListParams = {}) {
   });
 }
 
-export function useRackMounts(rackId: string) {
+export function useRackLayout(rackId: string) {
   return useQuery({
-    queryKey: ['rack-mounts', rackId],
-    queryFn: () => rackApi.listMounts(rackId, { limit: 100 }),
+    queryKey: ['rack-layout', rackId],
+    queryFn: () => rackApi.layout(rackId),
     enabled: !!rackId,
   });
 }
@@ -783,6 +800,15 @@ export function useMetricPoints(params: MetricQueryParams) {
     queryKey: ['monitoring-metrics', params],
     queryFn: () => monitoringApi.queryMetrics(params),
     enabled: Boolean(params.name),
+  });
+}
+
+export function useCIMetrics(ciId: string | undefined, enabled = false) {
+  return useQuery({
+    queryKey: ['ci-metrics', ciId],
+    queryFn: () => monitoringApi.ciMetrics(ciId!, { step: '15m' }),
+    enabled: !!ciId && enabled,
+    retry: false,
   });
 }
 

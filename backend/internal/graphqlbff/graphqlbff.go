@@ -1,51 +1,45 @@
-// Package graphqlbff provides a lightweight GraphQL Backend-for-Frontend layer.
+// Package graphqlbff is the GraphQL Backend-for-Frontend of the web UI
+// (GQL-01): a gqlgen server under /bff/graphql that only answers session
+// principals, is not part of the public REST contract and enforces the
+// limits of SEC-10 (depth 10, a complexity budget, a 10 s deadline).
 package graphqlbff
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
-	"unicode"
+	"time"
+
+	"github.com/99designs/gqlgen/graphql"
+	"github.com/99designs/gqlgen/graphql/handler"
+	"github.com/99designs/gqlgen/graphql/handler/extension"
+	"github.com/99designs/gqlgen/graphql/handler/transport"
+	"github.com/go-chi/chi/v5"
+	"github.com/vektah/gqlparser/v2/ast"
+	"github.com/vektah/gqlparser/v2/gqlerror"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff/generated"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
-	"github.com/go-chi/chi/v5"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology"
 )
 
-// QueryResolver resolves a top-level GraphQL query field.
-type QueryResolver func(ctx context.Context, args map[string]any) (any, error)
+// Path is the route of the BFF (GQL-01).
+const Path = "/bff/graphql"
 
-// Field is a registered top-level query field. Permission is the read
-// permission the caller must hold ("" for fields about the caller itself);
-// Feature is the entitlement the organization needs ("" for the core).
-type Field struct {
-	Resolve    QueryResolver
-	Permission identity.Permission
-	Feature    string
-}
-
-// Schema holds registered top-level query resolvers.
-type Schema struct {
-	queries map[string]Field
-}
-
-// NewSchema creates an empty schema.
-func NewSchema() *Schema {
-	return &Schema{queries: make(map[string]Field)}
-}
-
-// RegisterQuery registers a top-level query resolver with its read
-// permission and entitlement (GQL-04).
-func (s *Schema) RegisterQuery(name string, field Field) {
-	s.queries[name] = field
-}
+// Limits of SEC-10 (E-16, provisional until the SEC-10 text): the depth of
+// a query, its complexity budget and the deadline of one request.
+const (
+	MaxDepth      = 10
+	MaxComplexity = 5000
+	Deadline      = 10 * time.Second
+)
 
 // FeatureCMDBCore is the entitlement of the core CMDB fields (always active
 // for an organization, ENT-02).
@@ -56,814 +50,160 @@ type EntitlementChecker interface {
 	IsEnabled(ctx context.Context, orgID, featureKey string) bool
 }
 
-// Handler serves the GraphQL BFF endpoint. The route itself only requires an
-// authenticated principal; every resolver checks its own read permission and
-// entitlement and reads through the tenant-scoped repositories (RLS with the
+// Sources are the read models of the queries beyond CIs and relationships
+// (GQL-02); a missing source answers its query with an error.
+type Sources struct {
+	Topology TopologySource
+	Racks    RackSource
+	Search   SearchSource
+	Reviews  ReviewSource
+	Jobs     JobSource
+}
+
+// TopologySource builds topology graphs (topology.Handler).
+type TopologySource interface {
+	Graph(ctx context.Context, orgID, rootCIID string, depth int, filter *ci.FilterParams) (topology.Graph, error)
+}
+
+// RackSource reads racks and their mounts (rack.Repository).
+type RackSource interface {
+	GetRack(ctx context.Context, orgID, id string) (*rack.Rack, error)
+	ListMounts(ctx context.Context, orgID, rackID string, page api.PaginationParams) ([]rack.RackMount, int, error)
+}
+
+// SearchSource runs full-text queries (search.Backend).
+type SearchSource interface {
+	Query(ctx context.Context, q search.Query) (search.Result, error)
+}
+
+// ReviewSource lists review items (reviews.Repository).
+type ReviewSource interface {
+	ListReviewItems(ctx context.Context, orgID string, filter reviews.Filter, page api.PaginationParams) ([]reviews.Item, int, error)
+}
+
+// JobSource lists jobs (jobs.Service).
+type JobSource interface {
+	List(ctx context.Context, orgID string, filter jobs.Filter, page api.PaginationParams) ([]jobs.Job, int, error)
+}
+
+// Handler serves the GraphQL BFF. The route requires an authenticated
+// session; every resolver checks its own read permission and entitlement
+// and reads through the tenant-scoped repositories (RLS with the
 // principal's client, site and team scope).
 type Handler struct {
-	ciRepo       ci.Repository
-	relRepo      relationship.Repository
-	schema       *Schema
-	entitlements EntitlementChecker
+	resolver *Resolver
+	server   *handler.Server
+	deadline time.Duration
 }
 
-// User represents the current authenticated user in GraphQL responses.
-type User struct {
-	ID             string `json:"id"`
-	OrganizationID string `json:"organizationId"`
-	ClientID       string `json:"clientId,omitempty"`
-}
-
-// CIConnection is a minimal Relay-style connection for CIs.
-type CIConnection struct {
-	Edges      []CIEdge  `json:"edges"`
-	PageInfo   PageInfo  `json:"pageInfo"`
-	TotalCount int       `json:"totalCount"`
-	Nodes      []ci.Item `json:"nodes"`
-}
-
-// CIEdge represents a CI result edge.
-type CIEdge struct {
-	Cursor string  `json:"cursor"`
-	Node   ci.Item `json:"node"`
-}
-
-// PageInfo describes pagination state.
-type PageInfo struct {
-	HasNextPage bool   `json:"hasNextPage"`
-	EndCursor   string `json:"endCursor,omitempty"`
-}
-
-type graphQLRequest struct {
-	Query         string         `json:"query"`
-	Variables     map[string]any `json:"variables"`
-	OperationName string         `json:"operationName,omitempty"`
-}
-
-type graphQLResponse struct {
-	Data   map[string]any `json:"data,omitempty"`
-	Errors []graphQLError `json:"errors,omitempty"`
-}
-
-type graphQLError struct {
-	Message string `json:"message"`
-}
-
-type parsedOperation struct {
-	Type      string
-	Name      string
-	Field     string
-	Args      map[string]any
-	Selection []selection
-}
-
-// selection is one requested field; Children is its nested selection set.
-type selection struct {
-	Name     string
-	Alias    string
-	Children []selection
-}
-
-var defaultHandler *Handler
-
-// NewHandler creates a GraphQL BFF handler with CI and relationship resolvers.
+// NewHandler creates the BFF with the CI and relationship resolvers.
 func NewHandler(ciRepo ci.Repository, relRepo relationship.Repository) *Handler {
-	h := &Handler{
-		ciRepo:  ciRepo,
-		relRepo: relRepo,
-		schema:  NewSchema(),
+	r := &Resolver{ciRepo: ciRepo, relRepo: relRepo}
+	cfg := generated.Config{Resolvers: r}
+	// A page of CIs costs its size times the selection (SEC-10).
+	cfg.Complexity.Query.Cis = func(child int, first *int, _ *string, _ *generated.CIFilter) int {
+		return child * pageSize(first, defaultPage, maxPage)
 	}
-	h.registerQueries()
-	defaultHandler = h
+	cfg.Complexity.Query.Relationships = func(child int, _ string, first *int) int {
+		return child * pageSize(first, maxRelationships, maxRelationships)
+	}
+	cfg.Complexity.Query.Topology = func(child int, _ *string, _ *int, _ *string, _ *string) int { return child * maxPage }
+	cfg.Complexity.Query.RackLayout = func(child int, _ string) int { return child * maxPage }
+	cfg.Complexity.Query.SearchEverything = func(child int, _ string, _ []string, first *int) int {
+		return child * pageSize(first, defaultPage, maxPage)
+	}
+	cfg.Complexity.Query.ReviewInbox = func(child int, _ *string, _ *string, first *int) int {
+		return child * pageSize(first, defaultPage, maxPage)
+	}
+	cfg.Complexity.Query.Jobs = func(child int, _ *string, _ *string, first *int) int {
+		return child * pageSize(first, defaultPage, maxPage)
+	}
+	srv := handler.New(generated.NewExecutableSchema(cfg))
+	// POST only: no GET queries (no CSRF-able reads), no subscriptions.
+	srv.AddTransport(transport.POST{})
+	srv.Use(extension.FixedComplexityLimit(MaxComplexity))
+	srv.Use(depthLimit{max: MaxDepth})
+	// Every request carries a session (ServeHTTP), so introspection is
+	// never anonymous (SEC-10).
+	srv.Use(extension.Introspection{})
+	return &Handler{resolver: r, server: srv, deadline: Deadline}
+}
+
+// WithSources attaches the read models of topology, rack layout, search,
+// review inbox and jobs (GQL-02).
+func (h *Handler) WithSources(sources *Sources) *Handler {
+	h.resolver.sources = *sources
 	return h
 }
 
 // WithEntitlements attaches the entitlement check of feature-gated fields.
 // Without a checker, gated fields are refused.
 func (h *Handler) WithEntitlements(entitlements EntitlementChecker) *Handler {
-	h.entitlements = entitlements
+	h.resolver.entitlements = entitlements
 	return h
 }
 
-// RegisterRoutes registers the GraphQL BFF endpoint using the most recently created handler.
-func RegisterRoutes(r chi.Router) {
-	if defaultHandler == nil {
-		r.Post("/api/v1/graphql", func(w http.ResponseWriter, r *http.Request) {
-			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "graphql handler is not initialized")
-		})
-		return
-	}
-	defaultHandler.RegisterRoutes(r)
-}
-
-// RegisterRoutes registers POST /api/v1/graphql on the provided router.
+// RegisterRoutes registers POST /bff/graphql.
 func (h *Handler) RegisterRoutes(r chi.Router) {
-	r.Post("/api/v1/graphql", h.ServeHTTP)
+	r.Post(Path, h.ServeHTTP)
 }
 
-// ServeHTTP handles GraphQL requests.
+// ServeHTTP answers session principals only (GQL-01): API keys and
+// service tokens use the REST API. The request runs under the deadline of
+// SEC-10.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		api.WriteError(w, http.StatusMethodNotAllowed, "Method Not Allowed", "only POST is supported")
-		return
-	}
-
-	var req graphQLRequest
-	if err := api.ReadJSON(r, &req); err != nil {
-		writeGraphQLErrors(w, http.StatusBadRequest, err)
-		return
-	}
-	if strings.TrimSpace(req.Query) == "" {
-		writeGraphQLErrors(w, http.StatusBadRequest, fmt.Errorf("query is required"))
-		return
-	}
-
-	resp, status := h.execute(r.Context(), req)
-	api.WriteJSON(w, status, resp)
-}
-
-func (h *Handler) registerQueries() {
-	// Every data field names its feature and passes the entitlement check
-	// (ENT-05); CIs and relationships belong to cmdb_core.
-	h.schema.RegisterQuery("cis", Field{Resolve: h.resolveCIs, Permission: identity.PermCIRead, Feature: FeatureCMDBCore})
-	h.schema.RegisterQuery("ci", Field{Resolve: h.resolveCI, Permission: identity.PermCIRead, Feature: FeatureCMDBCore})
-	h.schema.RegisterQuery("relationships", Field{Resolve: h.resolveRelationships, Permission: identity.PermRelationshipRead,
-		Feature: FeatureCMDBCore})
-	h.schema.RegisterQuery("currentUser", Field{Resolve: h.resolveCurrentUser})
-}
-
-func (h *Handler) execute(ctx context.Context, req graphQLRequest) (graphQLResponse, int) {
-	op, err := parseOperation(req.Query, req.Variables)
-	if err != nil {
-		return graphQLResponse{Errors: []graphQLError{{Message: err.Error()}}}, http.StatusBadRequest
-	}
-	if op.Type != "query" {
-		return graphQLResponse{Errors: []graphQLError{{Message: fmt.Sprintf("%s operations are not supported", op.Type)}}}, http.StatusBadRequest
-	}
-
-	field, ok := h.schema.queries[op.Field]
+	principal, ok := identity.PrincipalFromContext(r.Context())
 	if !ok {
-		return graphQLResponse{Errors: []graphQLError{{Message: fmt.Sprintf("unsupported query field %q", op.Field)}}}, http.StatusBadRequest
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "the BFF requires a session")
+		return
 	}
-	if len(op.Selection) == 0 {
-		return graphQLResponse{Errors: []graphQLError{{Message: fmt.Sprintf("field %q requires a selection set", op.Field)}}}, http.StatusBadRequest
+	if principal.Type != identity.PrincipalTypeUser {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "the BFF accepts session tokens only; use the REST API with API keys")
+		return
 	}
-	if status, authErr := h.authorize(ctx, &field); authErr != nil {
-		return graphQLResponse{Data: map[string]any{op.Field: nil}, Errors: []graphQLError{{Message: authErr.Error()}}}, status
-	}
-
-	result, err := field.Resolve(ctx, op.Args)
-	if err != nil {
-		return graphQLResponse{
-			Data:   map[string]any{op.Field: nil},
-			Errors: []graphQLError{{Message: err.Error()}},
-		}, http.StatusOK
-	}
-
-	projected, err := project(result, op.Selection)
-	if err != nil {
-		return graphQLResponse{Data: map[string]any{op.Field: nil}, Errors: []graphQLError{{Message: err.Error()}}}, http.StatusOK
-	}
-	return graphQLResponse{Data: map[string]any{op.Field: projected}}, http.StatusOK
+	ctx, cancel := context.WithTimeout(r.Context(), h.deadline)
+	defer cancel()
+	// One CI dataloader per request (GQL-02).
+	ctx = withLoader(ctx, h.resolver.ciRepo, tenant.FromContext(ctx).OrganizationID)
+	h.server.ServeHTTP(w, r.WithContext(ctx))
 }
 
-// authorize checks the field's read permission against the authenticated
-// principal and the organization's entitlement. It fails closed.
-func (h *Handler) authorize(ctx context.Context, field *Field) (int, error) {
-	principal, ok := identity.PrincipalFromContext(ctx)
-	if !ok {
-		return http.StatusUnauthorized, fmt.Errorf("missing authenticated principal")
-	}
-	if field.Permission != "" && !principal.Has(field.Permission) {
-		return http.StatusForbidden, fmt.Errorf("missing required permission: %s", field.Permission)
-	}
-	if field.Feature != "" {
-		orgID := tenant.FromContext(ctx).OrganizationID
-		if h.entitlements == nil || orgID == "" || !h.entitlements.IsEnabled(ctx, orgID, field.Feature) {
-			return http.StatusForbidden, fmt.Errorf("feature %q is not included in the plan", field.Feature)
-		}
-	}
-	return 0, nil
-}
+// depthLimit refuses operations nested deeper than max fields (SEC-10).
+type depthLimit struct{ max int }
 
-// project returns only the selected fields of result (GQL-04): the result is
-// converted to its JSON form and every object is reduced to the requested
-// keys, recursively; lists are projected element by element. Unknown fields
-// are omitted.
-func project(result any, sel []selection) (any, error) {
-	raw, err := json.Marshal(result)
-	if err != nil {
-		return nil, fmt.Errorf("encode result: %w", err)
-	}
-	var generic any
-	if err := json.Unmarshal(raw, &generic); err != nil {
-		return nil, fmt.Errorf("decode result: %w", err)
-	}
-	return projectValue(generic, sel), nil
-}
+var _ interface {
+	graphql.HandlerExtension
+	graphql.OperationContextMutator
+} = depthLimit{}
 
-func projectValue(value any, sel []selection) any {
-	if len(sel) == 0 {
-		return value
-	}
-	switch v := value.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(sel))
-		for _, s := range sel {
-			key := s.Name
-			if s.Alias != "" {
-				key = s.Alias
-			}
-			if field, ok := v[s.Name]; ok {
-				out[key] = projectValue(field, s.Children)
-			}
-		}
-		return out
-	case []any:
-		out := make([]any, len(v))
-		for i, item := range v {
-			out[i] = projectValue(item, sel)
-		}
-		return out
-	default:
-		return value
-	}
-}
+func (depthLimit) ExtensionName() string                     { return "DepthLimit" }
+func (depthLimit) Validate(_ graphql.ExecutableSchema) error { return nil }
 
-func (h *Handler) resolveCIs(ctx context.Context, args map[string]any) (any, error) {
-	t := tenant.FromContext(ctx)
-	if t.OrganizationID == "" {
-		return nil, fmt.Errorf("missing tenant context")
-	}
-
-	filter := ci.FilterParams{}
-	if rawFilter, ok := args["filter"].(map[string]any); ok {
-		filter = ciFilterFromMap(rawFilter)
-	}
-
-	first := 50
-	if v, ok := args["first"]; ok {
-		parsed, err := toInt(v)
-		if err != nil {
-			return nil, fmt.Errorf("invalid first argument: %w", err)
-		}
-		if parsed > 0 {
-			first = parsed
-		}
-	}
-	if first > 100 {
-		first = 100
-	}
-
-	offset := 0
-	if v, ok := args["after"]; ok {
-		offset = decodeCursor(asString(v))
-	}
-
-	items, total, err := h.ciRepo.List(ctx, t.OrganizationID, filter, api.PaginationParams{Limit: first, Offset: offset})
-	if err != nil {
-		return nil, err
-	}
-
-	edges := make([]CIEdge, 0, len(items))
-	nodes := make([]ci.Item, 0, len(items))
-	for idx, item := range items {
-		cursor := encodeCursor(offset + idx + 1)
-		edges = append(edges, CIEdge{Cursor: cursor, Node: item})
-		nodes = append(nodes, item)
-	}
-
-	endCursor := ""
-	if len(edges) > 0 {
-		endCursor = edges[len(edges)-1].Cursor
-	}
-
-	return CIConnection{
-		Edges:      edges,
-		Nodes:      nodes,
-		TotalCount: total,
-		PageInfo: PageInfo{
-			HasNextPage: offset+len(items) < total,
-			EndCursor:   endCursor,
-		},
-	}, nil
-}
-
-func (h *Handler) resolveCI(ctx context.Context, args map[string]any) (any, error) {
-	t := tenant.FromContext(ctx)
-	if t.OrganizationID == "" {
-		return nil, fmt.Errorf("missing tenant context")
-	}
-
-	id := strings.TrimSpace(asString(args["id"]))
-	if id == "" {
-		return nil, fmt.Errorf("id is required")
-	}
-
-	return h.ciRepo.GetByID(ctx, t.OrganizationID, id)
-}
-
-func (h *Handler) resolveRelationships(ctx context.Context, args map[string]any) (any, error) {
-	t := tenant.FromContext(ctx)
-	if t.OrganizationID == "" {
-		return nil, fmt.Errorf("missing tenant context")
-	}
-
-	ciID := strings.TrimSpace(asString(firstNonNil(args["ciId"], args["ci_id"])))
-	if ciID == "" {
-		return nil, fmt.Errorf("ciId is required")
-	}
-
-	rels, _, err := h.relRepo.List(ctx, t.OrganizationID, ciID, api.PaginationParams{Limit: 100, Offset: 0})
-	if err != nil {
-		return nil, err
-	}
-	return rels, nil
-}
-
-func (h *Handler) resolveCurrentUser(ctx context.Context, _ map[string]any) (any, error) {
-	t := tenant.FromContext(ctx)
-	if t.OrganizationID == "" {
-		return nil, fmt.Errorf("missing tenant context")
-	}
-
-	return User{
-		ID:             t.UserID,
-		OrganizationID: t.OrganizationID,
-		ClientID:       t.ClientID,
-	}, nil
-}
-
-func writeGraphQLErrors(w http.ResponseWriter, status int, errs ...error) {
-	resp := graphQLResponse{Errors: make([]graphQLError, 0, len(errs))}
-	for _, err := range errs {
-		if err == nil {
-			continue
-		}
-		resp.Errors = append(resp.Errors, graphQLError{Message: err.Error()})
-	}
-	api.WriteJSON(w, status, resp)
-}
-
-func ciFilterFromMap(values map[string]any) ci.FilterParams {
-	return ci.FilterParams{
-		Status:   asString(firstNonNil(values["status"], values["Status"])),
-		TypeID:   asString(firstNonNil(values["ciTypeId"], values["ci_type_id"], values["typeId"], values["type_id"])),
-		ClientID: asString(firstNonNil(values["clientId"], values["client_id"])),
-		SiteID:   asString(firstNonNil(values["siteId"], values["site_id"])),
-		Search:   asString(firstNonNil(values["search"], values["q"])),
-		SortBy:   asString(firstNonNil(values["sortBy"], values["sort_by"])),
-		SortDir:  asString(firstNonNil(values["sortDir"], values["sort_dir"])),
-	}
-}
-
-func encodeCursor(offset int) string {
-	return base64.StdEncoding.EncodeToString([]byte(strconv.Itoa(offset)))
-}
-
-func decodeCursor(cursor string) int {
-	if cursor == "" {
-		return 0
-	}
-	if decoded, err := base64.StdEncoding.DecodeString(cursor); err == nil {
-		if n, err := strconv.Atoi(string(decoded)); err == nil && n >= 0 {
-			return n
-		}
-	}
-	if n, err := strconv.Atoi(cursor); err == nil && n >= 0 {
-		return n
-	}
-	return 0
-}
-
-func parseOperation(query string, variables map[string]any) (*parsedOperation, error) {
-	p := &parser{src: query, variables: variables}
-	op := &parsedOperation{Type: "query"}
-
-	p.skipIgnored()
-	if p.peek() != '{' {
-		name := p.readName()
-		if name == "" {
-			return nil, fmt.Errorf("invalid graphql query")
-		}
-		if name == "query" || name == "mutation" {
-			op.Type = name
-			p.skipIgnored()
-			if p.peek() != '{' && p.peek() != '(' {
-				op.Name = p.readName()
-				p.skipIgnored()
-			}
-			if p.peek() == '(' {
-				if err := p.skipBalanced('(', ')'); err != nil {
-					return nil, err
-				}
-			}
-		} else {
-			return nil, fmt.Errorf("unsupported operation type %q", name)
-		}
-	}
-
-	p.skipIgnored()
-	if p.peek() != '{' {
-		return nil, fmt.Errorf("graphql query must contain a selection set")
-	}
-	p.pos++
-	p.skipIgnored()
-
-	op.Field = p.readName()
-	if op.Field == "" {
-		return nil, fmt.Errorf("missing top-level query field")
-	}
-
-	p.skipIgnored()
-	args := map[string]any{}
-	if p.peek() == '(' {
-		parsedArgs, err := p.parseArguments()
-		if err != nil {
-			return nil, err
-		}
-		args = parsedArgs
-	}
-	op.Args = args
-
-	p.skipIgnored()
-	if p.peek() == '{' {
-		sel, err := p.parseSelectionSet()
-		if err != nil {
-			return nil, err
-		}
-		op.Selection = sel
-	}
-
-	return op, nil
-}
-
-// parseSelectionSet reads "{ a b: c d(arg: 1) { e } }". Arguments of nested
-// fields are skipped; fragments are not supported.
-func (p *parser) parseSelectionSet() ([]selection, error) {
-	if p.peek() != '{' {
-		return nil, fmt.Errorf("expected selection set")
-	}
-	p.pos++
-	var out []selection
-	for {
-		p.skipIgnored()
-		switch p.peek() {
-		case '}':
-			p.pos++
-			return out, nil
-		case 0:
-			return nil, fmt.Errorf("unterminated selection set")
-		case '.':
-			return nil, fmt.Errorf("fragments are not supported")
-		}
-		name := p.readName()
-		if name == "" {
-			return nil, fmt.Errorf("invalid selection near position %d", p.pos)
-		}
-		s := selection{Name: name}
-		p.skipIgnored()
-		if p.peek() == ':' {
-			p.pos++
-			p.skipIgnored()
-			s.Alias = name
-			if s.Name = p.readName(); s.Name == "" {
-				return nil, fmt.Errorf("invalid aliased selection %q", name)
-			}
-			p.skipIgnored()
-		}
-		if p.peek() == '(' {
-			if err := p.skipBalanced('(', ')'); err != nil {
-				return nil, err
-			}
-			p.skipIgnored()
-		}
-		if p.peek() == '{' {
-			children, err := p.parseSelectionSet()
-			if err != nil {
-				return nil, err
-			}
-			s.Children = children
-		}
-		out = append(out, s)
-	}
-}
-
-type parser struct {
-	src       string
-	pos       int
-	variables map[string]any
-}
-
-func (p *parser) parseArguments() (map[string]any, error) {
-	args := make(map[string]any)
-	if p.peek() != '(' {
-		return args, nil
-	}
-	p.pos++
-
-	for {
-		p.skipIgnored()
-		if p.peek() == ')' {
-			p.pos++
-			return args, nil
-		}
-
-		name := p.readName()
-		if name == "" {
-			return nil, fmt.Errorf("invalid argument list")
-		}
-		p.skipIgnored()
-		if p.peek() != ':' {
-			return nil, fmt.Errorf("expected ':' after argument %q", name)
-		}
-		p.pos++
-		p.skipIgnored()
-
-		value, err := p.parseValue()
-		if err != nil {
-			return nil, err
-		}
-		args[name] = value
-
-		p.skipIgnored()
-		if p.peek() == ',' {
-			p.pos++
-		}
-	}
-}
-
-func (p *parser) parseValue() (any, error) {
-	switch ch := p.peek(); {
-	case ch == '"':
-		return p.parseString()
-	case ch == '$':
-		p.pos++
-		name := p.readName()
-		if name == "" {
-			return nil, fmt.Errorf("invalid variable reference")
-		}
-		if p.variables == nil {
-			return nil, fmt.Errorf("variable %q not provided", name)
-		}
-		value, ok := p.variables[name]
-		if !ok {
-			return nil, fmt.Errorf("variable %q not provided", name)
-		}
-		return value, nil
-	case ch == '{':
-		return p.parseObject()
-	case ch == '[':
-		return p.parseArray()
-	case ch == '-' || unicode.IsDigit(ch):
-		return p.parseNumber()
-	case isNameStart(ch):
-		name := p.readName()
-		switch name {
-		case "true":
-			return true, nil
-		case "false":
-			return false, nil
-		case "null":
-			return nil, nil
-		default:
-			return name, nil
-		}
-	default:
-		return nil, fmt.Errorf("unsupported value near position %d", p.pos)
-	}
-}
-
-func (p *parser) parseObject() (map[string]any, error) {
-	obj := make(map[string]any)
-	if p.peek() != '{' {
-		return nil, fmt.Errorf("expected object")
-	}
-	p.pos++
-
-	for {
-		p.skipIgnored()
-		if p.peek() == '}' {
-			p.pos++
-			return obj, nil
-		}
-
-		key := p.readName()
-		if key == "" {
-			return nil, fmt.Errorf("invalid object field")
-		}
-		p.skipIgnored()
-		if p.peek() != ':' {
-			return nil, fmt.Errorf("expected ':' after object field %q", key)
-		}
-		p.pos++
-		p.skipIgnored()
-
-		value, err := p.parseValue()
-		if err != nil {
-			return nil, err
-		}
-		obj[key] = value
-
-		p.skipIgnored()
-		if p.peek() == ',' {
-			p.pos++
-		}
-	}
-}
-
-func (p *parser) parseArray() ([]any, error) {
-	if p.peek() != '[' {
-		return nil, fmt.Errorf("expected array")
-	}
-	p.pos++
-
-	var values []any
-	for {
-		p.skipIgnored()
-		if p.peek() == ']' {
-			p.pos++
-			return values, nil
-		}
-
-		value, err := p.parseValue()
-		if err != nil {
-			return nil, err
-		}
-		values = append(values, value)
-
-		p.skipIgnored()
-		if p.peek() == ',' {
-			p.pos++
-		}
-	}
-}
-
-func (p *parser) parseString() (string, error) {
-	if p.peek() != '"' {
-		return "", fmt.Errorf("expected string")
-	}
-	start := p.pos
-	p.pos++
-	escaped := false
-	for p.pos < len(p.src) {
-		ch := p.src[p.pos]
-		if ch == '\\' && !escaped {
-			escaped = true
-			p.pos++
-			continue
-		}
-		if ch == '"' && !escaped {
-			p.pos++
-			var out string
-			if err := json.Unmarshal([]byte(p.src[start:p.pos]), &out); err != nil {
-				return "", fmt.Errorf("invalid string literal: %w", err)
-			}
-			return out, nil
-		}
-		escaped = false
-		p.pos++
-	}
-	return "", fmt.Errorf("unterminated string literal")
-}
-
-func (p *parser) parseNumber() (any, error) {
-	start := p.pos
-	if p.peek() == '-' {
-		p.pos++
-	}
-	for unicode.IsDigit(p.peek()) {
-		p.pos++
-	}
-	if p.peek() == '.' {
-		p.pos++
-		for unicode.IsDigit(p.peek()) {
-			p.pos++
-		}
-		return strconv.ParseFloat(p.src[start:p.pos], 64)
-	}
-	return strconv.Atoi(p.src[start:p.pos])
-}
-
-func (p *parser) skipBalanced(open, close rune) error {
-	if p.peek() != open {
-		return nil
-	}
-	depth := 0
-	for p.pos < len(p.src) {
-		ch := rune(p.src[p.pos])
-		if ch == '"' {
-			if _, err := p.parseString(); err != nil {
-				return err
-			}
-			continue
-		}
-		if ch == open {
-			depth++
-		}
-		if ch == close {
-			depth--
-			p.pos++
-			if depth == 0 {
-				return nil
-			}
-			continue
-		}
-		p.pos++
-	}
-	return fmt.Errorf("unterminated %q block", string(open))
-}
-
-func (p *parser) skipIgnored() {
-	for p.pos < len(p.src) {
-		switch p.src[p.pos] {
-		case ' ', '\t', '\n', '\r', ',':
-			p.pos++
-		case '#':
-			for p.pos < len(p.src) && p.src[p.pos] != '\n' {
-				p.pos++
-			}
-		default:
-			return
-		}
-	}
-}
-
-func (p *parser) readName() string {
-	if !isNameStart(p.peek()) {
-		return ""
-	}
-	start := p.pos
-	p.pos++
-	for isNamePart(p.peek()) {
-		p.pos++
-	}
-	return p.src[start:p.pos]
-}
-
-func (p *parser) peek() rune {
-	if p.pos >= len(p.src) {
-		return 0
-	}
-	return rune(p.src[p.pos])
-}
-
-func isNameStart(ch rune) bool {
-	return ch == '_' || unicode.IsLetter(ch)
-}
-
-func isNamePart(ch rune) bool {
-	return isNameStart(ch) || unicode.IsDigit(ch)
-}
-
-func toInt(value any) (int, error) {
-	switch v := value.(type) {
-	case int:
-		return v, nil
-	case int32:
-		return int(v), nil
-	case int64:
-		return int(v), nil
-	case float64:
-		return int(v), nil
-	case json.Number:
-		parsed, err := v.Int64()
-		return int(parsed), err
-	case string:
-		return strconv.Atoi(strings.TrimSpace(v))
-	default:
-		return 0, fmt.Errorf("unsupported int value %T", value)
-	}
-}
-
-func asString(value any) string {
-	switch v := value.(type) {
-	case nil:
-		return ""
-	case string:
-		return v
-	case fmt.Stringer:
-		return v.String()
-	case json.Number:
-		return v.String()
-	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64)
-	case int:
-		return strconv.Itoa(v)
-	case int64:
-		return strconv.FormatInt(v, 10)
-	case bool:
-		return strconv.FormatBool(v)
-	default:
-		return fmt.Sprintf("%v", value)
-	}
-}
-
-func firstNonNil(values ...any) any {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
+func (d depthLimit) MutateOperationContext(_ context.Context, oc *graphql.OperationContext) *gqlerror.Error {
+	if depth := selectionDepth(oc.Operation.SelectionSet, oc.Doc.Fragments); depth > d.max {
+		return gqlerror.Errorf("the query is %d levels deep, more than the limit of %d", depth, d.max)
 	}
 	return nil
+}
+
+// selectionDepth is the deepest field nesting of a selection set; inline
+// fragments and fragment spreads add no level. Validation has rejected
+// fragment cycles before.
+func selectionDepth(set ast.SelectionSet, fragments ast.FragmentDefinitionList) int {
+	deepest := 0
+	for _, sel := range set {
+		var depth int
+		switch s := sel.(type) {
+		case *ast.Field:
+			depth = 1 + selectionDepth(s.SelectionSet, fragments)
+		case *ast.InlineFragment:
+			depth = selectionDepth(s.SelectionSet, fragments)
+		case *ast.FragmentSpread:
+			if def := fragments.ForName(s.Name); def != nil {
+				depth = selectionDepth(def.SelectionSet, fragments)
+			}
+		}
+		deepest = max(deepest, depth)
+	}
+	return deepest
 }

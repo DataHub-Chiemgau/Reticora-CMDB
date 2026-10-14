@@ -23,7 +23,6 @@ func ValidationError(w http.ResponseWriter, r *http.Request, detail string) {
 		Status:   http.StatusBadRequest,
 		Detail:   detail,
 		Instance: r.URL.Path,
-		TraceID:  r.Header.Get("X-Request-ID"),
 	})
 }
 
@@ -35,7 +34,6 @@ func Unauthorized(w http.ResponseWriter, r *http.Request, detail string) {
 		Status:   http.StatusUnauthorized,
 		Detail:   detail,
 		Instance: r.URL.Path,
-		TraceID:  r.Header.Get("X-Request-ID"),
 	})
 }
 
@@ -47,7 +45,6 @@ func Forbidden(w http.ResponseWriter, r *http.Request, detail string) {
 		Status:   http.StatusForbidden,
 		Detail:   detail,
 		Instance: r.URL.Path,
-		TraceID:  r.Header.Get("X-Request-ID"),
 	})
 }
 
@@ -59,7 +56,6 @@ func EntitlementLimit(w http.ResponseWriter, r *http.Request, detail string) {
 		Status:   http.StatusForbidden,
 		Detail:   detail,
 		Instance: r.URL.Path,
-		TraceID:  r.Header.Get("X-Request-ID"),
 	})
 }
 
@@ -71,7 +67,6 @@ func NotFound(w http.ResponseWriter, r *http.Request, detail string) {
 		Status:   http.StatusNotFound,
 		Detail:   detail,
 		Instance: r.URL.Path,
-		TraceID:  r.Header.Get("X-Request-ID"),
 	})
 }
 
@@ -83,7 +78,6 @@ func Conflict(w http.ResponseWriter, r *http.Request, detail string) {
 		Status:   http.StatusConflict,
 		Detail:   detail,
 		Instance: r.URL.Path,
-		TraceID:  r.Header.Get("X-Request-ID"),
 	})
 }
 
@@ -95,7 +89,6 @@ func IdempotencyMismatch(w http.ResponseWriter, r *http.Request, detail string) 
 		Status:   http.StatusConflict,
 		Detail:   detail,
 		Instance: r.URL.Path,
-		TraceID:  r.Header.Get("X-Request-ID"),
 	})
 }
 
@@ -107,7 +100,6 @@ func RateLimited(w http.ResponseWriter, r *http.Request, detail string) {
 		Status:   http.StatusTooManyRequests,
 		Detail:   detail,
 		Instance: r.URL.Path,
-		TraceID:  r.Header.Get("X-Request-ID"),
 	})
 }
 
@@ -119,6 +111,5 @@ func Internal(w http.ResponseWriter, r *http.Request, detail string) {
 		Status:   http.StatusInternalServerError,
 		Detail:   detail,
 		Instance: r.URL.Path,
-		TraceID:  r.Header.Get("X-Request-ID"),
 	})
 }

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
@@ -321,8 +322,35 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// unlicensed_ci and adopted once the limit is raised (ENT-03, CH21).
 	// Export and discovery jobs register in the generic job model (JOB-01).
 	var jobTracker jobs.Tracker
+	var bffJobs graphqlbff.JobSource
+	var historyJobs history.SnapshotJobs
+	// The generic job API (API-09) serves in both profiles; without a
+	// database it has an empty in-memory job table.
+	jobAPI := jobs.NewAPIHandler(jobs.NewService(jobs.NewMemoryRepository()))
 	if repos.Jobs != nil {
-		jobTracker = jobs.NewService(repos.Jobs)
+		jobService := jobs.NewService(repos.Jobs)
+		jobTracker = jobService
+		bffJobs = jobService
+		jobs.SetBacklogSource(repos.Jobs)
+		jobAPI = jobs.NewAPIHandler(jobService).
+			WithKind(ci.BulkJobKind, identity.PermCIWrite, nil).
+			WithKind("export", identity.PermExportRun, nil).
+			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
+			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) error {
+				if opts.CIService == nil {
+					return ci.ErrMergeUnsupported
+				}
+				_, err := opts.CIService.RevertMerge(ctx, job.OrganizationID, job.RefID)
+				return err
+			})
+		// A CI merge is a job (CI-12, JOB-01); bulk operations from 100
+		// ids on as well (API-08, JOB-04).
+		jobService.Register(jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute})
+		jobService.Register(jobs.Kind{Name: history.SnapshotJobKind, MaxAttempts: 1, Timeout: 15 * time.Minute})
+		historyJobs = jobService
+		if opts.CIService != nil {
+			opts.CIService.WithJobs(jobTracker).WithBulkJobs(jobService)
+		}
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -331,6 +359,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		WithInstanceFields(repos.CIType).
 		WithLimits(opts.Entitlements)
 	opts.Entitlements.WithUnlicensed(discoveryHandler)
+	// The collectors' edge data path checks the discovery license like the
+	// entitlement middleware on the HTTP ingest (COL-08, ENT-07).
+	if opts.Entitlements != nil {
+		discoveryHandler.WithEdgeLicense(edgeLicense{svc: opts.Entitlements})
+	}
 	if opts.CollectorCA != nil {
 		discoveryHandler.WithCA(opts.CollectorCA)
 	}
@@ -345,10 +378,15 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.IngestQueue != nil {
 		opts.IngestQueue.Attach(discoveryHandler)
 	}
+	// Review merges run as jobs (JOB-04).
+	if jobTracker != nil {
+		discoveryHandler.WithReviewJobs(jobTracker)
+	}
 	if opts.Events != nil {
 		discoveryHandler.WithReviewNotifier(reviewEvents{emitter: opts.Events})
 		exportWorker.Events = opts.Events
 	}
+	topologyHandler := topology.NewHandler(repos.CI, repos.Relationship).WithRelationshipTypes(repos.RelationshipType)
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -357,11 +395,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		invitationHandler(&repos, &opts),
 		entitlement.NewHandler(opts.Entitlements),
 		ciHandler(&repos, &opts),
+		jobAPI,
 		notifyHandler(&opts),
 		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
 		discoveryHandler,
-		topology.NewHandler(repos.CI, repos.Relationship),
+		topologyHandler,
 		export.NewHandler(repos.CI),
 		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs),
 		asset.NewHandler(repos.Asset).
@@ -395,8 +434,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
 		ipam.NewHandler(repos.IPAM),
-		monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)),
-		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements),
+		monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)).WithCIResolver(ciAddressResolver{repo: repos.CI}),
+		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
+			WithSources(bffSources(&repos, topologyHandler, bffJobs)),
 		relationshiptype.NewHandler(repos.RelationshipType),
 		citype.NewHandler(repos.CIType, opts.Dispatcher),
 		lifecycle.NewHandler(repos.Lifecycle,
@@ -407,7 +447,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		composition.NewHandler(repos.Composition, opts.Dispatcher).
 			WithAssets(parentAssetLookup{repo: repos.Asset}),
 		override.NewHandler(repos.Override, opts.Dispatcher),
-		history.NewHandler(repos.History),
+		historyHandler(repos.History, historyJobs),
 		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission),
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
@@ -419,9 +459,19 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	}
 
 	// The audit trail is hash-chained in PostgreSQL and therefore has no
-	// in-memory counterpart; it is only served when a pool was configured.
+	// in-memory counterpart. Without a pool (--no-db) its operations still
+	// exist and answer 503, so both profiles serve the same contract
+	// (API-01).
 	if opts.Audit != nil {
 		opts.Audit.RegisterRoutes(protected)
+	} else {
+		unavailable := func(w http.ResponseWriter, _ *http.Request) {
+			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "the audit trail needs PostgreSQL; it is not available with --no-db")
+		}
+		for _, base := range []string{"/api/v1/audit-log", "/api/v1/audit"} {
+			protected.Get(base, unavailable)
+			protected.Post(base+"/verify", unavailable)
+		}
 	}
 
 	return mux, httpMetrics, nil
@@ -542,6 +592,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 
 	registry.MustRegister(collectors.NewGoCollector())
 	observability.RegisterWorkerMetrics(registry)
+	jobs.RegisterMetrics(registry)
 	override.RegisterMetrics(registry)
 	operator.RegisterMetrics(registry)
 	entitlement.RegisterMetrics(registry)
@@ -582,10 +633,29 @@ func (a pgRouteAuditor) RecordRoute(ctx context.Context, entry *audit.Entry) err
 // ciHandler builds the CI handler; without the event outbox it hands CI
 // events to the webhook dispatcher directly.
 func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
+	var h *ci.Handler
 	if repos.EventOutbox || opts.Dispatcher == nil {
-		return ci.NewHandler(opts.CIService)
+		h = ci.NewHandler(opts.CIService)
+	} else {
+		h = ci.NewHandler(opts.CIService, opts.Dispatcher)
 	}
-	return ci.NewHandler(opts.CIService, opts.Dispatcher)
+	// GET /cis/{id}?include= (API-05) embeds up to includeLimit related
+	// rows of each kind.
+	const includeLimit = 200
+	page := api.PaginationParams{Limit: includeLimit}
+	if repos.Override != nil {
+		h.WithProvenance(repos.Override)
+	}
+	return h.WithIncludes(map[string]ci.IncludeFunc{
+		"relationships": func(ctx context.Context, orgID, ciID string) (any, error) {
+			rels, _, err := repos.Relationship.List(ctx, orgID, ciID, page)
+			return rels, err
+		},
+		"contacts": func(ctx context.Context, orgID, ciID string) (any, error) {
+			contacts, _, err := repos.Contact.ListForCI(ctx, orgID, ciID, page)
+			return contacts, err
+		},
+	})
 }
 
 // notifyHandler serves the notification center and the channels.
@@ -604,4 +674,14 @@ func (r reviewEvents) ReviewOpened(ctx context.Context, item *reviews.Item) {
 		Data: map[string]any{"id": item.ID, "kind": item.Kind, "object_key": item.ObjectKey}}); err != nil {
 		slog.Error("report opened review item", "item", item.ID, "error", err)
 	}
+}
+
+// historyHandler serves the history; with the job model the state snapshot
+// runs as a job (JOB-04).
+func historyHandler(repo history.Repository, snapshotJobs history.SnapshotJobs) *history.Handler {
+	h := history.NewHandler(repo)
+	if snapshotJobs != nil {
+		h.WithJobs(snapshotJobs)
+	}
+	return h
 }

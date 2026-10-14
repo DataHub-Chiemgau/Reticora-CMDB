@@ -108,6 +108,56 @@ describe('CIDetailPage', () => {
     expect(screen.getByText(/"ports": 48/)).toBeInTheDocument();
   });
 
+  it('shows time and location and the unified history (CI-06)', async () => {
+    stubFetchRoutes({
+      '/history/ci/ci-1': {
+        data: [
+          {
+            id: 'a-1',
+            entity_type: 'ci',
+            entity_id: 'ci-1',
+            change_type: 'ci.updated',
+            created_at: '2026-01-03T10:00:00Z',
+            source: 'audit',
+          },
+          {
+            id: 'c-1',
+            entity_type: 'ci',
+            entity_id: 'ci-1',
+            change_type: 'update',
+            field_name: 'name',
+            created_at: '2026-01-02T10:00:00Z',
+            source: 'ci_change',
+            site_id: 'site-1',
+          },
+        ],
+        total: 2,
+        limit: 50,
+        offset: 0,
+        has_more: false,
+      },
+      '/cis/ci-1/relationships': { data: [], total: 0, limit: 25, offset: 0, has_more: false },
+      '/topology/cis/ci-1/neighbors': { nodes: [], edges: [] },
+      '/cis/ci-1': {
+        ...ci,
+        location_id: 'loc-1',
+        site_id: 'site-1',
+        first_seen_at: '2026-01-01T08:00:00Z',
+      },
+    });
+
+    renderDetail();
+
+    expect(await screen.findByRole('heading', { name: 'core-sw-01' })).toBeInTheDocument();
+    expect(screen.getByText('Site')).toBeInTheDocument();
+    expect(screen.getAllByText('site-1').length).toBeGreaterThan(0);
+    expect(screen.getByText('2026-01-01T08:00:00Z')).toBeInTheDocument();
+    const history = await screen.findByRole('list', { name: 'Historie' });
+    expect(history).toHaveTextContent('update · name');
+    expect(history).toHaveTextContent('Audit');
+    expect(history).toHaveTextContent('Site site-1');
+  });
+
   it('shows an error state with a retry action when the CI cannot be loaded', async () => {
     stubFetchRoutes({});
 

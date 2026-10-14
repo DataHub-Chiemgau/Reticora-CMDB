@@ -13,17 +13,32 @@ type View struct {
 	Name           string         `json:"name"`
 	EntityKind     string         `json:"entity_kind"` // ci | asset
 	FilterSpec     map[string]any `json:"filter_spec"`
-	Shared         bool           `json:"shared"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	// Sort and Columns are the presentation of the view (VIE-01).
+	Sort    []SortKey `json:"sort"`
+	Columns []string  `json:"columns"`
+	Shared  bool      `json:"shared"`
+	// SharedWithRoles shares the view with the holders of these roles
+	// (role or custom role ids); they may read it, only the owner edits it.
+	SharedWithRoles []string  `json:"shared_with_roles"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// SortKey is one sort column of a view.
+type SortKey struct {
+	Field string `json:"field"`
+	Dir   string `json:"dir"`
 }
 
 // UpsertRequest is the payload for creating or updating a saved view.
 type UpsertRequest struct {
-	Name       string         `json:"name"`
-	EntityKind string         `json:"entity_kind"`
-	FilterSpec map[string]any `json:"filter_spec"`
-	Shared     bool           `json:"shared,omitempty"`
+	Name            string         `json:"name"`
+	EntityKind      string         `json:"entity_kind"`
+	FilterSpec      map[string]any `json:"filter_spec"`
+	Sort            []SortKey      `json:"sort,omitempty"`
+	Columns         []string       `json:"columns,omitempty"`
+	Shared          bool           `json:"shared,omitempty"`
+	SharedWithRoles []string       `json:"shared_with_roles,omitempty"`
 }
 
 // FilterSpec is the structured filter DSL (spec §17). Every field is
@@ -61,6 +76,9 @@ type FilterSpec struct {
 	// instance-level values share ci.attributes).
 	Attributes map[string]any `json:"attributes,omitempty"`
 	Search     string         `json:"search,omitempty"`
+	// Where is the filter AST with and, or and not (SRC-03); it is AND-ed
+	// with the fields above.
+	Where *Expr `json:"where,omitempty"`
 }
 
 // Presets returns the standard saved views (spec §17 examples). They are
