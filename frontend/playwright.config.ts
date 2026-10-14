@@ -7,6 +7,9 @@ const chromiumLaunch = process.env.PW_CHROMIUM_EXECUTABLE
 
 export default defineConfig({
   testDir: './e2e',
+  // The onboarding suite runs against a freshly installed stack only
+  // (e2e/fixtures/playwright.install.config.ts, install-smoke workflow).
+  testIgnore: ['onboarding.spec.ts'],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

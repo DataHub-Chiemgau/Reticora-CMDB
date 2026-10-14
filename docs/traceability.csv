@@ -412,3 +412,6 @@ UI-16;[B];C;frontend/src/pages/ReviewInboxPage.test.tsx;WP-196
 UI-16;[B];C;frontend/src/components/NotificationCenter.test.tsx;WP-197
 REC-10;[B];C;backend/internal/ci/provenance_integration_test.go;WP-198
 UI-17;[B];C;frontend/src/pages/OnboardingPage.test.tsx;WP-199
+INS-04;[Q];C;frontend/e2e/onboarding.spec.ts;WP-200
+TST-03;[B], Teilumfang [P2];C;frontend/e2e/onboarding.spec.ts;WP-200
+ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-200

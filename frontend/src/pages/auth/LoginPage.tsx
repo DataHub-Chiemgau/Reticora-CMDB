@@ -26,6 +26,10 @@ export function LoginPage() {
     } catch (err) {
       if (err instanceof InsecureContextError) {
         setError(t('auth.secureContextRequired'));
+      } else if (err instanceof TypeError) {
+        // fetch rejects with a TypeError ("Failed to fetch") when the backend
+        // is unreachable (INS-04): say so instead of the browser's message.
+        setError(t('auth.backendUnreachable'));
       } else {
         setError(err instanceof Error ? err.message : t('auth.loginError'));
       }

@@ -124,6 +124,11 @@ describe('OnboardingPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Konto bestätigen' }));
 
     expect(await screen.findByText(/„muster-gmbh“ ist angelegt/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        `Ihr Testzeitraum läuft bis ${new Date('2026-11-13T00:00:00Z').toLocaleDateString('de-DE')}.`,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Jetzt anmelden und fortfahren' })).toHaveAttribute(
       'href',
       '/login',

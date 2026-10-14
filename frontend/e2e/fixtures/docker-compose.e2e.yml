@@ -1,0 +1,25 @@
+# Compose overlay of the onboarding E2E suite (WP-200): a mail catcher for
+# the verification e-mail and the self-signup configuration of the server
+# (central SMTP, verification page, captcha key, Keycloak admin client).
+# setup-onboarding.sh exports the E2E_* variables and applies the overlay
+# on top of the installed stack.
+services:
+  mailpit:
+    image: axllent/mailpit:v1.21
+    restart: unless-stopped
+    ports:
+      - '${E2E_MAILPIT_PORT:-8025}:8025'
+
+  server:
+    environment:
+      RETICORA_SMTP_HOST: mailpit
+      RETICORA_SMTP_PORT: '1025'
+      RETICORA_SMTP_TLS: none
+      RETICORA_SMTP_FROM: 'Reticora <noreply@reticora-e2e.de>'
+      RETICORA_SIGNUP_VERIFY_URL: '${E2E_BASE_URL:-http://localhost:3000}/onboarding'
+      RETICORA_SIGNUP_CAPTCHA_KEY: '${E2E_CAPTCHA_KEY:?E2E_CAPTCHA_KEY must be set}'
+      RETICORA_KEYCLOAK_ADMIN_CLIENT_ID: '${E2E_KC_CLIENT_ID:-reticora-e2e-signup}'
+      RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET: '${E2E_KC_CLIENT_SECRET:?E2E_KC_CLIENT_SECRET must be set}'
+    depends_on:
+      mailpit:
+        condition: service_started

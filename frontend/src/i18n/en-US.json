@@ -465,7 +465,8 @@
     "callbackTitle": "Completing sign-in",
     "callbackProgress": "Please wait while we verify your session.",
     "callbackError": "Sign-in could not be completed.",
-    "sessionExpired": "Your session has expired. Please sign in again."
+    "sessionExpired": "Your session has expired. Please sign in again.",
+    "backendUnreachable": "The server cannot be reached. Check that Reticora is running and the address is correct, then try again."
   },
   "topology": {
     "subtitle": "Relationships between configuration items as a graph.",
@@ -1179,7 +1180,8 @@
       "done": "Your organization “{{slug}}” has been created.",
       "login": "Sign in and continue",
       "expired": "The confirmation link has expired. Please sign up again.",
-      "invalid": "The confirmation link is invalid or was already used."
+      "invalid": "The confirmation link is invalid or was already used.",
+      "trial": "Your trial runs until {{date}}."
     },
     "collector": {
       "hint": "Install the collector in your network and enter an enrollment code there.",

@@ -465,7 +465,8 @@
     "callbackTitle": "Anmeldung wird abgeschlossen",
     "callbackProgress": "Bitte warten Sie, während Ihre Sitzung geprüft wird.",
     "callbackError": "Die Anmeldung konnte nicht abgeschlossen werden.",
-    "sessionExpired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an."
+    "sessionExpired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
+    "backendUnreachable": "Der Server ist nicht erreichbar. Prüfen Sie, ob Reticora läuft und die Adresse stimmt, und versuchen Sie es erneut."
   },
   "topology": {
     "subtitle": "Beziehungen zwischen Configuration Items als Graph.",
@@ -1179,7 +1180,8 @@
       "done": "Ihre Organisation „{{slug}}“ ist angelegt.",
       "login": "Jetzt anmelden und fortfahren",
       "expired": "Der Bestätigungslink ist abgelaufen. Registrieren Sie sich bitte erneut.",
-      "invalid": "Der Bestätigungslink ist ungültig oder wurde bereits verwendet."
+      "invalid": "Der Bestätigungslink ist ungültig oder wurde bereits verwendet.",
+      "trial": "Ihr Testzeitraum läuft bis {{date}}."
     },
     "collector": {
       "hint": "Installieren Sie den Collector in Ihrem Netz und geben Sie dort einen Enrollment-Code ein.",

@@ -151,7 +151,7 @@ function SignupStep() {
 }
 
 function VerifyStep({ token }: { token: string }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [password, setPassword] = useState('');
   const verify = useMutation({
     mutationFn: () =>
@@ -165,6 +165,11 @@ function VerifyStep({ token }: { token: string }) {
     return (
       <div role="status" className="space-y-3 text-sm">
         <p>{t('onboarding.verify.done', { slug: verify.data.organization_slug })}</p>
+        <p>
+          {t('onboarding.verify.trial', {
+            date: new Date(verify.data.trial_ends_at).toLocaleDateString(i18n.language),
+          })}
+        </p>
         <Link
           to="/login"
           state={{ from: '/onboarding' }}
