@@ -81,6 +81,7 @@ const AgentListPage = lazyPage(() => import('./pages/AgentListPage'), 'AgentList
 const FindingsPage = lazyPage(() => import('./pages/FindingsPage'), 'FindingsPage');
 const ReviewInboxPage = lazyPage(() => import('./pages/ReviewInboxPage'), 'ReviewInboxPage');
 const JobCenterPage = lazyPage(() => import('./pages/JobCenterPage'), 'JobCenterPage');
+const OnboardingPage = lazyPage(() => import('./pages/OnboardingPage'), 'OnboardingPage');
 const MapPage = lazyPage(() => import('./pages/MapPage'), 'MapPage');
 const RoomPlanPage = lazyPage(() => import('./pages/RoomPlanPage'), 'RoomPlanPage');
 
@@ -294,6 +295,15 @@ function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/auth/callback" element={<CallbackPage />} />
+          {/* Signup and verification run without a session (UI-17). */}
+          <Route
+            path="/onboarding"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <OnboardingPage />
+              </Suspense>
+            }
+          />
           <Route element={<RequireAuth />}>
             <Route
               element={

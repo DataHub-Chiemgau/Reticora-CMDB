@@ -1153,5 +1153,54 @@
       "asset": "From the asset",
       "record": "Value of the CI record"
     }
+  },
+  "onboarding": {
+    "title": "Getting started",
+    "subtitle": "From the account to the first CIs in five steps.",
+    "progress": "Setup progress",
+    "progressText": "{{done}} of {{total}} steps done",
+    "steps": {
+      "signup": "Sign up",
+      "verify": "Verification",
+      "collector": "Connect a collector",
+      "scopes": "Confirm scopes",
+      "cis": "First CIs"
+    },
+    "signup": {
+      "organization": "Organization",
+      "email": "E-mail address",
+      "name": "Your name",
+      "submit": "Create account",
+      "sent": "We sent a confirmation link to {{email}}. Open it to continue."
+    },
+    "verify": {
+      "password": "Set a password (at least 12 characters)",
+      "submit": "Confirm account",
+      "done": "Your organization “{{slug}}” has been created.",
+      "login": "Sign in and continue",
+      "expired": "The confirmation link has expired. Please sign up again.",
+      "invalid": "The confirmation link is invalid or was already used."
+    },
+    "collector": {
+      "hint": "Install the collector in your network and enter an enrollment code there.",
+      "create": "Create enrollment code",
+      "code": "Your enrollment code:",
+      "waiting": "Waiting for the collector to connect …"
+    },
+    "scopes": {
+      "hint": "The collector reported these networks. Confirm which ones to scan.",
+      "waiting": "No networks reported yet.",
+      "accept": "Confirm",
+      "dismiss": "Dismiss",
+      "continue": "Continue"
+    },
+    "cis": {
+      "waiting": "The first discovery is running. As soon as CIs are found, the flow continues."
+    },
+    "done": {
+      "title": "Done",
+      "text": "{{count}} CIs are already in your CMDB.",
+      "open": "Open the CMDB"
+    }
   }
 }

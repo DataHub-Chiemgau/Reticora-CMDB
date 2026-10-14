@@ -1153,5 +1153,54 @@
       "asset": "Aus dem Asset",
       "record": "Wert des CI-Datensatzes"
     }
+  },
+  "onboarding": {
+    "title": "Erste Schritte",
+    "subtitle": "Vom Konto bis zu den ersten CIs – in fünf Schritten.",
+    "progress": "Fortschritt der Einrichtung",
+    "progressText": "{{done}} von {{total}} Schritten erledigt",
+    "steps": {
+      "signup": "Registrierung",
+      "verify": "Verifikation",
+      "collector": "Collector verbinden",
+      "scopes": "Scopes bestätigen",
+      "cis": "Erste CIs"
+    },
+    "signup": {
+      "organization": "Organisation",
+      "email": "E-Mail-Adresse",
+      "name": "Ihr Name",
+      "submit": "Konto anlegen",
+      "sent": "Wir haben einen Bestätigungslink an {{email}} geschickt. Öffnen Sie ihn, um fortzufahren."
+    },
+    "verify": {
+      "password": "Passwort festlegen (mindestens 12 Zeichen)",
+      "submit": "Konto bestätigen",
+      "done": "Ihre Organisation „{{slug}}“ ist angelegt.",
+      "login": "Jetzt anmelden und fortfahren",
+      "expired": "Der Bestätigungslink ist abgelaufen. Registrieren Sie sich bitte erneut.",
+      "invalid": "Der Bestätigungslink ist ungültig oder wurde bereits verwendet."
+    },
+    "collector": {
+      "hint": "Installieren Sie den Collector in Ihrem Netz und geben Sie dort einen Enrollment-Code ein.",
+      "create": "Enrollment-Code erzeugen",
+      "code": "Ihr Enrollment-Code:",
+      "waiting": "Warten auf die erste Verbindung des Collectors …"
+    },
+    "scopes": {
+      "hint": "Der Collector hat diese Netze gemeldet. Bestätigen Sie, welche durchsucht werden sollen.",
+      "waiting": "Noch keine Netze gemeldet.",
+      "accept": "Bestätigen",
+      "dismiss": "Verwerfen",
+      "continue": "Weiter"
+    },
+    "cis": {
+      "waiting": "Die erste Discovery läuft. Sobald CIs gefunden sind, geht es weiter."
+    },
+    "done": {
+      "title": "Fertig",
+      "text": "{{count}} CIs sind bereits in Ihrer CMDB.",
+      "open": "Zur CMDB"
+    }
   }
 }
