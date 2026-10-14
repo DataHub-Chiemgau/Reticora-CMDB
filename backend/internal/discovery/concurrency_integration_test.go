@@ -31,7 +31,8 @@ import (
 //     organization ends with exactly one CI for it;
 //   - discovery during edit: a manual change and an ingest of the same field
 //     run at once; the manual value stays, protected by its override, in
-//     every round;
+//     every round (the CI repository drops overridden fields of an
+//     automated write under the row lock);
 //   - the integrity check finds no orphans, duplicates or cycles afterwards.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
@@ -109,7 +110,7 @@ func TestDiscoveryConcurrency(t *testing.T) {
 	}
 
 	editor := ci.NewService(ci.NewPGRepository(f.App))
-	for round := 0; round < 5; round++ {
+	for round := 0; round < 20; round++ {
 		serial := fmt.Sprintf("ABN03-EDIT-%d", round)
 		if code := ingest(instances[0], device(serial, "M0")); code != http.StatusAccepted {
 			t.Fatalf("round %d: first ingest: %d", round, code)
