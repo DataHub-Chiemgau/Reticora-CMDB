@@ -324,3 +324,19 @@ func (r *PGRepository) ClearExpiredSecrets(ctx context.Context, now time.Time) (
 	}
 	return total, nil
 }
+
+// Deactivate switches a subscription off (WHK-01); the dispatcher calls it
+// outside a request, in the organization's own tenant context.
+func (r *PGRepository) Deactivate(ctx context.Context, orgID, id string) error {
+	return database.WithTenant(ctx, r.pool, orgScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE webhook_subscription SET is_active = false, updated_at = now()
+			WHERE id = $1 AND organization_id = $2`, id, orgID)
+		if err != nil {
+			return fmt.Errorf("deactivate webhook: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("not found")
+		}
+		return nil
+	})
+}

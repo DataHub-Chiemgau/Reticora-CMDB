@@ -218,6 +218,18 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	return nil
 }
 
+// Deactivate switches a subscription off (WHK-01).
+func (r *MemoryRepository) Deactivate(_ context.Context, orgID, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	sub, ok := r.items[id]
+	if !ok || sub.OrganizationID != orgID {
+		return fmt.Errorf("not found")
+	}
+	sub.IsActive = false
+	return nil
+}
+
 func (r *MemoryRepository) ListByEvent(_ context.Context, orgID, event string) ([]Subscription, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -247,6 +259,11 @@ type DeliveryLister interface {
 	ListDeliveries(ctx context.Context, orgID, subscriptionID string, page api.PaginationParams) ([]DeliveryRecord, int, error)
 }
 
+// DeliveryRetrier queues a failed or dead delivery again (WHK-01).
+type DeliveryRetrier interface {
+	Retry(ctx context.Context, orgID, subscriptionID, deliveryID string) (DeliveryRecord, error)
+}
+
 // DeadLetterLister exposes the dead-letter queue of a tenant.
 type DeadLetterLister interface {
 	ListDeadLetters(ctx context.Context, orgID string, page api.PaginationParams) ([]DeadLetter, int, error)
@@ -258,6 +275,7 @@ type Handler struct {
 	deliverer   TestDeliverer
 	deliveries  DeliveryLister
 	deadLetters DeadLetterLister
+	retrier     DeliveryRetrier
 	// egress validates subscriber URLs when they are stored (SEC-08).
 	egress egress.Options
 }
@@ -281,6 +299,9 @@ func NewHandler(repo Repository, deliverer ...TestDeliverer) *Handler {
 		if lister, ok := deliverer[0].(DeadLetterLister); ok {
 			h.deadLetters = lister
 		}
+		if retrier, ok := deliverer[0].(DeliveryRetrier); ok {
+			h.retrier = retrier
+		}
 	}
 	return h
 }
@@ -295,6 +316,37 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/webhooks/{id}/test", h.Test)
 	r.Post("/api/v1/webhooks/{id}/rotate-secret", h.RotateSecret)
 	r.Get("/api/v1/webhooks/{id}/deliveries", h.ListDeliveries)
+	r.Post("/api/v1/webhooks/{id}/deliveries/{delivery_id}/retry", h.RetryDelivery)
+}
+
+// RetryDelivery handles POST /api/v1/webhooks/{id}/deliveries/{delivery_id}/retry:
+// a failed or dead delivery gets a new round of attempts (WHK-01).
+func (h *Handler) RetryDelivery(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	if h.retrier == nil {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "webhook delivery store is not configured")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if _, err := h.repo.GetByID(r.Context(), t.OrganizationID, id); err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "webhook not found")
+		return
+	}
+	rec, err := h.retrier.Retry(r.Context(), t.OrganizationID, id, chi.URLParam(r, "delivery_id"))
+	switch {
+	case errors.Is(err, ErrNoDeliveryStore):
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", err.Error())
+	case errors.Is(err, ErrNotRetryable):
+		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+	case err != nil:
+		api.WriteRepoError(w, err)
+	default:
+		api.WriteJSON(w, http.StatusAccepted, rec)
+	}
 }
 
 // RotateSecret handles POST /api/v1/webhooks/{id}/rotate-secret: a new

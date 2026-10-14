@@ -11,12 +11,15 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
-// Delivery statuses persisted in webhook_delivery.status.
+// Delivery statuses persisted in webhook_delivery.status (WHK-01): pending
+// until the first attempt, delivering while a worker holds its lease,
+// delivered after a 2xx answer, failed after a failed attempt with a retry
+// scheduled, dead once the retry budget is exhausted.
 const (
-	StatusPending  = "pending"
-	StatusRetrying = "retrying"
-	StatusSuccess  = "success"
-	StatusFailed   = "failed"
+	StatusPending    = "pending"
+	StatusDelivering = "delivering"
+	StatusDelivered  = "delivered"
+	StatusFailed     = "failed"
 	// StatusDead marks a delivery whose retry budget is exhausted and whose
 	// payload was moved to the dead-letter queue.
 	StatusDead = "dead"
@@ -135,14 +138,15 @@ func (s *MemoryDeliveryStore) ClaimDue(_ context.Context, now time.Time, limit i
 
 	due := make([]DeliveryRecord, 0, limit)
 	for id, rec := range s.items {
-		if rec.Status != StatusPending && rec.Status != StatusRetrying {
+		// A delivering record whose lease ran out is due again.
+		if rec.Status != StatusPending && rec.Status != StatusFailed && rec.Status != StatusDelivering {
 			continue
 		}
 		if rec.NextRetryAt == nil || rec.NextRetryAt.After(now) {
 			continue
 		}
 		leased := now.Add(lease)
-		rec.Status = StatusRetrying
+		rec.Status = StatusDelivering
 		rec.NextRetryAt = &leased
 		s.items[id] = rec
 		due = append(due, rec)
@@ -242,4 +246,39 @@ func (s *MemoryDeliveryStore) ListDeadLetters(_ context.Context, orgID string, p
 		end = total
 	}
 	return all[start:end], total, nil
+}
+
+// CountDeadSince counts the dead deliveries of a subscription since a time.
+func (s *MemoryDeliveryStore) CountDeadSince(_ context.Context, orgID, subscriptionID string, since time.Time) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	n := 0
+	for id := range s.deadLetters {
+		if dl := s.deadLetters[id]; dl.OrganizationID == orgID && dl.SubscriptionID == subscriptionID && !dl.DeadAt.Before(since) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// Requeue puts a failed or dead delivery back into the queue with a fresh
+// retry budget; its dead letter is removed.
+func (s *MemoryDeliveryStore) Requeue(_ context.Context, orgID, subscriptionID, deliveryID string, now time.Time) (DeliveryRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.items[deliveryID]
+	if !ok || rec.OrganizationID != orgID || rec.SubscriptionID != subscriptionID {
+		return DeliveryRecord{}, fmt.Errorf("not found")
+	}
+	if rec.Status != StatusFailed && rec.Status != StatusDead {
+		return DeliveryRecord{}, ErrNotRetryable
+	}
+	rec.Status, rec.Attempt, rec.Error, rec.NextRetryAt = StatusPending, 0, "", &now
+	s.items[deliveryID] = rec
+	for id := range s.deadLetters {
+		if s.deadLetters[id].DeliveryID == deliveryID {
+			delete(s.deadLetters, id)
+		}
+	}
+	return rec, nil
 }

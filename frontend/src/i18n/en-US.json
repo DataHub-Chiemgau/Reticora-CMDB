@@ -352,7 +352,15 @@
     "dead": "Permanently failed",
     "attempts": "{{count}} attempts",
     "noDeadLetters": "No dead letters",
-    "noDeadLettersHint": "There are currently no permanently failed deliveries."
+    "noDeadLettersHint": "There are currently no permanently failed deliveries.",
+    "retry": "Retry",
+    "status": {
+      "pending": "pending",
+      "delivering": "delivering",
+      "delivered": "delivered",
+      "failed": "failed",
+      "dead": "dead"
+    }
   },
   "accessibility": {
     "closeModal": "Close modal",

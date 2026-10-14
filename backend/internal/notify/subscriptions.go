@@ -121,6 +121,13 @@ var Subscriptions = map[string]Subscription{
 			return &Audience{Permission: identity.PermWebhookManage, AllWithPermission: true}
 		},
 		Render: func(d map[string]any) (string, string) {
+			// The third dead delivery within 24 hours switches the
+			// subscription off (WHK-01).
+			if disabled, _ := d["subscription_disabled"].(bool); disabled {
+				return "Webhook-Abonnement deaktiviert: " + str(d, "subscription_id"),
+					text("Das Abonnement "+str(d, "subscription_id")+" wurde nach drei endgültig fehlgeschlagenen Zustellungen innerhalb von 24 Stunden deaktiviert. Letzter Fehler: "+str(d, "last_error"),
+						"Subscription "+str(d, "subscription_id")+" was deactivated after three dead deliveries within 24 hours. Last error: "+str(d, "last_error"))
+			}
 			return "Webhook-Zustellung aufgegeben: " + str(d, "event"),
 				text("Die Zustellung von "+str(d, "event")+" an das Abonnement "+str(d, "subscription_id")+" ist nach "+
 					fmt.Sprint(d["attempts"])+" Versuchen in der Dead-Letter-Queue: "+str(d, "last_error"),
@@ -132,7 +139,7 @@ var Subscriptions = map[string]Subscription{
 		Category: "certificate", Critical: true,
 		Audience: func(d map[string]any) *Audience {
 			return &Audience{Permission: identity.PermCIRead, AllWithPermission: true, ClientID: str(d, "client_id"),
-				SiteID: str(d, "site_id"), CIID: str(d, "ci_id"), ContactRoles: []string{"owner", "responsible"}}
+				SiteID: str(d, "site_id"), CIID: str(d, "ci_id"), ContactRoles: []string{"owner", "operations"}}
 		},
 		Render: func(d map[string]any) (string, string) {
 			return "Zertifikat läuft ab: " + str(d, "name"),

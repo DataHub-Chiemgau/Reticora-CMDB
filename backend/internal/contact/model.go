@@ -67,11 +67,10 @@ type LinkContactRequest struct {
 	RelationshipType string `json:"relationship_type,omitempty"`
 }
 
-// ValidRelationshipTypes lists allowed ci_contact relationship types.
+// ValidRelationshipTypes lists the roles of a ci_contact link (AUD-02).
 var ValidRelationshipTypes = map[string]bool{
-	"responsible": true,
-	"owner":       true,
-	"operator":    true,
-	"vendor":      true,
-	"escalation":  true,
+	"operations": true,
+	"escalation": true,
+	"owner":      true,
+	"vendor":     true,
 }

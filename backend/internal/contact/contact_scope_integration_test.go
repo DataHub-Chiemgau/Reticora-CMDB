@@ -67,7 +67,7 @@ func TestContactRepositoryClientScope(t *testing.T) {
 	if err = repo.Unlink(ctx, f.OrgA, crossLink.ID); err == nil {
 		t.Fatal("client-1 principal removed a link to a client-2 contact")
 	}
-	if err = repo.Link(ctx, &contact.CIContact{OrganizationID: f.OrgA, CIID: ownCI, ContactID: own.ID, RelationshipType: "responsible"}); err != nil {
+	if err = repo.Link(ctx, &contact.CIContact{OrganizationID: f.OrgA, CIID: ownCI, ContactID: own.ID, RelationshipType: "owner"}); err != nil {
 		t.Fatalf("client-1 link within its client: %v", err)
 	}
 

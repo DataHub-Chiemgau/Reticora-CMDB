@@ -1580,9 +1580,12 @@ paths:
       tags: [Webhooks]
       summary: List the durable delivery history of a webhook subscription
       description: >-
-        Returns the persisted deliveries including their retry state. Failed
-        deliveries are retried with exponential backoff until `max_attempts` is
-        reached.
+        Returns the persisted deliveries including their retry state
+        (WHK-01): pending, delivering, delivered, failed (a retry is
+        scheduled) and dead. Failed deliveries are retried after 30 s, 2 min,
+        10 min, 60 min and 360 min, then they are dead; the third dead
+        delivery within 24 hours deactivates the subscription and notifies
+        the webhook managers.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -1600,6 +1603,40 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/webhooks/{id}/deliveries/{delivery_id}/retry:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: delivery_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: retryWebhookDelivery
+      tags: [Webhooks]
+      summary: Retry a failed or dead delivery
+      description: >-
+        Queues the delivery again with a fresh retry budget (WHK-01); a dead
+        delivery leaves the dead-letter queue. The retry worker sends it with
+        its next poll. A pending, delivering or delivered delivery is 409.
+        Requires webhook:manage.
+      responses:
+        '202':
+          description: The queued delivery
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookDelivery'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -13329,7 +13366,7 @@ components:
           type: string
         status:
           type: string
-          enum: [pending, retrying, success, failed, dead]
+          enum: [pending, delivering, delivered, failed, dead]
         attempt:
           type: integer
         max_attempts:
@@ -17186,7 +17223,7 @@ components:
           type: string
         relationship_type:
           type: string
-          enum: [responsible, owner, operator, vendor, escalation]
+          enum: [operations, escalation, owner, vendor]
         created_at:
           type: string
           format: date-time
@@ -17199,7 +17236,7 @@ components:
           type: string
         relationship_type:
           type: string
-          enum: [responsible, owner, operator, vendor, escalation]
+          enum: [operations, escalation, owner, vendor]
 
     CIContactListResponse:
       allOf:

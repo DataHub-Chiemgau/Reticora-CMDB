@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   useCreateWebhook,
   useDeleteWebhook,
+  useRetryWebhookDelivery,
   useTestWebhook,
   useWebhookDeadLetters,
   useWebhookDeliveries,
@@ -35,6 +36,7 @@ export function WebhooksPage() {
   const testWebhook = useTestWebhook();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const deliveries = useWebhookDeliveries(selectedId);
+  const retryDelivery = useRetryWebhookDelivery();
   const [form, setForm] = useState({ name: '', url: '', secret: '', events: [] as string[] });
 
   const toggleEvent = (event: string) => {
@@ -218,14 +220,16 @@ export function WebhooksPage() {
                   <span className="font-medium">{delivery.event}</span>{' '}
                   <Badge
                     variant={
-                      delivery.status === 'success'
+                      delivery.status === 'delivered'
                         ? 'success'
-                        : delivery.status === 'dead' || delivery.status === 'failed'
+                        : delivery.status === 'dead'
                           ? 'danger'
-                          : 'info'
+                          : delivery.status === 'failed'
+                            ? 'warning'
+                            : 'info'
                     }
                   >
-                    {delivery.status}
+                    {t(`webhook.status.${delivery.status}`, delivery.status)}
                   </Badge>{' '}
                   <span className="text-gray-500 dark:text-gray-400">
                     {t('webhook.attemptOf', {
@@ -233,6 +237,19 @@ export function WebhooksPage() {
                       max: delivery.max_attempts,
                     })}
                   </span>
+                  {delivery.status === 'failed' || delivery.status === 'dead' ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        selectedId &&
+                        retryDelivery.mutate({ id: selectedId, deliveryId: delivery.id })
+                      }
+                      disabled={retryDelivery.isPending}
+                    >
+                      {t('webhook.retry')}
+                    </Button>
+                  ) : null}
                   {delivery.error ? (
                     <p className="mt-1 text-xs text-red-600 dark:text-red-400">{delivery.error}</p>
                   ) : null}

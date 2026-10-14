@@ -352,7 +352,15 @@
     "dead": "Endgültig fehlgeschlagen",
     "attempts": "{{count}} Versuche",
     "noDeadLetters": "Keine Dead Letters",
-    "noDeadLettersHint": "Aktuell gibt es keine endgültig fehlgeschlagenen Zustellungen."
+    "noDeadLettersHint": "Aktuell gibt es keine endgültig fehlgeschlagenen Zustellungen.",
+    "retry": "Erneut senden",
+    "status": {
+      "pending": "wartend",
+      "delivering": "wird zugestellt",
+      "delivered": "zugestellt",
+      "failed": "fehlgeschlagen",
+      "dead": "aufgegeben"
+    }
   },
   "accessibility": {
     "closeModal": "Modal schließen",

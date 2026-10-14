@@ -839,11 +839,35 @@ export interface paths {
     };
     /**
      * List the durable delivery history of a webhook subscription
-     * @description Returns the persisted deliveries including their retry state. Failed deliveries are retried with exponential backoff until `max_attempts` is reached.
+     * @description Returns the persisted deliveries including their retry state (WHK-01): pending, delivering, delivered, failed (a retry is scheduled) and dead. Failed deliveries are retried after 30 s, 2 min, 10 min, 60 min and 360 min, then they are dead; the third dead delivery within 24 hours deactivates the subscription and notifies the webhook managers.
      */
     get: operations['listWebhookDeliveries'];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/webhooks/{id}/deliveries/{delivery_id}/retry': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        delivery_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Retry a failed or dead delivery
+     * @description Queues the delivery again with a fresh retry budget (WHK-01); a dead delivery leaves the dead-letter queue. The retry worker sends it with its next poll. A pending, delivering or delivered delivery is 409. Requires webhook:manage.
+     */
+    post: operations['retryWebhookDelivery'];
     delete?: never;
     options?: never;
     head?: never;
@@ -7598,7 +7622,7 @@ export interface components {
       subscription_id: string;
       event: string;
       /** @enum {string} */
-      status: 'pending' | 'retrying' | 'success' | 'failed' | 'dead';
+      status: 'pending' | 'delivering' | 'delivered' | 'failed' | 'dead';
       attempt: number;
       max_attempts: number;
       response_status?: number;
@@ -9978,14 +10002,14 @@ export interface components {
       ci_id: string;
       contact_id: string;
       /** @enum {string} */
-      relationship_type: 'responsible' | 'owner' | 'operator' | 'vendor' | 'escalation';
+      relationship_type: 'operations' | 'escalation' | 'owner' | 'vendor';
       /** Format: date-time */
       created_at: string;
     };
     LinkContactRequest: {
       contact_id: string;
       /** @enum {string} */
-      relationship_type?: 'responsible' | 'owner' | 'operator' | 'vendor' | 'escalation';
+      relationship_type?: 'operations' | 'escalation' | 'owner' | 'vendor';
     };
     CIContactListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['CIContact'][];
@@ -12324,6 +12348,35 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  retryWebhookDelivery: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        delivery_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The queued delivery */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WebhookDelivery'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       503: components['responses']['ServiceUnavailable'];
     };
   };

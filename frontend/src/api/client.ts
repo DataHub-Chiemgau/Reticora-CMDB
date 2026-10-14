@@ -1866,7 +1866,7 @@ export interface WebhookDeliveryRecord {
   organization_id: string;
   subscription_id: string;
   event: string;
-  status: 'pending' | 'retrying' | 'success' | 'failed' | 'dead';
+  status: 'pending' | 'delivering' | 'delivered' | 'failed' | 'dead';
   attempt: number;
   max_attempts: number;
   response_status?: number;
@@ -1911,6 +1911,10 @@ export const webhookApi = {
   },
   deadLetters(params: ListParams = {}): Promise<PaginatedResponse<WebhookDeadLetter>> {
     return fetchAPI(`/webhooks/dead-letters${buildQuery(params)}`);
+  },
+  /** retry queues a failed or dead delivery again (WHK-01). */
+  retry(id: string, deliveryId: string): Promise<WebhookDeliveryRecord> {
+    return fetchAPI(`/webhooks/${id}/deliveries/${deliveryId}/retry`, { method: 'POST' });
   },
 };
 
