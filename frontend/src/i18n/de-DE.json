@@ -993,5 +993,13 @@
   "relationshipCard": {
     "suppress": "Entfernen und unterdrücken",
     "suppressHint": "Discovery-Kante: wird entfernt und von der Discovery nicht wieder angelegt."
+  },
+  "scope": {
+    "label": "Arbeitsbereich",
+    "organization": "Organisation",
+    "client": "Kunde",
+    "site": "Standort",
+    "allClients": "Alle Kunden",
+    "allSites": "Alle Standorte"
   }
 }

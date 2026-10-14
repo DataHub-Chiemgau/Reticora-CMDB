@@ -396,3 +396,12 @@ SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/filter_test.go;WP-187
 VIE-01;[B];C;backend/internal/savedview/savedview_integration_test.go;WP-188
 EXP-01;[B], DATEV [P2];C;backend/internal/export/export_test.go;WP-189
 MON-02;[B];C;backend/internal/monitoring/monitoring_test.go;WP-190
+UI-01;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-02;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-03;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-04;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-05;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-07;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-08;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-09;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191
+UI-10;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-191

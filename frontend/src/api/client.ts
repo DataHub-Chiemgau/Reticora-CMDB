@@ -1,4 +1,5 @@
 import { clearSession, getSessionToken, refreshSession } from '../auth/session';
+import { useScopeStore } from '../stores/scope';
 
 const API_BASE = '/api/v1';
 
@@ -355,8 +356,37 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * SCOPED_LISTS are the list endpoints that filter by client and site; the
+ * scope chosen in the layout (UI-01/UI-02) is added to their GET requests
+ * unless the caller set the parameter itself.
+ */
+const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> = {
+  '/cis': ['client_id', 'site_id'],
+  '/topology': ['client_id', 'site_id'],
+  '/assets': ['client_id'],
+  '/contacts': ['client_id'],
+  '/sites': ['client_id'],
+};
+
+/** withScope adds the selected scope to a GET of a scoped list. */
+export function withScope(path: string, method = 'GET'): string {
+  if (method.toUpperCase() !== 'GET') return path;
+  const [base, query = ''] = path.split('?', 2) as [string, string?];
+  const keys = SCOPED_LISTS[base];
+  if (!keys) return path;
+  const { clientId, siteId } = useScopeStore.getState();
+  const params = new URLSearchParams(query);
+  const values = { client_id: clientId, site_id: siteId };
+  for (const key of keys) {
+    if (values[key] && !params.has(key)) params.set(key, values[key]);
+  }
+  const next = params.toString();
+  return next ? `${base}?${next}` : base;
+}
+
 export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
-  return fetchURL<T>(`${API_BASE}${path}`, options);
+  return fetchURL<T>(`${API_BASE}${withScope(path, options?.method)}`, options);
 }
 
 async function fetchURL<T>(url: string, options?: RequestInit): Promise<T> {
@@ -2068,7 +2098,7 @@ export interface Site {
 }
 
 export const siteApi = {
-  list(params: ListParams = {}): Promise<PaginatedResponse<Site>> {
+  list(params: ListParams & { client_id?: string } = {}): Promise<PaginatedResponse<Site>> {
     return fetchAPI(`/sites${buildQuery(params)}`);
   },
   get(id: string): Promise<Site> {

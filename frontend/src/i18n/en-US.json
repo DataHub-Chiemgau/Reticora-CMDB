@@ -993,5 +993,13 @@
   "relationshipCard": {
     "suppress": "Remove and suppress",
     "suppressHint": "Discovery edge: removed and not recreated by discovery."
+  },
+  "scope": {
+    "label": "Scope",
+    "organization": "Organization",
+    "client": "Client",
+    "site": "Site",
+    "allClients": "All clients",
+    "allSites": "All sites"
   }
 }

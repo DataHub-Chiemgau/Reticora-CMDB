@@ -2,6 +2,7 @@ import { Suspense, lazy, useMemo, useState } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
+import { ScopeSwitcher } from './components/ScopeSwitcher';
 import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
 import { Button } from './components/ui/Button';
@@ -212,8 +213,9 @@ function App() {
       </a>
       <header className="border-b border-gray-200 bg-white/90 px-6 py-4 backdrop-blur dark:border-gray-800 dark:bg-gray-950/90">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
+          <div className="flex flex-col gap-2">
             <h1 className="text-xl font-semibold">{t('app.title')}</h1>
+            {isAuthenticated ? <ScopeSwitcher /> : null}
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             {isAuthenticated ? (
