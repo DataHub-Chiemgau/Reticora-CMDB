@@ -78,6 +78,7 @@ const TrainingListPage = lazyPage(() => import('./pages/TrainingListPage'), 'Tra
 const DeskListPage = lazyPage(() => import('./pages/DeskListPage'), 'DeskListPage');
 const AgentListPage = lazyPage(() => import('./pages/AgentListPage'), 'AgentListPage');
 const FindingsPage = lazyPage(() => import('./pages/FindingsPage'), 'FindingsPage');
+const ReviewInboxPage = lazyPage(() => import('./pages/ReviewInboxPage'), 'ReviewInboxPage');
 const MapPage = lazyPage(() => import('./pages/MapPage'), 'MapPage');
 const RoomPlanPage = lazyPage(() => import('./pages/RoomPlanPage'), 'RoomPlanPage');
 
@@ -163,6 +164,7 @@ function App() {
       'agents',
       'findings',
       'discovery',
+      'reviews',
       'users',
       'permissions',
       'ci-types',
@@ -322,6 +324,7 @@ function App() {
               <Route path="/desks" element={<DeskListPage />} />
               <Route path="/agents" element={<AgentListPage />} />
               <Route path="/findings" element={<FindingsPage />} />
+              <Route path="/reviews" element={<ReviewInboxPage />} />
               <Route path="/tickets" element={<TicketListPage />} />
               <Route path="/users" element={<UserManagementPage />} />
               <Route path="/permissions" element={<PermissionsPage />} />

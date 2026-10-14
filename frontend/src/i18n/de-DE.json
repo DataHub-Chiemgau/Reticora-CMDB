@@ -43,7 +43,8 @@
     "inventory": "Inventar",
     "saved-views": "Ansichten",
     "locations": "Standorte",
-    "ci-types": "CI-Typen"
+    "ci-types": "CI-Typen",
+    "reviews": "Reviews"
   },
   "common": {
     "save": "Speichern",
@@ -1053,5 +1054,58 @@
     "site": "Standort",
     "allClients": "Alle Kunden",
     "allSites": "Alle Standorte"
+  },
+  "reviews": {
+    "title": "Review-Inbox",
+    "subtitle": "Offene Entscheidungen des Abgleichs: Beobachtung und CI vergleichen, dann zusammenführen, neu anlegen, übernehmen oder verwerfen.",
+    "status": "Status",
+    "allStatuses": "Alle Status",
+    "statuses": {
+      "open": "Offen",
+      "resolved": "Erledigt",
+      "dismissed": "Verworfen"
+    },
+    "kind": "Typ",
+    "allKinds": "Alle Typen",
+    "kinds": {
+      "unclassified_device": "Unklassifiziertes Gerät",
+      "ambiguous_identity": "Mehrdeutige Identität",
+      "conflicting_values": "Widersprüchliche Werte",
+      "probable_duplicate": "Wahrscheinliches Duplikat",
+      "override_conflict": "Konflikt mit Override",
+      "resurrected_device": "Wiedergekehrtes Gerät",
+      "unlicensed_ci": "Nicht lizenziertes CI",
+      "scope_suggested": "Scope-Vorschlag",
+      "serial_mismatch": "Abweichende Seriennummer",
+      "duplicate_ip": "Doppelte IP-Adresse",
+      "unknown_relationship": "Unbekannte Beziehung"
+    },
+    "escalatedOnly": "Nur eskalierte",
+    "escalated": "Eskaliert",
+    "selectAll": "Alle offenen auswählen",
+    "select": "„{{name}}“ auswählen",
+    "bulk": {
+      "label": "Sammelaktion",
+      "selected": "{{count}} ausgewählt",
+      "action": "Aktion",
+      "choose": "Aktion wählen",
+      "run": "Ausführen",
+      "result": "{{resolved}} erledigt, {{failed}} fehlgeschlagen."
+    },
+    "actions": {
+      "merge": "Zusammenführen",
+      "new": "Neu anlegen",
+      "dismiss": "Verwerfen",
+      "accept": "Übernehmen"
+    },
+    "candidate": "Kandidat",
+    "diff": "Vergleich von Beobachtung und CI",
+    "field": "Feld",
+    "observed": "Beobachtet",
+    "current": "Im CI",
+    "differs": "abweichend",
+    "loadError": "Die Review-Items konnten nicht geladen werden",
+    "empty": "Keine Review-Items",
+    "emptyHint": "Der Abgleich hat nichts zu entscheiden."
   }
 }

@@ -43,7 +43,8 @@
     "inventory": "Inventory",
     "saved-views": "Saved views",
     "locations": "Locations",
-    "ci-types": "CI Types"
+    "ci-types": "CI Types",
+    "reviews": "Reviews"
   },
   "common": {
     "save": "Save",
@@ -1053,5 +1054,58 @@
     "site": "Site",
     "allClients": "All clients",
     "allSites": "All sites"
+  },
+  "reviews": {
+    "title": "Review inbox",
+    "subtitle": "Open reconciliation decisions: compare the observation with the CI, then merge, create, accept or dismiss.",
+    "status": "Status",
+    "allStatuses": "All statuses",
+    "statuses": {
+      "open": "Open",
+      "resolved": "Resolved",
+      "dismissed": "Dismissed"
+    },
+    "kind": "Type",
+    "allKinds": "All types",
+    "kinds": {
+      "unclassified_device": "Unclassified device",
+      "ambiguous_identity": "Ambiguous identity",
+      "conflicting_values": "Conflicting values",
+      "probable_duplicate": "Probable duplicate",
+      "override_conflict": "Override conflict",
+      "resurrected_device": "Resurrected device",
+      "unlicensed_ci": "Unlicensed CI",
+      "scope_suggested": "Suggested scope",
+      "serial_mismatch": "Serial number mismatch",
+      "duplicate_ip": "Duplicate IP address",
+      "unknown_relationship": "Unknown relationship"
+    },
+    "escalatedOnly": "Escalated only",
+    "escalated": "Escalated",
+    "selectAll": "Select all open",
+    "select": "Select “{{name}}”",
+    "bulk": {
+      "label": "Bulk action",
+      "selected": "{{count}} selected",
+      "action": "Action",
+      "choose": "Choose action",
+      "run": "Run",
+      "result": "{{resolved}} resolved, {{failed}} failed."
+    },
+    "actions": {
+      "merge": "Merge",
+      "new": "Create new",
+      "dismiss": "Dismiss",
+      "accept": "Accept"
+    },
+    "candidate": "Candidate",
+    "diff": "Observation compared with the CI",
+    "field": "Field",
+    "observed": "Observed",
+    "current": "In the CI",
+    "differs": "differs",
+    "loadError": "The review items could not be loaded",
+    "empty": "No review items",
+    "emptyHint": "Reconciliation has nothing to decide."
   }
 }

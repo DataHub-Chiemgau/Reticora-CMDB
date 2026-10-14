@@ -42,6 +42,7 @@ export type AppPage =
   | 'desks'
   | 'agents'
   | 'findings'
+  | 'reviews'
   // Enterprise CMDB + asset/inventory extension (Phase E).
   | 'ci-types'
   | 'locations'
@@ -83,6 +84,7 @@ export const pageToPath: Record<AppPage, string> = {
   desks: '/desks',
   agents: '/agents',
   findings: '/findings',
+  reviews: '/reviews',
   'ci-types': '/ci-types',
   locations: '/locations',
   inventory: '/inventory',
