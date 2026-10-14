@@ -512,7 +512,8 @@
       "site": "Standort",
       "type": "CI-Typ",
       "show": "Topologie anzeigen"
-    }
+    },
+    "graphUnavailable": "Die grafische Darstellung braucht WebGL, das in diesem Browser nicht verfügbar ist. Die Knotenliste unten zeigt dieselben Daten."
   },
   "rack": {
     "title": "Racks",

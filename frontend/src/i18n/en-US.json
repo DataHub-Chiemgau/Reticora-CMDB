@@ -512,7 +512,8 @@
       "site": "Site",
       "type": "CI type",
       "show": "Show topology"
-    }
+    },
+    "graphUnavailable": "The graph view needs WebGL, which is not available in this browser. The node list below shows the same data."
   },
   "rack": {
     "title": "Racks",
