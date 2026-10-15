@@ -264,10 +264,6 @@ func main() {
 		}
 		defer ingestQueue.Close()
 		slog.Info("ingest lanes", "lanes", ingestQueue.Lanes())
-		// The backlog per lane as the worker's 30-s sampler read it last,
-		// informational: it never takes the instance out of the load
-		// balancer, and a request never asks NATS (WP-334, OPS-05).
-		readiness = append(readiness, server.ReadinessCheck{Name: "ingest", Detail: ingestQueue.ReadinessDetail})
 	}
 	// Jobs are distributed over the JOBS work queue on NATS (TEC-14); job
 	// kinds register their handlers with jobQueue.Handle.
@@ -411,6 +407,18 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("late modules", "enabled", modules.EnabledKeys())
+	// A worker of a switched-off module does not start (WP-214).
+	workerEnabled := func(name string) bool {
+		return cfg.WorkerEnabled(name) && modules.WorkerAllowed(name)
+	}
+	// The backlog per lane as the ingest worker's 30-s sampler read it last,
+	// informational: it never takes the instance out of the load balancer,
+	// and a request never asks NATS (WP-334, OPS-05). Only the ingest worker
+	// samples, so an instance without it (the API deployment) has no
+	// detail instead of an "unavailable" one on every probe.
+	if ingestQueue != nil && workerEnabled(config.WorkerIngest) {
+		readiness = append(readiness, server.ReadinessCheck{Name: "ingest", Detail: ingestQueue.ReadinessDetail})
+	}
 	mux, httpMetrics, err := server.NewRouter(repos, server.Options{
 		Version:            version,
 		Modules:            modules,
@@ -610,10 +618,7 @@ func main() {
 			Run:  func(ctx context.Context) { evaluator.Run(ctx, time.Minute) },
 		})
 	}
-	// A worker of a switched-off module does not start (WP-214).
-	workerSet, err := server.StartWorkers(func(name string) bool {
-		return cfg.WorkerEnabled(name) && modules.WorkerAllowed(name)
-	}, workers...)
+	workerSet, err := server.StartWorkers(workerEnabled, workers...)
 	if err != nil {
 		slog.Error("worker registration failed", "error", err)
 		os.Exit(1)

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -103,7 +105,10 @@ func readinessHandler(checks []ReadinessCheck) http.HandlerFunc {
 
 // readinessDetail returns the detail of c, or "unavailable" when it fails or
 // takes longer than readinessDetailTimeout; a Detail that outlasts its
-// context finishes in the background.
+// context finishes in the background. A failure is logged as a warning,
+// except a detail that has no value yet (discovery.ErrNoBacklogSample: the
+// ingest worker has not sampled since the start): that state is expected,
+// and the endpoint is unauthenticated and probed every few seconds.
 func readinessDetail(parent context.Context, c ReadinessCheck) any {
 	ctx, cancel := context.WithTimeout(parent, readinessDetailTimeout)
 	defer cancel()
@@ -126,7 +131,11 @@ func readinessDetail(parent context.Context, c ReadinessCheck) any {
 	case <-ctx.Done():
 		err = ctx.Err()
 	}
-	slog.Warn("readiness detail failed", "check", c.Name, "error", err)
+	if errors.Is(err, discovery.ErrNoBacklogSample) {
+		slog.Debug("readiness detail not available yet", "check", c.Name, "error", err)
+	} else {
+		slog.Warn("readiness detail failed", "check", c.Name, "error", err)
+	}
 	return map[string]string{"error": "unavailable"}
 }
 

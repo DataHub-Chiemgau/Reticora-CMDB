@@ -904,19 +904,22 @@ func (q *NATSIngestQueue) Backlog(ctx context.Context) (int, error) {
 	return backlog.Total, nil
 }
 
-// errNoBacklogSample: Backlog has not read the backlog yet, or the ingest
-// worker does not run in this instance.
-var errNoBacklogSample = errors.New("ingest backlog not sampled yet")
+// ErrNoBacklogSample: Backlog has not read the backlog yet. Only the ingest
+// worker samples, so the server registers ReadinessDetail only where that
+// worker runs; there the error covers the time until the first sample, an
+// expected state that /readyz does not log as a failure (a failing sample
+// is logged every 30 s by the worker set).
+var ErrNoBacklogSample = errors.New("ingest backlog not sampled yet")
 
 // ReadinessDetail is the ingest detail of /readyz: the backlog Backlog read
 // last, with the time it was read (sampled_at). It never asks NATS: the
 // endpoint is unauthenticated, so a request must not make the server list
-// the stream's consumers. Without a sample it fails (the detail reads
-// "unavailable").
+// the stream's consumers. Without a sample it fails with ErrNoBacklogSample
+// (the detail reads "unavailable").
 func (q *NATSIngestQueue) ReadinessDetail(context.Context) (any, error) {
 	backlog := q.sample.Load()
 	if backlog == nil {
-		return nil, errNoBacklogSample
+		return nil, ErrNoBacklogSample
 	}
 	return backlog, nil
 }

@@ -1,9 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +16,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -114,6 +118,40 @@ func TestReadyzDetails(t *testing.T) {
 	// Without a Detail the response has no details.
 	if _, _, raw = serveReadiness(t, ok("database")); strings.Contains(raw, "details") {
 		t.Fatalf("details without a Detail: %s", raw)
+	}
+}
+
+// TestReadyzDetailNotSampledIsQuiet covers the review of WP-334: the ingest
+// detail fails with discovery.ErrNoBacklogSample until the ingest worker has
+// sampled the backlog. /readyz is unauthenticated and probed every 5 s, so
+// that expected state must not write a WARN line per request; it is still
+// reported as unavailable. Any other failure keeps its WARN.
+func TestReadyzDetailNotSampledIsQuiet(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	pending := ReadinessCheck{Name: "ingest", Detail: func(context.Context) (any, error) {
+		return nil, fmt.Errorf("lane backlog: %w", discovery.ErrNoBacklogSample)
+	}}
+	for range 3 {
+		code, body, raw := serveReadiness(t, ok("database"), pending)
+		if code != http.StatusOK || body.Status != "ready" || !strings.Contains(raw, `"details":{"ingest":{"error":"unavailable"}}`) {
+			t.Fatalf("detail not sampled yet: %d %s", code, raw)
+		}
+	}
+	if strings.Contains(logs.String(), "level=WARN") {
+		t.Errorf("a detail not sampled yet wrote a warning:\n%s", logs.String())
+	}
+
+	logs.Reset()
+	broken := ReadinessCheck{Name: "ingest", Detail: func(context.Context) (any, error) {
+		return nil, errors.New("nats: consumer info failed")
+	}}
+	serveReadiness(t, ok("database"), broken)
+	if !strings.Contains(logs.String(), `level=WARN msg="readiness detail failed" check=ingest`) {
+		t.Errorf("a failing detail wrote no warning:\n%s", logs.String())
 	}
 }
 

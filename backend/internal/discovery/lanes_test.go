@@ -808,8 +808,8 @@ func (consumerInfos) Err() error                             { return nil }
 // TestReadinessDetailFromSample covers the holistic review of WP-334: the
 // ingest detail of the unauthenticated /readyz is the backlog the 30-s
 // sampler (Backlog) read last, with the time it was read; a request never
-// lists the stream's consumers. Before the first sample it fails, so the
-// detail reads "unavailable".
+// lists the stream's consumers. Before the first sample it fails with
+// ErrNoBacklogSample, which /readyz reports as "unavailable" without a WARN.
 func TestReadinessDetailFromSample(t *testing.T) {
 	stream := &listingStream{infos: []*jetstream.ConsumerInfo{
 		{Name: IngestConsumer, NumPending: 2},
@@ -818,8 +818,8 @@ func TestReadinessDetailFromSample(t *testing.T) {
 		{Name: "reticora-other"},
 	}}
 	q := &NATSIngestQueue{stream: stream, lanes: 2}
-	if detail, err := q.ReadinessDetail(context.Background()); err == nil {
-		t.Errorf("detail before the first sample: %v, want an error", detail)
+	if detail, err := q.ReadinessDetail(context.Background()); !errors.Is(err, ErrNoBacklogSample) {
+		t.Errorf("detail before the first sample: %v, %v; want ErrNoBacklogSample", detail, err)
 	}
 	before := time.Now().Add(-time.Second)
 	if total, err := q.Backlog(context.Background()); err != nil || total != 8 {

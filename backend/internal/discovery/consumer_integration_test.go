@@ -333,8 +333,8 @@ func TestIngestLanes(t *testing.T) {
 	}
 	reg := prometheus.NewRegistry()
 	discovery.RegisterMetrics(reg)
-	if detail, derr := queue4.ReadinessDetail(bg); derr == nil {
-		t.Errorf("/readyz detail before the first sample: %+v, want unavailable", detail)
+	if detail, derr := queue4.ReadinessDetail(bg); !errors.Is(derr, discovery.ErrNoBacklogSample) {
+		t.Errorf("/readyz detail before the first sample: %+v, %v; want ErrNoBacklogSample", detail, derr)
 	}
 	if total, berr := queue4.Backlog(bg); berr != nil || total != 44 {
 		t.Errorf("Backlog = %d, %v", total, berr)
