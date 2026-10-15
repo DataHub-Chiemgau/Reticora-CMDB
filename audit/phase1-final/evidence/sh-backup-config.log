@@ -1,0 +1,28 @@
+ok   postgres is built with pgBackRest
+ok   postgres archives WAL (archive_mode=on)
+ok   archive_command is pgbackrest archive-push
+ok   archive_timeout keeps the RPO below 15 min (300s)
+ok   postgres and backup share the repository volume
+ok   backup reads the data directory read-only
+ok   backup runs the scheduler and reports its health
+ok   the cipher passphrase is required
+ok   volumes pgbackrest and pgsocket are declared
+ok   repo1 keeps backups 35 days by time (NFR-06)
+ok   repo1 is encrypted
+ok   the offsite repo2 keeps 35 days and is encrypted
+ok   the image builds pgBackRest
+ok   k8s: daily full backup CronJob
+ok   k8s: S3 repository, 35 days, encrypted
+ok   k8s: the component includes the pgBackRest resources
+ok   terraform: retention of at least 35 days is enforced
+ok   terraform: production requires an EU replica region
+ok   server enables bucket versioning
+ok   installer generates and keeps the cipher passphrase
+ok   installer starts the backup service
+ok   docs describe the chain, 35 days and the restore
+ok   health: a backup of 1 h is healthy
+ok   health: a backup of 30 h is unhealthy
+ok   health: no backup is unhealthy
+ok   scheduler waits at most a day (67652s)
+
+26 passed, 0 failed

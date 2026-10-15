@@ -1,0 +1,49 @@
+ok   REP-01 backend/internal/notify contains Go code
+ok   REP-01 backend/internal/jobs contains Go code
+ok   REP-01 backend/internal/locations contains Go code
+ok   REP-01 backend/internal/pii contains Go code
+ok   REP-01 backend/internal/reviews contains Go code
+ok   REP-01 backend/internal/rules contains Go code
+ok   REP-01 api/rules.schema.json is a JSON schema
+ok   REP-01 docs/acceptance exists
+ok   REP-01 docs/decisions has an index
+ok   REP-01 0001-timescale-rls.md is listed in docs/decisions/README.md
+ok   REP-01 docs/schema-baseline.md exists
+ok   gate checklist docs/acceptance/g1-gate.md exists
+ok   gate checklist has a section for GATE-01
+ok   gate checklist has a section for GATE-02
+ok   gate checklist has a section for GATE-03
+ok   gate checklist has a section for GATE-05
+ok   gate checklist has a section for SEQ-01
+ok   GATE-01 no open Critical finding
+ok   GATE-02 the checklist lists N/P and WARN IDs
+ok   GATE-02 GATE-04 has a status and a reason
+ok   GATE-02 traceability row AUT-05 -> docs/acceptance/g1-gate.md names an ID listed there
+ok   GATE-02 traceability row AUT-06 -> docs/acceptance/g1-gate.md names an ID listed there
+ok   GATE-02 traceability row NET-04 -> docs/acceptance/g1-gate.md names an ID listed there
+ok   GATE-02 traceability row NFR-08 -> docs/acceptance/g1-gate.md names an ID listed there
+ok   GATE-02 traceability row GATE-04 -> docs/acceptance/g1-gate.md names an ID listed there
+ok   GATE-05 no [O] ID in the gate rows of docs/traceability.csv
+ok   GATE-05 the traceability check selects only [B]/[Q] for the gate
+ok   SEQ-01 the order names Epic A
+ok   SEQ-01 the order names Epic B
+ok   SEQ-01 the order names Epic D
+ok   SEQ-01 the order names Epic C
+ok   SEQ-01 the order names Lasttest
+ok   SEQ-01 the order names Sicherheitsreview
+ok   SEQ-01 the order names G1
+ok   ABN-01 protocol docs/acceptance/abn-01.md exists
+ok   ABN-01 frozen artefacts match docs/acceptance/artefakte/SHA256SUMS
+ok   DOD-01 the PR template carries the Definition of Done
+ok   GLO-11 the CI job traceability runs TestTraceabilityFile
+ok   GLO-11 the CI job traceability is not allowed to fail
+ok   GLO-11 missing [B]/[Q] IDs block the traceability check
+ok   workflow ci.yml is valid YAML with triggers
+ok   workflow disposable-domains.yml is valid YAML with triggers
+ok   workflow install-smoke.yml is valid YAML with triggers
+ok   workflow load.yml is valid YAML with triggers
+ok   workflow outage.yml is valid YAML with triggers
+ok   workflow release.yml is valid YAML with triggers
+ok   workflow restore-test.yml is valid YAML with triggers
+
+47 passed, 0 failed

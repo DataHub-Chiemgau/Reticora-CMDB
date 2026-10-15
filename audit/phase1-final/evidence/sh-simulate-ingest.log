@@ -1,0 +1,6 @@
+ok   simulated fleet is deterministic
+ok   discovery cycle uploads the simulated fleet
+ok   RETICORA_SIMULATE is refused in production
+ok   real ingest creates the 30 simulated CIs with edges
+
+4 passed, 0 failed
