@@ -781,3 +781,67 @@ func TestLaneMetricsRegistered(t *testing.T) {
 	}
 	laneBacklog.Reset()
 }
+
+// listingStream is a stream whose consumer listing counts its calls and
+// lists infos; every other method is unused.
+type listingStream struct {
+	jetstream.Stream
+	listings atomic.Int32
+	infos    []*jetstream.ConsumerInfo
+}
+
+func (s *listingStream) ListConsumers(context.Context) jetstream.ConsumerInfoLister {
+	s.listings.Add(1)
+	ch := make(chan *jetstream.ConsumerInfo, len(s.infos))
+	for _, info := range s.infos {
+		ch <- info
+	}
+	close(ch)
+	return consumerInfos{ch}
+}
+
+type consumerInfos struct{ ch chan *jetstream.ConsumerInfo }
+
+func (l consumerInfos) Info() <-chan *jetstream.ConsumerInfo { return l.ch }
+func (consumerInfos) Err() error                             { return nil }
+
+// TestReadinessDetailFromSample covers the holistic review of WP-334: the
+// ingest detail of the unauthenticated /readyz is the backlog the 30-s
+// sampler (Backlog) read last, with the time it was read; a request never
+// lists the stream's consumers. Before the first sample it fails, so the
+// detail reads "unavailable".
+func TestReadinessDetailFromSample(t *testing.T) {
+	stream := &listingStream{infos: []*jetstream.ConsumerInfo{
+		{Name: IngestConsumer, NumPending: 2},
+		{Name: laneConsumerName(0), NumPending: 5, NumAckPending: 1},
+		{Name: laneConsumerName(1)},
+		{Name: "reticora-other"},
+	}}
+	q := &NATSIngestQueue{stream: stream, lanes: 2}
+	if detail, err := q.ReadinessDetail(context.Background()); err == nil {
+		t.Errorf("detail before the first sample: %v, want an error", detail)
+	}
+	before := time.Now().Add(-time.Second)
+	if total, err := q.Backlog(context.Background()); err != nil || total != 8 {
+		t.Fatalf("Backlog = %d, %v; want 8", total, err)
+	}
+	laneBacklog.Reset()
+	for range 50 {
+		detail, err := q.ReadinessDetail(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, ok := detail.(*IngestBacklog)
+		if !ok || b.Lanes != 2 || b.Total != 8 || len(b.Backlog) != 3 || b.Backlog["legacy"] != 2 || b.Backlog["0"] != 6 ||
+			b.SampledAt.Before(before) || b.SampledAt.After(time.Now()) {
+			t.Fatalf("detail %+v, want the sample of 8 with its time", detail)
+		}
+	}
+	if n := stream.listings.Load(); n != 1 {
+		t.Errorf("%d consumer listings for one sample and 50 details, want 1", n)
+	}
+	raw, err := json.Marshal(q.sample.Load())
+	if err != nil || !regexp.MustCompile(`"sampled_at":"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z"`).Match(raw) {
+		t.Errorf("JSON %s (%v), want sampled_at in UTC with at most milliseconds", raw, err)
+	}
+}

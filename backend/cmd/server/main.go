@@ -264,10 +264,10 @@ func main() {
 		}
 		defer ingestQueue.Close()
 		slog.Info("ingest lanes", "lanes", ingestQueue.Lanes())
-		// The backlog per lane, informational: it never takes the instance
-		// out of the load balancer (WP-334, OPS-05).
-		readiness = append(readiness, server.ReadinessCheck{Name: "ingest",
-			Detail: func(ctx context.Context) (any, error) { return ingestQueue.LaneBacklog(ctx) }})
+		// The backlog per lane as the worker's 30-s sampler read it last,
+		// informational: it never takes the instance out of the load
+		// balancer, and a request never asks NATS (WP-334, OPS-05).
+		readiness = append(readiness, server.ReadinessCheck{Name: "ingest", Detail: ingestQueue.ReadinessDetail})
 	}
 	// Jobs are distributed over the JOBS work queue on NATS (TEC-14); job
 	// kinds register their handlers with jobQueue.Handle.

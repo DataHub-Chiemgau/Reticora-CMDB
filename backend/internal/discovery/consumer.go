@@ -467,6 +467,8 @@ type NATSIngestQueue struct {
 	handler *Handler
 	// slots holds a token per batch in work (processingSlots).
 	slots chan struct{}
+	// sample is the backlog Backlog read last (ReadinessDetail).
+	sample atomic.Pointer[IngestBacklog]
 
 	mu        sync.Mutex
 	consumers map[string]*laneConsumer
@@ -856,17 +858,19 @@ func runIngestConsumer(ctx context.Context, src ingestSource, h *Handler, slots 
 // IngestBacklog is the backlog of the ingest consumers (/readyz details,
 // OPS-05): per lane ("legacy" for the former consumer) the messages not yet
 // delivered plus those delivered but unacknowledged, summed over all
-// organizations.
+// organizations, as read at SampledAt.
 type IngestBacklog struct {
-	Lanes   int            `json:"lanes"`
-	Backlog map[string]int `json:"backlog"`
-	Total   int            `json:"total"`
+	Lanes     int            `json:"lanes"`
+	Backlog   map[string]int `json:"backlog"`
+	Total     int            `json:"total"`
+	SampledAt time.Time      `json:"sampled_at"`
 }
 
 // LaneBacklog reads the backlog of every ingest consumer of the stream with
 // one listing.
 func (q *NATSIngestQueue) LaneBacklog(ctx context.Context) (*IngestBacklog, error) {
-	out := &IngestBacklog{Lanes: q.lanes, Backlog: map[string]int{}}
+	// Milliseconds: what a JSON client parses as a date.
+	out := &IngestBacklog{Lanes: q.lanes, Backlog: map[string]int{}, SampledAt: time.Now().UTC().Truncate(time.Millisecond)}
 	lister := q.stream.ListConsumers(ctx)
 	for info := range lister.Info() {
 		lane, ok := laneOf(info.Name)
@@ -885,7 +889,8 @@ func (q *NATSIngestQueue) LaneBacklog(ctx context.Context) (*IngestBacklog, erro
 
 // Backlog reports the messages waiting for the ingest worker, summed over
 // the lanes (reticora_worker_backlog), and samples the backlog per lane into
-// reticora_ingest_lane_backlog (OPS-05).
+// reticora_ingest_lane_backlog (OPS-05) and for ReadinessDetail. The worker
+// set calls it every 30 s while the ingest worker runs.
 func (q *NATSIngestQueue) Backlog(ctx context.Context) (int, error) {
 	backlog, err := q.LaneBacklog(ctx)
 	if err != nil {
@@ -895,7 +900,25 @@ func (q *NATSIngestQueue) Backlog(ctx context.Context) (int, error) {
 	for lane, n := range backlog.Backlog {
 		laneBacklog.WithLabelValues(lane).Set(float64(n))
 	}
+	q.sample.Store(backlog)
 	return backlog.Total, nil
+}
+
+// errNoBacklogSample: Backlog has not read the backlog yet, or the ingest
+// worker does not run in this instance.
+var errNoBacklogSample = errors.New("ingest backlog not sampled yet")
+
+// ReadinessDetail is the ingest detail of /readyz: the backlog Backlog read
+// last, with the time it was read (sampled_at). It never asks NATS: the
+// endpoint is unauthenticated, so a request must not make the server list
+// the stream's consumers. Without a sample it fails (the detail reads
+// "unavailable").
+func (q *NATSIngestQueue) ReadinessDetail(context.Context) (any, error) {
+	backlog := q.sample.Load()
+	if backlog == nil {
+		return nil, errNoBacklogSample
+	}
+	return backlog, nil
 }
 
 // consumeBatch processes one fetched batch. Undecodable messages are

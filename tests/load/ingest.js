@@ -26,7 +26,7 @@
 // records held as unlicensed_ci, dropped messages).
 //
 // Both scenarios record the peak backlog of /readyz (details.ingest.total,
-// WP-334) while they wait.
+// WP-334; the server samples it every 30 s) while they wait.
 //
 //   k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat key) tests/load/ingest.js
 //   k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat key) -e SCENARIO=spool tests/load/ingest.js
@@ -150,29 +150,36 @@ function visibleCount(prefix) {
   return res.status === 200 ? Number(res.json('total')) : -1;
 }
 
-// backlog samples the ingest backlog of /readyz (-1 without the detail).
+// backlog reads the ingest backlog of /readyz: total is the server's last
+// sample (details.ingest.total, taken every 30 s), at when it was taken
+// (sampled_at; now for a server that reads it per request); total -1
+// without the detail.
 function backlog() {
   const res = http.get(`${BASE_URL}/readyz`, { tags: { name: 'readyz' }, timeout: '10s' });
   try {
     const total = res.json('details.ingest.total');
     if (typeof total === 'number') {
       backlogPeak.add(total);
-      return total;
+      const at = Date.parse(res.json('details.ingest.sampled_at') || '');
+      return { total, at: Number.isNaN(at) ? Date.now() : at };
     }
   } catch (e) {
     // no JSON body
   }
-  return -1;
+  return { total: -1, at: 0 };
 }
 
 // waitVisible polls until want CIs with prefix are visible and returns the
 // time t and the count n. A shortfall is a failure (t = -1): it stops
 // waiting after WAIT_S, or as soon as the queue is empty and the count
 // stopped growing, since the missing records will never become visible.
-// The records missing are added to ingest_records_missing either way.
+// Empty counts only by a backlog sample taken after the count last grew:
+// an older one may predate the records still waiting. The records missing
+// are added to ingest_records_missing either way.
 function waitVisible(prefix, want) {
   const deadline = Date.now() + WAIT_S * 1000;
   let last = -1;
+  let grown = Date.now();
   let idle = 0;
   let t = -1;
   while (Date.now() < deadline) {
@@ -182,7 +189,11 @@ function waitVisible(prefix, want) {
       last = n;
       break;
     }
-    idle = backlog() === 0 && n === last ? idle + 1 : 0;
+    const queue = backlog();
+    if (n !== last) {
+      grown = Date.now();
+    }
+    idle = n === last && queue.total === 0 && queue.at > grown ? idle + 1 : 0;
     last = n;
     if (idle >= 3) {
       console.error(`${prefix}: only ${n} of ${want} records visible and the queue is empty`);
@@ -258,7 +269,7 @@ export function spool(data) {
   }
   const sent = Date.now();
   const atEnd = visibleCount(prefix);
-  const backlogAtEnd = backlog();
+  const backlogAtEnd = backlog().total;
   const all = waitVisible(prefix, SPOOL_RECORDS);
   check(all, { 'every spooled record visible': (v) => v.t >= 0 && v.n >= SPOOL_RECORDS });
   // A shortfall counts as a flush that never ended.

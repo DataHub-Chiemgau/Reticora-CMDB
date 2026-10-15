@@ -333,12 +333,16 @@ func TestIngestLanes(t *testing.T) {
 	}
 	reg := prometheus.NewRegistry()
 	discovery.RegisterMetrics(reg)
+	if detail, derr := queue4.ReadinessDetail(bg); derr == nil {
+		t.Errorf("/readyz detail before the first sample: %+v, want unavailable", detail)
+	}
 	if total, berr := queue4.Backlog(bg); berr != nil || total != 44 {
 		t.Errorf("Backlog = %d, %v", total, berr)
 	}
 	if got := gaugeValue(t, reg, "reticora_ingest_lane_backlog", "legacy"); got != 3 {
 		t.Errorf("reticora_ingest_lane_backlog{lane=legacy} = %v, want 3", got)
 	}
+	readinessFromSample(t, url, queue4, backlog)
 
 	countLike := func(pattern string) int {
 		t.Helper()
@@ -474,4 +478,54 @@ func gaugeValue(t *testing.T, reg *prometheus.Registry, name, lane string) float
 		}
 	}
 	return -1
+}
+
+// readinessFromSample: the /readyz detail of the queue is the backlog its
+// sampler read last (holistic review of WP-334); no request asks NATS. A
+// second connection watches the JetStream API requests of the consumers.
+func readinessFromSample(t *testing.T, url string, q *discovery.NATSIngestQueue, want *discovery.IngestBacklog) {
+	t.Helper()
+	bg := context.Background()
+	watch, err := nats.Connect(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer watch.Close()
+	sub, err := watch.SubscribeSync("$JS.API.CONSUMER.>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = watch.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	requests := func() int {
+		t.Helper()
+		time.Sleep(200 * time.Millisecond)
+		if ferr := watch.Flush(); ferr != nil {
+			t.Fatal(ferr)
+		}
+		n, _, perr := sub.Pending()
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		return n
+	}
+	for range 20 {
+		detail, derr := q.ReadinessDetail(bg)
+		b, ok := detail.(*discovery.IngestBacklog)
+		if derr != nil || !ok || b.Total != want.Total || !maps.Equal(b.Backlog, want.Backlog) || b.SampledAt.IsZero() ||
+			time.Since(b.SampledAt) > time.Minute {
+			t.Fatalf("/readyz detail %+v (%v), want the sample of %d with its time", detail, derr, want.Total)
+		}
+	}
+	if n := requests(); n != 0 {
+		t.Errorf("20 /readyz details sent %d JetStream consumer requests, want none", n)
+	}
+	// The watch sees the requests of a listing.
+	if _, err = q.LaneBacklog(bg); err != nil {
+		t.Fatal(err)
+	}
+	if n := requests(); n == 0 {
+		t.Error("the watch saw no JetStream request of a consumer listing")
+	}
 }

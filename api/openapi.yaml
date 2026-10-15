@@ -12654,7 +12654,11 @@ components:
         messages not yet delivered plus those delivered but unacknowledged,
         summed over all organizations. `legacy` is the consumer of the
         releases before the lanes; lanes beyond `lanes` are being drained.
-      required: [lanes, backlog, total]
+        The figures are the last sample the ingest worker takes every 30
+        seconds (`sampled_at`); a request never reads them from NATS. An
+        instance without the ingest worker, or before its first sample,
+        reports the detail as unavailable.
+      required: [lanes, backlog, total, sampled_at]
       properties:
         lanes:
           type: integer
@@ -12676,6 +12680,11 @@ components:
           type: integer
           minimum: 0
           example: 19
+        sampled_at:
+          type: string
+          format: date-time
+          description: When the backlog was read (UTC).
+          example: '2026-10-15T08:30:00.125Z'
 
     CallbackRequest:
       type: object

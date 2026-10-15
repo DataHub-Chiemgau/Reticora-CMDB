@@ -7195,7 +7195,7 @@ export interface components {
       /** @enum {string} */
       error: 'unavailable';
     };
-    /** @description Backlog of the ingest consumers (WP-334, NFR-03): per lane the messages not yet delivered plus those delivered but unacknowledged, summed over all organizations. `legacy` is the consumer of the releases before the lanes; lanes beyond `lanes` are being drained. */
+    /** @description Backlog of the ingest consumers (WP-334, NFR-03): per lane the messages not yet delivered plus those delivered but unacknowledged, summed over all organizations. `legacy` is the consumer of the releases before the lanes; lanes beyond `lanes` are being drained. The figures are the last sample the ingest worker takes every 30 seconds (`sampled_at`); a request never reads them from NATS. An instance without the ingest worker, or before its first sample, reports the detail as unavailable. */
     IngestBacklog: {
       /** @description RETICORA_INGEST_LANES of this instance. */
       lanes: number;
@@ -7213,6 +7213,12 @@ export interface components {
       };
       /** @example 19 */
       total: number;
+      /**
+       * Format: date-time
+       * @description When the backlog was read (UTC).
+       * @example 2026-10-15T08:30:00.125Z
+       */
+      sampled_at: string;
     };
     CallbackRequest: {
       code: string;
