@@ -18,7 +18,13 @@ Prüfungen:
   - die Workflows
 - Beide laufen in jedem PR (CI-Jobs `traceability` und `gate`).
 
-Stand: 2026-10-14, Release-Kandidat `main` nach PR „Gate G1: WP-211 – WP-213“.
+Stand: 2026-10-14, nach der G1-Nachbesserung (WP-332 bis WP-335,
+Commit `dbbfded`). Die Erstfassung prüfte den Release-Kandidaten `main` nach
+PR „Gate G1: WP-211 – WP-213“ (#62). Der Stand `dbbfded` ist lokal geprüft;
+danach kamen zwei Korrekturen aus dem Gesamtreview hinzu (`58863fa`,
+`dea65b7`, `docs/security/review-g1.md`), die die Werte des Nachweislaufs
+nicht ändern. Der CI-Lauf und der Workflow `load.yml` auf dem
+Release-Kandidaten stehen aus.
 
 ## Ergebnis
 
@@ -28,25 +34,53 @@ Stand: 2026-10-14, Release-Kandidat `main` nach PR „Gate G1: WP-211 – WP-213
 - Die Spätphasen-Module sind abgeschaltet.
 - Es gibt kein offenes Critical.
 
-Diese Punkte blockieren:
+Die Blocker beim Auftragnehmer, B1 (NFR-03) und B2 (NFR-02), sind mit der
+G1-Nachbesserung (WP-332 bis WP-335) geschlossen. Diese Punkte blockieren:
 
 | # | Blocker | Regel | Verantwortlich | Weg |
 |---|---|---|---|---|
-| B1 | Ingest-Durchsatz 58 statt 200 Records/s je Instanz (NFR-03, Befund SR-02, High) | GATE-02, GATE-03 (Lasttest bestanden), Sicherheitsreview ohne offene High | Auftragnehmer | WP-332 bis WP-334 (`docs/plan/implementierungsplan.md`, G1-Nachbesserung; E-56 offen) |
-| B2 | Impact im Worst Case unter Parallellast p95 2,39 s statt < 2 s (NFR-02, SR-05) | GATE-02 | Auftragnehmer | WP-335 (`docs/plan/implementierungsplan.md`, G1-Nachbesserung); Referenzhost bleibt SR-06 |
 | B3 | Externer Pentest ohne offene High/Critical (NFR-08 nach E-28) | GATE-03 | Auftraggeber (E-28, A-07) | `docs/security/pentest-g1.md` |
 | B4 | v2-Originaltexte fehlen: AUT-05, AUT-06, NET-04, ABN-01 (a)/(b) | GATE-02 | Auftraggeber (E-02, A-02) | Texte liefern, danach WPs nach Plan |
 | B5 | Skalierungsziel unbestätigt (E-17) | – (kein eigener Gate-Punkt; gemessen mit 10.000 Objekten nach CH15) | Auftraggeber | Bestätigung oder neuer Zielwert, dann Nachmessung |
+| B6 | Subprozessorenliste fehlt (NFR-09: „Subprozessoren dokumentiert und AVV-fähig“) | GATE-02 | Betreiber (E-35, A-11) | Liste in `docs/legal/subprozessoren.md` liefern, danach NFR-09 neu bewerten |
 
-B1 bis B4 müssen erledigt sein, bevor G1 freigegeben wird. Ist B5 nicht
+B3, B4 und B6 müssen erledigt sein, bevor G1 freigegeben wird. Ist B5 nicht
 bestätigt, gilt der Lasttest mit 10.000 Objekten.
+
+Geschlossen mit der G1-Nachbesserung:
+
+| # | Blocker (Erstlauf WP-206) | Regel | Geschlossen durch | Nachweis |
+|---|---|---|---|---|
+| B1 | Ingest-Durchsatz 58 statt 200 Records/s je Instanz (NFR-03, Befund SR-02, High) | GATE-02, GATE-03 (Lasttest bestanden), Sicherheitsreview ohne offene High | WP-332 bis WP-334 | Nachweislauf auf Commit `dbbfded` mit 4 Spuren (Standard): Abbau ab Sendeende 233 Records/s, Verzögerung Record → sichtbar höchstens 3,1 s bei 200 Records/s Angebot, Spool-Flush von 10.000 Records in 35,9 s, kein fehlender Record (`docs/acceptance/lasttest-g1.md`). SR-02 behoben (`docs/security/review-g1.md`). |
+| B2 | Impact im Worst Case unter Parallellast p95 2,39 s statt < 2 s (NFR-02, SR-05) | GATE-02 | WP-335 | Nachweislauf auf Commit `dbbfded`: Impact Tiefe 20 unter Parallellast p95 477 ms in der kompakten Form der Oberfläche und 546 ms in der Standardform mit Pfaden (`docs/acceptance/lasttest-g1.md`). SR-05 behoben (`docs/security/review-g1.md`). |
+
+Bedingungen der geschlossenen Blocker:
+
+- **E-58 (offen, Aufgabe A-14):** Der Nachweislauf lief auf einem Host mit 4
+  vCPU und 15 GB RAM (Größenklasse des Mindestsizings nach INS-07).
+  PostgreSQL, NATS, Redis, der Server und k6 teilten sich den Host. Ein
+  dedizierter Referenzhost steht für G1 nicht zur Verfügung (SR-06). Ob
+  dieser Lauf als G1-Nachweis für GATE-03 gilt, entscheidet der Auftraggeber
+  mit dem Product Owner. Empfohlen ist die Anerkennung mit Auflagen; eine
+  davon ist mindestens ein grüner `load.yml`-Lauf auf dem Commit des
+  Release-Kandidaten. Dieser Lauf steht aus.
+- **E-56 (offen, Aufgabe A-12):** Umgesetzt ist die Empfehlung: parallele
+  Spuren mit Identitätssperre (Standard 4 Spuren). Mit
+  `RETICORA_INGEST_LANES=1` (serielle Verarbeitung, Option 3) erreicht der
+  Abbau nur 182 Records/s und verfehlt NFR-03. Die Reserve mit 4 Spuren ist
+  auf diesem Host knapp: Frühere Läufe desselben Codes lagen bei 210–233
+  Records/s.
+- **E-57 (vorläufig entschieden, Aufgabe A-13):** WP-335 ändert die
+  Impact-Antwort nur additiv (Variante A). Die Standardantwort behält `path`.
+  Die Oberfläche ruft die kompakte Form über den Sparse-Fieldset `fields=`
+  (API-02) ab.
 
 ## GATE-01 – Kein offenes Critical
 
 | Quelle | Critical offen | Nachweis |
 |---|---:|---|
 | Audit-Befunde (225 Critical/High) | 0 | `docs/security/review-g1.md`, Abschnitt „Audit-Befunde Critical/High“: 41 geschlossen, 8 mit G1-Anteil geschlossen |
-| Neue Befunde des Sicherheitsreviews (SR-01 bis SR-07) | 0 | `docs/security/review-g1.md`: kein Critical |
+| Neue Befunde des Sicherheitsreviews (SR-01 bis SR-10) | 0 | `docs/security/review-g1.md`: kein Critical |
 | Abhängigkeits- und Image-Scans | 0 | govulncheck, npm audit, Trivy blockierend in CI |
 | Externer Pentest | ausstehend | `docs/security/pentest-g1.md` |
 
@@ -63,7 +97,8 @@ gemischte Tags wie „[B], Teilumfang [P2]“ zählt der [B]-Anteil.
   Katalog fehlt und in der Traceability als [B] geführt ist. Jede hat eine
   Zeile in `docs/traceability.csv`; die Prüfung blockiert, sobald eine fehlt.
 - Der Status je ID steht im [Anhang](#anhang-status-je-bq-id).
-- Abweichungen von PASS stehen in den beiden Tabellen unten.
+- Abweichungen von PASS stehen in den beiden ersten Tabellen unten. Die IDs,
+  die mit der G1-Nachbesserung PASS wurden, stehen in der dritten.
 
 ### N/P und WARN
 
@@ -83,12 +118,26 @@ G1:
 
 | ID | Status | Begründung |
 |---|---|---|
-| NFR-02 | FAIL | Alle Budgets bis auf Impact im Worst Case unter Parallellast erfüllt (`docs/acceptance/lasttest-g1.md`). Blocker B2. |
-| NFR-03 | FAIL | 58 statt 200 Records/s. Datenverlust tritt nicht auf. Blocker B1. |
-| NFR-10 | FAIL | Der Lasttest lief, ist wegen NFR-03 aber nicht bestanden. Blocker B1. |
-| GATE-03 | offen | Pentest ausstehend (B3), Lasttest nicht bestanden (B1). Isolationstest und Install-Smoke sind belegt (siehe GATE-03). |
-| GATE-02 | FAIL | Folgt aus den Zeilen oben. |
+| NFR-09 | offen | Die Datenresidenz ist belegt (`docs/betrieb/referenzmodell.md`, WP-105). „Subprozessoren dokumentiert und AVV-fähig“ ist erst mit der gefüllten Liste erfüllt (`docs/legal/subprozessoren.md`, `docs/betrieb/referenzmodell.md`). Die Liste liefert der Betreiber (E-35, Aufgabe A-11); sie ist leer. Die Erstfassung dieser Checkliste führte NFR-09 fälschlich als PASS. Blocker B6. |
+| GATE-03 | offen | Pentest ausstehend (B3). Der Lasttest ist im lokalen Nachweislauf bestanden; offen sind die Anerkennung der Referenzumgebung (E-58) und ein grüner `load.yml`-Lauf auf dem Release-Kandidaten. Isolationstest und Install-Smoke sind belegt (siehe GATE-03). |
+| GATE-02 | offen | Folgt aus den Zeilen oben und den N/P-Zeilen (B3, B4, B6). Keine ID steht mehr auf FAIL. |
 | ABN-01 | PASS für (d) und (e) | Die Teile (a) und (b) sind N/P nach E-02 (B4); (c) ist [P2]. Siehe `docs/acceptance/abn-01.md`. |
+
+### PASS mit der G1-Nachbesserung
+
+Die Erstfassung führte diese IDs als FAIL (B1, B2). Nachweis ist der Lastlauf
+auf Commit `dbbfded` mit 10.000 Objekten (`docs/acceptance/lasttest-g1.md`).
+
+| ID | Status | Begründung |
+|---|---|---|
+| NFR-02 | PASS | Alle Budgets erfüllt (`api.js`, 60 s, alle Szenarien parallel, frischer Seed). Impact Tiefe 20 p95 477 ms in der kompakten Form der Oberfläche und 546 ms in der Standardform mit Pfaden (Erstlauf 2,39 s). 7.038 von 7.038 Checks. WP-335, B2 geschlossen. |
+| NFR-03 | PASS | Mit 4 Spuren (Standard): Abbau ab Sendeende 233 Records/s (Erstlauf 58), Verzögerung Record → sichtbar höchstens 3,1 s bei 200 Records/s Angebot, Spool-Flush von 10.000 Records in 35,9 s, kein fehlender Record. Mit einer Spur 182 Records/s (E-56 offen). WP-332 bis WP-334, B1 geschlossen. |
+| NFR-10 | PASS | Lasttest mit 10.000 Objekten bestanden: Alle Schwellen von `api.js` und `ingest.js` (4 Spuren) sind erfüllt. Die Anerkennung der Referenzumgebung (E-58) und ein grüner `load.yml`-Lauf auf dem Release-Kandidaten stehen aus. |
+
+API-01 bleibt PASS: WP-335 erweitert die Antwort von `GET /impact/{ci_id}` und
+`GET /impact` nur additiv (`via`, `relay`). `path` bleibt in der
+Standardantwort; die kompakte Form liefert der Sparse-Fieldset `fields=`
+(API-02, E-57 vorläufig entschieden).
 
 ### Spätphasen-Module (E-03)
 
@@ -115,7 +164,7 @@ verschoben (`docs/security/review-g1.md`).
 
 | Bedingung | Status | Nachweis |
 |---|---|---|
-| Lasttest (NFR-10) bestanden | FAIL | `docs/acceptance/lasttest-g1.md` (B1, B2) |
+| Lasttest (NFR-10) bestanden | PASS im lokalen Nachweislauf | `docs/acceptance/lasttest-g1.md` (Commit `dbbfded`, B1 und B2 geschlossen); Anerkennung der Referenzumgebung offen (E-58), grüner `load.yml`-Lauf auf dem Release-Kandidaten ausstehend |
 | Pentest ohne offene High/Critical | offen | `docs/security/pentest-g1.md` (B3) |
 | Isolationstest (TEN-09) vollständig | PASS | `backend/internal/tenant/rls/channel_matrix_integration_test.go` (WP-208) |
 | Install-Smoke auf beiden Plattformen | PASS | `docs/acceptance/g1-installation.md` (WP-211) |
@@ -155,10 +204,14 @@ sein fachliches Epic in der Spalte „Epic (Traceability)“. Die Merge-Folge au
 | – | M-S: WP-214 Feature-Gates (E-03, vor G1) | #59 | 2026-10-14 | WP-214 |
 | 6 | Lasttest (NFR-10) | #60 | 2026-10-14 | WP-203 – WP-207 |
 | 7 | Sicherheitsreview | #61 | 2026-10-14 | WP-208 – WP-210 |
-| 8 | G1 | dieser PR | 2026-10-14 | WP-211 – WP-213 |
+| 8 | G1 | #62 | 2026-10-14 | WP-211 – WP-213 |
 
 PR #57 (Planung Phase 2) enthält kein Arbeitspaket. Die einzige Abweichung von
 SEQ-01 ist das Vorziehen von M0; E-07 erlaubt sie.
+
+Nach Schritt 8 folgt die G1-Nachbesserung (WP-332 bis WP-335, Epic G1, Planung
+in PR #63). Sie behebt die Befunde SR-02 und SR-05 des Sicherheitsreviews und
+wiederholt den Lasttest (NFR-10).
 
 **Status:** PASS.
 
@@ -188,12 +241,12 @@ SEQ-01 ist das Vorziehen von M0; E-07 erlaubt sie.
 
 ## Anhang: Status je [B]/[Q]-ID
 
-Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den genannten Tests bzw. Dokumenten, und die CI ist auf dem Release-Kandidaten grün. Die Abweichungen sind oben begründet.
+Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den genannten Tests bzw. Dokumenten, und die CI ist auf dem Release-Kandidaten grün. Die Abweichungen sind oben begründet. Für NFR-02, NFR-03 und NFR-10 ist der Nachweis der lokale Lastlauf auf Commit `dbbfded`; der CI-Lauf und der grüne `load.yml`-Lauf auf dem Release-Kandidaten stehen aus (E-58).
 
 | ID | Tag | Status | Nachweis | WP |
 |---|---|---|---|---|
 | ABN-01 | [Q] | PASS (d, e) | `frontend/e2e/onboarding.spec.ts`, `frontend/e2e/conflict.spec.ts` | WP-200, WP-212 |
-| ABN-02 | [Q] | PASS | `backend/internal/ci/querybudget_integration_test.go`, `tests/load/` | WP-204, WP-206 |
+| ABN-02 | [Q] | PASS | `backend/internal/ci/querybudget_integration_test.go`, `tests/load/`, `backend/internal/topology/querybudget_integration_test.go` | WP-204, WP-206, WP-335 |
 | ABN-03 | [Q], jeweilige Phase | PASS | `backend/internal/ci/concurrency_integration_test.go` | WP-207 |
 | API-01 | [B] | PASS | `backend/internal/middleware/openapi_test.go` | WP-167 |
 | API-02 | [B] | PASS | `backend/internal/api/cursor_test.go`, `backend/internal/api/listquery_test.go` | WP-164, WP-165 |
@@ -257,7 +310,7 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 | EVT-02 | [B] | PASS | `backend/internal/events/outbox_integration_test.go` | WP-136 |
 | EXP-01 | [B], DATEV [P2] | PASS | `backend/internal/export/scope_integration_test.go`, `backend/internal/export/export_test.go` | WP-035, WP-189 |
 | GATE-01 | [Q] | PASS | `tests/rep01-structure.test.sh` | WP-213 |
-| GATE-02 | [Q] | FAIL | `tests/rep01-structure.test.sh` | WP-213 |
+| GATE-02 | [Q] | offen | `tests/rep01-structure.test.sh` | WP-213 |
 | GATE-03 | [Q] | offen | `tests/install-smoke-health.test.sh`, `docs/security/review-g1.md`, `docs/security/pentest-g1.md` (+1) | WP-092, WP-209, WP-210, WP-211 |
 | GATE-04 | [Q], Bezug GA | N/P | `docs/acceptance/g1-gate.md` | WP-213 |
 | GATE-05 | [Q] | PASS | `tests/rep01-structure.test.sh` | WP-213 |
@@ -316,15 +369,15 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 | NET-05 | [B] | PASS | `backend/internal/ipam/handler_test.go` | WP-125 |
 | NET-08 | [B] | PASS | `backend/internal/ipam/vlan_integration_test.go` | WP-081 |
 | NFR-01 | [B], Teilumfang [P5] | PASS | `backend/internal/discovery/identity_test.go`, `backend/internal/discovery/scale_integration_test.go`, `tests/load/` | WP-086, WP-205, WP-206 |
-| NFR-02 | [B] | FAIL | `backend/internal/topology/impact_test.go`, `tests/load/` | WP-177, WP-206 |
-| NFR-03 | [B], Teilumfang [P5] | FAIL | `backend/internal/discovery/consumer_test.go`, `collector/collectorcmd/schedule_test.go`, `tests/load/` | WP-085, WP-154, WP-206 |
+| NFR-02 | [B] | PASS | `backend/internal/topology/impact_test.go`, `tests/load/`, `backend/internal/topology/querybudget_integration_test.go` (+1) | WP-177, WP-206, WP-335 |
+| NFR-03 | [B], Teilumfang [P5] | PASS | `backend/internal/discovery/consumer_test.go`, `collector/collectorcmd/schedule_test.go`, `tests/load/` (+4) | WP-085, WP-154, WP-206, WP-332 … |
 | NFR-04 | [B], Teilumfang [P5] | PASS | `edgecore/buffer/buffer_test.go`, `backend/internal/maintenance/status_test.go` | WP-062, WP-063 |
 | NFR-05 | [B] | PASS | `tests/backup-config.test.sh`, `tests/restore-pitr.sh` | WP-100, WP-101 |
 | NFR-06 | [B] | PASS | `backend/internal/jobs/retention_integration_test.go` | WP-135 |
 | NFR-07 | [B] | PASS | `frontend/e2e/a11y.spec.ts` | WP-193 |
 | NFR-08 | [B] | N/P | `docs/acceptance/g1-gate.md` | WP-213 |
-| NFR-09 | [B] | PASS | `docs/betrieb/referenzmodell.md` | WP-105 |
-| NFR-10 | [Q] | FAIL | `backend/cmd/seed/seed_integration_test.go`, `backend/internal/ci/querybudget_integration_test.go`, `tests/load/` | WP-203, WP-204, WP-206 |
+| NFR-09 | [B] | offen | `docs/betrieb/referenzmodell.md` | WP-105 |
+| NFR-10 | [Q] | PASS | `backend/cmd/seed/seed_integration_test.go`, `backend/internal/ci/querybudget_integration_test.go`, `tests/load/` (+1) | WP-203, WP-204, WP-206, WP-334 |
 | NTF-01 | [B] | PASS | `backend/internal/notify/channel_test.go` | WP-137 |
 | NTF-03 | [B] | PASS | `backend/internal/notify/recipients_integration_test.go` | WP-138 |
 | NTF-04 | [B] | PASS | `backend/internal/notify/notifier_test.go` | WP-139 |

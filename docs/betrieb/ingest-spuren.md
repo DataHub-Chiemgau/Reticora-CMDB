@@ -65,6 +65,21 @@ nebeneinander arbeiten.
   serielle Verarbeitung gesehen hätte: ein Gerät wird nicht zu zwei CIs
   (PRI-10), auch wenn sich seine Records nur über nicht eindeutige Merkmale
   (IP und sysObjectID, Interface-MACs) erkennen.
+- **Sperrform:** Identitäts- und `max_cis`-Sperren nutzen die
+  Zwei-Argument-Form `pg_advisory_xact_lock(klasse, schlüssel)` mit eigenen
+  Klassen: Identitätssperre der Organisation `0x52496f72` (1380544370),
+  Identitätsschlüssel `0x52496b79` (1380543353), `max_cis` `0x52436e74`
+  (1380150900). Sie unterscheiden sich von den Klassen von Audit-Kette,
+  Outbox und Publisher und können keiner Ein-Argument-Sperre gleichen (etwa
+  der Sperre des Scheduler-Leiters). Der Schlüssel in der Klasse sind die
+  ersten 4 Byte des SHA-256 der Organisation und des Werts; eine gezielte
+  Kollision serialisiert nur zwei Ingest-Transaktionen.
+- **Wartegrenze:** Jede Sperranweisung wartet höchstens 20 s
+  (`lock_timeout`, in derselben Anweisung gesetzt und zurückgesetzt; andere
+  Wartezeiten der Transaktion bleiben unverändert). Danach scheitert die
+  Transaktion mit 55P03 und wird wiederholt (siehe „Konflikte zwischen
+  Spuren“). Auch fünf solche Wartezeiten einer Zustellung (Batch und vier
+  Record-Versuche) enden innerhalb von `AckWait` (2 min).
 - **Obergrenze der Sperren:** Eine Transaktion sperrt höchstens 256
   Schlüssel. Ein Batch endet vor dem Record, der die Grenze überschreiten
   würde (z. B. 5 Switches mit 48 Ports, je 51 Schlüssel); ein Record mit mehr
@@ -90,9 +105,10 @@ nebeneinander arbeiten.
   Hardware-UUID oder Primär-MAC, den eine andere Spur zuerst belegt hat,
   wiederholt den Record sofort in einer neuen Transaktion (höchstens dreimal,
   Metrik `reticora_ingest_record_retries_total`). „out of shared memory“
-  (53200, meist eine volle Lock-Tabelle) wiederholt ihn ebenso, aber nach
-  100, 200 und 300 ms. Die Queue sieht diese Wiederholungen nicht; sie
-  zählen nicht gegen `MaxDeliver`.
+  (53200, meist eine volle Lock-Tabelle) und eine überschrittene Wartegrenze
+  der Sperren (55P03) wiederholen ihn ebenso, aber nach 100, 200 und 300 ms.
+  Die Queue sieht diese Wiederholungen nicht; sie zählen nicht gegen
+  `MaxDeliver`.
 
 ## Upgrade und Altconsumer
 
@@ -103,15 +119,16 @@ Filter). Nachrichten, die beim Upgrade noch im Stream liegen, bleiben erhalten
 und werden über diesen Consumer verarbeitet (`/readyz`: Spur `legacy`).
 
 - Startet während eines Rolling Upgrades eine Instanz des alten Releases neu,
-  setzt sie den Consumer wieder ohne Filter. NATS 2.10 nimmt das an; der alte
-  Server verarbeitet dann auch Spur-Nachrichten. Neue Instanzen stellen den
-  Filter innerhalb von 30 s wieder her (Log
-  `ingest.legacy_filter_restored`).
+  setzt sie den Consumer wieder ohne Filter (NATS 2.10 nimmt das an). Sie
+  sieht dann nur Nachrichten, die danach veröffentlicht werden; neue
+  Instanzen stellen den Filter innerhalb von 30 s wieder her (Log
+  `ingest.legacy_filter_restored`) und verarbeiten die Spuren weiter.
 - Der Server löscht `reticora-ingest` nie. Entfernen erst, wenn kein
   unterstütztes Release mehr dreiteilige Subjects veröffentlicht und die Spur
   `legacy` leer ist:
-  `nats consumer rm RETICORA_INGEST reticora-ingest`. Danach ist ein Rollback
-  auf ein Release vor WP-334 nicht mehr möglich.
+  `nats consumer rm RETICORA_INGEST reticora-ingest`. Ein Release vor WP-334
+  startet danach erst, wenn auch die Spur-Consumer gelöscht sind (siehe
+  „Rollback auf ein Release vor WP-334“, Schritt 5).
 
 ## Spurzahl ändern
 
@@ -129,13 +146,37 @@ und werden über diesen Consumer verarbeitet (`/readyz`: Spur `legacy`).
 
 ## Rückfall auf eine Spur
 
+`RETICORA_INGEST_LANES=1` auf allen Instanzen setzen und neu starten. Die
+Spuren `1` … `n-1` werden als Drain-Spuren geleert; es geht nichts
+verloren.
+
+## Rollback auf ein Release vor WP-334
+
+Ein Release vor WP-334 liest Nachrichten, die schon in Spur-Subjects
+(`ingest.<org>.<spur>.<collector>`) liegen, nicht: Sein ungefilterter
+Consumer beginnt hinter ihnen, und solange eine neue Instanz läuft,
+veröffentlicht sie weiter in Spur 0. Was beim Rollback in einer Spur liegt,
+verfällt nach 48 h (die Collectors haben dafür 202 erhalten und senden nicht
+erneut). Ein Rolling Rollback ist deshalb nicht verlustfrei. Ohne Verlust
+geht es so:
+
 1. `RETICORA_INGEST_LANES=1` auf allen Instanzen setzen und neu starten.
-2. Warten, bis `/readyz` für die Spuren `1` … `n-1` den Rückstand 0 zeigt
-   (`details.ingest.backlog`).
-3. Erst danach ein Rollback auf ein Release vor WP-334 durchführen. Ein
-   Release vor WP-334 kann Nachrichten in Spur-Subjects zwar über den
-   ungefilterten Altconsumer lesen, dieser Weg hängt aber von einer
-   Validierungslücke von NATS 2.10 ab und ist nicht zugesichert.
+2. Annahme stoppen: Collector-Edge trennen (die Collectors puffern im
+   Spool) und `POST /api/v1/ingest/bulk` sowie
+   `POST /api/v1/discovery/ingest` am Ingress sperren.
+3. Warten, bis `/readyz` `details.ingest.total` = 0 zeigt (alle Spuren
+   einschließlich `0` und `legacy`).
+4. Alle Instanzen des neuen Releases beenden (Strategie `Recreate`, kein
+   Rolling Update).
+5. Die leeren Spur-Consumer löschen, für jedes n aus
+   `nats consumer ls RETICORA_INGEST`:
+   `nats consumer rm RETICORA_INGEST reticora-ingest-lane-<n>`. Sonst lehnt
+   NATS jede Neuanlage des ungefilterten Consumers `reticora-ingest` ab
+   („multiple non-filtered consumers not allowed on workqueue stream“),
+   etwa nach der Wiederherstellung eines NATS-Clusters, und das alte
+   Release startet nicht.
+6. Das alte Release starten.
+7. Annahme wieder öffnen; die Collectors senden ihren Spool.
 
 ## Rückstand beobachten
 
@@ -148,6 +189,12 @@ und werden über diesen Consumer verarbeitet (`/readyz`: Spur `legacy`).
    "details":{"ingest":{"lanes":4,"backlog":{"0":12,"1":0,"2":7,"3":0,"legacy":0},"total":19}}}
   ```
 
+  Das Detail ist auf 300 ms begrenzt, unabhängig von den Checks (2 s).
+  Antwortet JetStream nicht rechtzeitig oder mit Fehler, steht dort
+  `{"error":"unavailable"}` (Ursache im Log), und `/readyz` antwortet
+  trotzdem sofort. Die Readiness-Probe in `deploy/k8s/base/deployment.yaml`
+  wartet 3 s (`timeoutSeconds`), länger als die Check-Grenze.
+
 - Metriken (alle 30 s):
 
   | Metrik | Bedeutung |
@@ -155,7 +202,7 @@ und werden über diesen Consumer verarbeitet (`/readyz`: Spur `legacy`).
   | `reticora_ingest_lanes` | Spurzahl dieser Instanz |
   | `reticora_ingest_lane_backlog{lane}` | Rückstand je Spur (`legacy` = Altconsumer) |
   | `reticora_ingest_lane_records_total{lane}` | bestätigte Nachrichten je Spur |
-  | `reticora_ingest_record_retries_total{reason}` | Wiederholungen im Prozess (`deadlock`, `serialization`, `identity`, `near_limit`, `out_of_memory`) |
+  | `reticora_ingest_record_retries_total{reason}` | Wiederholungen im Prozess (`deadlock`, `serialization`, `identity`, `near_limit`, `out_of_memory`, `lock_timeout`) |
   | `reticora_worker_backlog{worker="ingest"}` | Summe aller Spuren (bestehende Alerts) |
 
 - Eine einzelne hängende Spur fällt in der Summe kaum auf: steigt
@@ -165,10 +212,11 @@ und werden über diesen Consumer verarbeitet (`/readyz`: Spur `legacy`).
 ## Kosten je Transaktion
 
 Mit mehr als einer Spur kommt je Record- und Batch-Transaktion eine Anweisung
-hinzu (die Identitätssperre): ein Batch von 20 neuen Geräten braucht 11 statt
-10 Anweisungen, ein neuer Record einzeln 13 statt 12. Updates bekannter Geräte
-lesen ihre Kandidaten unter der Sperre neu (2 Anweisungen mehr). Organisationen
-mit `max_cis` zählen je anlegender Transaktion einmal neu (2 Anweisungen).
+hinzu (die Identitätssperre samt Wartegrenze): ein Batch von 20 neuen Geräten
+braucht 11 statt 10 Anweisungen, ein neuer Record einzeln 13 statt 12.
+Updates bekannter Geräte lesen ihre Kandidaten unter der Sperre neu
+(2 Anweisungen mehr). Organisationen mit `max_cis` zählen je anlegender
+Transaktion einmal neu (2 Anweisungen).
 
 Lock-Tabelle: Jede Advisory-Sperre ist ein Eintrag der gemeinsamen
 Lock-Tabelle des PostgreSQL-Clusters (etwa `max_locks_per_transaction` ×
