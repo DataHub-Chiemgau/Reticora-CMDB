@@ -2,6 +2,8 @@ package discovery
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"hash/fnv"
 	"log/slog"
@@ -134,9 +136,10 @@ func (h *Handler) laneMutex(orgID string, lane int) *sync.Mutex {
 }
 
 // IdentityLocker takes the transaction-scoped advisory locks of identity
-// keys as one statement of the context transaction: first Org, shared, or
-// exclusive with Exclusive, then every key of Keys in ascending order. The
-// discovery PG repository implements it.
+// keys as one statement of the context transaction: first Org
+// (identityOrgLockClass), shared, or exclusive with Exclusive, then every key
+// of Keys (identityKeyLockClass) in ascending order. The discovery PG
+// repository implements it.
 type IdentityLocker interface {
 	LockIdentities(ctx context.Context, orgID string, locks IdentityLocks) error
 }
@@ -146,9 +149,9 @@ type IdentityLocker interface {
 // keys of the transaction's records, or exclusive without keys when the
 // records have more than identityLockLimit keys.
 type IdentityLocks struct {
-	Org       int64
+	Org       int32
 	Exclusive bool
-	Keys      []int64
+	Keys      []int32
 }
 
 // identityLockLimit bounds the identity keys one transaction locks.
@@ -168,19 +171,37 @@ type IdentityLocks struct {
 // (identityLockLimit+1) identity locks.
 const identityLockLimit = 256
 
-// identityLockNamespace prefixes every hashed identity key: the keys use the
-// one-argument (bigint) form of the advisory locks, a lock space of its own
-// next to the two-argument keys of the audit chain and the event outbox
-// (migrations 000117, 000120), and the prefix keeps them apart from the
-// other bigint keys (location tree, scheduler leader).
+// Lock classes of the ingest locks. They use the two-argument form of the
+// advisory locks, pg_advisory_xact_lock(class, key), whose lock tag never
+// equals the tag of a one-argument (bigint) lock: the scheduler's leader
+// and job locks, the location tree and the operator audit stay out of
+// reach of keys derived from what a tenant reports. Their classes differ
+// from those of the audit chain (0x52657469), the event outbox (0x45766e74)
+// and its publisher (0x45766e75), and from each other, so the organization's
+// identity lock, taken before the keys, is never one of them.
+const (
+	identityOrgLockClass int32 = 0x52496f72 // "RIor"
+	identityKeyLockClass int32 = 0x52496b79 // "RIky"
+	ciCountLockClass     int32 = 0x52436e74 // "RCnt"
+)
+
+// identityLockNamespace prefixes every hashed identity key and the
+// organization's identity lock.
 const identityLockNamespace = "reticora/ingest-identity\x00"
 
+// ingestLockKey is the key of text within its lock class: the first four
+// bytes of its SHA-256. A tenant cannot choose a value whose key equals a
+// given one at less than about 2^32 hashes, and two values that share a key
+// only serialize their transactions, as one value would.
+func ingestLockKey(text string) int32 {
+	sum := sha256.Sum256([]byte(text))
+	return int32(binary.BigEndian.Uint32(sum[:4])) //nolint:gosec // the bits of the hash
+}
+
 // identityOrgLockKey is the advisory lock key of an organization's identity
-// lock; the hashed text differs from every identity key's.
-func identityOrgLockKey(orgID string) int64 {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(identityLockNamespace + strings.ToLower(orgID)))
-	return int64(h.Sum64()) //nolint:gosec // a hash, its sign does not matter
+// lock in identityOrgLockClass.
+func identityOrgLockKey(orgID string) int32 {
+	return ingestLockKey(identityLockNamespace + strings.ToLower(orgID))
 }
 
 // identityLocks returns the identity locks of a transaction that processes
@@ -197,21 +218,20 @@ func identityLocks(orgID string, ic *IdentityContext, items ...*IngestItem) Iden
 	return locks
 }
 
-// identityLockKeys returns the advisory lock keys of the identity values of
-// items, sorted and each once: the usable serial number (case folded), the
-// usable hardware UUID, every canonical MAC (primary, fingerprint and
-// interface MACs) and the management IP in its VRF; never the host name,
-// which never merges (CH29) and would make "localhost" a hot key.
-func identityLockKeys(orgID string, ic *IdentityContext, items ...*IngestItem) []int64 {
+// identityLockKeys returns the advisory lock keys (identityKeyLockClass) of
+// the identity values of items, sorted and each once: the usable serial
+// number (case folded), the usable hardware UUID, every canonical MAC
+// (primary, fingerprint and interface MACs) and the management IP in its
+// VRF; never the host name, which never merges (CH29) and would make
+// "localhost" a hot key.
+func identityLockKeys(orgID string, ic *IdentityContext, items ...*IngestItem) []int32 {
 	if ic == nil {
 		ic = &IdentityContext{}
 	}
 	org := strings.ToLower(orgID)
-	var keys []int64
+	var keys []int32
 	add := func(kind, value string) {
-		h := fnv.New64a()
-		_, _ = h.Write([]byte(identityLockNamespace + org + "\x00" + kind + "\x00" + value))
-		keys = append(keys, int64(h.Sum64())) //nolint:gosec // a hash, its sign does not matter
+		keys = append(keys, ingestLockKey(identityLockNamespace+org+"\x00"+kind+"\x00"+value))
 	}
 	for _, item := range items {
 		if usableSerial(item.SerialNumber) {
@@ -262,7 +282,7 @@ func (h *Handler) windowEnd(orgID string, frame *batchFrame, start int) int {
 	if !h.lanesOn() {
 		return end
 	}
-	keys := map[int64]struct{}{}
+	keys := map[int32]struct{}{}
 	locked := false
 	for i := start; i < end; i++ {
 		if frame.typeIDs[i] == "" {
@@ -344,8 +364,8 @@ func (h *Handler) admissionCount(ctx context.Context, orgID string, frame *batch
 const maxRecordRetries = 3
 
 // outOfMemoryPause is the pause before the first new attempt of a
-// transaction that failed because PostgreSQL ran out of shared memory; the
-// next attempts wait one more pause each.
+// transaction that failed because PostgreSQL ran out of shared memory or
+// gave up waiting for a lock; the next attempts wait one more pause each.
 const outOfMemoryPause = 100 * time.Millisecond
 
 // retryReason names why a failed record transaction is started again with
@@ -353,8 +373,9 @@ const outOfMemoryPause = 100 * time.Millisecond
 // failure (40001) with another lane, a unique identity index another lane
 // or instance won (23505 on serial number, hardware UUID or primary MAC; the
 // new attempt matches that CI), a max_cis admission that must run
-// exclusively, or PostgreSQL out of shared memory (53200, mostly a full
-// lock table) for a moment.
+// exclusively, PostgreSQL out of shared memory (53200, mostly a full lock
+// table) for a moment, or a lock wait longer than the ingest lock timeout
+// (55P03, see ingestLockTimeout).
 func retryReason(err error) string {
 	if errors.Is(err, errNearLimit) {
 		return "near_limit"
@@ -370,6 +391,8 @@ func retryReason(err error) string {
 		return "serialization"
 	case "53200":
 		return "out_of_memory"
+	case "55P03":
+		return "lock_timeout"
 	case "23505":
 		switch pgErr.ConstraintName {
 		case "uq_ci_org_serial", "uq_ci_org_hardware_uuid", "uq_ci_org_primary_mac":
@@ -381,11 +404,11 @@ func retryReason(err error) string {
 
 // retryPause waits before the new attempt of a transaction that failed for
 // reason, attempt being the number of the failed one (0 first): not at all
-// after losing against another lane; after running out of shared memory
-// (attempt+1)·outOfMemoryPause, so that other sessions can release their
-// locks first. It reports false when ctx ended first.
+// after losing against another lane; after running out of shared memory or
+// a lock timeout (attempt+1)·outOfMemoryPause, so that other sessions can
+// release their locks first. It reports false when ctx ended first.
 func retryPause(ctx context.Context, reason string, attempt int) bool {
-	if reason != "out_of_memory" {
+	if reason != "out_of_memory" && reason != "lock_timeout" {
 		return true
 	}
 	t := time.NewTimer(time.Duration(attempt+1) * outOfMemoryPause)
@@ -399,11 +422,11 @@ func retryPause(ctx context.Context, reason string, attempt int) bool {
 }
 
 // runRecord processes record i of the frame in its own transaction. With
-// more than one lane a transaction that lost against another lane or ran
-// out of shared memory (see retryReason) runs again, at most
-// maxRecordRetries times, in a fresh transaction and from the record as
-// reported (retryPause); the queue does not see these attempts. With one
-// lane the record runs once, as before.
+// more than one lane a transaction that lost against another lane, ran out
+// of shared memory or waited too long for a lock (see retryReason) runs
+// again, at most maxRecordRetries times, in a fresh transaction and from the
+// record as reported (retryPause); the queue does not see these attempts.
+// With one lane the record runs once, as before.
 func (h *Handler) runRecord(ctx context.Context, orgID string, frame *batchFrame, i int) (recordOutcome, error) {
 	var reported IngestItem
 	if h.lanesOn() {

@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,6 +42,8 @@ type PGRepository struct {
 	// Review items are stored by package reviews.
 	*reviews.PGRepository
 	pool *pgxpool.Pool
+	// lockTimeout replaces ingestLockTimeout when set (tests).
+	lockTimeout time.Duration
 }
 
 // NewPGRepository creates a new PostgreSQL-backed discovery repository.
@@ -515,31 +517,72 @@ func (r *PGRepository) LockCI(ctx context.Context, orgID, ciID string) error {
 // transactions find them by type assertion.
 var _ IdentityLocker = (*PGRepository)(nil)
 
+// ingestLockTimeout bounds the wait for the identity and max_cis locks of an
+// ingest transaction. Only ingest transactions take them, but the lane
+// goroutine that waits serves every organization, so no holder may stall it
+// for longer: the transaction fails with 55P03 and the record runs again
+// after a pause (retryReason). A wait behind other ingest transactions, one
+// batch each, stays far below it; a delivery that fails on it in its batch
+// and in every record attempt (5 waits) still ends within AckWait. The
+// other lock waits of the transaction keep their bounds.
+const ingestLockTimeout = 20 * time.Second
+
+// lockTimeoutSetting is the lock_timeout of a lock statement: the
+// repository's own for the tests, ingestLockTimeout otherwise.
+func (r *PGRepository) lockTimeoutSetting() string {
+	d := ingestLockTimeout
+	if r.lockTimeout > 0 {
+		d = r.lockTimeout
+	}
+	return strconv.FormatInt(d.Milliseconds(), 10) + "ms"
+}
+
+// boundedLocksSQL is one statement that sets lock_timeout to the parameter
+// timeout, takes the advisory locks of locks and restores the
+// transaction's lock_timeout: prev is read before bound sets the timeout
+// (bound reads prev), locks reads bound in its FROM list, so its lock
+// functions run after it, and the outer set_config runs after count(*) has
+// taken every lock.
+func boundedLocksSQL(timeout, locks string) string {
+	return `WITH prev AS MATERIALIZED (SELECT current_setting('lock_timeout') AS v),
+bound AS MATERIALIZED (SELECT set_config('lock_timeout', ` + timeout + `, true) FROM prev),
+locked AS MATERIALIZED (` + locks + `)
+SELECT set_config('lock_timeout', prev.v, true), n.locks FROM prev, (SELECT count(*) AS locks FROM locked) n`
+}
+
 // identityLockSQL takes the identity locks of a transaction in one
-// statement: the organization's lock ($1) first, shared, or exclusive with
-// $3, then the keys ($2) exclusively in ascending order. The lock functions
-// run after the sort (EXPLAIN: Result above Sort), so transactions that
-// share keys never wait for each other in a cycle.
-const identityLockSQL = `SELECT CASE WHEN s.o = 0 AND NOT $3 THEN pg_advisory_xact_lock_shared(s.k) ELSE pg_advisory_xact_lock(s.k) END
-FROM (SELECT 0 AS o, $1::bigint AS k UNION ALL SELECT DISTINCT 1, unnest($2::bigint[])) s ORDER BY s.o, s.k`
+// statement: the organization's lock ($1, identityOrgLockClass) first,
+// shared, or exclusive with $3, then the keys ($2, identityKeyLockClass)
+// exclusively in ascending order, each wait bounded by $4. The lock
+// functions run after the sort (EXPLAIN: Result above Sort), so
+// transactions that share keys never wait for each other in a cycle.
+var identityLockSQL = boundedLocksSQL("$4", `SELECT CASE WHEN s.o = 0 AND NOT $3 THEN pg_advisory_xact_lock_shared(s.c, s.k) ELSE pg_advisory_xact_lock(s.c, s.k) END
+	FROM bound, (SELECT 0 AS o, `+strconv.Itoa(int(identityOrgLockClass))+` AS c, $1::int AS k
+		UNION ALL SELECT DISTINCT 1, `+strconv.Itoa(int(identityKeyLockClass))+`, unnest($2::int[])) s
+	ORDER BY s.o, s.k`)
 
 // LockIdentities implements IdentityLocker with identityLockSQL (WP-334).
 func (r *PGRepository) LockIdentities(ctx context.Context, orgID string, locks IdentityLocks) error {
 	keys := locks.Keys
 	if keys == nil || locks.Exclusive {
-		keys = []int64{}
+		keys = []int32{}
 	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, identityLockSQL, locks.Org, keys, locks.Exclusive); err != nil {
+		if _, err := tx.Exec(ctx, identityLockSQL, locks.Org, keys, locks.Exclusive, r.lockTimeoutSetting()); err != nil {
 			return fmt.Errorf("lock identity keys: %w", err)
 		}
 		return nil
 	})
 }
 
-// ciCountLockNamespace keys the max_cis lock of an organization (one-argument
-// form, like the identity locks, with a prefix of its own).
+// ciCountLockNamespace keys the max_cis lock of an organization in
+// ciCountLockClass.
 const ciCountLockNamespace = "reticora/max-cis\x00"
+
+// ciCountLockSQL takes the max_cis lock ($2 in ciCountLockClass), shared or
+// exclusive with $3, its wait bounded by $1.
+var ciCountLockSQL = boundedLocksSQL("$1", `SELECT CASE WHEN $3 THEN pg_advisory_xact_lock(`+strconv.Itoa(int(ciCountLockClass))+`, $2::int)
+	ELSE pg_advisory_xact_lock_shared(`+strconv.Itoa(int(ciCountLockClass))+`, $2::int) END FROM bound`)
 
 // LockCICount implements CICountLocker: it takes the organization's max_cis
 // lock, exclusive or shared, until the end of the context transaction and
@@ -547,16 +590,10 @@ const ciCountLockNamespace = "reticora/max-cis\x00"
 // count is a statement of its own, so it sees what every holder before
 // committed.
 func (r *PGRepository) LockCICount(ctx context.Context, orgID string, exclusive bool) (int64, error) {
-	lock := "pg_advisory_xact_lock_shared"
-	if exclusive {
-		lock = "pg_advisory_xact_lock"
-	}
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(ciCountLockNamespace + strings.ToLower(orgID)))
-	key := int64(h.Sum64()) //nolint:gosec // a hash, its sign does not matter
+	key := ingestLockKey(ciCountLockNamespace + strings.ToLower(orgID))
 	var count int64
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "SELECT "+lock+"($1)", key); err != nil {
+		if _, err := tx.Exec(ctx, ciCountLockSQL, r.lockTimeoutSetting(), key, exclusive); err != nil {
 			return fmt.Errorf("lock max_cis: %w", err)
 		}
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`, orgID).Scan(&count); err != nil {

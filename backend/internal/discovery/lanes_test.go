@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -128,7 +131,7 @@ func TestIdentityLockKeys(t *testing.T) {
 	if len(keys) != 6 || !slices.IsSorted(keys) {
 		t.Fatalf("keys of a full record: %v", keys)
 	}
-	one := func(item IngestItem) int64 {
+	one := func(item IngestItem) int32 {
 		t.Helper()
 		k := identityLockKeys("org-1", ic, &item)
 		if len(k) != 1 {
@@ -164,6 +167,57 @@ func TestIdentityLockKeys(t *testing.T) {
 	// Two records: the union, each key once.
 	if both := identityLockKeys("org-1", ic, &full, &IngestItem{SerialNumber: "SN-1", ManagementIP: "198.51.100.1"}); len(both) != 7 {
 		t.Errorf("keys of two records: %d, want 7", len(both))
+	}
+}
+
+// TestIngestLockSpace pins the keys and the form of the ingest locks
+// (review finding, WP-334): the keys derive from values a tenant reports
+// (serial number, hardware UUID, MACs, IPs) and must not reach the locks of
+// other subsystems. They are two-argument advisory locks in classes of
+// their own, whose tags never equal a one-argument lock's (scheduler leader
+// and jobs, location tree, operator audit), and the key within the class is
+// the first four bytes of a SHA-256 (FNV-1a can be inverted byte by byte,
+// so a serial number with a chosen FNV key takes hours to find).
+func TestIngestLockSpace(t *testing.T) {
+	if k := identityLockKeys("Org-1", nil, &IngestItem{SerialNumber: " SN-1 "}); len(k) != 1 || k[0] != 2030715095 {
+		t.Errorf("identity key of serial SN-1 in org-1: %v, want SHA-256 of the namespaced value (2030715095)", k)
+	}
+	if k := identityOrgLockKey("ORG-1"); k != 1243962943 {
+		t.Errorf("organization identity key of org-1: %d, want 1243962943", k)
+	}
+	if k := ingestLockKey(ciCountLockNamespace + "org-1"); k != 522053624 {
+		t.Errorf("max_cis key of org-1: %d, want 522053624", k)
+	}
+	classes := map[int32]string{
+		0x52657469: "audit chain (audit.AdvisoryLockID, migration 000117)",
+		1165389428: "event outbox (migration 000120)",
+		1165389429: "event publisher (events.publisherLockKey)",
+	}
+	for class, name := range map[int32]string{identityOrgLockClass: "identity organization", identityKeyLockClass: "identity keys",
+		ciCountLockClass: "max_cis"} {
+		if other, taken := classes[class]; taken {
+			t.Errorf("lock class %d of the %s locks is the class of the %s locks", class, name, other)
+		}
+		classes[class] = name
+	}
+	// Only the two-argument form, with the classes, and a bounded wait that
+	// ends with the statement.
+	oneArg := regexp.MustCompile(`pg_advisory_xact_lock(_shared)?\(\s*[^,()]+\s*\)`)
+	for sql, classes := range map[string][]int32{identityLockSQL: {identityOrgLockClass, identityKeyLockClass}, ciCountLockSQL: {ciCountLockClass}} {
+		if oneArg.MatchString(sql) {
+			t.Errorf("one-argument advisory lock: %s", sql)
+		}
+		for _, class := range classes {
+			if !strings.Contains(sql, strconv.Itoa(int(class))) {
+				t.Errorf("lock class %d missing: %s", class, sql)
+			}
+		}
+		if strings.Count(sql, "set_config('lock_timeout'") != 2 {
+			t.Errorf("lock statement does not set and restore lock_timeout: %s", sql)
+		}
+	}
+	if !strings.Contains(identityLockSQL, "pg_advisory_xact_lock(s.c, s.k)") {
+		t.Errorf("identity keys not locked in their class: %s", identityLockSQL)
 	}
 }
 
@@ -300,14 +354,15 @@ func TestRetryReason(t *testing.T) {
 		{&pgconn.PgError{Code: "40001"}, "serialization"},
 		{fmt.Errorf("x: %w", errNearLimit), "near_limit"},
 		{fmt.Errorf("lock identity keys: %w", &pgconn.PgError{Code: "53200", Message: "out of shared memory"}), "out_of_memory"},
+		{fmt.Errorf("lock identity keys: %w", &pgconn.PgError{Code: "55P03", Message: "canceling statement due to lock timeout"}), "lock_timeout"},
 		{errors.New("database down"), ""},
 	} {
 		if got := retryReason(c.err); got != c.want {
 			t.Errorf("retryReason(%v) = %q, want %q", c.err, got, c.want)
 		}
 	}
-	// Only shared memory makes the new attempt wait, longer each time, and
-	// never past the context.
+	// Only shared memory and a lock timeout make the new attempt wait,
+	// longer each time, and never past the context.
 	start := time.Now()
 	if !retryPause(context.Background(), "deadlock", 2) || time.Since(start) >= outOfMemoryPause {
 		t.Error("a retry after losing against another lane waits")
@@ -315,6 +370,10 @@ func TestRetryReason(t *testing.T) {
 	start = time.Now()
 	if !retryPause(context.Background(), "out_of_memory", 1) || time.Since(start) < 2*outOfMemoryPause {
 		t.Errorf("second retry after out of shared memory waited %v, want %v", time.Since(start), 2*outOfMemoryPause)
+	}
+	start = time.Now()
+	if !retryPause(context.Background(), "lock_timeout", 0) || time.Since(start) < outOfMemoryPause {
+		t.Errorf("first retry after a lock timeout waited %v, want %v", time.Since(start), outOfMemoryPause)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

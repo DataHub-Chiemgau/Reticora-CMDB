@@ -2,7 +2,9 @@ package discovery_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"hash/fnv"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -179,6 +182,196 @@ func TestIngestLanesIdentityLock(t *testing.T) {
 	}
 
 	t.Run("bounded per transaction", func(t *testing.T) { identityLocksBounded(t, f) })
+	t.Run("own lock space", func(t *testing.T) { identityLockSpace(t, f) })
+	t.Run("lock timeout", func(t *testing.T) { identityLockTimeout(t, f) })
+}
+
+// schedulerLeaderKey is the bigint of the scheduler's leader lock
+// (jobs.lockKey of "reticora.scheduler"), a session lock the leader holds
+// for as long as it leads.
+func schedulerLeaderKey() int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte("reticora.scheduler"))
+	return int64(h.Sum64()) //nolint:gosec // the bits of the key
+}
+
+// advisoryTag is the lock tag of an advisory lock in pg_locks: classid and
+// objid hold the two keys of the two-argument form or the high and low half
+// of the bigint key; objsubid is 2 for the two-argument form, 1 otherwise.
+type advisoryTag struct {
+	classid, objid int64
+	objsubid       int16
+}
+
+// identityLockSpace: the ingest locks cannot meet a lock of another
+// subsystem (review finding, WP-334). The identity keys derive from values a
+// tenant reports; in the one-argument (bigint) space a crafted serial number
+// could hash to the key of the scheduler's leader lock, which the leader
+// holds for as long as it leads, and every lane that takes it would wait
+// forever. The identity and max_cis locks are two-argument locks of their
+// own classes, and a session that holds the scheduler leader's lock and a
+// one-argument lock with the bits of every one of them does not block them.
+func identityLockSpace(t *testing.T, f *scopetest.Fixture) {
+	bg := context.Background()
+	ctx := lanesCtx(f, f.OrgB)
+	repo := discovery.NewPGRepository(f.App)
+	item := discovery.IngestItem{SerialNumber: "LOCKSPACE-1", PrimaryMAC: "00:1b:21:40:00:01", ManagementIP: "198.18.40.1"}
+	locks := discovery.IdentityLocksOf(f.OrgB, &item)
+	if len(locks.Keys) != 3 || locks.Exclusive {
+		t.Fatalf("identity locks of the record: %+v, want three keys", locks)
+	}
+	// take takes the identity and max_cis locks in a transaction and
+	// returns the tags of the advisory locks the transaction holds; the
+	// lock statements leave the transaction's lock_timeout as it was.
+	take := func(ctx context.Context) ([]advisoryTag, error) {
+		var tags []advisoryTag
+		err := repo.RunInTx(ctx, f.OrgB, func(ctx context.Context) error {
+			inTx := func(fn func(tx pgx.Tx) error) error {
+				return database.WithRequestTenant(ctx, f.App, f.OrgB, func(_ context.Context, tx pgx.Tx) error { return fn(tx) })
+			}
+			if err := inTx(func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', '7s', true)`)
+				return err
+			}); err != nil {
+				return err
+			}
+			if err := repo.LockIdentities(ctx, f.OrgB, locks); err != nil {
+				return err
+			}
+			if _, err := repo.LockCICount(ctx, f.OrgB, true); err != nil {
+				return err
+			}
+			var timeout string
+			if err := inTx(func(tx pgx.Tx) error {
+				return tx.QueryRow(ctx, `SELECT current_setting('lock_timeout')`).Scan(&timeout)
+			}); err != nil || timeout != "7s" {
+				return fmt.Errorf("lock_timeout after the lock statements: %q, want the transaction's 7s (%v)", timeout, err)
+			}
+			return database.WithRequestTenant(ctx, f.App, f.OrgB, func(ctx context.Context, tx pgx.Tx) error {
+				rows, err := tx.Query(ctx, `SELECT classid::bigint, objid::bigint, objsubid FROM pg_locks
+					WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND granted ORDER BY 1, 2`)
+				if err != nil {
+					return err
+				}
+				tags, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (advisoryTag, error) {
+					var tag advisoryTag
+					return tag, row.Scan(&tag.classid, &tag.objid, &tag.objsubid)
+				})
+				return err
+			})
+		})
+		return tags, err
+	}
+	tags, err := take(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tags) != len(locks.Keys)+2 {
+		t.Fatalf("the transaction holds %d advisory locks, want the organization's, %d keys and max_cis: %+v", len(tags), len(locks.Keys), tags)
+	}
+	classes := map[int64]int{}
+	for _, tag := range tags {
+		if tag.objsubid != 2 {
+			t.Errorf("advisory lock %+v is not of the two-argument form", tag)
+		}
+		classes[tag.classid]++
+	}
+	if classes[int64(discovery.IdentityOrgLockClass)] != 1 || classes[int64(discovery.IdentityKeyLockClass)] != len(locks.Keys) ||
+		classes[int64(discovery.CICountLockClass)] != 1 || len(classes) != 3 {
+		t.Errorf("lock classes %v, want one organization lock, %d keys and one max_cis lock in their classes", classes, len(locks.Keys))
+	}
+
+	// Another session holds the scheduler leader's lock (or finds it held)
+	// and the one-argument locks with the bits of the identity locks.
+	conn, err := f.Admin.Acquire(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = conn.Exec(bg, `SELECT pg_advisory_unlock_all()`)
+		conn.Release()
+	}()
+	if _, err := conn.Exec(bg, `SELECT pg_try_advisory_lock($1)`, schedulerLeaderKey()); err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range tags {
+		var ok bool
+		if err := conn.QueryRow(bg, `SELECT pg_try_advisory_lock(($1::bigint << 32) | $2::bigint)`, tag.classid, tag.objid).Scan(&ok); err != nil || !ok {
+			t.Fatalf("one-argument lock with the bits of %+v: %v %v", tag, ok, err)
+		}
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if _, err := take(waitCtx); err != nil {
+		t.Errorf("ingest locks while another session holds the scheduler leader's lock and one-argument locks of the same bits: %v", err)
+	}
+}
+
+// identityLockTimeout: no holder of an identity key stalls a lane for longer
+// than the ingest lock timeout (review finding, WP-334). The lane goroutine
+// serves every organization; a transaction that holds a key of a record and
+// does not end makes the record's transactions fail with 55P03, the record
+// runs again after a pause, and processing returns the error to the queue
+// (which redelivers it) instead of waiting forever. Once the holder ends,
+// the record is processed.
+func identityLockTimeout(t *testing.T, f *scopetest.Fixture) {
+	bg := context.Background()
+	ctx := lanesCtx(f, f.OrgB)
+	repo := discovery.NewPGRepository(f.App)
+	const timeout = 300 * time.Millisecond
+	discovery.SetLockTimeout(repo, timeout)
+	h := discovery.NewHandler(repo, ci.NewPGRepository(f.App)).WithIngestLanes(4)
+	rec := plugins.RecordFromResult("snmp", &plugins.Result{CIType: "switch", Name: "lockwait-1", Serial: "LOCKWAIT-1", IP: "198.18.41.1"},
+		time.Now().Add(-time.Minute))
+	item := discovery.ItemFromRecord(&rec)
+
+	// The holder: a transaction that took the record's serial number key
+	// and does not end until released.
+	holder := discovery.IdentityLocksOf(f.OrgB, &discovery.IngestItem{SerialNumber: item.SerialNumber})
+	held, release, done := make(chan error, 1), make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = repo.RunInTx(lanesCtx(f, f.OrgB), f.OrgB, func(ctx context.Context) error {
+			err := repo.LockIdentities(ctx, f.OrgB, holder)
+			held <- err
+			if err == nil {
+				<-release
+			}
+			return err
+		})
+	}()
+	if err := <-held; err != nil {
+		t.Fatal(err)
+	}
+	retriesBefore := discovery.IngestRecordRetries()
+	start := time.Now()
+	// Without the lock timeout the lane would wait until this deadline.
+	waitCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	_, err := discovery.ProcessItemsInLane(waitCtx, h, f.OrgB, 2, item)
+	cancel()
+	elapsed := time.Since(start)
+	close(release)
+	<-done
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+		t.Fatalf("record behind a held identity key: %v, want the lock timeout (55P03)", err)
+	}
+	if retried := discovery.IngestRecordRetries() - retriesBefore; retried < 3 {
+		t.Errorf("%d retries after the lock timeout, want 3", retried)
+	}
+	// The batch attempt, four record attempts and three pauses, with room.
+	if elapsed > 5*timeout+600*time.Millisecond+5*time.Second {
+		t.Errorf("the lane waited %v for the held key", elapsed)
+	}
+	if _, err := discovery.ProcessItemsInLane(ctx, h, f.OrgB, 2, item); err != nil {
+		t.Fatalf("after the holder ended: %v", err)
+	}
+	var n int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci WHERE organization_id = $1 AND serial_number = 'LOCKWAIT-1' AND deleted_at IS NULL`,
+		f.OrgB).Scan(&n); err != nil || n != 1 {
+		t.Errorf("%d CIs of the record after the holder ended, want 1 (%v)", n, err)
+	}
+	t.Logf("the lane gave the record back after %v (lock timeout %v)", elapsed, timeout)
 }
 
 // lockProbe is the discovery repository that reads, in every

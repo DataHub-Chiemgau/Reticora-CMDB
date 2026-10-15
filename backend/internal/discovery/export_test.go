@@ -67,3 +67,19 @@ func QueueConsumers(q *NATSIngestQueue) []string { return q.names() }
 
 // RefreshQueue runs the periodic check of the queue at once.
 func RefreshQueue(ctx context.Context, q *NATSIngestQueue) { q.refresh(ctx) }
+
+// IdentityLocksOf returns the identity locks a transaction that processes
+// items takes (WP-334), with an empty identity context.
+func IdentityLocksOf(orgID string, items ...*IngestItem) IdentityLocks {
+	return identityLocks(orgID, &IdentityContext{}, items...)
+}
+
+// Lock classes of the ingest locks (two-argument advisory locks).
+const (
+	IdentityOrgLockClass = identityOrgLockClass
+	IdentityKeyLockClass = identityKeyLockClass
+	CICountLockClass     = ciCountLockClass
+)
+
+// SetLockTimeout replaces the lock timeout of r's ingest lock statements.
+func SetLockTimeout(r *PGRepository, d time.Duration) { r.lockTimeout = d }
