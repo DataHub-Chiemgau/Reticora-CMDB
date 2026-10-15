@@ -42,6 +42,7 @@ import {
  *  12 upgraded user creates a CI in the UI .... RBA-02, CI-01 (UI-04)        → WP-046, WP-120, WP-191
  *  13 role revocation effective ............... AUT-02, RBA-03, API-05       → WP-066, WP-009, WP-046
  *  14 SPA renews the session by cookie ........ AUT-02                       → WP-066, WP-009
+ *  14b SPA renews when the 15 minutes ran out .. AUT-02                       → WP-066
  *
  * The assertions encode the requirement texts (docs/spec/katalog-v3) and the
  * API contract (api/openapi.yaml); a failure is a product finding.
@@ -1083,6 +1084,44 @@ test('14 the SPA renews an expired access token with the refresh cookie instead 
     `SPA refresh (Content-Type: ${response.request().headers()['content-type'] ?? 'none'}) → ${await response.text()}`,
   ).toBe(200);
   await expect(page).toHaveURL(/\/cmdb/);
+  await expect(page.getByRole('link', { name: ci.name })).toBeVisible();
+  await context.close();
+});
+
+test('14b the SPA renews the session when the access token lifetime has run out instead of sending the user to the login', async ({
+  browser,
+  request,
+}) => {
+  const viewer = await ensureViewer(request);
+  const ci = await ensureCI(request);
+  const { context, page } = await signIn(browser, viewer);
+  await page.goto('/cmdb');
+  await expect(page.getByRole('link', { name: ci.name })).toBeVisible();
+
+  const refreshes: number[] = [];
+  page.on('response', (r) => {
+    if (r.url().endsWith('/api/v1/auth/refresh') && r.request().method() === 'POST') {
+      refreshes.push(r.status());
+    }
+  });
+  // As after the 15 minutes of AUT-02: the expiry the SPA stored with the
+  // session has passed. The HttpOnly refresh cookie is still valid, so the
+  // SPA must renew the session with it (WP-066) rather than sign the user out.
+  await page.evaluate(() => {
+    const raw = window.sessionStorage.getItem('reticora-auth-session')!;
+    const session = JSON.parse(raw) as { expiresAt: string };
+    session.expiresAt = new Date(Date.now() - 60_000).toISOString();
+    window.sessionStorage.setItem('reticora-auth-session', JSON.stringify(session));
+  });
+  await page.reload();
+  await expect
+    .poll(() => refreshes, {
+      message:
+        'the SPA renews the expired session with the refresh cookie (POST /auth/refresh → 200)',
+      timeout: 15_000,
+    })
+    .toContain(200);
+  await expect(page).not.toHaveURL(/\/login/);
   await expect(page.getByRole('link', { name: ci.name })).toBeVisible();
   await context.close();
 });

@@ -38,6 +38,7 @@ import { api, signupTenant, stamp, uiLogin, BASE, type Account } from './support
  *  T14 B's relationship to A's CI: status of the refusal  WP-010, WP-128, WP-163, WP-208 (TEN-05, TEN-09, REL-02, API-03)
  *  T15 topology rooted at A's CI ........................ WP-031, WP-163, WP-208 (IMP-06, API-03, TEN-09)
  *  T16 A creates a CI through the CMDB form ............. WP-117 (CI-03), WP-239, WP-010, WP-208 (TEN-06, TEN-09)
+ *  T17 A's audit viewer shows time and object ........... WP-133, WP-132, WP-191 (AUD-05, AUD-07, UI-01..UI-10 audit viewer)
  *
  * The fixture data of A (beforeAll) is created through the REST API the UI uses: the CI
  * form cannot create CIs (T16) and clients have no UI form; T01/T02/T16 drive the UI forms.
@@ -1179,5 +1180,36 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
     expect(NOT_FOUND).toContain(asB.status);
     const listB = await api<List<CI>>(w.rq, w.b.token, 'GET', `/cis?q=${name}`);
     expect(rows(listB.body).map((c) => c.id)).not.toContain(ci.id);
+  });
+
+  test('T17 A’s audit viewer shows when and on which object each of A’s entries happened', async () => {
+    // AUD-07: every change stores who, when and what; the audit viewer
+    // (UI-01..10) shows A's own entries with their time and object.
+    const page = w.a.page;
+    const listed = page.waitForResponse(
+      (r) => r.url().includes('/api/v1/audit-log') && r.request().method() === 'GET' && r.ok(),
+    );
+    await page.goto('/audit');
+    const entries = (
+      (await (await listed).json()) as {
+        data: { action: string; timestamp?: string; resource_id?: string }[];
+      }
+    ).data;
+    expect(entries.length, 'A has audit entries').toBeGreaterThan(0);
+    const tableRows = page.locator('#main-content table tbody tr');
+    await expect(tableRows).toHaveCount(entries.length);
+    for (let i = 0; i < Math.min(entries.length, 5); i++) {
+      const entry = entries[i];
+      const [time, , action, object] = await tableRows.nth(i).locator('td').allInnerTexts();
+      expect(action, `row ${i}`).toBe(entry.action);
+      expect(entry.timestamp, `API time of ${entry.action}`).toBeTruthy();
+      expect(time, `time of ${entry.action} (API ${entry.timestamp})`).not.toMatch(/invalid/i);
+      expect(time, `time of ${entry.action} (API ${entry.timestamp})`).toMatch(
+        /\d{1,2}\.\d{1,2}\.\d{4}/,
+      );
+      if (entry.resource_id) {
+        expect(object, `object of ${entry.action}`).toContain(entry.resource_id);
+      }
+    }
   });
 });
