@@ -1,0 +1,8 @@
+== api start 07:36:58 load1=0.62
+== api k6 exit=99 end 07:39:01 load1=12.68
+== ingest start 07:39:25 load1=9.58
+== ingest k6 exit=0 end 07:40:27 load1=5.84
+NOTICE:  database "load_ingest_spool" does not exist, skipping
+== ingest-spool start 07:40:53 load1=4.27
+== ingest-spool k6 exit=0 end 07:41:22 load1=4.78
+ALL_DONE

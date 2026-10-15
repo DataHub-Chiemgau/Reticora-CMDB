@@ -1,0 +1,60 @@
+running (01m57.0s), 31/32 VUs, 8488 complete and 0 interrupted iterations
+
+running (01m58.0s), 31/32 VUs, 8545 complete and 0 interrupted iterations
+
+running (01m59.0s), 31/32 VUs, 8586 complete and 0 interrupted iterations
+
+running (02m00.0s), 31/32 VUs, 8657 complete and 0 interrupted iterations
+
+running (02m01.0s), 20/32 VUs, 8714 complete and 0 interrupted iterations
+
+running (02m02.0s), 04/32 VUs, 8730 complete and 0 interrupted iterations
+
+     ✓ filter 200
+     ✓ detail 200
+     ✓ rack 200
+     ✓ search 200
+     ✓ list 200
+     ✓ bulk 200/202
+     ✓ topology 200
+     ✓ impact_full 200
+     ✓ full impact covers the organization
+     ✓ impact 200
+     ✓ impact covers the organization
+     ✓ impact <= 250 B per impacted CI
+     ✓ bulk job succeeded
+
+     █ setup
+
+       ✓ setup 200
+
+   ✓ bulk_500_duration..............: avg=16.16s   min=14.53s   med=15.15s   p(90)=18.06s   p(95)=18.43s   max=18.79s   count=3   
+   ✓ checks.........................: 100.00% 9088 out of 9088
+     data_received..................: 1.3 GB  11 MB/s
+     data_sent......................: 2.2 MB  18 kB/s
+     http_req_blocked...............: avg=21.04µs  min=1.63µs   med=6.14µs   p(90)=8.79µs   p(95)=11.61µs  max=17.34ms  count=9006
+     http_req_connecting............: avg=9.9µs    min=0s       med=0s       p(90)=0s       p(95)=0s       max=12.67ms  count=9006
+     http_req_duration..............: avg=188.19ms min=5.35ms   med=106.5ms  p(90)=430.24ms p(95)=634.43ms max=2.77s    count=9006
+       { expected_response:true }...: avg=188.19ms min=5.35ms   med=106.5ms  p(90)=430.24ms p(95)=634.43ms max=2.77s    count=9006
+     ✓ { name:detail }..............: avg=78.63ms  min=5.35ms   med=52.54ms  p(90)=161.89ms p(95)=220.03ms max=1.02s    count=2147
+     ✓ { name:filter }..............: avg=119.83ms min=9.93ms   med=99.83ms  p(90)=222.17ms p(95)=275.53ms max=1.19s    count=1871
+     ✓ { name:impact_full }.........: avg=1.18s    min=652.29ms med=1.11s    p(90)=1.59s    p(95)=1.89s    max=2.77s    count=111 
+     ✓ { name:impact }..............: avg=1.06s    min=428.56ms med=1s       p(90)=1.47s    p(95)=1.84s    max=2.77s    count=117 
+     ✗ { name:list }................: avg=351.24ms min=62.68ms  med=312.25ms p(90)=619.03ms p(95)=717.41ms max=1.4s     count=1090
+     ✓ { name:rack }................: avg=99.55ms  min=6.43ms   med=70.42ms  p(90)=196.22ms p(95)=254.03ms max=1.19s    count=1996
+     ✗ { name:search }..............: avg=281.52ms min=48.63ms  med=248.3ms  p(90)=470.44ms p(95)=580.65ms max=1.2s     count=1247
+     ✓ { name:topology }............: avg=590.77ms min=190.41ms med=525.04ms p(90)=883.15ms p(95)=1.19s    max=2.09s    count=152 
+     http_req_failed................: 0.00%   0 out of 9006
+     http_req_receiving.............: avg=583.5µs  min=14.31µs  med=104.31µs p(90)=376.93µs p(95)=1.16ms   max=352.29ms count=9006
+     http_req_sending...............: avg=41.4µs   min=4.93µs   med=18.7µs   p(90)=49.82µs  p(95)=83.04µs  max=16.07ms  count=9006
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s       p(95)=0s       max=0s       count=9006
+     http_req_waiting...............: avg=187.56ms min=5.28ms   med=106.36ms p(90)=429.66ms p(95)=632.08ms max=2.67s    count=9006
+     http_reqs......................: 9006    73.442789/s
+     iteration_duration.............: avg=433.35ms min=206.7ms  med=309.81ms p(90)=651.38ms p(95)=1.04s    max=18.79s   count=8734
+     iterations.....................: 8734    71.224663/s
+     vus............................: 4       min=4            max=32
+     vus_max........................: 32      min=32           max=32
+
+
+running (02m02.6s), 00/32 VUs, 8734 complete and 0 interrupted iterations
+time="2026-10-15T07:39:01Z" level=error msg="thresholds on metrics 'http_req_duration{name:list}, http_req_duration{name:search}' have been crossed"
