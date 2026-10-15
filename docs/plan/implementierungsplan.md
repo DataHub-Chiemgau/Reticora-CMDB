@@ -13,7 +13,8 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt alle offenen Punkte der Pha
 - Auswahlregel: Tag [B] oder [Q] mit Status FAIL, PARTIAL oder ABWEICHEND; alle Critical- und High-Befunde unabhängig vom Tag; N/P-Punkte, soweit sie ohne externe Klärung umsetzbar sind.
 - 20 IDs haben den Status N/P. Ohne externe Klärung nicht umsetzbare N/P-Punkte erhalten kein WP. Sie sind in `abdeckung.csv` der zuständigen Entscheidung zugeordnet.
 - **239 Arbeitspakete** mit zusammen **355,0 PT**. Davon fallen 26 WPs (42,5 PT) in den Meilenstein M-S. Nach E-03 (entschieden: deaktivieren) gehört von M-S nur WP-214 (`m-gates`) zum G1-Umfang. **G1-Umfang: 214 WPs mit 314,0 PT.** WP-215 bis WP-239 (25 WPs, 41,0 PT) sind in die jeweilige Folgephase verschoben.
-- **Nachtrag vom 2026-10-14 (G1-Nachbesserung):** Die Gate-Prüfung (WP-213) ergab die Blocker B1 (NFR-03) und B2 (NFR-02). WP-332 bis WP-335 (4 WPs, 5,5 PT) schließen sie und sind G1-Pflicht; G1-Umfang damit 218 WPs mit 319,5 PT.
+- **Nachtrag vom 2026-10-14 (G1-Nachbesserung):** Die Gate-Prüfung (WP-213) ergab die Blocker B1 (NFR-03) und B2 (NFR-02). WP-332 bis WP-335 (4 WPs, 5,5 PT) schließen sie und sind G1-Pflicht; G1-Umfang damit 218 WPs mit 319,5 PT. Stand 2026-10-14: Alle vier WPs sind umgesetzt (Commits `d2daeed` bis `dbbfded`, dazu `58863fa` und `dea65b7` aus dem Gesamtreview und am 2026-10-15 die Nachträge `3f2bfd5` bis `0f165cc` zu seinen nicht blockierenden Befunden; noch nicht gemergt); im Wiederholungslauf auf Commit `dbbfded` sind B1 und B2 geschlossen ([Umsetzungsstand](#umsetzungsstand-2026-10-14)).
+- **Nachtrag vom 2026-10-15 (Freigabe G1):** Der Auftraggeber hat [E-17](entscheidungen.md#e-17), [E-56](entscheidungen.md#e-56), [E-57](entscheidungen.md#e-57) und [E-58](entscheidungen.md#e-58) nach den Empfehlungen entschieden, die Blocker B3 (Pentest), B4 (v2-Texte) und B6 (Subprozessorenliste) für erledigt erklärt und G1 freigegeben. G1 ist damit bestanden; nachzureichen sind der grüne CI-Lauf auf PR #64 mit dem Merge nach `main` und die Nachweise zu B3, B4 und B6 (`docs/acceptance/g1-gate.md`, Abschnitt „Ergebnis“).
 - Format der WP-Blöcke: Die Aufgabenstellung bricht nach „### WP-“ ab. Das Format ist deshalb im Abschnitt „Konventionen“ festgelegt. Es enthält alle Felder, die die Planungsregeln verlangen (IDs, Tests, Traceability, Migration/RLS, Voraussetzungen, Aufwand, Entscheidungsbedarf).
 
 ## Überblick
@@ -38,7 +39,7 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt alle offenen Punkte der Pha
 | [Lasttest (NFR-10)](#lasttest-nfr-10) | Lasttest nach NFR-10 mit Nachweis NFR-01/02/03 und ABN-02/03. | WP-203 – WP-207 | 5 | 8,0 | Bericht mit p95-Werten; Budgets eingehalten. |
 | [Sicherheitsreview](#sicherheitsreview) | Sicherheitsreview, vollständige Kanal-Isolationsmatrix und externer Pentest. | WP-208 – WP-210 | 3 | 5,0 | Keine offenen High/Critical. |
 | [Gate G1](#gate-g1) | Gate G1 nach GATE-01 bis GATE-03 (GATE-05 berücksichtigt). | WP-211 – WP-213 | 3 | 3,5 | Gate-Checkliste vollständig belegt. |
-| [G1-Nachbesserung (NFR-02, NFR-03)](#g1-nachbesserung-nfr-02-nfr-03) | Blocker B1 (NFR-03, SR-02) und B2 (NFR-02, SR-05) der Gate-Checkliste schließen (Nachtrag 2026-10-14). | WP-332 – WP-335 | 4 | 5,5 | NFR-02 und NFR-03 PASS im Lastlauf; SR-02 und SR-05 behoben; B1 und B2 geschlossen. |
+| [G1-Nachbesserung (NFR-02, NFR-03)](#g1-nachbesserung-nfr-02-nfr-03) | Blocker B1 (NFR-03, SR-02) und B2 (NFR-02, SR-05) der Gate-Checkliste schließen (Nachtrag 2026-10-14). Stand 2026-10-15: umgesetzt, B1 und B2 geschlossen; der grüne `load.yml`-Lauf liegt für Commit `918a832` vor (Run 38665599979, Wiederholung nach dem Merge nächtlich auf `main`); E-17, E-56, E-57 und E-58 am 2026-10-15 entschieden, G1 mit der Freigabe des Auftraggebers bestanden (Nachweise zu B3, B4, B6 nachzureichen). | WP-332 – WP-335 | 4 | 5,5 | NFR-02 und NFR-03 PASS im Lastlauf; SR-02 und SR-05 behoben; B1 und B2 geschlossen. |
 | [M-S – High-Befunde späterer Phasen (nach E-03)](#m-s--high-befunde-späterer-phasen-nach-e-03) | High-/Critical-Befunde in Code späterer Phasen. Nach E-03 (entschieden: deaktivieren) schaltet WP-214 (`m-gates`) die Module im G1-Release ab; WP-215 bis WP-239 sind in die Folgephasen verschoben. | WP-214 – WP-239 | 26 (G1: 1) | 42,5 (G1: 1,5) | WP-214 (`m-gates`) gemergt vor G1; die übrigen WPs sind nicht G1-Umfang. |
 
 Reihenfolge nach Auftrag und SEQ-01 (`docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:75`):
@@ -124,8 +125,8 @@ Der Auftraggeber hat angewiesen, nach den Empfehlungen in `entscheidungen.md` vo
 - **G1-Umfang** ([E-03](entscheidungen.md#e-03), deaktivieren): WP-214 (`m-gates`) ist G1-Pflicht und schaltet Spätphasen-Module standardmäßig ab. WP-215 bis WP-239 sind verschoben. Die M0-WPs in Spätphasen-Modulen bleiben verpflichtend; ihre Kriterien „Alternative nach E-03“ entfallen.
 - **Epics und Traceability** ([E-06](entscheidungen.md#e-06), [E-07](entscheidungen.md#e-07)): Die Epic-Zuordnung ist bestätigt; M0-WPs tragen ihr fachliches Epic.
 - **Festgelegte Umsetzungsregeln:** fail-closed-Scopes und `WithSystem` ([E-08](entscheidungen.md#e-08)), NULL-Scope-Schreiben nur org-weit ([E-09](entscheidungen.md#e-09)), globale Kataloge read-only ([E-10](entscheidungen.md#e-10)), Team-Scope als Schnittmenge (vorläufig, [E-11](entscheidungen.md#e-11)), CH21/CH26–CH30 bestätigt ([E-14](entscheidungen.md#e-14), [E-18](entscheidungen.md#e-18) bis [E-22](entscheidungen.md#e-22)), VLAN-Eindeutigkeit über zwei Teilindizes ([E-24](entscheidungen.md#e-24)), API-05-Pfade wörtlich mit Deprecation/Sunset ([E-25](entscheidungen.md#e-25)), Quarantäne in 000056 ([E-26](entscheidungen.md#e-26)), Install-Matrix nach CH22 ([E-27](entscheidungen.md#e-27)), externer Pentest ([E-28](entscheidungen.md#e-28)), Traceability stufenweise blockierend ([E-30](entscheidungen.md#e-30)), Werkzeuge govulncheck/npm audit/Trivy/cosign keyless/k6 ([E-31](entscheidungen.md#e-31)), DB-05 nur [B]-Zeilen für G1 ([E-36](entscheidungen.md#e-36)).
-- **Offen mit Termin:** E-02, E-17, E-32 und E-35 (E-01 und E-23 sind seit der Lieferung vom 2026-10-01 entschieden, E-04, E-15, E-29 und E-33 seit 2026-10-12). Die WP-Blöcke zeigen den Status jeder verwiesenen Entscheidung im Feld „Entscheidungsbedarf“.
-- **G1-Nachbesserung (2026-10-14):** Die Gate-Prüfung (WP-213) ergab die Blocker B1 (NFR-03) und B2 (NFR-02). WP-332 bis WP-335 schließen sie; [E-56](entscheidungen.md#e-56) (Reihenfolge bei parallelen Ingest-Spuren) ist offen und sperrt WP-334.
+- **Offen mit Termin:** E-02 und E-35; ihre Lieferungen hat der Auftraggeber am 2026-10-15 für erledigt erklärt, die Texte bzw. die Liste sind nachzureichen (E-01 und E-23 sind seit der Lieferung vom 2026-10-01 entschieden, E-32 seit 2026-10-05, E-04, E-15, E-29 und E-33 seit 2026-10-12, E-17 sowie aus der G1-Nachbesserung E-56, E-57 und E-58 seit 2026-10-15). Die WP-Blöcke zeigen den Status jeder verwiesenen Entscheidung im Feld „Entscheidungsbedarf“.
+- **G1-Nachbesserung (2026-10-14):** Die Gate-Prüfung (WP-213) ergab die Blocker B1 (NFR-03) und B2 (NFR-02). WP-332 bis WP-335 sind umgesetzt und schließen sie (Wiederholungslauf auf Commit `dbbfded`, [Umsetzungsstand](#umsetzungsstand-2026-10-14)). [E-56](entscheidungen.md#e-56) (Reihenfolge bei parallelen Ingest-Spuren) ist am 2026-10-15 entschieden: Option 1 mit Identitätssperre, wie in WP-334 umgesetzt. Neu sind [E-57](entscheidungen.md#e-57) (Impact-Antwort und API-01, am 2026-10-15 entschieden: Option A, nur additiv) und [E-58](entscheidungen.md#e-58) (Referenzumgebung des G1-Lasttests, am 2026-10-15 entschieden: Option 1, der Lastnachweis auf 4-vCPU-Hosts gilt für GATE-03; dedizierter Referenzhost vor GA). Die Aufgaben A-12 bis A-14 in [`entscheidungen.md`](entscheidungen.md#offene-aufgaben) sind erledigt.
 
 ## Konventionen für alle WPs
 
@@ -4663,7 +4664,7 @@ INS-07;[B];A;tests/install-preflight.test.sh;WP-093
 TEC-09;[B];A;tests/install-preflight.test.sh;WP-093
 ```
 
-**Entscheidungsbedarf:** [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (offen)
+**Entscheidungsbedarf:** [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9656,7 +9657,7 @@ SIM-01;[B], Teilumfang [P2];LT;backend/cmd/seed/seed_integration_test.go;WP-203
 NFR-10;[Q];LT;backend/cmd/seed/seed_integration_test.go;WP-203
 ```
 
-**Entscheidungsbedarf:** [E-34](entscheidungen.md#e-34) ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan (vorläufig entschieden); [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (offen)
+**Entscheidungsbedarf:** [E-34](entscheidungen.md#e-34) ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan (vorläufig entschieden); [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9784,7 +9785,7 @@ NFR-03;[B], Teilumfang [P5];LT;tests/load/;WP-206
 ABN-02;[Q];LT;tests/load/;WP-206
 ```
 
-**Entscheidungsbedarf:** [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (offen)
+**Entscheidungsbedarf:** [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -10104,7 +10105,7 @@ REP-01;[B];G1;tests/rep01-structure.test.sh;WP-213
 
 **Ziel:** Die Gate-Prüfung (WP-213, `docs/acceptance/g1-gate.md`) ergab zwei Blocker beim Auftragnehmer: B1, der Ingest schafft 58 statt 200 Records/s (NFR-03, Befund SR-02), und B2, der Impact im Worst Case braucht unter Parallellast p95 2,39 s statt < 2 s (NFR-02, SR-05). Die Messungen vom 2026-10-14 (Statement-Profil je Record, Phasen der Impact-Abfrage) stehen in den Problembeschreibungen der WPs. Nachtrag vom 2026-10-14; die WP-Nummern folgen auf den Plan der Phase 2 (WP-243 bis WP-331).
 
-**Ausstieg:** NFR-02 und NFR-03 PASS im wiederholten Lastlauf (`docs/acceptance/lasttest-g1.md`); SR-02 und SR-05 in `docs/security/review-g1.md` behoben; B1 und B2 in `docs/acceptance/g1-gate.md` geschlossen. Danach bleiben für G1 nur B3 (Pentest, E-28) und B4 (v2-Texte, E-02) beim Auftraggeber.
+**Ausstieg:** NFR-02 und NFR-03 PASS im wiederholten Lastlauf (`docs/acceptance/lasttest-g1.md`); SR-02 und SR-05 in `docs/security/review-g1.md` behoben; B1 und B2 in `docs/acceptance/g1-gate.md` geschlossen. Danach bleiben für G1 B3 (Pentest, E-28) und B4 (v2-Texte, E-02) beim Auftraggeber; seit 2026-10-14 kommen B6 (Subprozessorenliste, E-35, Betreiber) und die Entscheidung E-58 über die Referenzumgebung des Lasttests hinzu (siehe Umsetzungsstand).
 
 Reihenfolge: WP-335 ist unabhängig und läuft parallel zu WP-332 → WP-333 → WP-334. Jedes WP ist ein PR (DOD-01); WP-334 schließt mit dem wiederholten Lastlauf ab.
 
@@ -10114,6 +10115,89 @@ Reihenfolge: WP-335 ist unabhängig und läuft parallel zu WP-332 → WP-333 →
 | [WP-333](#wp-333--ingest-batch-schreibpfad-für-neue-geräte) | `nfr03-batch` | Ingest: Batch-Schreibpfad für neue Geräte | 2,0 | WP-332 |
 | [WP-334](#wp-334--ingest-parallele-spuren-je-identitätsschlüssel-und-nachweis-nfr-03) | `nfr03-lanes` | Ingest: parallele Spuren je Identitätsschlüssel und Nachweis NFR-03 | 1,5 | WP-333 |
 | [WP-335](#wp-335--impact-im-worst-case-adaptive-kantenlesung-schlanke-knoten-pfade-auf-anfrage) | `nfr02-impact` | Impact im Worst Case: adaptive Kantenlesung, schlanke Knoten, Pfade auf Anfrage | 1,0 | WP-206, WP-213 |
+
+### Umsetzungsstand (2026-10-14)
+
+WP-332 bis WP-335 sind auf die Anweisung vom 2026-10-14 („WP-332 bis WP-335 umsetzen“) umgesetzt. Die Commits bauen auf `02ebb76` auf und sind noch nicht gemergt. Drei unabhängige Reviews haben jedes WP geprüft: Transaktionen und Nebenläufigkeit, Sicherheit und Mandantentrennung, Akzeptanzkriterien mit echten Testläufen. Ein Gesamtreview des integrierten Stands `dbbfded` fand danach drei blockierende Befunde zu WP-334; zwei sind im Code behoben (`58863fa`, `dea65b7`), der dritte in der Betriebsdoku (Bewertung in `docs/security/review-g1.md`). Seine nicht blockierenden Befunde sind am 2026-10-15 nachgetragen (`3f2bfd5`, `458a96d`, `111bdc4`, `f354c5a`, `0f165cc`); einen vorbestehenden Fehler außerhalb der G1-Nachbesserung führt `docs/security/review-g1.md` als SR-11 (Folgearbeit 7).
+
+| WP | Commits | Status | Review |
+|---|---|---|---|
+| WP-332 (`nfr03-tx`) | `d2daeed`, Nachtrag `82110bf` | umgesetzt | freigegeben; die nicht blockierenden Befunde sind mit `82110bf` behoben |
+| WP-333 (`nfr03-batch`) | `8320a12` | umgesetzt | freigegeben |
+| WP-334 (`nfr03-lanes`) | `25f0c79`, `55aa9f3`, `58863fa`, `dea65b7`, `3f2bfd5`, `458a96d`, `111bdc4`, `f354c5a`, `0f165cc` | umgesetzt; der grüne `load.yml`-Lauf aus AK 4 liegt für Commit `918a832` vor (Run 38665599979) | freigegeben nach einer Nachbesserungsrunde: `55aa9f3` behebt drei blockierende Befunde (unbegrenzte Identitätssperren konnten die Lock-Tabelle des Clusters erschöpfen; `ingest.js` bestand trotz fehlender Records). Aus dem Gesamtreview: `58863fa` legt die Identitäts- und `max_cis`-Sperren in eigene Lock-Klassen mit Wartegrenze 20 s (vorher im Lock-Raum der Scheduler-Sperre), `dea65b7` begrenzt das Ingest-Detail von `/readyz` auf 300 ms; der Rollback-Ablauf in `docs/betrieb/ingest-spuren.md` ist korrigiert. Nachträge zu den nicht blockierenden Befunden: `3f2bfd5` lässt jede Transaktion eines Records aus der Queue die Identitäts- und `max_cis`-Sperre nehmen, auch mit einer Spur (vorher konnten zwei Instanzen mit einer Spur ein Gerät doppelt anlegen), und hält den Speicherbetrieb seriell je Organisation; `458a96d` führt in `load.yml` jedes Szenario als eigenen Job mit frischem Seed und `ANALYZE` aus und lässt `ingest.js` an jeder abgelehnten Anfrage scheitern; `111bdc4` liest das `/readyz`-Detail aus der 30-s-Stichprobe statt je Anfrage aus NATS, `0f165cc` meldet es nur auf Instanzen mit Ingest-Worker, `f354c5a` nennt im Spool-Log das Alter der Stichprobe |
+| WP-335 (`nfr02-impact`) | `a8f5912`, Nachtrag `dbbfded` | umgesetzt | freigegeben; die nicht blockierenden Befunde sind mit `dbbfded` behoben |
+
+**Wiederholungslauf:** Commit `dbbfded`, 2026-10-14, allein auf einem Host mit 4 vCPU und 15 GB RAM; PostgreSQL, NATS, Redis, Server und k6 teilten sich den Host. 10.000 Objekte, vor jedem Szenario neu geseedet. Bericht: `docs/acceptance/lasttest-g1.md`.
+
+- NFR-02 (`api.js`, 60 s, alle Szenarien parallel): Alle Budgets sind erfüllt, 7.038 von 7.038 Checks. Impact Tiefe 20 p95 477 ms in der kompakten Form der Oberfläche und 546 ms in der Standardform mit Pfaden (Erstlauf 2,39 s).
+- NFR-03 (`ingest.js`, 4 Spuren, Standard): Abbau ab Sendeende 233 Records/s (Erstlauf 58), Verzögerung Record → sichtbar höchstens 3,1 s bei 200 Records/s Angebot, Spool-Flush von 10.000 Records in 35,9 s, kein fehlender Record. Mit einer Spur 182 Records/s; das verfehlt NFR-03. Die Reserve ist knapp: Frühere Läufe desselben Codes lagen bei 210–233 Records/s, die Streuung zwischen Läufen bei etwa ±10 %.
+- Kontrollmessung auf dem Stand der Korrekturen aus dem Gesamtreview (`58863fa`, `dea65b7`; Szenario `spool`, 4 Spuren): 243 Records/s ab Sendeende, Spool-Flush 34,9 s, kein fehlender Record. Die Werte des Wiederholungslaufs bleiben gültig.
+- Kontrollmessung nach den Nachträgen (Stand `111bdc4`, Szenario `spool`, je Lauf frisch geseedet): 4 Spuren 232–255 Records/s ab Sendeende in drei Läufen, mit `ANALYZE` nach dem Seed 219 und 232,5 Records/s; 1 Spur, jetzt mit Sperren aus der Queue, 177 Records/s (Wiederholungslauf 182). Kein fehlender Record; die Werte des Wiederholungslaufs bleiben gültig.
+
+**Prüfungen auf Commit `dbbfded`:** Build, `gofmt`, `go vet` und golangci-lint v2.14.0 ohne Befund; `go test ./...` grün. DB-Suite auf frischer Datenbank: 89 Pakete, 1.885 Tests, davon 2 Fehlschläge in `internal/permission` (Sortierung des Katalogs unter der lokalen Collation en_US; das CI-Image sortiert wie C, mit einer C.UTF-8-Datenbank ist das Paket grün; Paket und Migrationen sind unverändert). `TestMigrationsRoundtrip` läuft auf dem geteilten lokalen Cluster nicht (`DROP ROLE reticora_app` scheitert) und bleibt der CI überlassen. Frontend: Formatprüfung, Lint, Typecheck, Vitest (47 Dateien, 249 Tests), Build und `generate:api:check` grün. Auf dem Stand von `58863fa` und `dea65b7` sind `gofmt`, `go vet`, golangci-lint und `go test ./...` ohne Befund, die DB-Tests der betroffenen Pakete grün und `kustomize build` von base, staging und prod in Ordnung. Auf dem Stand der Nachträge (`111bdc4`) sind `gofmt`, `go vet`, golangci-lint und `go test ./...` ohne Befund, die DB-Tests von `discovery`, `database`, `ci`, `topology`, `relationship`, `server`, `tenant`, `override`, `middleware` und `api` grün, ebenso `tests/rep01-structure.test.sh`, `generate:api:check` und der Typecheck des Frontends. Der CI-Lauf auf dem Release-Kandidaten steht aus.
+
+**Folgen für Gate G1** (`docs/acceptance/g1-gate.md`, `docs/security/review-g1.md`): B1 und B2 sind geschlossen, SR-02 und SR-05 behoben; NFR-02, NFR-03 und NFR-10 stehen auf PASS. Der Ausstieg dieses Meilensteins ist damit erreicht; der grüne `load.yml`-Lauf aus WP-334 (AK 4) liegt für Commit `918a832` vor. GATE-03 „Lasttest bestanden“ ist PASS mit zwei Nachweisen: dem lokalen Wiederholungslauf und dem GitHub-Lauf. Am 2026-10-15 entschieden:
+
+- [E-58](entscheidungen.md#e-58) (entschieden, Option 1, Aufgabe A-14 erledigt): Der Auftraggeber erkennt den Lastnachweis auf 4-vCPU-Hosts als G1-Nachweis für GATE-03 an, mit den Auflagen der Empfehlung; ein dedizierter Referenzhost folgt vor GA (SR-06). Die Auflage eines grünen `load.yml`-Laufs ist für Commit `918a832` erfüllt: Run 38665599979 auf dem Standard-Runner `ubuntu-latest` (4 CPUs) hält alle k6-Schwellen ein, je Szenario als eigener Job mit frischem Seed und `ANALYZE` (Abbau ab Sendeende 798 Records/s, Spool-Flush 15,1 s, Impact Tiefe 20 p95 852 ms kompakt und 882 ms in der Standardform; `docs/acceptance/lasttest-g1.md`). `load.yml` läuft auf GitHub nur manuell oder nächtlich auf dem Standardbranch; nach dem Merge wiederholt der nächtliche Lauf den Nachweis auf dem Release-Kandidaten.
+- [E-56](entscheidungen.md#e-56) (Option 1 mit Identitätssperre, Aufgabe A-12) und [E-57](entscheidungen.md#e-57) (Option A, Aufgabe A-13) sind entschieden, ebenso [E-17](entscheidungen.md#e-17) (Option 1, Aufgabe A-05): B5 ist geschlossen, gemessen ist mit 10.000 Objekten.
+
+G1 ist mit der Freigabe des Auftraggebers vom 2026-10-15 bestanden. B3 (Pentest, E-28), B4 (v2-Texte, E-02) und B6 (Subprozessorenliste, NFR-09, E-35) sind laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; nachzureichen sind die Zusammenfassung des Pentest-Berichts in `docs/security/pentest-g1.md`, die v2-Texte in `docs/spec/` und die Liste in `docs/legal/subprozessoren.md`, außerdem der grüne CI-Lauf auf PR #64 und der Merge nach `main`.
+
+**Abweichungen vom Plan:** Alle vier WPs ändern mehr Dateien als die Richtgröße von etwa 15 (Konvention 1); hinzu kamen vor allem Tests und Anpassungen an neue Schnittstellen. Die Dateien außerhalb der Planlisten nennt je WP der letzte Punkt (Pfade unter `backend/internal/`, sofern nicht anders angegeben).
+
+**WP-332 (`nfr03-tx`):**
+
+- AK 3: Rahmen (vor den Records) und Ledger (nach den Records) laufen in je einer kurzen Transaktion statt in einer, die den ganzen Batch umspannt. Der Ledger schreibt mit einem `unnest`-Statement; ohne `record_id` öffnet er keine Transaktion. Grund: Eine umspannende Rahmen-Transaktion hielte eine zweite Pool-Verbindung „idle in transaction“, während jede Record-Transaktion eine eigene holt (MaxConns 25); bei vielen parallelen Batches warteten alle Rahmen im Acquire.
+- `BEGIN` und die fünf `set_config` der Mandanten-GUCs gehen in einem Roundtrip (`pgx.TxOptions{BeginQuery}`). Die Werte stehen als `E'…'`-Literale im Anweisungstext statt als Bind-Parameter. Das Review fand dabei eine Lücke bei fehlkonfigurierter Client-Kodierung; seit `82110bf` erzwingt jeder Pool `client_encoding=UTF8` (Bewertung in `docs/security/review-g1.md`).
+- AK 4: Gemessen ist die Record-Transaktion von `BEGIN` bis `COMMIT`: 12 Statements und eine Transaktion je neuem Record (vorher 24 Statements in 4–5 Transaktionen). Der Rahmen kostet 8 Statements in 2 Transaktionen je Batch; amortisiert sind es 12,4 Statements und 1,1 Transaktionen je Record.
+- Sperrreihenfolge vorgezogen: Im Match-Pfad sperrt die Record-Transaktion die CI-Zeile (`LockCI`, `FOR UPDATE`) vor den Feldwerten; ohne diese Sperre deadlockte `TestDiscoveryConcurrency`. Seit `82110bf` sperren auch `SetOverride`, `ClearOverride` und `RecordDiscovered(Many)` die CI-Zeile zuerst.
+- Benachrichtigungen, Embeddings, der entfernte Suchindex und das Log `review.opened` laufen erst nach dem Commit (`database.AfterCommit`). „Repositories bleiben unverändert“ gilt für fremde Repositories; das Discovery-Repository und die Indexer von AI und Suche ändern sich.
+- Der Architekturtest aus WP-041 ist `backend/internal/database/tenantguard_test.go` (im Plan `architecture_test.go`); er ist unverändert grün.
+- Dateien außerhalb der Planliste: `database/pool.go`, `discovery/review.go`, `discovery/topology.go`, `ai/ci_indexer.go`, `search/hybrid.go`, mit `82110bf` `override/pg_repository.go` und `reviews/service.go`, dazu Tests in `database/`, `ai/`, `search/` und `discovery/ingest_prefix_integration_test.go`.
+
+**WP-333 (`nfr03-batch`):**
+
+- AK 2, Unique-Konflikt: `CreateMany` schreibt mit `INSERT … ON CONFLICT DO NOTHING` und erkennt abgewiesene Records an der fehlenden Position. Nur diese laufen danach einzeln (Log `ingest.batch.unique` mit `record_id`); sie finden das bestehende CI oder melden den Konflikt wie in WP-207. Der Plan sah vor, nach einem Unique-Fehler den ganzen Batch je Record zu wiederholen; unter RLS nennt ein Fehler 23505 den Schlüssel aber nicht. Jeder andere Fehler rollt die Batch-Transaktion zurück, und das Fenster läuft je Record.
+- AK 1: Die Kandidatenabfrage für bestehende CIs liest in Seiten zu 1.000 Treffern (ein Statement je angefangene 1.000 Treffer, keine Obergrenze nach WP-205). Die Abfrage gelöschter Kandidaten läuft nur, wenn ein neuer Record einen Schlüssel außer dem Hostnamen trägt.
+- AK 2: `ci_field_value`, `search_document` und `ai_chunk` schreibt dieselbe Transaktion außerhalb von `CreateMany` (Provenienz im Override-Repository, Suchindex im Decorator). Das Advisory-Lock der Audit-Kette nimmt der Trigger von `audit_log` einmal beim ersten Eintrag, ohne eigenes Statement.
+- AK 4: 20 neue Geräte kosten 10 Statements in einer Transaktion (Produktionsverdrahtung mit Feldregeln und `ai_chunk`: 13), amortisiert 0,90 Statements je Record; der Rahmen aus WP-332 kommt hinzu.
+- Records ohne Profil-Treffer (`generic_device`) laufen weiter je Record. Innerhalb eines Fensters von 100 Records werden neue Geräte vor den Updates anderer Geräte committet; die Reihenfolge gilt damit nur je Gerät (E-56, Option 1, auch mit einer Spur).
+- Dateien außerhalb der Planliste: `audit/audit.go` (`RecordMany`), `events/outbox.go` (`AppendMany`), `ci/service.go`, `ci/validation.go`, `discovery/reconciliation.go`, `ai/ci_indexer.go`, `ai/pg_repository.go`, `search/ci_indexer.go`, `server/report_adapters.go` und Tests in `discovery/` (`identity_batch_test.go`, `identity_batch_integration_test.go`, `export_test.go`).
+
+**WP-334 (`nfr03-lanes`):**
+
+- AK 1, Subjects mit vier Token: `ingest.<org>.<spur>.<collector>` statt `ingest.<org>.<spur>`. Grund: Ein WorkQueue-Stream verlangt disjunkte Consumer-Filter, und dreiteilige Spur-Filter kollidieren mit dem Filter `ingest.*.*`, mit dem der Altconsumer `reticora-ingest` die Nachrichten aus der Zeit vor dem Upgrade leert. Der Altconsumer bleibt dauerhaft bestehen; fehlt er, legt der Server ihn wieder an. Spuren über der eingestellten Zahl werden ebenfalls geleert.
+- AK 1, Spur-Schlüssel in REC-02-Reihenfolge (Seriennummer, Hardware-UUID, MAC, Management-IP) statt mit der Hardware-UUID zuerst: SNMP- und SSH-Records eines Servers teilen die Seriennummer, nur SSH meldet die UUID.
+- AK 2, Identitätssperre (Option 1b zu E-56): „Dasselbe Gerät landet immer in derselben Spur“ gilt nur für Records mit demselben stärksten Schlüssel, und der Unique-Index fängt nur Seriennummer, Hardware-UUID und Primär-MAC ab. Deshalb nimmt jede Record- und Batch-Transaktion eines Records aus der Queue als erste Anweisung Advisory-Locks über alle normalisierten Identitätsschlüssel ihrer Records (ohne Hostname), seit `3f2bfd5` unabhängig von der Spurzahl (vorher nur mit mehr als einer Spur); seit `55aa9f3` höchstens 256 Schlüssel je Transaktion, darüber die Organisation exklusiv; seit `58863fa` in eigenen Lock-Klassen (Zwei-Argument-Form, Schlüssel aus SHA-256) mit einer Wartegrenze von 20 s je Sperranweisung. Außerdem wiederholt der Prozess dann Deadlocks, Serialisierungsfehler und Unique-Konflikte der Identität je Record bis zu dreimal, eine volle Lock-Tabelle (53200) und eine überschrittene Wartegrenze (55P03) ebenso, aber mit Pause.
+- Zusätzlich `max_cis` (ENT-03) exakt mit Spuren und über Instanzen: Jede anlegende Transaktion eines Records aus der Queue nimmt die `max_cis`-Sperre der Organisation (nahe am Limit exklusiv, sonst geteilt) und zählt in der Transaktion neu. Eine Sperre erst beim Erreichen des Limits wäre mit Spuren nicht exakt, weil der Zählerstand des Rahmens die gleichzeitigen Anlagen anderer Spuren nicht kennt.
+- Zusätzlich Audit und Outbox zuletzt: Die Messung zeigte Wartezeiten auf den Advisory-Locks von Audit-Kette und Outbox. Der Ingest schreibt deren Einträge deshalb zuletzt vor dem `COMMIT` (`database.BeforeCommit`). Danach zeigte die Messung eine bei veralteter Statistik langsame Batch-Provenienz; sie prüft die Sichtbarkeit jetzt einmal je Statement statt je Wert.
+- Budgets mit Identitätssperre (mehr als eine Spur oder Record aus der Queue): +1 Statement (Batch 11 statt 10, Record 13 statt 12; mit einer Spur aus der Queue gemessen im Teiltest `queue_with_one_lane`). Für den Ingest ohne Queue mit einer Spur gelten die Budgets von WP-332 und WP-333 unverändert.
+- Zusätzlich (Nachträge vom 2026-10-15): Im Speicherbetrieb (`--no-db` mit NATS) laufen die Spuren einer Organisation seriell, weil das Repository nicht sperren kann (`3f2bfd5`). Das `/readyz`-Detail ist die 30-s-Stichprobe des Ingest-Workers mit `sampled_at` (OpenAPI additiv) und erscheint nur auf Instanzen mit Ingest-Worker (`111bdc4`, `0f165cc`). `load.yml` führt jedes Szenario als eigenen Matrix-Job mit frischer Datenbank, Seed und `ANALYZE` aus; `ingest.js` hat die Schwellen `http_req_failed{name:ingest}` und `http_req_failed{name:spool}` = 0 (`458a96d`).
+- AK 3: `spoolFlushBatch = 64` zählt Spool-Nachrichten (je ein vollständiger Upload eines Zyklus), nicht Records; das Szenario `spool` sendet 10.000 Records als nacheinander bestätigte Uploads zu 64 Records. Seit `55aa9f3` scheitert `ingest.js`, wenn ein Record fehlt oder eine Iteration verworfen wird.
+- AK 4: Die Nachweisdokumente hat die Abschlussdokumentation vom 2026-10-14 aktualisiert, nicht das WP selbst; der grüne `load.yml`-Lauf liegt für Commit `918a832` vor (Run 38665599979, 2026-10-15) und wird nach dem Merge nächtlich auf `main` wiederholt.
+- Dateien außerhalb der Planliste: `discovery/lanes.go` (neu) mit Tests, `discovery/discovery.go`, `discovery/unlicensed.go`, `discovery/pg_repository.go`, `database/tenant_scope.go` und `database/pool.go` (`BeforeCommit`), `ci/pg_repository.go`, `override/pg_repository.go` mit Plantest, `server/health.go` (`/readyz` je Spur, Detail auf 300 ms begrenzt), `deploy/k8s/base/deployment.yaml` (Probe-Timeout, `dea65b7`), `.github/workflows/load.yml` (ein Job je Szenario, `458a96d`), `backend/cmd/server/main.go`, `api/openapi.yaml` und `frontend/src/api/generated/schema.d.ts` (`ReadinessResponse`, additiv), `docs/README.md` und `docs/ops/workers.md` sowie weitere Tests in `discovery/`, `config/`, `server/` und `database/`. `natsedge.go` und `edge_ingest.go` brauchten keine Änderung, weil der Edge-Pfad über dieselbe Veröffentlichung läuft.
+
+**WP-335 (`nfr02-impact`):**
+
+- AK 3, `fields=` statt `include=paths` ([E-57](entscheidungen.md#e-57), entschieden 2026-10-15, Option A): API-01 erlaubt nur additive Änderungen, und `path` ist Pflichtfeld in `ImpactNode`. Die Standardantwort von `GET /impact/{ci_id}` und `GET /impact` behält deshalb alle Felder einschließlich `path` und erhält additiv `hops`, `via` und optional `relay`. Die kompakte Form liefert der Sparse-Fieldset `fields=` nach API-02 (ID immer, unbekanntes Feld 422, Pfade nur mit `path`), in der OpenAPI als eigenes Schema `ImpactAnalysisFields`. Die Oberfläche fragt die kompakte Form an; der veraltete Pfad `/api/v1/topology/cis/{id}/impact` antwortet bis zum Sunset vollständig.
+- AK 3, `via`: zwei Breitensuchen mit `relay`. Die aus `via` und `relay` rekonstruierten Pfade sind byte-gleich mit den bisherigen, die Impact-Mengen unverändert (`TestComputeImpactViaRebuildsPaths`).
+- AK 1: Auch im Ebenenmodus liest die Kantenabfrage ohne `JOIN ci`; die Sichtbarkeit prüft Go (bis zu zwei Statements je Ebene). Erreicht eine Ebene mehr als 1.000 neue CIs, wechselt die Lesung früher auf alle Kanten der Organisation.
+- AK 2: `ListNodes` überlagert name, status und management_ip mit Overrides (nicht nur den Namen) und liest ab 2.000 IDs die Knoten der ganzen Organisation.
+- AK 5: „Unabhängig von der Graphgröße“ gilt je Regime (Ebenen- bzw. Organisationslesung); in tiefen Ketten kommen bis zu zwei Statements je Ebene hinzu (Tiefe 20: Topologie 53, Impact 63 Statements). Die 250-ms-Grenze der Einzelanfrage erzwingt `TestImpactWorstCase` nur mit `RETICORA_PERF_BUDGET=1` (gemessen 145–164 ms, bestes von fünf); Antwortgröße (239 Byte je betroffenem CI) und Statementzahl prüft er immer. In `api.js` sind beide Formen budgetiert (`impact`, `impact_full`).
+- Die Plan-Dateien `memory_repository.go` gibt es nicht; geändert sind `relationship/relationship.go` und `ci/memory_repo.go`.
+- Dateien außerhalb der Planliste: `ci/service.go` (`NodeReader`), `topology/redundancy.go` (ein Abwärts-Abschluss), `server/repositories.go`, `frontend/src/api/hooks.ts`, `frontend/src/api/cmdb.ts`, `tests/load/README.md`, `.github/workflows/load.yml` (Parameter `OBJECTS`) und Tests in `ci/`, `relationship/`, `topology/`, `graphqlbff/` und im Frontend.
+
+**Folgearbeiten (Vorschlag, nicht G1-Pflicht):**
+
+1. **Outbox-Nummerierung:** Der Trigger aus Migration 000120 (`event_outbox_number()`) bestimmt `max(sequence)` je Zeile. Ein Zähler je Organisation oder `ORDER BY sequence DESC LIMIT 1` (Migration) verkürzt den Audit-/Outbox-Sperrabschnitt voraussichtlich von etwa 200 ms auf etwa 20 ms je Batch und gibt NFR-03 mehr Reserve.
+2. **Statistik nach Massenimport:** `ANALYZE` nach großen Importen und beim Onboarding oder robuste Abfrageformen für die Batch-Kandidatenabfragen (WP-333).
+3. **Knotenlesung und Mehrfach-Impact:** Die Schwelle, ab der `ListNodes` die ganze Organisation liest (2.000 IDs), mit E-17 und 50.000 Objekten neu bewerten; Kanten innerhalb einer Anfrage `GET /impact?ci_ids=` wiederverwenden.
+4. **Listen über 10.000 Objekte:** `GET /cis` zählt je Anfrage per `COUNT(*)` (bestehender offener Punkt 4 in `docs/acceptance/lasttest-g1.md`).
+5. **Fingerprint-MACs:** Die Identitätssuche über Fingerprint-MACs liest einmal je Batch alle CIs der Organisation, weil `jsonb`-Containment unter RLS nicht leakproof ist. Die Lösung braucht eine Migration.
+6. **`AdoptUnlicensed`:** Die Anlage beim Anheben von `max_cis` nimmt die `max_cis`-Sperre nicht (vorbestehendes kleines Fenster für eine Überschreitung).
+7. **Weiterreichung im Indexing-Decorator** (vorbestehend, SR-11): Der Decorator des CI-Repositorys (`ci.NewIndexingRepository`) reicht `Restore` und `UniqueConflicts` nicht durch. In der Produktion antwortet das Auflösen eines Reviews `resurrected_device` mit `merge` deshalb 501, und die Vorabprüfung eindeutiger Attribute (MET-15) entfällt (der Unique-Index greift weiter). Beide Methoden im Decorator ergänzen (`Restore` mit neuer Indizierung) und mit einem Test absichern, der die Kette aus `main.go` baut und jede optionale Schnittstelle prüft, die Aufrufer erwarten.
+
+Weitere offene Punkte stehen in `docs/acceptance/lasttest-g1.md` (Offene Punkte) und `docs/security/review-g1.md`.
 
 ### WP-332 – Ingest: eine Transaktion je Record, Rahmen je Batch
 
@@ -10256,7 +10340,7 @@ NFR-03;[B], Teilumfang [P5];G1;tests/load/ingest.js;WP-334
 NFR-10;[Q];G1;tests/load/ingest.js;WP-334
 ```
 
-**Entscheidungsbedarf:** [E-56](entscheidungen.md#e-56) NFR-03: Reihenfolge der Verarbeitung bei parallelen Ingest-Spuren (offen); [E-17](entscheidungen.md#e-17) Skalierungsziel (offen, Messung mit 10.000 Objekten)
+**Entscheidungsbedarf:** [E-56](entscheidungen.md#e-56) NFR-03: Reihenfolge der Verarbeitung bei parallelen Ingest-Spuren (entschieden 2026-10-15: Option 1 mit Identitätssperre, Standard 4 Spuren, `RETICORA_INGEST_LANES=1` stellt Option 3 als Rückfall wieder her); [E-58](entscheidungen.md#e-58) Referenzumgebung des G1-Lasttests (SR-06) (entschieden 2026-10-15: Option 1, der Lauf auf dem 4-vCPU-Host gilt als Nachweis für GATE-03; dedizierter Referenzhost vor GA); [E-17](entscheidungen.md#e-17) Skalierungsziel (entschieden 2026-10-15: Option 1, Messung mit 10.000 Objekten)
 
 **Nicht Bestandteil:** Teilumfang [P5] (1.000 Records/s); dedizierter Referenzhost (SR-06, vor GA); Collector-seitige Änderungen am Spool.
 
@@ -10308,7 +10392,7 @@ NFR-02;[B];G1;tests/load/api.js;WP-335
 ABN-02;[Q];G1;backend/internal/topology/querybudget_integration_test.go;WP-335
 ```
 
-**Entscheidungsbedarf:** keiner. Die Antwortform ändert sich innerhalb von `/api/v1` ohne Entfernung eines Pfads (API-05): `path` bleibt mit `include=paths` verfügbar.
+**Entscheidungsbedarf:** [E-57](entscheidungen.md#e-57) Impact-Antwort: kompakte Form und API-01 (entschieden 2026-10-15: Option A, additiv; die Standardantwort behält `path`, die kompakte Form liefert `fields=` nach API-02, `include=paths` entfällt); [E-58](entscheidungen.md#e-58) Referenzumgebung des G1-Lasttests (SR-06) (entschieden 2026-10-15: Option 1)
 
 **Nicht Bestandteil:** Zwischenspeicher für Kanten oder Impact-Ergebnisse; dedizierter Referenzhost (SR-06); Topologie-Darstellung im Frontend.
 

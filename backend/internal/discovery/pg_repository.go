@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,8 @@ type PGRepository struct {
 	// Review items are stored by package reviews.
 	*reviews.PGRepository
 	pool *pgxpool.Pool
+	// lockTimeout replaces ingestLockTimeout when set (tests).
+	lockTimeout time.Duration
 }
 
 // NewPGRepository creates a new PostgreSQL-backed discovery repository.
@@ -458,6 +461,149 @@ func (r *PGRepository) LookupCITypeID(ctx context.Context, orgID, nameOrID strin
 	return id, nil
 }
 
+// LookupCITypeIDs resolves several type names or keys with one statement
+// (CITypeBatchLookup, NFR-03): per name the same type LookupCITypeID finds,
+// an org-specific type before a global one.
+func (r *PGRepository) LookupCITypeIDs(ctx context.Context, orgID string, namesOrKeys []string) (map[string]string, error) {
+	types := map[string]string{}
+	if len(namesOrKeys) == 0 {
+		return types, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT DISTINCT ON (k.name) k.name, t.id::text
+			FROM unnest($1::text[]) AS k(name)
+			JOIN ci_type t ON (t.key = k.name OR t.name = k.name)
+			  AND (t.organization_id IS NULL OR t.organization_id = $2)
+			ORDER BY k.name, t.organization_id NULLS LAST, t.id
+		`, namesOrKeys, orgID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name, id string
+			if err := rows.Scan(&name, &id); err != nil {
+				return err
+			}
+			types[name] = id
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("lookup ci types: %w", err)
+	}
+	return types, nil
+}
+
+// RunInTx implements TxRunner: fn runs in one transaction of the context's
+// tenant scope, which every repository call with fn's context joins.
+func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	return database.WithRequestTenantTx(ctx, r.pool, orgID, fn)
+}
+
+// LockCI implements CILocker: the CI row stays locked until the context
+// transaction ends.
+func (r *PGRepository) LockCI(ctx context.Context, orgID, ciID string) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM ci WHERE id = $1 AND organization_id = $2 FOR UPDATE`, ciID, orgID); err != nil {
+			return fmt.Errorf("lock ci: %w", err)
+		}
+		return nil
+	})
+}
+
+// The identity locks of the ingest lanes (WP-334); the record and batch
+// transactions find them by type assertion.
+var _ IdentityLocker = (*PGRepository)(nil)
+
+// ingestLockTimeout bounds the wait for the identity and max_cis locks of an
+// ingest transaction. Only ingest transactions take them, but the lane
+// goroutine that waits serves every organization, so no holder may stall it
+// for longer: the transaction fails with 55P03 and the record runs again
+// after a pause (retryReason). A wait behind other ingest transactions, one
+// batch each, stays far below it; a delivery that fails on it in its batch
+// and in every record attempt (5 waits) still ends within AckWait. The
+// other lock waits of the transaction keep their bounds.
+const ingestLockTimeout = 20 * time.Second
+
+// lockTimeoutSetting is the lock_timeout of a lock statement: the
+// repository's own for the tests, ingestLockTimeout otherwise.
+func (r *PGRepository) lockTimeoutSetting() string {
+	d := ingestLockTimeout
+	if r.lockTimeout > 0 {
+		d = r.lockTimeout
+	}
+	return strconv.FormatInt(d.Milliseconds(), 10) + "ms"
+}
+
+// boundedLocksSQL is one statement that sets lock_timeout to the parameter
+// timeout, takes the advisory locks of locks and restores the
+// transaction's lock_timeout: prev is read before bound sets the timeout
+// (bound reads prev), locks reads bound in its FROM list, so its lock
+// functions run after it, and the outer set_config runs after count(*) has
+// taken every lock.
+func boundedLocksSQL(timeout, locks string) string {
+	return `WITH prev AS MATERIALIZED (SELECT current_setting('lock_timeout') AS v),
+bound AS MATERIALIZED (SELECT set_config('lock_timeout', ` + timeout + `, true) FROM prev),
+locked AS MATERIALIZED (` + locks + `)
+SELECT set_config('lock_timeout', prev.v, true), n.locks FROM prev, (SELECT count(*) AS locks FROM locked) n`
+}
+
+// identityLockSQL takes the identity locks of a transaction in one
+// statement: the organization's lock ($1, identityOrgLockClass) first,
+// shared, or exclusive with $3, then the keys ($2, identityKeyLockClass)
+// exclusively in ascending order, each wait bounded by $4. The lock
+// functions run after the sort (EXPLAIN: Result above Sort), so
+// transactions that share keys never wait for each other in a cycle.
+var identityLockSQL = boundedLocksSQL("$4", `SELECT CASE WHEN s.o = 0 AND NOT $3 THEN pg_advisory_xact_lock_shared(s.c, s.k) ELSE pg_advisory_xact_lock(s.c, s.k) END
+	FROM bound, (SELECT 0 AS o, `+strconv.Itoa(int(identityOrgLockClass))+` AS c, $1::int AS k
+		UNION ALL SELECT DISTINCT 1, `+strconv.Itoa(int(identityKeyLockClass))+`, unnest($2::int[])) s
+	ORDER BY s.o, s.k`)
+
+// LockIdentities implements IdentityLocker with identityLockSQL (WP-334).
+func (r *PGRepository) LockIdentities(ctx context.Context, orgID string, locks IdentityLocks) error {
+	keys := locks.Keys
+	if keys == nil || locks.Exclusive {
+		keys = []int32{}
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, identityLockSQL, locks.Org, keys, locks.Exclusive, r.lockTimeoutSetting()); err != nil {
+			return fmt.Errorf("lock identity keys: %w", err)
+		}
+		return nil
+	})
+}
+
+// ciCountLockNamespace keys the max_cis lock of an organization in
+// ciCountLockClass.
+const ciCountLockNamespace = "reticora/max-cis\x00"
+
+// ciCountLockSQL takes the max_cis lock ($2 in ciCountLockClass), shared or
+// exclusive with $3, its wait bounded by $1.
+var ciCountLockSQL = boundedLocksSQL("$1", `SELECT CASE WHEN $3 THEN pg_advisory_xact_lock(`+strconv.Itoa(int(ciCountLockClass))+`, $2::int)
+	ELSE pg_advisory_xact_lock_shared(`+strconv.Itoa(int(ciCountLockClass))+`, $2::int) END FROM bound`)
+
+// LockCICount implements CICountLocker: it takes the organization's max_cis
+// lock, exclusive or shared, until the end of the context transaction and
+// then counts the CIs the transaction sees, as ci.List counts them. The
+// count is a statement of its own, so it sees what every holder before
+// committed.
+func (r *PGRepository) LockCICount(ctx context.Context, orgID string, exclusive bool) (int64, error) {
+	key := ingestLockKey(ciCountLockNamespace + strings.ToLower(orgID))
+	var count int64
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, ciCountLockSQL, r.lockTimeoutSetting(), key, exclusive); err != nil {
+			return fmt.Errorf("lock max_cis: %w", err)
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`, orgID).Scan(&count); err != nil {
+			return fmt.Errorf("count cis: %w", err)
+		}
+		return nil
+	})
+	return count, err
+}
+
 // CreateEnrollmentCode stores the hash of a new enrollment code.
 func (r *PGRepository) CreateEnrollmentCode(ctx context.Context, code *EnrollmentCode) error {
 	return database.WithRequestTenant(ctx, r.pool, code.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
@@ -621,20 +767,32 @@ func (r *PGRepository) ProcessedRecords(ctx context.Context, orgID string, recor
 }
 
 // MarkRecordsProcessed remembers processed records and forgets those older
-// than the dedupe window (REC-01, RecordLedger).
+// than the dedupe window (REC-01, RecordLedger), in one statement for the
+// whole batch (NFR-03). The record ids must be distinct; an expired entry of
+// a record of the batch is refreshed, not deleted. The lanes of an
+// organization write the ledger side by side (WP-334): each forgets at most
+// 1000 expired entries and skips those another lane is deleting.
 func (r *PGRepository) MarkRecordsProcessed(ctx context.Context, orgID string, records []ProcessedRecord) error {
+	ids := make([]string, len(records))
+	collectors := make([]string, len(records))
+	observed := make([]time.Time, len(records))
+	for i, rec := range records {
+		ids[i], collectors[i], observed[i] = rec.RecordID, rec.CollectorID, rec.ObservedAt
+	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		for _, rec := range records {
-			if _, err := tx.Exec(ctx, `INSERT INTO ingest_record (organization_id, record_id, collector_id, observed_at)
-				VALUES ($1, $2, NULLIF($3, ''), $4)
-				ON CONFLICT (organization_id, record_id) DO UPDATE SET processed_at = now(), observed_at = EXCLUDED.observed_at`,
-				orgID, rec.RecordID, rec.CollectorID, rec.ObservedAt); err != nil {
-				return fmt.Errorf("record processed ingest record: %w", err)
-			}
+		if _, err := tx.Exec(ctx, `WITH expired AS (
+				DELETE FROM ingest_record WHERE (organization_id, record_id) IN (
+					SELECT organization_id, record_id FROM ingest_record
+					WHERE organization_id = $1 AND processed_at <= now() - $5::interval AND record_id <> ALL($2::uuid[])
+					ORDER BY processed_at LIMIT 1000 FOR UPDATE SKIP LOCKED))
+			INSERT INTO ingest_record (organization_id, record_id, collector_id, observed_at)
+			SELECT $1, r.record_id, NULLIF(r.collector_id, ''), r.observed_at
+			FROM unnest($2::uuid[], $3::text[], $4::timestamptz[]) AS r(record_id, collector_id, observed_at)
+			ON CONFLICT (organization_id, record_id) DO UPDATE SET processed_at = now(), observed_at = EXCLUDED.observed_at`,
+			orgID, ids, collectors, observed, RecordDedupeWindow.String()); err != nil {
+			return fmt.Errorf("record processed ingest records: %w", err)
 		}
-		_, err := tx.Exec(ctx, `DELETE FROM ingest_record WHERE organization_id = $1 AND processed_at <= now() - $2::interval`,
-			orgID, RecordDedupeWindow.String())
-		return err
+		return nil
 	})
 }
 
@@ -782,6 +940,202 @@ func identityFilter(orgID string, q *IdentityQuery) (predicate string, args []an
 		return "", nil, false
 	}
 	return "(" + strings.Join(terms, " OR ") + ")", args, true
+}
+
+// identityBranch is one branch of the batch candidate queries (WP-333): the
+// CIs one kind of identity value matches, with the kind and the ordinality n
+// of the matching value in its array.
+type identityBranch struct {
+	name string
+	sql  string
+}
+
+// identityBranches builds the branches of the batch candidate query for the
+// non-empty kinds of keys, mirroring identityFilter term by term with the
+// same operators: the arrays are cast on the parameter, never on the
+// column, so every join stays an index condition under row level security
+// (texteq, uuid_eq, macaddr_eq and network_eq are leakproof). The arguments
+// follow the organization ($1). Live CIs come with created_at; deleted CIs
+// with at most 1000 per value in (deleted_at DESC, id) order, a superset of
+// the 1000 newest per record, which the caller caps.
+func identityBranches(keys *IdentityKeys, deleted bool) (branches []identityBranch, args []any) {
+	add := func(values []string) int {
+		args = append(args, values)
+		return len(args) + 1
+	}
+	live := func(name, kind, unnest, cond string) {
+		branches = append(branches, identityBranch{name, fmt.Sprintf(`SELECT c.id, c.created_at, '%s'::text AS kind, k.n
+			FROM unnest(%s) WITH ORDINALITY AS k(v, n) JOIN ci c ON %s
+			WHERE c.organization_id = $1 AND c.deleted_at IS NULL`, kind, unnest, cond)})
+	}
+	gone := func(name, kind, unnest, cond string) {
+		branches = append(branches, identityBranch{name, fmt.Sprintf(`SELECT '%s'::text AS kind, k.n, d.id
+			FROM unnest(%s) WITH ORDINALITY AS k(v, n)
+			CROSS JOIN LATERAL (SELECT c.id FROM ci c WHERE c.organization_id = $1 AND c.deleted_at IS NOT NULL AND %s
+				ORDER BY c.deleted_at DESC, c.id LIMIT 1000) d`, kind, unnest, cond)})
+	}
+	branch := func(name, kind, unnest, liveCond, goneCond string) {
+		if deleted {
+			gone(name, kind, unnest, goneCond)
+		} else {
+			live(name, kind, unnest, liveCond)
+		}
+	}
+	if len(keys.Serials) > 0 {
+		branch("serial", "serial", fmt.Sprintf("$%d::text[]", add(keys.Serials)), "c.serial_number = k.v", "c.serial_number = k.v")
+	}
+	if len(keys.UUIDs) > 0 {
+		branch("uuid", "uuid", fmt.Sprintf("$%d::text[]::uuid[]", add(keys.UUIDs)), "c.hardware_uuid = k.v", "c.hardware_uuid = k.v")
+	}
+	if len(keys.MACs) > 0 {
+		n := add(keys.MACs)
+		branch("primary_mac", "mac", fmt.Sprintf("$%d::text[]::macaddr[]", n), "c.primary_mac = k.v", "c.primary_mac = k.v")
+		// Interface MACs of the fingerprint: jsonb containment is not
+		// leakproof and reads the organization's CIs once per batch (per
+		// record before); the array elements narrow the containment test
+		// to the matching values, the test itself stays exact.
+		state := "IS NULL"
+		if deleted {
+			state = "IS NOT NULL"
+		}
+		var columns string
+		if deleted {
+			columns = "'mac'::text AS kind, k.n, c.id"
+		} else {
+			columns = "c.id, c.created_at, 'mac'::text AS kind, k.n"
+		}
+		branches = append(branches, identityBranch{"fingerprint_mac", fmt.Sprintf(`SELECT %s
+			FROM ci c
+			CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(c.attributes -> 'fingerprint' -> 'mac_addresses') = 'array'
+				THEN c.attributes -> 'fingerprint' -> 'mac_addresses' END) AS fm(v)
+			JOIN unnest($%d::text[]) WITH ORDINALITY AS k(v, n) ON k.v = fm.v
+			WHERE c.organization_id = $1 AND c.deleted_at %s
+				AND c.attributes @> jsonb_build_object('fingerprint', jsonb_build_object('mac_addresses', jsonb_build_array(k.v)))`,
+			columns, n, state)})
+	}
+	if len(keys.IPs) > 0 {
+		branch("ip", "ip", fmt.Sprintf("$%d::text[]::inet[]", add(keys.IPs)), "c.management_ip = k.v", "c.management_ip = k.v")
+	}
+	if len(keys.Hostnames) > 0 {
+		n := add(keys.Hostnames)
+		if deleted {
+			gone("host", "host", fmt.Sprintf("$%d::text[]", n), "(c.hostname_lc = k.v OR c.fqdn_lc = k.v)")
+		} else {
+			live("hostname", "host", fmt.Sprintf("$%d::text[]", n), "c.hostname_lc = k.v")
+			live("fqdn", "host", fmt.Sprintf("$%d::text[]", n), "c.fqdn_lc = k.v")
+		}
+	}
+	return branches, args
+}
+
+// identityHitsSQL is the live candidate query of branches, read page by
+// page on (created_at, id, kind, n) from parameter first on. UNION drops the
+// repeated hit of a MAC that is primary and in the fingerprint, and of a
+// host name that is hostname and FQDN.
+func identityHitsSQL(branches []identityBranch, first int) string {
+	parts := make([]string, len(branches))
+	for i, b := range branches {
+		parts[i] = b.sql
+	}
+	return fmt.Sprintf(`/* ingest identity hits */ SELECT h.id::text, h.created_at, h.kind, h.n FROM (%s) h
+		WHERE $%[2]d::text = '' OR (h.created_at, h.id, h.kind, h.n) > ($%[3]d::timestamptz, NULLIF($%[2]d::text, '')::uuid, $%[4]d::text, $%[5]d::bigint)
+		ORDER BY h.created_at, h.id, h.kind, h.n LIMIT $%[6]d`,
+		strings.Join(parts, "\n\t\tUNION\n\t\t"), first, first+1, first+2, first+3, first+4)
+}
+
+// deletedHitsSQL is the deleted candidate query of branches.
+func deletedHitsSQL(branches []identityBranch) string {
+	parts := make([]string, len(branches))
+	for i, b := range branches {
+		parts[i] = b.sql
+	}
+	return `/* ingest deleted identity hits */ WITH hit AS (` + strings.Join(parts, "\n\t\tUNION\n\t\t") + `)
+		SELECT hit.kind, hit.n, c.id::text, c.ci_type_id::text, COALESCE(c.client_id::text, ''), c.name,
+			COALESCE(c.serial_number, ''), COALESCE(c.hardware_uuid::text, ''), COALESCE(c.primary_mac::text, ''),
+			COALESCE(host(c.management_ip), ''), COALESCE(c.sys_object_id, ''), COALESCE(c.hostname, ''),
+			COALESCE(c.fqdn, ''), COALESCE(c.attributes, '{}'::jsonb), c.deleted_at
+		FROM hit JOIN ci c ON c.id = hit.id
+		ORDER BY c.deleted_at DESC, c.id, hit.kind, hit.n`
+}
+
+// IdentityHits implements BatchIdentityFinder: the live CIs matching the
+// identity values of a whole batch with one query, each with the value it
+// matched, read page by page without an upper bound like
+// IdentityCandidates (NFR-03, WP-333).
+func (r *PGRepository) IdentityHits(ctx context.Context, orgID string, keys *IdentityKeys) ([]IdentityHit, error) {
+	branches, base := identityBranches(keys, false)
+	if len(branches) == 0 {
+		return nil, nil
+	}
+	query := identityHitsSQL(branches, len(base)+2)
+	var hits []IdentityHit
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var (
+			afterCreated time.Time
+			afterID      string
+			afterKind    string
+			afterN       int64
+		)
+		for {
+			args := append(append([]any{orgID}, base...), afterID, afterCreated, afterKind, afterN, identityPage)
+			rows, err := tx.Query(ctx, query, args...)
+			if err != nil {
+				return err
+			}
+			page := 0
+			for rows.Next() {
+				if err := rows.Scan(&afterID, &afterCreated, &afterKind, &afterN); err != nil {
+					rows.Close()
+					return err
+				}
+				hits = append(hits, IdentityHit{CIID: afterID, Key: IdentityKey{Kind: afterKind, Index: int(afterN) - 1}})
+				page++
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			if page < identityPage {
+				return nil
+			}
+		}
+	})
+	return hits, err
+}
+
+// DeletedIdentityHits implements BatchIdentityFinder: the soft-deleted CIs
+// matching the identity values of a batch with one query, at most 1000 per
+// value, with the fields identity resolution compares (CI-13, WP-333).
+func (r *PGRepository) DeletedIdentityHits(ctx context.Context, orgID string, keys *IdentityKeys) ([]DeletedIdentityHit, error) {
+	branches, base := identityBranches(keys, true)
+	if len(branches) == 0 {
+		return nil, nil
+	}
+	var hits []DeletedIdentityHit
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, deletedHitsSQL(branches), append([]any{orgID}, base...)...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var hit DeletedIdentityHit
+			var n int64
+			var deletedAt time.Time
+			item := &hit.CI
+			item.OrganizationID = orgID
+			if err := rows.Scan(&hit.Key.Kind, &n, &item.ID, &item.CITypeID, &item.ClientID, &item.Name, &item.SerialNumber,
+				&item.HardwareUUID, &item.PrimaryMAC, &item.ManagementIP, &item.SysObjectID, &item.Hostname, &item.FQDN,
+				&item.Attributes, &deletedAt); err != nil {
+				return err
+			}
+			hit.Key.Index = int(n) - 1
+			item.DeletedAt = &deletedAt
+			hits = append(hits, hit)
+		}
+		return rows.Err()
+	})
+	return hits, err
 }
 
 // hostOnly drops a prefix length and anything that is no IP address.

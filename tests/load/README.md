@@ -12,31 +12,91 @@ Budgets: Wird ein Budget verfehlt, schlägt der Lauf fehl.
 | `api.js` `detail` | `GET /cis/{id}` | < 300 ms |
 | `api.js` `rack` | `GET /racks/{id}/layout` | < 300 ms |
 | `api.js` `topology` | Topologie des Core-Switches, Tiefe 1 (> 2.000 Knoten) | < 3 s |
-| `api.js` `impact` | Impact des Core-Switches, Tiefe 20 (ganze Organisation) | < 2 s |
+| `api.js` `impact` | Impact des Core-Switches, Tiefe 20 (ganze Organisation), kompakte Antwort der Topologie-Ansicht (`fields=…`, ≤ 250 Byte je betroffenem CI) | < 2 s |
+| `api.js` `impact_full` | derselbe Impact in der vollständigen Antwort (alle Felder und Pfade) | < 2 s |
 | `api.js` `bulk` | Bulk-Statuswechsel von 500 CIs bis Job-Ende | < 30 s |
-| `ingest.js` | `POST /ingest/bulk` mit `RATE` Records/s; Abbau-Rate der Queue und Verzögerung Record → sichtbar | ≥ 200/s, < 30 s |
+| `ingest.js` `load` | `POST /ingest/bulk` mit `RATE` Records/s für `DURATION_S`; Verzögerung Record → sichtbar (Probe-Records während der Last, danach bis alle Records sichtbar sind) | < 30 s |
+| `ingest.js` `spool` | Spool-Flush eines Collectors (COL-05): 10.000 Records als nacheinander gesendete Uploads (`POST /discovery/ingest`, gzip); Abbau-Rate ab Sendeende, Dauer bis alle sichtbar | ≥ 200/s, < 5 min |
 
 ## Ablauf
 
 ```sh
-# 1. Datenbank migrieren und den Last-Seed mit API-Schlüssel anlegen
+# 1. Datenbank migrieren, den Last-Seed mit API-Schlüssel anlegen und die
+#    Statistik aktualisieren (ohne ANALYZE hängen die Pläne davon ab, wann
+#    Autovacuum den Seed erreicht)
 migrate -path backend/migrations -database "$DATABASE_URL" up
 go run ./backend/cmd/seed -database-url "$DATABASE_URL" -objects 10000 -api-key-file /tmp/load.key
+psql "$DATABASE_URL" -c 'ANALYZE'
 
 # 2. Server starten. Das Rate-Limit (600 Anfragen/min je Principal, API-04)
 #    würde den Lastlauf drosseln und wird für den Lauf angehoben.
 RETICORA_RATE_LIMIT_RPM=1000000 RETICORA_RATE_LIMIT_ORG_RPM=1000000 ./server
 
-# 3. Szenarien
+# 3. Ein Szenario je Lauf; vor dem nächsten Szenario Schritt 1 und 2 mit
+#    frischer Datenbank wiederholen
 k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat /tmp/load.key) tests/load/api.js
 k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat /tmp/load.key) tests/load/ingest.js
+k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat /tmp/load.key) -e SCENARIO=spool tests/load/ingest.js
 ```
 
-Parameter: `DURATION` und `VUS` (api.js), `RATE`, `BATCH`, `DURATION_S` und
-`TARGET` (ingest.js). Der Workflow `.github/workflows/load.yml` (manuell und
-nächtlich) führt diese Schritte aus und lädt die k6-Zusammenfassungen als
-Artefakt hoch. Das Ergebnis des G1-Laufs steht in
-`docs/acceptance/lasttest-g1.md`.
+Parameter: `DURATION`, `VUS` und `OBJECTS` (api.js; Seed-Größe der
+Demo-Organisation, Standard 10.000, daraus die erwartete Zahl betroffener CIs
+der Impact-Szenarien); `SCENARIO` (`load` oder `spool`), `RATE`, `BATCH`,
+`DURATION_S`, `PROBE_EVERY_S`, `VISIBLE_BUDGET_S`, `SPOOL_RECORDS`,
+`SPOOL_BATCH`, `SPOOL_BUDGET_S`, `TARGET` und `WAIT_S` (ingest.js). Der
+Workflow `.github/workflows/load.yml` (manuell und nächtlich) führt diese
+Schritte aus: `api.js`, `ingest.js` (`load`) und `ingest.js` (`spool`) als
+getrennte Jobs einer Matrix, jeder mit frischer Datenbank, Seed, `ANALYZE`
+und einem Server mit 4 Spuren (Standard). Er übergibt seine Eingaben
+`objects` als `OBJECTS` und `duration` als `DURATION` (`api.js`) und lädt die
+k6-Zusammenfassung jedes Jobs als eigenes Artefakt hoch
+(`load-results-api`, `load-results-ingest`, `load-results-ingest-spool`).
+Das Ergebnis des G1-Laufs steht in `docs/acceptance/lasttest-g1.md`.
+
+### Ingest (NFR-03, WP-334)
+
+- **Messgrößen.** `ingest_visible_delay` (Probe-Records alle `PROBE_EVERY_S`
+  während der Last und die Zeit vom Lastende, bis jeder Record des Laufs
+  sichtbar ist), `ingest_drain_records_per_s` (verarbeitete Records ab
+  Sendeende je Sekunde: was beim Sendeende noch nicht sichtbar war, geteilt
+  durch die Zeit bis alle sichtbar sind; Budget nur im Szenario `spool`),
+  `ingest_drain_inclusive_records_per_s` (alle Records durch die Zeit ab dem
+  ersten Senden, zur Information), `ingest_spool_flush` (erstes Senden bis
+  alles sichtbar), `ingest_backlog_peak` (größter Rückstand laut `/readyz`,
+  `details.ingest.total`; der Server liest ihn alle 30 s, `sampled_at`),
+  `ingest_records_missing` (Records, die nie
+  sichtbar werden), `ingest_records_accepted` (mit 202 angenommene Records
+  des Szenarios `load`, zur Information). Sichtbar heißt:
+  `GET /cis?filter[serial_number][like]=<Lauf>*` zählt den Record.
+- **Vollständigkeit.** Beide Szenarien scheitern, sobald ein Record fehlt
+  (`ingest_records_missing` = 0): Ist die Queue leer (`/readyz`, eine
+  Stichprobe, die nach dem letzten Anstieg genommen wurde) und wächst die
+  Zahl sichtbarer Records nicht mehr, wartet der Lauf nicht weiter und
+  zählt den Rest als fehlend (Dead Letter, als `unlicensed_ci` gehaltene oder
+  verworfene Records). Im Szenario `load` muss k6 die Rate voll anbieten
+  (`dropped_iterations` = 0); die Sollzahl ist `RATE · DURATION_S`. Weil k6
+  dabei eine Iteration mehr starten kann, fällt eine einzelne abgelehnte
+  Anfrage nicht unbedingt als fehlender Record auf: Jede Anfrage muss
+  deshalb angenommen werden (`http_req_failed{name:ingest}` bzw.
+  `{name:spool}` = 0, also 202); schon eine abgelehnte lässt den Lauf
+  scheitern.
+- **Spool.** Der Collector liefert seinen Spool nacheinander aus; jede
+  Spool-Nachricht ist der vollständige Upload eines Erfassungszyklus
+  (`spoolFlushBatch` = 64 zählt Nachrichten je Lesedurchgang, nicht Records).
+  Das Szenario sendet `SPOOL_RECORDS` Records in Uploads zu `SPOOL_BATCH`
+  Records (gzip, wie der Collector), jeden nach der Antwort des vorigen, mit
+  einem `observed_at` eine Stunde zurück.
+- **HTTP statt Edge.** k6 nutzt `POST /ingest/bulk` bzw.
+  `/discovery/ingest`. Der mTLS-NATS-Kanal der Collectors (COL-08) ruft
+  denselben Handler und veröffentlicht in dieselbe Queue.
+- **Spuren.** Der Server verteilt den Ingest auf `RETICORA_INGEST_LANES`
+  Spuren (Standard 4; `docs/betrieb/ingest-spuren.md`). Für den Vergleich mit
+  der seriellen Verarbeitung `RETICORA_INGEST_LANES=1` setzen.
+- **Lokaler Lauf (4 vCPU).** PostgreSQL, Server, NATS, Redis und k6 teilen
+  sich die Kerne; die Werte sind konservativ. Vor jedem Lauf neu seeden und
+  danach `ANALYZE` ausführen, wie `load.yml`: der Rückstand eines Laufs
+  verfälscht den nächsten, und ohne aktuelle Statistik wählt PostgreSQL für
+  die Kandidatenabfragen Pläne über die ganze Organisation.
 
 Ergänzend prüfen die Integrationstests `backend/internal/ci/querybudget_integration_test.go`
 und `backend/internal/topology/querybudget_integration_test.go` die Zahl der

@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 )
 
@@ -70,8 +71,14 @@ func (s *Service) Open(ctx context.Context, item *Item) (bool, error) {
 	if s.notifier != nil {
 		s.notifier.ReviewOpened(ctx, item)
 	}
-	slog.InfoContext(ctx, "review item opened", "event", "review.opened", "organization_id", item.OrganizationID,
-		"review_item_id", item.ID, "kind", item.Kind)
+	// Inside a transaction in the context (the ingest's record transaction)
+	// the event is logged once the item has committed: a rolled back item
+	// never existed.
+	orgID, id, kind := item.OrganizationID, item.ID, item.Kind
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		slog.InfoContext(ctx, "review item opened", "event", "review.opened", "organization_id", orgID,
+			"review_item_id", id, "kind", kind)
+	})
 	return true, nil
 }
 

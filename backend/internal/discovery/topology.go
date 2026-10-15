@@ -228,11 +228,22 @@ func normalizeMAC(value string) string {
 	return value
 }
 
+// hasRelationships reports whether a resolved item of the batch reports
+// relationships; without one the suppressions are not read.
+func hasRelationships(items []IngestItem, resolvedCIID []string) bool {
+	for i := range items {
+		if resolvedCIID[i] != "" && len(items[i].Relationships) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // deriveTopology resolves and upserts topology relationships for a bulk ingest
 // batch, returning the number of relationships created. When the
 // suppressions cannot be loaded no edge is written (fail-closed, REL-03).
 func (h *Handler) deriveTopology(ctx context.Context, orgID string, items []IngestItem, resolvedCIID []string, existing []ci.Item) int {
-	if h.relRepo == nil {
+	if h.relRepo == nil || !hasRelationships(items, resolvedCIID) {
 		return 0
 	}
 

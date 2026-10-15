@@ -18,41 +18,106 @@ Prüfungen:
   - die Workflows
 - Beide laufen in jedem PR (CI-Jobs `traceability` und `gate`).
 
-Stand: 2026-10-14, Release-Kandidat `main` nach PR „Gate G1: WP-211 – WP-213“.
+Stand: 2026-10-15, nach der G1-Nachbesserung (WP-332 bis WP-335,
+Commit `dbbfded`). Die Erstfassung prüfte den Release-Kandidaten `main` nach
+PR „Gate G1: WP-211 – WP-213“ (#62). Der Stand `dbbfded` ist lokal geprüft;
+danach kamen zwei Korrekturen aus dem Gesamtreview hinzu (`58863fa`,
+`dea65b7`) und am 2026-10-15 die Nachträge zu seinen nicht blockierenden
+Befunden (`3f2bfd5`, `458a96d`, `111bdc4`, `f354c5a`, `0f165cc`; Bewertung in
+`docs/security/review-g1.md`). Sie ändern die Werte des Nachweislaufs nicht
+(Kontrollmessungen in `docs/acceptance/lasttest-g1.md`). Der Workflow
+`load.yml` ist auf Commit `918a832`, dem Code-Stand mit allen Nachträgen,
+grün (Run 38665599979); nach dem Merge wiederholt ihn der nächtliche Lauf auf
+dem Release-Kandidaten. Der CI-Lauf auf dem Release-Kandidaten steht aus.
+
+Nachtrag 2026-10-15: Der Auftraggeber hat E-17, E-56, E-57 und E-58 nach den
+Empfehlungen entschieden, B3, B4 und B6 für erledigt erklärt und G1
+freigegeben (`docs/plan/entscheidungen.md`, Nachtrag vom 2026-10-15). Die
+Nachweise zu B3, B4 und B6 sind nachzureichen (Abschnitt „Ergebnis“).
 
 ## Ergebnis
 
-**G1 ist nicht bestanden.** Strukturell ist das Gate vollständig:
+**G1 ist mit der Freigabe des Auftraggebers vom 2026-10-15 bestanden;
+nachzureichen sind:**
+
+- der grüne CI-Lauf auf PR #64 und der Merge nach `main`
+  (Release-Kandidat; danach wiederholt der nächtliche `load.yml`-Lauf den
+  Lastnachweis auf `main`)
+- die Zusammenfassung und Befundliste des Pentest-Berichts in
+  `docs/security/pentest-g1.md` (B3)
+- die v2-Texte zu AUT-05, AUT-06, NET-04 und ABN-01 (a)/(b) in `docs/spec/`
+  (B4)
+- die Subprozessorenliste in `docs/legal/subprozessoren.md` (B6)
+
+Strukturell ist das Gate vollständig:
 
 - Jede [B]/[Q]-ID hat einen Nachweis.
 - Die Spätphasen-Module sind abgeschaltet.
 - Es gibt kein offenes Critical.
 
-Diese Punkte blockieren:
+Die Blocker beim Auftragnehmer, B1 (NFR-03) und B2 (NFR-02), sind mit der
+G1-Nachbesserung (WP-332 bis WP-335) geschlossen. Die übrigen Punkte hat der
+Auftraggeber (zugleich Product Owner) am 2026-10-15 entschieden (B5) bzw. für
+erledigt erklärt (B3, B4, B6):
 
-| # | Blocker | Regel | Verantwortlich | Weg |
+| # | Blocker | Regel | Verantwortlich | Stand 2026-10-15 |
 |---|---|---|---|---|
-| B1 | Ingest-Durchsatz 58 statt 200 Records/s je Instanz (NFR-03, Befund SR-02, High) | GATE-02, GATE-03 (Lasttest bestanden), Sicherheitsreview ohne offene High | Auftragnehmer | WP-332 bis WP-334 (`docs/plan/implementierungsplan.md`, G1-Nachbesserung; E-56 offen) |
-| B2 | Impact im Worst Case unter Parallellast p95 2,39 s statt < 2 s (NFR-02, SR-05) | GATE-02 | Auftragnehmer | WP-335 (`docs/plan/implementierungsplan.md`, G1-Nachbesserung); Referenzhost bleibt SR-06 |
-| B3 | Externer Pentest ohne offene High/Critical (NFR-08 nach E-28) | GATE-03 | Auftraggeber (E-28, A-07) | `docs/security/pentest-g1.md` |
-| B4 | v2-Originaltexte fehlen: AUT-05, AUT-06, NET-04, ABN-01 (a)/(b) | GATE-02 | Auftraggeber (E-02, A-02) | Texte liefern, danach WPs nach Plan |
-| B5 | Skalierungsziel unbestätigt (E-17) | – (kein eigener Gate-Punkt; gemessen mit 10.000 Objekten nach CH15) | Auftraggeber | Bestätigung oder neuer Zielwert, dann Nachmessung |
+| B3 | Externer Pentest ohne offene High/Critical (NFR-08 nach E-28) | GATE-03 | Auftraggeber (E-28, A-07) | erledigt laut Erklärung des Auftraggebers vom 2026-10-15. Bericht, Befunde und Nachtest liegen im Repository nicht vor; Zusammenfassung und Befundliste sind in `docs/security/pentest-g1.md` nachzureichen. |
+| B4 | v2-Originaltexte fehlen: AUT-05, AUT-06, NET-04, ABN-01 (a)/(b) | GATE-02 | Auftraggeber (E-02, A-02) | erledigt laut Erklärung des Auftraggebers vom 2026-10-15. Die Texte liegen im Repository nicht vor und sind in `docs/spec/` nachzureichen; danach wird geprüft, ob die Umsetzung ihnen entspricht. |
+| B5 | Skalierungsziel unbestätigt (E-17) | – (kein eigener Gate-Punkt; gemessen mit 10.000 Objekten nach CH15) | Auftraggeber | geschlossen: E-17 am 2026-10-15 entschieden (Option 1, Budgets bei 10.000 Objekten, Headroom 50.000 ohne Budgetzusage). Keine Nachmessung nötig. |
+| B6 | Subprozessorenliste fehlt (NFR-09: „Subprozessoren dokumentiert und AVV-fähig“) | GATE-02 | Betreiber (E-35, A-11) | erledigt laut Erklärung des Auftraggebers vom 2026-10-15. Die Liste liegt im Repository nicht vor; `docs/legal/subprozessoren.md` ist leer und dort nachzureichen. |
 
-B1 bis B4 müssen erledigt sein, bevor G1 freigegeben wird. Ist B5 nicht
-bestätigt, gilt der Lasttest mit 10.000 Objekten.
+Für B3, B4 und B6 ersetzt die Erklärung des Auftraggebers den Nachweis bis
+zu seinem Eingang. Diese Checkliste erfindet keine Inhalte: Sie nennt weder
+Pentest-Befunde noch Texte noch Subprozessoren.
+
+Geschlossen mit der G1-Nachbesserung:
+
+| # | Blocker (Erstlauf WP-206) | Regel | Geschlossen durch | Nachweis |
+|---|---|---|---|---|
+| B1 | Ingest-Durchsatz 58 statt 200 Records/s je Instanz (NFR-03, Befund SR-02, High) | GATE-02, GATE-03 (Lasttest bestanden), Sicherheitsreview ohne offene High | WP-332 bis WP-334 | Nachweislauf auf Commit `dbbfded` mit 4 Spuren (Standard): Abbau ab Sendeende 233 Records/s, Verzögerung Record → sichtbar höchstens 3,1 s bei 200 Records/s Angebot, Spool-Flush von 10.000 Records in 35,9 s, kein fehlender Record (`docs/acceptance/lasttest-g1.md`). SR-02 behoben (`docs/security/review-g1.md`). |
+| B2 | Impact im Worst Case unter Parallellast p95 2,39 s statt < 2 s (NFR-02, SR-05) | GATE-02 | WP-335 | Nachweislauf auf Commit `dbbfded`: Impact Tiefe 20 unter Parallellast p95 477 ms in der kompakten Form der Oberfläche und 546 ms in der Standardform mit Pfaden (`docs/acceptance/lasttest-g1.md`). SR-05 behoben (`docs/security/review-g1.md`). |
+
+Entscheidungen zu den geschlossenen Blockern (alle am 2026-10-15 vom
+Auftraggeber entschieden):
+
+- **E-58 (entschieden, Option 1):** Der Lastnachweis auf 4-vCPU-Hosts gilt
+  als G1-Nachweis für GATE-03 „Lasttest bestanden“: der lokale Nachweislauf
+  auf Commit `dbbfded` (4 vCPU, 15 GB RAM, Größenklasse des Mindestsizings
+  nach INS-07; PostgreSQL, NATS, Redis, Server und k6 auf einem Host) und
+  Run 38665599979 auf Commit `918a832` (Standard-Runner `ubuntu-latest`,
+  4 CPUs, alle Schwellen eingehalten; `docs/acceptance/lasttest-g1.md`,
+  Abschnitt „GitHub-Lauf“). Die Auflagen der Empfehlung gelten: Nach dem
+  Merge wiederholt der nächtliche Lauf den Nachweis auf dem
+  Release-Kandidaten, und ein dedizierter Referenzhost folgt vor GA (SR-06,
+  bis dahin offen).
+- **E-56 (entschieden, Option 1 mit Identitätssperre):** parallele Spuren mit
+  Identitätssperre, Standard 4 Spuren. `RETICORA_INGEST_LANES=1` (serielle
+  Verarbeitung) bleibt der Rückfall; damit erreicht der Abbau nur 182
+  Records/s und verfehlt NFR-03. Die Reserve mit 4 Spuren ist auf dem
+  4-vCPU-Host knapp: Frühere Läufe desselben Codes lagen bei 210–233
+  Records/s.
+- **E-57 (entschieden, Option A):** WP-335 ändert die Impact-Antwort nur
+  additiv. Die Standardantwort behält `path`. Die Oberfläche ruft die
+  kompakte Form über den Sparse-Fieldset `fields=` (API-02) ab.
+- **E-17 (entschieden, Option 1):** Messbasis sind 10.000 Objekte; Listen
+  und Suche über etwa 25.000 Objekten sind eine bekannte Einschränkung mit
+  Folge-WP vor GA.
 
 ## GATE-01 – Kein offenes Critical
 
 | Quelle | Critical offen | Nachweis |
 |---|---:|---|
 | Audit-Befunde (225 Critical/High) | 0 | `docs/security/review-g1.md`, Abschnitt „Audit-Befunde Critical/High“: 41 geschlossen, 8 mit G1-Anteil geschlossen |
-| Neue Befunde des Sicherheitsreviews (SR-01 bis SR-07) | 0 | `docs/security/review-g1.md`: kein Critical |
+| Neue Befunde des Sicherheitsreviews (SR-01 bis SR-11) | 0 | `docs/security/review-g1.md`: kein Critical |
 | Abhängigkeits- und Image-Scans | 0 | govulncheck, npm audit, Trivy blockierend in CI |
-| Externer Pentest | ausstehend | `docs/security/pentest-g1.md` |
+| Externer Pentest | 0 laut Erklärung des Auftraggebers vom 2026-10-15 | `docs/security/pentest-g1.md`; Befundliste nachzureichen |
 
-**Status:** PASS für den internen Stand. `tests/rep01-structure.test.sh`
-schlägt fehl, sobald eine Critical-Zeile in Review oder Pentest nicht
-„behoben“ ist. Der Pentest kann neue Befunde bringen (B3).
+**Status:** PASS; für den Pentest durch Erklärung des Auftraggebers vom
+2026-10-15 (B3), die Befundliste ist nachzureichen.
+`tests/rep01-structure.test.sh` schlägt fehl, sobald eine Critical-Zeile in
+Review oder Pentest nicht „behoben“ ist; das gilt auch für die nachgereichte
+Befundliste.
 
 ## GATE-02 – Alle Anforderungen der Phase sind PASS
 
@@ -63,32 +128,64 @@ gemischte Tags wie „[B], Teilumfang [P2]“ zählt der [B]-Anteil.
   Katalog fehlt und in der Traceability als [B] geführt ist. Jede hat eine
   Zeile in `docs/traceability.csv`; die Prüfung blockiert, sobald eine fehlt.
 - Der Status je ID steht im [Anhang](#anhang-status-je-bq-id).
-- Abweichungen von PASS stehen in den beiden Tabellen unten.
+- Abweichungen von PASS stehen in den beiden ersten Tabellen unten. Die IDs,
+  die durch die Erklärung des Auftraggebers vom 2026-10-15 PASS wurden,
+  stehen in der dritten, die mit der G1-Nachbesserung PASS wurden, in der
+  vierten.
 
 ### N/P und WARN
 
 WARN ist nach GATE-02 nur für SOLL-Punkte zulässig (E-27). Phase 1 hat keine
-SOLL-Punkte mit WARN. Diese IDs sind nicht beurteilbar oder gehören nicht zu
-G1:
+SOLL-Punkte mit WARN. Diese ID gehört nicht zu G1:
 
 | ID | Status | Begründung |
 |---|---|---|
-| AUT-05 | N/P | Text „[B] unverändert“ verweist auf v2; die v2-Originaltexte fehlen (E-02, Aufgabe A-02). Nach der Übergangsregel werden keine Funktionen erfunden. Blocker B4. |
-| AUT-06 | N/P | Wie AUT-05: Verweis auf v2 ohne Originaltext (E-02). Blocker B4. |
-| NET-04 | N/P | „cable(...) unverändert“: Felder und Regeln stehen nur in v2 (E-02). Das bestehende Kabelmodell bleibt unverändert. Blocker B4. |
-| NFR-08 | N/P | „Sicherheit nach SEC-11“: SEC-11 ist mit WP-209 belegt (`docs/security/review-g1.md`); der externe Pentest steht nach E-28 aus. Blocker B3. |
 | GATE-04 | N/P | Gate-Regel für GA (COL-07, AI-02), nicht für G1. Die Add-ons sind nach E-03 abgeschaltet (WP-214). |
+
+AUT-05, AUT-06, NET-04 und NFR-08 standen bis 2026-10-15 hier (B3, B4); sie
+stehen jetzt in der Tabelle „PASS durch Erklärung des Auftraggebers“.
 
 ### FAIL und offen
 
+Keine ID steht auf FAIL oder offen. NFR-09, GATE-02, GATE-03 und die Teile
+(a) und (b) von ABN-01 standen bis 2026-10-15 hier; sie stehen jetzt in der
+nächsten Tabelle.
+
+### PASS durch Erklärung des Auftraggebers
+
+Der Auftraggeber hat B3, B4 und B6 am 2026-10-15 für erledigt erklärt. Die
+Nachweise liegen im Repository nicht vor. Diese IDs sind deshalb durch die
+Erklärung abgenommen, nicht durch einen Test oder ein Dokument; der Nachweis
+ist nachzureichen.
+
 | ID | Status | Begründung |
 |---|---|---|
-| NFR-02 | FAIL | Alle Budgets bis auf Impact im Worst Case unter Parallellast erfüllt (`docs/acceptance/lasttest-g1.md`). Blocker B2. |
-| NFR-03 | FAIL | 58 statt 200 Records/s. Datenverlust tritt nicht auf. Blocker B1. |
-| NFR-10 | FAIL | Der Lasttest lief, ist wegen NFR-03 aber nicht bestanden. Blocker B1. |
-| GATE-03 | offen | Pentest ausstehend (B3), Lasttest nicht bestanden (B1). Isolationstest und Install-Smoke sind belegt (siehe GATE-03). |
-| GATE-02 | FAIL | Folgt aus den Zeilen oben. |
-| ABN-01 | PASS für (d) und (e) | Die Teile (a) und (b) sind N/P nach E-02 (B4); (c) ist [P2]. Siehe `docs/acceptance/abn-01.md`. |
+| AUT-05 | PASS (Erklärung des Auftraggebers) | Abnahme durch Erklärung des Auftraggebers vom 2026-10-15 (B4); Nachweis nachzureichen: v2-Originaltext in `docs/spec/` (E-02, Aufgabe A-02). Der Text „[B] unverändert“ verweist auf v2; nach der Übergangsregel sind keine Funktionen erfunden. Mit dem Text ist zu prüfen, ob die Umsetzung ihm entspricht. |
+| AUT-06 | PASS (Erklärung des Auftraggebers) | Wie AUT-05: Abnahme durch Erklärung des Auftraggebers vom 2026-10-15 (B4); Nachweis nachzureichen: v2-Originaltext in `docs/spec/` (E-02). |
+| NET-04 | PASS (Erklärung des Auftraggebers) | Abnahme durch Erklärung des Auftraggebers vom 2026-10-15 (B4); Nachweis nachzureichen: v2-Text zu „cable(...) unverändert“ in `docs/spec/` (E-02). Das bestehende Kabelmodell ist unverändert. |
+| ABN-01 | PASS (Erklärung des Auftraggebers für a, b; Test für d, e) | (d) und (e) sind durch Tests belegt (`docs/acceptance/abn-01.md`). (a) und (b): Abnahme durch Erklärung des Auftraggebers vom 2026-10-15 (B4); Nachweis nachzureichen: v2-Text „V §65–66“ in `docs/spec/` (E-02). (c) ist [P2]. |
+| NFR-08 | PASS (Erklärung des Auftraggebers) | „Sicherheit nach SEC-11“: SEC-11 ist mit WP-209 belegt (`docs/security/review-g1.md`). Externer Pentest (E-28): Abnahme durch Erklärung des Auftraggebers vom 2026-10-15 (B3); Nachweis nachzureichen: Zusammenfassung und Befundliste in `docs/security/pentest-g1.md`. |
+| NFR-09 | PASS (Erklärung des Auftraggebers) | Die Datenresidenz ist belegt (`docs/betrieb/referenzmodell.md`, WP-105). „Subprozessoren dokumentiert und AVV-fähig“: Abnahme durch Erklärung des Auftraggebers vom 2026-10-15 (B6); Nachweis nachzureichen: Subprozessorenliste in `docs/legal/subprozessoren.md` (E-35, Aufgabe A-11, Betreiber), die Datei ist leer. Die Erstfassung dieser Checkliste führte NFR-09 fälschlich als PASS; bis 2026-10-15 stand es auf „offen“. |
+| GATE-03 | PASS (Erklärung des Auftraggebers für den Pentest) | Lasttest bestanden und als G1-Nachweis anerkannt (E-58 entschieden, Option 1): lokaler Nachweislauf auf `dbbfded` und GitHub-Lauf 38665599979 auf `918a832`. Isolationstest und Install-Smoke sind belegt. Pentest: Abnahme durch Erklärung des Auftraggebers vom 2026-10-15 (B3); Nachweis nachzureichen in `docs/security/pentest-g1.md`. |
+| GATE-02 | PASS (Erklärung des Auftraggebers für B4, B6) | Folgt aus den Zeilen oben: Jede [B]/[Q]-ID der Phase ist PASS, GATE-04 gehört nicht zu G1. Für AUT-05, AUT-06, NET-04, ABN-01 (a)/(b) und NFR-09 durch Erklärung des Auftraggebers vom 2026-10-15; Nachweise nachzureichen. |
+
+### PASS mit der G1-Nachbesserung
+
+Die Erstfassung führte diese IDs als FAIL (B1, B2). Nachweis ist der Lastlauf
+auf Commit `dbbfded` mit 10.000 Objekten (`docs/acceptance/lasttest-g1.md`);
+der GitHub-Lauf 38665599979 auf Commit `918a832` bestätigt ihn mit allen
+Schwellen.
+
+| ID | Status | Begründung |
+|---|---|---|
+| NFR-02 | PASS | Alle Budgets erfüllt (`api.js`, 60 s, alle Szenarien parallel, frischer Seed). Impact Tiefe 20 p95 477 ms in der kompakten Form der Oberfläche und 546 ms in der Standardform mit Pfaden (Erstlauf 2,39 s). 7.038 von 7.038 Checks. WP-335, B2 geschlossen. |
+| NFR-03 | PASS | Mit 4 Spuren (Standard): Abbau ab Sendeende 233 Records/s (Erstlauf 58), Verzögerung Record → sichtbar höchstens 3,1 s bei 200 Records/s Angebot, Spool-Flush von 10.000 Records in 35,9 s, kein fehlender Record. Mit einer Spur 182 Records/s (E-56 entschieden: Option 1, 4 Spuren Standard, eine Spur nur als Rückfall). WP-332 bis WP-334, B1 geschlossen. |
+| NFR-10 | PASS | Lasttest mit 10.000 Objekten bestanden: Alle Schwellen von `api.js` und `ingest.js` (4 Spuren) sind erfüllt, im lokalen Nachweislauf auf `dbbfded` und im GitHub-Lauf 38665599979 auf `918a832` (Workflow `load.yml`). Die Referenzumgebung ist anerkannt (E-58 entschieden, Option 1); dedizierter Referenzhost vor GA (SR-06). |
+
+API-01 bleibt PASS: WP-335 erweitert die Antwort von `GET /impact/{ci_id}` und
+`GET /impact` nur additiv (`via`, `relay`). `path` bleibt in der
+Standardantwort; die kompakte Form liefert der Sparse-Fieldset `fields=`
+(API-02, E-57 entschieden: Option A).
 
 ### Spätphasen-Module (E-03)
 
@@ -115,8 +212,8 @@ verschoben (`docs/security/review-g1.md`).
 
 | Bedingung | Status | Nachweis |
 |---|---|---|
-| Lasttest (NFR-10) bestanden | FAIL | `docs/acceptance/lasttest-g1.md` (B1, B2) |
-| Pentest ohne offene High/Critical | offen | `docs/security/pentest-g1.md` (B3) |
+| Lasttest (NFR-10) bestanden | PASS | `docs/acceptance/lasttest-g1.md`: lokaler Nachweislauf auf Commit `dbbfded` (B1 und B2 geschlossen) und GitHub-Lauf 38665599979 auf Commit `918a832` (`load.yml`, alle Schwellen eingehalten; nach dem Merge nächtlich auf dem Release-Kandidaten wiederholt). Als G1-Nachweis anerkannt (E-58 entschieden, Option 1, 2026-10-15); dedizierter Referenzhost vor GA (SR-06) |
+| Pentest ohne offene High/Critical | PASS (Erklärung des Auftraggebers) | Abnahme durch Erklärung des Auftraggebers vom 2026-10-15 (B3); Nachweis nachzureichen: Zusammenfassung und Befundliste in `docs/security/pentest-g1.md` |
 | Isolationstest (TEN-09) vollständig | PASS | `backend/internal/tenant/rls/channel_matrix_integration_test.go` (WP-208) |
 | Install-Smoke auf beiden Plattformen | PASS | `docs/acceptance/g1-installation.md` (WP-211) |
 
@@ -155,10 +252,14 @@ sein fachliches Epic in der Spalte „Epic (Traceability)“. Die Merge-Folge au
 | – | M-S: WP-214 Feature-Gates (E-03, vor G1) | #59 | 2026-10-14 | WP-214 |
 | 6 | Lasttest (NFR-10) | #60 | 2026-10-14 | WP-203 – WP-207 |
 | 7 | Sicherheitsreview | #61 | 2026-10-14 | WP-208 – WP-210 |
-| 8 | G1 | dieser PR | 2026-10-14 | WP-211 – WP-213 |
+| 8 | G1 | #62 | 2026-10-14 | WP-211 – WP-213 |
 
 PR #57 (Planung Phase 2) enthält kein Arbeitspaket. Die einzige Abweichung von
 SEQ-01 ist das Vorziehen von M0; E-07 erlaubt sie.
+
+Nach Schritt 8 folgt die G1-Nachbesserung (WP-332 bis WP-335, Epic G1, Planung
+in PR #63). Sie behebt die Befunde SR-02 und SR-05 des Sicherheitsreviews und
+wiederholt den Lasttest (NFR-10).
 
 **Status:** PASS.
 
@@ -188,12 +289,12 @@ SEQ-01 ist das Vorziehen von M0; E-07 erlaubt sie.
 
 ## Anhang: Status je [B]/[Q]-ID
 
-Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den genannten Tests bzw. Dokumenten, und die CI ist auf dem Release-Kandidaten grün. Die Abweichungen sind oben begründet.
+Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den genannten Tests bzw. Dokumenten, und die CI ist auf dem Release-Kandidaten grün. Die Abweichungen sind oben begründet. Für NFR-02, NFR-03 und NFR-10 sind die Nachweise der lokale Lastlauf auf Commit `dbbfded` und der grüne `load.yml`-Lauf 38665599979 auf Commit `918a832`, als G1-Nachweis anerkannt (E-58 entschieden); der CI-Lauf auf dem Release-Kandidaten (PR #64) steht aus. „PASS (Erklärung des Auftraggebers)“ heißt: abgenommen durch Erklärung des Auftraggebers vom 2026-10-15; der Nachweis ist nachzureichen (Abschnitt „Ergebnis“).
 
 | ID | Tag | Status | Nachweis | WP |
 |---|---|---|---|---|
-| ABN-01 | [Q] | PASS (d, e) | `frontend/e2e/onboarding.spec.ts`, `frontend/e2e/conflict.spec.ts` | WP-200, WP-212 |
-| ABN-02 | [Q] | PASS | `backend/internal/ci/querybudget_integration_test.go`, `tests/load/` | WP-204, WP-206 |
+| ABN-01 | [Q] | PASS (d, e; a, b durch Erklärung des Auftraggebers) | `frontend/e2e/onboarding.spec.ts`, `frontend/e2e/conflict.spec.ts` | WP-200, WP-212 |
+| ABN-02 | [Q] | PASS | `backend/internal/ci/querybudget_integration_test.go`, `tests/load/`, `backend/internal/topology/querybudget_integration_test.go` | WP-204, WP-206, WP-335 |
 | ABN-03 | [Q], jeweilige Phase | PASS | `backend/internal/ci/concurrency_integration_test.go` | WP-207 |
 | API-01 | [B] | PASS | `backend/internal/middleware/openapi_test.go` | WP-167 |
 | API-02 | [B] | PASS | `backend/internal/api/cursor_test.go`, `backend/internal/api/listquery_test.go` | WP-164, WP-165 |
@@ -214,8 +315,8 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 | AUT-02 | [B] | PASS | `backend/internal/identity/deactivation_integration_test.go`, `backend/internal/identity/session_test.go` | WP-042, WP-066 |
 | AUT-03 | [B] | PASS | `backend/internal/config/config_test.go` | WP-110 |
 | AUT-04 | [B] | PASS | `backend/internal/identity/apikey_scope_integration_test.go`, `backend/internal/identity/apikey_integration_test.go` | WP-012, WP-067 |
-| AUT-05 | [B] | N/P | `docs/acceptance/g1-gate.md` | WP-213 |
-| AUT-06 | [B] | N/P | `docs/acceptance/g1-gate.md` | WP-213 |
+| AUT-05 | [B] | PASS (Erklärung des Auftraggebers) | `docs/acceptance/g1-gate.md` | WP-213 |
+| AUT-06 | [B] | PASS (Erklärung des Auftraggebers) | `docs/acceptance/g1-gate.md` | WP-213 |
 | AUT-09 | [B] | PASS | `backend/internal/identity/oidc_test.go`, `tests/install-cloud-helpers.test.sh` | WP-043, WP-044 |
 | AUT-10 | [B] | PASS | `backend/internal/middleware/middleware_test.go` | WP-050 |
 | BLK-01 | [B] | PASS | `backend/internal/ci/bulk_test.go` | WP-181 |
@@ -257,8 +358,8 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 | EVT-02 | [B] | PASS | `backend/internal/events/outbox_integration_test.go` | WP-136 |
 | EXP-01 | [B], DATEV [P2] | PASS | `backend/internal/export/scope_integration_test.go`, `backend/internal/export/export_test.go` | WP-035, WP-189 |
 | GATE-01 | [Q] | PASS | `tests/rep01-structure.test.sh` | WP-213 |
-| GATE-02 | [Q] | FAIL | `tests/rep01-structure.test.sh` | WP-213 |
-| GATE-03 | [Q] | offen | `tests/install-smoke-health.test.sh`, `docs/security/review-g1.md`, `docs/security/pentest-g1.md` (+1) | WP-092, WP-209, WP-210, WP-211 |
+| GATE-02 | [Q] | PASS (Erklärung des Auftraggebers für B4, B6) | `tests/rep01-structure.test.sh` | WP-213 |
+| GATE-03 | [Q] | PASS (Erklärung des Auftraggebers für den Pentest) | `tests/install-smoke-health.test.sh`, `docs/security/review-g1.md`, `docs/security/pentest-g1.md` (+1) | WP-092, WP-209, WP-210, WP-211 |
 | GATE-04 | [Q], Bezug GA | N/P | `docs/acceptance/g1-gate.md` | WP-213 |
 | GATE-05 | [Q] | PASS | `tests/rep01-structure.test.sh` | WP-213 |
 | GLO-10 | [B] | PASS | `frontend/src/i18n/catalog.test.ts` | WP-194 |
@@ -312,19 +413,19 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 | NET-01 | [B] | PASS | `backend/internal/ipam/vlan_integration_test.go`, `backend/internal/discovery/last_seen_test.go`, `backend/internal/ipam/interface_integration_test.go` | WP-081, WP-090, WP-123 |
 | NET-02 | [B] | PASS | `backend/internal/ipam/vlan_integration_test.go`, `backend/internal/ipam/vrf_integration_test.go` | WP-081, WP-082 |
 | NET-03 | [B] | PASS | `backend/internal/ipam/vrf_integration_test.go`, `backend/internal/ipam/ip_integration_test.go` | WP-082, WP-124 |
-| NET-04 | [B] | N/P | `docs/acceptance/g1-gate.md` | WP-213 |
+| NET-04 | [B] | PASS (Erklärung des Auftraggebers) | `docs/acceptance/g1-gate.md` | WP-213 |
 | NET-05 | [B] | PASS | `backend/internal/ipam/handler_test.go` | WP-125 |
 | NET-08 | [B] | PASS | `backend/internal/ipam/vlan_integration_test.go` | WP-081 |
 | NFR-01 | [B], Teilumfang [P5] | PASS | `backend/internal/discovery/identity_test.go`, `backend/internal/discovery/scale_integration_test.go`, `tests/load/` | WP-086, WP-205, WP-206 |
-| NFR-02 | [B] | FAIL | `backend/internal/topology/impact_test.go`, `tests/load/` | WP-177, WP-206 |
-| NFR-03 | [B], Teilumfang [P5] | FAIL | `backend/internal/discovery/consumer_test.go`, `collector/collectorcmd/schedule_test.go`, `tests/load/` | WP-085, WP-154, WP-206 |
+| NFR-02 | [B] | PASS | `backend/internal/topology/impact_test.go`, `tests/load/`, `backend/internal/topology/querybudget_integration_test.go` (+1) | WP-177, WP-206, WP-335 |
+| NFR-03 | [B], Teilumfang [P5] | PASS | `backend/internal/discovery/consumer_test.go`, `collector/collectorcmd/schedule_test.go`, `tests/load/` (+4) | WP-085, WP-154, WP-206, WP-332 … |
 | NFR-04 | [B], Teilumfang [P5] | PASS | `edgecore/buffer/buffer_test.go`, `backend/internal/maintenance/status_test.go` | WP-062, WP-063 |
 | NFR-05 | [B] | PASS | `tests/backup-config.test.sh`, `tests/restore-pitr.sh` | WP-100, WP-101 |
 | NFR-06 | [B] | PASS | `backend/internal/jobs/retention_integration_test.go` | WP-135 |
 | NFR-07 | [B] | PASS | `frontend/e2e/a11y.spec.ts` | WP-193 |
-| NFR-08 | [B] | N/P | `docs/acceptance/g1-gate.md` | WP-213 |
-| NFR-09 | [B] | PASS | `docs/betrieb/referenzmodell.md` | WP-105 |
-| NFR-10 | [Q] | FAIL | `backend/cmd/seed/seed_integration_test.go`, `backend/internal/ci/querybudget_integration_test.go`, `tests/load/` | WP-203, WP-204, WP-206 |
+| NFR-08 | [B] | PASS (Erklärung des Auftraggebers) | `docs/acceptance/g1-gate.md` | WP-213 |
+| NFR-09 | [B] | PASS (Erklärung des Auftraggebers) | `docs/betrieb/referenzmodell.md` | WP-105 |
+| NFR-10 | [Q] | PASS | `backend/cmd/seed/seed_integration_test.go`, `backend/internal/ci/querybudget_integration_test.go`, `tests/load/` (+1) | WP-203, WP-204, WP-206, WP-334 |
 | NTF-01 | [B] | PASS | `backend/internal/notify/channel_test.go` | WP-137 |
 | NTF-03 | [B] | PASS | `backend/internal/notify/recipients_integration_test.go` | WP-138 |
 | NTF-04 | [B] | PASS | `backend/internal/notify/notifier_test.go` | WP-139 |

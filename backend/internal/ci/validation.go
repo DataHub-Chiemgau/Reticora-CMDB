@@ -346,6 +346,27 @@ func (s *Service) InvalidObserved(ctx context.Context, orgID, ciTypeID, ciID str
 	if err != nil {
 		return nil, err
 	}
+	return invalidObserved(defs, values), nil
+}
+
+// ObservedRules resolves the field definitions of a CI type for new CIs once
+// and returns the check InvalidObserved applies to the observed values of a
+// new CI of that type: a batch of discovered devices resolves the
+// definitions once per type instead of once per device (NFR-03, WP-333).
+func (s *Service) ObservedRules(ctx context.Context, orgID, ciTypeID string) (func(values map[string]any) []string, error) {
+	if s.fields == nil {
+		return func(map[string]any) []string { return nil }, nil
+	}
+	defs, err := resolveFields(ctx, s.fields, orgID, ciTypeID, "")
+	if err != nil {
+		return nil, err
+	}
+	return func(values map[string]any) []string { return invalidObserved(defs, values) }, nil
+}
+
+// invalidObserved returns the fields of defs whose observed value violates
+// the definition, sorted.
+func invalidObserved(defs []fieldmeta.FieldDefinition, values map[string]any) []string {
 	var invalid []string
 	for i := range defs {
 		def := &defs[i]
@@ -358,5 +379,5 @@ func (s *Service) InvalidObserved(ctx context.Context, orgID, ciTypeID, ciID str
 		}
 	}
 	sort.Strings(invalid)
-	return invalid, nil
+	return invalid
 }

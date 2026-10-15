@@ -40,6 +40,35 @@ func (r *indexingRepository) Create(ctx context.Context, item *Item) error {
 	return nil
 }
 
+// CreateMany implements BatchCreator: the wrapped repository creates the
+// CIs in one batch where it can, else one by one (all or nothing only in a
+// transaction of the context); the documents of the created CIs are indexed
+// with one statement where the indexer can (NFR-03, WP-333). The decorator
+// always offers the batch, so the outermost of several decorators keeps it.
+func (r *indexingRepository) CreateMany(ctx context.Context, orgID string, items []*Item) (CreateManyResult, error) {
+	var res CreateManyResult
+	if creator, ok := r.Repository.(BatchCreator); ok {
+		var err error
+		if res, err = creator.CreateMany(ctx, orgID, items); err != nil {
+			return res, err
+		}
+	} else {
+		for _, item := range items {
+			if err := r.Repository.Create(ctx, item); err != nil {
+				return res, err
+			}
+		}
+	}
+	created := make([]*Item, 0, len(items))
+	for _, item := range items {
+		if item.ID != "" {
+			created = append(created, item)
+		}
+	}
+	r.indexMany(ctx, created)
+	return res, nil
+}
+
 func (r *indexingRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
 	item, err := r.Repository.Update(ctx, orgID, id, req)
 	if err != nil {
@@ -86,6 +115,23 @@ func (r *indexingRepository) GetByIDs(ctx context.Context, orgID string, ids []s
 		}
 	}
 	return items, nil
+}
+
+// ListNodes forwards the graph projection (NFR-02); without it the nodes
+// come from the batch read.
+func (r *indexingRepository) ListNodes(ctx context.Context, orgID string, ids []string) ([]Node, error) {
+	if reader, ok := r.Repository.(NodeReader); ok {
+		return reader.ListNodes(ctx, orgID, ids)
+	}
+	items, err := r.GetByIDs(ctx, orgID, ids)
+	if err != nil {
+		return nil, err
+	}
+	nodes := make([]Node, 0, len(items))
+	for i := range items {
+		nodes = append(nodes, NodeOf(&items[i]))
+	}
+	return nodes, nil
 }
 
 // ChangeType forwards the type change (CI-11) and indexes the CI again.
@@ -163,6 +209,30 @@ func (r *indexingRepository) ListChanges(ctx context.Context, orgID, ciID string
 		return []Change{}, 0, nil
 	}
 	return reader.ListChanges(ctx, orgID, ciID, page)
+}
+
+// indexMany indexes the documents of several CIs, with one call where the
+// indexer takes a batch; like index it logs a failure.
+func (r *indexingRepository) indexMany(ctx context.Context, items []*Item) {
+	batch, ok := r.indexer.(BatchIndexer)
+	if !ok {
+		for _, item := range items {
+			r.index(ctx, item)
+		}
+		return
+	}
+	docs := make([]Document, 0, len(items))
+	for _, item := range items {
+		if doc := IndexDocumentFor(item); doc.OrganizationID != "" && doc.EntityID != "" {
+			docs = append(docs, doc)
+		}
+	}
+	if len(docs) == 0 {
+		return
+	}
+	if err := batch.IndexDocuments(ctx, docs); err != nil {
+		slog.WarnContext(ctx, "search index update failed; rebuild via POST /api/v1/search/reindex", "cis", len(docs), "error", err)
+	}
 }
 
 func (r *indexingRepository) index(ctx context.Context, item *Item) {

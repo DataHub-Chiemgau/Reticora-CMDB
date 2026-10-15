@@ -65,16 +65,34 @@ func (r *PGRepository) withEffectiveTx(ctx context.Context, tx pgx.Tx, fv *Field
 const visibleCI = "EXISTS (SELECT 1 FROM ci WHERE ci.id = ci_field_value.ci_id)"
 
 // requireVisibleCI rejects writes to a CI the tenant scope does not show; the
-// foreign key alone would accept a CI of another client.
+// foreign key alone would accept a CI of another client. It locks the CI row
+// (lockCI).
 func requireVisibleCI(ctx context.Context, tx pgx.Tx, ciID string) error {
-	var visible bool
-	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1)", ciID).Scan(&visible); err != nil {
-		return fmt.Errorf("check ci visibility: %w", err)
+	visible, err := lockCI(ctx, tx, ciID)
+	if err != nil {
+		return err
 	}
 	if !visible {
 		return fmt.Errorf("not found")
 	}
 	return nil
+}
+
+// lockCI locks the row of the CI before any of its field values and reports
+// whether the CI is visible, in one statement. Every write of a field value
+// updates the CI row as well (syncCIField, the projection trigger of
+// migration 000135), while the ingest's record transaction and ci.Update lock
+// the CI row first (discovery LockCI, SELECT … FOR UPDATE): taking it first
+// here too keeps one lock order, so the two wait for each other instead of
+// deadlocking (40P01). Only a row the scope may update is locked; the others
+// are not written either.
+func lockCI(ctx context.Context, tx pgx.Tx, ciID string) (visible bool, err error) {
+	var locked bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1),
+		EXISTS (SELECT 1 FROM ci WHERE id = $1 FOR UPDATE)`, ciID).Scan(&visible, &locked); err != nil {
+		return false, fmt.Errorf("check ci visibility: %w", err)
+	}
+	return visible, nil
 }
 
 // ListForCI returns all tracked field values of a CI with resolved effective
@@ -211,6 +229,96 @@ func (r *PGRepository) RecordDiscoveredMany(ctx context.Context, orgID, ciID str
 	})
 }
 
+// DiscoveredValues are the discovered fields of one CI with their source
+// and observation time.
+type DiscoveredValues struct {
+	CIID       string
+	Values     map[string]any
+	Source     string
+	ObservedAt time.Time
+}
+
+// recordDiscoveredBatchSQL upserts the discovered values of the fields of
+// several CIs ($2 … $7, one element per field) whose CIs ($8, each once) the
+// tenant scope shows.
+const recordDiscoveredBatchSQL = `
+	WITH visible AS MATERIALIZED (
+		SELECT v.id FROM unnest($8::uuid[]) AS k(id)
+		CROSS JOIN LATERAL (SELECT ci.id FROM ci WHERE ci.id = k.id) v
+	)
+	INSERT INTO ci_field_value (
+		organization_id, ci_id, field_name, discovered_value,
+		discovered_source, discovered_at, discovered_rank, observed_at
+	)
+	SELECT $1, f.ci_id::uuid, f.name, f.value::jsonb, f.source, now(), f.rank, f.observed_at
+	FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::integer[], $7::timestamptz[])
+	     WITH ORDINALITY AS f(ci_id, name, value, source, rank, observed_at, ord)
+	JOIN visible ON visible.id = f.ci_id::uuid
+	ORDER BY f.ord
+	ON CONFLICT (ci_id, field_name) DO UPDATE SET
+		discovered_value = EXCLUDED.discovered_value,
+		discovered_source = EXCLUDED.discovered_source,
+		discovered_at = EXCLUDED.discovered_at,
+		discovered_rank = EXCLUDED.discovered_rank,
+		observed_at = EXCLUDED.observed_at`
+
+// RecordDiscoveredBatch upserts the discovered columns of the fields of
+// several CIs, each at most once in batch, with one statement, each CI like
+// RecordDiscoveredMany (NFR-03, WP-333); the override columns stay
+// untouched. The visibility check is
+// part of the statement: the fields of a CI the tenant scope does not show
+// are not written, and the call reports "not found". It reads each CI once
+// by its key (WP-334): a semi join of the values with the CIs of the
+// organization made the planner, with statistics from before a large
+// ingest, compare every value with every CI.
+func (r *PGRepository) RecordDiscoveredBatch(ctx context.Context, orgID string, batch []DiscoveredValues) error {
+	var ids, names, cis []string
+	var raw, sources []*string
+	var ranks []int32
+	var observed []time.Time
+	seen := make(map[string]bool, len(batch))
+	for _, b := range batch {
+		if !seen[b.CIID] {
+			seen[b.CIID] = true
+			cis = append(cis, b.CIID)
+		}
+		observedAt := b.ObservedAt
+		if observedAt.IsZero() {
+			observedAt = time.Now()
+		}
+		var source *string
+		if strings.TrimSpace(b.Source) != "" {
+			source = &b.Source
+		}
+		fields := make([]string, 0, len(b.Values))
+		for name := range b.Values {
+			fields = append(fields, name)
+		}
+		sort.Strings(fields)
+		for _, name := range fields {
+			var value *string
+			if v, ok := jsonValue(b.Values[name]).(string); ok {
+				value = &v
+			}
+			ids, names, raw = append(ids, b.CIID), append(names, name), append(raw, value)
+			sources, ranks, observed = append(sources, source), append(ranks, int32(SourceRank(b.Source))), append(observed, observedAt.UTC())
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, recordDiscoveredBatchSQL, orgID, ids, names, raw, sources, ranks, observed, cis)
+		if err != nil {
+			return fmt.Errorf("record discovered values: %w", err)
+		}
+		if tag.RowsAffected() != int64(len(ids)) {
+			return fmt.Errorf("not found")
+		}
+		return nil
+	})
+}
+
 // SetOverride sets or replaces the manual override of a field.
 func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName string, value any, author, reason string, protected bool) (*FieldValue, error) {
 	if reason == "" {
@@ -306,6 +414,11 @@ func userID(author string) any {
 func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error) {
 	var out *FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// The CI row first (lockCI); an invisible CI is not found by the
+		// update below.
+		if _, err := lockCI(ctx, tx, ciID); err != nil {
+			return err
+		}
 		row := tx.QueryRow(ctx, fmt.Sprintf(`
 			UPDATE ci_field_value SET
 				override_value = NULL, override_author = NULL,

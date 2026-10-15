@@ -2,8 +2,10 @@ package ai
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 // CIChunkIndexer adapts the AI chunk store to the ci.Indexer interface so
@@ -76,9 +78,47 @@ func NewCIChunkIndexer(repo Repository, provider Provider) *CIChunkIndexer {
 	return &CIChunkIndexer{repo: repo, provider: provider}
 }
 
+// mayEmbed reports whether embeddings can be requested at all: a provider
+// with embeddings and a consent to ask. It reads no external state.
+func (x *CIChunkIndexer) mayEmbed() bool {
+	return x.provider != nil && x.provider.EmbeddingsEnabled() && x.consent != nil
+}
+
 // IndexDocument upserts the retrieval chunk for a CI document.
 func (x *CIChunkIndexer) IndexDocument(ctx context.Context, doc ci.Document) error {
-	chunk := Chunk{
+	chunk := chunkOf(&doc)
+	if !x.mayEmbed() {
+		return x.repo.UpsertChunk(ctx, chunk)
+	}
+	if !database.InTx(ctx) {
+		// The provider is called only for organizations that opted in and
+		// hold the ai add-on (AI-02).
+		if x.consent.AllowsExternalAI(ctx, doc.OrganizationID) {
+			x.embed(&chunk)
+		}
+		return x.repo.UpsertChunk(ctx, chunk)
+	}
+	// Inside a context transaction the chunk is written lexically with the
+	// CI; the consent (entitlement cache, opt-in) and the embedding, an
+	// external HTTP call, follow after the commit: the transaction never
+	// holds its locks while Redis or the provider answers (NFR-03).
+	if err := x.repo.UpsertChunk(ctx, chunk); err != nil {
+		return err
+	}
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		if !x.consent.AllowsExternalAI(ctx, chunk.OrganizationID) || !x.embed(&chunk) {
+			return
+		}
+		if err := x.repo.UpsertChunk(ctx, chunk); err != nil {
+			slog.WarnContext(ctx, "AI chunk embedding not stored", "entity_id", chunk.EntityID, "error", err)
+		}
+	})
+	return nil
+}
+
+// chunkOf is the retrieval chunk of a CI document.
+func chunkOf(doc *ci.Document) Chunk {
+	return Chunk{
 		OrganizationID: doc.OrganizationID,
 		EntityType:     doc.EntityType,
 		EntityID:       doc.EntityID,
@@ -86,17 +126,75 @@ func (x *CIChunkIndexer) IndexDocument(ctx context.Context, doc ci.Document) err
 		Content:        doc.Summary,
 		URL:            doc.URL,
 	}
-	// The provider is called only for organizations that opted in and hold
-	// the ai add-on (AI-02).
-	if x.provider != nil && x.provider.EmbeddingsEnabled() && x.consent != nil &&
-		x.consent.AllowsExternalAI(ctx, doc.OrganizationID) {
-		// Embedding failures degrade gracefully to lexical scoring; the chunk
-		// is still upserted without a vector so retrieval keeps working.
-		if emb, err := x.provider.Embed(doc.Title + " " + doc.Summary); err == nil {
-			chunk.Embedding = emb
+}
+
+// ChunkBatchWriter upserts several chunks of one organization at once
+// (NFR-03, WP-333); the PostgreSQL repository implements it.
+type ChunkBatchWriter interface {
+	UpsertChunks(ctx context.Context, chunks []Chunk) error
+}
+
+// IndexDocuments implements ci.BatchIndexer: the chunks of the documents of
+// one organization with one statement where the repository can, else chunk
+// by chunk. The consent is checked once for the batch; inside a context
+// transaction the consent and the embeddings follow after the commit, as in
+// IndexDocument.
+func (x *CIChunkIndexer) IndexDocuments(ctx context.Context, docs []ci.Document) error {
+	batch, ok := x.repo.(ChunkBatchWriter)
+	if !ok || len(docs) == 0 {
+		for i := range docs {
+			if err := x.IndexDocument(ctx, docs[i]); err != nil {
+				return err
+			}
 		}
+		return nil
 	}
-	return x.repo.UpsertChunk(ctx, chunk)
+	chunks := make([]Chunk, len(docs))
+	for i := range docs {
+		chunks[i] = chunkOf(&docs[i])
+	}
+	if !x.mayEmbed() {
+		return batch.UpsertChunks(ctx, chunks)
+	}
+	orgID := docs[0].OrganizationID
+	if !database.InTx(ctx) {
+		if x.consent.AllowsExternalAI(ctx, orgID) {
+			for i := range chunks {
+				x.embed(&chunks[i])
+			}
+		}
+		return batch.UpsertChunks(ctx, chunks)
+	}
+	if err := batch.UpsertChunks(ctx, chunks); err != nil {
+		return err
+	}
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		if !x.consent.AllowsExternalAI(ctx, orgID) {
+			return
+		}
+		var embedded []Chunk
+		for i := range chunks {
+			if x.embed(&chunks[i]) {
+				embedded = append(embedded, chunks[i])
+			}
+		}
+		if err := batch.UpsertChunks(ctx, embedded); err != nil {
+			slog.WarnContext(ctx, "AI chunk embeddings not stored", "chunks", len(embedded), "error", err)
+		}
+	})
+	return nil
+}
+
+// embed adds the embedding of the chunk and reports whether it got one.
+// Embedding failures degrade gracefully to lexical scoring; the chunk is
+// still upserted without a vector so retrieval keeps working.
+func (x *CIChunkIndexer) embed(chunk *Chunk) bool {
+	emb, err := x.provider.Embed(chunk.Title + " " + chunk.Content)
+	if err != nil {
+		return false
+	}
+	chunk.Embedding = emb
+	return true
 }
 
 // DeleteDocument removes the retrieval chunk for a CI document.

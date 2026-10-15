@@ -13,6 +13,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -42,8 +43,9 @@ var unlicensedQueued atomic.Int64
 // start.
 func UnlicensedQueued() int64 { return unlicensedQueued.Load() }
 
-// RegisterMetrics registers reticora_unlicensed_ci_total (ENT-03) and
-// reticora_ingest_future_records_total (GLO-12).
+// RegisterMetrics registers reticora_unlicensed_ci_total (ENT-03),
+// reticora_ingest_future_records_total (GLO-12) and the metrics of the
+// ingest lanes (WP-334).
 func RegisterMetrics(reg prometheus.Registerer) {
 	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
 		Namespace: "reticora",
@@ -57,6 +59,7 @@ func RegisterMetrics(reg prometheus.Registerer) {
 	}, func() float64 { return float64(UnlicensedQueued()) }))
 	// Discovery error states (DIS-08).
 	reg.MustRegister(scopeRuns, discoveryErrors)
+	reg.MustRegister(ingestLanesGauge, laneBacklog, laneRecords, recordRetries)
 }
 
 // discoveredAttributes are the attributes a discovered device stores on its
@@ -78,8 +81,23 @@ func discoveredAttributes(item *IngestItem) map[string]any {
 // createDiscoveredCI creates the CI of a discovered device and records the
 // provenance of every discovered field (spec §13).
 func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *IngestItem, typeID, source string) (ci.Item, error) {
+	newItem := discoveredCI(orgID, item, typeID, source)
+	if err := h.ciRepo.Create(ctx, &newItem); err != nil {
+		return ci.Item{}, err
+	}
+	// New CIs carry no overrides; every discovered field is recorded as
+	// provenance so future drift is visible.
+	if err := h.recordDiscoveredMany(ctx, orgID, newItem.ID, discoveredFields(item), source, item.ObservedAt); err != nil {
+		return ci.Item{}, err
+	}
+	return newItem, nil
+}
+
+// discoveredCI is the CI of a discovered device, before it is created; the
+// batch of WP-333 and createDiscoveredCI build it alike.
+func discoveredCI(orgID string, item *IngestItem, typeID, source string) ci.Item {
 	now := time.Now().UTC()
-	newItem := ci.Item{
+	return ci.Item{
 		OrganizationID: orgID,
 		// The client of the discovery scope (REC-02).
 		ClientID:        item.ClientID,
@@ -100,11 +118,11 @@ func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *In
 		FirstSeenAt:     &now,
 		LastSeenAt:      &now,
 	}
-	if err := h.ciRepo.Create(ctx, &newItem); err != nil {
-		return ci.Item{}, err
-	}
-	// New CIs carry no overrides; every discovered field is recorded as
-	// provenance so future drift is visible.
+}
+
+// discoveredFields are the fields of a new discovered CI whose provenance is
+// recorded.
+func discoveredFields(item *IngestItem) map[string]any {
 	fields := map[string]any{
 		"name": item.Name, "manufacturer": item.Manufacturer, "model": item.Model,
 		"serial_number": item.SerialNumber, "management_ip": item.ManagementIP,
@@ -113,8 +131,7 @@ func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *In
 	for k, v := range item.Attributes {
 		fields[k] = v
 	}
-	h.recordDiscoveredMany(ctx, orgID, newItem.ID, fields, source, item.ObservedAt)
-	return newItem, nil
+	return fields
 }
 
 // deviceKey identifies a discovered device across ingests so it is queued
@@ -141,7 +158,41 @@ func deviceKey(item *IngestItem) string {
 
 // queuedDevices holds the device keys of open unlicensed_ci items of one
 // ingest, loaded on first use.
-type queuedDevices struct{ keys map[string]bool }
+type queuedDevices struct {
+	keys map[string]bool
+	// added lists the keys set since they were loaded, so that the keys of
+	// a transaction that rolled back can be taken back (WP-334 retries).
+	added []string
+}
+
+// queue marks the device key as queued.
+func (q *queuedDevices) queue(key string) {
+	if !q.keys[key] {
+		q.keys[key] = true
+		q.added = append(q.added, key)
+	}
+}
+
+// mark returns the state rollback restores.
+func (q *queuedDevices) mark() int {
+	if q.keys == nil {
+		return -1
+	}
+	return len(q.added)
+}
+
+// rollback forgets the keys queued after mark; keys loaded after it are
+// dropped as a whole and loaded again on next use.
+func (q *queuedDevices) rollback(mark int) {
+	if mark < 0 {
+		q.keys, q.added = nil, nil
+		return
+	}
+	for _, key := range q.added[mark:] {
+		delete(q.keys, key)
+	}
+	q.added = q.added[:mark]
+}
 
 // admitNewCI checks max_cis for a new discovered device. Over the limit the
 // device is queued as unlicensed_ci (once per device) and admitNewCI reports
@@ -185,24 +236,34 @@ func (h *Handler) admitNewCI(ctx context.Context, orgID string, current int64, i
 		},
 		ObjectKey: key,
 	}
-	opened, err := h.openReview(ctx, review)
+	// The savepoint keeps the record's transaction usable after a unique
+	// violation of the open unlicensed_ci item of the device.
+	var opened bool
+	err = database.Savepoint(ctx, func(ctx context.Context) error {
+		var openErr error
+		opened, openErr = h.openReview(ctx, review)
+		return openErr
+	})
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			// Queued concurrently by another ingest.
-			queued.keys[key] = true
+			queued.queue(key)
 			return true, nil
 		}
 		return false, err
 	}
-	queued.keys[key] = true
+	queued.queue(key)
 	if !opened {
 		return true, nil
 	}
-	unlicensedQueued.Add(1)
-	slog.WarnContext(ctx, "discovered device held as unlicensed_ci: max_cis reached",
-		"event", "entitlement.unlicensed_ci", "organization_id", orgID, "review_item_id", review.ID,
-		"limit", exceeded.Limit, "current", exceeded.Current)
+	// Counted once the item is committed.
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		unlicensedQueued.Add(1)
+		slog.WarnContext(ctx, "discovered device held as unlicensed_ci: max_cis reached",
+			"event", "entitlement.unlicensed_ci", "organization_id", orgID, "review_item_id", review.ID,
+			"limit", exceeded.Limit, "current", exceeded.Current)
+	})
 	return true, nil
 }
 

@@ -462,3 +462,11 @@ AUT-06;[B];G1;docs/acceptance/g1-gate.md;WP-213
 NET-04;[B];G1;docs/acceptance/g1-gate.md;WP-213
 NFR-08;[B];G1;docs/acceptance/g1-gate.md;WP-213
 GATE-04;[Q], Bezug GA;G1;docs/acceptance/g1-gate.md;WP-213
+NFR-03;[B], Teilumfang [P5];G1;backend/internal/discovery/ingest_budget_integration_test.go;WP-332
+NFR-03;[B], Teilumfang [P5];G1;backend/internal/ci/create_many_integration_test.go;WP-333
+NFR-03;[B], Teilumfang [P5];G1;backend/internal/discovery/consumer_integration_test.go;WP-334
+NFR-03;[B], Teilumfang [P5];G1;tests/load/ingest.js;WP-334
+NFR-10;[Q];G1;tests/load/ingest.js;WP-334
+NFR-02;[B];G1;backend/internal/topology/querybudget_integration_test.go;WP-335
+NFR-02;[B];G1;tests/load/api.js;WP-335
+ABN-02;[Q];G1;backend/internal/topology/querybudget_integration_test.go;WP-335

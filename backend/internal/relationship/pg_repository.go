@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -39,11 +40,27 @@ const relationshipSelectColumns = `
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
 	pool *pgxpool.Pool
+	// bulkFrontier is the frontier size beyond which a traversal reads every
+	// edge of the organization at once instead of the next level.
+	bulkFrontier int
 }
+
+// DefaultBulkFrontier: a traversal whose frontier exceeds this many nodes
+// reads all edges of the organization in one statement instead of the next
+// levels (NFR-02, WP-335).
+const DefaultBulkFrontier = 1000
 
 // NewPGRepository creates a new PostgreSQL-backed relationship repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
-	return &PGRepository{pool: pool}
+	return &PGRepository{pool: pool, bulkFrontier: DefaultBulkFrontier}
+}
+
+// WithBulkFrontier sets the frontier size beyond which a traversal switches
+// to the organization read; 0 switches before the first level (tests run
+// IMP-07 in both modes).
+func (r *PGRepository) WithBulkFrontier(n int) *PGRepository {
+	r.bulkFrontier = max(n, 0)
+	return r
 }
 
 // visibleEndpoints restricts relationship rows to edges whose source and
@@ -335,73 +352,94 @@ func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, f
 }
 
 // TraverseFrom walks the configuration graph from rootCIID breadth first,
-// one statement per hop, under the caller's full tenant scope (RLS on ci and
-// ci_relationship). Each node is expanded once, so a walk costs at most
-// maxDepth statements and reads each edge at most twice, whatever cycles the
+// one edge read per hop, under the caller's full tenant scope (RLS on ci and
+// ci_relationship). Each node is expanded once, so a walk costs at most two
+// statements per hop and reads each edge at most twice, whatever cycles the
 // graph has (NFR-02, WP-206; the former recursive CTE re-expanded every node
-// at every depth). The walk only passes through CIs that are visible and not
-// deleted: an edge is followed only when both endpoints are such CIs, so an
-// invisible or deleted intermediate node never connects visible ones
-// (IMP-07). The result follows SelectTraversal, the semantics the memory
-// repository shares.
+// at every depth). Once a level reaches more than bulkFrontier CIs, the walk
+// reads every edge of the organization in one statement instead of the
+// further levels (organizationEdges, WP-335): the statements of a walk then
+// no longer grow with the graph. The walk only passes through CIs that are
+// visible and not deleted: the CIs a level reaches are checked against ci
+// under the same scope, and an edge is followed only when both endpoints
+// passed, so an invisible or deleted intermediate node never connects
+// visible ones (IMP-07). The result follows SelectTraversal, the semantics
+// the memory repository shares.
 func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error) {
 	if maxDepth < 1 || maxNodes < 1 {
 		return make([]Relationship, 0), nil
 	}
-	var edges []Relationship
+	var edges []edgeRow
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var visible bool
+		var rootVisible bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE id = $2 AND organization_id = $1 AND deleted_at IS NULL)`,
-			orgID, rootCIID).Scan(&visible); err != nil {
+			orgID, rootCIID).Scan(&rootVisible); err != nil {
 			return fmt.Errorf("traverse relationships: %w", err)
 		}
-		if !visible {
+		if !rootVisible {
 			return nil
 		}
-		seenNode := map[string]bool{rootCIID: true}
+		// A wide level reaches most of the graph: one read of all edges
+		// replaces the further levels, and the selection re-derives the
+		// walk from it.
+		readAll := func() error {
+			var err error
+			edges, err = organizationEdges(ctx, tx, orgID)
+			return err
+		}
+		// visible holds every CI checked so far, true when it is visible
+		// and not deleted; a CI is checked in the level that reaches it.
+		visible := map[string]bool{rootCIID: true}
 		seenEdge := map[string]bool{}
+		reached := 1
 		frontier := []string{rootCIID}
 		hops := maxDepth
 		for hop := 0; hop < hops && len(frontier) > 0; hop++ {
-			rows, err := tx.Query(ctx, `SELECT `+traversalSelectColumns+`
-				FROM `+graphEdges+` r
-				JOIN ci s ON s.id = r.source_ci_id AND s.deleted_at IS NULL
-				JOIN ci t ON t.id = r.target_ci_id AND t.deleted_at IS NULL
-				WHERE r.organization_id = $1
-				  AND (r.source_ci_id = ANY($2::uuid[]) OR r.target_ci_id = ANY($2::uuid[]))`, orgID, frontier)
-			if err != nil {
-				return fmt.Errorf("traverse relationships: %w", err)
+			if len(frontier) > r.bulkFrontier {
+				return readAll()
 			}
-			var next []string
-			for rows.Next() {
-				var item Relationship
-				if err := rows.Scan(&item.ID, &item.SourceCIID, &item.TargetCIID, &item.RelType, &item.Source); err != nil {
-					rows.Close()
-					return fmt.Errorf("scan traversed relationship: %w", err)
-				}
-				if seenEdge[item.ID] {
+			level, err := frontierEdges(ctx, tx, orgID, frontier)
+			if err != nil {
+				return err
+			}
+			var unchecked []string
+			fresh := level[:0]
+			for i := range level {
+				if seenEdge[level[i].id] {
 					continue
 				}
-				seenEdge[item.ID] = true
-				edges = append(edges, item)
-				for _, id := range []string{item.SourceCIID, item.TargetCIID} {
-					if !seenNode[id] {
-						seenNode[id] = true
-						next = append(next, id)
+				seenEdge[level[i].id] = true
+				fresh = append(fresh, level[i])
+				for _, id := range []string{level[i].sourceCIID, level[i].targetCIID} {
+					if _, checked := visible[id]; !checked && id != "" {
+						visible[id] = false
+						unchecked = append(unchecked, id)
 					}
 				}
 			}
-			rows.Close()
-			if err := rows.Err(); err != nil {
-				return fmt.Errorf("iterate traversed relationships: %w", err)
+			if len(unchecked) > r.bulkFrontier && hop+1 < hops {
+				return readAll()
 			}
+			if err := visibleCIs(ctx, tx, orgID, unchecked, visible); err != nil {
+				return err
+			}
+			for i := range fresh {
+				if visible[fresh[i].sourceCIID] && visible[fresh[i].targetCIID] {
+					edges = append(edges, fresh[i])
+				}
+			}
+			var next []string
+			for _, id := range unchecked {
+				if visible[id] {
+					next = append(next, id)
+				}
+			}
+			reached += len(next)
 			// Beyond the node limit the walk ends after collecting the
 			// edges of the nodes just reached: nodes further away are
 			// dropped by the limit anyway.
-			if len(seenNode) > maxNodes && len(next) > 0 {
-				frontier = next
+			if reached > maxNodes && len(next) > 0 {
 				hops = min(hops, hop+2)
-				continue
 			}
 			frontier = next
 		}
@@ -410,7 +448,7 @@ func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string,
 	if err != nil {
 		return nil, err
 	}
-	return SelectTraversal(rootCIID, edges, maxDepth, maxNodes), nil
+	return selectEdgeRows(rootCIID, edges, maxDepth, maxNodes), nil
 }
 
 const traversalSelectColumns = `
@@ -420,6 +458,97 @@ const traversalSelectColumns = `
 	r.rel_type,
 	r.source
 `
+
+// edgeRow is what a traversal reads of an edge. The organization read holds
+// every edge of the organization, so it keeps only these columns and turns
+// just the selected edges into a Relationship.
+type edgeRow struct{ id, sourceCIID, targetCIID, relType, source string }
+
+func edgeRowEnds(e *edgeRow) (source, target string) { return e.sourceCIID, e.targetCIID }
+
+// frontierEdges reads the edges of the frontier CIs. The edge reads of a
+// traversal carry no join with ci: the edge rows pass the RLS of
+// ci_relationship and of the security_invoker view ci_structure_edge, which
+// leave edges to CIs outside the scope or deleted ones (and the parent of a
+// containment) unchecked. The CIs read afterwards under the same scope
+// close that gap (IMP-07): an edge with an endpoint outside them is
+// dropped, also when that CI was deleted or moved out of the scope after
+// the edges were read.
+func frontierEdges(ctx context.Context, tx pgx.Tx, orgID string, frontier []string) ([]edgeRow, error) {
+	return readEdges(ctx, tx, `SELECT `+traversalSelectColumns+` FROM `+graphEdges+` r
+		WHERE r.organization_id = $1 AND (r.source_ci_id = ANY($2::uuid[]) OR r.target_ci_id = ANY($2::uuid[]))`, orgID, frontier)
+}
+
+// organizationEdges reads every traversable edge of the organization in one
+// statement, then the visible, not deleted CIs, and keeps the edges between
+// two of them.
+func organizationEdges(ctx context.Context, tx pgx.Tx, orgID string) ([]edgeRow, error) {
+	edges, err := readEdges(ctx, tx, `SELECT `+traversalSelectColumns+` FROM `+graphEdges+` r WHERE r.organization_id = $1`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("read visible cis: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("read visible cis: %w", err)
+	}
+	visible := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		visible[id] = true
+	}
+	return visibleEdges(edges, edgeRowEnds, visible), nil
+}
+
+func readEdges(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]edgeRow, error) {
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("traverse relationships: %w", err)
+	}
+	edges, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (edgeRow, error) {
+		var e edgeRow
+		serr := row.Scan(&e.id, &e.sourceCIID, &e.targetCIID, &e.relType, &e.source)
+		return e, serr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan traversed relationship: %w", err)
+	}
+	return edges, nil
+}
+
+// visibleCIs marks those of ids in visible that are visible, not deleted
+// CIs under the transaction's scope.
+func visibleCIs(ctx context.Context, tx pgx.Tx, orgID string, ids []string, visible map[string]bool) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM ci WHERE organization_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`, orgID, ids)
+	if err != nil {
+		return fmt.Errorf("read visible cis: %w", err)
+	}
+	found, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("read visible cis: %w", err)
+	}
+	for _, id := range found {
+		visible[id] = true
+	}
+	return nil
+}
+
+// selectEdgeRows is SelectTraversal over edge rows.
+func selectEdgeRows(rootCIID string, edges []edgeRow, maxDepth, maxNodes int) []Relationship {
+	kept := selectEdges(rootCIID, edges, edgeRowEnds, maxDepth, maxNodes)
+	slices.SortFunc(kept, func(a, b int) int { return strings.Compare(edges[a].id, edges[b].id) })
+	result := make([]Relationship, 0, len(kept))
+	for _, i := range kept {
+		e := &edges[i]
+		result = append(result, Relationship{ID: e.id, SourceCIID: e.sourceCIID, TargetCIID: e.targetCIID, RelType: e.relType, Source: e.source})
+	}
+	return result
+}
 
 type relationshipScanner interface {
 	Scan(dest ...any) error

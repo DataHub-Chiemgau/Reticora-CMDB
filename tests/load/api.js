@@ -1,6 +1,7 @@
 // NFR-02 latency budgets at the NFR-10 seed size (10,000 objects; WP-204).
 // Each request type is its own scenario; the thresholds are the p95 budgets
-// of NFR-02, so a missed budget fails the run.
+// of NFR-02, so a missed budget fails the run. OBJECTS is the size the
+// demo organization was seeded with (cmd/seed -objects, default 10000).
 //
 //   k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat key) tests/load/api.js
 import http from 'k6/http';
@@ -10,6 +11,7 @@ import { BASE_URL, firstID, get, params, post } from './lib.js';
 
 const DURATION = __ENV.DURATION || '1m';
 const VUS = Number(__ENV.VUS || 5);
+const OBJECTS = Number(__ENV.OBJECTS || 10000);
 
 // The bulk of 500 ids runs as a job; its duration is the time until the
 // job finished.
@@ -26,6 +28,7 @@ export const options = {
     rack: reads('rack'),
     topology: { ...reads('topology'), vus: 2 },
     impact: { ...reads('impact'), vus: 2 },
+    impact_full: { ...reads('impactFull'), vus: 2 },
     bulk: { executor: 'per-vu-iterations', exec: 'bulk', vus: 1, iterations: 3, maxDuration: '10m' },
   },
   thresholds: {
@@ -36,6 +39,7 @@ export const options = {
     'http_req_duration{name:rack}': ['p(95)<300'],
     'http_req_duration{name:topology}': ['p(95)<3000'],
     'http_req_duration{name:impact}': ['p(95)<2000'],
+    'http_req_duration{name:impact_full}': ['p(95)<2000'],
     bulk_500_duration: ['p(95)<30000'],
     checks: ['rate>0.99'],
   },
@@ -92,8 +96,36 @@ export function topology(data) {
   sleep(1);
 }
 
+// The fields of the impacted CIs the topology view asks for (frontend
+// IMPACT_COMPACT_FIELDS): hops and via instead of paths (NFR-02, WP-335).
+const IMPACT_FIELDS = 'name,ci_type,status,heuristic,hops,via,relay';
+
+// impactCount reads count without parsing megabytes of JSON: the keys of
+// the answer are sorted, so the top-level count comes before the CIs.
+const impactCount = (res) => Number((/"count":(\d+)/.exec(res.body || '') || [])[1] || 0);
+
+// The failure of the core switch reaches every CI of the seed but itself
+// and the two PDUs (cmd/seed relationships).
+const IMPACT_ALL = OBJECTS - 3;
+
+// impact is the impact of the core switch as the topology view asks for it:
+// the whole organization at depth 20, at most 250 bytes per impacted CI.
 export function impact(data) {
-  get(`/impact/${data.core}?depth=20`, 'impact');
+  const res = get(`/impact/${data.core}?depth=20&fields=${IMPACT_FIELDS}`, 'impact');
+  const count = impactCount(res);
+  check(res, {
+    'impact covers the organization': () => count >= IMPACT_ALL,
+    'impact <= 250 B per impacted CI': (r) => count > 0 && r.body.length / count <= 250,
+  });
+  sleep(1);
+}
+
+// impactFull is the same impact in the full answer (every field and the
+// paths), the default for API clients (API-01).
+export function impactFull(data) {
+  const res = get(`/impact/${data.core}?depth=20`, 'impact_full');
+  const count = impactCount(res);
+  check(res, { 'full impact covers the organization': () => count >= IMPACT_ALL });
   sleep(1);
 }
 

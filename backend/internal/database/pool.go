@@ -31,12 +31,18 @@ func appRole() string {
 	return DefaultAppRole
 }
 
+// PoolMaxConns is the size of the application pool NewPool creates; the
+// ingest lanes take at most a quarter of it (WP-334).
+const PoolMaxConns = 25
+
 // NewPool creates a pgx connection pool suitable for production use.
 //
 // Every connection switches into the restricted application role before it is
 // handed out, so RLS policies apply even when the configured login role is a
 // superuser or the schema owner. If isolation cannot be guaranteed, pool
-// creation fails instead of silently serving cross-tenant data.
+// creation fails instead of silently serving cross-tenant data. Every
+// connection uses the UTF-8 client encoding the quoting of the tenant
+// transaction relies on (pinClientEncoding); another one is refused.
 func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	if strings.TrimSpace(databaseURL) == "" {
 		return nil, fmt.Errorf("database URL is required")
@@ -47,19 +53,27 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("parse pool config: %w", err)
 	}
 
-	config.MaxConns = 25
+	config.MaxConns = PoolMaxConns
 	config.MinConns = 5
+	pinClientEncoding(config)
 
-	if role := appRole(); role != "" {
+	role := appRole()
+	if role != "" {
 		if err := ValidateRoleName(role); err != nil {
 			return nil, err
 		}
-		config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-			if _, err := conn.Exec(ctx, "SET ROLE "+quoteIdentifier(role)); err != nil {
-				return fmt.Errorf("switch to application role %q: %w", role, err)
-			}
+	}
+	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		if encErr := checkClientEncoding(conn); encErr != nil {
+			return encErr
+		}
+		if role == "" {
 			return nil
 		}
+		if _, roleErr := conn.Exec(ctx, "SET ROLE "+quoteIdentifier(role)); roleErr != nil {
+			return fmt.Errorf("switch to application role %q: %w", role, roleErr)
+		}
+		return nil
 	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, config)
@@ -102,6 +116,7 @@ func NewMaintenancePool(ctx context.Context, databaseURL string) (*pgxpool.Pool,
 	}
 	config.MaxConns = 5
 	config.MinConns = 1
+	pinClientEncoding(config)
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("create pool: %w", err)
@@ -155,43 +170,107 @@ func quoteIdentifier(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
+// clientEncoding is the client encoding of every pooled connection. The
+// statement that opens a tenant transaction carries the user id as a string
+// literal (beginTenantSQL), and PostgreSQL converts a statement from the
+// client encoding before it reads the literal. Doubling backslashes and
+// quotes is safe in UTF-8, where no byte of a multi-byte character is a
+// backslash or a quote; in client-only encodings such as SJIS or BIG5 it is
+// not (a trailing 0x5C byte swallows the next backslash).
+const clientEncoding = "UTF8"
+
+// pinClientEncoding makes the connections of config use clientEncoding,
+// whatever the database URL or the role defaults set: a startup parameter
+// overrides both.
+func pinClientEncoding(config *pgxpool.Config) {
+	if config.ConnConfig.RuntimeParams == nil {
+		config.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	config.ConnConfig.RuntimeParams["client_encoding"] = clientEncoding
+}
+
+// checkClientEncoding refuses a connection whose client encoding, as the
+// server reported it at startup, is not clientEncoding.
+func checkClientEncoding(conn *pgx.Conn) error {
+	if enc := conn.PgConn().ParameterStatus("client_encoding"); enc != clientEncoding {
+		return fmt.Errorf("refusing connection: client_encoding is %q, want %s", enc, clientEncoding)
+	}
+	return nil
+}
+
 // WithTenant is the single database entry point for tenant-scoped work
 // (TEN-06). It validates the scope, opens a transaction, sets every GUC of
 // TEN-04 transaction-locally, runs fn and commits on success. Because the
 // GUCs are set with is_local = true, they end with the transaction and never
 // leak to the next user of the pooled connection. An incomplete scope fails
 // before any connection is used.
+//
+// When ctx carries a transaction (ContextWithTx), fn runs in it if scope is
+// its scope (ErrTxScopeMismatch otherwise); the owner commits. A statement
+// error that fn swallowed rolls the transaction back (ErrTxAborted). Before
+// the commit the BeforeCommit writes run, after it the AfterCommit
+// callbacks.
 func WithTenant(ctx context.Context, pool *pgxpool.Pool, scope *TenantScope, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	if err := scope.Validate(); err != nil {
 		return err
 	}
+	if v := ctx.Value(txKey{}); v != nil {
+		return joinTx(ctx, v, scope, fn)
+	}
 
-	tx, err := pool.Begin(ctx)
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{BeginQuery: beginTenantSQL(scope)})
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	t := &tenantTx{Tx: tx, scope: *scope}
+	defer func() {
+		if t.state.CompareAndSwap(txOpen, txRolledBack) {
+			_ = tx.Rollback(ctx)
+		}
+	}()
 
-	// All values are set in every transaction, including the empty ones, so a
-	// session-level value set elsewhere on this connection can never widen
-	// the scope.
-	if _, err := tx.Exec(ctx, `SELECT
-		set_config('`+OrgGUC+`', $1, true),
-		set_config('`+UserGUC+`', $2, true),
-		set_config('`+ClientScopeGUC+`', $3, true),
-		set_config('`+SiteScopeGUC+`', $4, true),
-		set_config('`+TeamScopeGUC+`', $5, true)`,
-		scope.OrgID, scope.UserID,
-		scope.Clients.gucValue(), scope.Sites.gucValue(), scope.Teams.gucValue(),
-	); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-
-	if err := fn(ctx, tx); err != nil {
+	if err := fn(ctx, t); err != nil {
 		return err
 	}
+	if t.aborted() {
+		return ErrTxAborted
+	}
+	if err := t.runBeforeCommit(); err != nil {
+		return err
+	}
+	if t.aborted() {
+		return ErrTxAborted
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	t.state.Store(txCommitted)
+	t.runAfterCommit(WithoutTx(ctx))
+	return nil
+}
 
-	return tx.Commit(ctx)
+// beginTenantSQL opens the transaction and sets every GUC of TEN-04
+// transaction-locally in one round trip (NFR-03): a statement without
+// arguments goes with the simple protocol, which runs both commands of the
+// string. All values are set in every transaction, including the empty
+// ones, so a session-level value set elsewhere on this connection can never
+// widen the scope. The ids are validated UUIDs; the user id is quoted.
+func beginTenantSQL(scope *TenantScope) string {
+	return "BEGIN; SELECT set_config('" + OrgGUC + "', " + quoteLiteral(scope.OrgID) + ", true), " +
+		"set_config('" + UserGUC + "', " + quoteLiteral(scope.UserID) + ", true), " +
+		"set_config('" + ClientScopeGUC + "', " + quoteLiteral(scope.Clients.gucValue()) + ", true), " +
+		"set_config('" + SiteScopeGUC + "', " + quoteLiteral(scope.Sites.gucValue()) + ", true), " +
+		"set_config('" + TeamScopeGUC + "', " + quoteLiteral(scope.Teams.gucValue()) + ", true)"
+}
+
+// quoteLiteral renders s as an escape string constant: backslashes and
+// single quotes are doubled, which means the same under every setting of
+// standard_conforming_strings and backslash_quote in the UTF-8 client
+// encoding the pools pin (pinClientEncoding). Validate keeps NUL bytes and
+// invalid UTF-8 out of the values.
+func quoteLiteral(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	return "E'" + strings.ReplaceAll(s, `'`, `''`) + "'"
 }
 
 // SystemGUC is the flag WithSystem sets. Only SELECT policies honor it

@@ -16,6 +16,74 @@ type BatchReader interface {
 	GetByIDs(ctx context.Context, orgID string, ids []string) ([]Item, error)
 }
 
+// BatchCreator creates several CIs of one organization with a number of
+// statements that does not grow with the batch (NFR-03, WP-333): the CI
+// rows, their history, their audit entries chained in the order of items and
+// their ci.created events. Search and AI index decorators add their
+// documents with one statement each.
+type BatchCreator interface {
+	// CreateMany creates items in their order and sets on each what Create
+	// sets (ID, SiteID, RoomID, LocationID, Health, Version, SchemaVersion,
+	// CreatedAt, UpdatedAt). An item a unique index refuses (serial number,
+	// hardware UUID, primary MAC, unique attribute; WP-207) is not created:
+	// its position is in Refused, its ID stays empty and nothing of it is
+	// written. Any other error fails the whole call.
+	CreateMany(ctx context.Context, orgID string, items []*Item) (CreateManyResult, error)
+}
+
+// CreateManyResult lists the positions of the items a unique index refused.
+type CreateManyResult struct {
+	Refused []int
+}
+
+// BatchIndexer is the batch form of Indexer (NFR-03, WP-333): the documents
+// of the CIs of one batch with one statement.
+type BatchIndexer interface {
+	IndexDocuments(ctx context.Context, docs []Document) error
+}
+
+// Node is the graph projection of a CI that topology and impact read
+// (NFR-02): no attributes, no asset facts.
+type Node struct {
+	ID           string
+	Name         string
+	CITypeID     string
+	Status       string
+	ClientID     string
+	SiteID       string
+	ManagementIP string
+}
+
+// NodeOf projects an item onto its graph node.
+func NodeOf(item *Item) Node {
+	return Node{ID: item.ID, Name: item.Name, CITypeID: item.CITypeID, Status: item.Status,
+		ClientID: item.ClientID, SiteID: item.SiteID, ManagementIP: item.ManagementIP}
+}
+
+// NodeReader reads the graph projection of several CIs in one statement
+// (NFR-02): the visible, not deleted CIs among ids, in no particular order,
+// with the effective name, status and management IP (OVR-01), the values
+// GetByIDs returns.
+type NodeReader interface {
+	ListNodes(ctx context.Context, orgID string, ids []string) ([]Node, error)
+}
+
+// VisibleIDs adapts a NodeReader to the visibility check of a graph walk
+// (IMP-07): which of ids are visible, not deleted CIs.
+func VisibleIDs(reader NodeReader) func(ctx context.Context, orgID string, ids []string) (map[string]bool, error) {
+	return func(ctx context.Context, orgID string, ids []string) (map[string]bool, error) {
+		nodes, err := reader.ListNodes(ctx, orgID, ids)
+		if err != nil {
+			return nil, err
+		}
+		visible := make(map[string]bool, len(nodes))
+		for i := range nodes {
+			visible[nodes[i].ID] = true
+		}
+		return visible, nil
+	}
+}
+
 // Repository defines persistence operations for CIs.
 type Repository interface {
 	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error)

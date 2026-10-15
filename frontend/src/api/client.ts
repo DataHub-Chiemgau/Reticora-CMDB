@@ -631,18 +631,53 @@ export interface TopologyParams {
   depth?: number;
 }
 
+/** A step of an impact path by its origin (IMP-02): the CI the failure comes from and the relationship type. */
+export interface ImpactVia {
+  ci_id: string;
+  rel_type: string;
+}
+
+/** One hop of an impact path (IMP-02). */
+export interface ImpactPathStep {
+  from_ci_id: string;
+  to_ci_id: string;
+  rel_type: string;
+  category: string;
+  heuristic?: boolean;
+}
+
+/**
+ * An impacted CI: every field without `fields`; with it (API-02) the id and
+ * the selected fields. `via` is the last step of the shortest path, `relay`
+ * the step heuristic paths take through a certain CI.
+ */
+export interface ImpactedCI extends Partial<TopologyNode> {
+  id: string;
+  heuristic?: boolean;
+  hops?: number;
+  via?: ImpactVia;
+  relay?: ImpactVia;
+  path?: ImpactPathStep[];
+}
+
+/**
+ * The fields of an impacted CI the topology view asks for: no paths, no
+ * client, site or management IP, so the answer stays small (NFR-02).
+ */
+export const IMPACT_COMPACT_FIELDS = 'name,ci_type,status,heuristic,hops,via,relay';
+
 export interface ImpactResult {
   failed_ci_id: string;
   failed_ci: TopologyNode;
   rel_type: string;
   depth: number;
-  impacted: TopologyNode[];
+  impacted: ImpactedCI[];
   count: number;
 }
 
 export interface MultiImpactResult {
   failed_cis: TopologyNode[];
-  impacted: TopologyNode[];
+  impacted: ImpactedCI[];
   count: number;
 }
 
@@ -653,11 +688,17 @@ export const topologyApi = {
   neighbors(ciId: string): Promise<TopologyGraphData> {
     return fetchAPI(`/topology/cis/${ciId}/neighbors`);
   },
-  impact(ciId: string, params: { depth?: number; rel_type?: string } = {}): Promise<ImpactResult> {
+  impact(
+    ciId: string,
+    params: { depth?: number; rel_type?: string; fields?: string } = {},
+  ): Promise<ImpactResult> {
     return fetchAPI(`/impact/${ciId}${buildQuery(params)}`);
   },
   /** Joint impact of several CIs failing at once (IMP-05). */
-  impactMany(ciIds: string[], params: { rel_type?: string } = {}): Promise<MultiImpactResult> {
+  impactMany(
+    ciIds: string[],
+    params: { rel_type?: string; fields?: string } = {},
+  ): Promise<MultiImpactResult> {
     return fetchAPI(`/impact${buildQuery({ ci_ids: ciIds.join(','), ...params })}`);
   },
 };

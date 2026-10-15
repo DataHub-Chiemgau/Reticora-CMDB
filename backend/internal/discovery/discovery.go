@@ -11,14 +11,18 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"reflect"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
@@ -438,10 +442,22 @@ type Handler struct {
 	reviewsOnce    sync.Once
 	reviews        *reviews.Service
 	reviewNotifier reviews.Notifier
-	// serial holds one mutex per organization: the ingests of an
-	// organization run one after another in this process (REC-01).
+	// serial holds one mutex per organization and ingest lane: the ingests
+	// of a lane of an organization run one after another in this process
+	// (REC-01, WP-334).
 	serial     sync.Map
 	reviewJobs jobs.Tracker
+	// tx runs the frame of a batch and each record in one transaction
+	// (NFR-03); without one every repository call is its own transaction.
+	tx TxRunner
+	// ingestLanes is the number of ingest lanes (WP-334, E-56); with more
+	// than one and a repository that can lock, the lanes of an
+	// organization run side by side (parallel) and every record and batch
+	// transaction takes the identity locks of its records (locking).
+	ingestLanes int
+	// beforeCreate, when set, runs after a transaction decided to create
+	// new CIs and before it inserts them (tests of concurrent lanes).
+	beforeCreate func(ctx context.Context)
 }
 
 // CITypeLookup resolves a CI type name or UUID to the canonical ci_type id.
@@ -450,19 +466,44 @@ type CITypeLookup interface {
 	LookupCITypeID(ctx context.Context, orgID, nameOrID string) (string, error)
 }
 
+// TxRunner runs fn in one transaction of the context's tenant scope: the
+// repository calls fn makes with its context join it (database.ContextWithTx).
+// The discovery PG repository implements it.
+type TxRunner interface {
+	RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error
+}
+
+// CILocker locks the row of a CI until the end of the context transaction.
+// The discovery PG repository implements it.
+type CILocker interface {
+	LockCI(ctx context.Context, orgID, ciID string) error
+}
+
 // NewHandler creates a new discovery handler. ciRepo enables reconciliation and
 // review-item resolution; the optional relRepo enables topology relationship
 // derivation. Both may be nil (e.g. for --no-db smoke tests), in which case
-// those features are skipped gracefully.
+// those features are skipped gracefully. A repository that is a TxRunner
+// runs the ingest in transactions per batch frame and per record (NFR-03).
 func NewHandler(repo Repository, ciRepo ci.Repository, relRepo ...relationship.Repository) *Handler {
 	h := &Handler{repo: repo, ciRepo: ciRepo}
 	if lookup, ok := repo.(CITypeLookup); ok {
 		h.typeLookup = lookup
 	}
+	if runner, ok := repo.(TxRunner); ok {
+		h.tx = runner
+	}
 	if len(relRepo) > 0 {
 		h.relRepo = relRepo[0]
 	}
 	return h
+}
+
+// inTx runs fn in one transaction, or as it is without a TxRunner.
+func (h *Handler) inTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	if h.tx == nil {
+		return fn(ctx)
+	}
+	return h.tx.RunInTx(ctx, orgID, fn)
 }
 
 // WithProvenance attaches the field-provenance recorder (spec §13). Without
@@ -483,13 +524,17 @@ func (h *Handler) WithInstanceFields(source InstanceFieldSource) *Handler {
 // stripInstanceFields removes the instance attributes of ciID from
 // attributes and reports whether any discovered value was withheld. It fails
 // closed: without the definitions every discovered custom attribute is
-// withheld; the fingerprint and raw data of the ingest stay.
-func (h *Handler) stripInstanceFields(ctx context.Context, orgID, ciID string, attributes, discovered map[string]any) bool {
+// withheld; the fingerprint and raw data of the ingest stay. Only a failed
+// statement, which aborted the record's transaction, is returned.
+func (h *Handler) stripInstanceFields(ctx context.Context, orgID, ciID string, attributes, discovered map[string]any) (bool, error) {
 	if h.instance == nil {
-		return false
+		return false, nil
 	}
 	names, err := h.instance.InstanceFieldNames(ctx, orgID, ciID)
 	if err != nil {
+		if database.TxFailed(ctx) {
+			return false, err
+		}
 		withheld := false
 		for k := range discovered {
 			if k == "fingerprint" || k == "raw_data" {
@@ -500,18 +545,23 @@ func (h *Handler) stripInstanceFields(ctx context.Context, orgID, ciID string, a
 				withheld = true
 			}
 		}
-		return withheld
+		return withheld, nil
 	}
-	return len(WithoutInstanceFields(attributes, names)) > 0
+	return len(WithoutInstanceFields(attributes, names)) > 0, nil
 }
 
-// recordDiscovered fields the provenance of one applied field. It never
-// fails the ingest: provenance is best-effort alongside the audited CI row.
-func (h *Handler) recordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string, observedAt time.Time) {
+// recordDiscovered records the provenance of one applied field. A refused
+// write does not fail the ingest: provenance is best-effort alongside the
+// audited CI row. A failed statement does, because it aborted the record's
+// transaction.
+func (h *Handler) recordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string, observedAt time.Time) error {
 	if h.provenance == nil || ciID == "" {
-		return
+		return nil
 	}
-	_, _ = h.provenance.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source, observedAt)
+	if _, err := h.provenance.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source, observedAt); err != nil && database.TxFailed(ctx) {
+		return err
+	}
+	return nil
 }
 
 // manyProvenance records several fields of a CI at once (the PostgreSQL
@@ -522,18 +572,23 @@ type manyProvenance interface {
 
 // recordDiscoveredMany records the provenance of the fields of a new CI in
 // one statement where the store can (NFR-03), else field by field; like
-// recordDiscovered it never fails the ingest.
-func (h *Handler) recordDiscoveredMany(ctx context.Context, orgID, ciID string, values map[string]any, source string, observedAt time.Time) {
+// recordDiscovered it fails the ingest only on a failed statement.
+func (h *Handler) recordDiscoveredMany(ctx context.Context, orgID, ciID string, values map[string]any, source string, observedAt time.Time) error {
 	if h.provenance == nil || ciID == "" {
-		return
+		return nil
 	}
 	if many, ok := h.provenance.(manyProvenance); ok {
-		_ = many.RecordDiscoveredMany(ctx, orgID, ciID, values, source, observedAt)
-		return
+		if err := many.RecordDiscoveredMany(ctx, orgID, ciID, values, source, observedAt); err != nil && database.TxFailed(ctx) {
+			return err
+		}
+		return nil
 	}
 	for field, value := range values {
-		h.recordDiscovered(ctx, orgID, ciID, field, value, source, observedAt)
+		if err := h.recordDiscovered(ctx, orgID, ciID, field, value, source, observedAt); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // decide applies the central write decision; without a provenance store
@@ -559,8 +614,14 @@ func (h *Handler) queueOverrideConflict(ctx context.Context, orgID, ciID, field 
 		ObjectKey:      "ci:" + ciID + "/" + field,
 	}
 	// One open item per field; a dismissed value stays suppressed until the
-	// source reports another one (REC-12).
-	opened, err := h.ReviewService().OpenUnlessDismissed(ctx, item, "observed_value")
+	// source reports another one (REC-12). The savepoint undoes a review
+	// that failed after its insert, so the record's transaction goes on.
+	var opened bool
+	err := database.Savepoint(ctx, func(ctx context.Context) error {
+		var openErr error
+		opened, openErr = h.ReviewService().OpenUnlessDismissed(ctx, item, "observed_value")
+		return openErr
+	})
 	if err != nil {
 		slog.WarnContext(ctx, "override conflict review not created", "ci_id", ciID, "field", field, "error", err)
 		return false
@@ -588,38 +649,44 @@ func isUUID(value string) bool {
 	return true
 }
 
-// resolveCITypeIDs maps each item's ci_type_name to the canonical ci_type UUID.
-// Entries that are already UUIDs pass through. Items whose type cannot be
-// resolved get an empty string so the caller can queue them for review.
-func (h *Handler) resolveCITypeIDs(ctx context.Context, orgID string, items []IngestItem) []string {
+// resolveCITypeIDs maps each item's ci_type_name to the canonical ci_type UUID
+// with the types of the batch (lookupTypes). Entries that are already UUIDs
+// pass through. Items whose type cannot be resolved get an empty string so
+// the caller can queue them for review.
+func resolveCITypeIDs(items []IngestItem, types map[string]string) []string {
 	ids := make([]string, len(items))
-	missing := map[string]struct{}{}
-	for i, item := range items {
-		name := strings.TrimSpace(item.CITypeName)
+	for i := range items {
+		name := strings.TrimSpace(items[i].CITypeName)
 		if isUUID(name) {
 			ids[i] = name
 		} else if name != "" {
-			missing[name] = struct{}{}
-		}
-	}
-	if len(missing) == 0 {
-		return ids
-	}
-	for name := range missing {
-		if h.typeLookup == nil {
-			continue
-		}
-		id, err := h.typeLookup.LookupCITypeID(ctx, orgID, name)
-		if err != nil {
-			continue
-		}
-		for i, item := range items {
-			if strings.TrimSpace(item.CITypeName) == name {
-				ids[i] = id
-			}
+			ids[i] = types[name]
 		}
 	}
 	return ids
+}
+
+// frameTypeNames are the type names a batch looks up at once: the names of
+// its items that are no UUID, generic_device and the virtual types of the
+// identity context.
+func frameTypeNames(items []IngestItem) []string {
+	seen := map[string]bool{}
+	var names []string
+	add := func(name string) {
+		if name != "" && !isUUID(name) && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	for i := range items {
+		add(strings.TrimSpace(items[i].CITypeName))
+	}
+	add(ci.GenericDeviceType)
+	for _, key := range virtualTypeKeys {
+		add(key)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // RegisterRoutes registers discovery routes.
@@ -931,20 +998,161 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 // processItems reconciles the items of one organization; ctx carries that
 // organization's tenant scope. Records processed within 48 hours are skipped
 // (REC-01).
+//
+// With a transaction runner (the PostgreSQL repository) the frame of the
+// batch runs in one short transaction and every record in exactly one more
+// (NFR-03). A failing record rolls back completely and stops the batch: the
+// records before it stay committed, get their topology and are entered in
+// the ledger, and the error makes the queue deliver the batch again, which
+// skips them as duplicates.
+//
+// With the batch queries of the repository and the batch creation of the
+// CI repository (WP-333), each window of up to ingestBatch records (with
+// the ingest locks also bounded by its identity keys, see windowEnd) first
+// runs one more transaction: one candidate query for all its records, and
+// its new devices created together. Updates of known devices and every
+// record the batch leaves follow one by one in the order of the records;
+// the records of one device keep their order. When a record fails, the
+// devices its window created in the batch stay committed like the records
+// before it and are entered in the ledger.
 func (h *Handler) processItems(ctx context.Context, orgID string, items []IngestItem) (BulkIngestResponse, error) {
 	var resp BulkIngestResponse
 	if h.ciRepo == nil {
 		return resp, nil
 	}
-	items, duplicates, err := h.skipProcessed(ctx, orgID, items)
-	if err != nil {
-		return resp, err
+	// Whether the transactions take the ingest locks (WP-334): records
+	// consumed from the queue and parallel lanes do.
+	locking := h.locking(ctx)
+	var frame *batchFrame
+	for attempt := 0; ; attempt++ {
+		err := h.inTx(ctx, orgID, func(ctx context.Context) error {
+			var err error
+			frame, err = h.openFrame(ctx, orgID, items)
+			return err
+		})
+		if err == nil {
+			break
+		}
+		// With other ingests of the organization at the same time, the
+		// reviews of unknown types of two frames may wait for each other
+		// (WP-334): the frame starts again, as it does after PostgreSQL ran
+		// out of shared memory for a moment.
+		reason := retryReason(err)
+		if !locking || attempt >= maxRecordRetries ||
+			(reason != "deadlock" && reason != "serialization" && reason != "out_of_memory") || !retryPause(ctx, reason, attempt) {
+			return resp, err
+		}
+		recordRetries.WithLabelValues(reason).Inc()
 	}
-	resp.Duplicates = duplicates
-	if len(items) == 0 {
+	resp.add(&frame.resp)
+	if len(frame.items) == 0 {
 		return resp, nil
 	}
-	req := BulkIngestRequest{Items: items}
+	frame.locking = locking
+
+	// resolvedCIID[i] holds the CI id that item i resolved to (matched or
+	// created). Conflicts leave it empty so no topology is derived for them.
+	// handled[i] reports that record i is committed: in the batch of its
+	// window or in its own transaction.
+	n := len(frame.items)
+	resolvedCIID := make([]string, n)
+	handled := make([]bool, n)
+	var recordErr error
+windows:
+	for start, end := 0, 0; start < n; start = end {
+		end = h.windowEnd(orgID, frame, start)
+		h.processWindow(ctx, orgID, frame, start, end, handled, resolvedCIID, &resp)
+		for i := start; i < end; i++ {
+			if handled[i] {
+				continue
+			}
+			if frame.typeIDs[i] == "" {
+				// Unresolvable CI type: queued for review in the frame.
+				handled[i] = true
+				continue
+			}
+			out, err := h.runRecord(ctx, orgID, frame, i)
+			if err != nil {
+				recordErr = err
+				break windows
+			}
+			// Counted once the record's transaction has committed.
+			resp.add(&out.resp)
+			resolvedCIID[i] = out.ciID
+			handled[i] = true
+			if out.created {
+				frame.total++
+			}
+		}
+	}
+
+	var processed []IngestItem
+	var processedCIID []string
+	for i := range frame.items {
+		if handled[i] {
+			processed = append(processed, frame.items[i])
+			processedCIID = append(processedCIID, resolvedCIID[i])
+		}
+	}
+	resp.Relationships += h.deriveTopology(ctx, orgID, processed, processedCIID, h.neighborCandidates(ctx, orgID, processed))
+	// Outlet mappings of PDUs and UPS outlet groups (IMP-09).
+	resp.Relationships += h.derivePowerChain(ctx, orgID, processed, processedCIID)
+	if err := h.markProcessed(ctx, orgID, processed); err != nil {
+		return resp, errors.Join(recordErr, err)
+	}
+	settle(ctx, processed)
+	return resp, recordErr
+}
+
+// batchFrame is what the frame of a batch prepares for its records: the
+// records left after the ledger, their CI type ids, the identity context and
+// the CI count for max_cis.
+type batchFrame struct {
+	items   []IngestItem
+	typeIDs []string
+	// noProfile marks records no collector profile classified (DIS-02);
+	// known before CITypeName becomes the type id.
+	noProfile  []bool
+	identity   *IdentityContext
+	total      int64
+	unlicensed queuedDevices
+	resp       BulkIngestResponse
+	// candidates[i] are the identity candidates of record i the batch query
+	// of its window read (WP-333); valid only with prefetched[i] and
+	// without locks: with them, the batch's identity locks end with its
+	// commit, so a record reads its candidates again under its own.
+	candidates [][]ci.Item
+	prefetched []bool
+	// limitExclusive makes every creation of the batch take the exclusive
+	// max_cis lock (WP-334): a transaction found the headroom too small for
+	// the shared one.
+	limitExclusive bool
+	// locking makes the transactions of the records take the identity and
+	// max_cis locks and retry a lost race (Handler.locking, WP-334).
+	locking bool
+}
+
+// recordOutcome is what processing one record changed.
+type recordOutcome struct {
+	resp    BulkIngestResponse
+	ciID    string
+	created bool
+}
+
+// openFrame runs the frame of a batch: it drops the records processed within
+// the dedupe window (REC-01), resolves the CI types of the records and of the
+// identity context with one lookup, queues records of an unknown type for
+// review and reads the CI count (only with max_cis) and the default VRF.
+func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestItem) (*batchFrame, error) {
+	frame := &batchFrame{}
+	items, duplicates, err := h.skipProcessed(ctx, orgID, items)
+	if err != nil {
+		return nil, err
+	}
+	frame.resp.Duplicates = duplicates
+	if len(items) == 0 {
+		return frame, nil
+	}
 
 	// Resolve ci_type_name to the canonical ci_type UUID before
 	// reconciliation. Collectors send the type name (e.g. "switch"); the CI
@@ -952,12 +1160,19 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 	// (organization_id IS NULL) and org-specific types. Items whose type can
 	// be resolved neither as UUID nor by name are queued for review instead of
 	// failing the whole batch with a 500.
-	typeIDs := h.resolveCITypeIDs(ctx, orgID, req.Items)
-	for i, item := range req.Items {
-		if typeIDs[i] != "" {
+	types, err := h.lookupTypes(ctx, orgID, frameTypeNames(items))
+	if err != nil {
+		return nil, err
+	}
+	frame.typeIDs = resolveCITypeIDs(items, types)
+	frame.noProfile = make([]bool, len(items))
+	for i := range items {
+		item := &items[i]
+		if frame.typeIDs[i] != "" {
+			frame.noProfile[i] = unclassifiedDevice(item)
 			continue
 		}
-		reviewItem := &ReviewItem{
+		opened, openErr := h.openReview(ctx, &ReviewItem{
 			OrganizationID: orgID,
 			Kind:           ReviewKindUnclassifiedDevice,
 			Status:         ReviewStatusOpen,
@@ -972,30 +1187,62 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 				"fingerprint":   item.Fingerprint,
 				"raw_data":      item.RawData,
 			},
-			ObjectKey: deviceKey(&item),
-		}
-		opened, openErr := h.openReview(ctx, reviewItem)
+			ObjectKey: deviceKey(item),
+		})
 		if openErr != nil {
-			return resp, openErr
+			return nil, openErr
 		}
 		if opened {
-			resp.ReviewItems++
+			frame.resp.ReviewItems++
 		}
 	}
+
+	// The CI count for max_cis; identity candidates are looked up per item
+	// over the whole inventory (REC-02).
+	if h.limits != nil {
+		_, total, countErr := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 1})
+		if countErr != nil {
+			return nil, countErr
+		}
+		frame.total = int64(total)
+	}
+	if frame.identity, err = h.identityContext(ctx, orgID, types); err != nil {
+		return nil, err
+	}
+
+	// Reconciliation compares stored CIs (UUID type) against the incoming
+	// item, so the item must carry the resolved UUID as well.
+	for i := range items {
+		if frame.typeIDs[i] != "" {
+			items[i].CITypeName = frame.typeIDs[i]
+		}
+	}
+	frame.items = items
+	return frame, nil
+}
+
+// processRecord reconciles record i of the frame; with a transaction runner
+// it runs in the record's own transaction. out receives what it changed.
+func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchFrame, i int, out *recordOutcome) error {
+	item := frame.items[i]
+	typeID, identity := frame.typeIDs[i], frame.identity
+	resp := &out.resp
+	// Records that share an identity key never run at the same time: the
+	// locks come first, before anything is read (WP-334).
+	if err := h.lockIdentities(ctx, orgID, frame, &item); err != nil {
+		return err
+	}
+
 	// No collector profile matched (DIS-02): the device becomes a
 	// generic_device CI and a reviewer classifies it.
-	for i := range req.Items {
-		item := &req.Items[i]
-		if typeIDs[i] == "" || !unclassifiedDevice(item) {
-			continue
-		}
+	if frame.noProfile[i] {
 		opened, openErr := h.openReview(ctx, &ReviewItem{
 			OrganizationID: orgID,
 			Kind:           ReviewKindUnclassifiedDevice,
 			Status:         ReviewStatusOpen,
 			Payload: map[string]any{
 				"reason":        ReasonNoProfileMatch,
-				"ci_type_name":  item.CITypeName,
+				"ci_type_name":  ci.GenericDeviceType,
 				"name":          item.Name,
 				"manufacturer":  item.Manufacturer,
 				"model":         item.Model,
@@ -1005,259 +1252,583 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 				"fingerprint":   item.Fingerprint,
 				"raw_data":      item.RawData,
 			},
-			ObjectKey: deviceKey(item),
+			ObjectKey: deviceKey(&item),
 		})
 		if openErr != nil {
-			return resp, openErr
+			return openErr
 		}
 		if opened {
 			resp.ReviewItems++
 		}
 	}
 
-	// The CI count for max_cis; identity candidates are looked up per item
-	// over the whole inventory (REC-02).
-	_, total, err := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 1})
-	if err != nil {
-		return resp, err
-	}
-	identity := h.identityContext(ctx, orgID)
-
-	// Reconciliation compares stored CIs (UUID type) against the incoming
-	// item, so the item must carry the resolved UUID as well.
-	for i := range req.Items {
-		if typeIDs[i] != "" {
-			req.Items[i].CITypeName = typeIDs[i]
+	var candidates []ci.Item
+	if i < len(frame.prefetched) && frame.prefetched[i] && !frame.locking {
+		// Read by the batch query of the window (WP-333): no record before
+		// this one changed them.
+		candidates = frame.candidates[i]
+	} else {
+		var err error
+		if candidates, err = h.identityCandidates(ctx, orgID, &item); err != nil {
+			return err
 		}
 	}
-
-	// resolvedCIID[i] holds the CI id that item i resolved to (matched or
-	// created). Conflicts leave it empty so no topology is derived for them.
-	resolvedCIID := make([]string, len(req.Items))
-	var unlicensed queuedDevices
-
-	for i, item := range req.Items {
-		if typeIDs[i] == "" {
-			// Unresolvable CI type: already queued for review above.
-			continue
+	result := ResolveIdentity(candidates, &item, identity)
+	// No live CI: a soft-deleted one may be the device (CI-13).
+	if result.Action == ReconcileCreated {
+		held, reviewed, resErr := h.resurrection(ctx, orgID, &item, identity)
+		if resErr != nil {
+			return resErr
 		}
-		candidates, err := h.identityCandidates(ctx, orgID, &item)
-		if err != nil {
-			return resp, err
-		}
-		result := ResolveIdentity(candidates, &item, identity)
-		// No live CI: a soft-deleted one may be the device (CI-13).
-		if result.Action == ReconcileCreated {
-			held, reviewed, resErr := h.resurrection(ctx, orgID, &item, identity)
-			if resErr != nil {
-				return resp, resErr
-			}
-			if held {
-				resp.Resurrected++
-				if reviewed {
-					resp.ReviewItems++
-				}
-				continue
-			}
-		}
-		now := time.Now().UTC().Format(time.RFC3339)
-		source := item.Source
-		if source == "" {
-			source = ci.SourceSweep
-		}
-		// Discovered custom attributes are persisted on the CI itself so they
-		// are visible, searchable and filterable like any other attribute; the
-		// per-field provenance recorded below keeps the reporting source and
-		// timestamp available for reconciliation.
-		// Discovered values pass the same field rules as manual writes.
-		validateType, validateCI := typeIDs[i], ""
-		if result.Action == ReconcileMatched {
-			if m := findCI(candidates, result.MatchedCIID); m != nil {
-				validateType, validateCI = m.CITypeID, m.ID
-			}
-		}
-		dropped, dropErr := h.dropInvalidObserved(ctx, orgID, validateType, validateCI, &item)
-		if dropErr != nil {
-			return resp, dropErr
-		}
-		resp.InvalidValues += dropped
-		withoutBlocklistedIdentity(&item)
-		attributes := discoveredAttributes(&item)
-
-		switch result.Action {
-		case ReconcileCreated:
-			// Over max_cis the device is held as unlicensed_ci instead of
-			// becoming a CI (ENT-03, CH21); existing CIs keep updating.
-			if h.limits != nil {
-				queued, admitErr := h.admitNewCI(ctx, orgID, int64(total), &item, typeIDs[i], source, &unlicensed)
-				if admitErr != nil {
-					return resp, admitErr
-				}
-				if queued {
-					resp.Unlicensed++
-					continue
-				}
-			}
-			withoutTakenIdentity(&item, candidates)
-			newItem, err := h.createDiscoveredCI(ctx, orgID, &item, typeIDs[i], source)
-			if err != nil {
-				return resp, err
-			}
-			total++
-			resolvedCIID[i] = newItem.ID
-			resp.Created++
-			if syncErr := h.syncInterfaces(ctx, orgID, newItem.ID, &item); syncErr != nil {
-				return resp, syncErr
-			}
-			// A hostname or FQDN hit is never merged (CH29): the new CI is
-			// reviewed as a probable duplicate.
-			if len(result.ProbableDuplicates) > 0 {
-				review := probableDuplicateReview(orgID, newItem.ID, &item, result.ProbableDuplicates)
-				if _, reviewErr := h.openReview(ctx, review); reviewErr != nil {
-					return resp, reviewErr
-				}
+		if held {
+			resp.Resurrected++
+			if reviewed {
 				resp.ReviewItems++
 			}
-		case ReconcileMatched:
-			matched := findCI(candidates, result.MatchedCIID)
-			if matched == nil {
-				matched = &ci.Item{ID: result.MatchedCIID}
+			return nil
+		}
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	source := item.Source
+	if source == "" {
+		source = ci.SourceSweep
+	}
+	// Discovered custom attributes are persisted on the CI itself so they
+	// are visible, searchable and filterable like any other attribute; the
+	// per-field provenance recorded below keeps the reporting source and
+	// timestamp available for reconciliation.
+	// Discovered values pass the same field rules as manual writes.
+	validateType, validateCI := typeID, ""
+	if result.Action == ReconcileMatched {
+		if m := findCI(candidates, result.MatchedCIID); m != nil {
+			validateType, validateCI = m.CITypeID, m.ID
+		}
+	}
+	dropped, dropErr := h.dropInvalidObserved(ctx, orgID, validateType, validateCI, &item)
+	if dropErr != nil {
+		return dropErr
+	}
+	resp.InvalidValues += dropped
+	withoutBlocklistedIdentity(&item)
+	attributes := discoveredAttributes(&item)
+
+	switch result.Action {
+	case ReconcileCreated:
+		// Over max_cis the device is held as unlicensed_ci instead of
+		// becoming a CI (ENT-03, CH21); existing CIs keep updating.
+		if h.limits != nil {
+			total, countErr := h.admissionCount(ctx, orgID, frame, frame.total)
+			if countErr != nil {
+				return countErr
 			}
-			observedAt := item.ObservedAt
-			// Every field goes through the central write decision (REC-03):
-			// overrides are never overwritten, ranks and observation times
-			// decide the rest, unreadable state writes nothing.
-			conflict, refused := false, false
-			// Serial number and hardware UUID refused for a lower rank are
-			// reviewed as conflicting_values with the reported value (REC-06).
-			var lowerRank []string
-			decide := func(field string, value, current any) bool {
-				d := h.decide(ctx, &override.Write{
-					OrganizationID: orgID, CIID: matched.ID, Field: field, Value: value,
-					Source: source, ObservedAt: observedAt, Current: current, FallbackSource: matched.DiscoverySource,
-				})
-				if d.Write || d.Conflict || d.Reason == override.ReasonOverride {
-					// Observed under an override or written: the provenance
-					// keeps the reported value (REC-12, REC-10).
-					h.recordDiscovered(ctx, orgID, matched.ID, field, value, source, observedAt)
-				}
-				switch d.Reason {
-				case override.ReasonLowerRank, override.ReasonStale, override.ReasonError:
-					refused = true
-				}
-				if d.Reason == override.ReasonLowerRank && (field == "serial_number" || field == "hardware_uuid") {
-					lowerRank = append(lowerRank, field)
-				}
-				if d.Conflict {
-					conflict = true
-					if h.queueOverrideConflict(ctx, orgID, matched.ID, field, value, source) {
-						resp.ReviewItems++
-					}
-				}
-				return d.Write
+			queued, admitErr := h.admitNewCI(ctx, orgID, total, &item, typeID, source, &frame.unlicensed)
+			if admitErr != nil {
+				return admitErr
 			}
-			// A sighting updates last_seen_at without history and brings an
-			// unknown CI back to active (REC-07, AUD-03).
-			update := ci.UpdateRequest{LastSeenAt: &now}
-			if matched.Status == "unknown" {
-				active := "active"
-				update.Status = &active
+			if queued {
+				resp.Unlicensed++
+				return nil
 			}
-			for _, f := range []struct {
-				name           string
-				value, current string
-				target         **string
-			}{
-				{"name", item.Name, matched.Name, &update.Name},
-				{"manufacturer", item.Manufacturer, matched.Manufacturer, &update.Manufacturer},
-				{"model", item.Model, matched.Model, &update.Model},
-				{"serial_number", item.SerialNumber, matched.SerialNumber, &update.SerialNumber},
-				{"hardware_uuid", strings.ToLower(incomingUUID(&item)), strings.ToLower(matched.HardwareUUID), &update.HardwareUUID},
-				{"management_ip", item.ManagementIP, matched.ManagementIP, &update.ManagementIP},
-			} {
-				if f.value == "" || f.value == f.current {
-					continue
-				}
-				if decide(f.name, f.value, f.current) {
-					*f.target = stringPtr(f.value)
-				}
+		}
+		withoutTakenIdentity(&item, candidates)
+		if h.beforeCreate != nil {
+			h.beforeCreate(ctx)
+		}
+		newItem, err := h.createDiscoveredCI(ctx, orgID, &item, typeID, source)
+		if err != nil {
+			return err
+		}
+		out.created = true
+		out.ciID = newItem.ID
+		resp.Created++
+		if syncErr := h.syncInterfaces(ctx, orgID, newItem.ID, &item); syncErr != nil {
+			return syncErr
+		}
+		// A hostname or FQDN hit is never merged (CH29): the new CI is
+		// reviewed as a probable duplicate.
+		if len(result.ProbableDuplicates) > 0 {
+			review := probableDuplicateReview(orgID, newItem.ID, &item, result.ProbableDuplicates)
+			if _, reviewErr := h.openReview(ctx, review); reviewErr != nil {
+				return reviewErr
 			}
-			writes := map[string]any{
-				"fingerprint": mergeFingerprint(existingFingerprintMap(*matched), item.Fingerprint,
-					override.SourceRank(source) >= override.SourceRank(matched.DiscoverySource)),
-				"raw_data": item.RawData,
+			resp.ReviewItems++
+		}
+	case ReconcileMatched:
+		matched := findCI(candidates, result.MatchedCIID)
+		if matched == nil {
+			matched = &ci.Item{ID: result.MatchedCIID}
+		}
+		// The record's transaction locks the CI row before it writes field
+		// values, like a manual change does: otherwise the two wait for each
+		// other's field value and CI row (deadlock, ABN-03).
+		if locker, ok := h.repo.(CILocker); ok {
+			if err := locker.LockCI(ctx, orgID, matched.ID); err != nil {
+				return err
 			}
-			for k, v := range attributes {
-				if k == "fingerprint" || k == "raw_data" {
-					continue
-				}
-				if current, ok := matched.Attributes[k]; ok && reflect.DeepEqual(current, v) {
-					continue
-				}
-				if decide(k, v, matched.Attributes[k]) {
-					writes[k] = v
-				}
+		}
+		observedAt := item.ObservedAt
+		// Every field goes through the central write decision (REC-03):
+		// overrides are never overwritten, ranks and observation times
+		// decide the rest, unreadable state writes nothing.
+		conflict, refused := false, false
+		// Serial number and hardware UUID refused for a lower rank are
+		// reviewed as conflicting_values with the reported value (REC-06).
+		var lowerRank []string
+		// A failed statement aborted the record's transaction: no further
+		// field is decided, the record rolls back.
+		var txErr error
+		decide := func(field string, value, current any) bool {
+			if txErr == nil && database.TxFailed(ctx) {
+				txErr = database.ErrTxAborted
 			}
-			// A source whose values were refused does not become the CI's
-			// discovery source (REC-05).
-			if !refused && override.SourceRank(source) >= override.SourceRank(matched.DiscoverySource) {
-				update.DiscoverySource = &source
+			if txErr != nil {
+				return false
 			}
-			// Instance attributes of this CI are never written (MET-14).
-			if h.stripInstanceFields(ctx, orgID, matched.ID, writes, item.Attributes) {
-				resp.ProtectedInstanceFields++
-			}
-			update.Attributes = writes
-			updated, err := h.ciRepo.Update(ctx, orgID, result.MatchedCIID, update)
-			if err != nil {
-				return resp, err
-			}
-			if conflict {
-				resp.ProtectedOverrides++
-			}
-			// A generic_device classified now becomes the specific type
-			// through the type change service (CI-11).
-			if typeErr := h.raiseGenericType(ctx, orgID, updated, typeIDs[i], identity); typeErr != nil {
-				return resp, typeErr
-			}
-			resolvedCIID[i] = updated.ID
-			resp.Updated++
-			if syncErr := h.syncInterfaces(ctx, orgID, updated.ID, &item); syncErr != nil {
-				return resp, syncErr
-			}
-			// Contradicting identity values on a matched CI (e.g. a changed
-			// serial number) are queued for operator review instead of being
-			// silently applied (spec §5.3: Unklarheiten in Review-Queue).
-			if len(lowerRank) > 0 {
-				result.ValueConflicts = lowerRank
-				if reviewItem := reviewItemFromValueConflicts(orgID, *matched, item, result); reviewItem != nil {
-					opened, openErr := h.openReview(ctx, reviewItem)
-					if openErr != nil {
-						return resp, openErr
-					}
-					if opened {
-						resp.ReviewItems++
-					}
+			d := h.decide(ctx, &override.Write{
+				OrganizationID: orgID, CIID: matched.ID, Field: field, Value: value,
+				Source: source, ObservedAt: observedAt, Current: current, FallbackSource: matched.DiscoverySource,
+			})
+			if d.Write || d.Conflict || d.Reason == override.ReasonOverride {
+				// Observed under an override or written: the provenance
+				// keeps the reported value (REC-12, REC-10).
+				if txErr = h.recordDiscovered(ctx, orgID, matched.ID, field, value, source, observedAt); txErr != nil {
+					return false
 				}
 			}
-		case ReconcileConflict:
-			resp.Conflicts++
-			if reviewItem := reviewItemFromConflict(orgID, item, result); reviewItem != nil {
+			switch d.Reason {
+			case override.ReasonLowerRank, override.ReasonStale, override.ReasonError:
+				refused = true
+			}
+			if d.Reason == override.ReasonLowerRank && (field == "serial_number" || field == "hardware_uuid") {
+				lowerRank = append(lowerRank, field)
+			}
+			if d.Conflict {
+				conflict = true
+				if h.queueOverrideConflict(ctx, orgID, matched.ID, field, value, source) {
+					resp.ReviewItems++
+				}
+			}
+			return d.Write
+		}
+		// A sighting updates last_seen_at without history and brings an
+		// unknown CI back to active (REC-07, AUD-03).
+		update := ci.UpdateRequest{LastSeenAt: &now}
+		if matched.Status == "unknown" {
+			active := "active"
+			update.Status = &active
+		}
+		for _, f := range []struct {
+			name           string
+			value, current string
+			target         **string
+		}{
+			{"name", item.Name, matched.Name, &update.Name},
+			{"manufacturer", item.Manufacturer, matched.Manufacturer, &update.Manufacturer},
+			{"model", item.Model, matched.Model, &update.Model},
+			{"serial_number", item.SerialNumber, matched.SerialNumber, &update.SerialNumber},
+			{"hardware_uuid", strings.ToLower(incomingUUID(&item)), strings.ToLower(matched.HardwareUUID), &update.HardwareUUID},
+			{"management_ip", item.ManagementIP, matched.ManagementIP, &update.ManagementIP},
+		} {
+			if f.value == "" || f.value == f.current {
+				continue
+			}
+			if decide(f.name, f.value, f.current) {
+				*f.target = stringPtr(f.value)
+			}
+		}
+		writes := map[string]any{
+			"fingerprint": mergeFingerprint(existingFingerprintMap(*matched), item.Fingerprint,
+				override.SourceRank(source) >= override.SourceRank(matched.DiscoverySource)),
+			"raw_data": item.RawData,
+		}
+		// In a fixed order: two transactions that write field values of
+		// one CI take their row locks in the same order (WP-334).
+		for _, k := range slices.Sorted(maps.Keys(attributes)) {
+			v := attributes[k]
+			if k == "fingerprint" || k == "raw_data" {
+				continue
+			}
+			if current, ok := matched.Attributes[k]; ok && reflect.DeepEqual(current, v) {
+				continue
+			}
+			if decide(k, v, matched.Attributes[k]) {
+				writes[k] = v
+			}
+		}
+		if txErr != nil {
+			return txErr
+		}
+		// A source whose values were refused does not become the CI's
+		// discovery source (REC-05).
+		if !refused && override.SourceRank(source) >= override.SourceRank(matched.DiscoverySource) {
+			update.DiscoverySource = &source
+		}
+		// Instance attributes of this CI are never written (MET-14).
+		stripped, stripErr := h.stripInstanceFields(ctx, orgID, matched.ID, writes, item.Attributes)
+		if stripErr != nil {
+			return stripErr
+		}
+		if stripped {
+			resp.ProtectedInstanceFields++
+		}
+		update.Attributes = writes
+		updated, err := h.ciRepo.Update(ctx, orgID, result.MatchedCIID, update)
+		if err != nil {
+			return err
+		}
+		if conflict {
+			resp.ProtectedOverrides++
+		}
+		// A generic_device classified now becomes the specific type
+		// through the type change service (CI-11).
+		if typeErr := h.raiseGenericType(ctx, orgID, updated, typeID, identity); typeErr != nil {
+			return typeErr
+		}
+		out.ciID = updated.ID
+		resp.Updated++
+		if syncErr := h.syncInterfaces(ctx, orgID, updated.ID, &item); syncErr != nil {
+			return syncErr
+		}
+		// Contradicting identity values on a matched CI (e.g. a changed
+		// serial number) are queued for operator review instead of being
+		// silently applied (spec §5.3: Unklarheiten in Review-Queue).
+		if len(lowerRank) > 0 {
+			result.ValueConflicts = lowerRank
+			if reviewItem := reviewItemFromValueConflicts(orgID, *matched, item, result); reviewItem != nil {
 				opened, openErr := h.openReview(ctx, reviewItem)
 				if openErr != nil {
-					return resp, openErr
+					return openErr
 				}
 				if opened {
 					resp.ReviewItems++
 				}
 			}
 		}
+	case ReconcileConflict:
+		resp.Conflicts++
+		if reviewItem := reviewItemFromConflict(orgID, item, result); reviewItem != nil {
+			opened, openErr := h.openReview(ctx, reviewItem)
+			if openErr != nil {
+				return openErr
+			}
+			if opened {
+				resp.ReviewItems++
+			}
+		}
+	}
+	return nil
+}
+
+// batchProvenance records the fields of several new CIs at once (the
+// server's override adapter, WP-333).
+type batchProvenance interface {
+	RecordDiscoveredBatch(ctx context.Context, orgID string, batch []override.DiscoveredValues) error
+}
+
+// recordDiscoveredBatch records the provenance of the fields of the new CIs
+// of a batch in one statement where the store can, else CI by CI; like
+// recordDiscovered it fails the batch only on a failed statement.
+func (h *Handler) recordDiscoveredBatch(ctx context.Context, orgID string, batch []override.DiscoveredValues) error {
+	if h.provenance == nil || len(batch) == 0 {
+		return nil
+	}
+	if many, ok := h.provenance.(batchProvenance); ok {
+		if err := many.RecordDiscoveredBatch(ctx, orgID, batch); err != nil && database.TxFailed(ctx) {
+			return err
+		}
+		return nil
+	}
+	for _, b := range batch {
+		if err := h.recordDiscoveredMany(ctx, orgID, b.CIID, b.Values, b.Source, b.ObservedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// windowOutcome is what the batch transaction of a window changed (WP-333);
+// it counts only once the transaction has committed.
+type windowOutcome struct {
+	resp       BulkIngestResponse
+	total      int64
+	unlicensed queuedDevices
+	// done[k] reports that record start+k was handled completely in the
+	// batch, with the CI ciID[k] (held and unlicensed records have none).
+	done       []bool
+	ciID       []string
+	candidates [][]ci.Item
+	prefetched []bool
+}
+
+// pendingCI is a new device of a window that the batch creates.
+type pendingCI struct {
+	k      int
+	item   IngestItem
+	ci     ci.Item
+	source string
+	result ReconcileResult
+}
+
+// processWindow runs the batch of the records [start, end) of the frame in
+// one transaction (NFR-03, WP-333): one query for the live candidates of
+// all records, one for the soft-deleted candidates of the new devices, and
+// the new devices created together (ci.BatchCreator), indexed together and
+// with their provenance in one statement. It marks the records it handled
+// and leaves the candidates it read to the records that follow one by one.
+// It never fails the ingest: when the batch cannot run or rolls back, every
+// record of the window is processed on its own, which reports any error
+// for its record.
+func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchFrame, start, end int, handled []bool,
+	resolvedCIID []string, resp *BulkIngestResponse) {
+	finder, ok := h.repo.(BatchIdentityFinder)
+	creator, creates := h.ciRepo.(ci.BatchCreator)
+	if !ok || !creates || h.tx == nil {
+		return
+	}
+	n := end - start
+	qs, include := make([]IdentityQuery, n), make([]bool, n)
+	records := 0
+	for k := range n {
+		if frame.typeIDs[start+k] == "" {
+			continue
+		}
+		qs[k] = identityQuery(&frame.items[start+k])
+		if !batchable(&qs[k]) {
+			return
+		}
+		include[k] = true
+		records++
+	}
+	if records == 0 {
+		return
+	}
+	if frame.prefetched == nil {
+		frame.candidates = make([][]ci.Item, len(frame.items))
+		frame.prefetched = make([]bool, len(frame.items))
+	}
+	var w windowOutcome
+	run := func() error {
+		return h.inTx(ctx, orgID, func(ctx context.Context) error {
+			w = windowOutcome{
+				total: frame.total, unlicensed: queuedDevices{keys: maps.Clone(frame.unlicensed.keys)},
+				done: make([]bool, n), ciID: make([]string, n), candidates: make([][]ci.Item, n), prefetched: make([]bool, n),
+			}
+			return h.batchWindow(ctx, orgID, frame, start, qs, include, finder, creator, &w)
+		})
+	}
+	err := run()
+	if errors.Is(err, errNearLimit) {
+		// The lanes may pass max_cis together: once more, exclusively.
+		frame.limitExclusive = true
+		recordRetries.WithLabelValues("near_limit").Inc()
+		err = run()
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "ingest batch rolled back; its records are processed one by one",
+			"event", "ingest.batch.fallback", "organization_id", orgID, "records", records, "error", err)
+		return
+	}
+	resp.add(&w.resp)
+	frame.total, frame.unlicensed = w.total, w.unlicensed
+	for k := range n {
+		i := start + k
+		frame.candidates[i], frame.prefetched[i] = w.candidates[k], w.prefetched[k]
+		if w.done[k] {
+			handled[i], resolvedCIID[i] = true, w.ciID[k]
+		}
+	}
+}
+
+// batchWindow is the batch transaction of processWindow; w collects what it
+// changed.
+func (h *Handler) batchWindow(ctx context.Context, orgID string, frame *batchFrame, start int, qs []IdentityQuery, include []bool,
+	finder BatchIdentityFinder, creator ci.BatchCreator, w *windowOutcome) error {
+	// The identity locks of every record of the window come first
+	// (WP-334).
+	if frame.locking {
+		locked := make([]*IngestItem, 0, len(qs))
+		for k := range qs {
+			if include[k] {
+				locked = append(locked, &frame.items[start+k])
+			}
+		}
+		if err := h.lockIdentities(ctx, orgID, frame, locked...); err != nil {
+			return err
+		}
+	}
+	keys, refs := batchKeys(qs, include)
+	var hits []IdentityHit
+	if !keys.empty() {
+		var err error
+		if hits, err = finder.IdentityHits(ctx, orgID, keys); err != nil {
+			return fmt.Errorf("identity candidates: %w", err)
+		}
+	}
+	ids := assignCandidates(refs, hits)
+	candidates, loadErr := h.loadCandidates(ctx, orgID, ids)
+	if loadErr != nil {
+		return loadErr
+	}
+	// Only the first record of records that can change each other's
+	// resolution keeps its candidates or is created here; the others
+	// follow it one by one.
+	first := identityClusters(qs, include, ids)
+	var fresh []int
+	results := make([]ReconcileResult, len(qs))
+	deletedOf := make([]bool, len(qs))
+	for k := range qs {
+		if !first[k] {
+			continue
+		}
+		w.candidates[k], w.prefetched[k] = candidates[k], true
+		i := start + k
+		results[k] = ResolveIdentity(candidates[k], &frame.items[i], frame.identity)
+		// A device no collector profile matched opens its review on its own.
+		if results[k].Action == ReconcileCreated && !frame.noProfile[i] {
+			fresh = append(fresh, k)
+			deletedOf[k] = resurrectionGuard(&qs[k])
+		}
+	}
+	if len(fresh) == 0 {
+		return nil
+	}
+	// No live CI: a soft-deleted one may be the device (CI-13).
+	var deleted [][]ci.Item
+	if dkeys, drefs := batchKeys(qs, deletedOf); !dkeys.empty() {
+		dhits, derr := finder.DeletedIdentityHits(ctx, orgID, dkeys)
+		if derr != nil {
+			return fmt.Errorf("deleted identity candidates: %w", derr)
+		}
+		deleted = assignDeleted(drefs, dhits)
+	} else {
+		deleted = make([][]ci.Item, len(qs))
 	}
 
-	resp.Relationships = h.deriveTopology(ctx, orgID, req.Items, resolvedCIID, h.neighborCandidates(ctx, orgID, req.Items))
-	// Outlet mappings of PDUs and UPS outlet groups (IMP-09).
-	resp.Relationships += h.derivePowerChain(ctx, orgID, req.Items, resolvedCIID)
-	return resp, h.markProcessed(ctx, orgID, req.Items)
+	// With the ingest locks, admission counts under the max_cis lock
+	// (WP-334).
+	if h.limits != nil {
+		total, err := h.admissionCount(ctx, orgID, frame, w.total)
+		if err != nil {
+			return err
+		}
+		w.total = total
+	}
+	validator := h.batchValidator()
+	var pending []pendingCI
+	for _, k := range fresh {
+		i := start + k
+		// The batch works on a copy: a record it leaves is processed on its
+		// own from what it reported.
+		item := cloneItem(&frame.items[i])
+		typeID := frame.typeIDs[i]
+		held, reviewed, err := h.resurrectionWith(ctx, orgID, &item, frame.identity, deleted[k])
+		if err != nil {
+			return err
+		}
+		if held {
+			w.resp.Resurrected++
+			if reviewed {
+				w.resp.ReviewItems++
+			}
+			w.done[k] = true
+			continue
+		}
+		source := item.Source
+		if source == "" {
+			source = ci.SourceSweep
+		}
+		dropped, err := dropInvalidWith(ctx, validator, orgID, typeID, "", &item)
+		if err != nil {
+			return err
+		}
+		w.resp.InvalidValues += dropped
+		withoutBlocklistedIdentity(&item)
+		// Over max_cis the device is held as unlicensed_ci (ENT-03, CH21).
+		if h.limits != nil {
+			queued, err := h.admitNewCI(ctx, orgID, w.total, &item, typeID, source, &w.unlicensed)
+			if err != nil {
+				return err
+			}
+			if queued {
+				w.resp.Unlicensed++
+				w.done[k] = true
+				continue
+			}
+		}
+		withoutTakenIdentity(&item, candidates[k])
+		pending = append(pending, pendingCI{k: k, item: item, ci: discoveredCI(orgID, &item, typeID, source), source: source, result: results[k]})
+		w.total++
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
+	items := make([]*ci.Item, len(pending))
+	for p := range pending {
+		items[p] = &pending[p].ci
+	}
+	if h.beforeCreate != nil {
+		h.beforeCreate(ctx)
+	}
+	created, createErr := creator.CreateMany(ctx, orgID, items)
+	if createErr != nil {
+		return createErr
+	}
+	refused := make(map[int]bool, len(created.Refused))
+	for _, p := range created.Refused {
+		refused[p] = true
+		// Another CI holds a unique value (WP-207): the record is processed
+		// on its own with a fresh query, which matches that CI or names the
+		// violated index.
+		rec := &pending[p]
+		slog.WarnContext(ctx, "ingest batch: CI refused by a unique index; record processed on its own",
+			"event", "ingest.batch.unique", "organization_id", orgID, "record_id", rec.item.RecordID,
+			"serial_number", rec.item.SerialNumber)
+		w.total--
+		w.prefetched[rec.k], w.candidates[rec.k] = false, nil
+	}
+	provenance := make([]override.DiscoveredValues, 0, len(pending))
+	for p := range pending {
+		if !refused[p] {
+			rec := &pending[p]
+			provenance = append(provenance, override.DiscoveredValues{CIID: rec.ci.ID, Values: discoveredFields(&rec.item),
+				Source: rec.source, ObservedAt: rec.item.ObservedAt})
+		}
+	}
+	if err := h.recordDiscoveredBatch(ctx, orgID, provenance); err != nil {
+		return err
+	}
+	for p := range pending {
+		if refused[p] {
+			continue
+		}
+		rec := &pending[p]
+		if err := h.syncInterfaces(ctx, orgID, rec.ci.ID, &rec.item); err != nil {
+			return err
+		}
+		// A hostname or FQDN hit is never merged (CH29): the new CI is
+		// reviewed as a probable duplicate.
+		if len(rec.result.ProbableDuplicates) > 0 {
+			review := probableDuplicateReview(orgID, rec.ci.ID, &rec.item, rec.result.ProbableDuplicates)
+			if _, err := h.openReview(ctx, review); err != nil {
+				return err
+			}
+			w.resp.ReviewItems++
+		}
+		w.resp.Created++
+		w.done[rec.k], w.ciID[rec.k] = true, rec.ci.ID
+	}
+	return nil
+}
+
+// cloneItem copies a record with its own attribute, fingerprint and raw
+// data maps, which the batch changes or hands on.
+func cloneItem(item *IngestItem) IngestItem {
+	out := *item
+	out.Attributes = maps.Clone(item.Attributes)
+	out.Fingerprint = maps.Clone(item.Fingerprint)
+	out.RawData = maps.Clone(item.RawData)
+	return out
 }
 
 func stringPtr(value string) *string {

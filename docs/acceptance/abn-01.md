@@ -8,13 +8,13 @@ automatisierte Protokolle gegen eingefrorene Daten. Die Daten liegen in
 
 | Teil | Szenario | Tag | Status G1 | Nachweis |
 |---|---|---|---|---|
-| (a) | CMDB-Szenario, 34 Schritte, aus V §65 | [Q] | N/P | Originaltext fehlt (E-02, A-02) |
-| (b) | System-Szenario, 20 Schritte, aus V §66 | [Q] | N/P | Originaltext fehlt (E-02, A-02) |
+| (a) | CMDB-Szenario, 34 Schritte, aus V §65 | [Q] | PASS (Erklärung des Auftraggebers) | Abnahme durch Erklärung des Auftraggebers vom 2026-10-15 (B4); Originaltext nachzureichen (E-02, A-02) |
+| (b) | System-Szenario, 20 Schritte, aus V §66 | [Q] | PASS (Erklärung des Auftraggebers) | Abnahme durch Erklärung des Auftraggebers vom 2026-10-15 (B4); Originaltext nachzureichen (E-02, A-02) |
 | (c) | Metamodell-Szenario | [P2] | nicht G1 | Phase 2 |
 | (d) | Onboarding-Szenario | [B] | **PASS** | `frontend/e2e/onboarding.spec.ts`, Lauf auf der frischen Installation (`docs/acceptance/g1-installation.md`) |
 | (e) | Konflikt-Szenario | [B] | **PASS** | `frontend/e2e/conflict.spec.ts` mit `artefakte/abn-01-e-konflikt.json` |
 
-## (a) und (b): N/P nach E-02
+## (a) und (b): v2-Texte nach E-02
 
 ABN-01 verlangt, dass beide Szenarien „unverändert“ aus V §65–66 übernommen und
 vor G1 eingefroren werden. Die v2-Texte hat der Auftraggeber noch nicht
@@ -23,6 +23,12 @@ Schritte erfunden. Sobald die Texte vorliegen, kommen sie unverändert als
 `abn-01-a-cmdb.md` und `abn-01-b-system.md` in dieses Verzeichnis. Jeder
 Schritt wird dann einem Test oder einer manuellen Prüfung zugeordnet. Bis
 dahin bleibt der Punkt ein Gate-Blocker (B4 in `docs/acceptance/g1-gate.md`).
+
+Nachtrag 2026-10-15: Der Auftraggeber hat B4 am 2026-10-15 für erledigt
+erklärt. Die Texte liegen im Repository weiterhin nicht vor; (a) und (b) sind
+durch diese Erklärung abgenommen, nicht durch einen Test. Nachzureichen sind
+die Texte in `docs/spec/`; danach kommen sie wie oben beschrieben unverändert
+in dieses Verzeichnis, und jeder Schritt wird zugeordnet.
 
 ## (d) Onboarding-Szenario
 
@@ -100,4 +106,4 @@ Den Schutz des Overrides bei gleichzeitiger Discovery belegt
 | Rolle | Name | Datum | Ergebnis |
 |---|---|---|---|
 | Auftragnehmer | – | 2026-10-14 | (d) und (e) bestanden; (a) und (b) N/P (E-02) |
-| Auftraggeber | ausstehend | – | – |
+| Auftraggeber | – | 2026-10-15 | G1 freigegeben; (a) und (b) laut Erklärung erledigt, Texte nachzureichen (E-02) |

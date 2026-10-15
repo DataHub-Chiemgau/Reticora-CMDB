@@ -136,6 +136,19 @@ func (r *MemoryRepository) GetByIDs(_ context.Context, orgID string, ids []strin
 	return items, nil
 }
 
+// ListNodes implements NodeReader.
+func (r *MemoryRepository) ListNodes(_ context.Context, orgID string, ids []string) ([]Node, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	nodes := []Node{}
+	for _, id := range ids {
+		if item, ok := r.items[id]; ok && item.OrganizationID == orgID && item.DeletedAt == nil {
+			nodes = append(nodes, NodeOf(item))
+		}
+	}
+	return nodes, nil
+}
+
 func (r *MemoryRepository) Create(ctx context.Context, item *Item) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

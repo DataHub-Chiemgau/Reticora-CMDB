@@ -26,7 +26,37 @@ func NewCIIndexer(backend Backend) *CIIndexer {
 // IndexDocument upserts a CI document into the search index. Client and site
 // of the CI travel along so remote indexes can filter on them (TEC-12).
 func (a *CIIndexer) IndexDocument(ctx context.Context, doc ci.Document) error {
-	return a.Backend.IndexDocument(ctx, Document{
+	return a.Backend.IndexDocument(ctx, searchDocument(&doc))
+}
+
+// BatchBackend is a backend that indexes several documents of one
+// organization at once (NFR-03, WP-333); the PostgreSQL index implements it.
+type BatchBackend interface {
+	IndexDocuments(ctx context.Context, docs []Document) error
+}
+
+// IndexDocuments implements ci.BatchIndexer: with one call where the backend
+// takes a batch, else document by document.
+func (a *CIIndexer) IndexDocuments(ctx context.Context, docs []ci.Document) error {
+	batch, ok := a.Backend.(BatchBackend)
+	if !ok {
+		for i := range docs {
+			if err := a.IndexDocument(ctx, docs[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	out := make([]Document, len(docs))
+	for i := range docs {
+		out[i] = searchDocument(&docs[i])
+	}
+	return batch.IndexDocuments(ctx, out)
+}
+
+// searchDocument is the search document of a CI document.
+func searchDocument(doc *ci.Document) Document {
+	return Document{
 		OrganizationID: doc.OrganizationID,
 		EntityType:     doc.EntityType,
 		EntityID:       doc.EntityID,
@@ -36,7 +66,7 @@ func (a *CIIndexer) IndexDocument(ctx context.Context, doc ci.Document) error {
 		Metadata:       doc.Metadata,
 		ClientID:       doc.ClientID,
 		SiteID:         doc.SiteID,
-	})
+	}
 }
 
 // DeleteDocument removes a CI document from the search index.

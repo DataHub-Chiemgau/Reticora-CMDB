@@ -1,9 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +16,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -84,6 +88,105 @@ func TestReadyzWithoutChecks(t *testing.T) {
 	code, body, _ := serveReadiness(t)
 	if code != http.StatusOK || body.Status != "ready" || len(body.Checks) != 0 {
 		t.Fatalf("got %d %+v", code, body)
+	}
+}
+
+// TestReadyzDetails covers WP-334 (OPS-05): a check with a Detail reports
+// it under details; a Detail-only check is not listed in checks and never
+// changes the status, not even when it fails, and its error is not leaked.
+func TestReadyzDetails(t *testing.T) {
+	backlog := ReadinessCheck{Name: "ingest", Detail: func(context.Context) (any, error) {
+		return map[string]any{"lanes": 4, "backlog": map[string]int{"0": 12, "1": 0, "legacy": 0}, "total": 12}, nil
+	}}
+	code, body, raw := serveReadiness(t, ok("database"), backlog)
+	if code != http.StatusOK || body.Status != "ready" || len(body.Checks) != 1 || body.Checks["database"] != "ok" {
+		t.Fatalf("got %d %+v", code, body)
+	}
+	if !strings.Contains(raw, `"details":{"ingest":{"backlog":{"0":12,"1":0,"legacy":0},"lanes":4,"total":12}}`) {
+		t.Fatalf("details: %s", raw)
+	}
+
+	broken := ReadinessCheck{Name: "ingest", Detail: func(context.Context) (any, error) {
+		return nil, errors.New("nats: secret detail")
+	}}
+	code, body, raw = serveReadiness(t, ok("database"), broken)
+	if code != http.StatusOK || body.Status != "ready" || strings.Contains(raw, "secret detail") ||
+		!strings.Contains(raw, `"details":{"ingest":{"error":"unavailable"}}`) {
+		t.Fatalf("failing detail: %d %s", code, raw)
+	}
+
+	// Without a Detail the response has no details.
+	if _, _, raw = serveReadiness(t, ok("database")); strings.Contains(raw, "details") {
+		t.Fatalf("details without a Detail: %s", raw)
+	}
+}
+
+// TestReadyzDetailNotSampledIsQuiet covers the review of WP-334: the ingest
+// detail fails with discovery.ErrNoBacklogSample until the ingest worker has
+// sampled the backlog. /readyz is unauthenticated and probed every 5 s, so
+// that expected state must not write a WARN line per request; it is still
+// reported as unavailable. Any other failure keeps its WARN.
+func TestReadyzDetailNotSampledIsQuiet(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	pending := ReadinessCheck{Name: "ingest", Detail: func(context.Context) (any, error) {
+		return nil, fmt.Errorf("lane backlog: %w", discovery.ErrNoBacklogSample)
+	}}
+	for range 3 {
+		code, body, raw := serveReadiness(t, ok("database"), pending)
+		if code != http.StatusOK || body.Status != "ready" || !strings.Contains(raw, `"details":{"ingest":{"error":"unavailable"}}`) {
+			t.Fatalf("detail not sampled yet: %d %s", code, raw)
+		}
+	}
+	if strings.Contains(logs.String(), "level=WARN") {
+		t.Errorf("a detail not sampled yet wrote a warning:\n%s", logs.String())
+	}
+
+	logs.Reset()
+	broken := ReadinessCheck{Name: "ingest", Detail: func(context.Context) (any, error) {
+		return nil, errors.New("nats: consumer info failed")
+	}}
+	serveReadiness(t, ok("database"), broken)
+	if !strings.Contains(logs.String(), `level=WARN msg="readiness detail failed" check=ingest`) {
+		t.Errorf("a failing detail wrote no warning:\n%s", logs.String())
+	}
+}
+
+// TestReadyzSlowDetail: an informational detail never holds up the probe
+// (review finding, WP-334). The ingest backlog asks JetStream on every
+// /readyz; a stalled JetStream used to keep the answer back for the whole
+// readinessTimeout, past the orchestrator's default probe timeout of one
+// second, so every instance left the load balancer although every check
+// passed. A detail that waits for its context, or ignores it, is reported
+// as unavailable within readinessDetailTimeout; the checks are unaffected.
+func TestReadyzSlowDetail(t *testing.T) {
+	stop := make(chan struct{})
+	defer close(stop)
+	for name, detail := range map[string]func(context.Context) (any, error){
+		"until its context ends": func(ctx context.Context) (any, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+		"ignoring its context": func(context.Context) (any, error) {
+			<-stop
+			return map[string]int{"total": 1}, nil
+		},
+	} {
+		start := time.Now()
+		code, body, raw := serveReadiness(t, ok("database"), ReadinessCheck{Name: "ingest", Detail: detail})
+		if elapsed := time.Since(start); elapsed > readinessDetailTimeout+200*time.Millisecond {
+			t.Errorf("detail %s: /readyz answered after %v, want within %v", name, elapsed, readinessDetailTimeout)
+		}
+		if code != http.StatusOK || body.Status != "ready" || body.Checks["database"] != "ok" ||
+			!strings.Contains(raw, `"details":{"ingest":{"error":"unavailable"}}`) {
+			t.Errorf("detail %s: %d %s", name, code, raw)
+		}
+	}
+	if readinessDetailTimeout >= time.Second {
+		t.Errorf("readinessDetailTimeout %v must stay below the default probe timeout of one second", readinessDetailTimeout)
 	}
 }
 

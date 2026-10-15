@@ -37,6 +37,7 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range append(append([]string{
 		"RETICORA_ENVIRONMENT", "RETICORA_RATE_LIMIT_RPM", "RETICORA_RATE_LIMIT_ORG_RPM", "RETICORA_METRICS_TENANT_LABEL", "RETICORA_NATS_URL",
+		"RETICORA_INGEST_LANES",
 	}, requiredOutsideDevelopment...), s3Keys...) {
 		t.Setenv(key, "")
 	}
@@ -135,6 +136,9 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 		{"soft-delete retention below NFR-06", map[string]string{"RETICORA_RETENTION_SOFT_DELETE_DAYS": "7"}, false, "at least 90"},
 		{"review retention below AUD-09", map[string]string{"RETICORA_RETENTION_REVIEW_ITEM_DAYS": "30"}, false, "at least 365"},
 		{"unparsable bool", map[string]string{"RETICORA_METRICS_TENANT_LABEL": "maybe"}, false, "RETICORA_METRICS_TENANT_LABEL"},
+		{"no ingest lane", map[string]string{"RETICORA_INGEST_LANES": "0"}, false, "RETICORA_INGEST_LANES must be between 1 and 16, got 0"},
+		{"too many ingest lanes", map[string]string{"RETICORA_INGEST_LANES": "17"}, false, "RETICORA_INGEST_LANES must be between 1 and 16, got 17"},
+		{"unparsable ingest lanes", map[string]string{"RETICORA_INGEST_LANES": "x"}, false, "RETICORA_INGEST_LANES has an invalid value"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -145,6 +149,21 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 				t.Fatalf("Validate() = %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestIngestLanesSetting covers WP-334 (NFR-03, E-56): four ingest lanes by
+// default, one (the serial processing) and sixteen are accepted.
+func TestIngestLanesSetting(t *testing.T) {
+	clearEnv(t)
+	if cfg := Load(); cfg.IngestLanes != 4 || cfg.Validate(true) != nil {
+		t.Fatalf("default ingest lanes: %d, %v", cfg.IngestLanes, cfg.Validate(true))
+	}
+	for _, v := range []string{"1", "16"} {
+		t.Setenv("RETICORA_INGEST_LANES", v)
+		if cfg := Load(); cfg.Validate(true) != nil || cfg.IngestLanes != map[string]int{"1": 1, "16": 16}[v] {
+			t.Errorf("RETICORA_INGEST_LANES=%s: %d, %v", v, cfg.IngestLanes, cfg.Validate(true))
+		}
 	}
 }
 
