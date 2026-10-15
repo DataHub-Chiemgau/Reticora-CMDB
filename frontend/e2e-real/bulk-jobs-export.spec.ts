@@ -1048,22 +1048,26 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
       expect(problem.detail ?? '').toMatch(/not allowed/i);
       expect(problem.detail ?? '').toContain('127.0.0.1');
 
+      // WP-049 / SEC-08 with UI-01..10 (webhooks page): the user is told why the
+      // subscription was not saved, not left with a silently unchanged form. Checked right
+      // after the answer, so a transient toast (default lifetime 6 s) counts too; soft, so the
+      // storage and delivery checks below still run and report.
+      await expect
+        .soft(
+          page
+            .getByText(/not allowed|nicht erlaubt|nicht zulässig|blockiert|blocked|egress/i)
+            .filter({ visible: true })
+            .first(),
+          'the refusal is explained on the webhooks page',
+        )
+        .toBeVisible({ timeout: 5_000 });
+
       // Not stored, and an event of the tenant reaches nothing on the local address.
       const subs = rows(await ok<List<{ name: string; url: string }>>(a, 'GET', '/webhooks'));
       expect(subs.filter((w) => w.name === name || w.url === url)).toEqual([]);
       await newCI(a, { name: `wh1x${s}-event` });
       await page.waitForTimeout(5_000);
       expect(hits, 'the local catcher received nothing').toEqual([]);
-
-      // WP-049 / SEC-08 with UI-01..10 (webhooks page): the user is told why the
-      // subscription was not saved, not left with a silently unchanged form.
-      await expect(
-        page
-          .getByText(/not allowed|nicht erlaubt|nicht zulässig|blockiert|blocked|egress/i)
-          .filter({ visible: true })
-          .first(),
-        'the refusal is explained on the webhooks page',
-      ).toBeVisible({ timeout: 10_000 });
     } finally {
       await new Promise<void>((resolve) => catcher.close(() => resolve()));
     }
