@@ -117,6 +117,41 @@ func TestReadyzDetails(t *testing.T) {
 	}
 }
 
+// TestReadyzSlowDetail: an informational detail never holds up the probe
+// (review finding, WP-334). The ingest backlog asks JetStream on every
+// /readyz; a stalled JetStream used to keep the answer back for the whole
+// readinessTimeout, past the orchestrator's default probe timeout of one
+// second, so every instance left the load balancer although every check
+// passed. A detail that waits for its context, or ignores it, is reported
+// as unavailable within readinessDetailTimeout; the checks are unaffected.
+func TestReadyzSlowDetail(t *testing.T) {
+	stop := make(chan struct{})
+	defer close(stop)
+	for name, detail := range map[string]func(context.Context) (any, error){
+		"until its context ends": func(ctx context.Context) (any, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+		"ignoring its context": func(context.Context) (any, error) {
+			<-stop
+			return map[string]int{"total": 1}, nil
+		},
+	} {
+		start := time.Now()
+		code, body, raw := serveReadiness(t, ok("database"), ReadinessCheck{Name: "ingest", Detail: detail})
+		if elapsed := time.Since(start); elapsed > readinessDetailTimeout+200*time.Millisecond {
+			t.Errorf("detail %s: /readyz answered after %v, want within %v", name, elapsed, readinessDetailTimeout)
+		}
+		if code != http.StatusOK || body.Status != "ready" || body.Checks["database"] != "ok" ||
+			!strings.Contains(raw, `"details":{"ingest":{"error":"unavailable"}}`) {
+			t.Errorf("detail %s: %d %s", name, code, raw)
+		}
+	}
+	if readinessDetailTimeout >= time.Second {
+		t.Errorf("readinessDetailTimeout %v must stay below the default probe timeout of one second", readinessDetailTimeout)
+	}
+}
+
 func TestHealthzStaysLiveness(t *testing.T) {
 	mux := chi.NewRouter()
 	failing := ReadinessCheck{Name: "database", Check: func(context.Context) error { return errors.New("down") }}

@@ -22,11 +22,19 @@ var RequiredExtensions = []string{"pgcrypto", "btree_gist", "timescaledb"}
 // into "unavailable" instead of a hanging probe.
 const readinessTimeout = 2 * time.Second
 
+// readinessDetailTimeout bounds every detail. A detail is informational, so
+// it must not hold up the answer: the probe of the orchestrator times out
+// after one second by default, and a slow answer would take the instance out
+// of the load balancer although every check passed.
+const readinessDetailTimeout = 300 * time.Millisecond
+
 // ReadinessCheck is one dependency that /readyz verifies (OPS-01). Check
 // returns nil when the dependency is usable. Detail optionally reports
 // operational figures under details.<Name> (the ingest backlog per lane,
-// WP-334); a check with only a Detail is informational: it is not listed in
-// checks and never changes the status.
+// WP-334) within readinessDetailTimeout, or "unavailable"; a check with only
+// a Detail is informational: it is not listed in checks and never changes
+// the status, and a slow Detail never delays the answer by more than
+// readinessDetailTimeout.
 type ReadinessCheck struct {
 	Name   string
 	Check  func(ctx context.Context) error
@@ -49,27 +57,27 @@ func readinessHandler(checks []ReadinessCheck) http.HandlerFunc {
 		var mu sync.Mutex
 		var wg sync.WaitGroup
 		for _, c := range checks {
+			if c.Detail != nil {
+				wg.Add(1)
+				go func(c ReadinessCheck) {
+					defer wg.Done()
+					detail := readinessDetail(r.Context(), c)
+					mu.Lock()
+					defer mu.Unlock()
+					if resp.Details == nil {
+						resp.Details = map[string]any{}
+					}
+					resp.Details[c.Name] = detail
+				}(c)
+			}
+			if c.Check == nil {
+				continue
+			}
 			wg.Add(1)
 			go func(c ReadinessCheck) {
 				defer wg.Done()
 				ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
 				defer cancel()
-				if c.Detail != nil {
-					detail, err := c.Detail(ctx)
-					if err != nil {
-						slog.Warn("readiness detail failed", "check", c.Name, "error", err)
-						detail = map[string]string{"error": "unavailable"}
-					}
-					mu.Lock()
-					if resp.Details == nil {
-						resp.Details = map[string]any{}
-					}
-					resp.Details[c.Name] = detail
-					mu.Unlock()
-				}
-				if c.Check == nil {
-					return
-				}
 				err := c.Check(ctx)
 				mu.Lock()
 				defer mu.Unlock()
@@ -91,6 +99,35 @@ func readinessHandler(checks []ReadinessCheck) http.HandlerFunc {
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	}
+}
+
+// readinessDetail returns the detail of c, or "unavailable" when it fails or
+// takes longer than readinessDetailTimeout; a Detail that outlasts its
+// context finishes in the background.
+func readinessDetail(parent context.Context, c ReadinessCheck) any {
+	ctx, cancel := context.WithTimeout(parent, readinessDetailTimeout)
+	defer cancel()
+	type result struct {
+		detail any
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		detail, err := c.Detail(ctx)
+		done <- result{detail, err}
+	}()
+	var err error
+	select {
+	case res := <-done:
+		if res.err == nil {
+			return res.detail
+		}
+		err = res.err
+	case <-ctx.Done():
+		err = ctx.Err()
+	}
+	slog.Warn("readiness detail failed", "check", c.Name, "error", err)
+	return map[string]string{"error": "unavailable"}
 }
 
 // DatabaseReadiness checks that PostgreSQL answers and that the given

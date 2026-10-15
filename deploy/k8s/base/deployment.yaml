@@ -88,7 +88,8 @@ spec:
           # Liveness only asks whether the process serves HTTP; readiness
           # (/readyz) also checks database, Redis, object storage and NATS, so
           # a dependency outage removes the pod from the Service without
-          # restarting it (OPS-01).
+          # restarting it (OPS-01). /readyz answers within 2 s (its check
+          # timeout); the probe waits longer, so the answer decides.
           livenessProbe:
             httpGet:
               path: /healthz
@@ -101,6 +102,7 @@ spec:
               port: http
             initialDelaySeconds: 3
             periodSeconds: 5
+            timeoutSeconds: 3
           resources:
             requests:
               cpu: 100m
