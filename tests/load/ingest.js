@@ -269,7 +269,7 @@ export function spool(data) {
   }
   const sent = Date.now();
   const atEnd = visibleCount(prefix);
-  const backlogAtEnd = backlog().total;
+  const backlogAtEnd = backlog();
   const all = waitVisible(prefix, SPOOL_RECORDS);
   check(all, { 'every spooled record visible': (v) => v.t >= 0 && v.n >= SPOOL_RECORDS });
   // A shortfall counts as a flush that never ended.
@@ -279,6 +279,7 @@ export function spool(data) {
   drainRate.add((total - atEnd) / Math.max((done - sent) / 1000, 0.001));
   drainInclusive.add(total / ((done - first) / 1000));
   console.log(`spool: ${total} of ${SPOOL_RECORDS} records visible; sending took ${sent - first} ms, ` +
-    `${atEnd} visible and backlog ${backlogAtEnd} at its end, ` +
+    `${atEnd} visible and backlog ${backlogAtEnd.total} at its end ` +
+    `(sampled ${Math.round((sent - backlogAtEnd.at) / 1000)} s before), ` +
     (all.t >= 0 ? `all visible ${done - sent} ms later` : 'not all became visible'));
 }
