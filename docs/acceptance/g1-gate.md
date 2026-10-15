@@ -18,13 +18,15 @@ Prüfungen:
   - die Workflows
 - Beide laufen in jedem PR (CI-Jobs `traceability` und `gate`).
 
-Stand: 2026-10-14, nach der G1-Nachbesserung (WP-332 bis WP-335,
+Stand: 2026-10-15, nach der G1-Nachbesserung (WP-332 bis WP-335,
 Commit `dbbfded`). Die Erstfassung prüfte den Release-Kandidaten `main` nach
 PR „Gate G1: WP-211 – WP-213“ (#62). Der Stand `dbbfded` ist lokal geprüft;
 danach kamen zwei Korrekturen aus dem Gesamtreview hinzu (`58863fa`,
-`dea65b7`, `docs/security/review-g1.md`), die die Werte des Nachweislaufs
-nicht ändern. Der CI-Lauf und der Workflow `load.yml` auf dem
-Release-Kandidaten stehen aus.
+`dea65b7`) und am 2026-10-15 die Nachträge zu seinen nicht blockierenden
+Befunden (`3f2bfd5`, `458a96d`, `111bdc4`, `f354c5a`, `0f165cc`; Bewertung in
+`docs/security/review-g1.md`). Sie ändern die Werte des Nachweislaufs nicht
+(Kontrollmessungen in `docs/acceptance/lasttest-g1.md`). Der CI-Lauf und der
+Workflow `load.yml` auf dem Release-Kandidaten stehen aus.
 
 ## Ergebnis
 
@@ -63,7 +65,12 @@ Bedingungen der geschlossenen Blocker:
   dieser Lauf als G1-Nachweis für GATE-03 gilt, entscheidet der Auftraggeber
   mit dem Product Owner. Empfohlen ist die Anerkennung mit Auflagen; eine
   davon ist mindestens ein grüner `load.yml`-Lauf auf dem Commit des
-  Release-Kandidaten. Dieser Lauf steht aus.
+  Release-Kandidaten. Dieser Lauf steht aus. Seit `458a96d` führt `load.yml`
+  jedes Szenario als eigenen Job mit frischem Seed und `ANALYZE` aus, wie es
+  das Nachweisprotokoll verlangt. Der Standard-Runner von GitHub war im
+  letzten Lauf etwa halb so schnell wie der Nachweishost; ein grüner Lauf ist
+  deshalb nicht gesichert. Die Wiederholung ist angestoßen, ihr Ergebnis
+  steht aus (`docs/acceptance/lasttest-g1.md`).
 - **E-56 (offen, Aufgabe A-12):** Umgesetzt ist die Empfehlung: parallele
   Spuren mit Identitätssperre (Standard 4 Spuren). Mit
   `RETICORA_INGEST_LANES=1` (serielle Verarbeitung, Option 3) erreicht der
@@ -80,7 +87,7 @@ Bedingungen der geschlossenen Blocker:
 | Quelle | Critical offen | Nachweis |
 |---|---:|---|
 | Audit-Befunde (225 Critical/High) | 0 | `docs/security/review-g1.md`, Abschnitt „Audit-Befunde Critical/High“: 41 geschlossen, 8 mit G1-Anteil geschlossen |
-| Neue Befunde des Sicherheitsreviews (SR-01 bis SR-10) | 0 | `docs/security/review-g1.md`: kein Critical |
+| Neue Befunde des Sicherheitsreviews (SR-01 bis SR-11) | 0 | `docs/security/review-g1.md`: kein Critical |
 | Abhängigkeits- und Image-Scans | 0 | govulncheck, npm audit, Trivy blockierend in CI |
 | Externer Pentest | ausstehend | `docs/security/pentest-g1.md` |
 

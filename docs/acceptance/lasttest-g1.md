@@ -6,15 +6,21 @@ Ingest-Durchsatz (Blocker B2 und B1 in `docs/acceptance/g1-gate.md`). Die
 G1-Nachbesserung (WP-332 bis WP-335, `docs/plan/implementierungsplan.md`)
 behebt beides; der Wiederholungslauf auf Commit `dbbfded` (Nachweislauf für
 G1) belegt das. Danach kamen zwei Korrekturen aus dem Gesamtreview hinzu
-(`58863fa`, `dea65b7`); eine Kontrollmessung auf ihrem Stand bestätigt die
-Werte (Abschnitt „Ergebnis NFR-03“). Der Erstlauf steht unten als
-historischer Abschnitt.
+(`58863fa`, `dea65b7`) und am 2026-10-15 die Nachträge zu seinen nicht
+blockierenden Befunden (`3f2bfd5`, `458a96d`, `111bdc4`, `f354c5a`,
+`0f165cc`). Kontrollmessungen auf beiden Ständen bestätigen die Werte
+(Abschnitt „Ergebnis NFR-03“). Der Erstlauf steht unten als historischer
+Abschnitt.
 
 Die Szenarien, ihre Schwellen und der Ablauf stehen in
-`tests/load/README.md`; der Workflow `.github/workflows/load.yml` wiederholt
-den Lauf manuell und nächtlich (`api.js`, `ingest.js` mit den Szenarien
-`load` und `spool`, 4 Spuren) und legt die k6-Zusammenfassungen als Artefakt
-ab.
+`tests/load/README.md`. Der Workflow `.github/workflows/load.yml` wiederholt
+den Lauf manuell und nächtlich. Seit `458a96d` läuft jedes Szenario als
+eigener Job (`api.js`, `ingest.js` mit dem Szenario `load`, `ingest.js` mit
+dem Szenario `spool`), jeweils mit frischer Datenbank, Seed, `ANALYZE` und
+4 Spuren, wie es das Nachweisprotokoll verlangt. Vorher liefen die drei
+nacheinander gegen einen Seed, ohne neuen Seed und ohne `ANALYZE`. Jeder Job
+legt seine k6-Zusammenfassung als eigenes Artefakt ab (`load-results-api`,
+`load-results-ingest`, `load-results-ingest-spool`).
 
 ## Umgebung und Datenbestand
 
@@ -43,6 +49,19 @@ ab.
   - mindestens ein grüner `load.yml`-Lauf auf dem Commit des
     Release-Kandidaten (steht aus)
   - dedizierter Referenzhost vor GA (SR-06)
+
+  **GitHub-Runner:** Der letzte `load.yml`-Lauf (Run 38514977761 auf Commit
+  `fa76b16`, dem Vorgänger von `02ebb76` mit identischem `backend/` und
+  `tests/load/`) lief auf dem Standard-Runner `ubuntu-latest` mit 4 vCPU. Er
+  maß 38,47 Records/s und eine Verzögerung von 4 min 11 s. Der Nachweishost
+  maß auf demselben Code 74 Records/s und 102 s (Basis, Abschnitt
+  „Budgetkorrekturen der G1-Nachbesserung“). Der Standard-Runner ist damit
+  etwa halb so schnell. Bei demselben Abstand bliebe das Szenario `spool`
+  (lokal 233 Records/s) unter seiner Schwelle von 200 Records/s; ein grüner
+  `load.yml`-Lauf auf dem Release-Kandidaten ist also nicht gesichert. Die
+  Wiederholung auf GitHub auf dem Stand der Nachbesserung ist angestoßen,
+  ihr Ergebnis steht aus. Bleibt sie rot, ist diese Auflage von E-58 neu zu
+  fassen, etwa mit einem größeren Runner oder dem Lauf auf dem Referenzhost.
 
 ## Wiederholungslauf (Commit `dbbfded`)
 
@@ -118,7 +137,9 @@ Organisation.
   10.000 Records < 5 min.
 - **Eine Spur:** `RETICORA_INGEST_LANES=1` ist der Rückfall auf die serielle
   Verarbeitung (Option 3 von E-56 per Konfiguration). Er hält Verzögerung und
-  Spool-Flush, verfehlt aber die Abbau-Rate von 200 Records/s.
+  Spool-Flush, verfehlt aber die Abbau-Rate von 200 Records/s. Seit `3f2bfd5`
+  nehmen Records aus der Queue auch mit einer Spur die Identitäts- und
+  `max_cis`-Sperre (Kontrollmessung unten).
 - **Messgrößen:** Die Abbau-Rate ist im Szenario `spool` budgetiert. Der
   Collector liefert seinen Spool nacheinander aus (COL-05); das Szenario sendet
   10.000 Records als Uploads zu 64 Records (gzip, `POST /discovery/ingest`),
@@ -131,7 +152,18 @@ Organisation.
   `ingest_records_missing` = 0, das Szenario `load` zusätzlich
   `dropped_iterations` = 0. k6 scheitert also, sobald ein Record nie sichtbar
   wird oder k6 die Rate nicht voll anbietet. Vorher bestand der Lauf auch mit
-  fehlenden Records.
+  fehlenden Records. Seit `458a96d` scheitert k6 außerdem an jeder abgelehnten
+  Anfrage (`http_req_failed{name:ingest}` und `http_req_failed{name:spool}`
+  = 0): Im Szenario `load` startet k6 bis zu eine Iteration mehr als
+  angeboten, sodass eine einzelne abgelehnte Anfrage weder als fehlender
+  Record noch an der Schwelle von `checks` auffiel.
+- **Rückstand (`/readyz`):** Seit `111bdc4` liefert `/readyz` die letzte
+  30-s-Stichprobe des Ingest-Workers (`sampled_at`) statt einer Abfrage je
+  Anfrage. `ingest_backlog_peak` ist damit gröber; die Werte der Tabelle
+  stammen aus der Abfrage je Anfrage. `ingest.js` wertet „Queue leer“ nur mit
+  einer Stichprobe aus, die nach dem letzten Anstieg der sichtbaren Records
+  genommen wurde, und das Spool-Log nennt das Alter der Stichprobe
+  (`f354c5a`).
 - **Reserve:** Die Reserve ist auf diesem 4-vCPU-Host knapp. Frühere Läufe in
   WP-334 lagen bei 210–233 Records/s (ein Lauf nach der Nachbesserung
   `55aa9f3` bei 246 Records/s); die Streuung zwischen Läufen liegt bei etwa
@@ -145,15 +177,34 @@ Organisation.
   Objekten, kein anderer Lastlauf auf demselben Host): Abbau ab Sendeende 243 Records/s, inklusive Senden
   287 Records/s, Spool-Flush 34,9 s, kein fehlender Record. Das liegt in der
   Streuung des Wiederholungslaufs; seine Werte bleiben gültig.
+- **Kontrollmessung nach den Review-Nachträgen (2026-10-15):** `3f2bfd5`
+  lässt jede Transaktion eines Records aus der Queue die Sperren nehmen, auch
+  mit einer Spur; `111bdc4` liest das `/readyz`-Detail aus der Stichprobe.
+  Szenario `spool` auf dem Stand `111bdc4`, je Lauf frisch geseedet, allein
+  auf dem Host. Danach änderten sich nur das Spool-Log von `ingest.js`
+  (`f354c5a`) sowie Registrierung und Log des `/readyz`-Details (`0f165cc`),
+  nicht der Ingest-Pfad.
+  - 4 Spuren: 232–255 Records/s ab Sendeende in drei Läufen, Spool-Flush
+    33,1–36,3 s; mit `ANALYZE` nach dem Seed 219 und 232,5 Records/s.
+  - 1 Spur, jetzt mit Sperren: 177 Records/s (ohne Sperre im
+    Wiederholungslauf 182, in früheren Läufen 161–169).
+  - kein fehlender Record
+
+  Die zusätzliche Sperranweisung je Transaktion kostet mit einer Spur
+  messbar keinen Durchsatz, und `ANALYZE` nach dem Seed ändert ihn nicht
+  nachweisbar (Streuung etwa ±10 %). Die Werte des Wiederholungslaufs
+  bleiben gültig.
 - **Reihenfolge (E-56):** E-56 ist offen (Aufgabe A-12). WP-334 setzt auf die
   Anweisung vom 2026-10-14 die Empfehlung um: Option 1 mit Identitätssperre.
   Die Spur folgt dem stärksten Identitätsschlüssel in REC-02-Reihenfolge
-  (Seriennummer, Hardware-UUID, MAC, IP). Mit mehr als einer Spur sperrt jede
-  Ingest-Transaktion die normalisierten Identitätsschlüssel ihrer Records
-  (über 256 Schlüssel die ganze Organisation). Reihenfolge und Dedupe je Gerät
-  sichert diese Identitätssperre, nicht die Spur allein: Records eines Geräts
-  mit verschiedenen stärksten Schlüsseln können in verschiedenen Spuren
-  laufen. Sperrform und Wartegrenze stehen in `docs/betrieb/ingest-spuren.md`.
+  (Seriennummer, Hardware-UUID, MAC, IP). Jede Ingest-Transaktion eines
+  Records aus der Queue sperrt die normalisierten Identitätsschlüssel ihrer
+  Records (über 256 Schlüssel die ganze Organisation), seit `3f2bfd5`
+  unabhängig von der Spurzahl, vorher nur mit mehr als einer Spur.
+  Reihenfolge und Dedupe je Gerät sichert diese Identitätssperre, nicht die
+  Spur allein: Records eines Geräts mit verschiedenen stärksten Schlüsseln
+  können in verschiedenen Spuren laufen. Sperrform und Wartegrenze stehen in
+  `docs/betrieb/ingest-spuren.md`.
 
 ## Verbleibende Grenze: Audit-/Outbox-Sperrabschnitt
 
@@ -225,6 +276,7 @@ Verlauf je Schritt, 200 Records/s angeboten:
 | WP-334 nach der Nachbesserung, 4 Spuren | `55aa9f3` | 246 Records/s² | max. 6,5 s |
 | Wiederholungslauf, 4 Spuren | `dbbfded` | 233 Records/s² | max. 3,1 s |
 | Kontrollmessung nach dem Gesamtreview, 4 Spuren | `58863fa`, `dea65b7` | 243 Records/s² | nicht gemessen (nur `spool`) |
+| Kontrollmessung nach den Review-Nachträgen, 4 Spuren | `111bdc4` | 232–255 Records/s² | nicht gemessen (nur `spool`) |
 
 ¹ Formel von `ingest.js` vor WP-334: angebotene Records geteilt durch die Zeit
 vom Lastbeginn, bis der Probe-Record hinter der Last sichtbar ist. Der Wert
@@ -299,11 +351,13 @@ Transaktion (kein N+1) und prüfen per `EXPLAIN` die Indexnutzung.
     ohne eigenes Lock-Statement. Die Audit-Kette bleibt intakt
     (`audit.Verify`) und hält die Einträge lückenlos in Record-Reihenfolge.
   - Bekannte Geräte: eine Batch-Kandidatenabfrage, Update je Record.
-  - Spuren: Mit mehr als einer Spur nimmt jede Record- und
-    Batch-Transaktion die Identitätssperre genau einmal als erstes Statement
-    nach BEGIN; das Budget wächst um dieses eine Statement (gemessen: Batch 11
-    statt 10, Record 13 statt 12). Audit und Outbox stehen in jeder Record-
-    und Batch-Transaktion zuletzt.
+  - Spuren und Queue: Mit mehr als einer Spur und für jeden Record aus der
+    Queue nimmt jede Record- und Batch-Transaktion die Identitätssperre genau
+    einmal als erstes Statement nach BEGIN; das Budget wächst um dieses eine
+    Statement (gemessen: Batch 11 statt 10, Record 13 statt 12). Der Teiltest
+    `queue_with_one_lane` (seit `3f2bfd5`) misst das für Records aus der
+    Queue mit einer Spur; über HTTP ohne Queue bleibt es bei 10 und 12. Audit
+    und Outbox stehen in jeder Record- und Batch-Transaktion zuletzt.
   - `TestIngestBatchMatchesRecordPath` vergleicht Batch- und Einzelpfad über
     den ganzen Ingest.
 - **Batch-Anlage** (`backend/internal/ci/create_many_integration_test.go`,
@@ -334,7 +388,10 @@ einmal je Statement (`TestRecordDiscoveredBatchReadsCIsOnce`).
   Wiederholungslauf. Offen sind:
   - die Anerkennung der Referenzumgebung (E-58)
   - ein grüner `load.yml`-Lauf auf dem Release-Kandidaten; `load.yml` läuft
-    auf GitHub nur manuell oder nächtlich auf dem Standardbranch
+    auf GitHub nur manuell oder nächtlich auf dem Standardbranch. Auf dem
+    Standard-Runner ist er nicht gesichert (etwa halb so schnell wie der
+    Nachweishost, Abschnitt „Umgebung und Datenbestand“); die Wiederholung
+    ist angestoßen, ihr Ergebnis steht aus.
 - **G1 insgesamt:** weiter nicht bestanden. Offen sind B3 (Pentest, E-28,
   A-07), B4 (v2-Texte, E-02, A-02) und B6 (NFR-09, Subprozessorenliste, E-35,
   A-11, Betreiber) sowie E-58. B5 (E-17) ist unverändert offen. Stand und
@@ -421,7 +478,9 @@ Der Erstlauf deckte Fehler auf, die in WP-206 behoben wurden:
 
 1. **NFR-03 Durchsatz:** erledigt mit WP-332 bis WP-334 (`d2daeed`,
    `8320a12`, `82110bf`, `25f0c79`, `55aa9f3`; Korrekturen aus dem
-   Gesamtreview `58863fa`, `dea65b7`). Mit 4 Spuren: Abbau
+   Gesamtreview `58863fa`, `dea65b7`; Nachträge zu seinen nicht
+   blockierenden Befunden `3f2bfd5`, `458a96d`, `111bdc4`, `f354c5a`,
+   `0f165cc`). Mit 4 Spuren: Abbau
    233 Records/s ab Sendeende, Verzögerung höchstens 3,1 s. Die Reserve auf
    dem 4-vCPU-Host ist knapp (Punkt 5).
 2. **Impact unter Parallellast im Worst Case:** erledigt mit WP-335
@@ -454,9 +513,10 @@ Der Erstlauf deckte Fehler auf, die in WP-206 behoben wurden:
 9. **`AdoptUnlicensed`:** Die Anlage beim Anheben von `max_cis` nimmt die
    `max_cis`-Sperre nicht. Nebenläufig zum Ingest mit Spuren bleibt ein kleines
    Fenster für eine Überschreitung (vorbestehend).
-10. **Altconsumer:** Der NATS-Consumer `reticora-ingest` ist nach dem Upgrade
-    zu entfernen, sobald sein Rückstand 0 ist (Betrieb,
-    `docs/betrieb/ingest-spuren.md`).
+10. **Altconsumer:** kein Folge-WP. Der NATS-Consumer `reticora-ingest`
+    bleibt dauerhaft bestehen: Der Server legt ihn wieder an, sobald er
+    fehlt, ein Entfernen ist nicht vorgesehen. Leer kostet er je
+    Ingest-Instanz einen Abruf pro Sekunde (`docs/betrieb/ingest-spuren.md`).
 11. **Override-Abgleich der Knotenlesung:** `ci_field_value` hat keinen Index
     für den Override-Abgleich der Organisationslesung, und der Seed schreibt
     keine Feldwerte. In einer per Discovery befüllten Organisation mit 10.000
