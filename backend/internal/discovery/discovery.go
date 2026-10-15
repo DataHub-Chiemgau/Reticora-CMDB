@@ -451,8 +451,9 @@ type Handler struct {
 	// (NFR-03); without one every repository call is its own transaction.
 	tx TxRunner
 	// ingestLanes is the number of ingest lanes (WP-334, E-56); with more
-	// than one, the lanes of an organization run side by side and every
-	// record and batch transaction takes the identity locks of its records.
+	// than one and a repository that can lock, the lanes of an
+	// organization run side by side (parallel) and every record and batch
+	// transaction takes the identity locks of its records (locking).
 	ingestLanes int
 	// beforeCreate, when set, runs after a transaction decided to create
 	// new CIs and before it inserts them (tests of concurrent lanes).
@@ -1007,8 +1008,8 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 //
 // With the batch queries of the repository and the batch creation of the
 // CI repository (WP-333), each window of up to ingestBatch records (with
-// lanes, also bounded by its identity locks, see windowEnd) first runs one
-// more transaction: one candidate query for all its records, and
+// the ingest locks also bounded by its identity keys, see windowEnd) first
+// runs one more transaction: one candidate query for all its records, and
 // its new devices created together. Updates of known devices and every
 // record the batch leaves follow one by one in the order of the records;
 // the records of one device keep their order. When a record fails, the
@@ -1019,6 +1020,9 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 	if h.ciRepo == nil {
 		return resp, nil
 	}
+	// Whether the transactions take the ingest locks (WP-334): records
+	// consumed from the queue and parallel lanes do.
+	locking := h.locking(ctx)
 	var frame *batchFrame
 	for attempt := 0; ; attempt++ {
 		err := h.inTx(ctx, orgID, func(ctx context.Context) error {
@@ -1029,11 +1033,12 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 		if err == nil {
 			break
 		}
-		// With lanes, the reviews of unknown types of two frames may wait
-		// for each other (WP-334): the frame starts again, as it does after
-		// PostgreSQL ran out of shared memory for a moment.
+		// With other ingests of the organization at the same time, the
+		// reviews of unknown types of two frames may wait for each other
+		// (WP-334): the frame starts again, as it does after PostgreSQL ran
+		// out of shared memory for a moment.
 		reason := retryReason(err)
-		if !h.lanesOn() || attempt >= maxRecordRetries ||
+		if !locking || attempt >= maxRecordRetries ||
 			(reason != "deadlock" && reason != "serialization" && reason != "out_of_memory") || !retryPause(ctx, reason, attempt) {
 			return resp, err
 		}
@@ -1043,6 +1048,7 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 	if len(frame.items) == 0 {
 		return resp, nil
 	}
+	frame.locking = locking
 
 	// resolvedCIID[i] holds the CI id that item i resolved to (matched or
 	// created). Conflicts leave it empty so no topology is derived for them.
@@ -1112,15 +1118,18 @@ type batchFrame struct {
 	unlicensed queuedDevices
 	resp       BulkIngestResponse
 	// candidates[i] are the identity candidates of record i the batch query
-	// of its window read (WP-333); valid only with prefetched[i] and one
-	// lane: with more, the batch's identity locks end with its commit, so
-	// a record reads its candidates again under its own.
+	// of its window read (WP-333); valid only with prefetched[i] and
+	// without locks: with them, the batch's identity locks end with its
+	// commit, so a record reads its candidates again under its own.
 	candidates [][]ci.Item
 	prefetched []bool
 	// limitExclusive makes every creation of the batch take the exclusive
 	// max_cis lock (WP-334): a transaction found the headroom too small for
 	// the shared one.
 	limitExclusive bool
+	// locking makes the transactions of the records take the identity and
+	// max_cis locks and retry a lost race (Handler.locking, WP-334).
+	locking bool
 }
 
 // recordOutcome is what processing one record changed.
@@ -1218,9 +1227,9 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 	item := frame.items[i]
 	typeID, identity := frame.typeIDs[i], frame.identity
 	resp := &out.resp
-	// With lanes, records that share an identity key never run at the same
-	// time: the locks come first, before anything is read (WP-334).
-	if err := h.lockIdentities(ctx, orgID, identity, &item); err != nil {
+	// Records that share an identity key never run at the same time: the
+	// locks come first, before anything is read (WP-334).
+	if err := h.lockIdentities(ctx, orgID, frame, &item); err != nil {
 		return err
 	}
 
@@ -1254,7 +1263,7 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 	}
 
 	var candidates []ci.Item
-	if i < len(frame.prefetched) && frame.prefetched[i] && !h.lanesOn() {
+	if i < len(frame.prefetched) && frame.prefetched[i] && !frame.locking {
 		// Read by the batch query of the window (WP-333): no record before
 		// this one changed them.
 		candidates = frame.candidates[i]
@@ -1634,16 +1643,16 @@ func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchF
 // changed.
 func (h *Handler) batchWindow(ctx context.Context, orgID string, frame *batchFrame, start int, qs []IdentityQuery, include []bool,
 	finder BatchIdentityFinder, creator ci.BatchCreator, w *windowOutcome) error {
-	// With lanes, the identity locks of every record of the window come
-	// first (WP-334).
-	if h.lanesOn() {
+	// The identity locks of every record of the window come first
+	// (WP-334).
+	if frame.locking {
 		locked := make([]*IngestItem, 0, len(qs))
 		for k := range qs {
 			if include[k] {
 				locked = append(locked, &frame.items[start+k])
 			}
 		}
-		if err := h.lockIdentities(ctx, orgID, frame.identity, locked...); err != nil {
+		if err := h.lockIdentities(ctx, orgID, frame, locked...); err != nil {
 			return err
 		}
 	}
@@ -1695,7 +1704,8 @@ func (h *Handler) batchWindow(ctx context.Context, orgID string, frame *batchFra
 		deleted = make([][]ci.Item, len(qs))
 	}
 
-	// With lanes, admission counts under the max_cis lock (WP-334).
+	// With the ingest locks, admission counts under the max_cis lock
+	// (WP-334).
 	if h.limits != nil {
 		total, err := h.admissionCount(ctx, orgID, frame, w.total)
 		if err != nil {

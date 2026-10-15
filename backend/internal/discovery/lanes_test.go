@@ -275,11 +275,12 @@ func TestIdentityLocksBounded(t *testing.T) {
 	}
 
 	// windows cuts the frame of items into the windows of processItems and
-	// checks what each locks.
+	// checks what each locks; lanes > 1 stands for transactions that take
+	// the identity locks (locking), one lane for those that do not.
 	windows := func(lanes int, items []IngestItem) [][2]int {
 		t.Helper()
-		h := (&Handler{}).WithIngestLanes(lanes)
-		frame := &batchFrame{items: items, typeIDs: make([]string, len(items)), identity: ic}
+		h := &Handler{}
+		frame := &batchFrame{items: items, typeIDs: make([]string, len(items)), identity: ic, locking: lanes > 1}
 		for i := range items {
 			frame.typeIDs[i] = "type"
 		}
@@ -329,8 +330,8 @@ func TestIdentityLocksBounded(t *testing.T) {
 	}
 	// Records the frame queued for review (no type) are not locked and do
 	// not count.
-	h := (&Handler{}).WithIngestLanes(4)
-	frame := &batchFrame{items: fleet[:12], typeIDs: make([]string, 12), identity: ic}
+	h := &Handler{}
+	frame := &batchFrame{items: fleet[:12], typeIDs: make([]string, 12), identity: ic, locking: true}
 	for i := range 12 {
 		if i%2 == 0 {
 			frame.typeIDs[i] = "type"
@@ -505,15 +506,34 @@ func laneSerials(t *testing.T, prefix string) (a, b, c string) {
 	return a, b, c
 }
 
+// lockingMemory is the memory repository as one that can take the ingest
+// locks (TxRunner, IdentityLocker, CICountLocker), so that the lanes of an
+// organization run side by side; it runs no transaction and takes no lock.
+type lockingMemory struct{ *MemoryRepository }
+
+func (lockingMemory) RunInTx(ctx context.Context, _ string, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+func (lockingMemory) LockIdentities(context.Context, string, IdentityLocks) error { return nil }
+
+func (lockingMemory) LockCICount(context.Context, string, bool) (int64, error) { return 0, nil }
+
 // TestLanesRunConcurrentlyPerOrg covers WP-334 (AC 1): the records of one
 // organization in different lanes are processed at the same time, those of
-// one lane, and all with one lane, one after another.
+// one lane, and all with one lane, one after another. Without a repository
+// that can lock (--no-db with NATS) the lanes of an organization never run
+// side by side (holistic review).
 func TestLanesRunConcurrentlyPerOrg(t *testing.T) {
 	ctx := tenant.WithTenant(context.Background(), tenant.TenantInfo{OrganizationID: "org-1"})
-	run := func(lanes int, s1, s2 string) bool {
+	run := func(lockable bool, lanes int, s1, s2 string) bool {
 		repo := NewMemoryRepository()
 		repo.SeedCIType("server", "server")
-		h := NewHandler(repo, ci.NewMemoryRepository()).WithIngestLanes(lanes)
+		var r Repository = repo
+		if lockable {
+			r = lockingMemory{repo}
+		}
+		h := NewHandler(r, ci.NewMemoryRepository()).WithIngestLanes(lanes)
 		b := &barrier{}
 		h.beforeCreate = func(context.Context) { b.wait(500 * time.Millisecond) }
 		msg := func(serial string) []IngestMessage {
@@ -534,14 +554,151 @@ func TestLanesRunConcurrentlyPerOrg(t *testing.T) {
 		return b.met.Load() == 1
 	}
 	a, other, same := laneSerials(t, "LANES-CONC")
-	if !run(4, a, other) {
+	if !run(true, 4, a, other) {
 		t.Error("two lanes of one organization did not run at the same time")
 	}
-	if run(4, a, same) {
+	if run(true, 4, a, same) {
 		t.Error("one lane ran two batches at the same time")
 	}
-	if run(1, a, other) {
+	if run(true, 1, a, other) {
 		t.Error("with one lane two batches ran at the same time")
+	}
+	if run(false, 4, a, other) {
+		t.Error("without the ingest locks two lanes of one organization ran at the same time")
+	}
+}
+
+// TestNoDBLanesKeepOneDevice is the scenario of the holistic review of
+// WP-334: --no-db with NATS (memory repositories, RETICORA_INGEST_LANES=4).
+// Two records of one switch, one with serial number, IP and MAC and one of
+// a sweep with MAC and IP only, are consumed at the same time, each from the
+// lane IngestLane picks for it. The memory repository takes no identity
+// lock and enforces no unique key, so the lanes of an organization must not
+// run side by side: one CI, and the second record never reached the
+// creation together with the first.
+func TestNoDBLanesKeepOneDevice(t *testing.T) {
+	ctx := tenant.WithTenant(context.Background(), tenant.TenantInfo{OrganizationID: "org-1"})
+	const mac, ip = "00:1b:21:cc:00:01", "10.9.0.1"
+	seen := time.Now().Add(-time.Minute)
+	sweep := plugins.RecordFromResult("sweep", &plugins.Result{CIType: "switch", Name: "sweep-" + ip, IP: ip, MAC: mac}, seen)
+	var snmp plugins.DeviceRecord
+	for i := 0; ; i++ {
+		serial := fmt.Sprintf("SW-NODB-%d", i)
+		snmp = plugins.RecordFromResult("snmp", &plugins.Result{CIType: "switch", Name: "core-sw", IP: ip, MAC: mac, Serial: serial}, seen)
+		a, b := itemFromRecord(&snmp), itemFromRecord(&sweep)
+		if IngestLane(&a, 4) != IngestLane(&b, 4) {
+			break
+		}
+	}
+	for _, lanes := range []int{1, 4} {
+		repo := NewMemoryRepository()
+		repo.SeedCIType("switch", "switch")
+		cis := ci.NewMemoryRepository()
+		h := NewHandler(repo, cis).WithIngestLanes(lanes)
+		b := &barrier{}
+		h.beforeCreate = func(context.Context) { b.wait(500 * time.Millisecond) }
+		var wg sync.WaitGroup
+		for _, rec := range []plugins.DeviceRecord{snmp, sweep} {
+			item := itemFromRecord(&rec)
+			msgs := newIngestMessages(ctx, tenant.TenantInfo{OrganizationID: "org-1"}, "col-1", []IngestItem{item})
+			raw, err := json.Marshal(&msgs[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				d := &fakeDelivery{data: raw, delivered: 1}
+				consumeBatch(context.Background(), h, []ingestDelivery{d})
+				if d.result != "ack" {
+					t.Errorf("%d lanes, lane %d: delivery %s", lanes, IngestLane(&item, lanes), d.result)
+				}
+			}()
+		}
+		wg.Wait()
+		items, _, err := cis.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != 1 || b.met.Load() != 0 {
+			t.Errorf("%d lanes without the ingest locks: %d CIs for one switch, both records decided to create together %d times; want 1 and 0",
+				lanes, len(items), b.met.Load())
+		}
+	}
+}
+
+// deadlockOnce fails the first creation with a deadlock (40P01), as a lost
+// race against another lane or instance does.
+type deadlockOnce struct {
+	ci.Repository
+	failed atomic.Bool
+}
+
+func (r *deadlockOnce) Create(ctx context.Context, item *ci.Item) error {
+	if r.failed.CompareAndSwap(false, true) {
+		return &pgconn.PgError{Code: "40P01", Message: "deadlock detected"}
+	}
+	return r.Repository.Create(ctx, item)
+}
+
+// TestQueuedRecordsTakeLocks covers the holistic review of WP-334: records
+// consumed from the ingest queue take the ingest locks and retry a lost race
+// whatever the lane count, since other instances, the former consumer and
+// drain lanes process the same organizations with one lane too; the HTTP
+// ingest without a queue keeps processing as before (WP-332/333 budgets),
+// and nothing locks without a repository that can.
+func TestQueuedRecordsTakeLocks(t *testing.T) {
+	queued := withQueued(context.Background())
+	lockable := NewHandler(lockingMemory{NewMemoryRepository()}, ci.NewMemoryRepository())
+	memory := NewHandler(NewMemoryRepository(), ci.NewMemoryRepository())
+	for _, c := range []struct {
+		name             string
+		h                *Handler
+		lanes            int
+		ctx              context.Context
+		locking, sideway bool
+	}{
+		{"lockable, one lane, HTTP", lockable, 1, context.Background(), false, false},
+		{"lockable, one lane, queue", lockable, 1, queued, true, false},
+		{"lockable, four lanes, HTTP", lockable, 4, context.Background(), true, true},
+		{"lockable, four lanes, queue", lockable, 4, queued, true, true},
+		{"memory, one lane, queue", memory, 1, queued, false, false},
+		{"memory, four lanes, queue", memory, 4, queued, false, false},
+	} {
+		c.h.WithIngestLanes(c.lanes)
+		if got := c.h.locking(c.ctx); got != c.locking {
+			t.Errorf("%s: locking %v, want %v", c.name, got, c.locking)
+		}
+		if got := c.h.parallel(); got != c.sideway {
+			t.Errorf("%s: lanes side by side %v, want %v", c.name, got, c.sideway)
+		}
+	}
+
+	// One lane: a record consumed from the queue that loses a race runs
+	// again at once and is acknowledged; through HTTP it fails as before.
+	record := func(serial string) IngestMessage {
+		r := plugins.RecordFromResult("snmp", &plugins.Result{CIType: "server", Name: serial, Serial: serial}, time.Now().Add(-time.Minute))
+		return newIngestMessages(context.Background(), tenant.TenantInfo{OrganizationID: "org-1"}, "col-1",
+			[]IngestItem{itemFromRecord(&r)})[0]
+	}
+	handler := func() *Handler {
+		repo := NewMemoryRepository()
+		repo.SeedCIType("server", "server")
+		return NewHandler(lockingMemory{repo}, &deadlockOnce{Repository: ci.NewMemoryRepository()}).WithIngestLanes(1)
+	}
+	retriesBefore := IngestRecordRetries()
+	msg := record("QUEUED-1")
+	raw, err := json.Marshal(&msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &fakeDelivery{data: raw, delivered: 1}
+	consumeBatch(context.Background(), handler(), []ingestDelivery{d})
+	if d.result != "ack" || IngestRecordRetries()-retriesBefore != 1 {
+		t.Errorf("one lane, from the queue: delivery %s after %d retries, want ack after 1", d.result, IngestRecordRetries()-retriesBefore)
+	}
+	if _, err := handler().ProcessMessages(context.Background(), []IngestMessage{record("HTTP-1")}); err == nil {
+		t.Error("one lane, HTTP without a queue: the lost race was retried; want the error as before")
 	}
 }
 

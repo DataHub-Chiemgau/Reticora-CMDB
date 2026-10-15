@@ -29,10 +29,11 @@ import (
 // own JetStream consumer and is processed serially per organization, the
 // lanes of one organization run side by side. Records that share any
 // identity key (serial number, hardware UUID, MAC, management IP in its
-// VRF) never run at the same time: with more than one lane every record and
-// batch transaction first takes the advisory locks of its identity keys, so
-// identity resolution sees what a serial run would have seen. One lane is
-// the serial processing of the releases before.
+// VRF) never run at the same time: every record and batch transaction that
+// another one may run next to (see locking) first takes the advisory locks
+// of its identity keys, so identity resolution sees what a serial run would
+// have seen. One lane is the serial processing of the releases before
+// within a process.
 
 // MaxIngestLanes is the largest number of ingest lanes
 // (RETICORA_INGEST_LANES, 1-16).
@@ -45,17 +46,74 @@ func clampLanes(n int) int {
 
 // WithIngestLanes sets the number of ingest lanes (WP-334): records are
 // grouped and serialized per organization and lane, and with more than one
-// lane the transactions take the identity locks. NATSIngestQueue.Attach sets
-// the queue's lane count; without a queue the ingest stays serial unless
-// this is called.
+// lane and a repository that can lock (parallel) the lanes of an
+// organization run side by side. NATSIngestQueue.Attach sets the queue's
+// lane count; without a queue the ingest stays serial unless this is
+// called.
 func (h *Handler) WithIngestLanes(n int) *Handler {
 	h.ingestLanes = clampLanes(n)
 	return h
 }
 
-// lanesOn reports whether more than one lane may process an organization at
-// a time.
-func (h *Handler) lanesOn() bool { return h.ingestLanes > 1 }
+// canLock reports whether the repository takes the ingest locks: it runs
+// every record and batch in a transaction (TxRunner) and takes the identity
+// and max_cis locks in it (IdentityLocker, CICountLocker). The PostgreSQL
+// repository can; the memory repository of --no-db cannot.
+func (h *Handler) canLock() bool {
+	_, identities := h.repo.(IdentityLocker)
+	_, counts := h.repo.(CICountLocker)
+	return h.tx != nil && identities && counts
+}
+
+// parallel reports whether the lanes of an organization run side by side in
+// this process: with more than one lane and a repository that can lock.
+// Without the locks nothing would keep two lanes from creating one device
+// twice, so a process without them (--no-db with NATS) processes every
+// organization serially whatever the lane count; the subjects stay per
+// lane.
+func (h *Handler) parallel() bool { return h.ingestLanes > 1 && h.canLock() }
+
+// serialLane is the lane whose mutex serializes the ingest of records of
+// lane: lane itself when the lanes of an organization run side by side,
+// else 0, the organization's one mutex.
+func (h *Handler) serialLane(lane int) int {
+	if h.parallel() {
+		return lane
+	}
+	return 0
+}
+
+// queuedKey marks the context of records consumed from the ingest queue.
+type queuedKey struct{}
+
+// withQueued marks ctx as processing records consumed from the ingest queue
+// (consumeBatch).
+func withQueued(ctx context.Context) context.Context {
+	return context.WithValue(ctx, queuedKey{}, true)
+}
+
+// fromQueue reports whether ctx processes records consumed from the ingest
+// queue.
+func fromQueue(ctx context.Context) bool {
+	queued, _ := ctx.Value(queuedKey{}).(bool)
+	return queued
+}
+
+// locking reports whether the transactions of an ingest take the identity
+// locks and the max_cis lock, and start again after losing a race
+// (retryReason): whenever another transaction may process records of the
+// same organization at the same time. That is so when the lanes of an
+// organization run side by side in this process (parallel), and for every
+// record consumed from the ingest queue whatever this instance's lane
+// count: the other instances consume the same lanes, and the former
+// consumer and the drain lanes run next to them with a MaxAckPending of
+// their own, with one lane too, while the lane count changes and while
+// instances with different counts run side by side. The HTTP ingest
+// without a queue processes in the request, serially per organization in
+// this process, and takes none of them (the budgets of WP-332/333).
+func (h *Handler) locking(ctx context.Context) bool {
+	return h.canLock() && (h.ingestLanes > 1 || fromQueue(ctx))
+}
 
 // IngestLane returns the lane of a record: FNV-1a/32 of its strongest
 // identity key modulo lanes; 0 without a key or with at most one lane. The
@@ -252,19 +310,19 @@ func identityLockKeys(orgID string, ic *IdentityContext, items ...*IngestItem) [
 }
 
 // lockIdentities takes the identity locks of items in the context
-// transaction when more than one lane can process the organization; it must
-// be the transaction's first statement, so that the candidate query after it
-// sees every transaction that held one of the keys before (WP-334, E-56).
+// transaction when the frame's records take locks (locking); it must be the
+// transaction's first statement, so that the candidate query after it sees
+// every transaction that held one of the keys before (WP-334, E-56).
 // Records without an identity key match nothing and lock nothing.
-func (h *Handler) lockIdentities(ctx context.Context, orgID string, ic *IdentityContext, items ...*IngestItem) error {
-	if !h.lanesOn() || !database.InTx(ctx) {
+func (h *Handler) lockIdentities(ctx context.Context, orgID string, frame *batchFrame, items ...*IngestItem) error {
+	if !frame.locking || !database.InTx(ctx) {
 		return nil
 	}
 	locker, ok := h.repo.(IdentityLocker)
 	if !ok {
 		return nil
 	}
-	locks := identityLocks(orgID, ic, items...)
+	locks := identityLocks(orgID, frame.identity, items...)
 	if !locks.Exclusive && len(locks.Keys) == 0 {
 		return nil
 	}
@@ -272,14 +330,14 @@ func (h *Handler) lockIdentities(ctx context.Context, orgID string, ic *Identity
 }
 
 // windowEnd returns the end of the batch window of the frame's records that
-// starts at start: at most ingestBatch records and, with more than one
-// lane, only as many as keep the identity keys of the records the batch
-// locks within identityLockLimit; a record over the limit on its own is a
-// window of its own. With one lane nothing is locked and windows keep
+// starts at start: at most ingestBatch records and, when the records take
+// the identity locks (locking), only as many as keep the identity keys of
+// the records the batch locks within identityLockLimit; a record over the
+// limit on its own is a window of its own. Without locks windows keep
 // ingestBatch records.
 func (h *Handler) windowEnd(orgID string, frame *batchFrame, start int) int {
 	end := min(start+ingestBatch, len(frame.items))
-	if !h.lanesOn() {
+	if !frame.locking {
 		return end
 	}
 	keys := map[int32]struct{}{}
@@ -317,8 +375,8 @@ type CICountLocker interface {
 var errNearLimit = errors.New("ingest: max_cis headroom below the creations the lanes may have in flight")
 
 // admissionCount returns the CI count the new CIs of a transaction are
-// admitted against (max_cis, ENT-03). With one lane it is the frame's count,
-// as before. With more lanes and a limit, the transaction takes the
+// admitted against (max_cis, ENT-03). Without locks (locking) it is the
+// frame's count, as before. With them and a limit, the transaction takes the
 // organization's max_cis lock and counts again inside the transaction: the
 // exclusive lock near the limit, so that admission is exact; the shared lock
 // otherwise, which lanes hold side by side and which an exclusive holder
@@ -333,7 +391,7 @@ var errNearLimit = errors.New("ingest: max_cis headroom below the creations the 
 // (errNearLimit). Lanes being drained after a lane count was lowered are not
 // counted: until they are empty, each may add up to ingestBatch.
 func (h *Handler) admissionCount(ctx context.Context, orgID string, frame *batchFrame, snapshot int64) (int64, error) {
-	if !h.lanesOn() || h.limits == nil || !database.InTx(ctx) {
+	if !frame.locking || h.limits == nil || !database.InTx(ctx) {
 		return snapshot, nil
 	}
 	locker, ok := h.repo.(CICountLocker)
@@ -347,7 +405,7 @@ func (h *Handler) admissionCount(ctx context.Context, orgID string, frame *batch
 	if err := h.limits.AllowCreate(ctx, orgID, entitlement.LimitMaxCIs, math.MaxInt64); !errors.As(err, &exceeded) {
 		return snapshot, nil
 	}
-	inFlight := int64(h.ingestLanes+1) * ingestBatch
+	inFlight := int64(max(h.ingestLanes, 1)+1) * ingestBatch
 	exclusive := frame.limitExclusive || snapshot+inFlight > exceeded.Limit
 	count, err := locker.LockCICount(ctx, orgID, exclusive)
 	if err != nil {
@@ -360,7 +418,7 @@ func (h *Handler) admissionCount(ctx context.Context, orgID string, frame *batch
 }
 
 // maxRecordRetries bounds the immediate retries of a record whose
-// transaction lost against another lane.
+// transaction lost against another lane or instance.
 const maxRecordRetries = 3
 
 // outOfMemoryPause is the pause before the first new attempt of a
@@ -368,10 +426,10 @@ const maxRecordRetries = 3
 // gave up waiting for a lock; the next attempts wait one more pause each.
 const outOfMemoryPause = 100 * time.Millisecond
 
-// retryReason names why a failed record transaction is started again with
-// more than one lane, or returns "": a deadlock (40P01) or serialization
-// failure (40001) with another lane, a unique identity index another lane
-// or instance won (23505 on serial number, hardware UUID or primary MAC; the
+// retryReason names why a failed record transaction that takes the ingest
+// locks (locking) is started again, or returns "": a deadlock (40P01) or
+// serialization failure (40001) with another lane or instance, a unique
+// identity index another lane or instance won (23505 on serial number, hardware UUID or primary MAC; the
 // new attempt matches that CI), a max_cis admission that must run
 // exclusively, PostgreSQL out of shared memory (53200, mostly a full lock
 // table) for a moment, or a lock wait longer than the ingest lock timeout
@@ -421,15 +479,16 @@ func retryPause(ctx context.Context, reason string, attempt int) bool {
 	}
 }
 
-// runRecord processes record i of the frame in its own transaction. With
-// more than one lane a transaction that lost against another lane, ran out
-// of shared memory or waited too long for a lock (see retryReason) runs
-// again, at most maxRecordRetries times, in a fresh transaction and from the
-// record as reported (retryPause); the queue does not see these attempts.
-// With one lane the record runs once, as before.
+// runRecord processes record i of the frame in its own transaction. When
+// the frame's records take the ingest locks (locking), a transaction that
+// lost against another one, ran out of shared memory or waited too long for
+// a lock (see retryReason) runs again, at most maxRecordRetries times, in a
+// fresh transaction and from the record as reported (retryPause); the queue
+// does not see these attempts. Without locks the record runs once, as
+// before.
 func (h *Handler) runRecord(ctx context.Context, orgID string, frame *batchFrame, i int) (recordOutcome, error) {
 	var reported IngestItem
-	if h.lanesOn() {
+	if frame.locking {
 		reported = cloneItem(&frame.items[i])
 	}
 	for attempt := 0; ; attempt++ {
@@ -444,7 +503,7 @@ func (h *Handler) runRecord(ctx context.Context, orgID string, frame *batchFrame
 		// Devices the failed transaction queued as unlicensed are not.
 		frame.unlicensed.rollback(mark)
 		reason := retryReason(err)
-		if !h.lanesOn() || reason == "" || attempt >= maxRecordRetries || !retryPause(ctx, reason, attempt) {
+		if !frame.locking || reason == "" || attempt >= maxRecordRetries || !retryPause(ctx, reason, attempt) {
 			return out, err
 		}
 		if reason == "near_limit" {

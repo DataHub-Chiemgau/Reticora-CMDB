@@ -170,20 +170,21 @@ func (h *Handler) dispatch(ctx context.Context, msgs []IngestMessage) (BulkInges
 
 // ProcessMessages is the ingest consumer's processing step: it orders the
 // messages by observed_at and processes them per organization and ingest
-// lane, serially per organization and lane within this process, each in the
-// tenant scope it carries.
+// lane, serially per organization and lane within this process (per
+// organization when its lanes do not run side by side, see serialLane),
+// each in the tenant scope it carries.
 func (h *Handler) ProcessMessages(ctx context.Context, msgs []IngestMessage) (BulkIngestResponse, error) {
 	ordered := append([]IngestMessage(nil), msgs...)
 	sortByObservedAt(ordered)
 	var total BulkIngestResponse
 	for len(ordered) > 0 {
 		head := ordered[0]
-		lane := head.lane(h.ingestLanes)
+		lane := h.serialLane(head.lane(h.ingestLanes))
 		var group []IngestItem
 		var rest []IngestMessage
 		for i := range ordered {
 			if ordered[i].OrganizationID == head.OrganizationID && sameScope(ordered[i].Scope, head.Scope) &&
-				ordered[i].lane(h.ingestLanes) == lane {
+				h.serialLane(ordered[i].lane(h.ingestLanes)) == lane {
 				group = append(group, ordered[i].item())
 			} else {
 				rest = append(rest, ordered[i])
@@ -206,10 +207,11 @@ func sameScope(a, b *MessageScope) bool {
 }
 
 // processSerially processes the items of one lane of an organization while
-// no other ingest of that lane runs in this process. With one lane that is
-// the organization.
+// no other ingest of that lane runs in this process. With one lane, or when
+// the lanes of an organization do not run side by side (serialLane), that
+// is the organization.
 func (h *Handler) processSerially(ctx context.Context, orgID string, lane int, items []IngestItem) (BulkIngestResponse, error) {
-	mu := h.laneMutex(orgID, lane)
+	mu := h.laneMutex(orgID, h.serialLane(lane))
 	mu.Lock()
 	defer mu.Unlock()
 	return h.processItems(ctx, orgID, items)
@@ -900,8 +902,11 @@ func (q *NATSIngestQueue) Backlog(ctx context.Context) (int, error) {
 // terminated; the messages of a group (organization, scope, lane) are
 // acknowledged when it was processed, and so are its records processed
 // before or within it when it failed; the others are redelivered, and given
-// up after ingestMaxDeliver attempts.
+// up after ingestMaxDeliver attempts. Other consumers may process records
+// of the same organization at the same time, so the transactions take the
+// ingest locks whatever the lane count (Handler.locking).
 func consumeBatch(ctx context.Context, h *Handler, deliveries []ingestDelivery) {
+	ctx = withQueued(ctx)
 	type entry struct {
 		msg IngestMessage
 		d   ingestDelivery

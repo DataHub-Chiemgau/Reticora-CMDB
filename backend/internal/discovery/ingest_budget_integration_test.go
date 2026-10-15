@@ -216,7 +216,7 @@ func TestIngestStatementBudget(t *testing.T) {
 
 	// Every repository on the counting pool: a join runs on the
 	// transaction's connection whatever pool the callee holds.
-	handler := func(production, batch bool, lanes ...int) http.Handler {
+	build := func(production, batch bool, lanes ...int) *discovery.Handler {
 		var indexer ci.Indexer = search.NewCIIndexer(search.NewPGRepository(pool))
 		cis := ci.NewIndexingRepository(ci.NewPGRepositoryWithAudit(pool, audit.NewPGRecorder()).WithEvents(events.NewOutbox()), indexer)
 		if production {
@@ -234,8 +234,11 @@ func TestIngestStatementBudget(t *testing.T) {
 			types := citype.NewPGRepository(pool)
 			h.WithInstanceFields(types).WithObservedValidator(ci.NewService(cis).WithFieldResolver(types))
 		}
+		return h
+	}
+	handler := func(production, batch bool, lanes ...int) http.Handler {
 		mux := chi.NewRouter()
-		h.RegisterRoutes(mux)
+		build(production, batch, lanes...).RegisterRoutes(mux)
 		return mux
 	}
 	seq := 0
@@ -589,6 +592,60 @@ func TestIngestStatementBudget(t *testing.T) {
 		}
 		t.Logf("with 4 lanes: 20 new devices in %d batch transactions (one per lane) of at most %d statements, a new record in %d statements",
 			len(b.records), len(tx), largest)
+	})
+
+	// Records consumed from the ingest queue take the identity locks with
+	// one lane too (holistic review of WP-334): other instances, the former
+	// consumer and drain lanes may process the organization at the same
+	// time. The same one statement more as with lanes; the HTTP ingest
+	// without a queue (the subtests above) takes none.
+	t.Run("queue with one lane", func(t *testing.T) {
+		lock := regexp.MustCompile(`(?s)^with prev as materialized .*pg_advisory_xact_lock_shared\(s\.c, s\.k\)`)
+		consume := func(t *testing.T, h *discovery.Handler, n int) ingestBatch {
+			t.Helper()
+			records := devices(n)
+			trace.take()
+			for i, result := range discovery.ConsumeRecords(ctx, h, f.OrgA, records...) {
+				if result != "ack" {
+					t.Fatalf("record %d: delivery %s", i, result)
+				}
+			}
+			var b ingestBatch
+			var txs [][]string
+			txs, b.loose = trace.take()
+			for _, tx := range txs {
+				if count(tx, insertCI) > 0 {
+					b.records = append(b.records, tx)
+				} else {
+					b.frame = append(b.frame, tx)
+				}
+			}
+			return b
+		}
+		batched := build(false, true, 1)
+		consume(t, batched, 1)
+		b := consume(t, batched, 20)
+		if len(b.records) != 1 {
+			t.Fatalf("%d transactions create the 20 new devices of one lane, want one batch: %q", len(b.records), b.records)
+		}
+		if tx := b.records[0]; count(tx, lock.String()) != 1 || !lock.MatchString(tx[1]) || len(tx) > batchBudget+1 {
+			t.Errorf("batch transaction from the queue with one lane: %d statements, want the identity locks once, first, within %d: %q",
+				len(tx), batchBudget+1, tx)
+		}
+		perRecord := build(false, false, 1)
+		consume(t, perRecord, 1)
+		r := consume(t, perRecord, 20)
+		largest := checkRecords(t, &r, 20)
+		for _, tx := range r.records {
+			if !lock.MatchString(tx[1]) {
+				t.Errorf("record transaction from the queue with one lane does not take the identity locks first: %q", tx)
+			}
+		}
+		if largest > ingestRecordBudget+1 {
+			t.Errorf("record transaction from the queue with one lane: %d statements, budget %d plus the lock", largest, ingestRecordBudget)
+		}
+		t.Logf("from the queue with one lane: 20 new devices in one batch transaction of %d statements, a new record in %d statements",
+			len(b.records[0]), largest)
 	})
 
 	// Two records of one device in a window: the first is created in the

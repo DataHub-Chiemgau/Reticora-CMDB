@@ -2,7 +2,10 @@ package discovery
 
 import (
 	"context"
+	"encoding/json"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // Hooks of the batch candidate queries for the integration tests of
@@ -32,10 +35,13 @@ func IdentityBranchQuery(orgID string, keys *IdentityKeys, deleted bool, name st
 	return "", nil, false
 }
 
-// ProcessInLane processes records in a lane of the organization as that
-// lane's consumer would, whatever lane their keys select (WP-334): records
-// of one device with different strongest keys, a lane count changed under
-// way, or two instances. ctx carries the tenant and its scope.
+// ProcessInLane processes records in a lane of the organization, whatever
+// lane their keys select (WP-334): records of one device with different
+// strongest keys, a lane count changed under way, or two instances. It
+// processes as the HTTP ingest without a queue does, which with more than
+// one lane takes the same locks as a lane's consumer; ConsumeRecords
+// consumes as a consumer of the queue does with any lane count. ctx carries
+// the tenant and its scope.
 func ProcessInLane(ctx context.Context, h *Handler, orgID string, lane int, recs ...DeviceRecord) (BulkIngestResponse, error) {
 	items := make([]IngestItem, len(recs))
 	for i := range recs {
@@ -48,6 +54,34 @@ func ProcessInLane(ctx context.Context, h *Handler, orgID string, lane int, recs
 // like ProcessInLane.
 func ProcessItemsInLane(ctx context.Context, h *Handler, orgID string, lane int, items ...IngestItem) (BulkIngestResponse, error) {
 	return h.processSerially(ctx, orgID, lane, items)
+}
+
+// ConsumeRecords consumes records of the organization as a consumer of the
+// ingest queue does (consumeBatch), one delivery per record in the tenant
+// scope of ctx, and returns how each delivery ended ("ack", "nak", "term")
+// in the order of observed_at.
+func ConsumeRecords(ctx context.Context, h *Handler, orgID string, recs ...DeviceRecord) []string {
+	items := make([]IngestItem, len(recs))
+	for i := range recs {
+		items[i] = itemFromRecord(&recs[i])
+	}
+	msgs := newIngestMessages(ctx, tenant.TenantInfo{OrganizationID: orgID}, "", items)
+	fakes := make([]*fakeDelivery, len(msgs))
+	deliveries := make([]ingestDelivery, len(msgs))
+	for i := range msgs {
+		data, err := json.Marshal(&msgs[i])
+		if err != nil {
+			panic(err)
+		}
+		fakes[i] = &fakeDelivery{data: data, delivered: 1}
+		deliveries[i] = fakes[i]
+	}
+	consumeBatch(ctx, h, deliveries)
+	results := make([]string, len(fakes))
+	for i, d := range fakes {
+		results[i] = d.result
+	}
+	return results
 }
 
 // ItemFromRecord is the ingest item of a record.

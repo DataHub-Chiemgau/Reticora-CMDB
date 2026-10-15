@@ -184,6 +184,84 @@ func TestIngestLanesIdentityLock(t *testing.T) {
 	t.Run("bounded per transaction", func(t *testing.T) { identityLocksBounded(t, f) })
 	t.Run("own lock space", func(t *testing.T) { identityLockSpace(t, f) })
 	t.Run("lock timeout", func(t *testing.T) { identityLockTimeout(t, f) })
+	t.Run("one lane from the queue", func(t *testing.T) { identityLockQueued(t, f) })
+}
+
+// identityLockQueued: records consumed from the ingest queue take the
+// identity locks with one lane too (holistic review of WP-334). Two
+// instances with RETICORA_INGEST_LANES=1 consume records of one device at
+// the same time (the lane 0 consumer of one, the former consumer or a drain
+// lane of the other, each with its own MaxAckPending); the mutex of one
+// process does not hold the other. The records share only the management
+// IP and sysObjectID, which no unique index catches. Control: the HTTP
+// ingest without a queue takes no locks (the WP-332/333 budgets), so two
+// instances create the device twice there.
+func identityLockQueued(t *testing.T, f *scopetest.Fixture) {
+	bg := context.Background()
+	ctx := lanesCtx(f, f.OrgB)
+	instance := func(b *pairBarrier) *discovery.Handler {
+		h := discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App)).
+			WithProvenance(provenance{repo: override.NewPGRepository(f.App)}).WithIngestLanes(1)
+		discovery.SetBeforeCreate(h, func(context.Context) { b.wait(time.Second) })
+		return h
+	}
+	seen := time.Now().Add(-time.Minute)
+	record := func(serial, ip string) plugins.DeviceRecord {
+		rec := plugins.RecordFromResult("snmp", &plugins.Result{CIType: "switch", Name: "queued-" + ip, IP: ip, Serial: serial}, seen)
+		rec.Classification.SysObjectID = "1.3.6.1.4.1.9.1.1208"
+		return rec
+	}
+	byIP := func(ip string) int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci WHERE organization_id = $1 AND management_ip = $2 AND deleted_at IS NULL`,
+			f.OrgB, ip).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	control := &pairBarrier{}
+	one, two := instance(control), instance(control)
+	var wg sync.WaitGroup
+	for i, h := range []*discovery.Handler{one, two} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := discovery.ProcessInLane(ctx, h, f.OrgB, 0, record([]string{"", "QUEUED-HTTP"}[i], "198.18.50.1")); err != nil {
+				t.Errorf("control, instance %d: %v", i, err)
+			}
+		}()
+	}
+	wg.Wait()
+	if control.met.Load() != 1 || byIP("198.18.50.1") != 2 {
+		t.Fatalf("control (HTTP without a queue, one lane, two instances): decided together %d times, %d CIs; the race must create two",
+			control.met.Load(), byIP("198.18.50.1"))
+	}
+
+	queued := &pairBarrier{}
+	one, two = instance(queued), instance(queued)
+	for round := 0; round < 5; round++ {
+		ip := fmt.Sprintf("198.18.51.%d", round)
+		results := make([][]string, 2)
+		for i, h := range []*discovery.Handler{one, two} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				results[i] = discovery.ConsumeRecords(ctx, h, f.OrgB, record([]string{"", fmt.Sprintf("QUEUED-%d", round)}[i], ip))
+			}()
+		}
+		wg.Wait()
+		if results[0][0] != "ack" || results[1][0] != "ack" {
+			t.Errorf("round %d: deliveries %v, want both acknowledged", round, results)
+		}
+		if n := byIP(ip); n != 1 {
+			t.Errorf("round %d: %d CIs for one device consumed by two instances with one lane, want 1", round, n)
+		}
+	}
+	if queued.met.Load() != 0 {
+		t.Errorf("records consumed from the queue with one lane decided to create one device together %d times", queued.met.Load())
+	}
 }
 
 // schedulerLeaderKey is the bigint of the scheduler's leader lock
@@ -501,7 +579,9 @@ func (l fixedLimit) AllowCreate(_ context.Context, _, quota string, current int6
 // organization ends with exactly as many CIs as its limit allows and holds
 // every other device as unlicensed_ci. Organization A starts near the limit
 // (every creation exclusive), organization B far from it, so its lanes
-// start under the shared lock and turn exclusive on the way.
+// start under the shared lock and turn exclusive on the way. Then four
+// instances with one lane consume new devices of organization A from the
+// queue at once (holistic review): the limit holds across them too.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestIngestLanesMaxCIs(t *testing.T) {
@@ -522,24 +602,48 @@ func TestIngestLanesMaxCIs(t *testing.T) {
 		rounds       int
 		wantCIs      int
 		wantHeldOpen int
+		queued       bool
 	}{
-		{f.OrgA, 150, 1, 150, 250},
-		{f.OrgB, 500, 2, 500, 300},
+		{f.OrgA, 150, 1, 150, 250, false},
+		{f.OrgB, 500, 2, 500, 300, false},
+		// Four instances with one lane consume from the queue at once
+		// (holistic review): 150 more on top of the 150 of the first case.
+		{f.OrgA, 300, 1, 300, 500, true},
 	} {
-		h := discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App)).
-			WithLimits(fixedLimit{c.limit}).WithIngestLanes(4)
+		lanes := 4
+		if c.queued {
+			lanes = 1
+		}
+		instance := func() *discovery.Handler {
+			return discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App)).
+				WithLimits(fixedLimit{c.limit}).WithIngestLanes(lanes)
+		}
+		h := instance()
 		ctx := lanesCtx(f, c.org)
 		var wg sync.WaitGroup
 		for lane := range 4 {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				h := h
+				if c.queued {
+					h = instance()
+				}
 				for round := range c.rounds {
 					recs := make([]plugins.DeviceRecord, 100)
 					for i := range recs {
-						serial := fmt.Sprintf("LIMIT-%d-%d-%03d", lane, round, i)
+						serial := fmt.Sprintf("LIMIT-%v-%d-%d-%03d", c.queued, lane, round, i)
 						recs[i] = plugins.RecordFromResult("snmp", &plugins.Result{CIType: "server", Name: serial, Serial: serial,
-							IP: fmt.Sprintf("10.%d.%d.%d", 40+lane, round, i)}, time.Now().Add(-time.Minute))
+							IP: fmt.Sprintf("10.%d.%d.%d", 40+lane, round+c.rounds*btoi(c.queued), i)}, time.Now().Add(-time.Minute))
+					}
+					if c.queued {
+						for _, result := range discovery.ConsumeRecords(ctx, h, c.org, recs...) {
+							if result != "ack" {
+								t.Errorf("instance %d: delivery %s", lane, result)
+								break
+							}
+						}
+						continue
 					}
 					if _, err := discovery.ProcessInLane(ctx, h, c.org, lane, recs...); err != nil {
 						t.Errorf("lane %d, round %d: %v", lane, round, err)
@@ -549,8 +653,16 @@ func TestIngestLanesMaxCIs(t *testing.T) {
 		}
 		wg.Wait()
 		if cis, held := counts(c.org); cis != c.wantCIs || held != c.wantHeldOpen {
-			t.Errorf("limit %d, %d rounds of 4 x 100 devices: %d CIs and %d unlicensed_ci, want %d and %d",
-				c.limit, c.rounds, cis, held, c.wantCIs, c.wantHeldOpen)
+			t.Errorf("limit %d, %d rounds of 4 x 100 devices (one lane from the queue: %v): %d CIs and %d unlicensed_ci, want %d and %d",
+				c.limit, c.rounds, c.queued, cis, held, c.wantCIs, c.wantHeldOpen)
 		}
 	}
+}
+
+// btoi is 1 for true.
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
