@@ -1,10 +1,11 @@
 # Sizing
 
 Reticora is designed for 1,000–10,000 objects (CIs, assets, locations) per
-customer with headroom up to 50,000 (CH15, NFR-01; the range is still to be
-confirmed, decision E-17). The installer checks the host against the minimum
-of its profile and warns when a resource is below it (INS-07); it does not
-abort.
+customer with headroom up to 50,000 (CH15, NFR-01; the range was confirmed on
+2026-10-15, decision E-17: budgets apply at 10,000 objects, the headroom up
+to 50,000 works without a budget commitment). The installer checks the host
+against the minimum of its profile and warns when a resource is below it
+(INS-07); it does not abort.
 
 ## Supported platforms
 

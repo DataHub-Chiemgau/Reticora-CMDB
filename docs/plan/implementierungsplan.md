@@ -14,6 +14,7 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt alle offenen Punkte der Pha
 - 20 IDs haben den Status N/P. Ohne externe Klärung nicht umsetzbare N/P-Punkte erhalten kein WP. Sie sind in `abdeckung.csv` der zuständigen Entscheidung zugeordnet.
 - **239 Arbeitspakete** mit zusammen **355,0 PT**. Davon fallen 26 WPs (42,5 PT) in den Meilenstein M-S. Nach E-03 (entschieden: deaktivieren) gehört von M-S nur WP-214 (`m-gates`) zum G1-Umfang. **G1-Umfang: 214 WPs mit 314,0 PT.** WP-215 bis WP-239 (25 WPs, 41,0 PT) sind in die jeweilige Folgephase verschoben.
 - **Nachtrag vom 2026-10-14 (G1-Nachbesserung):** Die Gate-Prüfung (WP-213) ergab die Blocker B1 (NFR-03) und B2 (NFR-02). WP-332 bis WP-335 (4 WPs, 5,5 PT) schließen sie und sind G1-Pflicht; G1-Umfang damit 218 WPs mit 319,5 PT. Stand 2026-10-14: Alle vier WPs sind umgesetzt (Commits `d2daeed` bis `dbbfded`, dazu `58863fa` und `dea65b7` aus dem Gesamtreview und am 2026-10-15 die Nachträge `3f2bfd5` bis `0f165cc` zu seinen nicht blockierenden Befunden; noch nicht gemergt); im Wiederholungslauf auf Commit `dbbfded` sind B1 und B2 geschlossen ([Umsetzungsstand](#umsetzungsstand-2026-10-14)).
+- **Nachtrag vom 2026-10-15 (Freigabe G1):** Der Auftraggeber hat [E-17](entscheidungen.md#e-17), [E-56](entscheidungen.md#e-56), [E-57](entscheidungen.md#e-57) und [E-58](entscheidungen.md#e-58) nach den Empfehlungen entschieden, die Blocker B3 (Pentest), B4 (v2-Texte) und B6 (Subprozessorenliste) für erledigt erklärt und G1 freigegeben. G1 ist damit bestanden; nachzureichen sind der grüne CI-Lauf auf PR #64 mit dem Merge nach `main` und die Nachweise zu B3, B4 und B6 (`docs/acceptance/g1-gate.md`, Abschnitt „Ergebnis“).
 - Format der WP-Blöcke: Die Aufgabenstellung bricht nach „### WP-“ ab. Das Format ist deshalb im Abschnitt „Konventionen“ festgelegt. Es enthält alle Felder, die die Planungsregeln verlangen (IDs, Tests, Traceability, Migration/RLS, Voraussetzungen, Aufwand, Entscheidungsbedarf).
 
 ## Überblick
@@ -38,7 +39,7 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt alle offenen Punkte der Pha
 | [Lasttest (NFR-10)](#lasttest-nfr-10) | Lasttest nach NFR-10 mit Nachweis NFR-01/02/03 und ABN-02/03. | WP-203 – WP-207 | 5 | 8,0 | Bericht mit p95-Werten; Budgets eingehalten. |
 | [Sicherheitsreview](#sicherheitsreview) | Sicherheitsreview, vollständige Kanal-Isolationsmatrix und externer Pentest. | WP-208 – WP-210 | 3 | 5,0 | Keine offenen High/Critical. |
 | [Gate G1](#gate-g1) | Gate G1 nach GATE-01 bis GATE-03 (GATE-05 berücksichtigt). | WP-211 – WP-213 | 3 | 3,5 | Gate-Checkliste vollständig belegt. |
-| [G1-Nachbesserung (NFR-02, NFR-03)](#g1-nachbesserung-nfr-02-nfr-03) | Blocker B1 (NFR-03, SR-02) und B2 (NFR-02, SR-05) der Gate-Checkliste schließen (Nachtrag 2026-10-14). Stand 2026-10-15: umgesetzt, B1 und B2 geschlossen; der grüne `load.yml`-Lauf liegt für Commit `918a832` vor (Run 38665599979, Wiederholung nach dem Merge nächtlich auf `main`); offen ist E-58. | WP-332 – WP-335 | 4 | 5,5 | NFR-02 und NFR-03 PASS im Lastlauf; SR-02 und SR-05 behoben; B1 und B2 geschlossen. |
+| [G1-Nachbesserung (NFR-02, NFR-03)](#g1-nachbesserung-nfr-02-nfr-03) | Blocker B1 (NFR-03, SR-02) und B2 (NFR-02, SR-05) der Gate-Checkliste schließen (Nachtrag 2026-10-14). Stand 2026-10-15: umgesetzt, B1 und B2 geschlossen; der grüne `load.yml`-Lauf liegt für Commit `918a832` vor (Run 38665599979, Wiederholung nach dem Merge nächtlich auf `main`); E-17, E-56, E-57 und E-58 am 2026-10-15 entschieden, G1 mit der Freigabe des Auftraggebers bestanden (Nachweise zu B3, B4, B6 nachzureichen). | WP-332 – WP-335 | 4 | 5,5 | NFR-02 und NFR-03 PASS im Lastlauf; SR-02 und SR-05 behoben; B1 und B2 geschlossen. |
 | [M-S – High-Befunde späterer Phasen (nach E-03)](#m-s--high-befunde-späterer-phasen-nach-e-03) | High-/Critical-Befunde in Code späterer Phasen. Nach E-03 (entschieden: deaktivieren) schaltet WP-214 (`m-gates`) die Module im G1-Release ab; WP-215 bis WP-239 sind in die Folgephasen verschoben. | WP-214 – WP-239 | 26 (G1: 1) | 42,5 (G1: 1,5) | WP-214 (`m-gates`) gemergt vor G1; die übrigen WPs sind nicht G1-Umfang. |
 
 Reihenfolge nach Auftrag und SEQ-01 (`docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:75`):
@@ -124,8 +125,8 @@ Der Auftraggeber hat angewiesen, nach den Empfehlungen in `entscheidungen.md` vo
 - **G1-Umfang** ([E-03](entscheidungen.md#e-03), deaktivieren): WP-214 (`m-gates`) ist G1-Pflicht und schaltet Spätphasen-Module standardmäßig ab. WP-215 bis WP-239 sind verschoben. Die M0-WPs in Spätphasen-Modulen bleiben verpflichtend; ihre Kriterien „Alternative nach E-03“ entfallen.
 - **Epics und Traceability** ([E-06](entscheidungen.md#e-06), [E-07](entscheidungen.md#e-07)): Die Epic-Zuordnung ist bestätigt; M0-WPs tragen ihr fachliches Epic.
 - **Festgelegte Umsetzungsregeln:** fail-closed-Scopes und `WithSystem` ([E-08](entscheidungen.md#e-08)), NULL-Scope-Schreiben nur org-weit ([E-09](entscheidungen.md#e-09)), globale Kataloge read-only ([E-10](entscheidungen.md#e-10)), Team-Scope als Schnittmenge (vorläufig, [E-11](entscheidungen.md#e-11)), CH21/CH26–CH30 bestätigt ([E-14](entscheidungen.md#e-14), [E-18](entscheidungen.md#e-18) bis [E-22](entscheidungen.md#e-22)), VLAN-Eindeutigkeit über zwei Teilindizes ([E-24](entscheidungen.md#e-24)), API-05-Pfade wörtlich mit Deprecation/Sunset ([E-25](entscheidungen.md#e-25)), Quarantäne in 000056 ([E-26](entscheidungen.md#e-26)), Install-Matrix nach CH22 ([E-27](entscheidungen.md#e-27)), externer Pentest ([E-28](entscheidungen.md#e-28)), Traceability stufenweise blockierend ([E-30](entscheidungen.md#e-30)), Werkzeuge govulncheck/npm audit/Trivy/cosign keyless/k6 ([E-31](entscheidungen.md#e-31)), DB-05 nur [B]-Zeilen für G1 ([E-36](entscheidungen.md#e-36)).
-- **Offen mit Termin:** E-02, E-17 und E-35, aus der G1-Nachbesserung E-56 und E-58 (E-01 und E-23 sind seit der Lieferung vom 2026-10-01 entschieden, E-32 seit 2026-10-05, E-04, E-15, E-29 und E-33 seit 2026-10-12). Die WP-Blöcke zeigen den Status jeder verwiesenen Entscheidung im Feld „Entscheidungsbedarf“.
-- **G1-Nachbesserung (2026-10-14):** Die Gate-Prüfung (WP-213) ergab die Blocker B1 (NFR-03) und B2 (NFR-02). WP-332 bis WP-335 sind umgesetzt und schließen sie (Wiederholungslauf auf Commit `dbbfded`, [Umsetzungsstand](#umsetzungsstand-2026-10-14)). [E-56](entscheidungen.md#e-56) (Reihenfolge bei parallelen Ingest-Spuren) bleibt offen, sperrt WP-334 aber nicht mehr: Umgesetzt ist die Empfehlung, Option 1 mit Identitätssperre. Neu sind [E-57](entscheidungen.md#e-57) (Impact-Antwort und API-01, vorläufig entschieden: nur additiv) und [E-58](entscheidungen.md#e-58) (Referenzumgebung des G1-Lasttests, offen: Gilt der lokale Lauf als Nachweis für GATE-03?). Die Bestätigungen stehen als Aufgaben A-12 bis A-14 in [`entscheidungen.md`](entscheidungen.md#offene-aufgaben).
+- **Offen mit Termin:** E-02 und E-35; ihre Lieferungen hat der Auftraggeber am 2026-10-15 für erledigt erklärt, die Texte bzw. die Liste sind nachzureichen (E-01 und E-23 sind seit der Lieferung vom 2026-10-01 entschieden, E-32 seit 2026-10-05, E-04, E-15, E-29 und E-33 seit 2026-10-12, E-17 sowie aus der G1-Nachbesserung E-56, E-57 und E-58 seit 2026-10-15). Die WP-Blöcke zeigen den Status jeder verwiesenen Entscheidung im Feld „Entscheidungsbedarf“.
+- **G1-Nachbesserung (2026-10-14):** Die Gate-Prüfung (WP-213) ergab die Blocker B1 (NFR-03) und B2 (NFR-02). WP-332 bis WP-335 sind umgesetzt und schließen sie (Wiederholungslauf auf Commit `dbbfded`, [Umsetzungsstand](#umsetzungsstand-2026-10-14)). [E-56](entscheidungen.md#e-56) (Reihenfolge bei parallelen Ingest-Spuren) ist am 2026-10-15 entschieden: Option 1 mit Identitätssperre, wie in WP-334 umgesetzt. Neu sind [E-57](entscheidungen.md#e-57) (Impact-Antwort und API-01, am 2026-10-15 entschieden: Option A, nur additiv) und [E-58](entscheidungen.md#e-58) (Referenzumgebung des G1-Lasttests, am 2026-10-15 entschieden: Option 1, der Lastnachweis auf 4-vCPU-Hosts gilt für GATE-03; dedizierter Referenzhost vor GA). Die Aufgaben A-12 bis A-14 in [`entscheidungen.md`](entscheidungen.md#offene-aufgaben) sind erledigt.
 
 ## Konventionen für alle WPs
 
@@ -4663,7 +4664,7 @@ INS-07;[B];A;tests/install-preflight.test.sh;WP-093
 TEC-09;[B];A;tests/install-preflight.test.sh;WP-093
 ```
 
-**Entscheidungsbedarf:** [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (offen)
+**Entscheidungsbedarf:** [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9656,7 +9657,7 @@ SIM-01;[B], Teilumfang [P2];LT;backend/cmd/seed/seed_integration_test.go;WP-203
 NFR-10;[Q];LT;backend/cmd/seed/seed_integration_test.go;WP-203
 ```
 
-**Entscheidungsbedarf:** [E-34](entscheidungen.md#e-34) ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan (vorläufig entschieden); [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (offen)
+**Entscheidungsbedarf:** [E-34](entscheidungen.md#e-34) ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan (vorläufig entschieden); [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -9784,7 +9785,7 @@ NFR-03;[B], Teilumfang [P5];LT;tests/load/;WP-206
 ABN-02;[Q];LT;tests/load/;WP-206
 ```
 
-**Entscheidungsbedarf:** [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (offen)
+**Entscheidungsbedarf:** [E-17](entscheidungen.md#e-17) CH15: Skalierungsziel bestätigen (entschieden)
 
 **Nicht Bestandteil:** Änderungen außerhalb der genannten Dateien und IDs.
 
@@ -10135,12 +10136,12 @@ WP-332 bis WP-335 sind auf die Anweisung vom 2026-10-14 („WP-332 bis WP-335 um
 
 **Prüfungen auf Commit `dbbfded`:** Build, `gofmt`, `go vet` und golangci-lint v2.14.0 ohne Befund; `go test ./...` grün. DB-Suite auf frischer Datenbank: 89 Pakete, 1.885 Tests, davon 2 Fehlschläge in `internal/permission` (Sortierung des Katalogs unter der lokalen Collation en_US; das CI-Image sortiert wie C, mit einer C.UTF-8-Datenbank ist das Paket grün; Paket und Migrationen sind unverändert). `TestMigrationsRoundtrip` läuft auf dem geteilten lokalen Cluster nicht (`DROP ROLE reticora_app` scheitert) und bleibt der CI überlassen. Frontend: Formatprüfung, Lint, Typecheck, Vitest (47 Dateien, 249 Tests), Build und `generate:api:check` grün. Auf dem Stand von `58863fa` und `dea65b7` sind `gofmt`, `go vet`, golangci-lint und `go test ./...` ohne Befund, die DB-Tests der betroffenen Pakete grün und `kustomize build` von base, staging und prod in Ordnung. Auf dem Stand der Nachträge (`111bdc4`) sind `gofmt`, `go vet`, golangci-lint und `go test ./...` ohne Befund, die DB-Tests von `discovery`, `database`, `ci`, `topology`, `relationship`, `server`, `tenant`, `override`, `middleware` und `api` grün, ebenso `tests/rep01-structure.test.sh`, `generate:api:check` und der Typecheck des Frontends. Der CI-Lauf auf dem Release-Kandidaten steht aus.
 
-**Folgen für Gate G1** (`docs/acceptance/g1-gate.md`, `docs/security/review-g1.md`): B1 und B2 sind geschlossen, SR-02 und SR-05 behoben; NFR-02, NFR-03 und NFR-10 stehen auf PASS. Der Ausstieg dieses Meilensteins ist damit erreicht; der grüne `load.yml`-Lauf aus WP-334 (AK 4) liegt für Commit `918a832` vor. GATE-03 „Lasttest bestanden“ ist PASS mit zwei Nachweisen: dem lokalen Wiederholungslauf und dem GitHub-Lauf. Offen sind:
+**Folgen für Gate G1** (`docs/acceptance/g1-gate.md`, `docs/security/review-g1.md`): B1 und B2 sind geschlossen, SR-02 und SR-05 behoben; NFR-02, NFR-03 und NFR-10 stehen auf PASS. Der Ausstieg dieses Meilensteins ist damit erreicht; der grüne `load.yml`-Lauf aus WP-334 (AK 4) liegt für Commit `918a832` vor. GATE-03 „Lasttest bestanden“ ist PASS mit zwei Nachweisen: dem lokalen Wiederholungslauf und dem GitHub-Lauf. Am 2026-10-15 entschieden:
 
-- [E-58](entscheidungen.md#e-58) (offen, Aufgabe A-14): Ob der Lauf auf dem 4-vCPU-Host als G1-Nachweis für GATE-03 gilt, entscheidet der Auftraggeber bei der Gate-Abnahme mit dem Product Owner. Empfohlen ist die Anerkennung mit Auflagen. Die Auflage eines grünen `load.yml`-Laufs ist für Commit `918a832` erfüllt: Run 38665599979 auf dem Standard-Runner `ubuntu-latest` (4 CPUs) hält alle k6-Schwellen ein, je Szenario als eigener Job mit frischem Seed und `ANALYZE` (Abbau ab Sendeende 798 Records/s, Spool-Flush 15,1 s, Impact Tiefe 20 p95 852 ms kompakt und 882 ms in der Standardform; `docs/acceptance/lasttest-g1.md`). `load.yml` läuft auf GitHub nur manuell oder nächtlich auf dem Standardbranch; nach dem Merge wiederholt der nächtliche Lauf den Nachweis auf dem Release-Kandidaten.
-- Die Bestätigungen zu [E-56](entscheidungen.md#e-56) (Aufgabe A-12) und [E-57](entscheidungen.md#e-57) (Aufgabe A-13), beide vor der G1-Freigabe.
+- [E-58](entscheidungen.md#e-58) (entschieden, Option 1, Aufgabe A-14 erledigt): Der Auftraggeber erkennt den Lastnachweis auf 4-vCPU-Hosts als G1-Nachweis für GATE-03 an, mit den Auflagen der Empfehlung; ein dedizierter Referenzhost folgt vor GA (SR-06). Die Auflage eines grünen `load.yml`-Laufs ist für Commit `918a832` erfüllt: Run 38665599979 auf dem Standard-Runner `ubuntu-latest` (4 CPUs) hält alle k6-Schwellen ein, je Szenario als eigener Job mit frischem Seed und `ANALYZE` (Abbau ab Sendeende 798 Records/s, Spool-Flush 15,1 s, Impact Tiefe 20 p95 852 ms kompakt und 882 ms in der Standardform; `docs/acceptance/lasttest-g1.md`). `load.yml` läuft auf GitHub nur manuell oder nächtlich auf dem Standardbranch; nach dem Merge wiederholt der nächtliche Lauf den Nachweis auf dem Release-Kandidaten.
+- [E-56](entscheidungen.md#e-56) (Option 1 mit Identitätssperre, Aufgabe A-12) und [E-57](entscheidungen.md#e-57) (Option A, Aufgabe A-13) sind entschieden, ebenso [E-17](entscheidungen.md#e-17) (Option 1, Aufgabe A-05): B5 ist geschlossen, gemessen ist mit 10.000 Objekten.
 
-G1 bleibt nicht bestanden: B3 (Pentest, E-28) und B4 (v2-Texte, E-02) liegen unverändert beim Auftraggeber. Neu ist B6: Die Subprozessorenliste fehlt, NFR-09 ist deshalb offen (E-35, Aufgabe A-11, Betreiber). B5 (Skalierungsziel, E-17) ist unverändert offen; gemessen ist mit 10.000 Objekten.
+G1 ist mit der Freigabe des Auftraggebers vom 2026-10-15 bestanden. B3 (Pentest, E-28), B4 (v2-Texte, E-02) und B6 (Subprozessorenliste, NFR-09, E-35) sind laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; nachzureichen sind die Zusammenfassung des Pentest-Berichts in `docs/security/pentest-g1.md`, die v2-Texte in `docs/spec/` und die Liste in `docs/legal/subprozessoren.md`, außerdem der grüne CI-Lauf auf PR #64 und der Merge nach `main`.
 
 **Abweichungen vom Plan:** Alle vier WPs ändern mehr Dateien als die Richtgröße von etwa 15 (Konvention 1); hinzu kamen vor allem Tests und Anpassungen an neue Schnittstellen. Die Dateien außerhalb der Planlisten nennt je WP der letzte Punkt (Pfade unter `backend/internal/`, sofern nicht anders angegeben).
 
@@ -10178,7 +10179,7 @@ G1 bleibt nicht bestanden: B3 (Pentest, E-28) und B4 (v2-Texte, E-02) liegen unv
 
 **WP-335 (`nfr02-impact`):**
 
-- AK 3, `fields=` statt `include=paths` ([E-57](entscheidungen.md#e-57), vorläufig entschieden): API-01 erlaubt nur additive Änderungen, und `path` ist Pflichtfeld in `ImpactNode`. Die Standardantwort von `GET /impact/{ci_id}` und `GET /impact` behält deshalb alle Felder einschließlich `path` und erhält additiv `hops`, `via` und optional `relay`. Die kompakte Form liefert der Sparse-Fieldset `fields=` nach API-02 (ID immer, unbekanntes Feld 422, Pfade nur mit `path`), in der OpenAPI als eigenes Schema `ImpactAnalysisFields`. Die Oberfläche fragt die kompakte Form an; der veraltete Pfad `/api/v1/topology/cis/{id}/impact` antwortet bis zum Sunset vollständig.
+- AK 3, `fields=` statt `include=paths` ([E-57](entscheidungen.md#e-57), entschieden 2026-10-15, Option A): API-01 erlaubt nur additive Änderungen, und `path` ist Pflichtfeld in `ImpactNode`. Die Standardantwort von `GET /impact/{ci_id}` und `GET /impact` behält deshalb alle Felder einschließlich `path` und erhält additiv `hops`, `via` und optional `relay`. Die kompakte Form liefert der Sparse-Fieldset `fields=` nach API-02 (ID immer, unbekanntes Feld 422, Pfade nur mit `path`), in der OpenAPI als eigenes Schema `ImpactAnalysisFields`. Die Oberfläche fragt die kompakte Form an; der veraltete Pfad `/api/v1/topology/cis/{id}/impact` antwortet bis zum Sunset vollständig.
 - AK 3, `via`: zwei Breitensuchen mit `relay`. Die aus `via` und `relay` rekonstruierten Pfade sind byte-gleich mit den bisherigen, die Impact-Mengen unverändert (`TestComputeImpactViaRebuildsPaths`).
 - AK 1: Auch im Ebenenmodus liest die Kantenabfrage ohne `JOIN ci`; die Sichtbarkeit prüft Go (bis zu zwei Statements je Ebene). Erreicht eine Ebene mehr als 1.000 neue CIs, wechselt die Lesung früher auf alle Kanten der Organisation.
 - AK 2: `ListNodes` überlagert name, status und management_ip mit Overrides (nicht nur den Namen) und liest ab 2.000 IDs die Knoten der ganzen Organisation.
@@ -10339,7 +10340,7 @@ NFR-03;[B], Teilumfang [P5];G1;tests/load/ingest.js;WP-334
 NFR-10;[Q];G1;tests/load/ingest.js;WP-334
 ```
 
-**Entscheidungsbedarf:** [E-56](entscheidungen.md#e-56) NFR-03: Reihenfolge der Verarbeitung bei parallelen Ingest-Spuren (offen; umgesetzt ist die Empfehlung, Option 1 mit Identitätssperre, `RETICORA_INGEST_LANES=1` stellt Option 3 wieder her); [E-58](entscheidungen.md#e-58) Referenzumgebung des G1-Lasttests (SR-06) (offen: Anerkennung des Laufs auf dem 4-vCPU-Host als Nachweis für GATE-03); [E-17](entscheidungen.md#e-17) Skalierungsziel (offen, Messung mit 10.000 Objekten)
+**Entscheidungsbedarf:** [E-56](entscheidungen.md#e-56) NFR-03: Reihenfolge der Verarbeitung bei parallelen Ingest-Spuren (entschieden 2026-10-15: Option 1 mit Identitätssperre, Standard 4 Spuren, `RETICORA_INGEST_LANES=1` stellt Option 3 als Rückfall wieder her); [E-58](entscheidungen.md#e-58) Referenzumgebung des G1-Lasttests (SR-06) (entschieden 2026-10-15: Option 1, der Lauf auf dem 4-vCPU-Host gilt als Nachweis für GATE-03; dedizierter Referenzhost vor GA); [E-17](entscheidungen.md#e-17) Skalierungsziel (entschieden 2026-10-15: Option 1, Messung mit 10.000 Objekten)
 
 **Nicht Bestandteil:** Teilumfang [P5] (1.000 Records/s); dedizierter Referenzhost (SR-06, vor GA); Collector-seitige Änderungen am Spool.
 
@@ -10391,7 +10392,7 @@ NFR-02;[B];G1;tests/load/api.js;WP-335
 ABN-02;[Q];G1;backend/internal/topology/querybudget_integration_test.go;WP-335
 ```
 
-**Entscheidungsbedarf:** [E-57](entscheidungen.md#e-57) Impact-Antwort: kompakte Form und API-01 (vorläufig entschieden: Option A, additiv; die Standardantwort behält `path`, die kompakte Form liefert `fields=` nach API-02, `include=paths` entfällt); [E-58](entscheidungen.md#e-58) Referenzumgebung des G1-Lasttests (SR-06) (offen)
+**Entscheidungsbedarf:** [E-57](entscheidungen.md#e-57) Impact-Antwort: kompakte Form und API-01 (entschieden 2026-10-15: Option A, additiv; die Standardantwort behält `path`, die kompakte Form liefert `fields=` nach API-02, `include=paths` entfällt); [E-58](entscheidungen.md#e-58) Referenzumgebung des G1-Lasttests (SR-06) (entschieden 2026-10-15: Option 1)
 
 **Nicht Bestandteil:** Zwischenspeicher für Kanten oder Impact-Ergebnisse; dedizierter Referenzhost (SR-06); Topologie-Darstellung im Frontend.
 

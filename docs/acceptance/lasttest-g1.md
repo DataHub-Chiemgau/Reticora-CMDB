@@ -10,8 +10,10 @@ G1) belegt das. Danach kamen zwei Korrekturen aus dem Gesamtreview hinzu
 blockierenden Befunden (`3f2bfd5`, `458a96d`, `111bdc4`, `f354c5a`,
 `0f165cc`). Kontrollmessungen auf beiden Ständen bestätigen die Werte
 (Abschnitt „Ergebnis NFR-03“). Auf GitHub hält der Workflow `load.yml` auf
-Commit `918a832` alle Schwellen ein (Abschnitt „GitHub-Lauf“). Der Erstlauf
-steht unten als historischer Abschnitt.
+Commit `918a832` alle Schwellen ein (Abschnitt „GitHub-Lauf“). Am 2026-10-15
+hat der Auftraggeber beide Läufe als G1-Nachweis anerkannt (E-58) und das
+Skalierungsziel bestätigt (E-17). Der Erstlauf steht unten als historischer
+Abschnitt.
 
 Die Szenarien, ihre Schwellen und der Ablauf stehen in
 `tests/load/README.md`. Der Workflow `.github/workflows/load.yml` wiederholt
@@ -31,8 +33,10 @@ legt seine k6-Zusammenfassung als eigenes Artefakt ab (`load-results-api`,
   Metriken. Der Core-Switch `sw-00001` trägt etwa die Hälfte aller CIs, sein
   Impact umfasst die ganze Organisation (Worst Case). Vor jedem Szenario wird
   neu geseedet, denn der Rückstand eines Laufs verfälscht den nächsten.
-- **Skalierungsziel:** 10.000 Objekte nach CH15 (NFR-01). E-17 (Bestätigung des
-  Skalierungsziels) ist weiter offen (B5); gemessen ist mit 10.000 Objekten.
+- **Skalierungsziel:** 10.000 Objekte nach CH15 (NFR-01). E-17 ist am
+  2026-10-15 entschieden (Option 1, B5 geschlossen): Die Budgets gelten bei
+  10.000 Objekten, Headroom 50.000 ohne Budgetzusage; gemessen ist mit
+  10.000 Objekten.
   Seed und Szenarien sind parametrisiert (`OBJECTS` in `api.js`) und bis
   50.000 Objekte nutzbar.
 - **Referenzumgebung:** Der Wiederholungslauf lief auf einem Host mit 4 vCPU
@@ -40,9 +44,9 @@ legt seine k6-Zusammenfassung als eigenes Artefakt ab (`load-results-api`,
   Werte sind deshalb konservativ. Der Host entspricht der Mindestgrößenklasse
   nach INS-07 (4 vCPU), ist aber kein dedizierter Referenzhost (SR-06).
 
-  Ob dieser Lauf als G1-Nachweis für GATE-03 gilt, entscheidet E-58 (offen,
-  Aufgabe A-14). Die Empfehlung (Option 1) knüpft die Anerkennung an
-  Auflagen:
+  Der Auftraggeber hat diesen Lauf am 2026-10-15 als G1-Nachweis für GATE-03
+  anerkannt (E-58, Option 1, Aufgabe A-14 erledigt). Die Anerkennung gilt mit
+  diesen Auflagen:
   - Protokoll mit Commit, CPU und RAM, Konfiguration und k6-Ergebnissen
     (Abschnitt „Wiederholungslauf“)
   - NFR-02 auf frischem Seed vor dem Ingest gemessen
@@ -101,9 +105,8 @@ Organisation.
   `fields=name,ci_type,status,heuristic,hops,via,relay` an. In der OpenAPI
   hat die Antwort mit `fields` ein eigenes Schema (`ImpactAnalysisFields`,
   `ImpactNodeFields`). Beide Formen sind budgetiert (`impact` und
-  `impact_full` in `api.js`). E-57 ist vorläufig entschieden (Option A,
-  umgesetzt in WP-335); die Bestätigung durch Product Owner und
-  API-Verantwortlichen steht aus (Aufgabe A-13).
+  `impact_full` in `api.js`). E-57 ist am 2026-10-15 entschieden (Option A,
+  umgesetzt in WP-335; Aufgabe A-13 erledigt).
 - **Einzelanfrage (WP-335, 11 Aufrufe per curl):** Die kompakte Form braucht
   im Median 190 ms (173–220 ms) für 2,39 MB, das sind 239 Byte je betroffenem
   CI. Die Standardform mit Pfaden braucht im Median 184 ms (172–217 ms) für
@@ -189,8 +192,9 @@ Organisation.
   messbar keinen Durchsatz, und `ANALYZE` nach dem Seed ändert ihn nicht
   nachweisbar (Streuung etwa ±10 %). Die Werte des Wiederholungslaufs
   bleiben gültig.
-- **Reihenfolge (E-56):** E-56 ist offen (Aufgabe A-12). WP-334 setzt auf die
-  Anweisung vom 2026-10-14 die Empfehlung um: Option 1 mit Identitätssperre.
+- **Reihenfolge (E-56):** E-56 ist am 2026-10-15 entschieden (Option 1 mit
+  Identitätssperre, Aufgabe A-12 erledigt). WP-334 setzt sie auf die
+  Anweisung vom 2026-10-14 um.
   Die Spur folgt dem stärksten Identitätsschlüssel in REC-02-Reihenfolge
   (Seriennummer, Hardware-UUID, MAC, IP). Jede Ingest-Transaktion eines
   Records aus der Queue sperrt die normalisierten Identitätsschlüssel ihrer
@@ -255,8 +259,8 @@ dem Branch der G1-Nachbesserung.
 - **Auflage von E-58:** Die Auflage „mindestens ein grüner `load.yml`-Lauf“
   ist für Commit `918a832` erfüllt. Nach dem Merge auf `main` wiederholt der
   nächtliche Lauf von `load.yml` den Nachweis auf dem Release-Kandidaten.
-  Offen bleibt die Entscheidung E-58 selbst: Ob die Referenzumgebung als
-  G1-Nachweis gilt, entscheidet der Auftraggeber (Aufgabe A-14).
+  Die Entscheidung E-58 ist am 2026-10-15 gefallen: Der Auftraggeber erkennt
+  die Referenzumgebung als G1-Nachweis an (Option 1, Aufgabe A-14).
 
 ## Verbleibende Grenze: Audit-/Outbox-Sperrabschnitt
 
@@ -438,15 +442,18 @@ einmal je Statement (`TestRecordDiscoveredBatchReadsCIsOnce`).
   gelaufen und bestanden; das Ergebnis steht in diesem Dokument.
 - **GATE-03 „Lasttest bestanden“:** erfüllt mit zwei Nachweisen: dem lokalen
   Wiederholungslauf auf Commit `dbbfded` und dem GitHub-Lauf 38665599979 auf
-  Commit `918a832`. Offen ist nur die Anerkennung der Referenzumgebung
-  (E-58, Entscheidung des Auftraggebers). Die Auflage eines grünen
+  Commit `918a832`. Der Auftraggeber hat beide am 2026-10-15 als G1-Nachweis
+  anerkannt (E-58, Option 1); ein dedizierter Referenzhost folgt vor GA
+  (SR-06). Die Auflage eines grünen
   `load.yml`-Laufs ist erfüllt; `load.yml` läuft auf GitHub manuell oder
   nächtlich auf dem Standardbranch und wiederholt den Lauf nach dem Merge auf
   dem Release-Kandidaten.
-- **G1 insgesamt:** weiter nicht bestanden. Offen sind B3 (Pentest, E-28,
-  A-07), B4 (v2-Texte, E-02, A-02) und B6 (NFR-09, Subprozessorenliste, E-35,
-  A-11, Betreiber) sowie E-58. B5 (E-17) ist unverändert offen. Stand und
-  Begründung stehen in `docs/acceptance/g1-gate.md`.
+- **G1 insgesamt:** mit der Freigabe des Auftraggebers vom 2026-10-15
+  bestanden. B5 ist mit E-17 geschlossen. B3 (Pentest, E-28, A-07), B4
+  (v2-Texte, E-02, A-02) und B6 (NFR-09, Subprozessorenliste, E-35, A-11)
+  sind laut Erklärung des Auftraggebers erledigt; ihre Nachweise sind
+  nachzureichen, ebenso der grüne CI-Lauf auf PR #64 und der Merge nach
+  `main`. Stand und Begründung stehen in `docs/acceptance/g1-gate.md`.
 
 ## Erstlauf (WP-206, historisch)
 
@@ -537,13 +544,15 @@ Der Erstlauf deckte Fehler auf, die in WP-206 behoben wurden:
 2. **Impact unter Parallellast im Worst Case:** erledigt mit WP-335
    (`a8f5912`, `dbbfded`): p95 477 ms in der kompakten Form, 546 ms in der
    Standardform. Die Messung auf einem dedizierten Referenzhost bleibt SR-06
-   (vor GA); ob der lokale Lauf für G1 genügt, entscheidet E-58.
+   (vor GA); für G1 genügt der lokale Lauf nach E-58 (entschieden am
+   2026-10-15).
 3. **Spool-Flush:** erledigt mit WP-334: Szenario `spool` in `ingest.js` und
    `load.yml`, 10.000 Records in 35,9 s.
 4. **Listen über 10.000 Objekte:** Bei 28.000 CIs lag `GET /cis` bei p95 1,9 s
    (Gesamtzahl per `COUNT(*)` je Listenanfrage und Sortierung über die ganze
    Organisation). Das ist für den Headroom bis 50.000 Objekte (NFR-01) zu
-   prüfen. Die Empfehlung zu E-17 sieht dafür ein Folge-WP vor G2/GA vor.
+   prüfen. Nach E-17 (entschieden am 2026-10-15) ist das über etwa 25.000
+   Objekten eine bekannte Einschränkung; ein Folge-WP vor GA behebt sie.
 5. **Outbox-Nummerierung:** Der Trigger aus Migration 000120
    (`event_outbox_number()`) bestimmt `max(sequence)` je Zeile und liegt im
    Audit-/Outbox-Sperrabschnitt. Folge-WP mit Migration: Zähler je

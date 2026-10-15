@@ -18,10 +18,12 @@ Stand: 2026-10-15. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 
 **Nachtrag vom 2026-10-15 (Review-Nachträge zu WP-334):** Die nicht blockierenden Befunde des Gesamtreviews sind nachgetragen (Commits `3f2bfd5`, `458a96d`, `111bdc4`, `f354c5a`, `0f165cc`). Zu [E-56](#e-56): Identitäts- und `max_cis`-Sperre gelten für jeden Record aus der Queue, unabhängig von der Spurzahl; der Altconsumer bleibt dauerhaft bestehen. Zu [E-58](#e-58): `load.yml` führt jedes Szenario als eigenen Job mit frischem Seed und `ANALYZE` aus; der Lauf auf GitHub ist grün ([Run 38665599979](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38665599979) auf Commit `918a832`, alle Schwellen eingehalten), die Auflage eines grünen `load.yml`-Laufs ist damit für diesen Commit erfüllt. Die Entscheidung selbst bleibt beim Auftraggeber. Kein Status ändert sich; die Zählung bleibt.
 
+**Nachtrag vom 2026-10-15 (Freigabe des Auftraggebers):** Der Auftraggeber, zugleich Product Owner, hat am 2026-10-15 [E-17](#e-17), [E-56](#e-56), [E-57](#e-57) und [E-58](#e-58) nach den Empfehlungen entschieden: E-17 Option 1 (Budgets bei 10.000 Objekten, Headroom 50.000 funktionsfähig ohne Budgetzusage, Listen und Suche über etwa 25.000 Objekten als bekannte Einschränkung mit Folge-WP vor GA), E-56 Option 1 mit Identitätssperre (Standard 4 Spuren, `RETICORA_INGEST_LANES=1` als Rückfall), E-57 Option A (additiv, kompakte Form über `fields=`) und E-58 Option 1 (Lastnachweis auf 4-vCPU-Hosts, lokaler Lauf auf `dbbfded` und GitHub-Run 38665599979, als G1-Nachweis anerkannt; dedizierter Referenzhost vor GA, SR-06). Die Aufgaben A-05, A-12, A-13 und A-14 sind erledigt. Außerdem hat er die G1-Blocker B3 (Pentest), B4 (v2-Texte zu AUT-05, AUT-06, NET-04 und ABN-01 (a)/(b)) und B6 (Subprozessorenliste, NFR-09) für erledigt erklärt. Die Nachweise liegen im Repository nicht vor. Die Aufgaben A-07, A-02 und A-11 stehen deshalb auf „laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen“: Zusammenfassung und Befundliste des Pentest-Berichts in `docs/security/pentest-g1.md`, die v2-Texte in `docs/spec/`, die Subprozessorenliste in `docs/legal/subprozessoren.md`. [E-02](#e-02) und [E-35](#e-35) bleiben offen: Nach den Regeln oben ist eine Entscheidung offen, solange ihre Empfehlung eine Lieferung verlangt, und die Lieferung liegt nicht vor. Mit dem Eingang der Texte bzw. der Liste werden sie entschieden. [E-28](#e-28) ist seit 2026-10-01 entschieden; nur ihre Aufgabe A-07 ändert sich. Stand jetzt: 33 entschieden, 4 vorläufig entschieden, 2 offen.
+
 | Nr. | Thema | Status | Sperrt / betrifft | WPs mit Verweis |
 |---|---|---|---|---:|
 | [E-01](#e-01) | Fehlende Anforderungstexte der Katalogteile 02, 04, 05 und 06 | entschieden | Keine Sperre mehr; WPs mit Verweis prüfen ihre Kriterien gegen den Text. | 130 |
-| [E-02](#e-02) | Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) | offen | Teilumfänge von c-ui-*, WP-152 (`d-protocols`), WP-212 (`g1-abnahme`), WP-231 (`m-workflow`), WP-232 (`m-iga`), WP-237 (`m-ui-mods`), WP-219 (`m-relay`). | 9 |
+| [E-02](#e-02) | Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) | offen | Laut Erklärung des Auftraggebers vom 2026-10-15 geliefert (B4 erledigt); die Texte sind in `docs/spec/` nachzureichen. Teilumfänge von c-ui-*, WP-152 (`d-protocols`), WP-212 (`g1-abnahme`), WP-231 (`m-workflow`), WP-232 (`m-iga`), WP-237 (`m-ui-mods`), WP-219 (`m-relay`). | 9 |
 | [E-03](#e-03) | Umgang mit vorhandenem Code späterer Phasen im G1-Release | entschieden | Steuert den gesamten Meilenstein M-S und den G1-Umfang. | 37 |
 | [E-04](#e-04) | Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells | entschieden | Keiner für M0; Namensschema für WP-142 (`b-met-ddl`). | 3 |
 | [E-05](#e-05) | Fehlende oder abweichende Tags | entschieden | Keiner (Annahme konservativ). | 1 |
@@ -36,7 +38,7 @@ Stand: 2026-10-15. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 | [E-14](#e-14) | CH26 (V): Keycloak-Org-Attribut, MFA-Pflicht, Brokering | entschieden | WP-043 (`auth-org`), WP-044 (`kc-admin`). | 2 |
 | [E-15](#e-15) | CH16 (V): PII-Vault, Paket `internal/pii`, Schlüsselrotation | entschieden | WP-141 (`b-sec-rotation`), WP-213 (`g1-gate`) (REP-01-Strukturtest). | 2 |
 | [E-16](#e-16) | SEC-10: Zahlenwerte für GraphQL-Limits | vorläufig entschieden | WP-184 (`c-gql-bff`). | 1 |
-| [E-17](#e-17) | CH15: Skalierungsziel bestätigen | offen | Messbasis von NFR-02, NFR-03 und NFR-10 (G1-Punkt B5, kein eigener Gate-Punkt); WP-093 (`a-preflight`), WP-203 (`lt-seed`), WP-206 (`lt-run`), WP-334 (`nfr03-lanes`). | 4 |
+| [E-17](#e-17) | CH15: Skalierungsziel bestätigen | entschieden | Keine Sperre mehr: Messbasis von NFR-02, NFR-03 und NFR-10 sind 10.000 Objekte (G1-Punkt B5 geschlossen); Folge-WP für Listen und Suche über etwa 25.000 Objekten vor GA. WP-093 (`a-preflight`), WP-203 (`lt-seed`), WP-206 (`lt-run`), WP-334 (`nfr03-lanes`). | 4 |
 | [E-18](#e-18) | CH27 (V): impact_direction | entschieden | WP-127 (`b-rel-types`), WP-176 (`c-imp-direction`). | 2 |
 | [E-19](#e-19) | CH28 (V): gemeinsamer Location-Baum | entschieden | WP-026 (`loc-model`) und Folge-WPs. | 1 |
 | [E-20](#e-20) | CH29 (V): Hostname-Treffer nur als Review | entschieden | WP-086 (`identity`). | 1 |
@@ -54,11 +56,11 @@ Stand: 2026-10-15. Gehört zu [`implementierungsplan.md`](implementierungsplan.m
 | [E-32](#e-32) | REC-03: Rang der Quelle IPMI | entschieden | WP-058 (`rec-decide`), WP-220 (`m-srcpolicy`). | 2 |
 | [E-33](#e-33) | TLC-01: Captcha-Anbieter, Wegwerf-Domain-Liste, Trial-Werte | entschieden | WP-111 (`b-signup`), WP-112 (`b-signup-protect`). | 2 |
 | [E-34](#e-34) | ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan | vorläufig entschieden | Folgeänderung zu WP-071 (`ent-model`), WP-203 (`lt-seed`). | 2 |
-| [E-35](#e-35) | NFR-09: Inhalt der Subprozessorenliste | offen | WP-105 (`a-reference`); bis zur Lieferung G1-Blocker B6 (NFR-09). | 1 |
+| [E-35](#e-35) | NFR-09: Inhalt der Subprozessorenliste | offen | WP-105 (`a-reference`); B6 laut Erklärung des Auftraggebers vom 2026-10-15 erledigt, die Liste ist in `docs/legal/subprozessoren.md` nachzureichen. | 1 |
 | [E-36](#e-36) | DB-05: Zeilen für Vertrag, installierte Software und Health-Findings | entschieden | WP-077 (`db05-asset`), WP-080 (`db05-lcy`), WP-230 (`m-agent`). | 3 |
-| [E-56](#e-56) | NFR-03: Reihenfolge der Verarbeitung bei parallelen Ingest-Spuren | offen | Keine Sperre mehr: WP-334 (`nfr03-lanes`) ist mit der Empfehlung umgesetzt; der Nachweis von NFR-03 (B1) setzt Option 1 voraus. | 1 |
-| [E-57](#e-57) | Impact-Antwort: kompakte Form und API-01 | vorläufig entschieden | Keine Sperre: WP-335 (`nfr02-impact`) ist nach der Übergangsregel (Option A, additiv) umgesetzt. | 1 |
-| [E-58](#e-58) | Referenzumgebung des G1-Lasttests (SR-06) | offen | GATE-03 „Lasttest bestanden“ und damit die G1-Freigabe; Nachweis aus WP-334 (`nfr03-lanes`) und WP-335 (`nfr02-impact`). | 2 |
+| [E-56](#e-56) | NFR-03: Reihenfolge der Verarbeitung bei parallelen Ingest-Spuren | entschieden | Keine Sperre: WP-334 (`nfr03-lanes`) ist mit Option 1 (Identitätssperre, Standard 4 Spuren) umgesetzt; der Nachweis von NFR-03 (B1) beruht darauf. | 1 |
+| [E-57](#e-57) | Impact-Antwort: kompakte Form und API-01 | entschieden | Keine Sperre: WP-335 (`nfr02-impact`) ist mit Option A (additiv) umgesetzt. | 1 |
+| [E-58](#e-58) | Referenzumgebung des G1-Lasttests (SR-06) | entschieden | Keine Sperre mehr: GATE-03 „Lasttest bestanden“ ist mit dem Nachweis aus WP-334 (`nfr03-lanes`) und WP-335 (`nfr02-impact`) anerkannt; dedizierter Referenzhost vor GA (SR-06). | 2 |
 
 ## E-01
 
@@ -98,6 +100,8 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 **Festlegung:** Keine Festlegung möglich: Die Texte kann nur der Auftraggeber liefern. Die Übergangsregel gilt ab sofort: WPs setzen nur ausdrücklich genannte Bestandteile um und erfinden keine Funktionen.
 
 **Aufgabe:** v2-Originaltexte (UI-01–UI-10, ABN-01, DIS-04, IGA, WFL-04, AUT-05/06, NET-04, REP-01) nachliefern. Zuständig: Auftraggeber/Product Owner. Termin: vor Epic C (UI) bzw. vor WP-212 (ABN-01).
+
+**Nachtrag 2026-10-15:** Der Auftraggeber hat G1-Blocker B4 (v2-Texte zu AUT-05, AUT-06, NET-04 und ABN-01 (a)/(b)) am 2026-10-15 für erledigt erklärt. Die Texte liegen im Repository nicht vor; sie sind in `docs/spec/` nachzureichen (Aufgabe A-02: laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen). Der Status bleibt offen, bis die Texte vorliegen: Erst dann lässt sich Option 1 umsetzen und prüfen, ob die bestehende Umsetzung den Texten entspricht. Die Übergangsregel gilt bis dahin weiter.
 
 **Frage:** Mehrere IDs verweisen auf nicht vorliegende v2-Texte: individuelle Verträge UI-01–UI-10, ABN-01 (a)/(b) aus „V §65–66“, DIS-04-Umfang „wie v2“, IGA-Details, WFL-04-Ketten, AUT-05, AUT-06, NET-04 sowie der v2-Bestandteil von REP-01.
 
@@ -481,11 +485,11 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 
 **Thema:** CH15: Skalierungsziel bestätigen
 
-**Status:** offen (2026-10-01)
+**Status:** entschieden (2026-10-15)
 
-**Festlegung:** Keine Festlegung möglich: Den Zielwert legt der Product Owner fest; die vorgesehene Bestätigung vor dem Lasttest steht aus. Übergangsregel (Punkt B5 in `docs/acceptance/g1-gate.md`): Ohne Bestätigung gilt der Lasttest mit 10.000 Objekten. Der Erstlauf (WP-206) und der Wiederholungslauf auf Commit `dbbfded` sind so gemessen.
+**Festlegung:** Option 1, mit der Bedeutung des Headroom aus der Empfehlung (Entscheidung des Auftraggebers vom 2026-10-15): 1.000–10.000 Objekte, Headroom 50.000. Die Budgets aus NFR-02 und NFR-03 gelten bei 10.000 Objekten je Organisation; das ist die Messbasis für G1. Headroom 50.000 heißt in G1: funktionsfähig ohne Budgetzusage. Listen und Suche über etwa 25.000 Objekten sind eine bekannte Einschränkung; ein Folge-WP vor GA behebt sie. Der Erstlauf (WP-206) und der Wiederholungslauf auf Commit `dbbfded` sind mit 10.000 Objekten gemessen; eine Nachmessung ist nicht nötig. G1-Punkt B5 ist damit geschlossen.
 
-**Aufgabe:** Skalierungsziel CH15 bestätigen (1.000–10.000 Objekte, Headroom 50.000) oder anderen Wert festlegen. Zuständig: Product Owner. Termin: vor WP-093 (`a-preflight`), spätestens vor WP-203 (`lt-seed`); überschritten, empfohlen vor der G1-Freigabe.
+**Aufgabe:** erledigt (A-05, 2026-10-15).
 
 **Frage:** CH15 vermerkt, dass die Antwort „1000-1000“ als 1.000–10.000 Objekte interpretiert wurde und zu bestätigen ist. Davon hängen Sizing-Tabelle, Seed-Größe und Lasttest ab.
 
@@ -502,7 +506,7 @@ Nicht Teil dieser Lieferung und weiter offen: DB-01, MET-20, MET-30–34, MET-40
 
 Ein höherer Zielwert entwertet die G1-Messungen und macht vor G1 weitere WPs nötig (u. a. Listenzählung und Sortierung, Volltextsuche nach SR-04).
 
-**Blockiert / Auswirkung:** Messbasis von NFR-02, NFR-03 und NFR-10 (G1-Punkt B5, kein eigener Gate-Punkt). WP-093 (`a-preflight`), WP-203 (`lt-seed`), WP-206 (`lt-run`) und WP-334 (`nfr03-lanes`) sind mit 10.000 Objekten umgesetzt bzw. gemessen.
+**Blockiert / Auswirkung:** Keine Sperre mehr. Messbasis von NFR-02, NFR-03 und NFR-10 (G1-Punkt B5, kein eigener Gate-Punkt, geschlossen). WP-093 (`a-preflight`), WP-203 (`lt-seed`), WP-206 (`lt-run`) und WP-334 (`nfr03-lanes`) sind mit 10.000 Objekten umgesetzt bzw. gemessen.
 
 **Quelle:** docs/spec/katalog-v3/00-grundlagen.md (CH15); `docs/acceptance/lasttest-g1.md`; `docs/ops/sizing.md`
 
@@ -772,6 +776,8 @@ Ein höherer Zielwert entwertet die G1-Messungen und macht vor G1 weitere WPs n�
 
 **Aufgabe:** Pentest-Dienstleister beauftragen, Umfang und Termin festlegen. Zuständig: Auftraggeber. Termin: parallel zu Epic C, vor WP-210.
 
+**Nachtrag 2026-10-15:** Der Auftraggeber hat G1-Blocker B3 (externer Pentest ohne offene High/Critical) am 2026-10-15 für erledigt erklärt. Bericht, Befundliste und Nachtest liegen im Repository nicht vor; Zusammenfassung und Befundliste sind in `docs/security/pentest-g1.md` nachzureichen (Aufgabe A-07: laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen). NFR-08 steht in `docs/acceptance/g1-gate.md` auf PASS durch diese Erklärung.
+
 **Frage:** GATE-03 verlangt einen Pentest ohne offene High/Critical. Dienstleister, Umfang und Zeitfenster sind festzulegen; NFR-08 ist N/P.
 
 **Optionen:**
@@ -964,13 +970,15 @@ Ein höherer Zielwert entwertet die G1-Messungen und macht vor G1 weitere WPs n�
 
 **Nachtrag 2026-10-14:** Die Erstfassung der Gate-Checkliste führte NFR-09 als PASS. `docs/legal/subprozessoren.md` und `docs/betrieb/referenzmodell.md` sagen aber, dass NFR-09 („Subprozessoren dokumentiert und AVV-fähig“) erst mit der gelieferten Liste erfüllt ist; die Liste ist leer. NFR-09 steht deshalb in `docs/acceptance/g1-gate.md` auf „offen“, und die fehlende Liste ist bis zur Lieferung G1-Blocker B6 (Regel GATE-02, verantwortlich: Betreiber).
 
+**Nachtrag 2026-10-15:** Der Auftraggeber hat G1-Blocker B6 am 2026-10-15 für erledigt erklärt. Die Liste liegt im Repository nicht vor; `docs/legal/subprozessoren.md` ist weiter leer. Sie ist dort nachzureichen (Aufgabe A-11: laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen). NFR-09 steht in `docs/acceptance/g1-gate.md` auf PASS durch diese Erklärung. Der Status bleibt offen, bis die Liste vorliegt, denn Option 1 ist die Lieferung selbst.
+
 **Optionen:**
 
 1. Liste liefern.
 
 **Empfehlung:** Vor WP-105 (`a-reference`) liefern.
 
-**Blockiert / Auswirkung:** WP-105 (`a-reference`); bis zur Lieferung G1-Blocker B6 (NFR-09, GATE-02).
+**Blockiert / Auswirkung:** WP-105 (`a-reference`); G1-Blocker B6 (NFR-09, GATE-02) laut Erklärung des Auftraggebers vom 2026-10-15 erledigt, die Liste ist nachzureichen.
 
 **Quelle:** NFR-09; PRI-11
 
@@ -1007,9 +1015,9 @@ Ein höherer Zielwert entwertet die G1-Messungen und macht vor G1 weitere WPs n�
 
 **Thema:** NFR-03: Reihenfolge der Verarbeitung bei parallelen Ingest-Spuren
 
-**Status:** offen (2026-10-14)
+**Status:** entschieden (2026-10-15)
 
-**Festlegung:** Keine; die Bestätigung durch den Product Owner steht aus (Aufgabe A-12). Übergangsregel: WP-334 ist auf die Anweisung vom 2026-10-14 („WP-332 bis WP-335 umsetzen“) mit der Empfehlung umgesetzt, Option 1 mit Identitätssperre („1b“, Commits `25f0c79` und `55aa9f3`, Korrekturen aus dem Gesamtreview `58863fa` und `dea65b7`, Nachträge zu seinen nicht blockierenden Befunden `3f2bfd5`, `458a96d`, `111bdc4`, `f354c5a` und `0f165cc`, Betrieb in `docs/betrieb/ingest-spuren.md`):
+**Festlegung:** Option 1 mit Identitätssperre (Entscheidung des Auftraggebers vom 2026-10-15), Standard 4 Spuren, mit der Formulierung unter „Empfehlung“; `RETICORA_INGEST_LANES=1` bleibt als Rückfall. WP-334 ist auf die Anweisung vom 2026-10-14 („WP-332 bis WP-335 umsetzen“) so umgesetzt, Option 1 mit Identitätssperre („1b“, Commits `25f0c79` und `55aa9f3`, Korrekturen aus dem Gesamtreview `58863fa` und `dea65b7`, Nachträge zu seinen nicht blockierenden Befunden `3f2bfd5`, `458a96d`, `111bdc4`, `f354c5a` und `0f165cc`, Betrieb in `docs/betrieb/ingest-spuren.md`):
 
 - **Spuren:** Spur = Hash des stärksten Identitätsschlüssels in REC-02-Reihenfolge (Seriennummer, Hardware-UUID, MAC, IP; normalisiert wie in der Identitätsauflösung, ohne solchen Schlüssel Spur 0) modulo `RETICORA_INGEST_LANES` (Standard 4, zulässig 1–16).
 - **Identitätssperre:** Jede Record- und Batch-Transaktion eines Records aus der Queue nimmt, unabhängig von der Spurzahl, als erste Anweisung transaktionsgebundene Advisory-Locks über alle normalisierten Identitätsschlüssel ihrer Records (Seriennummer, Hardware-UUID, jede kanonische MAC einschließlich Fingerprint- und Interface-MACs, Management-IP je VRF; nicht der Hostname). Records mit einem gemeinsamen Schlüssel laufen damit nie gleichzeitig, auch nicht über Spuren oder Instanzen hinweg. Eine Transaktion sperrt höchstens 256 Schlüssel; darüber sperrt sie die Organisation exklusiv. Die Sperren liegen in eigenen Lock-Klassen (Zwei-Argument-Form) und warten höchstens 20 s je Sperranweisung.
@@ -1019,7 +1027,7 @@ Ein höherer Zielwert entwertet die G1-Messungen und macht vor G1 weitere WPs n�
 
 Auch mit einer Spur gilt seit WP-333 innerhalb eines Batch-Fensters (100 Records) die Reihenfolge nur je Gerät: Der Batch-Schreibpfad committet neue Geräte vor den Updates anderer Geräte.
 
-**Aufgabe:** Reihenfolgegarantie bestätigen (Empfehlung: Option 1 mit Identitätssperre und die Formulierung unter „Empfehlung“) oder eine andere Option wählen. Zuständig: Product Owner. Termin: vor WP-334 (`nfr03-lanes`); überschritten, weil WP-334 umgesetzt ist, jetzt vor der G1-Freigabe.
+**Aufgabe:** erledigt (A-12, 2026-10-15).
 
 **Frage:** Vor der G1-Nachbesserung verarbeitete der Ingest je Organisation seriell nach `observed_at`: ein Batch von 100 war gleichzeitig in Arbeit, ein Mutex je Organisation verhinderte parallele Verarbeitung. Gemessen waren 58 Records/s (Erstlauf WP-206, `docs/acceptance/lasttest-g1.md`, SR-02). Weniger Transaktionen (WP-332) und der Batch-Schreibpfad (WP-333) senken die Zeit je Record; die 200 Records/s je Instanz aus NFR-03 brauchen zusätzlich parallele Spuren innerhalb einer Organisation. Welche Reihenfolgegarantie gilt dann?
 
@@ -1050,7 +1058,7 @@ Zu bestätigende Formulierung:
 - **Lock-Tabelle (aus dem Review):** Unbegrenzte Identitätssperren konnten die Lock-Tabelle des Clusters erschöpfen (bis 20.003 Advisory-Locks in einer Transaktion). Gegenmaßnahme in `55aa9f3`: höchstens 256 Schlüssel je Transaktion, darüber die Organisation exklusiv; höchstens 1.542 Identitätssperren je Instanz. Die Lock-Tabelle ist nach `max_locks_per_transaction` × (`max_connections` + `max_prepared_transactions`) ≥ Ingest-Instanzen × 1.542 + Reserve zu bemessen; beim HPA-Maximum von 10 Replikaten mit `max_connections` = 100 sind das 256, alternativ eigene Ingest-Instanzen (`docs/betrieb/ingest-spuren.md`).
 - **Lock-Raum (aus dem Gesamtreview):** Die Sperrschlüssel stammen aus Werten, die ein Mandant meldet. Als Ein-Argument-Sperren mit FNV-1a-Schlüsseln teilten sie sich den Raum mit der Sperre des Scheduler-Leiters; eine gewählte Seriennummer hätte eine Spur für alle Mandanten ohne Zeitgrenze blockieren können. Gegenmaßnahme in `58863fa`: eigene Lock-Klassen, Schlüssel aus SHA-256, Wartegrenze 20 s mit Wiederholung (`docs/security/review-g1.md`).
 
-**Blockiert / Auswirkung:** Keine Sperre mehr: WP-334 (`nfr03-lanes`) ist umgesetzt. Der Nachweis von NFR-03 und damit die Schließung von B1 setzen Option 1 voraus: Mit Option 3 (`RETICORA_INGEST_LANES=1`) verfehlt der Abbau 200 Records/s (gemessen 182), Option 2 bringt bei einem Collector je Organisation keinen Durchsatz.
+**Blockiert / Auswirkung:** Keine Sperre: WP-334 (`nfr03-lanes`) ist umgesetzt. Der Nachweis von NFR-03 und damit die Schließung von B1 beruhen auf Option 1: Mit Option 3 (`RETICORA_INGEST_LANES=1`) verfehlt der Abbau 200 Records/s (gemessen 182), Option 2 bringt bei einem Collector je Organisation keinen Durchsatz.
 
 **Quelle:** NFR-03, REC-01, REC-02, REC-03, REC-05, ENT-03, PRI-10; `docs/acceptance/lasttest-g1.md`; `docs/security/review-g1.md` (SR-02); `docs/betrieb/ingest-spuren.md`
 
@@ -1062,9 +1070,9 @@ Zu bestätigende Formulierung:
 
 **Thema:** Impact-Antwort: kompakte Form und API-01
 
-**Status:** vorläufig entschieden (2026-10-14)
+**Status:** entschieden (2026-10-15)
 
-**Festlegung:** Übergangsregel Option A (additiv), umgesetzt in WP-335 (Commits `a8f5912` und `dbbfded`):
+**Festlegung:** Option A (additiv; Entscheidung des Auftraggebers vom 2026-10-15, vorher Übergangsregel seit 2026-10-14); Option C bleibt als spätere Möglichkeit. Umgesetzt in WP-335 (Commits `a8f5912` und `dbbfded`):
 
 - Die Standardantwort von `GET /impact/{ci_id}` und `GET /impact` behält alle bisherigen Felder einschließlich `path` und erhält additiv `hops`, `via` (Vorgänger-CI und Beziehungstyp) und optional `relay`.
 - Die kompakte Form liefert der Sparse-Fieldset `fields=` nach API-02: Die ID kommt immer, ein unbekanntes Feld ergibt 422, Pfade werden nur berechnet, wenn `path` angefragt ist. In der OpenAPI hat diese Antwort ein eigenes Schema (`ImpactAnalysisFields`, `ImpactNodeFields`); die Standardantwort bleibt `ImpactAnalysis` mit `ImpactNode`.
@@ -1073,7 +1081,7 @@ Zu bestätigende Formulierung:
 
 Das `include=paths` aus dem Plantext von WP-335 entfällt.
 
-**Aufgabe:** Option A bestätigen; Option C bleibt als spätere Möglichkeit. Zuständig: Product Owner/API-Verantwortlicher. Termin: vor der G1-Freigabe.
+**Aufgabe:** erledigt (A-13, 2026-10-15).
 
 **Frage:** Darf die Standardantwort von `GET /impact/{ci_id}` und `GET /impact` das Feld `path` weglassen, wie es der Plantext von WP-335 vorsah (vollständige Pfade nur mit `include=paths`)? WP-335 nannte „Entscheidungsbedarf: keiner“ mit Verweis auf API-05. Maßgeblich ist aber API-01 [B]: „Änderungen nur additiv; Deprecation mit Sunset-Header und mindestens 12 Monaten Vorlauf“. `path` ist Pflichtfeld in `ImpactNode`, und IMP-02 verlangt den „Pfad mit Beziehungstypen“. Das Projekt behandelt `/api/v1` bereits als veröffentlicht: Der alte Impact-Pfad trägt Deprecation und Sunset (2027-10-14).
 
@@ -1085,7 +1093,7 @@ Das `include=paths` aus dem Plantext von WP-335 entfällt.
 
 **Empfehlung:** A, C als spätere Möglichkeit. A ist API-01-konform ohne Ausnahme, kostet nichts zusätzlich (beide Formen gibt es ohnehin) und erfüllt IMP-02 in der Standardantwort. Gate-Nachweis für NFR-02 ist die Form, die die Oberfläche aufruft (kompakt); NFR-02 legt keine Antwortform fest. Die Standardform ist mitgemessen und ebenfalls budgetiert (p95 546 ms). Das Größenbudget aus WP-335 (höchstens 250 Byte je betroffenem CI, gemessen 239) gilt für die kompakte Form.
 
-**Blockiert / Auswirkung:** Keine Sperre: WP-335 (`nfr02-impact`) ist nach der Übergangsregel umgesetzt, API-01 bleibt PASS (`docs/acceptance/g1-gate.md`). Option B würde ein Pflichtfeld entfernen und API-01 verletzen.
+**Blockiert / Auswirkung:** Keine Sperre: WP-335 (`nfr02-impact`) ist mit Option A umgesetzt, API-01 bleibt PASS (`docs/acceptance/g1-gate.md`). Option B würde ein Pflichtfeld entfernen und API-01 verletzen.
 
 **Quelle:** API-01, API-02, IMP-02, NFR-02; `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md` (API-01, API-02); `api/openapi.yaml` (`ImpactNode`, `ImpactNodeFields`); `docs/acceptance/lasttest-g1.md`
 
@@ -1097,11 +1105,11 @@ Das `include=paths` aus dem Plantext von WP-335 entfällt.
 
 **Thema:** Referenzumgebung des G1-Lasttests (SR-06)
 
-**Status:** offen (2026-10-14)
+**Status:** entschieden (2026-10-15)
 
-**Festlegung:** Keine Festlegung möglich: Ob der Lauf als G1-Nachweis gilt, entscheidet der Auftraggeber bei der Gate-Abnahme. Bis dahin führt `docs/acceptance/g1-gate.md` die Bedingung „Lasttest bestanden“ von GATE-03 als PASS (lokaler Nachweislauf und grüner `load.yml`-Lauf, Stand 2026-10-15), mit dem Vorbehalt dieser Entscheidung.
+**Festlegung:** Option 1 mit den Auflagen der Empfehlung (Entscheidung des Auftraggebers vom 2026-10-15): Der Lastnachweis auf 4-vCPU-Hosts, der lokale Nachweislauf auf Commit `dbbfded` und der GitHub-Lauf [Run 38665599979](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38665599979) auf Commit `918a832`, gilt als G1-Nachweis für GATE-03 „Lasttest bestanden“ (NFR-10). Ein dedizierter Referenzhost folgt vor GA (SR-06). Nach dem Merge wiederholt der nächtliche `load.yml`-Lauf den Nachweis auf dem Release-Kandidaten.
 
-**Aufgabe:** Den dokumentierten Lauf als G1-Nachweis für GATE-03 anerkennen (Empfehlung) oder einen anderen Nachweis verlangen. Zuständig: Auftraggeber (Gate-Abnahme) mit dem Product Owner. Termin: vor der G1-Freigabe.
+**Aufgabe:** erledigt (A-14, 2026-10-15). Offen bis GA bleibt der dedizierte Referenzhost (SR-06).
 
 **Frage:** Gilt der Lastlauf auf einem Host mit 4 vCPU ohne dedizierten Referenzhost als Nachweis für GATE-03 „Lasttest bestanden“ (NFR-10)? NFR-03 verlangt 200 Records/s „pro Instanz“, ohne die Instanzgröße festzulegen; die einzige normative Größe ist das Mindest-Sizing nach INS-07 [B] (4 vCPU, 8 GB RAM, 100 GB SSD für ≤ 10.000 Objekte). SR-06 (Info) sieht den Referenzhost vor GA vor; WP-334 und WP-335 nehmen ihn ausdrücklich aus (Feld „Nicht Bestandteil“). Der Nachweislauf auf Commit `dbbfded` (2026-10-14) lief auf 4 vCPU (Intel Xeon @ 2,10 GHz) mit 15 GB RAM; PostgreSQL, NATS, Redis, der Server und k6 teilten sich den Host. `load.yml` läuft auf GitHub nur manuell oder nächtlich auf dem Standardbranch.
 
@@ -1121,9 +1129,9 @@ Das `include=paths` aus dem Plantext von WP-335 entfällt.
 
 Stand 2026-10-14: Der Lauf auf Commit `dbbfded` hält alle Schwellen ein und misst NFR-02 auf frischem Seed; Commit, Host und Konfiguration stehen in `docs/acceptance/lasttest-g1.md`. Offen sind die k6-Zusammenfassungen im Repository (die des lokalen Laufs sind nicht versioniert; archiviert werden die des `load.yml`-Laufs) und der grüne `load.yml`-Lauf auf dem Release-Kandidaten.
 
-Stand 2026-10-15: `load.yml` führt seit `458a96d` jedes Szenario als eigenen Job mit frischer Datenbank, Seed und `ANALYZE` aus, wie es das Nachweisprotokoll verlangt; vorher liefen die Szenarien nacheinander gegen einen Seed. Der grüne `load.yml`-Lauf liegt vor: [Run 38665599979](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38665599979) auf Commit `918a832` (Code-Stand der G1-Nachbesserung mit allen Nachträgen; spätere Commits ändern nur Dokumentation) hält auf dem Standard-Runner `ubuntu-latest` (4 CPUs, 15,61 GB RAM) alle k6-Schwellen ein. Darunter sind Impact Tiefe 20 p95 852 ms (kompakt) und 882 ms (Standardform), Abbau ab Sendeende 798 Records/s, Spool-Flush 15,1 s und eine Verzögerung von höchstens 1,84 s ohne fehlenden Record. Die Auflage „mindestens ein grüner `load.yml`-Lauf“ ist damit für diesen Commit erfüllt; nach dem Merge wiederholt der nächtliche Lauf den Nachweis auf dem Release-Kandidaten. Die k6-Zusammenfassungen sind Artefakte des Laufs (aufbewahrt bis 2027-01-13). Der letzte Lauf vor der Nachbesserung (Run 38514977761, Commit `fa76b16`, Code wie die Basis `02ebb76`) hatte auf dem Runner 38,47 Records/s gemessen, etwa die Hälfte des Nachweishosts (74 Records/s); damals bestimmten die Commits je Record den Durchsatz. Mit dem Batch-Schreibpfad ist der Runner beim Ingest schneller als der Nachweishost. Die Empfehlung (Option 1) ist damit gestärkt: Zwei unabhängige Umgebungen mit 4 vCPU halten jede Schwelle ein. Die Entscheidung trifft weiter der Auftraggeber (Aufgabe A-14; `docs/acceptance/lasttest-g1.md`, Abschnitt „GitHub-Lauf“).
+Stand 2026-10-15: `load.yml` führt seit `458a96d` jedes Szenario als eigenen Job mit frischer Datenbank, Seed und `ANALYZE` aus, wie es das Nachweisprotokoll verlangt; vorher liefen die Szenarien nacheinander gegen einen Seed. Der grüne `load.yml`-Lauf liegt vor: [Run 38665599979](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38665599979) auf Commit `918a832` (Code-Stand der G1-Nachbesserung mit allen Nachträgen; spätere Commits ändern nur Dokumentation) hält auf dem Standard-Runner `ubuntu-latest` (4 CPUs, 15,61 GB RAM) alle k6-Schwellen ein. Darunter sind Impact Tiefe 20 p95 852 ms (kompakt) und 882 ms (Standardform), Abbau ab Sendeende 798 Records/s, Spool-Flush 15,1 s und eine Verzögerung von höchstens 1,84 s ohne fehlenden Record. Die Auflage „mindestens ein grüner `load.yml`-Lauf“ ist damit für diesen Commit erfüllt; nach dem Merge wiederholt der nächtliche Lauf den Nachweis auf dem Release-Kandidaten. Die k6-Zusammenfassungen sind Artefakte des Laufs (aufbewahrt bis 2027-01-13). Der letzte Lauf vor der Nachbesserung (Run 38514977761, Commit `fa76b16`, Code wie die Basis `02ebb76`) hatte auf dem Runner 38,47 Records/s gemessen, etwa die Hälfte des Nachweishosts (74 Records/s); damals bestimmten die Commits je Record den Durchsatz. Mit dem Batch-Schreibpfad ist der Runner beim Ingest schneller als der Nachweishost. Die Empfehlung (Option 1) ist damit gestärkt: Zwei unabhängige Umgebungen mit 4 vCPU halten jede Schwelle ein (`docs/acceptance/lasttest-g1.md`, Abschnitt „GitHub-Lauf“). Am 2026-10-15 hat der Auftraggeber Option 1 entschieden (Aufgabe A-14).
 
-**Blockiert / Auswirkung:** GATE-03 „Lasttest bestanden“ (NFR-10) und damit die G1-Freigabe. Ohne Entscheidung bleibt der Nachweis aus WP-334 und WP-335 angreifbar; mit Option 2 verschiebt sich G1, bis ein Referenzhost bereitsteht.
+**Blockiert / Auswirkung:** Keine Sperre mehr: GATE-03 „Lasttest bestanden“ (NFR-10) ist mit dem Nachweis aus WP-334 und WP-335 anerkannt. SR-06 bleibt bis zum dedizierten Referenzhost vor GA offen.
 
 **Quelle:** GATE-03, INS-07, NFR-03, NFR-10; `docs/security/review-g1.md` (SR-06); `docs/acceptance/lasttest-g1.md`; `docs/acceptance/g1-gate.md`
 
@@ -1138,16 +1146,16 @@ Diese Aufgaben folgen aus den Empfehlungen. Die betroffenen WPs starten erst, we
 | Nr. | Entscheidung | Aufgabe | Zuständig | Termin |
 |---|---|---|---|---|
 | A-01 | [E-01](#e-01) | **erledigt 2026-10-01:** Katalogteile 02, 04, 05 und 06 in `docs/spec/katalog-v3/` nachliefern | Auftraggeber/Product Owner | vor Beginn von M0.1 (WP-008) |
-| A-02 | [E-02](#e-02) | v2-Originaltexte (UI-01–UI-10, ABN-01, DIS-04, IGA, WFL-04, AUT-05/06, NET-04, REP-01) nachliefern | Auftraggeber/Product Owner | vor Epic C (UI) bzw. vor WP-212 (ABN-01) |
+| A-02 | [E-02](#e-02) | **laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen** (B4; Texte in `docs/spec/` ablegen): v2-Originaltexte (UI-01–UI-10, ABN-01, DIS-04, IGA, WFL-04, AUT-05/06, NET-04, REP-01) nachliefern | Auftraggeber/Product Owner | vor Epic C (UI) bzw. vor WP-212 (ABN-01) |
 | A-03 | [E-04](#e-04) | **entschieden 2026-10-12** (Option 2, Namensschema `idx_attr_<id>`[`_u`]); offen bleibt nur: Teil 03 in `docs/audit/befunde.csv` und `docs/audit/99-gesamtbericht.md` konsolidieren; Texte DB-01, MET-20, MET-30–34, MET-40–44 mit E-01 anfordern | Audit | vor WP-142 (`b-met-ddl`), spätestens vor G1 |
 | A-04 | [E-15](#e-15) | **erledigt 2026-10-12** (Option 1, WP-240–242): Option zu CH16/PII-Vault wählen (eigenes WP-Paket oder nur Gerüst und Konzept) | Product Owner/Datenschutz | vor Beginn von Epic B (WP-107) |
-| A-05 | [E-17](#e-17) | **Stand 2026-10-14:** Empfehlung Option 1 (Budgets bei 10.000 Objekten; Headroom 50.000 funktionsfähig ohne Budgetzusage in G1; Listen und Suche über etwa 25.000 Objekten als bekannte Einschränkung mit Folge-WP vor G2/GA). Skalierungsziel CH15 bestätigen (1.000–10.000 Objekte, Headroom 50.000) oder anderen Wert festlegen | Product Owner | vor WP-093 (`a-preflight`), spätestens vor WP-203 (`lt-seed`); überschritten, empfohlen vor der G1-Freigabe (sonst gilt der Lasttest mit 10.000 Objekten, B5) |
+| A-05 | [E-17](#e-17) | **erledigt 2026-10-15** (Option 1, B5 geschlossen). Stand 2026-10-14: Empfehlung Option 1 (Budgets bei 10.000 Objekten; Headroom 50.000 funktionsfähig ohne Budgetzusage in G1; Listen und Suche über etwa 25.000 Objekten als bekannte Einschränkung mit Folge-WP vor G2/GA). Skalierungsziel CH15 bestätigen (1.000–10.000 Objekte, Headroom 50.000) oder anderen Wert festlegen | Product Owner | vor WP-093 (`a-preflight`), spätestens vor WP-203 (`lt-seed`); überschritten, empfohlen vor der G1-Freigabe (sonst gilt der Lasttest mit 10.000 Objekten, B5) |
 | A-06 | [E-23](#e-23) | **erledigt 2026-10-01** (durch CI-10/GLO-13): Abgrenzung GLO-13/CI-10 mit den Texten aus E-01 nachliefern | Auftraggeber/Product Owner | vor WP-091 (`glo13-ns`) |
-| A-07 | [E-28](#e-28) | Pentest-Dienstleister beauftragen, Umfang und Termin festlegen | Auftraggeber | parallel zu Epic C, vor WP-210 |
+| A-07 | [E-28](#e-28) | **laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen** (B3; Zusammenfassung und Befundliste in `docs/security/pentest-g1.md`): Pentest-Dienstleister beauftragen, Umfang und Termin festlegen | Auftraggeber | parallel zu Epic C, vor WP-210 |
 | A-08 | [E-29](#e-29) | **erledigt 2026-10-12** (pgBackRest): Werkzeug für WAL-Archivierung und Basisbackups wählen (pgBackRest, WAL-G oder Managed-Postgres) | Betrieb | vor WP-100 (`a-backup`) |
 | A-09 | [E-32](#e-32) | **erledigt 2026-10-05** (Rang wie Redfish, 90): REC-03-Rang für IPMI festlegen (der am 2026-10-01 gelieferte REC-03-Text nennt IPMI nicht) | Auftraggeber/Product Owner | vor WP-058 (`rec-decide`) |
 | A-10 | [E-33](#e-33) | **erledigt 2026-10-12** (ALTCHA, disposable-email-domains, Trial nach ENT-07): Captcha-Anbieter, Wegwerf-Domain-Liste und Trial-Werte festlegen | Produkt/Datenschutz | vor WP-111 (`b-signup`) |
-| A-11 | [E-35](#e-35) | Subprozessorenliste liefern; bis zur Lieferung ist NFR-09 offen und G1-Blocker B6 | Betreiber | vor WP-105 (`a-reference`); überschritten, spätestens vor der G1-Freigabe (B6) |
-| A-12 | [E-56](#e-56) | **Stand 2026-10-14:** WP-334 ist mit der Empfehlung umgesetzt (Option 1 mit Identitätssperre, Standard 4 Spuren: 233 Records/s; mit einer Spur 182 Records/s, NFR-03 verfehlt). Reihenfolgegarantie bei parallelen Ingest-Spuren bestätigen (Empfehlung: je Gerät, gesichert durch die Identitätssperre) | Product Owner | vor WP-334 (`nfr03-lanes`); überschritten, jetzt vor der G1-Freigabe |
-| A-13 | [E-57](#e-57) | Option A bestätigen: Impact-Antwort nur additiv, kompakte Form über `fields=` (API-02); Option C (Wechsel der Standardform nach mindestens 12 Monaten Deprecation) bleibt als spätere Möglichkeit | Product Owner/API-Verantwortlicher | vor der G1-Freigabe |
-| A-14 | [E-58](#e-58) | **Stand 2026-10-15:** Der grüne `load.yml`-Lauf liegt vor ([Run 38665599979](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38665599979) auf Commit `918a832`, alle Schwellen eingehalten); die Empfehlung ist gestärkt, zwei unabhängige Umgebungen mit 4 vCPU halten jede Schwelle ein. Lastlauf auf dem 4-vCPU-Host (Commit `dbbfded`) als G1-Nachweis für GATE-03 anerkennen (Empfehlung: Option 1 mit Auflagen; die Auflage eines grünen `load.yml`-Laufs ist für `918a832` erfüllt und wird nach dem Merge nächtlich auf dem Release-Kandidaten wiederholt) oder anderen Nachweis verlangen | Auftraggeber (Gate-Abnahme) mit Product Owner | vor der G1-Freigabe |
+| A-11 | [E-35](#e-35) | **laut Erklärung des Auftraggebers vom 2026-10-15 erledigt; Nachweis nachzureichen** (B6; Liste in `docs/legal/subprozessoren.md`): Subprozessorenliste liefern; bis zur Lieferung ist NFR-09 offen und G1-Blocker B6 | Betreiber | vor WP-105 (`a-reference`); überschritten, spätestens vor der G1-Freigabe (B6) |
+| A-12 | [E-56](#e-56) | **erledigt 2026-10-15** (Option 1 mit Identitätssperre). Stand 2026-10-14: WP-334 ist mit der Empfehlung umgesetzt (Option 1 mit Identitätssperre, Standard 4 Spuren: 233 Records/s; mit einer Spur 182 Records/s, NFR-03 verfehlt). Reihenfolgegarantie bei parallelen Ingest-Spuren bestätigen (Empfehlung: je Gerät, gesichert durch die Identitätssperre) | Product Owner | vor WP-334 (`nfr03-lanes`); überschritten, jetzt vor der G1-Freigabe |
+| A-13 | [E-57](#e-57) | **erledigt 2026-10-15** (Option A): Option A bestätigen: Impact-Antwort nur additiv, kompakte Form über `fields=` (API-02); Option C (Wechsel der Standardform nach mindestens 12 Monaten Deprecation) bleibt als spätere Möglichkeit | Product Owner/API-Verantwortlicher | vor der G1-Freigabe |
+| A-14 | [E-58](#e-58) | **erledigt 2026-10-15** (Option 1; dedizierter Referenzhost vor GA, SR-06). Stand 2026-10-15: Der grüne `load.yml`-Lauf liegt vor ([Run 38665599979](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38665599979) auf Commit `918a832`, alle Schwellen eingehalten); die Empfehlung ist gestärkt, zwei unabhängige Umgebungen mit 4 vCPU halten jede Schwelle ein. Lastlauf auf dem 4-vCPU-Host (Commit `dbbfded`) als G1-Nachweis für GATE-03 anerkennen (Empfehlung: Option 1 mit Auflagen; die Auflage eines grünen `load.yml`-Laufs ist für `918a832` erfüllt und wird nach dem Merge nächtlich auf dem Release-Kandidaten wiederholt) oder anderen Nachweis verlangen | Auftraggeber (Gate-Abnahme) mit Product Owner | vor der G1-Freigabe |
