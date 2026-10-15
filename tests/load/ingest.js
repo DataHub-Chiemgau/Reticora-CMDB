@@ -7,13 +7,15 @@
 //         delay record -> visible; after the load the time until every
 //         record of the run is visible is added as the tail delay. Budget:
 //         every delay < VISIBLE_BUDGET_S (30 s), every offered request
-//         sent (no dropped iterations) and every record visible.
+//         sent (no dropped iterations) and accepted (202), and every record
+//         visible.
 //   spool One collector delivers its spool after an outage (COL-05):
 //         SPOOL_RECORDS records (10,000), observed an hour ago, one spooled
 //         upload after the other as flushSpool sends them (POST
 //         /api/v1/discovery/ingest, gzip, SPOOL_BATCH records per upload).
 //         Then it waits until every record is visible. Budgets: every
-//         record becomes visible, the flush is done within SPOOL_BUDGET_S
+//         upload is accepted (202), every record becomes visible, the
+//         flush is done within SPOOL_BUDGET_S
 //         (5 min) and the queue drains at least TARGET records/s (200),
 //         measured from the end of sending; the rate including the sending
 //         is reported as information.
@@ -74,6 +76,10 @@ const scenarios = {
 const thresholds = {
   load: {
     'http_req_duration{name:ingest}': ['p(95)<1000'],
+    // Every batch is accepted (202): k6 may start one iteration more than
+    // RATE · DURATION_S, so a single rejected batch would not show as
+    // missing records.
+    'http_req_failed{name:ingest}': ['rate==0'],
     ingest_visible_delay: [`max<${VISIBLE_BUDGET_S * 1000}`],
     // The RATE is offered in full: an iteration k6 could not start would
     // lower the load.
@@ -83,6 +89,9 @@ const thresholds = {
   },
   spool: {
     'http_req_duration{name:spool}': ['p(95)<1000'],
+    // Every upload is accepted (202); a rejected one ends the iteration
+    // before the records are counted.
+    'http_req_failed{name:spool}': ['rate==0'],
     ingest_spool_flush: [`max<${SPOOL_BUDGET_S * 1000}`],
     ingest_drain_records_per_s: [`value>=${TARGET}`],
     ingest_records_missing: ['count==0'],

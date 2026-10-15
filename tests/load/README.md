@@ -21,15 +21,19 @@ Budgets: Wird ein Budget verfehlt, schlägt der Lauf fehl.
 ## Ablauf
 
 ```sh
-# 1. Datenbank migrieren und den Last-Seed mit API-Schlüssel anlegen
+# 1. Datenbank migrieren, den Last-Seed mit API-Schlüssel anlegen und die
+#    Statistik aktualisieren (ohne ANALYZE hängen die Pläne davon ab, wann
+#    Autovacuum den Seed erreicht)
 migrate -path backend/migrations -database "$DATABASE_URL" up
 go run ./backend/cmd/seed -database-url "$DATABASE_URL" -objects 10000 -api-key-file /tmp/load.key
+psql "$DATABASE_URL" -c 'ANALYZE'
 
 # 2. Server starten. Das Rate-Limit (600 Anfragen/min je Principal, API-04)
 #    würde den Lastlauf drosseln und wird für den Lauf angehoben.
 RETICORA_RATE_LIMIT_RPM=1000000 RETICORA_RATE_LIMIT_ORG_RPM=1000000 ./server
 
-# 3. Szenarien
+# 3. Ein Szenario je Lauf; vor dem nächsten Szenario Schritt 1 und 2 mit
+#    frischer Datenbank wiederholen
 k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat /tmp/load.key) tests/load/api.js
 k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat /tmp/load.key) tests/load/ingest.js
 k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat /tmp/load.key) -e SCENARIO=spool tests/load/ingest.js
@@ -41,9 +45,13 @@ der Impact-Szenarien); `SCENARIO` (`load` oder `spool`), `RATE`, `BATCH`,
 `DURATION_S`, `PROBE_EVERY_S`, `VISIBLE_BUDGET_S`, `SPOOL_RECORDS`,
 `SPOOL_BATCH`, `SPOOL_BUDGET_S`, `TARGET` und `WAIT_S` (ingest.js). Der
 Workflow `.github/workflows/load.yml` (manuell und nächtlich) führt diese
-Schritte aus, übergibt seine Eingabe `objects` als `OBJECTS` und lädt die
-k6-Zusammenfassungen als Artefakt hoch. Das Ergebnis des G1-Laufs steht in
-`docs/acceptance/lasttest-g1.md`.
+Schritte aus: `api.js`, `ingest.js` (`load`) und `ingest.js` (`spool`) als
+getrennte Jobs einer Matrix, jeder mit frischer Datenbank, Seed, `ANALYZE`
+und einem Server mit 4 Spuren (Standard). Er übergibt seine Eingaben
+`objects` als `OBJECTS` und `duration` als `DURATION` (`api.js`) und lädt die
+k6-Zusammenfassung jedes Jobs als eigenes Artefakt hoch
+(`load-results-api`, `load-results-ingest`, `load-results-ingest-spool`).
+Das Ergebnis des G1-Laufs steht in `docs/acceptance/lasttest-g1.md`.
 
 ### Ingest (NFR-03, WP-334)
 
@@ -64,8 +72,12 @@ k6-Zusammenfassungen als Artefakt hoch. Das Ergebnis des G1-Laufs steht in
   die Zahl sichtbarer Records nicht mehr, wartet der Lauf nicht weiter und
   zählt den Rest als fehlend (Dead Letter, als `unlicensed_ci` gehaltene oder
   verworfene Records). Im Szenario `load` muss k6 die Rate voll anbieten
-  (`dropped_iterations` = 0); damit ist die Sollzahl `RATE · DURATION_S`
-  und jede abgelehnte Anfrage fehlt sichtbar.
+  (`dropped_iterations` = 0); die Sollzahl ist `RATE · DURATION_S`. Weil k6
+  dabei eine Iteration mehr starten kann, fällt eine einzelne abgelehnte
+  Anfrage nicht unbedingt als fehlender Record auf: Jede Anfrage muss
+  deshalb angenommen werden (`http_req_failed{name:ingest}` bzw.
+  `{name:spool}` = 0, also 202); schon eine abgelehnte lässt den Lauf
+  scheitern.
 - **Spool.** Der Collector liefert seinen Spool nacheinander aus; jede
   Spool-Nachricht ist der vollständige Upload eines Erfassungszyklus
   (`spoolFlushBatch` = 64 zählt Nachrichten je Lesedurchgang, nicht Records).
@@ -79,8 +91,10 @@ k6-Zusammenfassungen als Artefakt hoch. Das Ergebnis des G1-Laufs steht in
   Spuren (Standard 4; `docs/betrieb/ingest-spuren.md`). Für den Vergleich mit
   der seriellen Verarbeitung `RETICORA_INGEST_LANES=1` setzen.
 - **Lokaler Lauf (4 vCPU).** PostgreSQL, Server, NATS, Redis und k6 teilen
-  sich die Kerne; die Werte sind konservativ. Vor jedem Lauf neu seeden: der
-  Rückstand eines Laufs verfälscht den nächsten.
+  sich die Kerne; die Werte sind konservativ. Vor jedem Lauf neu seeden und
+  danach `ANALYZE` ausführen, wie `load.yml`: der Rückstand eines Laufs
+  verfälscht den nächsten, und ohne aktuelle Statistik wählt PostgreSQL für
+  die Kandidatenabfragen Pläne über die ganze Organisation.
 
 Ergänzend prüfen die Integrationstests `backend/internal/ci/querybudget_integration_test.go`
 und `backend/internal/topology/querybudget_integration_test.go` die Zahl der
